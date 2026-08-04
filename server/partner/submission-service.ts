@@ -26,6 +26,7 @@ import {
   PartnerSubmissionCreditLifecycleError,
   releasePartnerReservationForPartnerCancellation,
 } from "./partner-submission-credit-lifecycle";
+import { toCardImageState } from "./card-image-service";
 
 export class SubmissionError extends Error {
   constructor(
@@ -371,13 +372,16 @@ export async function editSubmissionDraft(
         newTierCode = input.serviceTierCode;
       }
     }
+    const customerChanged = input.customerId !== undefined;
+    const internalReferenceChanged = input.internalReference !== undefined;
+    const intakeNotesChanged = input.intakeNotes !== undefined;
     const { rows } = await c.query(
       `UPDATE partner_submissions SET
-         customer_id = COALESCE($3, customer_id),
-         internal_reference = COALESCE($4, internal_reference),
-         service_tier_code = CASE WHEN $8 THEN $5 ELSE service_tier_code END,
-         estimated_price_pence = CASE WHEN $8 THEN $6 ELSE estimated_price_pence END,
-         intake_notes = COALESCE($7, intake_notes),
+         customer_id = CASE WHEN $8 THEN $3 ELSE customer_id END,
+         internal_reference = CASE WHEN $9 THEN $4 ELSE internal_reference END,
+         service_tier_code = CASE WHEN $10 THEN $5 ELSE service_tier_code END,
+         estimated_price_pence = CASE WHEN $10 THEN $6 ELSE estimated_price_pence END,
+         intake_notes = CASE WHEN $11 THEN $7 ELSE intake_notes END,
          version = version + 1,
          updated_at = now()
        WHERE id=$1 AND version=$2
@@ -391,7 +395,10 @@ export async function editSubmissionDraft(
         newTierCode ?? null,
         newEstimatedPrice ?? null,
         input.intakeNotes ?? null,
+        customerChanged,
+        internalReferenceChanged,
         tierChanged,
+        intakeNotesChanged,
       ]
     );
     if (rows.length !== 1) throw STALE(); // lost the race between load and update
@@ -469,6 +476,28 @@ export interface CardInput {
   intakeNotes?: string | null;
 }
 
+async function toPartnerCard(row: any) {
+  return {
+    id: row.id,
+    tenant_id: row.tenant_id,
+    submission_id: row.submission_id,
+    sequence_number: row.sequence_number,
+    card_name: row.card_name,
+    game: row.game,
+    card_set: row.card_set,
+    card_number: row.card_number,
+    year: row.year,
+    variant: row.variant,
+    language: row.language,
+    declared_value_pence: row.declared_value_pence,
+    quantity: row.quantity,
+    customer_notes: row.customer_notes,
+    intake_notes: row.intake_notes,
+    created_at: row.created_at,
+    ...(await toCardImageState(row)),
+  };
+}
+
 export async function addCard(principal: PartnerPrincipal, submissionId: string, input: CardInput) {
   if (!input.cardName || !input.cardName.trim()) throw VALIDATION("Card name is required.");
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
@@ -486,8 +515,8 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
          (tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year,
           variant, language, declared_value_pence, quantity, customer_notes, intake_notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       RETURNING id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-                 declared_value_pence, quantity, customer_notes, intake_notes, created_at`,
+       RETURNING id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+                 declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at`,
       [
         principal.tenantId,
         submissionId,
@@ -509,7 +538,7 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
       submissionId,
     ]);
     await writeEvent(c, principal, submissionId, "card_added", null, null, null);
-    return rows[0];
+    return toPartnerCard(rows[0]);
   });
 }
 
@@ -555,8 +584,8 @@ export async function editCard(
          intake_notes = COALESCE($13, intake_notes),
          updated_at = now()
        WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL
-       RETURNING id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-                 declared_value_pence, quantity, customer_notes, intake_notes, created_at`,
+       RETURNING id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+                 declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at`,
       [
         cardId,
         submissionId,
@@ -575,7 +604,7 @@ export async function editCard(
     );
     if (rows.length !== 1) throw NOT_FOUND();
     await writeEvent(c, principal, submissionId, "card_updated", null, null, null);
-    return rows[0];
+    return toPartnerCard(rows[0]);
   });
 }
 
@@ -609,12 +638,12 @@ export async function listCards(principal: PartnerPrincipal, submissionId: strin
     ]);
     if (exists.rowCount !== 1) throw NOT_FOUND();
     const { rows } = await c.query(
-      `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-              declared_value_pence, quantity, customer_notes, intake_notes, created_at
+      `SELECT id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+              declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at
          FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL ORDER BY sequence_number`,
       [submissionId]
     );
-    return rows;
+    return Promise.all(rows.map(toPartnerCard));
   });
 }
 
@@ -640,8 +669,8 @@ async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissio
   );
   if (rows.length !== 1) throw NOT_FOUND();
   const cards = await c.query(
-    `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-            declared_value_pence, quantity, customer_notes, intake_notes, created_at
+    `SELECT id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+            declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at
        FROM partner_submission_cards WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL ORDER BY sequence_number`,
     [submissionId, principal.tenantId]
   );
@@ -650,7 +679,62 @@ async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissio
        FROM partner_submission_events WHERE submission_id=$1 AND tenant_id=$2 ORDER BY created_at`,
     [submissionId, principal.tenantId]
   );
-  return { submission: toSummary(rows[0]), cards: cards.rows, events: events.rows };
+  return {
+    submission: toSummary(rows[0]),
+    cards: await Promise.all(cards.rows.map(toPartnerCard)),
+    events: events.rows,
+  };
+}
+
+export interface SubmissionCreditPreview {
+  cardRows: number;
+  cardUnits: number;
+  availableCredits: number | null;
+  reservedCredits: number | null;
+  remainingAfterSubmit: number | null;
+  enoughCredits: boolean;
+}
+
+export async function previewSubmissionCredits(
+  principal: PartnerPrincipal,
+  submissionId: string
+): Promise<SubmissionCreditPreview> {
+  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+    const scope = await locationScopeSql(c, principal, 2);
+    const exists = await c.query(`SELECT 1 FROM partner_submissions WHERE id=$1 AND tenant_id=$2 AND ${scope.sql}`, [
+      submissionId,
+      principal.tenantId,
+      ...scope.params,
+    ]);
+    if (exists.rowCount !== 1) throw NOT_FOUND();
+    const cards = await c.query<{ rows: string; units: string }>(
+      `SELECT count(*)::text AS rows, COALESCE(sum(quantity), 0)::text AS units
+         FROM partner_submission_cards
+        WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL`,
+      [submissionId, principal.tenantId]
+    );
+    const wallet = await c.query<{ available_credits: string; reserved_credits: string }>(
+      `SELECT COALESCE(available_balance, 0)::text AS available_credits,
+              COALESCE(active_reserved, 0)::text AS reserved_credits
+         FROM partner_credit_availability
+        WHERE tenant_id=$1
+        LIMIT 1`,
+      [principal.tenantId]
+    );
+    const cardRows = Number(cards.rows[0]?.rows ?? 0);
+    const cardUnits = Number(cards.rows[0]?.units ?? 0);
+    const availableCredits = Number(wallet.rows[0]?.available_credits ?? 0);
+    const reservedCredits = Number(wallet.rows[0]?.reserved_credits ?? 0);
+    const canViewWalletTotals = principal.permissions.has("partner.credits.view");
+    return {
+      cardRows,
+      cardUnits,
+      availableCredits: canViewWalletTotals ? availableCredits : null,
+      reservedCredits: canViewWalletTotals ? reservedCredits : null,
+      remainingAfterSubmit: canViewWalletTotals ? availableCredits - cardUnits : null,
+      enoughCredits: cardUnits > 0 && availableCredits >= cardUnits,
+    };
+  });
 }
 
 /**

@@ -18,13 +18,13 @@ import {
   LayoutDashboard,
   FileText,
   Users,
+  UserRound,
   MapPin,
   CreditCard,
   HelpCircle,
   ShieldCheck,
   LogOut,
   PlusCircle,
-  Bell,
 } from "lucide-react";
 import { useState } from "react";
 import "@/styles/partner-portal.css";
@@ -40,6 +40,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/partner/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
+  { href: "/partner/customers", label: "Customers", icon: UserRound, permission: "partner.orders.view" },
   { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
   { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
   { href: "/partner/billing", label: "Credits & Billing", icon: CreditCard, permission: "partner.credits.view" },
@@ -89,12 +90,7 @@ export function PartnerShell({ children }: { children: ReactNode }) {
           </div>
 
           <div className="hidden md:flex items-center gap-2">
-            {session?.mfaPassed && (
-              <Button variant="ghost" size="icon" aria-label="Notifications: no new alerts" title="No new alerts">
-                <Bell className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            )}
-            {session?.mfaPassed && (
+            {session?.mfaPassed && hasPermission("partner.orders.create") && (
               <Link href="/partner/submissions/new">
                 <Button size="sm" data-testid="button-new-submission-header">
                   <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />

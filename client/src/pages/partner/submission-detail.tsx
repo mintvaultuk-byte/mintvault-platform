@@ -6,16 +6,29 @@
  * MintVault grade or internal grader/fraud notes, because the backend does not return them here.
  */
 import { useParams, Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { partnerSubmissions, partnerErrorMessage, formatPence } from "@/lib/partner-api";
+import { Button } from "@/components/ui/button";
+import {
+  partnerCards,
+  partnerSubmissions,
+  partnerErrorMessage,
+  formatPence,
+  type SubmissionCard,
+} from "@/lib/partner-api";
+import { usePartnerSession } from "@/hooks/use-partner-session";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Upload, Image as ImageIcon, CheckCircle2 } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
   submitted_to_mintvault: "Submitted to MintVault",
+  received: "Received",
+  grading: "Grading",
+  graded: "Graded",
+  awaiting_settlement: "Awaiting settlement",
+  completed: "Completed",
   cancelled: "Cancelled",
 };
 
@@ -25,12 +38,15 @@ const EVENT_LABELS: Record<string, string> = {
   card_added: "Card added",
   card_updated: "Card updated",
   card_removed: "Card removed",
+  card_image_uploaded: "Card image uploaded",
   submitted: "Submitted to MintVault",
   cancelled: "Submission cancelled",
 };
 
 export default function PartnerSubmissionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { hasPermission } = usePartnerSession();
+  const qc = useQueryClient();
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["/api/partner/submissions", id],
     queryFn: () => partnerSubmissions.detail(id!),
@@ -42,6 +58,8 @@ export default function PartnerSubmissionDetailPage() {
   if (!data) return null;
 
   const { submission, cards, events } = data;
+  const canUploadImages =
+    hasPermission("partner.orders.edit") && ["draft", "submitted_to_mintvault"].includes(submission.status);
 
   return (
     <div className="space-y-6" data-testid="page-submission-detail">
@@ -109,6 +127,12 @@ export default function PartnerSubmissionDetailPage() {
                     Intake observation — not a MintVault grade: {c.intake_notes}
                   </p>
                 )}
+                <CardImageControls
+                  submissionId={submission.id}
+                  card={c}
+                  canUpload={canUploadImages}
+                  onUploaded={() => qc.invalidateQueries({ queryKey: ["/api/partner/submissions", id] })}
+                />
               </li>
             ))}
           </ul>
@@ -130,6 +154,118 @@ export default function PartnerSubmissionDetailPage() {
           </ol>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function CardImageControls({
+  submissionId,
+  card,
+  canUpload,
+  onUploaded,
+}: {
+  submissionId: string;
+  card: SubmissionCard;
+  canUpload: boolean;
+  onUploaded: () => void;
+}) {
+  return (
+    <div className="mt-3 grid gap-3 sm:grid-cols-2" data-testid={`card-images-${card.id}`}>
+      <CardImageSideControl
+        submissionId={submissionId}
+        cardId={card.id}
+        side="front"
+        label="Front image"
+        hasImage={card.hasFrontImage}
+        imageUrl={card.frontImageUrl}
+        canUpload={canUpload}
+        onUploaded={onUploaded}
+      />
+      <CardImageSideControl
+        submissionId={submissionId}
+        cardId={card.id}
+        side="back"
+        label="Back image"
+        hasImage={card.hasBackImage}
+        imageUrl={card.backImageUrl}
+        canUpload={canUpload}
+        onUploaded={onUploaded}
+      />
+    </div>
+  );
+}
+
+function CardImageSideControl({
+  submissionId,
+  cardId,
+  side,
+  label,
+  hasImage,
+  imageUrl,
+  canUpload,
+  onUploaded,
+}: {
+  submissionId: string;
+  cardId: string;
+  side: "front" | "back";
+  label: string;
+  hasImage: boolean;
+  imageUrl: string | null;
+  canUpload: boolean;
+  onUploaded: () => void;
+}) {
+  const mutation = useMutation({
+    mutationFn: (file: File) => partnerCards.uploadImage(submissionId, cardId, side, file),
+    onSuccess: onUploaded,
+  });
+
+  return (
+    <div className="rounded-md border p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium flex items-center gap-1.5">
+          <ImageIcon className="h-4 w-4" aria-hidden="true" />
+          {label}
+        </p>
+        {hasImage && (
+          <Badge variant="outline" className="gap-1">
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Uploaded
+          </Badge>
+        )}
+      </div>
+      {imageUrl && (
+        <a href={imageUrl} target="_blank" rel="noreferrer" className="text-xs underline">
+          Open uploaded image
+        </a>
+      )}
+      {canUpload && (
+        <div>
+          <input
+            id={`${cardId}-${side}-image`}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            disabled={mutation.isPending}
+            data-testid={`input-upload-${side}-${cardId}`}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) mutation.mutate(file);
+              event.currentTarget.value = "";
+            }}
+          />
+          <Button asChild variant="outline" size="sm" disabled={mutation.isPending}>
+            <label htmlFor={`${cardId}-${side}-image`} className="cursor-pointer">
+              <Upload className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              {hasImage ? "Replace" : "Upload"}
+            </label>
+          </Button>
+        </div>
+      )}
+      {mutation.error && (
+        <p role="alert" className="text-xs text-destructive">
+          {partnerErrorMessage(mutation.error)}
+        </p>
+      )}
     </div>
   );
 }

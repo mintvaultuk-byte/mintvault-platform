@@ -207,6 +207,7 @@ describe("PartnerSessionInfo keeps BOTH field families", () => {
       read("server", "partner", "public-routes.ts") +
       read("server", "partner", "submission-routes.ts") +
       read("server", "partner", "customer-routes.ts") +
+      read("server", "partner", "catalogue-routes.ts") +
       read("server", "partner", "dashboard-routes.ts");
     const registered = new Set(
       [...all.matchAll(/\br\.(?:get|post|patch|put|delete)\(\s*"([^"]+)"/g)].map((m) =>

@@ -40,6 +40,7 @@ export default function PartnerDashboardPage() {
    */
   const { hasPermission } = usePartnerSession();
   const canViewCredits = hasPermission("partner.credits.view");
+  const canCreateOrders = hasPermission("partner.orders.create");
 
   const submissions = useQuery({
     queryKey: ["/api/partner/dashboard/submissions"],
@@ -63,12 +64,14 @@ export default function PartnerDashboardPage() {
             Dashboard
           </h1>
         </div>
-        <Link href="/partner/submissions/new">
-          <Button data-testid="button-new-submission-dashboard">
-            <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />
-            New Submission
-          </Button>
-        </Link>
+        {canCreateOrders && (
+          <Link href="/partner/submissions/new">
+            <Button data-testid="button-new-submission-dashboard">
+              <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              New Submission
+            </Button>
+          </Link>
+        )}
       </div>
 
       {loading && <PartnerLoadingState label="Loading your dashboard…" />}
@@ -114,35 +117,35 @@ export default function PartnerDashboardPage() {
               </p>
             )}
             {canViewCredits && credits.data && (
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="grid-credit-summary">
-              {[
-                ["Available", credits.data.summary.availableCredits, "available"],
-                ["Reserved", credits.data.summary.reservedCredits, "reserved"],
-                ["Consumed this month", credits.data.summary.consumedThisMonth, "consumed-month"],
-                ["Lifetime consumed", credits.data.summary.consumedLifetime, "consumed-lifetime"],
-              ].map(([label, value, id]) => (
-                <Card key={String(id)} className="rounded-md">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="grid-credit-summary">
+                {[
+                  ["Available", credits.data.summary.availableCredits, "available"],
+                  ["Reserved", credits.data.summary.reservedCredits, "reserved"],
+                  ["Consumed this month", credits.data.summary.consumedThisMonth, "consumed-month"],
+                  ["Lifetime consumed", credits.data.summary.consumedLifetime, "consumed-lifetime"],
+                ].map(([label, value, id]) => (
+                  <Card key={String(id)} className="rounded-md">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-semibold" data-testid={`text-credit-${id}`}>
+                        {metric(value as number | null, credits.data.summary.configured ? "Unknown" : "Not available")}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
+                <Card className="rounded-md border-primary/30">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
+                    <CardTitle className="text-xs font-medium text-muted-foreground">Balance status</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-semibold" data-testid={`text-credit-${id}`}>
-                      {metric(value as number | null, credits.data.summary.configured ? "Unknown" : "Not available")}
+                    <p className="text-sm font-semibold text-primary" data-testid="text-credit-status">
+                      {statusLabel(credits.data.summary.balanceStatus)}
                     </p>
                   </CardContent>
                 </Card>
-              ))}
-              <Card className="rounded-md border-primary/30">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs font-medium text-muted-foreground">Balance status</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm font-semibold text-primary" data-testid="text-credit-status">
-                    {statusLabel(credits.data.summary.balanceStatus)}
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
+              </div>
             )}
           </section>
 
@@ -150,19 +153,15 @@ export default function PartnerDashboardPage() {
             <h2 id="submission-summary-title" className="text-base font-semibold">
               Submission summary
             </h2>
-            {/*
-              Only the three states the schema actually has are rendered. The previous version
-              also advertised Validating / Grading / Awaiting correction / Completed as hardcoded
-              nulls: partner_submissions.status is CHECK-constrained to
-              ('draft','submitted_to_mintvault','cancelled') (migration 0007), so those four tiles
-              could never populate, had no server signal behind them, and had no wiring point to
-              light up later. Advertising four permanently-empty workflow stages to a paying
-              partner reads as "the system is broken", not "not built yet".
-            */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="grid-dashboard-cards">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="grid-dashboard-cards">
               {[
                 ["Drafts", submissions.data.draft, "draft"],
                 ["Submitted", submissions.data.submitted_to_mintvault, "submitted"],
+                ["Received", submissions.data.received, "received"],
+                ["Grading", submissions.data.grading, "grading"],
+                ["Graded", submissions.data.graded, "graded"],
+                ["Awaiting settlement", submissions.data.awaiting_settlement, "awaiting-settlement"],
+                ["Completed", submissions.data.completed, "completed"],
                 ["Cancelled", submissions.data.cancelled, "cancelled"],
               ].map(([label, value, id]) => (
                 <Card key={String(id)} className="rounded-md" data-testid={`card-dashboard-${id}`}>
@@ -189,29 +188,29 @@ export default function PartnerDashboardPage() {
 
           {/* Recent activity is ledger data, so it carries the same permission gate as the panel above. */}
           {canViewCredits && credits.data && (
-          <section aria-labelledby="recent-activity-title" className="space-y-3">
-            <h2 id="recent-activity-title" className="text-base font-semibold">
-              Recent activity
-            </h2>
-            {credits.data.ledger.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No activity yet</p>
-            ) : (
-              <div className="divide-y divide-border border-y border-border">
-                {credits.data.ledger.slice(0, 5).map((entry) => (
-                  <div key={entry.id} className="py-3 flex items-center justify-between gap-4 text-sm">
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">{entry.reason}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(entry.date).toLocaleString("en-GB")}</p>
+            <section aria-labelledby="recent-activity-title" className="space-y-3">
+              <h2 id="recent-activity-title" className="text-base font-semibold">
+                Recent activity
+              </h2>
+              {credits.data.ledger.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No activity yet</p>
+              ) : (
+                <div className="divide-y divide-border border-y border-border">
+                  {credits.data.ledger.slice(0, 5).map((entry) => (
+                    <div key={entry.id} className="py-3 flex items-center justify-between gap-4 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{entry.reason}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(entry.date).toLocaleString("en-GB")}</p>
+                      </div>
+                      <span className={entry.quantity > 0 ? "text-emerald-300" : "text-rose-300"}>
+                        {entry.quantity > 0 ? "+" : ""}
+                        {entry.quantity}
+                      </span>
                     </div>
-                    <span className={entry.quantity > 0 ? "text-emerald-300" : "text-rose-300"}>
-                      {entry.quantity > 0 ? "+" : ""}
-                      {entry.quantity}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+                  ))}
+                </div>
+              )}
+            </section>
           )}
         </>
       )}

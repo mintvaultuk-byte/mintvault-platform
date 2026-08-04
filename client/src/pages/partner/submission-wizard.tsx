@@ -37,11 +37,16 @@ import { Trash2, Pencil, Check, X } from "lucide-react";
 
 const STEPS = ["Customer", "Service", "Cards", "Review", "Submit"] as const;
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
+type CreditPreview = Awaited<ReturnType<typeof partnerSubmissions.creditPreview>>;
 
 export default function PartnerSubmissionWizardPage() {
   const [, navigate] = useLocation();
   const { session } = usePartnerSession();
   const qc = useQueryClient();
+  const preselectedCustomerId = useMemo(() => {
+    const match = window.location.search.match(/[?&]customerId=([^&]+)/);
+    return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : null;
+  }, []);
 
   const [step, setStep] = useState(0);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
@@ -96,6 +101,21 @@ export default function PartnerSubmissionWizardPage() {
     queryFn: () => partnerCustomers.list(customerSearch || undefined),
     enabled: !!submission && customerSearch.length > 0,
   });
+  const { data: preselectedCustomer } = useQuery({
+    queryKey: ["/api/partner/customers", preselectedCustomerId],
+    queryFn: () => partnerCustomers.get(preselectedCustomerId!),
+    enabled: !!submission && !!preselectedCustomerId && !customerId,
+  });
+  const { data: creditPreview } = useQuery({
+    queryKey: [
+      "/api/partner/submissions",
+      submission?.id,
+      "credit-preview",
+      cards.map((card) => `${card.id}:${card.quantity}`).join("|"),
+    ],
+    queryFn: () => partnerSubmissions.creditPreview(submission!.id),
+    enabled: !!submission && (step === 3 || step === 4),
+  });
 
   const saveField = useCallback(
     async (patch: {
@@ -119,6 +139,13 @@ export default function PartnerSubmissionWizardPage() {
     },
     [submission]
   );
+
+  useEffect(() => {
+    if (!preselectedCustomer || customerId) return;
+    setCustomerId(preselectedCustomer.id);
+    setCustomerDisplay(preselectedCustomer.fullName);
+    void saveField({ customerId: preselectedCustomer.id });
+  }, [customerId, preselectedCustomer, saveField]);
 
   // Free-text fields (unlike selects/buttons) fire on every keystroke — saving each one individually
   // would send several PATCHes carrying the SAME pre-request version, so the server correctly rejects
@@ -163,6 +190,14 @@ export default function PartnerSubmissionWizardPage() {
     setCustomerDisplay(c.fullName);
     setCustomerSearch("");
     saveField({ customerId: c.id });
+  }
+
+  function changeCustomer() {
+    setCustomerId(null);
+    setCustomerDisplay("");
+    setCustomerSearch("");
+    setCreatingCustomer(false);
+    void saveField({ customerId: null });
   }
 
   async function handleAddCard(input: Parameters<typeof partnerCards.add>[1]) {
@@ -266,6 +301,7 @@ export default function PartnerSubmissionWizardPage() {
           onSelectCustomer={selectExistingCustomer}
           creatingCustomer={creatingCustomer}
           onToggleCreate={() => setCreatingCustomer((v) => !v)}
+          onChangeCustomer={changeCustomer}
           newCustomerName={newCustomerName}
           setNewCustomerName={setNewCustomerName}
           newCustomerEmail={newCustomerEmail}
@@ -308,13 +344,20 @@ export default function PartnerSubmissionWizardPage() {
           serviceTierCode={serviceTierCode}
           tiers={availableTiers ?? []}
           cards={cards}
+          creditPreview={creditPreview ?? null}
           missing={missing}
           onEditStep={setStep}
         />
       )}
 
       {step === 4 && (
-        <SubmitStep missing={missing} submitting={submitting} error={submitError} onSubmit={handleSubmit} />
+        <SubmitStep
+          missing={missing}
+          submitting={submitting}
+          error={submitError}
+          creditPreview={creditPreview ?? null}
+          onSubmit={handleSubmit}
+        />
       )}
 
       <div className="flex items-center justify-between pt-4 border-t">
@@ -401,6 +444,7 @@ function CustomerStep(props: {
   onSelectCustomer: (c: PartnerCustomer) => void;
   creatingCustomer: boolean;
   onToggleCreate: () => void;
+  onChangeCustomer: () => void;
   newCustomerName: string;
   setNewCustomerName: (v: string) => void;
   newCustomerEmail: string;
@@ -423,7 +467,7 @@ function CustomerStep(props: {
         {props.customerId ? (
           <div className="flex items-center justify-between rounded-md border p-3">
             <span data-testid="text-selected-customer">{props.customerDisplay}</span>
-            <Button variant="ghost" size="sm" onClick={props.onToggleCreate} data-testid="button-change-customer">
+            <Button variant="ghost" size="sm" onClick={props.onChangeCustomer} data-testid="button-change-customer">
               Change
             </Button>
           </div>
@@ -889,6 +933,7 @@ function ReviewStep(props: {
   serviceTierCode: string | null;
   tiers: AvailableServiceTier[];
   cards: SubmissionCard[];
+  creditPreview: CreditPreview | null;
   missing: string[];
   onEditStep: (step: number) => void;
 }) {
@@ -921,9 +966,21 @@ function ReviewStep(props: {
         />
         <ReviewRow
           label="Cards"
-          value={`${props.cards.length} card${props.cards.length === 1 ? "" : "s"}`}
+          value={`${props.creditPreview?.cardUnits ?? props.cards.length} grading credit${(props.creditPreview?.cardUnits ?? props.cards.length) === 1 ? "" : "s"}`}
           onEdit={() => props.onEditStep(2)}
         />
+        {props.creditPreview && (
+          <div className="rounded-md border p-3 text-sm" data-testid="panel-credit-preview">
+            <p className="font-medium">Credit preview</p>
+            <p className="text-muted-foreground">
+              This submission will reserve {props.creditPreview.cardUnits} credit
+              {props.creditPreview.cardUnits === 1 ? "" : "s"} when you submit.
+              {props.creditPreview.availableCredits == null || props.creditPreview.remainingAfterSubmit == null
+                ? ""
+                : ` Available now: ${props.creditPreview.availableCredits}. Remaining after submit: ${props.creditPreview.remainingAfterSubmit}.`}
+            </p>
+          </div>
+        )}
 
         <p className="text-xs text-muted-foreground">
           Intake observations recorded on cards are not MintVault grades. Estimated pricing is confirmed by MintVault.
@@ -960,13 +1017,16 @@ function SubmitStep({
   missing,
   submitting,
   error,
+  creditPreview,
   onSubmit,
 }: {
   missing: string[];
   submitting: boolean;
   error: string | null;
+  creditPreview: CreditPreview | null;
   onSubmit: () => void;
 }) {
+  const creditBlocked = !!creditPreview && !creditPreview.enoughCredits;
   return (
     <Card data-testid="wizard-step-submit">
       <CardHeader>
@@ -993,6 +1053,22 @@ function SubmitStep({
             </ul>
           </div>
         )}
+        {creditPreview && (
+          <div
+            className={`rounded-md border p-3 text-sm ${creditBlocked ? "border-destructive/30 bg-destructive/5" : ""}`}
+            data-testid="panel-submit-credit-preview"
+          >
+            <p className="font-medium">Credit reservation</p>
+            <p className="text-muted-foreground">
+              {creditPreview.cardUnits} credit{creditPreview.cardUnits === 1 ? "" : "s"} will be reserved only when you
+              press Submit.
+              {creditPreview.availableCredits == null || creditPreview.remainingAfterSubmit == null
+                ? ""
+                : ` Available: ${creditPreview.availableCredits}. Remaining: ${creditPreview.remainingAfterSubmit}.`}
+            </p>
+            {creditBlocked && <p className="text-destructive mt-1">There are not enough available credits.</p>}
+          </div>
+        )}
         {error && (
           <p role="alert" className="text-sm text-destructive" data-testid="text-submit-error">
             {error}
@@ -1001,7 +1077,7 @@ function SubmitStep({
         <Button
           size="lg"
           className="w-full"
-          disabled={submitting || missing.length > 0}
+          disabled={submitting || missing.length > 0 || creditBlocked}
           onClick={onSubmit}
           data-testid="button-confirm-submit"
         >

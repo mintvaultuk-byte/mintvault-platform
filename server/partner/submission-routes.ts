@@ -6,6 +6,7 @@
  * { error: { code, message } } shape — never a raw DB error or stack trace.
  */
 import { Router } from "express";
+import { attachImagesUpload } from "../lib/multer-configs";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly, requireNotSensitiveFrozen } from "./session";
 import { partnerSubmissionMutationLimiter } from "./rate-limit";
 import {
@@ -22,7 +23,10 @@ import {
   submitSubmission,
   dashboardSummary,
   listAvailableServiceTiers,
+  previewSubmissionCredits,
 } from "./submission-service";
+import { CardImageError, uploadPartnerCardImage } from "./card-image-service";
+import { PartnerGradingBridgeError, createPartnerGradingWorkItems } from "./grading-bridge-service";
 
 function sendError(res: import("express").Response, err: unknown): void {
   if (err instanceof SubmissionError) {
@@ -39,6 +43,16 @@ function sendError(res: import("express").Response, err: unknown): void {
             ? 409
             : 400;
     res.status(status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  if (err instanceof CardImageError) {
+    const status =
+      err.code === "not_found" ? 404 : err.code === "forbidden" ? 403 : err.code === "not_draft" ? 409 : 400;
+    res.status(status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  if (err instanceof PartnerGradingBridgeError) {
+    res.status(err.status).json({ error: { code: err.code, message: err.message } });
     return;
   }
   // eslint-disable-next-line no-console
@@ -71,6 +85,10 @@ function asStringOrExplicitNull(v: unknown): string | null | undefined {
   if (v === undefined) return undefined;
   if (v === null) return null;
   return typeof v === "string" && !tooLong(v) ? v : undefined;
+}
+
+function isOptionalStringOrNull(v: unknown): boolean {
+  return v === undefined || v === null || (typeof v === "string" && !tooLong(v));
 }
 
 /** Bounded positive integer, or null if absent/invalid/out of range. */
@@ -140,10 +158,10 @@ export function partnerSubmissionRouter(): Router {
         const body = req.body ?? {};
         if (
           typeof body.locationId !== "string" ||
-          tooLong(body.customerId) ||
-          tooLong(body.internalReference) ||
-          tooLong(body.serviceTierCode) ||
-          tooLong(body.intakeNotes)
+          !isOptionalStringOrNull(body.customerId) ||
+          !isOptionalStringOrNull(body.internalReference) ||
+          !isOptionalStringOrNull(body.serviceTierCode) ||
+          !isOptionalStringOrNull(body.intakeNotes)
         ) {
           res.status(400).json({ error: { code: "validation", message: "Invalid submission input." } });
           return;
@@ -170,6 +188,14 @@ export function partnerSubmissionRouter(): Router {
     }
   });
 
+  r.get("/submissions/:id/credit-preview", requirePartnerCapability("partner.orders.view"), async (req, res) => {
+    try {
+      res.json(await previewSubmissionCredits(req.partner!, String(req.params.id)));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.patch(
     "/submissions/:id",
     requirePartnerCapability("partner.orders.edit"),
@@ -181,20 +207,20 @@ export function partnerSubmissionRouter(): Router {
         const body = req.body ?? {};
         if (
           typeof body.version !== "number" ||
-          tooLong(body.customerId) ||
-          tooLong(body.internalReference) ||
-          tooLong(body.serviceTierCode) ||
-          tooLong(body.intakeNotes)
+          !isOptionalStringOrNull(body.customerId) ||
+          !isOptionalStringOrNull(body.internalReference) ||
+          !isOptionalStringOrNull(body.serviceTierCode) ||
+          !isOptionalStringOrNull(body.intakeNotes)
         ) {
           res.status(400).json({ error: { code: "validation", message: "Invalid submission input." } });
           return;
         }
         const updated = await editSubmissionDraft(req.partner!, String(req.params.id), {
           version: body.version,
-          customerId: typeof body.customerId === "string" ? body.customerId : undefined,
-          internalReference: typeof body.internalReference === "string" ? body.internalReference : undefined,
+          customerId: asStringOrExplicitNull(body.customerId),
+          internalReference: asStringOrExplicitNull(body.internalReference),
           serviceTierCode: asStringOrExplicitNull(body.serviceTierCode),
-          intakeNotes: typeof body.intakeNotes === "string" ? body.intakeNotes : undefined,
+          intakeNotes: asStringOrExplicitNull(body.intakeNotes),
         });
         res.json(updated);
       } catch (err) {
@@ -243,13 +269,13 @@ export function partnerSubmissionRouter(): Router {
         if (
           typeof body.cardName !== "string" ||
           tooLong(body.cardName) ||
-          tooLong(body.game) ||
-          tooLong(body.cardSet) ||
-          tooLong(body.cardNumber) ||
-          tooLong(body.variant) ||
-          tooLong(body.language) ||
-          tooLong(body.customerNotes) ||
-          tooLong(body.intakeNotes)
+          !isOptionalStringOrNull(body.game) ||
+          !isOptionalStringOrNull(body.cardSet) ||
+          !isOptionalStringOrNull(body.cardNumber) ||
+          !isOptionalStringOrNull(body.variant) ||
+          !isOptionalStringOrNull(body.language) ||
+          !isOptionalStringOrNull(body.customerNotes) ||
+          !isOptionalStringOrNull(body.intakeNotes)
         ) {
           res.status(400).json({ error: { code: "validation", message: "Invalid card input." } });
           return;
@@ -293,13 +319,13 @@ export function partnerSubmissionRouter(): Router {
         if (
           (body.cardName !== undefined && typeof body.cardName !== "string") ||
           tooLong(body.cardName) ||
-          tooLong(body.game) ||
-          tooLong(body.cardSet) ||
-          tooLong(body.cardNumber) ||
-          tooLong(body.variant) ||
-          tooLong(body.language) ||
-          tooLong(body.customerNotes) ||
-          tooLong(body.intakeNotes)
+          !isOptionalStringOrNull(body.game) ||
+          !isOptionalStringOrNull(body.cardSet) ||
+          !isOptionalStringOrNull(body.cardNumber) ||
+          !isOptionalStringOrNull(body.variant) ||
+          !isOptionalStringOrNull(body.language) ||
+          !isOptionalStringOrNull(body.customerNotes) ||
+          !isOptionalStringOrNull(body.intakeNotes)
         ) {
           res.status(400).json({ error: { code: "validation", message: "Invalid card input." } });
           return;
@@ -366,6 +392,30 @@ export function partnerSubmissionRouter(): Router {
   );
 
   r.post(
+    "/submissions/:id/cards/:cardId/images/:side",
+    requirePartnerCapability("partner.orders.edit"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerSubmissionMutationLimiter,
+    attachImagesUpload.single("image"),
+    async (req, res) => {
+      try {
+        res.json(
+          await uploadPartnerCardImage(
+            req.partner!,
+            String(req.params.id),
+            String(req.params.cardId),
+            String(req.params.side),
+            req.file
+          )
+        );
+      } catch (err) {
+        sendError(res, err);
+      }
+    }
+  );
+
+  r.post(
     "/submissions/:id/submit",
     requirePartnerCapability("partner.orders.submit"),
     requireNotViewOnly,
@@ -380,6 +430,27 @@ export function partnerSubmissionRouter(): Router {
           return;
         }
         res.json(await submitSubmission(req.partner!, String(req.params.id), idempotencyKeyRaw));
+      } catch (err) {
+        sendError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/submissions/:id/grading-work-items",
+    requirePartnerCapability("partner.cards.assess"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerSubmissionMutationLimiter,
+    async (req, res) => {
+      try {
+        const graderId = req.body?.graderId;
+        if (typeof graderId !== "string") {
+          res.status(400).json({ error: { code: "validation", message: "Select a grader." } });
+          return;
+        }
+        const result = await createPartnerGradingWorkItems(req.partner!, String(req.params.id), { graderId });
+        res.status(result.existing ? 200 : 201).json(result);
       } catch (err) {
         sendError(res, err);
       }

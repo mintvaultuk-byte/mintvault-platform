@@ -25,6 +25,7 @@ import { partnerSessionMiddleware } from "./session";
 import { partnerApiRouter } from "./routes";
 import { partnerSubmissionRouter } from "./submission-routes";
 import { partnerCustomerRouter } from "./customer-routes";
+import { partnerCatalogueRouter } from "./catalogue-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { definerModelViolations } from "./definer-guard";
@@ -154,6 +155,7 @@ export function partnerPortalRouter(): Router {
   r.use(partnerApiRouter());
   r.use(partnerSubmissionRouter()); // Phase 2 submission workflow
   r.use(partnerCustomerRouter()); // Phase 2 customer records
+  r.use(partnerCatalogueRouter()); // read-only partner catalogue projection
 
   return r;
 }
