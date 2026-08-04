@@ -93,13 +93,23 @@ export const partnerMfa = {
    * set up (server-enforced — F3); first-time setup takes the password alone. Never persisted.
    */
   enrol: (password: string, secondFactor?: { code?: string; recoveryCode?: string }) =>
-    req<{ ok: boolean; secret: string; otpauthUri: string }>("POST", "/api/partner/mfa/enrol", {
-      password,
-      ...(secondFactor?.code ? { code: secondFactor.code } : {}),
-      ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
-    }),
-  confirm: (code: string) =>
-    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", { code }),
+    req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
+      "POST",
+      "/api/partner/mfa/enrol",
+      {
+        password,
+        ...(secondFactor?.code ? { code: secondFactor.code } : {}),
+        ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
+      }
+    ),
+  restart: () =>
+    req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
+      "POST",
+      "/api/partner/mfa/restart"
+    ),
+  cancel: () => req<{ ok: boolean }>("POST", "/api/partner/mfa/cancel"),
+  confirm: (input: { enrolmentId: string; code: string }) =>
+    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", input),
   /**
    * Replaces every unused recovery code. Requires the account password AND, once an authenticator is
    * enrolled, a current factor (C) — the same proof the server demands to replace the authenticator

@@ -255,6 +255,7 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
 
     const enrol = await call("POST", "/api/partner/mfa/enrol", { password: OWNER_PASSWORD });
     expect(enrol.status).toBe(200);
+    const enrolmentId = enrol.json.enrolmentId as string;
     const secret = enrol.json.secret as string;
     expect(secret).toBeTruthy();
     expect(enrol.json.otpauthUri as string).toContain("otpauth://totp/MintVault:");
@@ -262,7 +263,10 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     // A PENDING secret is NOT yet a factor: access is still refused.
     expect((await call("GET", "/api/partner/dashboard")).status).toBe(401);
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secret, Date.now()) });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId,
+      code: currentTotp(secret, Date.now()),
+    });
     expect(confirm.status).toBe(200);
     const codes = confirm.json.recoveryCodes as string[];
     expect(codes).toHaveLength(10);
@@ -326,7 +330,10 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     expect(enrol.status).toBe(403);
     expect(enrol.json.error).toBe("requires_current_factor");
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: "000000" });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: "00000000-0000-0000-0000-000000000000",
+      code: "000000",
+    });
     expect(confirm.status).toBe(403);
     expect(confirm.json.error).toBe("requires_current_factor");
   });

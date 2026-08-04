@@ -139,6 +139,9 @@ describe("partner schema ↔ migration parity", () => {
       // 0044 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+      // 0046 hardens Partner MFA pending setup lifecycle. 0045 is deliberately skipped here because
+      // active Partner grading/certificate worktrees already claim it; 0046 is the next free number.
+      "0046_partner_mfa_pending_lifecycle.sql",
     ]);
   });
 
