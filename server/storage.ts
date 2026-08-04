@@ -171,6 +171,7 @@ export interface IStorage {
   listCertificates(filters?: CertificateFilters): Promise<CertificateRecord[]>;
   searchCertificates(query: string): Promise<CertificateRecord[]>;
   getNextCertId(): Promise<string>;
+  reclaimCertNumberIfLatest(numericValue: number): Promise<boolean>;
   ensureCertCounterTable(): Promise<void>;
 
   saveNfcData(
@@ -1384,6 +1385,27 @@ export class DatabaseStorage implements IStorage {
       throw new Error(`FATAL: cert_counter returned invalid last_issued value: ${result.rows[0].last_issued}`);
     }
     return `MV${nextNum}`;
+  }
+
+  /**
+   * Best-effort: give a certificate number back to the pool when a scanner
+   * operator rejects a scan immediately after it's created, so an obviously-bad
+   * scan doesn't permanently burn a number and leave a gap in the sequence.
+   *
+   * Only reclaims if `numericValue` is STILL the most-recently-issued number —
+   * the WHERE clause is a compare-and-swap, so if another scan has already
+   * claimed the next number in the meantime, this affects 0 rows and does
+   * nothing. That makes it safe under concurrency (multiple scanners): it can
+   * never roll the counter back past a number that's already been handed to a
+   * different card, so two certs can never end up sharing a number. In that
+   * case the rejected number simply stays retired — today's existing
+   * behaviour, never worse.
+   */
+  async reclaimCertNumberIfLatest(numericValue: number): Promise<boolean> {
+    const result = await db.execute(
+      sql`UPDATE cert_counter SET last_issued = last_issued - 1, updated_at = NOW() WHERE id = 1 AND last_issued = ${numericValue} AND last_issued > 0 RETURNING last_issued`
+    );
+    return result.rows.length > 0;
   }
 
   async getLastIssuedMvNumber(): Promise<{ lastIssued: number; mvNumber: string }> {
