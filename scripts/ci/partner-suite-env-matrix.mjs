@@ -125,6 +125,13 @@ export const SUITES = [
     isolate: true,
     note: "ensureWallet had no caller in server/, so no ACTIVE org ever got a wallet and every credit path 404'd; own cluster.",
   },
+  {
+    file: "tests/partner-submission-lifecycle-migration.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "0044 widens the submission status domain past handover and pins the immutable location snapshot; own cluster.",
+  },
 
   // ---------------------------------------------------------------- admin-only (migration proofs)
   {

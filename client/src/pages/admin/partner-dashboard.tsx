@@ -14,7 +14,7 @@
  * Renders <AdminShell> as its outermost element: the repo-wide shell guard parses App.tsx and
  * fails any /admin route whose page is not shell-unified.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell, Panel, StatCard, Badge, AdminButton, Chip } from "@/components/admin";
@@ -731,24 +731,24 @@ function CreditAdjustmentControl({ partnerId }: { partnerId: string }) {
   const [operation, setOperation] = useState<"add" | "remove">("add");
   const [quantity, setQuantity] = useState("1");
   const [reason, setReason] = useState("");
-  const idempotencyKey = useRef(crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => crypto.randomUUID());
   const mutation = useMutation({
     mutationFn: async () => {
       const parsedQuantity = Number(quantity);
       if (!Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1)
         throw new Error("Enter a whole credit quantity.");
       if (!reason.trim()) throw new Error("Enter an adjustment reason.");
+      if (!idempotencyKey.trim()) throw new Error("Enter an idempotency key.");
       const response = await apiRequest("POST", `${PARTNER_DASHBOARD_BASE}/partners/${partnerId}/credits/adjust`, {
         operation,
         quantity: parsedQuantity,
         reason: reason.trim(),
-        idempotencyKey: idempotencyKey.current,
+        idempotencyKey: idempotencyKey.trim(),
       });
       return response.json();
     },
     onSuccess: async () => {
       setReason("");
-      idempotencyKey.current = crypto.randomUUID();
       await qc.invalidateQueries({ queryKey: dashKeys.section(partnerId, "wallet") });
     },
   });
@@ -801,6 +801,21 @@ function CreditAdjustmentControl({ partnerId }: { partnerId: string }) {
         />
       </label>
       <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+        Idempotency key
+        <input
+          type="text"
+          value={idempotencyKey}
+          onChange={(event) => setIdempotencyKey(event.target.value)}
+          style={{
+            border: "1px solid var(--admin-line-hard)",
+            borderRadius: 6,
+            padding: "9px 10px",
+            background: "var(--admin-panel2)",
+          }}
+          data-testid="pd-credit-idempotency-key"
+        />
+      </label>
+      <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
         Reason
         <textarea
           rows={2}
@@ -829,7 +844,7 @@ function CreditAdjustmentControl({ partnerId }: { partnerId: string }) {
       <div>
         <AdminButton
           variant="gold"
-          disabled={mutation.isPending || !reason.trim()}
+          disabled={mutation.isPending || !reason.trim() || !idempotencyKey.trim()}
           onClick={() => mutation.mutate()}
           data-testid="pd-credit-submit"
         >

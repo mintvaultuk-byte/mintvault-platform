@@ -20,6 +20,7 @@ import {
   type AiGrading,
 } from "./ai-grading-service";
 import { runScanJob } from "./lib/scan-job-queue";
+import { CERTIFICATE_ORIGIN_SNAPSHOT_VERSION } from "@shared/schema";
 
 /**
  * Build a server-log suffix exposing the Postgres SQLSTATE + detail behind a
@@ -194,9 +195,26 @@ export async function createCertForScan(
   const { generateReferenceNumber } = await import("./reference-number");
   const certNumber = await storage.getNextCertId();
   const refNum = generateReferenceNumber();
+  // Stamp the grading-origin snapshot explicitly as HQ.
+  //
+  // This path bypasses storage.createCertificate (and therefore buildOriginSnapshot), so before
+  // this it left every origin_* column NULL. NULL is the LEGACY marker — "created before 0035
+  // existed" — and getCertOrigin treats legacy as HQ policy. Since scanner ingest is how
+  // essentially every certificate is actually born, that meant the origin columns 0035 added were
+  // never populated by the dominant path: 262 of 262 staging certificates read origin_type NULL.
+  //
+  // Writing 'HQ' here restores the distinction the schema was designed around: NULL means "predates
+  // the feature", 'HQ' means "we affirmatively recorded that MintVault graded this". Partner
+  // provenance is NOT set here — a partner-originated card must carry its shop identity, and that
+  // is supplied by the partner intake path, never inferred at the scanner.
+  //
+  // captured_at and snapshot_version are mandatory whenever origin_type is non-null
+  // (chk_certificates_origin_capture_pairing); all partner fields stay NULL
+  // (chk_certificates_origin_non_partner_clean). 0035's trigger is set-once, so this value is
+  // frozen the moment it lands — which is exactly why it must not be guessed.
   const ins = await db.execute(sql`
-    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key)
-    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null})
+    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key, origin_type, origin_captured_at, origin_snapshot_version)
+    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null}, 'HQ', NOW(), ${CERTIFICATE_ORIGIN_SNAPSHOT_VERSION})
     ON CONFLICT (ingest_idempotency_key) DO NOTHING
     RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
   `);

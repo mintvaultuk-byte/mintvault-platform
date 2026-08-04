@@ -13,7 +13,7 @@
  */
 import { Router, type Express, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
-import { requireAdmin } from "../auth";
+import { requireAdmin, requireSuperAdmin } from "../auth";
 import {
   toG5Error,
   g5StatusFor,
@@ -289,6 +289,23 @@ export function partnerManagementRouter(): Router {
 
   // ---- MUTATIONS ----
   r.use(g5MutationRateLimit);
+
+  r.post("/wallet-backfills/WALLET-BACKFILL1", requireSuperAdmin, async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      if (req.body?.confirm !== "WALLET-BACKFILL1") {
+        throw new G5RequestError("VALIDATION_ERROR", "Confirmation phrase is required.");
+      }
+      const reason = requireReason(req.body?.reason);
+      const targetTenantIds = parseTargetTenantIds(req.body?.targetTenantIds);
+      mutationResponse(res, actor.requestId, {
+        result: await svc.provisionMissingActivePartnerWallets(actor, { reason, targetTenantIds }),
+        alreadyCompleted: false,
+      });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
 
   r.post("/partners", async (req, res) => {
     try {
@@ -668,6 +685,19 @@ function requireNonEmptyLong(raw: unknown, field: string): string {
   if (s.length === 0) throw new G5RequestError("VALIDATION_ERROR", `${field} is required.`);
   if (s.length > 10000) throw new G5RequestError("VALIDATION_ERROR", `${field} is too long.`);
   return s;
+}
+
+function parseTargetTenantIds(raw: unknown): string[] | undefined {
+  if (raw == null) return undefined;
+  if (!Array.isArray(raw)) throw new G5RequestError("VALIDATION_ERROR", "targetTenantIds must be an array.");
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const ids = raw.map((id) => {
+    if (typeof id !== "string" || !uuid.test(id)) {
+      throw new G5RequestError("VALIDATION_ERROR", "targetTenantIds must contain valid organisation ids.");
+    }
+    return id;
+  });
+  return ids.length ? Array.from(new Set(ids)) : undefined;
 }
 
 /** Additive registration into the existing MintVault admin app (G5 partner management). */

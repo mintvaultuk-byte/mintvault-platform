@@ -9,7 +9,7 @@
  * locking (WHERE version = $expected). No connector/wallet/slot/billing/grading logic here; no secret
  * is ever read or written; the actor is always server-derived.
  */
-import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
+import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
@@ -145,7 +145,8 @@ type AuditAction =
   | "partner_user_mfa_reset"
   | "partner_invitation_amended"
   | "partner_legal_name_changed"
-  | "partner_duplicate_override";
+  | "partner_duplicate_override"
+  | "partner_wallet_backfilled";
 
 // ---------------------------------------------------------------------------
 // Partner + profile lookups (admin pool, explicit tenant scoping).
@@ -180,6 +181,129 @@ async function loadOrInitProfileVersion(tenantId: string): Promise<number> {
     tenantId,
   ]);
   return 1;
+}
+
+export interface WalletBackfillResult {
+  backfillId: "WALLET-BACKFILL1";
+  considered: number;
+  provisioned: Array<{ tenantId: string; legalName: string; walletId: string }>;
+  alreadyPresent: Array<{ tenantId: string; legalName: string; walletId: string }>;
+  skipped: Array<{ tenantId: string; legalName: string; status: string; reason: string }>;
+  ledgerEntriesCreated: 0;
+}
+
+function walletBackfillAllowed(): boolean {
+  if (process.env.PARTNER_WALLET_BACKFILL1_ENABLED !== "true") return false;
+  const appUrl = process.env.APP_URL ?? "";
+  const appName = process.env.FLY_APP_NAME ?? "";
+  const staging = appName === "mintvault-v2" || appUrl.includes("mintvault-v2.fly.dev");
+  const local =
+    process.env.NODE_ENV !== "production" &&
+    (process.env.VITEST === "true" || appUrl.includes("localhost") || appUrl.includes("127.0.0.1"));
+  if (local) return true;
+  if (!staging) return false;
+
+  const expectedIdentity = process.env.PARTNER_WALLET_BACKFILL1_EXPECTED_DATABASE_IDENTITY?.trim();
+  const actualUrl = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
+  if (!expectedIdentity || !actualUrl) return false;
+  try {
+    return databaseIdentity(actualUrl, "PARTNER_ADMIN_DATABASE_URL") === expectedIdentity;
+  } catch {
+    return false;
+  }
+}
+
+function walletBackfillIdempotencyKey(actor: ActorContext, tenantId: string): string {
+  return `${actor.idempotencyKey ?? "WALLET-BACKFILL1"}:${tenantId}`;
+}
+
+export async function provisionMissingActivePartnerWallets(
+  actor: ActorContext,
+  input: { reason: string; targetTenantIds?: string[] }
+): Promise<WalletBackfillResult> {
+  if (!walletBackfillAllowed()) {
+    throw new G5RequestError("WALLET_BACKFILL_DISABLED", "Wallet backfill is not enabled in this environment.");
+  }
+  const targets = input.targetTenantIds ?? [];
+  const result: WalletBackfillResult = {
+    backfillId: "WALLET-BACKFILL1",
+    considered: 0,
+    provisioned: [],
+    alreadyPresent: [],
+    skipped: [],
+    ledgerEntriesCreated: 0,
+  };
+
+  return withPartnerAdminTransaction(async (client) => {
+    const orgs = await client.query<{ id: string; legal_name: string; status: string; wallet_id: string | null }>(
+      `SELECT o.id, o.legal_name, o.status, w.id AS wallet_id
+         FROM partner_organisations o
+         LEFT JOIN partner_wallets w ON w.tenant_id = o.id
+        WHERE ($1::uuid[] IS NULL OR o.id = ANY($1::uuid[]))
+        ORDER BY o.legal_name, o.id`,
+      [targets.length ? targets : null]
+    );
+    result.considered = orgs.rows.length;
+
+    for (const org of orgs.rows) {
+      const beforeState = { status: org.status, walletPresent: !!org.wallet_id };
+      if (org.status !== "ACTIVE") {
+        result.skipped.push({
+          tenantId: org.id,
+          legalName: org.legal_name,
+          status: org.status,
+          reason: "organisation_not_active",
+        });
+        continue;
+      }
+
+      const idempotencyKey = walletBackfillIdempotencyKey(actor, org.id);
+      await client.query(
+        `INSERT INTO partner_management_audit
+           (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, reason, result)
+         VALUES ($1,'partner_wallet_backfilled',$2,$3,$4,$5,'partner_wallet',$1::uuid::text,$6,'__attempt__','attempted')`,
+        [org.id, actor.actorUserId, actor.actorEmail, actor.requestId, idempotencyKey, JSON.stringify(beforeState)]
+      );
+
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO partner_wallets (tenant_id)
+         VALUES ($1)
+         ON CONFLICT (tenant_id) DO NOTHING
+         RETURNING id`,
+        [org.id]
+      );
+      const walletId =
+        inserted.rows[0]?.id ??
+        (
+          await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])
+        ).rows[0]?.id;
+      if (!walletId) throw new G5RequestError("INTERNAL_ERROR", "Wallet backfill could not verify wallet.");
+
+      const created = inserted.rowCount === 1;
+      await client.query(
+        `INSERT INTO partner_management_audit
+           (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, after_state, reason, result)
+         VALUES ($1,'partner_wallet_backfilled',$2,$3,$4,$5,'partner_wallet',$6,$7,$8,$9,$10)`,
+        [
+          org.id,
+          actor.actorUserId,
+          actor.actorEmail,
+          actor.requestId,
+          idempotencyKey,
+          walletId,
+          JSON.stringify(beforeState),
+          JSON.stringify({ walletId, created, ledgerEntriesCreated: 0 }),
+          input.reason,
+          created ? "succeeded" : "no_op",
+        ]
+      );
+
+      const bucket = created ? result.provisioned : result.alreadyPresent;
+      bucket.push({ tenantId: org.id, legalName: org.legal_name, walletId });
+    }
+
+    return result;
+  });
 }
 
 // ---------------------------------------------------------------------------

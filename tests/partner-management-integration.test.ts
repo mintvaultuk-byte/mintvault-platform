@@ -16,11 +16,15 @@ import { Client } from "pg";
 import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS,
+  PARTNER_MIGRATIONS_WITH_LIFECYCLE,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MANAGEMENT_RT_ADMIN;
 const ORIGINAL_RESEND_API_KEY = process.env.RESEND_API_KEY;
+const ORIGINAL_WALLET_BACKFILL_ENABLED = process.env.PARTNER_WALLET_BACKFILL1_ENABLED;
+const ORIGINAL_APP_URL = process.env.APP_URL;
+const ORIGINAL_FLY_APP_NAME = process.env.FLY_APP_NAME;
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 
 const emailTransport = vi.hoisted(() => ({
   invitationCalls: [] as unknown[],
@@ -99,6 +103,8 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     process.env.PARTNER_DATABASE_URL = ADMIN_DB;
     process.env.SESSION_SECRET = "synthetic-test-session-secret-not-committed";
     process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY = "true";
+    process.env.PARTNER_WALLET_BACKFILL1_ENABLED = "true";
+    process.env.APP_URL = "http://127.0.0.1";
 
     admin = new Client({ connectionString: ADMIN_DB });
     await admin.connect();
@@ -158,7 +164,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     // Includes the wallet/ledger tables (0016/0017). Activating an organisation now provisions
     // its wallet, so a migration list without partner_wallets makes every activation 500 —
     // deliberately, since an ACTIVE org with no wallet is the exact defect being fixed.
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_LIFECYCLE);
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
 
@@ -260,6 +266,14 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     await admin?.end().catch(() => {});
     if (ORIGINAL_RESEND_API_KEY === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = ORIGINAL_RESEND_API_KEY;
+    if (ORIGINAL_WALLET_BACKFILL_ENABLED === undefined) delete process.env.PARTNER_WALLET_BACKFILL1_ENABLED;
+    else process.env.PARTNER_WALLET_BACKFILL1_ENABLED = ORIGINAL_WALLET_BACKFILL_ENABLED;
+    if (ORIGINAL_APP_URL === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = ORIGINAL_APP_URL;
+    if (ORIGINAL_FLY_APP_NAME === undefined) delete process.env.FLY_APP_NAME;
+    else process.env.FLY_APP_NAME = ORIGINAL_FLY_APP_NAME;
+    if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
   });
 
   afterEach(async () => {
@@ -375,6 +389,115 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
       [A]
     );
     expect(audit.rows.map((x) => x.result).sort()).toEqual(["attempted", "succeeded"]);
+  });
+
+  it("WALLET-BACKFILL1 provisions only ACTIVE missing wallets through Super Admin audit", async () => {
+    const c = await cookie();
+    const active = "11111111-1111-4444-9444-111111111111";
+    const pending = "22222222-2222-4444-9444-222222222222";
+    await admin.query(
+      `INSERT INTO partner_organisations (id, public_ref, legal_name, status)
+       VALUES ($1,'bf1a','Backfill Active Ltd','ACTIVE'),($2,'bf1p','Backfill Pending Ltd','PENDING')`,
+      [active, pending]
+    );
+
+    const first = await post(
+      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+      {
+        confirm: "WALLET-BACKFILL1",
+        reason: "staging owner-approved wallet provisioning",
+        idempotencyKey: "wallet-backfill-route-test",
+        targetTenantIds: [active, pending],
+      },
+      c
+    );
+    expect(first.status).toBe(200);
+    const body = await first.json();
+    expect(body.result).toMatchObject({ backfillId: "WALLET-BACKFILL1", considered: 2, ledgerEntriesCreated: 0 });
+    expect(body.result.provisioned).toHaveLength(1);
+    expect(body.result.provisioned[0]).toMatchObject({ tenantId: active, legalName: "Backfill Active Ltd" });
+    expect(body.result.alreadyPresent).toHaveLength(0);
+    expect(body.result.skipped).toEqual([
+      { tenantId: pending, legalName: "Backfill Pending Ltd", status: "PENDING", reason: "organisation_not_active" },
+    ]);
+
+    const counts = await admin.query<{ wallets: number; ledger: number }>(
+      `SELECT
+        (SELECT count(*)::int FROM partner_wallets WHERE tenant_id = ANY($1::uuid[])) AS wallets,
+        (SELECT count(*)::int FROM partner_credit_ledger WHERE tenant_id = ANY($1::uuid[])) AS ledger`,
+      [[active, pending]]
+    );
+    expect(counts.rows[0]).toEqual({ wallets: 1, ledger: 0 });
+
+    const audit = await admin.query<{ result: string; action_type: string; reason: string; idem: string }>(
+      `SELECT result, action_type, reason, idempotency_key AS idem
+         FROM partner_management_audit
+        WHERE tenant_id=$1 AND action_type='partner_wallet_backfilled'
+        ORDER BY CASE result
+                   WHEN 'attempted' THEN 0
+                   WHEN 'succeeded' THEN 1
+                   WHEN 'no_op' THEN 2
+                   ELSE 3
+                 END, created_at, id`,
+      [active]
+    );
+    expect(audit.rows.map((r) => r.result)).toEqual(["attempted", "succeeded"]);
+    expect(audit.rows[1]).toMatchObject({
+      action_type: "partner_wallet_backfilled",
+      reason: "staging owner-approved wallet provisioning",
+      idem: `wallet-backfill-route-test:${active}`,
+    });
+
+    const replay = await post(
+      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+      {
+        confirm: "WALLET-BACKFILL1",
+        reason: "staging owner-approved wallet provisioning",
+        idempotencyKey: "wallet-backfill-route-test",
+        targetTenantIds: [active],
+      },
+      c
+    );
+    expect(replay.status).toBe(200);
+    const replayBody = await replay.json();
+    expect(replayBody.result.provisioned).toHaveLength(0);
+    expect(replayBody.result.alreadyPresent).toHaveLength(1);
+    expect(
+      (await admin.query("SELECT count(*)::int AS n FROM partner_wallets WHERE tenant_id=$1", [active])).rows[0].n
+    ).toBe(1);
+  });
+
+  it("WALLET-BACKFILL1 refuses malformed targets, missing confirmation and production", async () => {
+    const c = await cookie();
+    const malformed = await post(
+      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+      { confirm: "WALLET-BACKFILL1", reason: "bad target", targetTenantIds: ["not-a-uuid"] },
+      c
+    );
+    expect(malformed.status).toBe(400);
+    expect((await malformed.json()).error.code).toBe("VALIDATION_ERROR");
+
+    const missingConfirm = await post(
+      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+      { reason: "missing confirm" },
+      c
+    );
+    expect(missingConfirm.status).toBe(400);
+    expect((await missingConfirm.json()).error.code).toBe("VALIDATION_ERROR");
+
+    process.env.NODE_ENV = "production";
+    process.env.APP_URL = "https://mintvault.fly.dev";
+    process.env.FLY_APP_NAME = "mintvault";
+    const production = await post(
+      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+      { confirm: "WALLET-BACKFILL1", reason: "must not run in production" },
+      c
+    );
+    expect(production.status).toBe(403);
+    expect((await production.json()).error.code).toBe("WALLET_BACKFILL_DISABLED");
+    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    process.env.APP_URL = "http://127.0.0.1";
+    delete process.env.FLY_APP_NAME;
   });
 
   it("contacts: add + duplicate-primary + edit + soft-deactivate", async () => {

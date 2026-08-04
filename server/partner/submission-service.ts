@@ -163,11 +163,12 @@ export async function createSubmissionDraft(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     // Never trust a client-supplied location — it must be one this user is actually assigned to,
     // UNLESS the user is org-wide (owner/manager may create on behalf of any org location).
-    const assigned = await c.query("SELECT 1 FROM partner_locations WHERE id=$1 AND tenant_id=$2 AND status='ACTIVE'", [
-      input.locationId,
-      principal.tenantId,
-    ]);
+    const assigned = await c.query<{ name: string }>(
+      "SELECT name FROM partner_locations WHERE id=$1 AND tenant_id=$2 AND status='ACTIVE'",
+      [input.locationId, principal.tenantId]
+    );
     if (assigned.rowCount !== 1) throw VALIDATION("Selected location is not available.");
+    const locationNameSnapshot = assigned.rows[0].name;
     if (!principal.orgWide) {
       const own = await c.query(
         `SELECT 1
@@ -187,27 +188,59 @@ export async function createSubmissionDraft(
       input.serviceTierCode != null
         ? (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence
         : null;
-    const { rows } = await c.query(
-      `INSERT INTO partner_submissions
-         (tenant_id, location_id, created_by, customer_id, internal_reference, service_tier_code, estimated_price_pence, intake_notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
-                 estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at`,
-      [
-        principal.tenantId,
-        input.locationId,
-        principal.userId,
-        input.customerId ?? null,
-        input.internalReference ?? null,
-        input.serviceTierCode ?? null,
-        estimatedPrice,
-        input.intakeNotes ?? null,
-      ]
-    );
+    const hasLocationSnapshot = await partnerSubmissionsHasLocationSnapshot(c);
+    const { rows } = hasLocationSnapshot
+      ? await c.query(
+          `INSERT INTO partner_submissions
+             (tenant_id, location_id, location_name_snapshot, created_by, customer_id, internal_reference, service_tier_code, estimated_price_pence, intake_notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           RETURNING id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
+                     estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at`,
+          [
+            principal.tenantId,
+            input.locationId,
+            locationNameSnapshot,
+            principal.userId,
+            input.customerId ?? null,
+            input.internalReference ?? null,
+            input.serviceTierCode ?? null,
+            estimatedPrice,
+            input.intakeNotes ?? null,
+          ]
+        )
+      : await c.query(
+          `INSERT INTO partner_submissions
+             (tenant_id, location_id, created_by, customer_id, internal_reference, service_tier_code, estimated_price_pence, intake_notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
+                     estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at`,
+          [
+            principal.tenantId,
+            input.locationId,
+            principal.userId,
+            input.customerId ?? null,
+            input.internalReference ?? null,
+            input.serviceTierCode ?? null,
+            estimatedPrice,
+            input.intakeNotes ?? null,
+          ]
+        );
     const row = rows[0];
     await writeEvent(c, principal, row.id, "created", null, "draft", null);
     return toSummary(row);
   });
+}
+
+async function partnerSubmissionsHasLocationSnapshot(c: PoolClient): Promise<boolean> {
+  const { rows } = await c.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'partner_submissions'
+          AND column_name = 'location_name_snapshot'
+     )`
+  );
+  return rows[0]?.exists === true;
 }
 
 /**
