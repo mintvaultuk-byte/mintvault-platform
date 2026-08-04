@@ -30,6 +30,7 @@ import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17
 
 let cluster: DisposablePostgres17;
 let admin: Client;
+let submissionSvc: typeof import("../server/partner/submission-service");
 
 const TENANT = "cccccccc-4400-0000-0000-000000000001";
 const LOCATION = "dddddddd-4400-0000-0000-000000000001";
@@ -79,6 +80,9 @@ async function insertSubmission(status: string): Promise<string> {
 describe("Migration 0044 — submission lifecycle + location snapshot (PostgreSQL 17)", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("submission-lifecycle");
+    process.env.MINTVAULT_DATABASE_URL = cluster.url;
+    process.env.PARTNER_ADMIN_DATABASE_URL = cluster.url;
+    process.env.PARTNER_DATABASE_URL = cluster.url;
     admin = new Client({ connectionString: cluster.url });
     await admin.connect();
     await provisionRealisticRoles(admin);
@@ -99,9 +103,12 @@ describe("Migration 0044 — submission lifecycle + location snapshot (PostgreSQ
       "INSERT INTO partner_users (id, tenant_id, partner_id, email, status) VALUES ($1,$2,$2,'lifecycle@example.test','ACTIVE')",
       [USER, TENANT]
     );
+    submissionSvc = await import("../server/partner/submission-service");
   }, 180_000);
 
   afterAll(async () => {
+    const { closePartnerPools } = await import("../server/partner/db");
+    await closePartnerPools().catch(() => {});
     await admin?.end();
     await cluster?.stop();
   });
@@ -161,12 +168,61 @@ describe("Migration 0044 — submission lifecycle + location snapshot (PostgreSQ
     await admin.query("UPDATE partner_locations SET name='Original Name' WHERE id=$1", [LOCATION]);
   });
 
+  it("captures the location snapshot when the real draft writer creates a submission", async () => {
+    const submission = await submissionSvc.createSubmissionDraft(
+      {
+        sessionId: "session-0044",
+        tenantId: TENANT,
+        userId: USER,
+        locationId: null,
+        mfaPassed: true,
+        permissions: new Set(),
+        viewOnly: false,
+        sensitiveDisabled: false,
+        orgWide: true,
+      },
+      { locationId: LOCATION, internalReference: "snapshot-writer" }
+    );
+    await admin.query("UPDATE partner_locations SET name='Writer Renamed Later' WHERE id=$1", [LOCATION]);
+    const r = await admin.query<{ snapshot: string }>(
+      "SELECT location_name_snapshot AS snapshot FROM partner_submissions WHERE id=$1",
+      [submission.id]
+    );
+    expect(r.rows[0].snapshot).toBe("Original Name");
+    await admin.query("UPDATE partner_locations SET name='Original Name' WHERE id=$1", [LOCATION]);
+  });
+
+  it("direct inserts without a snapshot are repaired by the trigger and later snapshot edits fail closed", async () => {
+    const r = await admin.query<{ id: string; snapshot: string }>(
+      `INSERT INTO partner_submissions
+         (tenant_id, location_id, created_by, public_ref, card_count, status, version)
+       VALUES ($1,$2,$3,'REF-TRIGGER-SNAPSHOT',0,'draft',1)
+       RETURNING id, location_name_snapshot AS snapshot`,
+      [TENANT, LOCATION, USER]
+    );
+    expect(r.rows[0].snapshot).toBe("Original Name");
+    await expect(
+      admin.query("UPDATE partner_submissions SET location_name_snapshot='tampered' WHERE id=$1", [r.rows[0].id])
+    ).rejects.toThrow(/location_name_snapshot is immutable/i);
+  });
+
+  it("extends the management-audit action CHECK for the audited wallet backfill", async () => {
+    await expect(
+      admin.query(
+        `INSERT INTO partner_management_audit
+           (tenant_id, action_type, actor_user_id, actor_email, request_id, reason, result)
+         VALUES ($1,'partner_wallet_backfilled',$2,'audit@example.test','wallet-action-proof','proof','succeeded')`,
+        [TENANT, USER]
+      )
+    ).resolves.toBeTruthy();
+  });
+
   it("the location FK is still enforced — a snapshot does not replace referential integrity", async () => {
     await expect(
       admin.query(
         `INSERT INTO partner_submissions
-           (tenant_id, location_id, created_by, public_ref, card_count, status, version)
-         VALUES ($1,'99999999-9999-9999-9999-999999999999',$2,'REF-ORPHAN',0,'draft',1)`,
+           (tenant_id, location_id, location_name_snapshot, created_by, public_ref, card_count, status, version)
+         VALUES ($1,'99999999-9999-9999-9999-999999999999','Explicit Snapshot',$2,'REF-ORPHAN',0,'draft',1)`,
         [TENANT, USER]
       )
     ).rejects.toThrow(/foreign key|violates/i);

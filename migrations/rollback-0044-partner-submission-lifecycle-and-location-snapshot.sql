@@ -18,8 +18,6 @@
 -- Dropping location_name_snapshot DISCARDS captured history. Once dropped, the original location
 -- names as at submission time are not recoverable from the pointer alone.
 
-BEGIN;
-
 DO $$
 DECLARE
   blocking text;
@@ -39,7 +37,25 @@ ALTER TABLE partner_submissions DROP CONSTRAINT chk_partner_submissions_status;
 ALTER TABLE partner_submissions ADD CONSTRAINT chk_partner_submissions_status
   CHECK (status IN ('draft', 'submitted_to_mintvault', 'cancelled'));
 
+DROP TRIGGER IF EXISTS trg_partner_submissions_location_snapshot ON partner_submissions;
+DROP FUNCTION IF EXISTS partner_submissions_capture_location_snapshot();
+
 ALTER TABLE partner_submissions DROP COLUMN IF EXISTS location_name_snapshot;
+
+ALTER TABLE partner_management_audit DROP CONSTRAINT chk_partner_management_audit_action;
+
+ALTER TABLE partner_management_audit ADD CONSTRAINT chk_partner_management_audit_action CHECK (action_type IN (
+  'partner_created','profile_updated','status_changed','contact_added','contact_updated',
+  'contact_deactivated','branding_updated','note_added',
+  'partner_user_invited','partner_invitation_resent','partner_invitation_revoked',
+  'partner_invitation_accepted','partner_user_role_changed','partner_user_suspended',
+  'partner_user_reactivated','partner_user_password_reset_initiated',
+  'partner_user_sessions_revoked','partner_user_membership_removed',
+  'partner_user_mfa_reset',
+  'partner_invitation_amended',
+  'partner_legal_name_changed',
+  'partner_duplicate_override'
+));
 
 DO $$
 BEGIN
@@ -51,6 +67,13 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'rollback-0044 assertion failed: widened constraint is still present';
   END IF;
-END$$;
 
-COMMIT;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'partner_management_audit'::regclass
+       AND conname = 'chk_partner_management_audit_action'
+       AND pg_get_constraintdef(oid) LIKE '%partner_wallet_backfilled%'
+  ) THEN
+    RAISE EXCEPTION 'rollback-0044 assertion failed: wallet backfill audit action is still present';
+  END IF;
+END$$;

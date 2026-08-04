@@ -72,8 +72,10 @@
 -- have origin_type NULL — which is a code defect, not a schema one, and is fixed separately.
 --
 -- It changes NO grading logic, NO MVGS scoring, NO certificate numbering, and touches no HQ table.
-
-BEGIN;
+--
+-- PART 3 adds the partner_wallet_backfilled management-audit action. This is required by the
+-- staging wallet backfill: wallet creation is money-adjacent and must be evidenced in the internal
+-- Super Admin audit ledger, not via ad hoc SQL or a tenant-visible partner_audit_events row.
 
 -- ---------------------------------------------------------------------------------------------
 -- PART 1 — widen the status domain
@@ -126,6 +128,59 @@ UPDATE partner_submissions s
  WHERE l.id = s.location_id
    AND s.location_name_snapshot IS NULL;
 
+CREATE OR REPLACE FUNCTION partner_submissions_capture_location_snapshot()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  location_name text;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.location_name_snapshot IS NULL THEN
+      SELECT l.name INTO location_name
+        FROM partner_locations l
+       WHERE l.id = NEW.location_id
+         AND l.tenant_id = NEW.tenant_id;
+      IF location_name IS NULL THEN
+        RAISE EXCEPTION 'partner_submissions.location_name_snapshot could not resolve location % for tenant %',
+          NEW.location_id, NEW.tenant_id;
+      END IF;
+      NEW.location_name_snapshot := location_name;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF OLD.location_name_snapshot IS DISTINCT FROM NEW.location_name_snapshot THEN
+    RAISE EXCEPTION 'partner_submissions.location_name_snapshot is immutable after insert';
+  END IF;
+  RETURN NEW;
+END$$;
+
+DROP TRIGGER IF EXISTS trg_partner_submissions_location_snapshot ON partner_submissions;
+CREATE TRIGGER trg_partner_submissions_location_snapshot
+BEFORE INSERT OR UPDATE OF location_name_snapshot ON partner_submissions
+FOR EACH ROW EXECUTE FUNCTION partner_submissions_capture_location_snapshot();
+
+-- ---------------------------------------------------------------------------------------------
+-- PART 3 — honest audit action for the audited wallet backfill
+-- ---------------------------------------------------------------------------------------------
+
+ALTER TABLE partner_management_audit DROP CONSTRAINT chk_partner_management_audit_action;
+
+ALTER TABLE partner_management_audit ADD CONSTRAINT chk_partner_management_audit_action CHECK (action_type IN (
+  'partner_created','profile_updated','status_changed','contact_added','contact_updated',
+  'contact_deactivated','branding_updated','note_added',
+  'partner_user_invited','partner_invitation_resent','partner_invitation_revoked',
+  'partner_invitation_accepted','partner_user_role_changed','partner_user_suspended',
+  'partner_user_reactivated','partner_user_password_reset_initiated',
+  'partner_user_sessions_revoked','partner_user_membership_removed',
+  'partner_user_mfa_reset',
+  'partner_invitation_amended',
+  'partner_legal_name_changed',
+  'partner_duplicate_override',
+  'partner_wallet_backfilled'
+));
+
 -- ---------------------------------------------------------------------------------------------
 -- Fail-closed assertions: prove the migration achieved what it claims, in the same transaction.
 -- ---------------------------------------------------------------------------------------------
@@ -152,6 +207,22 @@ BEGIN
   ) THEN
     RAISE EXCEPTION '0044 assertion failed: backfill left rows without a location snapshot';
   END IF;
-END$$;
 
-COMMIT;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+     WHERE tgrelid = 'partner_submissions'::regclass
+       AND tgname = 'trg_partner_submissions_location_snapshot'
+       AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION '0044 assertion failed: location snapshot trigger is absent';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'partner_management_audit'::regclass
+       AND conname = 'chk_partner_management_audit_action'
+       AND pg_get_constraintdef(oid) LIKE '%partner_wallet_backfilled%'
+  ) THEN
+    RAISE EXCEPTION '0044 assertion failed: partner_wallet_backfilled audit action is absent';
+  END IF;
+END$$;

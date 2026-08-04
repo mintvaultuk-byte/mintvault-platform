@@ -136,6 +136,9 @@ describe("partner schema ↔ migration parity", () => {
       // policy 0041 omitted on partner_submission_credit_holds. It contains an INTENTIONAL
       // DROP INDEX, so the runner requires --allow-destructive for it.
       "0043_partner_credit_hold_per_card.sql",
+      // 0044 widens partner submission lifecycle states after handover and stores an immutable
+      // location-name snapshot. It also permits the audited wallet-only staging backfill action.
+      "0044_partner_submission_lifecycle_and_location_snapshot.sql",
     ]);
   });
 

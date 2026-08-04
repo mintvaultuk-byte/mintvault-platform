@@ -31,6 +31,7 @@ export const G5_ERROR_CODES = [
   "RATE_LIMITED",
   "IDEMPOTENCY_CONFLICT",
   "REQUEST_ALREADY_COMPLETED",
+  "WALLET_BACKFILL_DISABLED",
   "INTERNAL_ERROR",
 ] as const;
 export type G5ErrorCode = (typeof G5_ERROR_CODES)[number];
@@ -110,6 +111,8 @@ export function g5StatusFor(code: G5ErrorCode): number {
       return 503;
     case "REQUEST_ALREADY_COMPLETED":
       return 200;
+    case "WALLET_BACKFILL_DISABLED":
+      return 403;
     case "INTERNAL_ERROR":
       return 500;
     default:

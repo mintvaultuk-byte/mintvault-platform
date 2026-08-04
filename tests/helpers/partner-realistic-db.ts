@@ -148,11 +148,19 @@ export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
  * completed — must use this list, or the CHECK constraint rejects every one of those states.
  */
 export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
-  ...PARTNER_MIGRATIONS_WITH_PER_CARD,
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0031_partner_user_management",
+  "0032_partner_final_owner_invariant",
+  "0033_partner_audit_action_precision",
+  "0034_partner_rbac_seed",
   // 0035 is included because the partner→certificate link lives there
   // (certificates.origin_partner_id). 0044 deliberately adds no second link, and a suite that
   // cannot see 0035's columns could not prove that.
   "0035_partner_certificate_origin",
+  "0041_partner_submission_credit_lifecycle",
+  "0042_partner_per_card_credit_settlement",
+  "0043_partner_credit_hold_per_card",
   "0044_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
