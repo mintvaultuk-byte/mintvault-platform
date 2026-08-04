@@ -145,6 +145,7 @@ const PartnerPasswordResetRequestPage = lazy(() => import("@/pages/partner/passw
 const PartnerPasswordResetPage = lazy(() => import("@/pages/partner/password-reset"));
 const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
+const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
 const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
@@ -286,6 +287,11 @@ function PartnerPortalRoutes() {
         <Route path="/partner/submissions">
           <PartnerRouteGuard>
             <PartnerSubmissionsPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/customers">
+          <PartnerRouteGuard>
+            <PartnerCustomersPage />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/users">

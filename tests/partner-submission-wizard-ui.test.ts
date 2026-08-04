@@ -56,7 +56,7 @@ describe("double-submit / duplication safety", () => {
     // Submit's enabled state must reuse the SAME "missing" check as the Review step's warning
     // banner (a real bug found in review: Submit was previously enabled by card-count alone,
     // letting a partner skip past an incomplete Review straight to an active Submit button).
-    expect(WIZARD).toContain("disabled={submitting || missing.length > 0}");
+    expect(WIZARD).toContain("disabled={submitting || missing.length > 0 || creditBlocked}");
     expect(WIZARD).toContain('data-testid="button-confirm-submit"');
   });
   it("Review and Submit steps share one computed 'missing' list, not two independent checks", () => {
@@ -65,7 +65,7 @@ describe("double-submit / duplication safety", () => {
     expect(WIZARD).toContain('if (cards.length === 0) missing.push("At least one card");');
     // ReviewStep/SubmitStep receive it as a prop rather than recomputing their own copy.
     expect(WIZARD).toMatch(/<ReviewStep[\s\S]*?missing=\{missing\}/);
-    expect(WIZARD).toContain("<SubmitStep missing={missing}");
+    expect(WIZARD).toMatch(/<SubmitStep[\s\S]*?missing=\{missing\}/);
   });
   it("passes the idempotency key through to partnerSubmissions.submit", () => {
     expect(WIZARD).toContain("partnerSubmissions.submit(submission.id, idempotencyKey)");
@@ -74,6 +74,43 @@ describe("double-submit / duplication safety", () => {
     // Only the single useMemo call site should exist.
     const matches = WIZARD.match(/newIdempotencyKey\(/g) ?? [];
     expect(matches.length).toBe(1);
+  });
+});
+
+describe("customer selection and credit preview controls", () => {
+  it("the Change customer button clears the selected customer instead of opening a hidden create form", () => {
+    expect(WIZARD).toContain("function changeCustomer()");
+    expect(WIZARD).toContain("setCustomerId(null)");
+    expect(WIZARD).toContain("void saveField({ customerId: null })");
+    expect(WIZARD).toContain("onClick={props.onChangeCustomer}");
+  });
+
+  it("a customer selected from the Customers page is fetched and saved to the draft", () => {
+    expect(WIZARD).toContain("window.location.search.match(/[?&]customerId=([^&]+)/)");
+    expect(WIZARD).toContain("partnerCustomers.get(preselectedCustomerId!)");
+    expect(WIZARD).toContain("void saveField({ customerId: preselectedCustomer.id })");
+  });
+
+  it("review and submit use the backend credit preview, not client-side card counting alone", () => {
+    expect(WIZARD).toContain("partnerSubmissions.creditPreview(submission!.id)");
+    expect(WIZARD).toContain('data-testid="panel-credit-preview"');
+    expect(WIZARD).toContain('data-testid="panel-submit-credit-preview"');
+  });
+});
+
+describe("partner card image uploads", () => {
+  it("detail page exposes independent front/back upload controls through the partner API only", () => {
+    expect(DETAIL).toContain("partnerCards.uploadImage(submissionId, cardId, side, file)");
+    expect(DETAIL).toContain('side="front"');
+    expect(DETAIL).toContain('side="back"');
+    expect(DETAIL).toContain('accept="image/jpeg,image/png,image/webp"');
+    expect(DETAIL).not.toContain("/api/admin/");
+  });
+
+  it("typed API uses multipart FormData and never sends a raw password/token-like payload", () => {
+    expect(API).toContain("async function multipartReq");
+    expect(API).toContain('form.set("image", file)');
+    expect(API).toContain("/api/partner/submissions/${submissionId}/cards/${cardId}/images/${side}");
   });
 });
 

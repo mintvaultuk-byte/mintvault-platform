@@ -13,11 +13,17 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { partnerSubmissions, partnerErrorMessage, type SubmissionSummary } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
+import { usePartnerSession } from "@/hooks/use-partner-session";
 import { PlusCircle } from "lucide-react";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
   submitted_to_mintvault: "Submitted to MintVault",
+  received: "Received",
+  grading: "Grading",
+  graded: "Graded",
+  awaiting_settlement: "Awaiting settlement",
+  completed: "Completed",
   cancelled: "Cancelled",
 };
 
@@ -31,6 +37,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function PartnerSubmissionsPage() {
+  const { hasPermission } = usePartnerSession();
+  const canCreateOrders = hasPermission("partner.orders.create");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const pageSize = 25;
@@ -47,12 +55,14 @@ export default function PartnerSubmissionsPage() {
         <h1 className="text-2xl font-bold" data-testid="text-submissions-title">
           Submissions
         </h1>
-        <Link href="/partner/submissions/new">
-          <Button data-testid="button-new-submission-list">
-            <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />
-            New Submission
-          </Button>
-        </Link>
+        {canCreateOrders && (
+          <Link href="/partner/submissions/new">
+            <Button data-testid="button-new-submission-list">
+              <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />
+              New Submission
+            </Button>
+          </Link>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -70,6 +80,11 @@ export default function PartnerSubmissionsPage() {
             <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="draft">Draft</SelectItem>
             <SelectItem value="submitted_to_mintvault">Submitted to MintVault</SelectItem>
+            <SelectItem value="received">Received</SelectItem>
+            <SelectItem value="grading">Grading</SelectItem>
+            <SelectItem value="graded">Graded</SelectItem>
+            <SelectItem value="awaiting_settlement">Awaiting settlement</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
@@ -82,9 +97,11 @@ export default function PartnerSubmissionsPage() {
         <Card>
           <CardContent className="p-8 text-center text-muted-foreground" data-testid="text-empty-submissions">
             <p className="mb-4">No submissions yet.</p>
-            <Link href="/partner/submissions/new">
-              <Button data-testid="button-new-submission-empty">Create your first submission</Button>
-            </Link>
+            {canCreateOrders && (
+              <Link href="/partner/submissions/new">
+                <Button data-testid="button-new-submission-empty">Create your first submission</Button>
+              </Link>
+            )}
           </CardContent>
         </Card>
       )}

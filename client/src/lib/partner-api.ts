@@ -39,6 +39,33 @@ async function req<T>(method: string, url: string, data?: unknown): Promise<T> {
   }
 }
 
+async function multipartReq<T>(method: string, url: string, form: FormData): Promise<T> {
+  try {
+    const res = await fetch(url, {
+      method,
+      body: form,
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let body: { error?: { code?: string; message?: string } } | null = null;
+      try {
+        body = await res.json();
+      } catch {
+        body = null;
+      }
+      throw new PartnerApiError(
+        res.status,
+        body?.error?.code ?? "error",
+        body?.error?.message ?? "Something went wrong. Please try again."
+      );
+    }
+    return (await res.json()) as T;
+  } catch (err) {
+    if (err instanceof PartnerApiError) throw err;
+    throw new PartnerApiError(0, "error", "Something went wrong. Please try again.");
+  }
+}
+
 // ---- session / auth ----
 export interface PartnerSessionInfo {
   mfaPassed: boolean;
@@ -131,12 +158,23 @@ export interface PartnerCustomer {
   phone: string | null;
   reference: string | null;
   createdAt: string;
+  updatedAt: string | null;
 }
 export const partnerCustomers = {
   list: (search?: string) =>
     req<PartnerCustomer[]>("GET", `/api/partner/customers${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  get: (id: string) => req<PartnerCustomer>("GET", `/api/partner/customers/${id}`),
   create: (input: { fullName: string; email?: string | null; phone?: string | null; reference?: string | null }) =>
     req<PartnerCustomer>("POST", "/api/partner/customers", input),
+  update: (
+    id: string,
+    input: { fullName?: string; email?: string | null; phone?: string | null; reference?: string | null }
+  ) => req<PartnerCustomer>("PATCH", `/api/partner/customers/${id}`, input),
+};
+
+// ---- catalogue ----
+export const partnerCatalogue = {
+  snapshot: () => req<{ snapshot: unknown; categories: string[] }>("GET", "/api/partner/catalogue/snapshot"),
 };
 
 // ---- locations ----
@@ -212,6 +250,11 @@ export interface DashboardCounts {
   draft: number;
   submitted_to_mintvault: number;
   cancelled: number;
+  received?: number;
+  grading?: number;
+  graded?: number;
+  awaiting_settlement?: number;
+  completed?: number;
 }
 export const partnerDashboard = {
   summary: () => req<DashboardCounts>("GET", "/api/partner/dashboard/submissions"),
@@ -301,6 +344,10 @@ export interface SubmissionCard {
   customer_notes: string | null;
   intake_notes: string | null;
   created_at: string;
+  hasFrontImage: boolean;
+  hasBackImage: boolean;
+  frontImageUrl: string | null;
+  backImageUrl: string | null;
 }
 
 export interface SubmissionEvent {
@@ -336,6 +383,15 @@ export const partnerSubmissions = {
     intakeNotes?: string | null;
   }) => req<SubmissionSummary>("POST", "/api/partner/submissions", input),
   detail: (id: string) => req<SubmissionDetail>("GET", `/api/partner/submissions/${id}`),
+  creditPreview: (id: string) =>
+    req<{
+      cardRows: number;
+      cardUnits: number;
+      availableCredits: number | null;
+      reservedCredits: number | null;
+      remainingAfterSubmit: number | null;
+      enoughCredits: boolean;
+    }>("GET", `/api/partner/submissions/${id}/credit-preview`),
   edit: (
     id: string,
     input: {
@@ -393,6 +449,16 @@ export const partnerCards = {
       `/api/partner/submissions/${submissionId}/cards/${cardId}`,
       reason ? { reason } : undefined
     ),
+  uploadImage: (submissionId: string, cardId: string, side: "front" | "back", file: File) => {
+    const form = new FormData();
+    form.set("image", file);
+    return multipartReq<{
+      hasFrontImage: boolean;
+      hasBackImage: boolean;
+      frontImageUrl: string | null;
+      backImageUrl: string | null;
+    }>("POST", `/api/partner/submissions/${submissionId}/cards/${cardId}/images/${side}`, form);
+  },
 };
 
 /** A stable idempotency key for one submit "session" — regenerated only when the user explicitly retries after a genuine error, never on every render. */
