@@ -1307,6 +1307,8 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           sql`${certificates.deletedAt} IS NULL`,
+          sql`${certificates.gradeApprovedAt} IS NOT NULL`,
+          sql`${certificates.status} = 'active'`,
           or(
             ilike(certificates.certId, q),
             ilike(certificates.cardName, q),

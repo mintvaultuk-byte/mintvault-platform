@@ -9,6 +9,7 @@
  * ready_for_import" is structurally impossible.
  */
 import type pg from "pg";
+import { headR2 } from "../r2";
 import { withConnectorTx, connectorQuery } from "./connector-db";
 import { resolveGlobalFlag } from "./flags";
 import { ConnectorError, toConnectorError } from "./connector-errors";
@@ -62,6 +63,8 @@ export const VALIDATION_FINDING_CODES = [
   "card_invalid_quantity",
   "card_invalid_declared_value",
   "card_missing_required_field",
+  "card_front_image_missing",
+  "card_back_image_missing",
   "card_tenant_mismatch",
   "totals_mismatch",
   "source_version_mismatch",
@@ -127,6 +130,10 @@ function isEmail(v: string): boolean {
 
 function isBlank(v: string | null | undefined): boolean {
   return v == null || v.trim().length === 0;
+}
+
+function expectedCardImagePrefix(tenantId: string, submissionId: string, cardId: string, side: "front" | "back") {
+  return `partner-submissions/${tenantId}/${submissionId}/${cardId}/${side}-`;
 }
 
 /**
@@ -213,9 +220,12 @@ export async function loadValidationRows(client: pg.PoolClient, connector: Conne
     variant: string | null;
     language: string | null;
     declared_value_pence: number | null;
+    front_image_key: string | null;
+    back_image_key: string | null;
     quantity: number;
   }>(
-    `SELECT id, tenant_id, sequence_number, card_name, game, card_set, card_number, year, variant, language, declared_value_pence, quantity
+    `SELECT id, tenant_id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+            declared_value_pence, front_image_key, back_image_key, quantity
        FROM partner_submission_cards
       WHERE submission_id = $1 AND removed_at IS NULL
       ORDER BY sequence_number ASC`,
@@ -469,6 +479,52 @@ function evaluateRules(connector: ConnectorRow, rows: LoadedRows): ValidationFin
           safeMetadata: {},
         });
       }
+      const frontImageKey = card.front_image_key;
+      if (isBlank(frontImageKey)) {
+        push({
+          severity: "blocking",
+          code: "card_front_image_missing",
+          entityType: "card",
+          safeEntityReference: card.id,
+          safeFieldName: "front_image_key",
+          safeMetadata: {},
+        });
+      } else if (
+        typeof frontImageKey !== "string" ||
+        !frontImageKey.startsWith(expectedCardImagePrefix(connector.tenant_id, rows.submission.id, card.id, "front"))
+      ) {
+        push({
+          severity: "blocking",
+          code: "card_front_image_missing",
+          entityType: "card",
+          safeEntityReference: card.id,
+          safeFieldName: "front_image_key",
+          safeMetadata: {},
+        });
+      }
+      const backImageKey = card.back_image_key;
+      if (isBlank(backImageKey)) {
+        push({
+          severity: "blocking",
+          code: "card_back_image_missing",
+          entityType: "card",
+          safeEntityReference: card.id,
+          safeFieldName: "back_image_key",
+          safeMetadata: {},
+        });
+      } else if (
+        typeof backImageKey !== "string" ||
+        !backImageKey.startsWith(expectedCardImagePrefix(connector.tenant_id, rows.submission.id, card.id, "back"))
+      ) {
+        push({
+          severity: "blocking",
+          code: "card_back_image_missing",
+          entityType: "card",
+          safeEntityReference: card.id,
+          safeFieldName: "back_image_key",
+          safeMetadata: {},
+        });
+      }
     }
 
     // TOTALS
@@ -521,6 +577,33 @@ function evaluateRules(connector: ConnectorRow, rows: LoadedRows): ValidationFin
   return findings;
 }
 
+async function evaluateImageObjectPresence(connector: ConnectorRow, rows: LoadedRows): Promise<ValidationFinding[]> {
+  const findings: ValidationFinding[] = [];
+  for (const card of rows.cards) {
+    for (const side of ["front", "back"] as const) {
+      const key = side === "front" ? card.front_image_key : card.back_image_key;
+      if (
+        typeof key !== "string" ||
+        !key.startsWith(expectedCardImagePrefix(connector.tenant_id, connector.partner_submission_id, card.id, side))
+      ) {
+        continue;
+      }
+      const exists = await headR2(key);
+      if (!exists) {
+        findings.push({
+          severity: "blocking",
+          code: side === "front" ? "card_front_image_missing" : "card_back_image_missing",
+          entityType: "card",
+          safeEntityReference: card.id,
+          safeFieldName: side === "front" ? "front_image_key" : "back_image_key",
+          safeMetadata: {},
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 /** Exported for the same reason as loadValidationRows above. */
 export function toFingerprintSource(rows: LoadedRows): FingerprintSource {
   return {
@@ -553,6 +636,8 @@ export function toFingerprintSource(rows: LoadedRows): FingerprintSource {
       language: c.language,
       declaredValuePence: c.declared_value_pence,
       quantity: c.quantity,
+      frontImageKey: c.front_image_key,
+      backImageKey: c.back_image_key,
     })),
   };
 }
@@ -730,6 +815,7 @@ export async function validateConnectorRecord(params: {
               ];
             } else {
               findings = evaluateRules(connector, rows);
+              findings.push(...(await evaluateImageObjectPresence(connector, rows)));
               // submission_superseded: defence in depth against another connector record existing for
               // the same Partner submission. Migration 0008's UNIQUE(handoff_id) already makes this
               // structurally impossible under the current schema (one handoff -> at most one connector

@@ -20,6 +20,7 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const WIZARD = read("client/src/pages/partner/submission-wizard.tsx");
 const DETAIL = read("client/src/pages/partner/submission-detail.tsx");
 const API = read("client/src/lib/partner-api.ts");
+const ROUTES = read("server/partner/submission-routes.ts");
 const COMING_SOON = read("client/src/pages/partner/coming-soon.tsx");
 const LOCATIONS_PAGE = read("client/src/pages/partner/locations.tsx");
 const BILLING_PAGE = read("client/src/pages/partner/billing.tsx");
@@ -60,12 +61,13 @@ describe("double-submit / duplication safety", () => {
     expect(WIZARD).toContain('data-testid="button-confirm-submit"');
   });
   it("Review and Submit steps share one computed 'missing' list, not two independent checks", () => {
-    expect(WIZARD).toContain('if (!customerDisplay) missing.push("Customer");');
-    expect(WIZARD).toContain('if (!serviceTierCode) missing.push("Service");');
-    expect(WIZARD).toContain('if (cards.length === 0) missing.push("At least one card");');
+    expect(WIZARD).toContain('if (!submission.customerId) missing.push("Customer");');
+    expect(WIZARD).toContain('if (!submission.serviceTierCode) missing.push("Service");');
+    expect(WIZARD).toContain('if (savedCardCount === 0) missing.push("At least one card");');
+    expect(WIZARD).toContain('missing.push("Front and back images for every card")');
     // ReviewStep/SubmitStep receive it as a prop rather than recomputing their own copy.
     expect(WIZARD).toMatch(/<ReviewStep[\s\S]*?missing=\{missing\}/);
-    expect(WIZARD).toContain("<SubmitStep missing={missing}");
+    expect(WIZARD).toMatch(/<SubmitStep[\s\S]*?missing=\{missing\}/);
   });
   it("passes the idempotency key through to partnerSubmissions.submit", () => {
     expect(WIZARD).toContain("partnerSubmissions.submit(submission.id, idempotencyKey)");
@@ -91,6 +93,38 @@ describe("optimistic-concurrency conflict is surfaced, never silently overwritte
   });
   it("every PATCH-style edit call includes the current submission.version", () => {
     expect(WIZARD).toContain("partnerSubmissions.edit(submission.id, { version: submission.version, ...patch })");
+  });
+  it("the wizard rehydrates from submission detail after create, field edits, and card/image mutations", () => {
+    expect(WIZARD).toContain("const syncDraftDetail = useCallback((detail: SubmissionDetail)");
+    expect(WIZARD).toContain("const detail = await partnerSubmissions.detail(created.id)");
+    expect(WIZARD).toContain("await refreshDraft(updated.id)");
+    expect(WIZARD).toContain("await refreshDraft(submission.id)");
+  });
+  it("existing/new customer selection does not mark the customer selected until the PATCH persists", () => {
+    const create = WIZARD.slice(
+      WIZARD.indexOf("async function handleCreateCustomer"),
+      WIZARD.indexOf("async function selectExistingCustomer")
+    );
+    const select = WIZARD.slice(
+      WIZARD.indexOf("async function selectExistingCustomer"),
+      WIZARD.indexOf("async function clearCustomer")
+    );
+    expect(create).not.toContain("setCustomerDisplay(created.fullName)");
+    expect(select).not.toContain("setCustomerDisplay(c.fullName)");
+    expect(select).toContain("const saved = await saveField({ customerId: c.id })");
+  });
+  it("customer change is a real tri-state clear persisted as customerId: null", () => {
+    expect(WIZARD).toContain("async function clearCustomer()");
+    expect(WIZARD).toContain("saveField({ customerId: null })");
+    expect(WIZARD).toContain("onClick={props.onClearCustomer}");
+    expect(ROUTES).toContain("customerId: asStringOrExplicitNull(body.customerId)");
+  });
+  it("Continue is gated by authoritative saved step state, not optimistic local display fields", () => {
+    expect(WIZARD).toContain("const canContinue =");
+    expect(WIZARD).toContain("!!submission.customerId");
+    expect(WIZARD).toContain("!!submission.serviceTierCode");
+    expect(WIZARD).toContain("savedCardCount > 0 && !cardsMissingImages");
+    expect(WIZARD).toContain("disabled={!canContinue}");
   });
   it("the save-status indicator shows a plain-English conflict message, not a technical one", () => {
     expect(WIZARD).toContain("This submission was updated elsewhere. Refresh before saving again.");
@@ -153,22 +187,22 @@ describe("wizard never touches protected grading surfaces", () => {
 });
 
 describe("success screen offers the required next actions without duplicating submission", () => {
-  it("renders View Submission, Print Intake Receipt, and Start Another Submission", () => {
+  it("renders View Submission, Open Grading, and Start Another Submission", () => {
     expect(WIZARD).toContain('data-testid="button-view-submission"');
-    expect(WIZARD).toContain('data-testid="button-print-receipt"');
+    expect(WIZARD).toContain('data-testid="button-open-grading"');
     expect(WIZARD).toContain('data-testid="button-start-another"');
   });
   it("does not call partnerSubmissions.create again from the success panel (no accidental double draft)", () => {
     const panel = WIZARD.slice(WIZARD.indexOf("function SubmitSuccessPanel"));
     expect(panel).not.toContain("partnerSubmissions.create");
   });
-  it("Print Intake Receipt is a real, non-fabricated action (uses window.print — no fake network call, no dead onClick)", () => {
+  it("Open Grading is a real navigation action (no fake network call, no dead onClick)", () => {
     const panel = WIZARD.slice(WIZARD.indexOf("function SubmitSuccessPanel"));
-    const printButton = panel.slice(
-      panel.indexOf('data-testid="button-print-receipt"') - 200,
-      panel.indexOf('data-testid="button-print-receipt"') + 100
+    const gradingButton = panel.slice(
+      panel.indexOf('data-testid="button-open-grading"') - 200,
+      panel.indexOf('data-testid="button-open-grading"') + 100
     );
-    expect(printButton).toContain("window.print()");
+    expect(gradingButton).toContain('navigate("/partner/grading")');
   });
 });
 
@@ -177,6 +211,8 @@ describe("strict quantity error copy matches the repo's established convention",
     const addForm = WIZARD.slice(WIZARD.indexOf("async function submitAdd"), WIZARD.indexOf("function CardEditRow"));
     expect(addForm).toContain('data-testid="text-add-card-error"');
     expect(addForm).toContain("setError(partnerErrorMessage(err))");
+    expect(addForm).toContain("quantity: Number(form.quantity)");
+    expect(addForm).not.toContain("quantity: Number(form.quantity) || 1");
   });
 });
 

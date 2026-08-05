@@ -6,14 +6,23 @@
  *
  * Runs ONLY when PARTNER_CONNECTOR_SCALE_RT_ADMIN + PARTNER_CONNECTOR_SCALE_RT_URL are set.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G3F,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
+
+vi.mock("../server/r2", () => ({
+  headR2: vi.fn(async () => ({
+    lastModified: new Date("2026-08-05T00:00:00.000Z"),
+    contentLength: 1024,
+    contentType: "image/jpeg",
+    eTag: '"scale-fixture"',
+  })),
+}));
 
 const ADMIN = process.env.PARTNER_CONNECTOR_SCALE_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_SCALE_RT_URL;
@@ -69,12 +78,29 @@ async function seedMintVaultTables(): Promise<void> {
     created_at timestamptz NOT NULL DEFAULT now())`);
   await admin.query(`CREATE TABLE IF NOT EXISTS cards (id serial PRIMARY KEY, submission_id integer, card_name text)`);
   // Forbidden-side-effect fixtures: representative MintVault tables the importer must NEVER touch.
-  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text)`);
-  await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (id integer PRIMARY KEY, value integer)`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY, certificate_number text, cert_id text, card_id integer, submission_id integer, submission_item_id integer,
+    status text, label_type text, grade_type text, language text, card_game text, set_name text,
+    card_name text, card_number_display text, year_text text, variant text, front_image_path text,
+    back_image_path text, grading_front_original text, grading_back_original text, created_by text,
+    issued_at timestamptz, updated_at timestamptz, reference_number text, logbook_version integer,
+    logbook_last_issued_at timestamptz, integrity_hash text, print_state text, grader_status text,
+    origin_type text, origin_partner_id uuid, origin_partner_public_ref text, origin_partner_legal_name text,
+    origin_partner_trading_name text, origin_location_id uuid, origin_location_public_ref text,
+    origin_location_name text, origin_location_address text, origin_captured_at timestamptz,
+    origin_snapshot_version integer
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+    id integer PRIMARY KEY DEFAULT 1,
+    last_issued integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now())`);
   await admin.query(`CREATE TABLE IF NOT EXISTS labels (id serial PRIMARY KEY, cert_id text)`);
   await admin.query(`CREATE TABLE IF NOT EXISTS payments (id serial PRIMARY KEY, amount integer)`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+    id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+    admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now())`);
   await admin.query("INSERT INTO certificates (cert_id) VALUES ('SEED-CERT') ON CONFLICT DO NOTHING");
-  await admin.query("INSERT INTO cert_counter (id, value) VALUES (1, 42) ON CONFLICT DO NOTHING");
+  await admin.query("INSERT INTO cert_counter (id, last_issued) VALUES (1, 42) ON CONFLICT DO NOTHING");
   await admin.query("INSERT INTO labels (cert_id) VALUES ('SEED-LABEL') ON CONFLICT DO NOTHING");
   await admin.query("INSERT INTO payments (amount) VALUES (999) ON CONFLICT DO NOTHING");
   for (const t of [
@@ -83,6 +109,7 @@ async function seedMintVaultTables(): Promise<void> {
     "submission_items",
     "cards",
     "certificates",
+    "audit_log",
     "cert_counter",
     "labels",
     "payments",
@@ -134,11 +161,20 @@ async function seedValidatedReady(index: number, itemCount: number, email: strin
     [subId, org.id, loc.id, org.userId, custId, 1500 * itemCount, itemCount]
   );
   for (let i = 1; i <= itemCount; i++) {
+    const cardId = uuid(400_000 + seq * 10 + i);
     await admin.query(
       `INSERT INTO partner_submission_cards
-         (tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity)
-       VALUES ($1,$2,$3,$4,'pokemon','Base Set','4/102',1999,50000,1)`,
-      [org.id, subId, i, `Card ${i}`]
+         (id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity, front_image_key, back_image_key)
+       VALUES ($1,$2,$3,$4,$5,'pokemon','Base Set','4/102',1999,50000,1,$6,$7)`,
+      [
+        cardId,
+        org.id,
+        subId,
+        i,
+        `Card ${i}`,
+        `partner-submissions/${org.id}/${subId}/${cardId}/front-seed.jpg`,
+        `partner-submissions/${org.id}/${subId}/${cardId}/back-seed.jpg`,
+      ]
     );
   }
   const h = await admin.query(
@@ -200,11 +236,14 @@ function pct(sorted: number[], p: number): number {
   beforeAll(async () => {
     admin = new Client({ connectionString: ADMIN });
     await admin.connect();
+    await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await admin.query("CREATE SCHEMA public");
+    await admin.query("GRANT ALL ON SCHEMA public TO public");
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3F);
+    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
 
     await admin.query("DROP ROLE IF EXISTS partner_connector_scale_test").catch(() => {});
     await admin.query("CREATE ROLE partner_connector_scale_test LOGIN PASSWORD 'synthetic'");
@@ -555,9 +594,16 @@ function pct(sorted: number[], p: number): number {
     }
   }, 60_000);
 
-  it("forbidden side effects: no grading/certificate/counter/label/payment/dead-cards write occurred", async () => {
-    expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM certificates")).rows[0].n).toBe(1);
-    expect((await admin.query<{ v: number }>("SELECT value AS v FROM cert_counter WHERE id = 1")).rows[0].v).toBe(42);
+  it("side effects: imports mint partner certificates, but never labels/payments/dead-cards", async () => {
+    const certs = await admin.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM certificates WHERE origin_type = 'PARTNER'"
+    );
+    const workItems = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM partner_grading_work_items");
+    expect(certs.rows[0].n).toBe(workItems.rows[0].n);
+    expect(certs.rows[0].n).toBeGreaterThan(80);
+    expect(
+      (await admin.query<{ v: number }>("SELECT last_issued AS v FROM cert_counter WHERE id = 1")).rows[0].v
+    ).toBeGreaterThan(42);
     expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM labels")).rows[0].n).toBe(1);
     expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM payments")).rows[0].n).toBe(1);
     expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM cards")).rows[0].n).toBe(0);

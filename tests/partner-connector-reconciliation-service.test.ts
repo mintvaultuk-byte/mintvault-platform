@@ -8,18 +8,22 @@
  *   PARTNER_CONNECTOR_RECON_RT_URL=postgresql://partner_connector_recon_test:synthetic@127.0.0.1:5630/dispo \
  *   npx vitest run tests/partner-connector-reconciliation-service.test.ts
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G3F,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_RECON_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_RECON_RT_URL;
 const isLocal = !!ADMIN && !!CONNECTOR_URL && /@(127\.0\.0\.1|localhost)[:/]/.test(ADMIN);
+
+vi.mock("../server/r2", () => ({
+  headR2: vi.fn(async () => ({ size: 1024, contentType: "image/jpeg" })),
+}));
 
 const A = "aaaaaaaa-5000-0000-0000-000000000001";
 const L1 = "10000000-5000-0000-0000-0000000000c1";
@@ -50,9 +54,65 @@ async function seedMintVaultTables(): Promise<void> {
     declared_value integer DEFAULT 0, declared_new boolean DEFAULT false, notes text,
     created_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY,
+    cert_id text,
+    certificate_number text UNIQUE,
+    card_id integer,
+    submission_item_id integer,
+    submission_id integer,
+    status varchar(10) NOT NULL DEFAULT 'active',
+    label_type text NOT NULL DEFAULT 'Standard',
+    grade_type text NOT NULL DEFAULT 'numeric',
+    language text DEFAULT 'English',
+    card_game text,
+    set_name text,
+    card_name text,
+    card_number_display text,
+    year_text text,
+    variant text,
+    front_image_path text,
+    back_image_path text,
+    grading_front_original text,
+    grading_back_original text,
+    created_by text,
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    reference_number text UNIQUE,
+    logbook_version integer NOT NULL DEFAULT 1,
+    logbook_last_issued_at timestamptz,
+    integrity_hash text,
+    print_state varchar(24) NOT NULL DEFAULT 'awaiting_approval',
+    grader_status varchar(20) NOT NULL DEFAULT 'unassigned',
+    origin_type text,
+    origin_partner_id uuid,
+    origin_partner_public_ref text,
+    origin_partner_legal_name text,
+    origin_partner_trading_name text,
+    origin_location_id uuid,
+    origin_location_public_ref text,
+    origin_location_name text,
+    origin_location_address text,
+    origin_captured_at timestamptz,
+    origin_snapshot_version integer,
+    deleted_at timestamptz,
+    grade_approved_at timestamptz
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+    id integer PRIMARY KEY,
+    last_issued integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+    id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+    admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now()
+  )`);
   await admin.query("ALTER TABLE users OWNER TO pn_migrator");
   await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
   await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE certificates OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE cert_counter OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE audit_log OWNER TO pn_migrator");
 }
 
 async function seedTenant(tenantId: string, locationId: string, userId: string, ref: string): Promise<void> {
@@ -102,11 +162,20 @@ async function seedReadyForImport(opts: { cardCount?: number; claimant?: string 
     [subId, A, L1, U1, custId, 1500 * cardCount, cardCount]
   );
   for (let i = 1; i <= (opts.cardCount ?? 1); i++) {
+    const cardId = uuid(seq + 400_000 + i);
     await admin.query(
       `INSERT INTO partner_submission_cards
-         (tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity)
-       VALUES ($1,$2,$3,$4,'pokemon','Base Set','4/102',1999,50000,1)`,
-      [A, subId, i, `Card ${i}`]
+         (id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity, front_image_key, back_image_key)
+       VALUES ($1,$2,$3,$4,$5,'pokemon','Base Set','4/102',1999,50000,1,$6,$7)`,
+      [
+        cardId,
+        A,
+        subId,
+        i,
+        `Card ${i}`,
+        `partner-submissions/${A}/${subId}/${cardId}/front-seed.jpg`,
+        `partner-submissions/${A}/${subId}/${cardId}/back-seed.jpg`,
+      ]
     );
   }
   const h = await admin.query(
@@ -168,6 +237,16 @@ async function seedImportedConnector(): Promise<{
   };
 }
 
+async function forceDeleteDestination(destinationSubmissionId: number): Promise<void> {
+  await admin.query("SET session_replication_role = replica");
+  try {
+    await admin.query("DELETE FROM submission_items WHERE submission_id = $1", [destinationSubmissionId]);
+    await admin.query("DELETE FROM submissions WHERE id = $1", [destinationSubmissionId]);
+  } finally {
+    await admin.query("SET session_replication_role = DEFAULT");
+  }
+}
+
 (isLocal ? describe : describe.skip)(
   "Trusted Intake Connector G3E — reconciliation engine (disposable DB, real connections)",
   () => {
@@ -176,9 +255,12 @@ async function seedImportedConnector(): Promise<{
       await admin.connect();
       await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
       await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
+      await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+      await admin.query("CREATE SCHEMA public");
+      await admin.query("GRANT ALL ON SCHEMA public TO public");
       await provisionRealisticRoles(admin);
       await seedMintVaultTables();
-      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3F);
+      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
 
       await admin.query("DROP ROLE IF EXISTS partner_connector_recon_test").catch(() => {});
       await admin.query("CREATE ROLE partner_connector_recon_test LOGIN PASSWORD 'synthetic'");
@@ -231,8 +313,7 @@ async function seedImportedConnector(): Promise<{
       it("detects a completed mapping whose destination was deleted", async () => {
         const recon = await import("../server/partner/connector-reconciliation-service");
         const { connectorId, destinationSubmissionId } = await seedImportedConnector();
-        await admin.query("DELETE FROM submission_items WHERE submission_id = $1", [destinationSubmissionId]);
-        await admin.query("DELETE FROM submissions WHERE id = $1", [destinationSubmissionId]);
+        await forceDeleteDestination(destinationSubmissionId);
         const issues = await recon.inspectImportMapping(connectorId);
         expect(issues.some((i) => i.code === "destination_missing")).toBe(true);
         const report = await recon.inspectConnectorConsistency(connectorId);
@@ -670,8 +751,7 @@ async function seedImportedConnector(): Promise<{
       it("escalates genuine corruption (destination deleted) to manual_review — flags the MAPPING, never un-terminals the imported connector", async () => {
         const recon = await import("../server/partner/connector-reconciliation-service");
         const { connectorId, destinationSubmissionId } = await seedImportedConnector();
-        await admin.query("DELETE FROM submission_items WHERE submission_id = $1", [destinationSubmissionId]);
-        await admin.query("DELETE FROM submissions WHERE id = $1", [destinationSubmissionId]);
+        await forceDeleteDestination(destinationSubmissionId);
 
         const result = await recon.reconcileConnector({
           connectorId,

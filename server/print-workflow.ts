@@ -289,6 +289,16 @@ function pgTextArray(ids: string[]): string {
   return `{${ids.map((s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
 }
 
+function certIdStorageVariants(ids: string[]): string[] {
+  const out = new Set<string>();
+  for (const id of ids) {
+    out.add(id);
+    const match = /^MV(\d+)$/.exec(id);
+    if (match) out.add(`MV-${match[1].padStart(10, "0")}`);
+  }
+  return [...out];
+}
+
 async function loadEffectiveStates(certIds: string[]): Promise<Map<string, PrintState>> {
   if (certIds.length === 0) return new Map();
   const result = await db.execute(sql`
@@ -308,6 +318,96 @@ async function loadEffectiveStates(certIds: string[]): Promise<Map<string, Print
     );
   }
   return map;
+}
+
+export async function requireCompletePartnerSubmissionSet(
+  certIds: string[],
+  phase: "batch" | "complete"
+): Promise<WorkflowResult["rejected"]> {
+  if (certIds.length === 0) return [];
+  const selected = new Set(certIdStorageVariants(certIds));
+  const exists = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`);
+  if (!(exists.rows[0] as { rel?: string | null } | undefined)?.rel) return [];
+  const rows = await db.execute(sql`
+    WITH selected AS (
+      SELECT unnest(${pgTextArray(certIds)}::text[]) AS certificate_number
+    ),
+    touched AS (
+      SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+        FROM selected s
+        JOIN certificates c ON c.certificate_number = s.certificate_number
+        JOIN partner_grading_work_items pgwi
+          ON pgwi.certificate_id = c.id
+         AND pgwi.submission_item_id = c.submission_item_id
+         AND pgwi.destination_submission_id = c.submission_id
+    )
+    SELECT pgwi.tenant_id::text AS tenant_id,
+           pgwi.partner_submission_id::text AS partner_submission_id,
+           pgwi.destination_submission_id::int AS destination_submission_id,
+           c.certificate_number,
+           s.status AS destination_status
+      FROM touched t
+      JOIN partner_grading_work_items pgwi
+        ON pgwi.tenant_id = t.tenant_id
+       AND pgwi.partner_submission_id = t.partner_submission_id
+       AND pgwi.destination_submission_id = t.destination_submission_id
+      JOIN certificates c
+        ON c.id = pgwi.certificate_id
+       AND c.submission_item_id = pgwi.submission_item_id
+       AND c.submission_id = pgwi.destination_submission_id
+      JOIN submissions s ON s.id = pgwi.destination_submission_id
+     WHERE pgwi.status <> 'void'
+     ORDER BY pgwi.destination_submission_id, c.certificate_number
+  `);
+  const rejected: WorkflowResult["rejected"] = [];
+  const byDestination = new Map<string, { certs: string[]; destinationStatus: string | null }>();
+  for (const row of rows.rows as unknown as {
+    destination_submission_id: number;
+    certificate_number: string;
+    destination_status: string | null;
+  }[]) {
+    const key = String(row.destination_submission_id);
+    const current = byDestination.get(key) ?? { certs: [], destinationStatus: row.destination_status };
+    current.certs.push(row.certificate_number);
+    current.destinationStatus = row.destination_status;
+    byDestination.set(key, current);
+  }
+  for (const group of byDestination.values()) {
+    const missing = group.certs.filter((certId) => !selected.has(certId));
+    if (missing.length > 0) {
+      rejected.push(
+        ...missing.map((certId) => ({
+          certId,
+          code: "partner_submission_incomplete",
+          message: "Select every certificate from this Partner submission together.",
+        }))
+      );
+    }
+    if (phase === "batch" && !["ready_to_return", "completed"].includes(String(group.destinationStatus ?? ""))) {
+      rejected.push(
+        ...group.certs.map((certId) => ({
+          certId,
+          code: "partner_settlement_required",
+          message: "Partner credits must be settled before labels are rendered.",
+        }))
+      );
+    }
+  }
+  const touchedSubmissions = new Set(
+    (rows.rows as unknown as { tenant_id: string; partner_submission_id: string }[]).map(
+      (row) => `${row.tenant_id}:${row.partner_submission_id}`
+    )
+  );
+  if (touchedSubmissions.size > 1) {
+    rejected.push(
+      ...certIds.map((certId) => ({
+        certId,
+        code: "cross_tenant_partner_batch",
+        message: "Print Partner submissions in separate batches.",
+      }))
+    );
+  }
+  return rejected;
 }
 
 // ── Transition results ───────────────────────────────────────────────────────
@@ -494,6 +594,23 @@ export async function createBatchAtomic(params: {
     return {
       applied: [],
       rejected,
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
+  }
+
+  const partnerRejected = await requireCompletePartnerSubmissionSet(
+    printable.map((e) => e.certId),
+    "batch"
+  );
+  if (partnerRejected.length > 0) {
+    return {
+      applied: [],
+      rejected: [...partnerRejected, ...rejected],
       batchId: null,
       kind: null,
       pdfUrl: null,
@@ -792,7 +909,10 @@ export async function markBatchPrinted(batchId: string, identity: ActorIdentity)
         WHERE batch_id = ${batchId} AND status = 'printing'
       `);
       await tx.execute(sql`
-        UPDATE label_prints SET printed_at = NOW() WHERE sheet_ref = ${`print_batch_${batchId}`}
+        UPDATE label_prints
+           SET printed_at = NOW()
+         WHERE sheet_ref = ${`print_batch_${batchId}`}
+           AND cert_id = ANY(${pgTextArray(certIdStorageVariants(applied))}::text[])
       `);
     }
   });
@@ -886,6 +1006,11 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
     else targets.push({ certId, from });
   }
   if (targets.length === 0) return { applied, rejected };
+  const partnerRejected = await requireCompletePartnerSubmissionSet(
+    targets.map((t) => t.certId),
+    "complete"
+  );
+  if (partnerRejected.length > 0) return { applied: [], rejected: [...partnerRejected, ...rejected] };
   await db.transaction(async (tx) => {
     for (const { certId, from } of targets) {
       // CAS: complete only if still printed/reprinted; event on real change only.
@@ -902,6 +1027,131 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
       await tx.execute(sql`
         INSERT INTO print_events (cert_id, actor, actor_role, action, from_state, to_state)
         VALUES (${certId}, ${identity.actor}, ${identity.role}, 'complete', ${from}, 'completed')
+      `);
+    }
+    const partnerBridge =
+      applied.length > 0
+        ? await tx.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`)
+        : { rows: [] as unknown[] };
+    if (applied.length > 0 && (partnerBridge.rows[0] as { rel?: string | null } | undefined)?.rel) {
+      await tx.execute(sql`
+        UPDATE partner_grading_work_items pgwi
+           SET status = 'completed', updated_at = NOW()
+          FROM certificates c
+         WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+           AND c.id = pgwi.certificate_id
+           AND c.submission_item_id = pgwi.submission_item_id
+           AND c.submission_id = pgwi.destination_submission_id
+           AND pgwi.status = 'approved'
+      `);
+      await tx.execute(sql`
+        WITH touched AS (
+          SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+            FROM partner_grading_work_items pgwi
+            JOIN certificates c
+              ON c.id = pgwi.certificate_id
+             AND c.submission_item_id = pgwi.submission_item_id
+             AND c.submission_id = pgwi.destination_submission_id
+           WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+        ),
+        complete_partner_submissions AS (
+          SELECT t.tenant_id, t.partner_submission_id, t.destination_submission_id
+            FROM touched t
+           WHERE NOT EXISTS (
+             SELECT 1
+               FROM partner_grading_work_items pending
+              WHERE pending.tenant_id = t.tenant_id
+                AND pending.partner_submission_id = t.partner_submission_id
+                AND pending.destination_submission_id = t.destination_submission_id
+                AND pending.status NOT IN ('completed','void')
+           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM partner_credit_reservations r
+              WHERE r.tenant_id = t.tenant_id
+                AND r.submission_reference = t.partner_submission_id::text
+                AND r.status <> 'consumed'
+           )
+        )
+        UPDATE partner_submissions ps
+           SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+          FROM complete_partner_submissions cps
+         WHERE ps.id = cps.partner_submission_id
+           AND ps.tenant_id = cps.tenant_id
+      `);
+      await tx.execute(sql`
+        WITH touched AS (
+          SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+            FROM partner_grading_work_items pgwi
+            JOIN certificates c
+              ON c.id = pgwi.certificate_id
+             AND c.submission_item_id = pgwi.submission_item_id
+             AND c.submission_id = pgwi.destination_submission_id
+           WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+        ),
+        complete_destinations AS (
+          SELECT t.destination_submission_id
+            FROM touched t
+           WHERE NOT EXISTS (
+             SELECT 1
+               FROM partner_grading_work_items pending
+              WHERE pending.tenant_id = t.tenant_id
+                AND pending.partner_submission_id = t.partner_submission_id
+                AND pending.destination_submission_id = t.destination_submission_id
+                AND pending.status NOT IN ('completed','void')
+           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM partner_credit_reservations r
+              WHERE r.tenant_id = t.tenant_id
+                AND r.submission_reference = t.partner_submission_id::text
+                AND r.status <> 'consumed'
+           )
+        )
+        UPDATE submissions s
+           SET status = 'shipped',
+               shipped_at = COALESCE(shipped_at, NOW()),
+               updated_at = NOW()
+          FROM complete_destinations cd
+         WHERE s.id = cd.destination_submission_id
+           AND s.status = 'ready_to_return'
+      `);
+      await tx.execute(sql`
+        WITH touched AS (
+          SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+            FROM partner_grading_work_items pgwi
+            JOIN certificates c
+              ON c.id = pgwi.certificate_id
+             AND c.submission_item_id = pgwi.submission_item_id
+             AND c.submission_id = pgwi.destination_submission_id
+           WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+        ),
+        complete_destinations AS (
+          SELECT t.destination_submission_id
+            FROM touched t
+           WHERE NOT EXISTS (
+             SELECT 1
+               FROM partner_grading_work_items pending
+              WHERE pending.tenant_id = t.tenant_id
+                AND pending.partner_submission_id = t.partner_submission_id
+                AND pending.destination_submission_id = t.destination_submission_id
+                AND pending.status NOT IN ('completed','void')
+           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM partner_credit_reservations r
+              WHERE r.tenant_id = t.tenant_id
+                AND r.submission_reference = t.partner_submission_id::text
+                AND r.status <> 'consumed'
+           )
+        )
+        UPDATE submissions s
+           SET status = 'completed',
+               completed_at = COALESCE(completed_at, NOW()),
+               updated_at = NOW()
+          FROM complete_destinations cd
+         WHERE s.id = cd.destination_submission_id
+           AND s.status IN ('shipped','completed')
       `);
     }
   });

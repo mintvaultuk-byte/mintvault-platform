@@ -17,6 +17,9 @@
  * crash-point table for why this collapses every crash scenario to one of exactly two safe outcomes.
  */
 import type pg from "pg";
+import crypto from "crypto";
+import { CERTIFICATE_ORIGIN_SNAPSHOT_VERSION } from "@shared/schema";
+import { generateReferenceNumber } from "../reference-number";
 import { withConnectorTx, connectorQuery } from "./connector-db";
 import { resolveGlobalFlag } from "./flags";
 import { ConnectorError, toConnectorError } from "./connector-errors";
@@ -27,6 +30,136 @@ import { allocateReferenceAndInsert } from "./connector-reference";
 import { connectorHook, type ConnectorHookPoint, type ConnectorHookContext } from "./connector-instrumentation";
 
 const MAPPING_VERSION = 1;
+
+function expectedCardImagePrefix(tenantId: string, submissionId: string, cardId: string, side: "front" | "back") {
+  return `partner-submissions/${tenantId}/${submissionId}/${cardId}/${side}-`;
+}
+
+function assertImportableCardImages(
+  tenantId: string,
+  submissionId: string,
+  card: { id: string; front_image_key: string | null; back_image_key: string | null }
+) {
+  if (
+    !card.front_image_key ||
+    !card.front_image_key.startsWith(expectedCardImagePrefix(tenantId, submissionId, String(card.id), "front"))
+  ) {
+    throw new ConnectorError("import_blocking_findings", "The source card is missing a valid front image.");
+  }
+  if (
+    !card.back_image_key ||
+    !card.back_image_key.startsWith(expectedCardImagePrefix(tenantId, submissionId, String(card.id), "back"))
+  ) {
+    throw new ConnectorError("import_blocking_findings", "The source card is missing a valid back image.");
+  }
+}
+
+async function allocateCertificateNumber(client: pg.PoolClient): Promise<string> {
+  await client.query("INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING");
+  const result = await client.query<{ last_issued: number }>(
+    "UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued"
+  );
+  const next = Number(result.rows[0]?.last_issued);
+  if (!Number.isSafeInteger(next) || next <= 0) {
+    throw new Error("FATAL: cert_counter returned an invalid certificate number");
+  }
+  return `MV${next}`;
+}
+
+async function createPartnerCertificateForWorkItem(
+  client: pg.PoolClient,
+  params: {
+    partnerOrganisationId: string;
+    partnerLocationId: string;
+    submissionId: number;
+    submissionItemId: number;
+    card: any;
+    frontImageKey: string;
+    backImageKey: string;
+  }
+): Promise<{ id: number; certificateNumber: string }> {
+  const origin = await client.query<{
+    partner_public_ref: string | null;
+    partner_legal_name: string | null;
+    partner_trading_name: string | null;
+    location_public_ref: string | null;
+    location_name: string | null;
+    location_address: string | null;
+  }>(
+    `SELECT o.public_ref AS partner_public_ref,
+            o.legal_name AS partner_legal_name,
+            NULL::text AS partner_trading_name,
+            l.public_ref AS location_public_ref,
+            l.name AS location_name,
+            l.address AS location_address
+       FROM partner_organisations o
+       JOIN partner_locations l ON l.id = $2 AND l.tenant_id = o.id
+      WHERE o.id = $1`,
+    [params.partnerOrganisationId, params.partnerLocationId]
+  );
+  const snapshot = origin.rows[0];
+  if (!snapshot || !(snapshot.partner_trading_name || snapshot.partner_legal_name)) {
+    throw new ConnectorError("import_blocking_findings", "Partner certificate origin snapshot is incomplete.");
+  }
+
+  const certificateNumber = await allocateCertificateNumber(client);
+  const integrityHash = crypto
+    .createHash("sha256")
+    .update(certificateNumber + Date.now())
+    .digest("hex");
+  const referenceNumber = generateReferenceNumber();
+  const inserted = await client.query<{ id: number; certificate_number: string }>(
+    `INSERT INTO certificates (
+       certificate_number, submission_id, submission_item_id,
+       status, label_type, grade_type, language,
+       card_game, set_name, card_name, card_number_display, year_text, variant,
+       front_image_path, back_image_path, grading_front_original, grading_back_original,
+       created_by, issued_at, updated_at, reference_number, logbook_version, logbook_last_issued_at,
+       integrity_hash, print_state, grader_status,
+       origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
+       origin_partner_trading_name, origin_location_id, origin_location_public_ref,
+       origin_location_name, origin_location_address, origin_captured_at, origin_snapshot_version
+     )
+     VALUES (
+       $1, $2, $3,
+       'active', 'Standard', 'numeric', COALESCE($4, 'English'),
+       $5, $6, $7, $8, $9, $10,
+       $11, $12, $11, $12,
+       'partner_connector', NOW(), NOW(), $13, 1, NOW(),
+       $14, 'awaiting_approval', 'unassigned',
+       'PARTNER', $15, $16, $17,
+       $18, $19, $20,
+       $21, $22, NOW(), $23
+     )
+     RETURNING id, certificate_number`,
+    [
+      certificateNumber,
+      params.submissionId,
+      params.submissionItemId,
+      params.card.language ?? null,
+      params.card.game ?? null,
+      params.card.card_set ?? null,
+      params.card.card_name ?? null,
+      params.card.card_number ?? null,
+      params.card.year != null ? String(params.card.year) : null,
+      params.card.variant ?? null,
+      params.frontImageKey,
+      params.backImageKey,
+      referenceNumber,
+      integrityHash,
+      params.partnerOrganisationId,
+      snapshot.partner_public_ref,
+      snapshot.partner_legal_name,
+      snapshot.partner_trading_name,
+      params.partnerLocationId,
+      snapshot.location_public_ref,
+      snapshot.location_name,
+      snapshot.location_address,
+      CERTIFICATE_ORIGIN_SNAPSHOT_VERSION,
+    ]
+  );
+  return { id: inserted.rows[0].id, certificateNumber: inserted.rows[0].certificate_number };
+}
 
 /**
  * G3F: append ONE immutable evidence row for a committed import-attempt outcome (see
@@ -126,6 +259,9 @@ interface ImportMappingRow {
   id: string;
   state: string;
   destination_submission_id: number | null;
+  validation_run_id: string;
+  source_fingerprint: string;
+  source_fingerprint_version: number;
 }
 
 /**
@@ -163,7 +299,8 @@ export async function importValidatedConnector(params: {
       // already-`imported` connector (or a connector whose mapping completed but whose caller never
       // saw the response) always succeeds with the existing destination rather than erroring.
       const existingMapRes = await client.query<ImportMappingRow>(
-        `SELECT id, state, destination_submission_id FROM partner_connector_imports WHERE connector_record_id = $1`,
+        `SELECT id, state, destination_submission_id, validation_run_id, source_fingerprint, source_fingerprint_version
+           FROM partner_connector_imports WHERE connector_record_id = $1`,
         [connectorId]
       );
       const existingMap = existingMapRes.rows[0] ?? null;
@@ -351,8 +488,14 @@ export async function importValidatedConnector(params: {
       // both automatically here and via recoverReservedImport for a stale abandoned reservation).
       await hook("before_reservation", { connectorId, claimant });
       let mappingId: string;
+      let bridgeValidationRunId = run.id;
+      let bridgeSourceFingerprint = fingerprint;
+      let bridgeSourceFingerprintVersion = SOURCE_FINGERPRINT_VERSION;
       if (existingMap && existingMap.state === "reserved") {
         mappingId = existingMap.id;
+        bridgeValidationRunId = existingMap.validation_run_id;
+        bridgeSourceFingerprint = existingMap.source_fingerprint;
+        bridgeSourceFingerprintVersion = existingMap.source_fingerprint_version;
       } else {
         await client.query("SAVEPOINT connector_import_reserve");
         try {
@@ -409,6 +552,9 @@ export async function importValidatedConnector(params: {
       const expandedItems = rows.cards.flatMap((card) =>
         Array.from({ length: Math.max(1, card.quantity) }, () => card)
       );
+      for (const card of expandedItems) {
+        assertImportableCardImages(connector.tenant_id, connector.partner_submission_id, card);
+      }
       const cardCount = expandedItems.length;
       const pricePerCardPence = rows.serviceTier.price_per_card_pence;
       const gradingCostPence = pricePerCardPence * cardCount;
@@ -448,12 +594,17 @@ export async function importValidatedConnector(params: {
         destinationSubmissionId: created.id,
       });
 
+      const sourceOrdinals = new Map<string, number>();
       let cardIndex = 1;
       for (const card of expandedItems) {
-        await client.query(
+        const sourceCardId = String(card.id);
+        const cardOrdinal = (sourceOrdinals.get(sourceCardId) ?? 0) + 1;
+        sourceOrdinals.set(sourceCardId, cardOrdinal);
+        const itemRes = await client.query<{ id: number }>(
           `INSERT INTO submission_items
              (submission_id, card_index, game, card_set, card_name, card_number, year, declared_value)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING id`,
           [
             created.id,
             cardIndex++,
@@ -463,6 +614,43 @@ export async function importValidatedConnector(params: {
             card.card_number,
             card.year != null ? String(card.year) : null,
             card.declared_value_pence ?? 0,
+          ]
+        );
+        const certificate = await createPartnerCertificateForWorkItem(client, {
+          partnerOrganisationId: connector.tenant_id,
+          partnerLocationId: rows.submission.location_id,
+          submissionId: created.id,
+          submissionItemId: itemRes.rows[0].id,
+          card,
+          frontImageKey: card.front_image_key!,
+          backImageKey: card.back_image_key!,
+        });
+        await client.query(
+          `INSERT INTO partner_grading_work_items
+             (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id, partner_submission_card_id,
+              partner_handoff_id, connector_import_id, connector_record_id, validation_run_id,
+              destination_submission_id, submission_item_id, card_ordinal, status, certificate_id, certificate_linked_at, front_image_key, back_image_key,
+              source_fingerprint, source_fingerprint_version)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),$15,$16,$17,$18)`,
+          [
+            connector.tenant_id,
+            connector.tenant_id,
+            rows.submission.location_id,
+            connector.partner_submission_id,
+            sourceCardId,
+            connector.handoff_id,
+            mappingId,
+            connectorId,
+            bridgeValidationRunId,
+            created.id,
+            itemRes.rows[0].id,
+            cardOrdinal,
+            "ready_for_assignment",
+            certificate.id,
+            card.front_image_key ?? null,
+            card.back_image_key ?? null,
+            bridgeSourceFingerprint,
+            bridgeSourceFingerprintVersion,
           ]
         );
         await hook("during_item_insert", {

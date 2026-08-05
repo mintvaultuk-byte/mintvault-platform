@@ -25,6 +25,7 @@ function getClient(): S3Client {
   s3Client = new S3Client({
     region: "auto",
     endpoint,
+    forcePathStyle: process.env.R2_FORCE_PATH_STYLE === "1",
     credentials: { accessKeyId, secretAccessKey },
     // Cloudflare R2 doesn't require AWS's flexible-checksums protocol and
     // its body framing trips @smithy/hash-stream-node ("Unable to calculate
@@ -106,7 +107,7 @@ export async function getR2Buffer(key: string): Promise<Buffer | null> {
  *  streamed back same-origin (behind admin auth) from any machine — the bytes live
  *  in shared R2, not on the machine that rendered them. */
 export async function getR2ObjectStream(
-  key: string,
+  key: string
 ): Promise<{ body: NodeJS.ReadableStream; contentLength?: number; contentType?: string } | null> {
   try {
     const out = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: key }));
@@ -136,7 +137,7 @@ export async function listR2Keys(prefix: string): Promise<string[]> {
  *  Read-only; used by the VQ orphan reconciler, whose age filter needs
  *  LastModified (which listR2Keys drops). Returns [] on any error. */
 export async function listR2Objects(
-  prefix: string,
+  prefix: string
 ): Promise<{ key: string; sizeBytes: number | null; lastModified: Date | null }[]> {
   const out: { key: string; sizeBytes: number | null; lastModified: Date | null }[] = [];
   try {
@@ -145,7 +146,7 @@ export async function listR2Objects(
     let continuationToken: string | undefined;
     do {
       const page = await client.send(
-        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken })
       );
       for (const o of page.Contents ?? []) {
         if (o.Key) out.push({ key: o.Key, sizeBytes: o.Size ?? null, lastModified: o.LastModified ?? null });
@@ -164,7 +165,14 @@ export async function listR2Objects(
  * Failure modes (404, network, no creds) all return null → caller treats as
  * "no cache" and regenerates, which is the safe default.
  */
-export async function headR2(key: string): Promise<{ lastModified: Date } | null> {
+export async function headR2(
+  key: string
+): Promise<{
+  lastModified: Date;
+  contentLength: number | null;
+  contentType: string | null;
+  eTag: string | null;
+} | null> {
   try {
     const client = getClient();
     const result = await client.send(
@@ -173,7 +181,14 @@ export async function headR2(key: string): Promise<{ lastModified: Date } | null
         Key: key,
       })
     );
-    return result.LastModified ? { lastModified: result.LastModified } : null;
+    return result.LastModified
+      ? {
+          lastModified: result.LastModified,
+          contentLength: result.ContentLength ?? null,
+          contentType: result.ContentType ?? null,
+          eTag: result.ETag ?? null,
+        }
+      : null;
   } catch {
     return null;
   }

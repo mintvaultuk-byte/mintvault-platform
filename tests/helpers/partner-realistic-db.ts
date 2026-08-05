@@ -163,6 +163,12 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0043_partner_credit_hold_per_card",
   "0044_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
+
+/** 0045 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
+export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
+  ...PARTNER_MIGRATIONS_WITH_LIFECYCLE,
+  "0045_partner_grading_work_items",
+] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
@@ -301,9 +307,7 @@ export async function applyMigrationsRealistic(
       if (name === "0042_partner_per_card_credit_settlement") {
         // SET FALSE is NOT optional. PostgreSQL 16+ defaults a role grant to SET TRUE, so
         // `WITH INHERIT TRUE` alone would silently also confer SET ROLE into the definer.
-        await migrator.query(
-          `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`
-        );
+        await migrator.query(`GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`);
       }
       // EVERY migration — including 0041 and 0042 — runs as the NON-SUPERUSER pn_migrator.
       // There is deliberately no executor swap here any more.
@@ -406,9 +410,7 @@ export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise
     // asserts exactly this membership is ABSENT when a suite applies 0041 without 0042. 0041's own
     // closing REVOKE happens to clear it today because pn_migrator is its own grantor, but relying
     // on that makes the outcome order-dependent. Revoke it explicitly instead.
-    await migrator
-      .query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator")
-      .catch(() => {}); // best-effort: never mask the real failure from applyMigrations
+    await migrator.query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator").catch(() => {}); // best-effort: never mask the real failure from applyMigrations
   }
 }
 

@@ -9,13 +9,20 @@ import { useLocation } from "wouter";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import {
   PartnerShell,
+  PartnerErrorState,
   PartnerLoadingState,
   PartnerUnavailableState,
   PartnerSessionExpiredState,
 } from "./partner-shell";
 
-export function PartnerRouteGuard({ children }: { children: ReactNode }) {
-  const { session, ready, isLoading, unavailable, expired } = usePartnerSession();
+export function PartnerRouteGuard({
+  children,
+  requiredPermission,
+}: {
+  children: ReactNode;
+  requiredPermission?: string;
+}) {
+  const { session, ready, isLoading, unavailable, expired, hasPermission } = usePartnerSession();
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -46,6 +53,14 @@ export function PartnerRouteGuard({ children }: { children: ReactNode }) {
   if (!session || !session.mfaPassed) {
     // Redirect effect above will fire; render nothing rather than a flash of protected content.
     return null;
+  }
+
+  if (requiredPermission && !hasPermission(requiredPermission)) {
+    return (
+      <PartnerShell>
+        <PartnerErrorState message="You do not have permission to view this page." />
+      </PartnerShell>
+    );
   }
 
   return <PartnerShell>{children}</PartnerShell>;

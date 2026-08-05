@@ -2,7 +2,13 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { partnerCredits, partnerDashboard, partnerErrorMessage } from "@/lib/partner-api";
+import {
+  partnerCredits,
+  partnerCustomers,
+  partnerDashboard,
+  partnerErrorMessage,
+  partnerSubmissions,
+} from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { ArrowRight, PlusCircle } from "lucide-react";
@@ -38,8 +44,9 @@ export default function PartnerDashboardPage() {
    * wallet data can reach a client that may not see it), and any credit failure is contained to
    * the credit panel.
    */
-  const { hasPermission } = usePartnerSession();
+  const { session, hasPermission } = usePartnerSession();
   const canViewCredits = hasPermission("partner.credits.view");
+  const canAssessCards = hasPermission("partner.cards.assess");
 
   const submissions = useQuery({
     queryKey: ["/api/partner/dashboard/submissions"],
@@ -49,6 +56,24 @@ export default function PartnerDashboardPage() {
     queryKey: ["/api/partner/credits"],
     queryFn: () => partnerCredits.view(),
     enabled: canViewCredits,
+  });
+  const customers = useQuery({
+    queryKey: ["/api/partner/customers", "dashboard"],
+    queryFn: () => partnerCustomers.list(),
+  });
+  const recentSubmissions = useQuery({
+    queryKey: ["/api/partner/submissions", "dashboard-recent"],
+    queryFn: () => partnerSubmissions.list({ page: 1, pageSize: 5 }),
+  });
+  const gradingQueue = useQuery({
+    queryKey: ["/api/partner/grading/queue", "partner-dashboard"],
+    enabled: canAssessCards,
+    retry: false,
+    queryFn: async () => {
+      const res = await fetch("/api/partner/grading/queue", { credentials: "include" });
+      if (!res.ok) throw new Error("Grading workspace unavailable.");
+      return (await res.json()) as { items: { cards: { gradingStatus: string }[] }[] };
+    },
   });
   // Page-level state tracks ONLY the submission query. Credit state is handled inside its panel.
   const loading = submissions.isLoading;
@@ -114,35 +139,35 @@ export default function PartnerDashboardPage() {
               </p>
             )}
             {canViewCredits && credits.data && (
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="grid-credit-summary">
-              {[
-                ["Available", credits.data.summary.availableCredits, "available"],
-                ["Reserved", credits.data.summary.reservedCredits, "reserved"],
-                ["Consumed this month", credits.data.summary.consumedThisMonth, "consumed-month"],
-                ["Lifetime consumed", credits.data.summary.consumedLifetime, "consumed-lifetime"],
-              ].map(([label, value, id]) => (
-                <Card key={String(id)} className="rounded-md">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="grid-credit-summary">
+                {[
+                  ["Available", credits.data.summary.availableCredits, "available"],
+                  ["Reserved", credits.data.summary.reservedCredits, "reserved"],
+                  ["Consumed this month", credits.data.summary.consumedThisMonth, "consumed-month"],
+                  ["Lifetime consumed", credits.data.summary.consumedLifetime, "consumed-lifetime"],
+                ].map(([label, value, id]) => (
+                  <Card key={String(id)} className="rounded-md">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-semibold" data-testid={`text-credit-${id}`}>
+                        {metric(value as number | null, credits.data.summary.configured ? "Unknown" : "Not available")}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
+                <Card className="rounded-md border-primary/30">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
+                    <CardTitle className="text-xs font-medium text-muted-foreground">Balance status</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-semibold" data-testid={`text-credit-${id}`}>
-                      {metric(value as number | null, credits.data.summary.configured ? "Unknown" : "Not available")}
+                    <p className="text-sm font-semibold text-primary" data-testid="text-credit-status">
+                      {statusLabel(credits.data.summary.balanceStatus)}
                     </p>
                   </CardContent>
                 </Card>
-              ))}
-              <Card className="rounded-md border-primary/30">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-xs font-medium text-muted-foreground">Balance status</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm font-semibold text-primary" data-testid="text-credit-status">
-                    {statusLabel(credits.data.summary.balanceStatus)}
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
+              </div>
             )}
           </section>
 
@@ -179,6 +204,70 @@ export default function PartnerDashboardPage() {
             </div>
           </section>
 
+          <section aria-labelledby="shop-summary-title" className="space-y-3">
+            <h2 id="shop-summary-title" className="text-base font-semibold">
+              Shop workflow
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="grid-shop-workflow">
+              <Card className="rounded-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground">Location</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm font-semibold" data-testid="text-dashboard-location">
+                    {session?.locationName || "Not selected"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground">Customers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xl font-semibold" data-testid="text-dashboard-customers">
+                    {customers.data ? metric(customers.data.length) : "Loading"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground">Ready to grade</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xl font-semibold" data-testid="text-dashboard-ready-grade">
+                    {gradingQueue.data
+                      ? metric(
+                          gradingQueue.data.items
+                            .flatMap((item) => item.cards)
+                            .filter((card) => card.gradingStatus === "assigned").length
+                        )
+                      : canAssessCards
+                        ? "Not available"
+                        : "Not authorised"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-md">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground">Grading</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xl font-semibold" data-testid="text-dashboard-grading">
+                    {gradingQueue.data
+                      ? metric(
+                          gradingQueue.data.items
+                            .flatMap((item) => item.cards)
+                            .filter((card) => card.gradingStatus === "pending_review").length
+                        )
+                      : canAssessCards
+                        ? "Not available"
+                        : "Not authorised"}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
           {/*
             The "Operations" section (Cards in progress / Turnaround / Quality rating) was removed.
             All three were client-side literal "Not available" strings with no server field behind
@@ -189,32 +278,63 @@ export default function PartnerDashboardPage() {
 
           {/* Recent activity is ledger data, so it carries the same permission gate as the panel above. */}
           {canViewCredits && credits.data && (
-          <section aria-labelledby="recent-activity-title" className="space-y-3">
-            <h2 id="recent-activity-title" className="text-base font-semibold">
-              Recent activity
-            </h2>
-            {credits.data.ledger.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No activity yet</p>
-            ) : (
-              <div className="divide-y divide-border border-y border-border">
-                {credits.data.ledger.slice(0, 5).map((entry) => (
-                  <div key={entry.id} className="py-3 flex items-center justify-between gap-4 text-sm">
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">{entry.reason}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(entry.date).toLocaleString("en-GB")}</p>
+            <section aria-labelledby="recent-activity-title" className="space-y-3">
+              <h2 id="recent-activity-title" className="text-base font-semibold">
+                Recent activity
+              </h2>
+              {credits.data.ledger.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No activity yet</p>
+              ) : (
+                <div className="divide-y divide-border border-y border-border">
+                  {credits.data.ledger.slice(0, 5).map((entry) => (
+                    <div key={entry.id} className="py-3 flex items-center justify-between gap-4 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{entry.reason}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(entry.date).toLocaleString("en-GB")}</p>
+                      </div>
+                      <span className={entry.quantity > 0 ? "text-emerald-300" : "text-rose-300"}>
+                        {entry.quantity > 0 ? "+" : ""}
+                        {entry.quantity}
+                      </span>
                     </div>
-                    <span className={entry.quantity > 0 ? "text-emerald-300" : "text-rose-300"}>
-                      {entry.quantity > 0 ? "+" : ""}
-                      {entry.quantity}
-                    </span>
-                  </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          <section aria-labelledby="recent-submissions-title" className="space-y-3">
+            <h2 id="recent-submissions-title" className="text-base font-semibold">
+              Recent submissions
+            </h2>
+            {recentSubmissions.data?.items.length ? (
+              <div
+                className="divide-y divide-border border-y border-border"
+                data-testid="list-dashboard-recent-submissions"
+              >
+                {recentSubmissions.data.items.map((item) => (
+                  <Link
+                    key={item.id}
+                    href={`/partner/submissions/${item.id}`}
+                    className="py-3 flex items-center justify-between gap-4 text-sm"
+                  >
+                    <span className="font-mono">{item.internalReference || item.publicRef}</span>
+                    <span className="text-xs text-muted-foreground">{STATUS_COPY[item.status] ?? item.status}</span>
+                  </Link>
                 ))}
               </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No submissions yet</p>
             )}
           </section>
-          )}
         </>
       )}
     </div>
   );
 }
+
+const STATUS_COPY: Record<string, string> = {
+  draft: "Draft",
+  submitted_to_mintvault: "Submitted",
+  cancelled: "Cancelled",
+};

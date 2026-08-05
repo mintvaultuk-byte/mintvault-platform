@@ -7,12 +7,7 @@
  * for authorised reconciliation/recovery.
  */
 import type pg from "pg";
-import {
-  isActive,
-  isConsumed,
-  isLive,
-  isReleaseTerminal,
-} from "@shared/partner-credit-reservation-states";
+import { isActive, isConsumed, isLive, isReleaseTerminal } from "@shared/partner-credit-reservation-states";
 import {
   assertPartnerAccountingDatabaseTopology,
   withPartnerAccountingAuditTransaction,
@@ -43,6 +38,7 @@ export class PartnerSubmissionCreditLifecycleError extends Error {
       | "reservation_link_inconsistent"
       | "credit_schema_incomplete"
       | "credit_settlement_required"
+      | "partner_grading_approval_missing"
       | "destination_credit_hold_active" = "reservation_link_inconsistent"
   ) {
     super(message);
@@ -51,7 +47,11 @@ export class PartnerSubmissionCreditLifecycleError extends Error {
 }
 
 export type ConnectorReservationReleaseOutcome =
-  "released" | "expired" | "legacy_missing_credit_schema" | "legacy_no_reservation" | "already_settled";
+  | "released"
+  | "expired"
+  | "legacy_missing_credit_schema"
+  | "legacy_no_reservation"
+  | "already_settled";
 
 export type ConnectorTerminalReleaseReason =
   | "connector_rejected"
@@ -721,7 +721,10 @@ async function auditAccountingException(
   status: string,
   code: string,
   details: Record<string, unknown>,
-  eventType: "settlement_exception" | "destination_credit_hold" | "destination_credit_recovery" = "settlement_exception",
+  eventType:
+    | "settlement_exception"
+    | "destination_credit_hold"
+    | "destination_credit_recovery" = "settlement_exception",
   /**
    * Extra discriminator for the idempotency key. Under the per-card model a single submission
    * produces N hold and N recovery events, and without this they would all share one key —
@@ -830,16 +833,66 @@ async function updateDestinationStatus(
   return { id: row.id, submissionId: row.tracking_number, ...row };
 }
 
-async function hasExactConsumedEvidence(client: pg.PoolClient, reservation: ReservationRow): Promise<boolean> {
-  const terminal = await client.query<{ count: string; event_type: string | null }>(
-    `SELECT count(*)::text AS count, min(event_type) AS event_type
-       FROM partner_credit_reservation_events
-      WHERE reservation_id=$1
-        AND tenant_id=$2
-        AND event_type IN ('consumed','released','expired')`,
-    [reservation.id, reservation.tenant_id]
+async function assertPartnerGradingApprovedForSettlement(
+  client: pg.PoolClient,
+  link: PartnerDestinationLink,
+  expectedUnits: number
+): Promise<void> {
+  const exists = await client.query<{ exists: string | null }>(
+    "SELECT to_regclass('public.partner_grading_work_items')::text AS exists"
   );
-  return terminal.rows[0]?.count === "1" && terminal.rows[0]?.event_type === "consumed";
+  if (!exists.rows[0]?.exists) return;
+  const approved = await client.query<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM partner_grading_work_items pgwi
+       JOIN certificates cert
+         ON cert.id = pgwi.certificate_id
+        AND cert.submission_item_id = pgwi.submission_item_id
+        AND cert.submission_id = pgwi.destination_submission_id
+      WHERE pgwi.tenant_id = $1
+        AND pgwi.partner_submission_id = $2
+        AND pgwi.destination_submission_id = $3
+        AND pgwi.status = 'approved'
+        AND cert.grader_status = 'approved'
+        AND cert.grade_approved_at IS NOT NULL
+        AND cert.deleted_at IS NULL`,
+    [link.tenant_id, link.partner_submission_id, link.destination_submission_id]
+  );
+  if (approved.rows[0].n !== expectedUnits) {
+    throw new PartnerSubmissionCreditLifecycleError(
+      "Partner grading approval evidence is incomplete.",
+      "partner_grading_approval_missing"
+    );
+  }
+}
+
+async function hasExactConsumedEvidence(client: pg.PoolClient, reservation: ReservationRow): Promise<boolean> {
+  const terminal = await client.query<{
+    count: string;
+    event_type: string | null;
+    ledger_count: string;
+    ledger_amount: string | null;
+  }>(
+    `SELECT count(*)::text AS count,
+            min(e.event_type) AS event_type,
+            count(l.id)::text AS ledger_count,
+            min(l.amount)::text AS ledger_amount
+       FROM partner_credit_reservation_events e
+       LEFT JOIN partner_credit_ledger l
+         ON l.id = e.ledger_entry_id
+        AND l.wallet_id = e.wallet_id
+        AND l.tenant_id = e.tenant_id
+        AND l.correlation_id = e.reservation_id::text
+        AND l.amount = -1
+        AND l.idempotency_key = ${`reservation-consume:${reservation.id}`}
+      WHERE e.reservation_id=$1
+        AND e.tenant_id=$2
+        AND e.wallet_id=$3
+        AND e.event_type IN ('consumed','released','expired')`,
+    [reservation.id, reservation.tenant_id, reservation.wallet_id]
+  );
+  const row = terminal.rows[0];
+  return row?.count === "1" && row.event_type === "consumed" && row.ledger_count === "1" && row.ledger_amount === "-1";
 }
 
 async function hasActiveDestinationCreditHold(
@@ -974,11 +1027,7 @@ export async function settlePartnerCreditForDestinationStatus(
         true,
         true
       );
-      expectedUnits = await expectedCreditUnitsForPartnerSubmission(
-        client,
-        link.tenant_id,
-        link.partner_submission_id
-      );
+      expectedUnits = await expectedCreditUnitsForPartnerSubmission(client, link.tenant_id, link.partner_submission_id);
     } catch (error) {
       if (!(error instanceof PartnerSubmissionCreditLifecycleError)) throw error;
       return failClosedAccountingException(destination, status, error.code, {
@@ -1007,6 +1056,17 @@ export async function settlePartnerCreditForDestinationStatus(
         tenant_id: link.tenant_id,
         expected_credit_units: expectedUnits,
         live_reservations: reservations.length,
+      });
+    }
+
+    try {
+      await assertPartnerGradingApprovedForSettlement(client, link, expectedUnits);
+    } catch (err) {
+      if (!(err instanceof PartnerSubmissionCreditLifecycleError)) throw err;
+      return failClosedAccountingException(destination, status, err.code, {
+        partner_submission_id: link.partner_submission_id,
+        tenant_id: link.tenant_id,
+        expected_credit_units: expectedUnits,
       });
     }
 
@@ -1312,13 +1372,7 @@ export async function recoverPartnerDestinationCreditHold(params: {
             SET released_at=now(), recovered_by_user_id=$2::uuid, recovered_by_email=$3,
                 recovery_reservation_id=$4::uuid, recovery_idempotency_key=$5
           WHERE id=$1 AND released_at IS NULL`,
-        [
-          predecessor.holdId,
-          params.actorUserId,
-          params.actorEmail,
-          replacement.reservation.id,
-          keyFor(predecessor.id),
-        ]
+        [predecessor.holdId, params.actorUserId, params.actorEmail, replacement.reservation.id, keyFor(predecessor.id)]
       );
       if (updated.rowCount !== 1) {
         // Lost a race for this hold despite FOR UPDATE: refuse rather than leave a replacement

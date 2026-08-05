@@ -144,10 +144,10 @@ export function clearPendingAdmin(req: Request): void {
 }
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  // Internal grader→admin delegation: the grader proxy (server/routes/grader.ts)
-  // sets this request-local flag ONLY after verifying grader OWNERSHIP of the
-  // cert, then re-dispatches to the unchanged admin handler. Not settable by any
-  // client (no header/body path), so it can't be forged.
+  // Internal grading-adapter delegation: grader/partner proxies set this
+  // request-local flag ONLY after their own capability/scope checks, then
+  // re-dispatch to the unchanged admin handler. Not settable by any client
+  // (no header/body path), so it can't be forged.
   if ((req as any).__graderProxy === true) {
     return next();
   }

@@ -22,7 +22,7 @@ import {
 } from "./lib/grade-kind";
 import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
@@ -753,10 +753,22 @@ export class GradeDraftRejected extends Error {
   }
 }
 
-export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
+type ApplyCertGradeDraftOptions = {
+  submitForReviewBy?: string | null;
+};
+
+export async function applyCertGradeDraft(
+  certId: number,
+  body: any,
+  extraWhere: SQL = sql``,
+  options: ApplyCertGradeDraftOptions = {}
+): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
-  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
+  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(
+    cert,
+    body
+  );
 
   const overall = body.overall_grade;
   // grade_type used to be written VERBATIM from the request body, and the column is plain
@@ -795,14 +807,32 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
   const gradeType = gradeTypeToPersist(storedGradeType, requestedKind);
   const isNonNum = requestedKind !== "numeric";
   const parsed = parseFloat(overall);
-  const gradeNum = isNonNum ? null : Number.isNaN(parsed) ? pick(undefined, cert.gradeOverall) : parsed;
+  const draftOverall = isNonNum ? null : Number.isNaN(parsed) ? pick(undefined, cert.gradeOverall) : parsed;
 
   const num = (v: any, cur: any) => (v === undefined || v === null || v === "" ? (cur ?? null) : v);
   const jb = (v: any, cur: any) => JSON.stringify(v === undefined ? (cur ?? null) : v);
+  const centerDraft = num(body.grade_centering, cert.gradeCentering);
+  const cornerDraft = num(body.grade_corners, cert.gradeCorners);
+  const edgeDraft = num(body.grade_edges, cert.gradeEdges);
+  const surfaceDraft = num(body.grade_surface, cert.gradeSurface);
+  const submitForReview = options.submitForReviewBy
+    ? sql`
+      grader_status = 'pending_review',
+      review_required = true,
+      graded_at = NOW(),
+      graded_by = ${options.submitForReviewBy},
+      operator_grade = ${draftOverall},
+      operator_subgrades = jsonb_build_object(
+        'center' || 'ing', ${centerDraft},
+        'corners', ${cornerDraft},
+        'edges', ${edgeDraft},
+        'surface', ${surfaceDraft}
+      ),`
+    : sql``;
 
   const r = await db.execute(sql`
     UPDATE certificates SET
-      grade = ${gradeNum},
+      grade = ${draftOverall},
       grade_type = ${gradeType},
       card_name           = ${keepStr(body.card_name, cert.cardName)},
       set_name            = ${keepStr(body.set_name, cert.setName)},
@@ -813,10 +843,10 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       rarity_code         = ${nextRarityCode},
       finish_variant      = ${nextFinishVariant},
       promo_type          = ${nextPromoType},
-      centering_score = ${num(body.grade_centering, cert.gradeCentering)},
-      corners_score   = ${num(body.grade_corners, cert.gradeCorners)},
-      edges_score     = ${num(body.grade_edges, cert.gradeEdges)},
-      surface_score   = ${num(body.grade_surface, cert.gradeSurface)},
+      centering_score = ${centerDraft},
+      corners_score   = ${cornerDraft},
+      edges_score     = ${edgeDraft},
+      surface_score   = ${surfaceDraft},
       centering_front_lr = ${pick(body.centering_front_lr, cert.centeringFrontLr)},
       centering_front_tb = ${pick(body.centering_front_tb, cert.centeringFrontTb)},
       centering_back_lr  = ${pick(body.centering_back_lr, cert.centeringBackLr)},
@@ -836,8 +866,9 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       eye_appeal_modifier = ${num(body.eye_appeal_modifier, cert.eyeAppealModifier)},
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
+      ${submitForReview}
       updated_at = NOW()
-    WHERE id = ${certId} AND grade_approved_at IS NULL
+    WHERE id = ${certId} AND grade_approved_at IS NULL ${extraWhere}
     RETURNING id
   `);
   return r.rows.length > 0;
@@ -979,6 +1010,91 @@ export async function assignCerts(graderId: string, certIds: number[], adminUser
   return { ok: true as const, count: r.rows.length };
 }
 
+/** Assign partner-origin work items to a partner user with MVGS assessment permission. */
+export async function assignPartnerCerts(partnerUserId: string, certIds: number[], adminUser: string) {
+  const clean = certIds.filter((n) => Number.isInteger(n) && n > 0);
+  if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
+  const eligible = await db.execute(sql`
+    SELECT u.id, u.tenant_id
+      FROM partner_users u
+     WHERE u.id = ${partnerUserId}
+       AND u.status = 'ACTIVE'
+       AND EXISTS (
+         SELECT 1
+           FROM partner_user_roles ur
+           JOIN partner_role_permissions rp ON rp.role_id = ur.role_id
+           JOIN partner_permissions p ON p.id = rp.permission_id
+          WHERE ur.user_id = u.id
+            AND ur.tenant_id = u.tenant_id
+            AND p.code = 'partner.cards.assess'
+       )
+     LIMIT 1
+  `);
+  const partner = eligible.rows[0] as { id: string; tenant_id: string } | undefined;
+  if (!partner) return { ok: false as const, status: 400, error: "Not a valid partner grader" };
+
+  const r = await db.execute(sql`
+    WITH assigned AS (
+      UPDATE certificates cert
+         SET assigned_grader_id = ${partnerUserId},
+             grader_status = 'assigned',
+             assigned_at = NOW(),
+             rejection_reason = NULL,
+             updated_at = NOW()
+        FROM partner_grading_work_items pgwi
+        JOIN partner_connector_imports pci ON pci.id = pgwi.connector_import_id
+       WHERE cert.id = ANY(${intArray(clean)})
+         AND cert.submission_item_id = pgwi.submission_item_id
+         AND cert.submission_id = pgwi.destination_submission_id
+         AND pgwi.tenant_id = ${partner.tenant_id}
+         AND (pgwi.certificate_id IS NULL OR pgwi.certificate_id = cert.id)
+         AND pgwi.status IN ('ready_for_assignment','assigned','returned_for_change')
+         AND pci.state = 'completed'
+         AND pci.deleted_at IS NULL
+         AND cert.deleted_at IS NULL
+         AND cert.grader_status IN ('unassigned','assigned','rejected')
+         AND (
+           EXISTS (
+             SELECT 1
+               FROM partner_user_roles ur
+               JOIN partner_roles r ON r.id = ur.role_id
+              WHERE ur.user_id = ${partnerUserId}
+                AND ur.tenant_id = ${partner.tenant_id}
+                AND r.code IN ('PARTNER_OWNER','PARTNER_MANAGER')
+           )
+           OR EXISTS (
+             SELECT 1
+               FROM partner_user_locations pul
+              WHERE pul.user_id = ${partnerUserId}
+                AND pul.tenant_id = ${partner.tenant_id}
+                AND pul.location_id = pgwi.partner_location_id
+           )
+         )
+       RETURNING cert.id, cert.submission_item_id
+    )
+    UPDATE partner_grading_work_items pgwi
+       SET certificate_id = assigned.id,
+           certificate_linked_at = COALESCE(pgwi.certificate_linked_at, NOW()),
+           assigned_partner_grader_id = ${partnerUserId},
+           assigned_at = COALESCE(pgwi.assigned_at, NOW()),
+           status = 'assigned',
+           updated_at = NOW()
+      FROM assigned
+     WHERE assigned.submission_item_id = pgwi.submission_item_id
+       AND pgwi.tenant_id = ${partner.tenant_id}
+       AND (pgwi.certificate_id IS NULL OR pgwi.certificate_id = assigned.id)
+       AND pgwi.status IN ('ready_for_assignment','assigned','returned_for_change')
+    RETURNING assigned.id
+  `);
+  await storage.writeAuditLog("certificate", clean.join(","), "partner_grader_assign", adminUser, {
+    partner_user_id: partnerUserId,
+    partner_tenant_id: partner.tenant_id,
+    cert_ids: clean,
+    count: r.rows.length,
+  });
+  return { ok: true as const, count: r.rows.length };
+}
+
 /** Reassign a batch of certs to a different grader; audits from→to. */
 export async function reassignCerts(graderId: string, certIds: number[], adminUser: string) {
   if (!(await isGrader(graderId))) return { ok: false as const, status: 400, error: "Not a valid grader" };
@@ -1032,9 +1148,12 @@ export async function getCertsForSubmission(submissionId: number) {
     SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_name, cert.set_name,
            cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
            cert.assigned_grader_id, cert.grader_status, cert.redo_count, u.email AS grader_email
-    FROM certificates cert JOIN cards c ON cert.card_id = c.id
+    FROM certificates cert
+    LEFT JOIN cards c ON cert.card_id = c.id
+    LEFT JOIN submission_items si ON si.id = cert.submission_item_id
+    JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
     LEFT JOIN users u ON u.id = cert.assigned_grader_id
-    WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
+    WHERE s.id = ${submissionId} AND cert.deleted_at IS NULL
     ORDER BY cert.id ASC
   `);
   return (r.rows as any[]).map((row) => ({
@@ -1074,6 +1193,12 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
   if (r.rows.length === 0) {
     return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
   }
+  await db.execute(sql`
+    UPDATE partner_grading_work_items
+       SET status = 'returned_for_change', updated_at = NOW()
+     WHERE certificate_id = ${certId}
+       AND status = 'pending_review'
+  `);
   await storage.writeAuditLog("certificate", String(certId), "grade_reject", adminUser, { reason: reason || null });
   return { ok: true as const };
 }
@@ -1161,9 +1286,77 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   // rather than flip grader_status on an unpublished grade.
   // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
   // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
-  const published = await approveCertGrade(certId, adminUser);
-  if (!published) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+  const partnerWorkItem = await db.execute(sql`
+    SELECT 1
+      FROM partner_grading_work_items pgwi
+      JOIN certificates cert
+        ON cert.id = pgwi.certificate_id
+       AND cert.submission_item_id = pgwi.submission_item_id
+       AND cert.submission_id = pgwi.destination_submission_id
+     WHERE cert.id = ${certId}
+       AND pgwi.status = 'pending_review'
+     LIMIT 1
+  `);
+  if (partnerWorkItem.rows.length > 0) {
+    const approved = await db.transaction(async (tx) => {
+      const certUpdate = await tx.execute(sql`
+        UPDATE certificates
+           SET grade_approved_at = NOW(),
+               grade_approved_by = ${adminUser},
+               grader_status = 'approved',
+               status = 'active',
+               print_state = 'needs_printing',
+               updated_at = NOW()
+         WHERE id = ${certId}
+           AND grader_status = 'pending_review'
+           AND grade_approved_at IS NULL
+           AND deleted_at IS NULL
+         RETURNING id
+      `);
+      if (certUpdate.rows.length === 0) return false;
+      const workUpdate = await tx.execute(sql`
+        UPDATE partner_grading_work_items
+           SET status = 'approved', updated_at = NOW()
+         WHERE certificate_id = ${certId}
+           AND status = 'pending_review'
+         RETURNING id
+      `);
+      if (workUpdate.rows.length !== 1) {
+        throw new GradeDraftRejected("Partner work item changed; refresh and try again.", 409);
+      }
+      const statusCheck = await tx.execute(sql`
+        SELECT pgwi.destination_submission_id::int AS destination_submission_id,
+               bool_and(pgwi.status = 'approved') AS all_approved
+          FROM partner_grading_work_items pgwi
+         WHERE pgwi.destination_submission_id = (
+           SELECT destination_submission_id
+             FROM partner_grading_work_items
+            WHERE certificate_id = ${certId}
+            LIMIT 1
+         )
+           AND pgwi.status <> 'void'
+         GROUP BY pgwi.destination_submission_id
+      `);
+      const row = statusCheck.rows[0] as { destination_submission_id?: number; all_approved?: boolean } | undefined;
+      return row?.all_approved && row.destination_submission_id
+        ? { allApproved: true, destinationSubmissionId: row.destination_submission_id }
+        : { allApproved: false, destinationSubmissionId: row?.destination_submission_id ?? null };
+    });
+    if (!approved) {
+      return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    }
+    if (approved.allApproved && approved.destinationSubmissionId) {
+      const { storage } = await import("./storage");
+      await storage.updateSubmissionStatus(approved.destinationSubmissionId, "ready_to_return", {
+        partner_grading_approved_by: adminUser,
+        partner_grading_completed_cert_id: certId,
+      });
+    }
+  } else {
+    const published = await approveCertGrade(certId, adminUser);
+    if (!published) {
+      return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    }
   }
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
@@ -1198,7 +1391,10 @@ async function gradeSnapshot(certId: number) {
   };
 }
 
-function sameGradeSnapshot(a: Awaited<ReturnType<typeof gradeSnapshot>>, b: Awaited<ReturnType<typeof gradeSnapshot>>): boolean {
+function sameGradeSnapshot(
+  a: Awaited<ReturnType<typeof gradeSnapshot>>,
+  b: Awaited<ReturnType<typeof gradeSnapshot>>
+): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -1215,7 +1411,7 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
-  let saved = false;
+  let saved: boolean;
   try {
     saved = await applyCertGradeDraft(certId, body);
   } catch (e) {
