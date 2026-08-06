@@ -39,6 +39,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { setupPartnerTestStorage, ONE_PIXEL_PNG, type PartnerTestStorage } from "./helpers/partner-test-storage";
 import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
@@ -51,6 +52,26 @@ let cluster: DisposablePostgres17;
 let admin: Client;
 let mirror: typeof import("../server/partner/grading-review-mirror");
 let creditReservations: typeof import("../server/partner/partner-credit-reservation-service");
+let wallet: typeof import("../server/partner/partner-wallet-service");
+let submissions: typeof import("../server/partner/submission-service");
+let storage: PartnerTestStorage;
+
+const ADMIN_ACTOR = { actorUserId: null, actorEmail: "full-pilot-admin@example.test" };
+
+/** The principal shape the production submit service expects. */
+function principalFor(f: { tenantId: string; locationId: string; graderId: string }) {
+  return {
+    sessionId: `full-pilot-${f.tenantId}`,
+    tenantId: f.tenantId,
+    userId: f.graderId,
+    locationId: f.locationId,
+    mfaPassed: true,
+    permissions: new Set(["partner.orders.create", "partner.orders.cancel"]),
+    viewOnly: false,
+    sensitiveDisabled: false,
+    orgWide: true,
+  } as never;
+}
 
 let sequence = 0;
 const SUPER_ADMIN = "full-pilot-super-admin@example.test";
@@ -177,7 +198,7 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
   const partnerSubmissionId = await scalar<string>(
     `INSERT INTO partner_submissions
        (tenant_id, location_id, created_by, card_count, status, customer_id, service_tier_code, submitted_at)
-     VALUES ($1,$2,$3,2,'submitted_to_mintvault',$4,$5, now()) RETURNING id`,
+     VALUES ($1,$2,$3,2,'draft',$4,$5, NULL) RETURNING id`,
     [tenantId, locationId, graderId, customerId, `fp-tier-${n}`]
   );
 
@@ -201,11 +222,49 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
     cardIds.push(cardId);
   }
 
-  const handoffId = await scalar<string>(
-    `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot)
-     VALUES ($1,$2,'pending',$3::jsonb) RETURNING id`,
-    [tenantId, partnerSubmissionId, JSON.stringify({ cards: 2, fixture: "FULL-PILOT-LOCAL-01" })]
+  // ---- REAL storage objects, at the exact production key shape --------------------------------
+  for (const cardId of cardIds) {
+    for (const side of ["front", "back"] as const) {
+      await storage.put(
+        `partner-submissions/${tenantId}/${partnerSubmissionId}/${cardId}/${side}-fp.jpg`,
+        ONE_PIXEL_PNG
+      );
+    }
+  }
+
+  // ---- REAL wallet funding through the production wallet service ------------------------------
+  await wallet.ensureWallet(ADMIN_ACTOR, tenantId);
+  await wallet.appendFoundationCredit(ADMIN_ACTOR, {
+    tenantId,
+    amount: 10,
+    entryType: "purchase",
+    source: "admin",
+    reason: "full pilot funding",
+    idempotencyKey: `fp-fund-${n}`,
+    actorType: "admin",
+  });
+
+  // ---- REAL submit. This is what creates the handoff and BOTH reservations. --------------------
+  // Hand-seeding them is exactly what produced reservation_link_inconsistent: production stamps
+  // location_id on every reservation, and assertReservationSourceSubmission re-reads the source
+  // submission with `location_id IS NOT DISTINCT FROM $3`, so a NULL location_id fails closed.
+  await submissions.submitSubmission(
+    principalFor({ tenantId, locationId, graderId }),
+    partnerSubmissionId,
+    `fp-submit-${n}`
   );
+
+  const handoffId = await scalar<string>("SELECT id FROM partner_submission_handoffs WHERE submission_id=$1", [
+    partnerSubmissionId,
+  ]);
+  const walletId = await scalar<string>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [tenantId]);
+  const reservationIds = (
+    await admin.query<{ id: string }>(
+      "SELECT id FROM partner_credit_reservations WHERE submission_reference=$1 ORDER BY created_at, id",
+      [partnerSubmissionId]
+    )
+  ).rows.map((r) => r.id);
+
   const connectorId = await scalar<string>(
     `INSERT INTO partner_connector_records (tenant_id, partner_submission_id, handoff_id, state, attempt_count)
      VALUES ($1,$2,$3,'imported',1) RETURNING id`,
@@ -218,7 +277,6 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
      VALUES ($1,1,1,'pending',$2,1,'valid',0,0,now()) RETURNING id`,
     [connectorId, "a".repeat(64)]
   );
-  // in_grading — NOT ready_to_return. Reaching ready_to_return is what the final approval must do.
   const destinationSubmissionId = await scalar<number>(
     `INSERT INTO submissions (user_id, tracking_number, status) VALUES ('fp-owner',$1,'in_grading') RETURNING id`,
     [`MV-FP-${n}`]
@@ -241,22 +299,9 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
     ]
   );
 
-  // Wallet funded with exactly 10 credits.
-  const walletId = await scalar<string>(
-    "INSERT INTO partner_wallets (tenant_id, status) VALUES ($1,'active') RETURNING id",
-    [tenantId]
-  );
-  await admin.query(
-    `INSERT INTO partner_credit_ledger
-       (wallet_id, tenant_id, amount, entry_type, idempotency_key, source, reason, actor_type, request_fingerprint)
-     VALUES ($1,$2,10,'purchase',$3,'admin','full pilot funding','admin',$4)`,
-    [walletId, tenantId, `fp-fund-${n}`, "b".repeat(64)]
-  );
-
   const certIds: number[] = [];
   const certNumbers: string[] = [];
   const workItemIds: string[] = [];
-  const reservationIds: string[] = [];
 
   for (let i = 0; i < 2; i++) {
     const itemId = await scalar<number>("INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id", [
@@ -292,31 +337,6 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
     );
     certIds.push(certId);
     certNumbers.push(certNumber);
-
-    const reservationId = await scalar<string>(
-      `INSERT INTO partner_credit_reservations
-         (wallet_id, tenant_id, source, submission_reference, card_reference, reserved_credits,
-          status, idempotency_key, request_fingerprint, reason, actor_type, expires_at)
-       VALUES ($1,$2,'portal',$3,$4,1,'active',$5,$6,'full pilot reservation','system', now() + interval '30 days')
-       RETURNING id`,
-      [
-        walletId,
-        tenantId,
-        partnerSubmissionId,
-        `partner-submission-card:${cardIds[i]}:1`,
-        `fp-res-${n}-${i}`,
-        "c".repeat(64),
-      ]
-    );
-    // Production writes a 'reserved' event at creation; the fixture matches it.
-    await admin.query(
-      `INSERT INTO partner_credit_reservation_events
-         (reservation_id, wallet_id, tenant_id, event_type, amount, idempotency_key,
-          request_fingerprint, source, reason, actor_type)
-       VALUES ($1,$2,$3,'reserved',1,$4,$5,'portal','full pilot reservation','system')`,
-      [reservationId, walletId, tenantId, `fp-res-evt-${n}-${i}`, "c".repeat(64)]
-    );
-    reservationIds.push(reservationId);
 
     workItemIds.push(
       await scalar<string>(
@@ -395,11 +415,25 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     process.env.PARTNER_CONNECTOR_DATABASE_URL = cluster.url;
     process.env.PARTNER_DATABASE_URL = cluster.url;
 
+    // Feature flags the production submit path reads (global rows).
+    await admin.query(
+      `INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled)
+       VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false)`
+    );
+
+    // REAL disposable MinIO. submitSubmission verifies both card images with a live headR2, so a
+    // stubbed store would make the storage gate — and the reservation cardinality behind it —
+    // unproven. Must precede every server/* import: server/r2 memoises its client at module scope.
+    storage = await setupPartnerTestStorage({ bucketSuffix: "fpilot" });
+
     mirror = await import("../server/partner/grading-review-mirror");
     creditReservations = await import("../server/partner/partner-credit-reservation-service");
+    wallet = await import("../server/partner/partner-wallet-service");
+    submissions = await import("../server/partner/submission-service");
   }, 180_000);
 
   afterAll(async () => {
+    await storage?.cleanup().catch(() => {});
     const db = await import("../server/partner/db");
     await db.closePartnerPools().catch(() => {});
     await admin?.end().catch(() => {});
@@ -499,5 +533,99 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
         f.tenantId,
       ])
     ).toBe("0");
+  });
+
+  it("P3: approving the FINAL card fires the mirror, transitions the destination and settles — 8/0/2", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    expect(await triple(f.tenantId), "precondition: unsettled after card one").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+
+    const outcome = await approveAsSuperAdmin(f.certIds[1]);
+
+    expect(outcome.kind).toBe("mirrored");
+    expect(outcome.allApproved, "the COMPLETE approved set is what triggers the transition").toBe(true);
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status='approved'",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+        [f.destinationSubmissionId]
+      )
+    ).toBe("2");
+
+    // mirror -> updateSubmissionStatus('ready_to_return') -> settlePartnerCreditForDestinationStatus
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "the final approval must transition the destination"
+    ).toBe("ready_to_return");
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='active'",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("0");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='consumed'",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='consumed'",
+        [f.tenantId]
+      ),
+      "exactly one terminal consumed event per physical card"
+    ).toBe("2");
+    // Read one leg by raw SQL, so both legs of the triple are not from getCreditPosition alone.
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount = -1", [
+        f.tenantId,
+      ]),
+      "exactly one -1 debit per physical card"
+    ).toBe("2");
+
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+  });
+
+  it("P4: replaying the final approval settles nothing twice — one consumed event and one debit per card, forever", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    await approveAsSuperAdmin(f.certIds[1]);
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+
+    // The certificate is already approved, so the mirror finds no pending_review work item.
+    const replay = await approveAsSuperAdmin(f.certIds[1]);
+    expect(replay.kind).toBe("not_partner");
+
+    expect(await triple(f.tenantId), "a replayed approval must not move money").toEqual({
+      available: 8,
+      reserved: 0,
+      consumed: 2,
+    });
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount = -1", [
+        f.tenantId,
+      ])
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='consumed'",
+        [f.tenantId]
+      )
+    ).toBe("2");
+    expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId])).toBe(
+      "ready_to_return"
+    );
   });
 });
