@@ -884,12 +884,22 @@ async function hasExactConsumedEvidence(client: pg.PoolClient, reservation: Rese
         AND l.tenant_id = e.tenant_id
         AND l.correlation_id = e.reservation_id::text
         AND l.amount = -1
-        AND l.idempotency_key = ${`reservation-consume:${reservation.id}`}
+        AND l.idempotency_key = $4
       WHERE e.reservation_id=$1
         AND e.tenant_id=$2
         AND e.wallet_id=$3
         AND e.event_type IN ('consumed','released','expired')`,
-    [reservation.id, reservation.tenant_id, reservation.wallet_id]
+    // $4 was a JS template literal interpolated into a PLAIN (non-tagged) SQL string, so the
+    // rendered text was `l.idempotency_key = reservation-consume:<uuid>` — unquoted and
+    // unparameterised. Postgres stopped at the ':' with `syntax error at or near ":"`, which meant
+    // this function THREW on every call rather than returning a verdict.
+    //
+    // hasExactConsumedEvidence is the replay check for settlement: it answers "has this
+    // reservation already been consumed exactly once, with exactly one matching -1 ledger row?".
+    // Because it threw, the idempotent-replay path could not report "already settled" at all.
+    // It surfaced only once the financial fixtures were repaired far enough for a test to reach a
+    // second settlement attempt.
+    [reservation.id, reservation.tenant_id, reservation.wallet_id, `reservation-consume:${reservation.id}`]
   );
   const row = terminal.rows[0];
   return row?.count === "1" && row.event_type === "consumed" && row.ledger_count === "1" && row.ledger_amount === "-1";
