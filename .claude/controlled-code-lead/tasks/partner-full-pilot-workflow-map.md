@@ -90,14 +90,51 @@ stage 5 even though the grading itself is done by the Partner.
 
 ---
 
-## Gaps still to map before the test can be completed
+## Stage 11 — label, print and completion (NOW MAPPED, `server/print-workflow.ts`)
 
-- Label render + print authorisation + print-event rows: the exact route/service chain and which
-  table carries the authoritative print event (`label_prints` vs `print_state` on `certificates`).
-- Reprint reason/audit enforcement path.
-- What marks a work item, a card unit and a Partner submission COMPLETE, and the cardinality between
-  them (stage 11 above is the least-mapped stage).
-- Whether any public-visibility gate reads certificate state directly or via a cached artifact.
+| Step | Entry point | Writes |
+|---|---|---|
+| Batch / label | `createBatchAtomic(...)` (`:448`) | `certificates.print_state = 'printing'` (`:666`), `label_prints (cert_id, sheet_ref, printed_at)` (`:714`), rollback to prior state on failure (`:726`) |
+| Mark printed | `markBatchPrinted(batchId, identity)` (`:845`) | `certificates.print_state` (`:890`) + `print_events` |
+| Reprint | `requestReprint({...})` (`:928`) | `certificates.print_state = 'reprint_required'` (`:968`) + `print_events` |
+| **Complete** | `markCompleted({ certIds, identity })` (`:992`) | `print_events` action `'complete'`, then Partner completion cascade below |
 
-Until these are mapped, the full-pilot test can be built truthfully as far as stage 10 and must stop
-there rather than assert invented completion semantics.
+**F5 — `print_events` is the authoritative print evidence, not `label_prints`.** `label_prints` is
+written once by `createBatchAtomic` at `:714` and records the sheet. Every state transition
+(`complete`, reprint, batch-printed) appends to `print_events` with `(cert_id, actor, actor_role,
+action, from_state, to_state)` — that is the audited actor trail a print assertion must read.
+
+**F6 — the completion cascade is a THREE-LEVEL, NOT-EXISTS-guarded cascade inside one transaction**
+(`:1031-1081`), and it is the answer to "what completes a work item / card unit / submission":
+
+1. Work item: `UPDATE partner_grading_work_items SET status='completed' … AND pgwi.status='approved'`,
+   joined on the full triple `certificate_id` + `submission_item_id` + `destination_submission_id`.
+   So a work item can only complete from `approved`, and only via its own certificate.
+2. Physical card unit: there is no separate card-unit table — the unit IS the work item
+   (one per `submission_item_id`, materialised per physical unit by connector import).
+3. Partner submission: completed only where **NOT EXISTS** a sibling work item whose status is not
+   in `('completed','void')` **AND NOT EXISTS** a `partner_credit_reservations` row for that
+   submission whose status `<> 'consumed'`.
+
+**F7 (HIGH, load-bearing for the acceptance flow) — completion requires settlement to have already
+happened.** The second `NOT EXISTS` above means a Partner submission cannot complete while any
+reservation is still `active`. Since settlement is what turns reservations `consumed` (stage 10),
+the real production order is:
+
+    approve both certs -> destination status -> SETTLE (8/0/2) -> print/complete -> submission completed
+
+Printing before settlement therefore cannot complete the submission — the guard is in the SQL, not
+in a service check. A test asserting "print then settle" would be asserting an order production does
+not support.
+
+**F8 — `requireCompletePartnerSubmissionSet(certIds, phase)` (`:323`)** gates both `"batch"` and
+`"complete"` phases: a partial selection of a Partner submission's certificates is rejected before
+either phase proceeds. This is the production mechanism behind the "partial print must not complete
+the submission" requirement — it refuses the operation rather than allowing a half-complete state.
+
+## Remaining gap
+
+Public-visibility gates (lookup / slab / share / claim / transfer / cached artifact) are still
+unmapped: specifically whether each reads certificate state directly or via a cached artifact, and
+which of them key on `grade_approved_at` versus `print_state`. The full-pilot test can now be built
+truthfully through stage 11; the public-gate assertions in Phase 8 still need that last map.
