@@ -16,6 +16,7 @@ const GRADER_ROUTES = read("server/routes/grader.ts");
 const GRADER_SERVICE = read("server/grader.ts");
 const PARTNER_ASSIGNMENT = read("server/partner/grading-assignment.ts");
 const PARTNER_MIRROR = read("server/partner/grading-review-mirror.ts");
+const REAL_STORAGE_PROOF = read("tests/partner-real-r2-storage.test.ts");
 const CREDIT_LIFECYCLE = read("server/partner/partner-submission-credit-lifecycle.ts");
 const IMPORTER = read("server/partner/connector-import-service.ts");
 const VALIDATION = read("server/partner/connector-validation-service.ts");
@@ -244,5 +245,37 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
     expect(PRINT_WORKFLOW).toContain("AND cert_id = ANY(${pgTextArray(certIdStorageVariants(applied))}::text[])");
     expect(PRINT_WORKFLOW).toContain("SET status = 'completed'");
     expect(WORK_ITEM_MIGRATION).toContain("'completed'");
+  });
+});
+
+describe("the real-storage proof cannot destroy a bucket", () => {
+  it("never imports bucket- or bulk-deletion commands", () => {
+    // A previous revision ran, in beforeAll and before any assertion, an UNPREFIXED
+    // ListObjectsV2 -> bulk DeleteObjects -> DeleteBucket against an endpoint and bucket taken
+    // from ambient R2_* env vars, with localhost only as a fallback. With real credentials
+    // exported into the shell that would have deleted up to 1,000 live objects and then the
+    // production bucket. These are the two commands that made that possible.
+    expect(REAL_STORAGE_PROOF).not.toContain("DeleteBucketCommand");
+    expect(REAL_STORAGE_PROOF).not.toContain("DeleteObjectsCommand");
+    expect(REAL_STORAGE_PROOF).not.toContain("CreateBucketCommand");
+  });
+
+  it("targets only dedicated proof env vars, never ambient R2_* configuration", () => {
+    // The suite may SET process.env.R2_* after proving the target is disposable, but it must
+    // never READ its target from them — that is the "ambient production config wins" class.
+    expect(REAL_STORAGE_PROOF).not.toMatch(/process\.env\.R2_ENDPOINT\s*\?\?/);
+    expect(REAL_STORAGE_PROOF).not.toMatch(/process\.env\.R2_BUCKET_NAME\s*\?\?/);
+    expect(REAL_STORAGE_PROOF).toContain("PARTNER_REAL_R2_PROOF_ENDPOINT");
+    expect(REAL_STORAGE_PROOF).toContain("PARTNER_REAL_R2_PROOF_BUCKET");
+  });
+
+  it("keeps the endpoint allow-list, bucket pattern, foreign-object probe and prefixed cleanup", () => {
+    expect(REAL_STORAGE_PROOF).toContain("ALLOWED_STORAGE_HOSTS");
+    expect(REAL_STORAGE_PROOF).toContain("FORBIDDEN_HOST_FRAGMENTS");
+    expect(REAL_STORAGE_PROOF).toContain("PROOF_BUCKET_RE");
+    expect(REAL_STORAGE_PROOF).toContain("assertBucketIsEmptyOfForeignObjects");
+    expect(REAL_STORAGE_PROOF).toContain("refusing to delete out-of-prefix key");
+    // Exact-hostname matching, never substring — "https://evil.example/?h=127.0.0.1" must fail.
+    expect(REAL_STORAGE_PROOF).toContain("ALLOWED_STORAGE_HOSTS.has(host)");
   });
 });
