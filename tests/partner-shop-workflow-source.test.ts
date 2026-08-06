@@ -327,3 +327,50 @@ describe("no partner-reachable proxy handler performs schema mutation", () => {
     expect(body).not.toMatch(/catch\s*\{\s*\}/);
   });
 });
+
+describe("recrop never writes a canonical object before the guard succeeds", () => {
+  const ROUTES = read("server/routes.ts");
+
+  function recropBody(): string {
+    const start = ROUTES.indexOf('"/api/admin/certificates/:id/recrop"');
+    expect(start).toBeGreaterThan(-1);
+    const next = ROUTES.indexOf("app.post(", start + 40);
+    return ROUTES.slice(start, next === -1 ? ROUTES.length : next);
+  }
+
+  it("defers the partner canonical writes until after the guarded UPDATE", () => {
+    const body = recropBody();
+    // The three canonical keys — including images/{cert}/{side}.jpg, the customer-visible key the
+    // certificate row points at — must be written through one helper that the partner path invokes
+    // only after the guard, not inline before it.
+    expect(body).toContain("const writeCanonicalObjects");
+    expect(body).toContain("if (!partnerProxied) await writeCanonicalObjects()");
+    expect(body).toContain("if (partnerProxied) await writeCanonicalObjects()");
+
+    const adminWrite = body.indexOf("if (!partnerProxied) await writeCanonicalObjects()");
+    // NOT indexOf — the FIRST guard usage is the pre-flight SELECT. The ordering that matters is
+    // against the guard inside the persisting UPDATE, which is the atomic authority.
+    const guardedUpdate = body.indexOf("UPDATE certificates SET");
+    const refusal = body.indexOf("partnerProxied && imageUpdate.rows.length !== 1");
+    const partnerWrite = body.indexOf("if (partnerProxied) await writeCanonicalObjects()");
+
+    // Admin keeps the original ordering: write, then update.
+    expect(adminWrite).toBeLessThan(guardedUpdate);
+    // Partner: guard, then refuse-or-write. The write must come AFTER the refusal branch, so a 409
+    // leaves every canonical object byte-for-byte unchanged.
+    expect(refusal).toBeGreaterThan(guardedUpdate);
+    expect(partnerWrite).toBeGreaterThan(refusal);
+  });
+
+  it("performs no bare uploadToR2 before the guarded UPDATE on the partner path", () => {
+    const body = recropBody();
+    const guardedUpdate = body.indexOf("UPDATE certificates SET");
+    const beforeGuard = body.slice(0, guardedUpdate);
+    // Any uploadToR2 in the pre-guard region must be inside the deferred helper, never a direct
+    // call — a direct one would replace a live customer image before authorisation is confirmed.
+    const helperStart = beforeGuard.indexOf("const writeCanonicalObjects");
+    const helperEnd = beforeGuard.indexOf("};", helperStart);
+    const outsideHelper = beforeGuard.slice(0, helperStart) + beforeGuard.slice(helperEnd);
+    expect(outsideHelper).not.toContain("await uploadToR2(");
+  });
+});

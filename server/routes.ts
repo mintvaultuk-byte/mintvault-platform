@@ -7774,16 +7774,38 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .toBuffer();
 
       const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
-      await uploadToR2(cropKey, cropped, "image/jpeg");
       const displayKey = r2KeyForImage(certIdStr, side, "jpg");
-      await uploadToR2(displayKey, cropped, "image/jpeg");
+      const recropDerivKey = `grading/${certIdStr}/${side}_display.jpg`;
 
       // Refresh the 1600px viewer derivative so the recrop is visible in the
       // grading panel (which prefers grading_{side}_display over cropped).
       const { makeDisplayDerivative: makeDeriv } = await import("./image-processing");
       const recropDerivBuf = await makeDeriv(cropped);
-      const recropDerivKey = `grading/${certIdStr}/${side}_display.jpg`;
-      await uploadToR2(recropDerivKey, recropDerivBuf, "image/jpeg");
+
+      // CANONICAL WRITES ARE DEFERRED FOR THE PARTNER PATH.
+      //
+      // The pre-flight above closes the DETERMINISTIC case, but it is a check-then-act pair: state
+      // could still change between it and these writes, and that window spans a signed-URL fetch of
+      // the original plus the whole sharp pipeline — seconds, not microseconds. Writing the
+      // canonical keys first meant a request that the guarded UPDATE then refused had already
+      // replaced `images/{cert}/{side}.jpg`, the customer-visible key the certificate points at.
+      // R2 PutObject cannot join the transaction and cannot be rolled back, so on an unversioned
+      // bucket those bytes were gone.
+      //
+      // No staging-key copy is needed: the crop and its derivative are already in memory, so
+      // "promotion" is simply performing the upload after the guard rather than before it. The
+      // guarded UPDATE stays the single atomic authority and is now genuinely a precondition of
+      // the object write, not a report issued after it.
+      //
+      // The ADMIN path keeps its original ordering byte-for-byte — uploads first, then the UPDATE —
+      // so nothing about HQ behaviour, error codes or timing changes.
+      const partnerProxied = isPartnerGradingProxy(req);
+      const writeCanonicalObjects = async () => {
+        await uploadToR2(cropKey, cropped, "image/jpeg");
+        await uploadToR2(displayKey, cropped, "image/jpeg");
+        await uploadToR2(recropDerivKey, recropDerivBuf, "image/jpeg");
+      };
+      if (!partnerProxied) await writeCanonicalObjects();
 
       let imageUpdate;
       if (side === "front") {
@@ -7811,9 +7833,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           `
         );
       }
-      if (isPartnerGradingProxy(req) && imageUpdate.rows.length !== 1) {
+      if (partnerProxied && imageUpdate.rows.length !== 1) {
+        // Refused AFTER the guard and BEFORE any canonical object was touched. The customer's
+        // existing front/back/derived images are byte-for-byte unchanged.
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
+      // Guard satisfied — now, and only now, replace the canonical objects.
+      if (partnerProxied) await writeCanonicalObjects();
 
       const variants = await gv(cropped);
       for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
