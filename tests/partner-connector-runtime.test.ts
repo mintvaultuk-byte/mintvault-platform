@@ -30,9 +30,14 @@ import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G4,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
+  createMintvaultCertificatesTable,
+  createMintvaultLabelPrintsTable,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
+import { setupPartnerTestStorage, ONE_PIXEL_PNG, type PartnerTestStorage } from "./helpers/partner-test-storage";
+
+let storage: PartnerTestStorage;
 
 const ADMIN = process.env.PARTNER_CONNECTOR_RUNTIME_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_RUNTIME_URL;
@@ -141,11 +146,36 @@ async function seedPendingHandoff(
     [subId, tenantId, locationId, partnerUserId, custId, 1500 * cardCount, cardCount]
   );
   for (let i = 1; i <= cardCount; i++) {
-    await admin.query(
+    const card = await admin.query<{ id: string }>(
       `INSERT INTO partner_submission_cards
          (tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity)
-       VALUES ($1,$2,$3,$4,'pokemon','Base Set','4/102',1999,50000,1)`,
+       VALUES ($1,$2,$3,$4,'pokemon','Base Set','4/102',1999,50000,1) RETURNING id`,
       [tenantId, subId, i, `Runtime Card ${i}`]
+    );
+    /**
+     * IMAGE KEYS + REAL OBJECTS. The connector validator runs its OWN image gate, independent of
+     * the submit contract: connector-validation-service raises a BLOCKING finding when a card's
+     * key is blank or does not start with
+     * partner-submissions/{tenantId}/{submissionId}/{cardId}/{side}- , and then HEADs the object
+     * and raises the same blocking codes when it is absent.
+     *
+     * This fixture wrote NULL keys, so every seeded record collected
+     * card_front_image_missing + card_back_image_missing, validated as `invalid`, went to
+     * `rejected` and was never imported. All 8 failures in this file traced to that — and because
+     * headR2 returns null both when the object is missing AND when storage is unconfigured, an
+     * unconfigured suite fails identically and silently.
+     *
+     * The portal is what produces these rows in production, so the fixture has to produce what the
+     * portal produces. The objects are written to real disposable MinIO, not mocked, because the
+     * gate being satisfied here is object EXISTENCE.
+     */
+    const frontKey = `partner-submissions/${tenantId}/${subId}/${card.rows[0].id}/front-${seq}-${i}.png`;
+    const backKey = `partner-submissions/${tenantId}/${subId}/${card.rows[0].id}/back-${seq}-${i}.png`;
+    await storage.put(frontKey, ONE_PIXEL_PNG);
+    await storage.put(backKey, ONE_PIXEL_PNG);
+    await admin.query(
+      "UPDATE partner_submission_cards SET front_image_key=$1, back_image_key=$2 WHERE id=$3",
+      [frontKey, backKey, card.rows[0].id]
     );
   }
   const h = await admin.query<{ id: string }>(
@@ -214,7 +244,37 @@ const partnerIntakeSubmissionCount = () =>
       await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
       await provisionRealisticRoles(admin);
       await seedMintVaultTables();
-      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G4);
+      /**
+       * The importer creates a certificate (allocating from cert_counter) and a
+       * partner_grading_work_items row for every imported card, so the destination tables must
+       * exist and the migration set must include 0045 — PARTNER_MIGRATIONS_WITH_G4 stops at 0014.
+       *
+       * ORDER IS LOAD-BEARING: 0045 grants on cert_counter only inside
+       * `IF to_regclass('public.cert_counter') IS NOT NULL`, so a cert_counter created AFTER the
+       * migrations would leave partner_connector_runtime with no grant and the import would fail
+       * on permissions. Tables first, migrations second.
+       *
+       * The shared certificates helper is used rather than a hand-rolled table because 0045 issues
+       * column-level grants naming 38 certificates columns, and a missing column is a hard 42703
+       * that aborts beforeAll — which vitest then reports as "skipped".
+       */
+      await createMintvaultCertificatesTable(admin);
+      await createMintvaultLabelPrintsTable(admin);
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS cert_counter (id integer PRIMARY KEY DEFAULT 1, last_issued integer NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now())"
+      );
+      await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+        id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+        admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now()
+      )`);
+      for (const t of ["certificates", "label_prints", "cert_counter", "audit_log"]) {
+        await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
+      }
+      // Real disposable MinIO. The connector validator HEADs every card image, so this suite
+      // cannot fake object existence — and it gets its OWN bucket, because the storage-proof suite
+      // refuses to run if its bucket holds anything outside ci-proof/.
+      storage = await setupPartnerTestStorage({ bucketSuffix: "conn" });
+      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
 
       await admin.query("DROP ROLE IF EXISTS partner_connector_rt_test").catch(() => {});
       await admin.query("CREATE ROLE partner_connector_rt_test LOGIN PASSWORD 'synthetic'");
@@ -250,6 +310,8 @@ const partnerIntakeSubmissionCount = () =>
     }, 120_000);
 
     afterAll(async () => {
+      // Deletes exactly the objects this run wrote. No bucket deletion, no unprefixed delete.
+      await storage?.cleanup().catch(() => undefined);
       await runtime?.stopConnectorRuntime().catch(() => undefined);
       const { closePartnerPools } = await import("../server/partner/db");
       const { closeConnectorPool } = await import("../server/partner/connector-db");
