@@ -41,6 +41,12 @@ const SUITES = [
    * If this floor is ever missing, that entire code path is unproven again.
    */
   { file: "tests/partner-completion-cascade.test.ts", min: 7 },
+  /**
+   * FULL-PILOT-LOCAL-01. Pins the corrected approval/settlement lifecycle: approving card ONE of
+   * two must NOT settle. The earlier acceptance wording asserted 8/2/0 after BOTH approvals, which
+   * production does not do — mirrorPartnerApproval fires on the COMPLETE approved set.
+   */
+  { file: "tests/partner-full-pilot-workflow.test.ts", min: 2 },
 ];
 
 let report;

@@ -135,6 +135,13 @@ export const SUITES = [
       "to_regclass guard opens, then calls the real markCompleted; own disposable cluster.",
   },
   {
+    file: "tests/partner-full-pilot-workflow.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "FULL-PILOT-LOCAL-01 approval/settlement lifecycle; own disposable cluster.",
+  },
+  {
     file: "tests/partner-submission-lifecycle-migration.test.ts",
     topology: TOPOLOGY.SELF,
     critical: true,
