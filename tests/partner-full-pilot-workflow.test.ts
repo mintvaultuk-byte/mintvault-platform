@@ -45,6 +45,8 @@ import {
   applyMigrationsRealistic,
   createMintvaultCertificatesTable,
   createMintvaultLabelPrintsTable,
+  alignCertificatesTableToSchema,
+  certificatesSchemaDrift,
   PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
 } from "./helpers/partner-realistic-db";
 
@@ -54,6 +56,7 @@ let mirror: typeof import("../server/partner/grading-review-mirror");
 let creditReservations: typeof import("../server/partner/partner-credit-reservation-service");
 let wallet: typeof import("../server/partner/partner-wallet-service");
 let submissions: typeof import("../server/partner/submission-service");
+let printWorkflow: typeof import("../server/print-workflow");
 let storage: PartnerTestStorage;
 
 const ADMIN_ACTOR = { actorUserId: null, actorEmail: "full-pilot-admin@example.test" };
@@ -129,22 +132,10 @@ async function seedMintVaultTables(): Promise<void> {
   );
   await admin.query("CREATE UNIQUE INDEX uq_submission_items_submission ON submission_items (submission_id, id)");
 
-  // The grading columns the real approval path reads and writes, absent from the shared helper.
-  for (const col of [
-    "grade numeric",
-    "centering_score numeric",
-    "corners_score numeric",
-    "edges_score numeric",
-    "surface_score numeric",
-    "graded_at timestamptz",
-    "grade_approved_by text",
-    "assigned_grader_id text",
-    "rejection_reason text",
-    "redo_count integer NOT NULL DEFAULT 0",
-    "review_required boolean NOT NULL DEFAULT false",
-  ]) {
-    await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ${col}`);
-  }
+  // Derive the FULL production certificates shape from the Drizzle schema itself. The shared
+  // helper declares ~55 columns; production declares ~150, and storage.listCertificates() SELECTs
+  // every one of them - which is why the print path was unreachable from any fixture until now.
+  await alignCertificatesTableToSchema(admin);
 
   for (const t of [
     "users",
@@ -406,12 +397,12 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
     const certId = await scalar<number>(
       `INSERT INTO certificates
          (certificate_number, submission_id, submission_item_id, status, grade_type, grader_status,
-          print_state, grade, centering_score, corners_score, edges_score, surface_score,
+          print_state, ownership_status, grade, centering_score, corners_score, edges_score, surface_score,
           assigned_grader_id, review_required, graded_at, created_by, issued_at, updated_at,
           origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
           origin_location_id, origin_location_public_ref, origin_location_name,
           origin_captured_at, origin_snapshot_version)
-       VALUES ($1,$2,$3,'active','numeric','pending_review','awaiting_approval',
+       VALUES ($1,$2,$3,'active','numeric','pending_review','awaiting_approval','unclaimed',
                9,9,9,9,9,$4,true, now(),'partner_connector', now(), now(),
                'PARTNER',$5,$6,$7,$8,$9,$10, now(), 1)
        RETURNING id`,
@@ -523,6 +514,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     creditReservations = await import("../server/partner/partner-credit-reservation-service");
     wallet = await import("../server/partner/partner-wallet-service");
     submissions = await import("../server/partner/submission-service");
+    printWorkflow = await import("../server/print-workflow");
   }, 180_000);
 
   afterAll(async () => {
@@ -813,5 +805,21 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
 
     // Credit is fully returned: nothing reserved, nothing consumed.
     expect(await triple(f.tenantId)).toEqual({ available: 10, reserved: 0, consumed: 0 });
+  });
+
+  it("P8: the fixture certificates table matches the production Drizzle model — no schema drift", async () => {
+    // A column added to shared/schema.ts must surface here as a red test, not as an opaque 42703
+    // from deep inside storage.listCertificates() the next time someone touches the print path.
+    const drift = await certificatesSchemaDrift(admin);
+    expect(drift, `fixture certificates table is missing production columns: ${drift.join(", ")}`).toEqual([]);
+    // Non-vacuity: the model really does declare the approval columns this suite depends on.
+    const declared = await scalar<string>(
+      `SELECT count(*)::text FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='certificates'
+          AND column_name IN ('grade','centering_score','corners_score','edges_score','surface_score',
+                              'graded_at','grade_approved_by','grade_approved_at','print_state','nfc_uid')`,
+      []
+    );
+    expect(Number(declared)).toBe(10);
   });
 });

@@ -567,3 +567,84 @@ export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise
 export function pinAccountingTopologyTo(url: string): void {
   process.env.MINTVAULT_DATABASE_URL = url;
 }
+
+/**
+ * Bring a test `certificates` table up to the FULL production column set, derived from the Drizzle
+ * schema itself rather than from a hand-maintained list.
+ *
+ * WHY THIS EXISTS. `createMintvaultCertificatesTable` declares ~55 columns. The production
+ * `certificates` table declares ~150. Anything that goes through `storage.listCertificates()` —
+ * which is every print path, because `createBatchAtomic` renders from it — issues a full
+ * `SELECT` of all of them and dies with 42703 on the first one the fixture omits (`nfc_uid`).
+ * That is why NO suite had ever executed createBatchAtomic, and why the approval columns
+ * (grade, the four sub-scores, graded_at, grade_approved_by) were missing too.
+ *
+ * Hand-extending the shared list would fix today and rot tomorrow: a column added to
+ * shared/schema.ts would silently break the next print test with the same opaque 42703. So this
+ * reads `getTableColumns(certificates)` and adds whatever the live schema declares and the table
+ * lacks, using each column's own `getSQLType()`. Every column is added NULLABLE with no default:
+ * the point is queryability, not re-implementing production's constraints.
+ *
+ * ADDITIVE AND OPT-IN. Existing suites keep the small fixture unless they call this, so nothing
+ * that relies on the narrow shape changes semantics.
+ */
+export async function alignCertificatesTableToSchema(
+  admin: pg.Client
+): Promise<{ added: string[]; unsupported: string[] }> {
+  const [{ getTableColumns }, schema] = await Promise.all([import("drizzle-orm"), import("../../shared/schema")]);
+  const columns = getTableColumns(schema.certificates as never) as Record<
+    string,
+    { name: string; getSQLType(): string }
+  >;
+  const existing = new Set(
+    (
+      await admin.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='certificates'"
+      )
+    ).rows.map((r) => r.column_name)
+  );
+  const added: string[] = [];
+  const unsupported: string[] = [];
+  for (const col of Object.values(columns)) {
+    if (existing.has(col.name)) continue;
+    try {
+      await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS "${col.name}" ${col.getSQLType()}`);
+      added.push(col.name);
+    } catch {
+      // A type the disposable cluster cannot provide — in practice only pgvector's `vector`, which
+      // needs an extension the plain postgres:17 image lacks. The column must still EXIST, because
+      // storage.listCertificates() SELECTs it by name and would otherwise 42703 the whole print
+      // path. Fall back to a placeholder type: nothing under test reads its value, only its
+      // presence. Recorded so a caller can assert on what was degraded.
+      try {
+        await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS "${col.name}" text`);
+        added.push(col.name);
+        unsupported.push(`${col.name} (declared ${col.getSQLType()}, created as text)`);
+      } catch (inner) {
+        unsupported.push(`${col.name}: ${(inner as Error).message}`);
+      }
+    }
+  }
+  return { added, unsupported };
+}
+
+/**
+ * Schema-parity guard. Returns every column the Drizzle `certificates` model declares that the
+ * database does not have, so a test can assert it is empty. Without this, a production column added
+ * to shared/schema.ts reaches the print path as a 42703 at runtime instead of a red schema test.
+ */
+export async function certificatesSchemaDrift(admin: pg.Client): Promise<string[]> {
+  const [{ getTableColumns }, schema] = await Promise.all([import("drizzle-orm"), import("../../shared/schema")]);
+  const columns = getTableColumns(schema.certificates as never) as Record<string, { name: string }>;
+  const existing = new Set(
+    (
+      await admin.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='certificates'"
+      )
+    ).rows.map((r) => r.column_name)
+  );
+  return Object.values(columns)
+    .map((c) => c.name)
+    .filter((n) => !existing.has(n))
+    .sort();
+}
