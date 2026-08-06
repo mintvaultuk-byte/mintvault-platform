@@ -16,7 +16,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, createMintvaultCertificatesTable, createMintvaultLabelPrintsTable } from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -111,12 +111,8 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
       id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
       admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now()
     )`);
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, submission_id integer)"
-    );
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS label_prints (id serial PRIMARY KEY, certificate_id integer)"
-    );
+    await createMintvaultCertificatesTable(admin);
+    await createMintvaultLabelPrintsTable(admin);
     for (const t of ["audit_log", "certificates", "label_prints"]) {
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }

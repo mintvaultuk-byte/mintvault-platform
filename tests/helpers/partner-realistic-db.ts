@@ -169,6 +169,95 @@ export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
   ...PARTNER_MIGRATIONS_WITH_LIFECYCLE,
   "0045_partner_grading_work_items",
 ] as const;
+/**
+ * Create the MintVault `certificates` table a partner migration needs.
+ *
+ * WHY THIS EXISTS: migration 0045 both creates
+ *   CREATE UNIQUE INDEX ... ON certificates(id, submission_id, submission_item_id)
+ * and issues COLUMN-LEVEL grants naming 38 distinct certificates columns. `IF NOT EXISTS` on the
+ * index guards its NAME, not its columns, and a column-level GRANT naming a missing column is a
+ * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0045 fail and
+ * the whole suite abort inside beforeAll. vitest renders a beforeAll throw as "N skipped", which
+ * reads exactly like a benign env gate; that is how two critical suites sat red while looking
+ * merely unconfigured.
+ *
+ * Several suites previously hand-rolled their own certificates table, each with a different
+ * subset of columns, so every new migration broke a different arbitrary set of them. This is the
+ * single definition. Extend it here when a migration needs another column, and every suite that
+ * uses it stays correct.
+ *
+ * Types are deliberately loose (text/integer/timestamptz) — these fixtures exercise partner
+ * migrations against a stand-in for the HQ table, not the HQ schema itself.
+ */
+export async function createMintvaultCertificatesTable(admin: pg.Client): Promise<void> {
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY,
+    cert_id text,
+    secret text,
+    certificate_number text,
+    reference_number text,
+    submission_id integer,
+    submission_item_id integer,
+    card_id integer,
+    status text,
+    label_type text,
+    grade_type text,
+    language text,
+    card_game text,
+    set_name text,
+    card_name text,
+    card_number_display text,
+    year_text text,
+    variant text,
+    front_image_path text,
+    back_image_path text,
+    grading_front_original text,
+    grading_back_original text,
+    grader_status text,
+    print_state text,
+    created_by text,
+    integrity_hash text,
+    logbook_version integer,
+    logbook_last_issued_at timestamptz,
+    issued_at timestamptz,
+    deleted_at timestamptz,
+    grade_approved_at timestamptz,
+    archived_to_b2_at timestamptz,
+    origin_type text,
+    origin_partner_id uuid,
+    origin_partner_public_ref text,
+    origin_partner_legal_name text,
+    origin_partner_trading_name text,
+    origin_location_id uuid,
+    origin_location_public_ref text,
+    origin_location_name text,
+    origin_location_address text,
+    origin_captured_at timestamptz,
+    origin_snapshot_version integer,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
+}
+
+/**
+ * Create the MintVault `label_prints` table a partner/print migration needs.
+ *
+ * Migration 0022 backfills `print_state` with a subquery that reads `lp.cert_id` and
+ * `lp.printed_at`. Its DO block is guarded on the label_prints TABLE existing
+ * (information_schema.tables), not on its COLUMNS — so a stub table with only
+ * (id, certificate_id, created_at) satisfies the guard and then fails at
+ * `column lp.cert_id does not exist`. Same class as the certificates fixture above: the guard
+ * protects against the table being absent, not against it being the wrong shape.
+ */
+export async function createMintvaultLabelPrintsTable(admin: pg.Client): Promise<void> {
+  await admin.query(`CREATE TABLE IF NOT EXISTS label_prints (
+    id serial PRIMARY KEY,
+    certificate_id integer,
+    cert_id text,
+    printed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+}
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
