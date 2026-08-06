@@ -553,7 +553,14 @@ async function login(
 
       const users = await req("GET", "/api/partner/users", { cookie: owner.cookie });
       expect(users.status).toBe(200);
-      expect((users.body.users as Array<{ email: string }>).every((u) => u.email.endsWith("@example.test"))).toBe(true);
+      /**
+       * `[].every(...)` is TRUE, so the old single-line form passed against an empty list — a
+       * /api/partner/users that returned nothing for every caller would have satisfied it. Assert
+       * cardinality FIRST, then the per-item property.
+       */
+      const userList = users.body.users as Array<{ email: string }>;
+      expect(userList.length, "the tenant must have users, or the .every() below proves nothing").toBeGreaterThan(0);
+      expect(userList.every((u) => u.email.endsWith("@example.test"))).toBe(true);
 
       // --- 5. location switch (session state bound server-side) ---
       const switched = await req("POST", "/api/partner/session/location", {

@@ -261,6 +261,12 @@ async function seedMintVaultTables(): Promise<void> {
     // Location-scoped reception's OWN list only ever returns L1-scoped rows.
     const receptionList = await j("GET", "/api/partner/submissions", receptionCookie);
     expect(receptionList.status).toBe(200);
+    // An empty list makes the loop body never run, so the old form passed even if reception could
+    // see nothing at all — which is the opposite of what the test name claims.
+    expect(
+      receptionList.body.items.length,
+      "reception must SEE its own L1 drafts, or the per-item check below is vacuous"
+    ).toBeGreaterThan(0);
     for (const s of receptionList.body.items) expect(s.locationId).toBe(L1);
   });
 
@@ -482,11 +488,43 @@ async function seedMintVaultTables(): Promise<void> {
   });
 
   it("dashboard summary is tenant- and location-scoped", async () => {
+    /**
+     * THE DEFECT THIS REPLACES. The old body created one draft and asserted only
+     * `expect(summary.body.draft).toBeGreaterThanOrEqual(1)`. By this point in the file ~20 drafts
+     * exist for tenant A, so deleting the tenant AND location predicates from dashboardSummary
+     * makes the count go UP and the test still passes. A named scoping proof that passes with the
+     * scoping removed proves nothing.
+     *
+     * Scoping is now measured as a DELTA against a baseline, in three directions:
+     *   - another TENANT's draft must not appear;
+     *   - another LOCATION in the same tenant must not appear for a location-scoped user;
+     *   - the same tenant + same location MUST appear (or the test could pass by returning 0).
+     */
     const cookie = await login("owner@wfa.com");
+    const summaryFor = async (c: string) => {
+      const r = await j("GET", "/api/partner/dashboard/submissions", c);
+      expect(r.status).toBe(200);
+      return r.body.draft as number;
+    };
+
+    const baseline = await summaryFor(cookie);
+
+    // POSITIVE: a draft in this tenant at this location moves the number by exactly one.
     await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
-    const summary = await j("GET", "/api/partner/dashboard/submissions", cookie);
-    expect(summary.status).toBe(200);
-    expect(summary.body.draft).toBeGreaterThanOrEqual(1);
+    expect(await summaryFor(cookie)).toBe(baseline + 1);
+
+    // TENANT BOUNDARY: tenant B's draft must be invisible to tenant A.
+    const bCookie = await login("owner@wfb.com");
+    const bDraft = await j("POST", "/api/partner/submissions", bCookie, { locationId: LB });
+    expect(bDraft.status).toBe(201);
+    expect(await summaryFor(cookie)).toBe(baseline + 1); // unchanged — no cross-tenant leak
+
+    // LOCATION BOUNDARY: a location-scoped user must not count another location's draft.
+    const receptionCookie = await login("reception@wfa.com");
+    const receptionBaseline = await summaryFor(receptionCookie);
+    const otherLocation = await j("POST", "/api/partner/submissions", cookie, { locationId: L2 });
+    expect(otherLocation.status).toBe(201);
+    expect(await summaryFor(receptionCookie)).toBe(receptionBaseline); // unchanged — L2 is not theirs
   });
 
   it("a suspended user is blocked before any submission action (reuses Phase 1 session invalidation)", async () => {
@@ -546,7 +584,8 @@ async function seedMintVaultTables(): Promise<void> {
       ["4. zero", 0],
       ["5. negative", -3],
       ["6. decimal", 2.5],
-      ["8. alphabetic-shaped number", NaN],
+      // NOTE: NaN and Infinity are NOT in this table, and deliberately so — see the null case
+      // below and the comment on the JSON boundary block.
       ["10. excessive", 100000],
     ])("%s quantity fails, creates no card, creates no card_added event", async (_label, qty) => {
       const cookie = await login("owner@wfa.com");
@@ -581,12 +620,40 @@ async function seedMintVaultTables(): Promise<void> {
       expect(obj.body.error.code).toBe("invalid_quantity");
     });
 
-    it("Infinity quantity fails", async () => {
+    /**
+     * TRUTHFUL BOUNDARY CASES, replacing two tests that claimed something untrue.
+     *
+     * The suite previously had a `["8. alphabetic-shaped number", NaN]` row and an
+     * `it("Infinity quantity fails")`. Neither value ever reached the server: the request helper
+     * does JSON.stringify, and JSON has no representation for NaN or Infinity — both serialise to
+     * **null**. Verified: JSON.stringify({quantity: NaN}) === '{"quantity":null}'. So both tests
+     * were exercising the null branch under two misleading names, and "alphabetic-shaped number"
+     * was already genuinely covered by the "seven" case below.
+     *
+     * These assert what the wire can actually carry. The null case keeps the coverage those two
+     * tests were really providing, under its real name.
+     */
+    it.each([
+      ["null (what NaN and Infinity actually become on the wire)", null],
+      ["a numeric STRING is never coerced", "5"],
+      ["an empty string", ""],
+      ["an array", [1]],
+      ["an object", { n: 1 }],
+      ["a boolean", true],
+    ])("%s is rejected as an invalid quantity", async (_label, qty) => {
       const cookie = await login("owner@wfa.com");
       const id = await draftId(cookie);
-      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: Infinity });
+      const before = await cardCount(id);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: qty });
       expect(r.status).toBe(400);
       expect(r.body.error.code).toBe("invalid_quantity");
+      expect(await cardCount(id)).toBe(before); // never silently becomes 1
+    });
+
+    it("documents the JSON boundary: NaN and Infinity cannot reach the server at all", () => {
+      // Pinned so nobody re-adds a test claiming these values are transported and rejected.
+      expect(JSON.stringify({ quantity: NaN })).toBe('{"quantity":null}');
+      expect(JSON.stringify({ quantity: Infinity })).toBe('{"quantity":null}');
     });
 
     it("non-numeric text quantity fails", async () => {
