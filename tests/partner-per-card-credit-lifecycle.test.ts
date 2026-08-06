@@ -13,10 +13,11 @@
  *
  * The whole file is a mutation target: CARD1-CARD6 and LEDGER1-LEDGER2 must turn it red.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
+import { randomUUID } from "node:crypto";
 import {
   applyMigrationsRealistic,
   migratorUrlFrom,
@@ -24,6 +25,31 @@ import {
   provisionRealisticRoles,
 } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+/**
+ * DETERMINISTIC STORAGE SEAM — see the sibling note in partner-recovery-cardinality.test.ts.
+ *
+ * submitSubmission requires per-card image keys plus a real headR2() existence check, and its
+ * return path signs keys via getR2SignedUrl(). Both reach server/r2.ts, which throws when R2 is
+ * unconfigured. This suite proves credit cardinality, not storage, so both are stubbed.
+ *
+ * The production gate is NOT weakened, and this suite carries the behavioural proof of it: the
+ * "storage existence gate refuses" test below drives headR2 to null and asserts submit refuses
+ * with zero reservations — so the mock cannot go quietly vacuous.
+ */
+const storageExists = { present: true };
+vi.mock("../server/r2", async () => {
+  const actual = await vi.importActual<typeof import("../server/r2")>("../server/r2");
+  return {
+    ...actual,
+    headR2: vi.fn(async () =>
+      storageExists.present
+        ? { lastModified: new Date("2026-08-06T00:00:00Z"), contentLength: 1024, contentType: "image/jpeg", eTag: '"fixture"' }
+        : null
+    ),
+    getR2SignedUrl: vi.fn(async (key: string) => `https://storage.invalid/${key}`),
+  };
+});
 
 let cluster: DisposablePostgres17;
 let admin: Client;
@@ -39,6 +65,8 @@ interface TenantFixture {
   tenantId: string;
   locationId: string;
   userId: string;
+  customerId: string;
+  serviceTierCode: string;
 }
 
 async function seedMintVaultTables(): Promise<void> {
@@ -86,7 +114,20 @@ async function createTenantFixture(label: string): Promise<TenantFixture> {
       [`percard-${ordinal}`, tenantId, `percard-${ordinal}@example.test`]
     )
   ).rows[0].id;
-  return { tenantId, locationId, userId };
+  const customerId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_customers (tenant_id,full_name) VALUES ($1,$2) RETURNING id",
+      [tenantId, `PerCard ${label} Customer ${ordinal}`]
+    )
+  ).rows[0].id;
+  // Tenant-scoped tier: a global (tenant_id IS NULL) row would collide on the partial unique
+  // index uq_partner_service_tiers_global for the second fixture.
+  await admin.query(
+    `INSERT INTO partner_service_tiers (tenant_id,tier_code,label,price_per_card_pence,turnaround_days,is_active)
+     VALUES ($1,'percard-tier','Per-card Tier',1500,20,true)`,
+    [tenantId]
+  );
+  return { tenantId, locationId, userId, customerId, serviceTierCode: "percard-tier" };
 }
 
 function principalFor(f: TenantFixture) {
@@ -122,17 +163,29 @@ async function addCredits(f: TenantFixture, amount: number, key: string): Promis
 async function makeDraft(f: TenantFixture, cards: Array<[string, number]>): Promise<string> {
   const id = (
     await admin.query<{ id: string }>(
-      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status)
-       VALUES ($1,$2,$3,$4,'draft') RETURNING id`,
-      [f.tenantId, f.locationId, f.userId, cards.length]
+      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status,customer_id,service_tier_code)
+       VALUES ($1,$2,$3,$4,'draft',$5,$6) RETURNING id`,
+      [f.tenantId, f.locationId, f.userId, cards.length, f.customerId, f.serviceTierCode]
     )
   ).rows[0].id;
   let seq = 0;
   for (const [name, quantity] of cards) {
+    // Generate the card id client-side so the image keys can embed it in one statement. The keys
+    // must match cardImageKeyAllowed()'s tenant/submission/card/side prefix exactly.
+    const cardId = randomUUID();
     await admin.query(
-      `INSERT INTO partner_submission_cards (tenant_id,submission_id,sequence_number,card_name,quantity)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [f.tenantId, id, ++seq, name, quantity]
+      `INSERT INTO partner_submission_cards (id,tenant_id,submission_id,sequence_number,card_name,quantity,front_image_key,back_image_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        cardId,
+        f.tenantId,
+        id,
+        ++seq,
+        name,
+        quantity,
+        `partner-submissions/${f.tenantId}/${id}/${cardId}/front-fixture.jpg`,
+        `partner-submissions/${f.tenantId}/${id}/${cardId}/back-fixture.jpg`,
+      ]
     );
   }
   return id;
