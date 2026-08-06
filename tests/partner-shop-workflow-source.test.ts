@@ -374,3 +374,38 @@ describe("recrop never writes a canonical object before the guard succeeds", () 
     expect(outsideHelper).not.toContain("await uploadToR2(");
   });
 });
+
+describe("every partner grading route is rate limited", () => {
+  const GRADING = read("server/partner/grading-routes.ts");
+  const LIMITS = read("server/partner/rate-limit.ts");
+
+  it("applies a limiter to every registered grading route", () => {
+    // Match each route registration and the text up to its handler, so a limiter on the line
+    // above a multi-line registration still counts.
+    const registrations = [...GRADING.matchAll(/r\.(get|post|put|patch|delete)\(([\s\S]{0,400}?)(?:async )?\(req/g)];
+    expect(registrations.length, "no grading routes found — the regex has rotted").toBeGreaterThanOrEqual(8);
+    const unlimited = registrations
+      .filter((m) => !/partnerGradingReadLimiter|partnerGradingMutationLimiter/.test(m[2]))
+      .map((m) => m[2].slice(0, 60).replace(/\s+/g, " ").trim());
+    expect(unlimited, `grading routes with no rate limiter: ${unlimited.join(" | ")}`).toEqual([]);
+  });
+
+  it("keeps reads and mutations on separate ceilings, keyed per partner user", () => {
+    expect(GRADING).toContain("partnerGradingReadLimiter");
+    expect(GRADING).toContain("partnerGradingMutationLimiter");
+    // Per-user, not per-IP: the ceiling must bound one account regardless of source address.
+    expect(LIMITS).toContain("req.partner?.userId");
+    expect(LIMITS).toMatch(/max:\s*240/);
+    expect(LIMITS).toMatch(/max:\s*60/);
+  });
+
+  it("uses a limiter shape static analysis can recognise", () => {
+    // The hand-rolled partnerRateLimit wrapper is real at runtime but invisible to CodeQL's
+    // js/missing-rate-limiting query, which recognises known libraries. Six HIGH alerts persisted
+    // on routes that were demonstrably limited. A control the scanner cannot see is one the next
+    // reviewer must re-derive by hand.
+    const gradingBlock = LIMITS.slice(LIMITS.indexOf("partnerGradingReadLimiter"));
+    expect(gradingBlock).toMatch(/partnerGradingReadLimiter\s*=\s*rateLimit\(/);
+    expect(gradingBlock).toMatch(/partnerGradingMutationLimiter\s*=\s*rateLimit\(/);
+  });
+});

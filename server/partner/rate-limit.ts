@@ -10,6 +10,7 @@
  * a non-failClosed limiter allows through on store failure.
  */
 import type { Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 
 export interface RateLimitStore {
   /** Increment the counter for key within the window; returns the current count. Throws if unavailable. */
@@ -309,30 +310,45 @@ export const partnerSubmissionMutationLimiter = partnerRateLimit({
   keyFn: userKey,
 });
 
-// Partner grading bridge. Every grading route performs authorization but none carried a ceiling,
-// which CodeQL flagged as six HIGH "Missing rate limiting" findings. Keyed per authenticated
-// partner user for the same reason as the submission limiter above: it bounds one account's
-// volume regardless of source IP.
+// Partner grading bridge. Every grading route performs authorization but none carried a ceiling.
 //
-// Two ceilings rather than one. The read limiter is generous because the grading workstation
-// legitimately polls the queue and re-fetches a card's payload and signed image URLs while an
-// operator works. The mutation limiter is tighter: draft saves, submits and edits are
-// human-paced, and each submit/edit performs a guarded state transition.
+// These two use express-rate-limit DIRECTLY rather than the partnerRateLimit wrapper above, and
+// that is deliberate. The wrapper is hand-rolled middleware over MemoryRateLimitStore; CodeQL's
+// js/missing-rate-limiting query recognises known limiter libraries, not bespoke ones, so with the
+// wrapper applied it still reported six HIGH "missing rate limiting" alerts on routes that were
+// demonstrably limited at runtime. A security control the scanner cannot see is a control the next
+// reviewer has to re-derive by hand, so this uses the shape dashboard-routes.ts already uses and
+// that CodeQL does not flag.
 //
-// Not failClosed, matching partnerSubmissionMutationLimiter: a rate-limit-store outage must not
-// strand a partner mid-grade. Fail-closed is reserved for credential paths (login/reset/MFA).
-export const partnerGradingReadLimiter = partnerRateLimit({
-  name: "partner_grading_read",
+// Behaviourally equivalent: MemoryRateLimitStore is in-process, and so is express-rate-limit's
+// default MemoryStore, so the per-Fly-machine scope is unchanged. The credential-path limiters
+// above stay on the wrapper — they need failClosed, which express-rate-limit does not offer, and
+// CodeQL does not flag them.
+//
+// Two ceilings rather than one. Reads are generous because the grading workstation legitimately
+// polls the queue and re-fetches a card payload and signed image URLs while an operator works.
+// Mutations are tighter: draft saves, submits and edits are human-paced and each performs a
+// guarded state transition.
+//
+// Keyed per authenticated partner user, not per IP, so the ceiling bounds one account's volume
+// regardless of source address — matching partnerSubmissionMutationLimiter.
+const gradingUserKey = (req: Request): string => req.partner?.userId ?? req.ip ?? "unknown";
+export const partnerGradingReadLimiter = rateLimit({
   windowMs: 60_000,
   max: 240,
-  failClosed: false,
-  keyFn: userKey,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: { error: "too many requests" },
+  keyGenerator: gradingUserKey,
 });
 
-export const partnerGradingMutationLimiter = partnerRateLimit({
-  name: "partner_grading_mutation",
+export const partnerGradingMutationLimiter = rateLimit({
   windowMs: 60_000,
   max: 60,
-  failClosed: false,
-  keyFn: userKey,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: { error: "too many requests" },
+  keyGenerator: gradingUserKey,
 });
