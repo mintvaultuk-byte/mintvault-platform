@@ -1,4 +1,4 @@
-# Canonical Partner pilot workflow map (verified against HEAD 21c8462d)
+# Canonical Partner pilot workflow map (verified against HEAD 46589030)
 
 Purpose: the production-surface map that must exist BEFORE the full-pilot integration test is
 written. Every row below was read from the source on this branch, not inferred. Two earlier attempts
@@ -64,7 +64,7 @@ grading-complete status is the deliberate G6D design, recorded in the comment at
 | 9 | **Super Admin approve** | `POST /api/admin/certificates/:id/approve-grader-grade` (`server/routes/grader.ts:1074`) | **`requireSuperAdmin`** | `approveGraderCert` (engine gates) **then** `mirrorPartnerApproval`; 409 on mirror conflict |
 | 9b | Reject / return | `POST /api/admin/certificates/:id/reject-grade` (`:1094`) | `requireSuperAdmin` | `rejectCertGrade` + `mirrorPartnerRejection` |
 | 10 | **Settle credits** | `updateSubmissionStatus(destinationSubmissionId, "ready_to_return"\|"completed")` (`server/storage.ts:781`) | admin surface | consumes EVERY active reservation, one `-1` ledger row each |
-| 11 | Label / print / completion | print workflow (`print_state`, `label_prints`) | admin | not yet mapped in detail — see gaps |
+| 11 | Label / print / completion | `server/print-workflow.ts` — `createBatchAtomic` / `markBatchPrinted` / `requestReprint` / `markCompleted` | admin | `print_state`, `label_prints`, `print_events`, then the completion cascade (see Stage 11 below) |
 
 ---
 
