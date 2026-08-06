@@ -19,6 +19,7 @@ import { storage } from "../storage";
 import { applyCertGradeDraft, buildCertGradingPayload, GradeDraftRejected, stripGraderPii } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { auditInOwnTxn } from "./audit";
+import { partnerGradingMutationLimiter, partnerGradingReadLimiter } from "./rate-limit";
 import { withPartnerAdminTransaction } from "./db";
 import {
   requireNotSensitiveFrozen,
@@ -291,11 +292,11 @@ export function partnerGradingRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
 
-  r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
+  r.get("/grading/session", partnerGradingReadLimiter, requirePartnerCapability("partner.cards.assess"), (req, res) => {
     res.json({ authenticated: true, userId: req.partner!.userId });
   });
 
-  r.get("/grading/queue", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
+  r.get("/grading/queue", partnerGradingReadLimiter, requirePartnerCapability("partner.cards.assess"), async (req, res) => {
     try {
       const principal = req.partner!;
       if (!principal.orgWide && !principal.locationId) return res.json({ items: [] });
@@ -372,7 +373,7 @@ export function partnerGradingRouter(): Router {
     }
   });
 
-  r.get("/grading/certificates/:id/images", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
+  r.get("/grading/certificates/:id/images", partnerGradingReadLimiter, requirePartnerCapability("partner.cards.assess"), async (req, res) => {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
@@ -397,7 +398,7 @@ export function partnerGradingRouter(): Router {
     }
   });
 
-  r.get("/grading/certificates/:id/grading", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
+  r.get("/grading/certificates/:id/grading", partnerGradingReadLimiter, requirePartnerCapability("partner.cards.assess"), async (req, res) => {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
@@ -413,6 +414,7 @@ export function partnerGradingRouter(): Router {
 
   r.put(
     "/grading/certificates/:id/grade",
+    partnerGradingMutationLimiter,
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -456,6 +458,7 @@ export function partnerGradingRouter(): Router {
 
   r.post(
     "/grading/certificates/:id/submit",
+    partnerGradingMutationLimiter,
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -524,6 +527,7 @@ export function partnerGradingRouter(): Router {
 
   r.post(
     "/grading/certificates/:id/edit-submission",
+    partnerGradingMutationLimiter,
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -598,6 +602,7 @@ export function partnerGradingRouter(): Router {
 
   r.post(
     "/grading/certificates/:id/:action",
+    partnerGradingMutationLimiter,
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,

@@ -105,15 +105,35 @@ export interface CreateCustomerInput {
 }
 
 // Deliberately simple format check (not RFC 5322) — good enough to catch typos ("bob@") without
-// rejecting real-world addresses a stricter regex would choke on. Matches the pattern used by
-// HTML5 <input type="email">'s baseline validation.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// rejecting real-world addresses a stricter regex would choke on. Same acceptance set as the
+// pattern HTML5 <input type="email"> uses for baseline validation.
+//
+// Written as a linear scan rather than /^[^\s@]+@[^\s@]+\.[^\s@]+$/, which CodeQL flagged HIGH as
+// a polynomial ReDoS: the two adjacent unbounded [^\s@]+ groups either side of the literal dot
+// backtrack quadratically on attacker-supplied input of the shape "a@" + "!.".repeat(n). This
+// value comes straight off a partner request body, so it is genuinely uncontrolled.
+//
+// indexOf/lastIndexOf/slice are all O(n) with no backtracking, and the length bound (RFC 5321's
+// 254-character maximum) caps the work before any scanning happens.
+const MAX_EMAIL_LENGTH = 254;
+function isPlausibleEmail(email: string): boolean {
+  if (email.length > MAX_EMAIL_LENGTH) return false;
+  const at = email.indexOf("@");
+  // exactly one "@", and neither side empty
+  if (at <= 0 || at !== email.lastIndexOf("@") || at === email.length - 1) return false;
+  const domain = email.slice(at + 1);
+  // no whitespace anywhere (the [^\s@] classes in the original pattern)
+  if (/\s/.test(email)) return false;
+  // domain must contain a dot that is neither first nor last character
+  const dot = domain.lastIndexOf(".");
+  return dot > 0 && dot < domain.length - 1;
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizedInput(input: CreateCustomerInput): Required<CreateCustomerInput> {
   if (!input.fullName || !input.fullName.trim()) throw VALIDATION("Customer name is required.");
   const email = input.email?.trim().toLowerCase() || null;
-  if (email && !EMAIL_RE.test(email)) throw VALIDATION("Enter a valid customer email.");
+  if (email && !isPlausibleEmail(email)) throw VALIDATION("Enter a valid customer email.");
   return {
     fullName: input.fullName.trim(),
     email,

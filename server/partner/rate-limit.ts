@@ -308,3 +308,31 @@ export const partnerSubmissionMutationLimiter = partnerRateLimit({
   failClosed: false,
   keyFn: userKey,
 });
+
+// Partner grading bridge. Every grading route performs authorization but none carried a ceiling,
+// which CodeQL flagged as six HIGH "Missing rate limiting" findings. Keyed per authenticated
+// partner user for the same reason as the submission limiter above: it bounds one account's
+// volume regardless of source IP.
+//
+// Two ceilings rather than one. The read limiter is generous because the grading workstation
+// legitimately polls the queue and re-fetches a card's payload and signed image URLs while an
+// operator works. The mutation limiter is tighter: draft saves, submits and edits are
+// human-paced, and each submit/edit performs a guarded state transition.
+//
+// Not failClosed, matching partnerSubmissionMutationLimiter: a rate-limit-store outage must not
+// strand a partner mid-grade. Fail-closed is reserved for credential paths (login/reset/MFA).
+export const partnerGradingReadLimiter = partnerRateLimit({
+  name: "partner_grading_read",
+  windowMs: 60_000,
+  max: 240,
+  failClosed: false,
+  keyFn: userKey,
+});
+
+export const partnerGradingMutationLimiter = partnerRateLimit({
+  name: "partner_grading_mutation",
+  windowMs: 60_000,
+  max: 60,
+  failClosed: false,
+  keyFn: userKey,
+});
