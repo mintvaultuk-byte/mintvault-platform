@@ -169,6 +169,99 @@ async function applyPrintLifecycle(): Promise<void> {
  * connector import (2 work items + 2 certificates), assignment, drafting and submit-for-review.
  * Both work items sit at `pending_review`; both reservations are ACTIVE; the wallet is 8/2/0.
  */
+interface SubmittedFixture {
+  tenantId: string;
+  locationId: string;
+  graderId: string;
+  partnerSubmissionId: string;
+  cardIds: string[];
+  n: number;
+}
+
+/**
+ * Everything up to and including the REAL production submit: org, location, user, customer, active
+ * tier, draft submission, two quantity-1 cards, four real MinIO objects, a wallet funded with
+ * exactly 10 credits, then submitSubmission(). Stops there, so a cancellation test can run before
+ * any destination submission exists.
+ */
+async function seedSubmittedOnly(): Promise<SubmittedFixture> {
+  const n = ++sequence;
+  const tenantId = await scalar<string>(
+    "INSERT INTO partner_organisations (public_ref, legal_name, status) VALUES ($1,$2,'ACTIVE') RETURNING id",
+    [`fp-org-${n}`, `Full Pilot ${n} Ltd`]
+  );
+  const locationId = await scalar<string>(
+    "INSERT INTO partner_locations (tenant_id, partner_id, public_ref, name, status) VALUES ($1,$1,$2,$3,'ACTIVE') RETURNING id",
+    [tenantId, `fp-loc-${n}`, `Full Pilot ${n} HQ`]
+  );
+  const graderId = await scalar<string>(
+    `INSERT INTO partner_users (public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required)
+     VALUES ($1,$2,$2,$3,'x','ACTIVE',false) RETURNING id`,
+    [`fp-grader-${n}`, tenantId, `fp-grader-${n}@example.test`]
+  );
+  const customerId = await scalar<string>(
+    "INSERT INTO partner_customers (tenant_id, full_name) VALUES ($1,$2) RETURNING id",
+    [tenantId, `Full Pilot Customer ${n}`]
+  );
+  await admin.query(
+    `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active)
+     VALUES ($1,$2,'Pilot Tier',1500,20,true)`,
+    [tenantId, `fp-tier-${n}`]
+  );
+  const partnerSubmissionId = await scalar<string>(
+    `INSERT INTO partner_submissions
+       (tenant_id, location_id, created_by, card_count, status, customer_id, service_tier_code, submitted_at)
+     VALUES ($1,$2,$3,2,'draft',$4,$5, NULL) RETURNING id`,
+    [tenantId, locationId, graderId, customerId, `fp-tier-${n}`]
+  );
+
+  const cardIds: string[] = [];
+  for (let i = 1; i <= 2; i++) {
+    const cardId = randomUUID();
+    await admin.query(
+      `INSERT INTO partner_submission_cards
+         (id, tenant_id, submission_id, sequence_number, card_name, quantity, front_image_key, back_image_key)
+       VALUES ($1,$2,$3,$4,$5,1,$6,$7)`,
+      [
+        cardId,
+        tenantId,
+        partnerSubmissionId,
+        i,
+        `Pilot Card ${i}`,
+        `partner-submissions/${tenantId}/${partnerSubmissionId}/${cardId}/front-fp.jpg`,
+        `partner-submissions/${tenantId}/${partnerSubmissionId}/${cardId}/back-fp.jpg`,
+      ]
+    );
+    cardIds.push(cardId);
+  }
+  for (const cardId of cardIds) {
+    for (const side of ["front", "back"] as const) {
+      await storage.put(
+        `partner-submissions/${tenantId}/${partnerSubmissionId}/${cardId}/${side}-fp.jpg`,
+        ONE_PIXEL_PNG
+      );
+    }
+  }
+
+  await wallet.ensureWallet(ADMIN_ACTOR, tenantId);
+  await wallet.appendFoundationCredit(ADMIN_ACTOR, {
+    tenantId,
+    amount: 10,
+    entryType: "purchase",
+    source: "admin",
+    reason: "full pilot funding",
+    idempotencyKey: `fp-fund-${n}`,
+    actorType: "admin",
+  });
+
+  await submissions.submitSubmission(
+    principalFor({ tenantId, locationId, graderId }),
+    partnerSubmissionId,
+    `fp-submit-${n}`
+  );
+  return { tenantId, locationId, graderId, partnerSubmissionId, cardIds, n };
+}
+
 async function seedPilotAtPendingReview(): Promise<Pilot> {
   const n = ++sequence;
 
@@ -627,5 +720,98 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId])).toBe(
       "ready_to_return"
     );
+  });
+
+  it("P5: settlement REFUSES when card two's reservation is invalidated — no partial consume", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    // Deliberate corruption of REAL production-created state: card two's reservation is moved to a
+    // release-terminal status with no authorised replacement hold. The reservation row cannot be
+    // deleted (its events are append-only and FK-RESTRICT it), so this is the safest invalidation
+    // that leaves everything else production-made.
+    await admin.query("UPDATE partner_credit_reservations SET status='released', released_at=now() WHERE id=$1", [
+      f.reservationIds[1],
+    ]);
+
+    // The final approval must now fail rather than settle card one alone.
+    await expect(approveAsSuperAdmin(f.certIds[1])).rejects.toThrow();
+
+    expect(
+      await scalar<string>("SELECT status FROM partner_credit_reservations WHERE id=$1", [f.reservationIds[0]]),
+      "card one's reservation must survive untouched"
+    ).toBe("active");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='consumed'",
+        [f.partnerSubmissionId]
+      ),
+      "a refused settlement must consume nothing"
+    ).toBe("0");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0", [
+        f.tenantId,
+      ]),
+      "a refused settlement must move no money"
+    ).toBe("0");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='consumed'",
+        [f.tenantId]
+      )
+    ).toBe("0");
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "the destination must not advance on a refused settlement"
+    ).toBe("in_grading");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM print_events WHERE cert_id = ANY($1::text[])", [f.certNumbers]),
+      "nothing may print when settlement was refused"
+    ).toBe("0");
+  });
+
+  it("P6: cancelling a submitted two-card submission releases exactly two and returns the wallet to 10/0/0", async () => {
+    const f = await seedSubmittedOnly();
+    expect(await triple(f.tenantId), "funded and reserved before cancelling").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+
+    await submissions.cancelSubmission(
+      principalFor({ tenantId: f.tenantId, locationId: f.locationId, graderId: f.graderId }),
+      f.partnerSubmissionId,
+      "full pilot cancellation"
+    );
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='active'",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("0");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='released'",
+        [f.partnerSubmissionId]
+      ),
+      "exactly one release per physical card"
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='released'",
+        [f.tenantId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0", [
+        f.tenantId,
+      ]),
+      "a release returns credit by leaving the active filter, NOT by writing a debit"
+    ).toBe("0");
+
+    // Credit is fully returned: nothing reserved, nothing consumed.
+    expect(await triple(f.tenantId)).toEqual({ available: 10, reserved: 0, consumed: 0 });
   });
 });
