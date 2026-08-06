@@ -138,3 +138,47 @@ Public-visibility gates (lookup / slab / share / claim / transfer / cached artif
 unmapped: specifically whether each reads certificate state directly or via a cached artifact, and
 which of them key on `grade_approved_at` versus `print_state`. The full-pilot test can now be built
 truthfully through stage 11; the public-gate assertions in Phase 8 still need that last map.
+
+
+---
+
+## Public / downstream gate table (PARTIAL — verified rows only)
+
+| Route | File | Gate actually enforced |
+|---|---|---|
+| `GET /api/cert/:id` | `server/routes.ts:3030` | **NONE in the route.** `findCertByIdFlex` then `certToPublic` (`:610`). Neither checks `grade_approved_at`. |
+| `GET /api/public/slab-image/:certNumber/:kind` | `:3187` | `cert.status !== "active"` OR `cert.gradeOverall == null` -> 404 |
+| `GET /api/public/share/:certNumber/feed` | `:3302` | `shareImageHandler("feed")` |
+| showcase / recent-graded / population | `:3120`, `:3134`, `:3164` | `grade_approved_at IS NOT NULL` in their SQL (`:1247`, `:3471`, `:12169`, `:12210`, `:12308`) |
+
+**F9 (VERIFIED) — public visibility is NOT gated on settlement, print_state, work-item status, or
+consumed-reservation evidence.** `grep print_state server/routes.ts` returns only admin/print-workflow
+call sites, and `partner_grading_work_items` appears in `server/routes.ts` only at `:294`, `:2150`,
+`:2156` (a join and two information_schema probes) — never in a public predicate.
+
+Consequence for the Phase 9 checkpoints: at checkpoint B (approved but UNSETTLED) the aggregate
+public surfaces are already OPEN, because `grade_approved_at` is set at approval and settlement is a
+later, independent step. A test asserting "public stays closed until settlement" would fail against
+correct production behaviour. Only checkpoints A and C differ, and they differ on APPROVAL, not on
+settlement.
+
+## OPEN QUESTION — must be resolved before any public-gate assertion is written
+
+`certToPublic` (`server/routes.ts:610-700`) maps `grade`, `gradeNumeric`, `gradeCentering`,
+`gradeCorners`, `gradeEdges`, `gradeSurface` straight off the certificate row with no
+`grade_approved_at` check, and `/api/cert/:id` adds none. So the exposure of an UNAPPROVED grade on
+that route depends entirely on whether a draft grade is written to `certificates` at all.
+
+The Partner draft route (`server/partner/grading-routes.ts:415`) calls
+`applyCertGradeDraft(certId, partnerGradeBody(req.body))`. I did NOT trace where that function
+persists to, so I am recording this as an OPEN QUESTION, not a finding.
+
+Two possibilities, with very different consequences:
+  * drafts land in a separate evidence/draft store and `certificates.grade_*` is written only at
+    approval -> no exposure, and the CERT1 mutation target is the approval writer;
+  * drafts land on `certificates` directly -> `/api/cert/:id` would surface an unapproved grade, and
+    this would apply to HQ graders too (same shared drafting function), making it PRE-EXISTING and
+    NOT partner-specific.
+
+Do not write the checkpoint-A public assertions until this is traced. Claiming a public-exposure
+defect without tracing it would be exactly the kind of unverified HIGH this map exists to prevent.
