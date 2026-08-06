@@ -446,6 +446,129 @@ describe("Per-card credit lifecycle (real PostgreSQL)", () => {
     expect(position.availableBalance).toBe(40 - cards);
   });
 
+  /**
+   * THE AUTHORITATIVE TWO-CARD WALLET PROGRESSION.
+   *
+   * The pilot acceptance criterion is stated as three wallet triples —
+   * available/reserved/consumed — and the suite proved each transition only in isolation:
+   * "settling a 2-card submission consumes every reservation" never asserts the RESERVED state in
+   * between, and the reserve tests never carry through to consumption. A wallet that reserved 2 and
+   * consumed 2 while briefly showing the wrong reserved figure would satisfy both and still be
+   * wrong on the operator's screen.
+   *
+   * This walks ONE submission of TWO physical cards through all three states and asserts the FULL
+   * triple at each step:
+   *
+   *      10 / 0 / 0   ->   8 / 2 / 0   ->   8 / 0 / 2
+   *      available     reserved          consumed
+   *
+   * `consumed` is derived the way the ledger derives it — the count of -1 debit rows — because
+   * balance is DERIVED from the append-only ledger, never stored on the wallet (proven separately
+   * in block F). Asserting a stored figure would prove nothing about what an operator sees.
+   */
+  it("PILOT: two physical cards walk 10/0/0 -> 8/2/0 -> 8/0/2, and every step replays clean", async () => {
+    const f = await createTenantFixture("pilot-two-card");
+    await addCredits(f, 10, "pilot-two-card-credits");
+
+    /** available / reserved / consumed, exactly as the operator surface reports them. */
+    const triple = async () => {
+      const position = await creditReservations.getCreditPosition(f.tenantId);
+      const debits = await admin.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0",
+        [f.tenantId]
+      );
+      return {
+        available: position.availableBalance,
+        reserved: position.activeReserved,
+        consumed: Number(debits.rows[0].n),
+      };
+    };
+
+    // --- 10 / 0 / 0 : funded, nothing in flight. A draft alone must move nothing.
+    const draft = await makeDraft(f, nCards(2, "pilot"));
+    expect(await triple()).toEqual({ available: 10, reserved: 0, consumed: 0 });
+
+    // --- 8 / 2 / 0 : submit reserves ONE credit per PHYSICAL card.
+    await submissions.submitSubmission(principalFor(f), draft, "pilot-two-card-submit");
+    expect(await triple()).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    const reservedRows = await reservationsFor(f, draft);
+    expect(reservedRows).toHaveLength(2);
+    expect(reservedRows.every((r) => r.status === "active")).toBe(true);
+    // Two DISTINCT per-card references. One reservation of 2 credits would satisfy the totals above
+    // while defeating uq_partner_credit_reserve_card_live, which is the per-card double-spend guard.
+    const refs = reservedRows.map((r) => r.card_reference).sort();
+    expect(new Set(refs).size).toBe(2);
+
+    // Replay the submit: idempotent, no second reservation set.
+    await submissions
+      .submitSubmission(principalFor(f), draft, "pilot-two-card-submit")
+      .catch(() => undefined);
+    expect(await triple()).toEqual({ available: 8, reserved: 2, consumed: 0 });
+    expect(await reservationsFor(f, draft)).toHaveLength(2);
+
+    // --- 8 / 0 / 2 : settlement consumes both, writing exactly two -1 ledger rows.
+    const destinationId = await mapImportedSubmission(f, draft);
+    const settled = await lifecycle.settlePartnerCreditForDestinationStatus(destinationId, "ready_to_return", {
+      creditActorEmail: "admin@example.test",
+    });
+    expect(settled).not.toBeNull();
+    expect(await triple()).toEqual({ available: 8, reserved: 0, consumed: 2 });
+
+    const consumedRows = await reservationsFor(f, draft);
+    expect(consumedRows).toHaveLength(2);
+    expect(consumedRows.every((r) => r.status === "consumed")).toBe(true);
+    // available must be the LEDGER total, not a coincidence of the arithmetic above.
+    expect(await ledgerTotal(f)).toBe(8);
+
+    // Replay settlement: idempotent, no third debit, no state churn.
+    await lifecycle.settlePartnerCreditForDestinationStatus(destinationId, "completed", {});
+    expect(await triple()).toEqual({ available: 8, reserved: 0, consumed: 2 });
+
+    // A cancellation AFTER consumption must be refused outright — releasing here would refund
+    // credits already billed. Proven not to leave a partial state.
+    await submissions.cancelSubmission(principalFor(f), draft, "too late").catch(() => undefined);
+    expect(await triple()).toEqual({ available: 8, reserved: 0, consumed: 2 });
+    expect((await reservationsFor(f, draft)).every((r) => r.status === "consumed")).toBe(true);
+  });
+
+  it("PILOT: cancelling two reserved cards returns the wallet to 10/0/0 with no consumption", async () => {
+    const f = await createTenantFixture("pilot-two-card-cancel");
+    await addCredits(f, 10, "pilot-two-card-cancel-credits");
+
+    const triple = async () => {
+      const position = await creditReservations.getCreditPosition(f.tenantId);
+      const debits = await admin.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0",
+        [f.tenantId]
+      );
+      return {
+        available: position.availableBalance,
+        reserved: position.activeReserved,
+        consumed: Number(debits.rows[0].n),
+      };
+    };
+
+    const draft = await makeDraft(f, nCards(2, "pilotcan"));
+    await submissions.submitSubmission(principalFor(f), draft, "pilot-cancel-submit");
+    expect(await triple()).toEqual({ available: 10 - 2, reserved: 2, consumed: 0 });
+
+    await submissions.cancelSubmission(principalFor(f), draft, "customer withdrew");
+
+    // Back to the starting triple: released is NOT consumed, so nothing may appear as a debit.
+    expect(await triple()).toEqual({ available: 10, reserved: 0, consumed: 0 });
+    const rows = await reservationsFor(f, draft);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "released")).toBe(true);
+    // A release must never write a ledger movement — the hold simply ends.
+    expect(await ledgerTotal(f)).toBe(10);
+
+    // Replay: idempotent, exactly two released rows, wallet unchanged.
+    await submissions.cancelSubmission(principalFor(f), draft, "again").catch(() => undefined);
+    expect(await triple()).toEqual({ available: 10, reserved: 0, consumed: 0 });
+    expect((await reservationsFor(f, draft)).filter((r) => r.status === "released")).toHaveLength(2);
+  });
+
   it("C: repeated settlement is idempotent — no second debit", async () => {
     const f = await createTenantFixture("settle-twice");
     await addCredits(f, 10, "pc-settle-twice");
