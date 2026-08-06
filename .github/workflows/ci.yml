@@ -66,6 +66,20 @@ jobs:
       PARTNER_PUBLIC_RT_RUNTIME: postgres://partner_app_test_public:synthetic@127.0.0.1:55433/mintvault_partner_public
       PARTNER_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_runtime
       PARTNER_RT_RUNTIME: postgres://partner_app_test_rt:synthetic@127.0.0.1:55433/mintvault_partner_runtime
+      # ---- Real object-storage proof (MinIO service below) --------------------
+      # DEDICATED variables only. tests/partner-real-r2-storage.test.ts deliberately reads these
+      # and NEVER R2_*, so that an ambient production storage configuration cannot become the
+      # target. An earlier revision of that suite resolved its endpoint from R2_ENDPOINT with
+      # localhost only as a fallback, and then ran an unprefixed list -> bulk delete -> DeleteBucket
+      # in beforeAll. Adding R2_* secrets to this job would have re-armed exactly that.
+      #
+      # These are CI-only credentials for a throwaway container on loopback. They are not secrets
+      # and must never be replaced with repository secrets.
+      PARTNER_REAL_R2_PROOF: "1"
+      PARTNER_REAL_R2_PROOF_ENDPOINT: http://127.0.0.1:9010
+      PARTNER_REAL_R2_PROOF_BUCKET: partner-real-r2-proof
+      PARTNER_REAL_R2_PROOF_KEY: minioadmin
+      PARTNER_REAL_R2_PROOF_SECRET: minioadmin
 
       # ---- Partner portal MAIN-APP mount + GLOBAL flag administration (WP-1) ----
       # tests/partner-portal-mount-integration.test.ts. Same PostgreSQL 17 server and the same
@@ -336,7 +350,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -349,6 +362,33 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      # S3-compatible object storage for the real Partner storage proof.
+      #
+      # A step rather than a `services:` entry, for two concrete reasons:
+      #  1. minio/minio needs `server /data`, and Actions service containers cannot supply a
+      #     command. bitnami/minio used to start it via its own entrypoint, but that image was
+      #     retired and no longer resolves — wiring it as a service would fail on image pull.
+      #  2. A step lets the bucket be created and asserted before any test runs.
+      #
+      # Bound to loopback 9010, which is what the suite's endpoint allow-list accepts. Throwaway
+      # container, CI-only credentials, holding nothing but this run's ci-proof/ prefix.
+      - name: Start MinIO (real storage proof)
+        run: |
+          set -euo pipefail
+          docker run -d --name mv-ci-minio -p 9010:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio:latest server /data
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null 2>&1; then
+              echo "MinIO healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "MinIO never became healthy"; docker logs --tail 50 mv-ci-minio; exit 1
+
+      - name: Create the storage proof bucket
+        run: node scripts/ci/ensure-proof-bucket.mjs
 
       - run: npm ci
 
