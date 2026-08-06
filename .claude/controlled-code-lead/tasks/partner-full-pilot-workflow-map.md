@@ -162,7 +162,9 @@ later, independent step. A test asserting "public stays closed until settlement"
 correct production behaviour. Only checkpoints A and C differ, and they differ on APPROVAL, not on
 settlement.
 
-## OPEN QUESTION — must be resolved before any public-gate assertion is written
+## RESOLVED (was an open question) — see F10 below
+
+### Original question, kept for the record
 
 `certToPublic` (`server/routes.ts:610-700`) maps `grade`, `gradeNumeric`, `gradeCentering`,
 `gradeCorners`, `gradeEdges`, `gradeSurface` straight off the certificate row with no
@@ -182,3 +184,64 @@ Two possibilities, with very different consequences:
 
 Do not write the checkpoint-A public assertions until this is traced. Claiming a public-exposure
 defect without tracing it would be exactly the kind of unverified HIGH this map exists to prevent.
+
+
+---
+
+## F10 (RESOLVED) — Outcome B: draft grades ARE written to `certificates`. But it is PRE-EXISTING, not a PR #288 regression.
+
+`applyCertGradeDraft` (`server/grader.ts:756`, PROTECTED and byte-identical to origin/main) writes
+draft grade fields DIRECTLY onto the certificate row:
+
+```
+UPDATE certificates SET
+  grade_type       = ...,
+  centering_score  = ...,
+  corners_score    = ...,
+  edges_score      = ...,
+  surface_score    = ...,
+  auth_status      = ...,
+  grade_explanation= ...
+WHERE id = $certId AND grade_approved_at IS NULL
+```
+
+So Outcome B holds: unapproved grade data lives on `certificates` before approval.
+
+And the public read path applies no approval predicate:
+  * `GET /api/cert/:id` -> `findCertByIdFlex` -> `certToPublic`, with no `grade_approved_at` check
+    in the handler;
+  * `certToPublic` maps `grade`, `gradeNumeric`, `gradeCentering`, `gradeCorners`, `gradeEdges`,
+    `gradeSurface` straight off the row — **0** occurrences of `grade_approved_at` inside it.
+
+### Why this is NOT a PR #288 finding
+
+Content-compared against `origin/main`, not by line number (routes.ts moved ~1300 lines on this
+branch, so line-based comparison is meaningless):
+
+  * `/api/cert/:id` handler body: IDENTICAL on main and branch (same three statements);
+  * `certToPublic`: **0** `grade_approved_at` checks on main, **0** on branch;
+  * `server/grader.ts` (the draft writer): byte-identical to main.
+
+The aggregate surfaces (showcase, recent-graded, population, search) DO gate on
+`grade_approved_at IS NOT NULL`, and slab-image gates on `status='active' AND gradeOverall != null`.
+It is specifically the single-certificate lookup that carries no approval predicate — on both
+branches, for HQ and Partner certificates alike.
+
+### What I did NOT verify
+
+Whether a certificate row is actually publicly REACHABLE before approval in practice — i.e. whether
+`findCertByIdFlex` or the `status` column filters it out earlier, and what `certificates.status` is
+between import and approval. Without that, "an anonymous caller can read an unapproved grade" is
+plausible but UNPROVEN, and I am not asserting it.
+
+### Recommendation — owner decision, not a unilateral change in this PR
+
+Adding an approval predicate to `/api/cert/:id` would change PUBLIC CERTIFICATE BEHAVIOUR FOR EVERY
+CERTIFICATE, including every legacy HQ certificate — the public trust surface CLAUDE.md lists as
+business-critical. That is a product decision, and doing it inside a Partner pilot PR would be
+exactly the "change production behaviour to satisfy a test" move this work has repeatedly refused.
+
+Consequences for the pilot test, either way:
+  * checkpoint-A assertions should pin the AGGREGATE surfaces (which do gate correctly) rather than
+    `/api/cert/:id`;
+  * CERT1 should target the approval predicate on an aggregate query, where one demonstrably exists.
