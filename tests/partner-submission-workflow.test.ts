@@ -22,6 +22,10 @@ import {
   provisionRealisticRoles,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
+import { setupPartnerTestStorage, type PartnerTestStorage } from "./helpers/partner-test-storage";
+import { createSubmitReadyPartnerDraft } from "./helpers/partner-submit-ready";
+
+let storage: PartnerTestStorage;
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_RT_RUNTIME;
@@ -162,6 +166,15 @@ async function seedMintVaultTables(): Promise<void> {
       [A]
     );
 
+    /**
+     * Real disposable MinIO, configured BEFORE the app is imported: server/r2.ts memoises its S3
+     * client at module scope, so the first getR2Client() wins for this whole file. The submit
+     * contract verifies every card image with a live headR2, so this suite cannot fake storage —
+     * and it deliberately gets its OWN bucket, because the storage-proof suite refuses to run if
+     * its bucket holds any object outside ci-proof/ and submit writes partner-submissions/ keys.
+     */
+    storage = await setupPartnerTestStorage({ bucketSuffix: "wf" });
+
     const { createPartnerApp } = await import("../server/partner/app");
     server = http.createServer(createPartnerApp());
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -169,6 +182,8 @@ async function seedMintVaultTables(): Promise<void> {
   });
 
   afterAll(async () => {
+    // Prefix-scoped: deletes only this run's objects. No bucket deletion, no unprefixed delete.
+    await storage?.cleanup().catch(() => {});
     if (server) await new Promise<void>((r) => server.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
@@ -317,10 +332,24 @@ async function seedMintVaultTables(): Promise<void> {
 
   it("idempotency key reused across two DIFFERENT submissions under a race returns a clean 409, not a raw 500", async () => {
     const cookie = await login("owner@wfa.com");
-    const subX = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
-    const subY = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
-    await j("POST", `/api/partner/submissions/${subX.body.id}/cards`, cookie, { cardName: "X-card" });
-    await j("POST", `/api/partner/submissions/${subY.body.id}/cards`, cookie, { cardName: "Y-card" });
+    /**
+     * Both drafts must be genuinely submit-ready. The 409 this test wants comes from the
+     * idempotency-key collision, which is only detectable once one transaction has COMMITTED the
+     * key — and submitSubmission does not persist idempotency_key until its final UPDATE. If either
+     * submit aborts on an earlier precondition, neither key is ever written and the only reachable
+     * outcome is [400, 400]. This test is therefore structurally dependent on one submit fully
+     * succeeding; tolerating the 400 would have deleted the proof entirely.
+     */
+    const draftX = await createSubmitReadyPartnerDraft({
+      j, base, cookie, admin, tenantId: A, locationId: L1, storage,
+      cards: [{ cardName: "X-card" }],
+    });
+    const draftY = await createSubmitReadyPartnerDraft({
+      j, base, cookie, admin, tenantId: A, locationId: L1, storage,
+      cards: [{ cardName: "Y-card" }],
+    });
+    const subX = { body: { id: draftX.submissionId } };
+    const subY = { body: { id: draftY.submissionId } };
 
     const sameKey = "collide-" + subX.body.id;
     const [rx, ry] = await Promise.all([
@@ -336,8 +365,11 @@ async function seedMintVaultTables(): Promise<void> {
 
   it("19-25: submit is idempotent, creates exactly one handoff, is audited, and locks the draft", async () => {
     const cookie = await login("owner@wfa.com");
-    const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
-    await j("POST", `/api/partner/submissions/${sub.body.id}/cards`, cookie, { cardName: "Pikachu" });
+    const draft = await createSubmitReadyPartnerDraft({
+      j, base, cookie, admin, tenantId: A, locationId: L1, storage,
+      cards: [{ cardName: "Pikachu" }],
+    });
+    const sub = { body: { id: draft.submissionId } };
 
     const key = "idem-key-" + sub.body.id;
     const [r1, r2] = await Promise.all([
@@ -695,25 +727,42 @@ async function seedMintVaultTables(): Promise<void> {
     });
 
     it("20/21/22. a tier disabled between draft creation and submission fails submit safely: no handoff, submission stays draft", async () => {
-      // Seed a fresh tier just for this test so disabling it doesn't affect other parallel-ish tests.
+      // A fresh tier per RUN, not merely per test: tier rows persist for the whole file, and a
+      // leftover disabled 'temp-tier' from an earlier run against a reused database makes the
+      // CREATE below fail as invalid_service_tier — which looks like a product bug.
+      const tempTier = `temp-tier-${process.pid}-${Date.now()}`;
       await admin.query(
-        "INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES (NULL,'temp-tier','Temp',500,10,true)"
+        "INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES (NULL,$1,'Temp',500,10,true)",
+        [tempTier]
       );
       const cookie = await login("owner@wfa.com");
-      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "temp-tier" });
-      expect(sub.status).toBe(201);
-      await j("POST", `/api/partner/submissions/${sub.body.id}/cards`, cookie, { cardName: "Late-disable card" });
+      /**
+       * THE POINT OF THIS FIXTURE. The target is the tier revalidation, which is the SEVENTH gate in
+       * submitSubmission and returns 409 service_tier_unavailable. Every earlier gate must therefore
+       * pass, or the submit dies at gate 2 with a 400 "Select a customer before submitting." and the
+       * tier is never even looked at. That is exactly what this test used to do — and its follow-on
+       * assertions (no handoff, still draft) PASSED, for entirely the wrong reason.
+       */
+      const draft = await createSubmitReadyPartnerDraft({
+        j, base, cookie, admin, tenantId: A, locationId: L1, storage,
+        tierCode: tempTier,
+        cards: [{ cardName: "Late-disable card" }],
+      });
+      const sub = { body: { id: draft.submissionId } };
 
       // disable it AFTER the draft was created — simulating a super-admin action mid-flow
       await admin.query(
-        "UPDATE partner_service_tiers SET is_active=false WHERE tier_code='temp-tier' AND tenant_id IS NULL"
+        "UPDATE partner_service_tiers SET is_active=false WHERE tier_code=$1 AND tenant_id IS NULL",
+        [tempTier]
       );
 
       const submitted = await j("POST", `/api/partner/submissions/${sub.body.id}/submit`, cookie, {
         idempotencyKey: "tier-disabled-" + sub.body.id,
       });
-      expect(submitted.status).toBe(409); // 20. safe conflict response
+      // Assert the CODE, not just the status: several earlier gates also return 4xx, so a status-only
+      // assertion would still pass if a reordering moved a different gate in front of this one.
       expect(submitted.body.error.code).toBe("service_tier_unavailable");
+      expect(submitted.status).toBe(409); // 20. safe conflict response
 
       const handoffs = await admin.query(
         "SELECT count(*)::int n FROM partner_submission_handoffs WHERE submission_id=$1",
@@ -738,15 +787,79 @@ async function seedMintVaultTables(): Promise<void> {
     });
   });
 
+  describe("PATCH customer tri-state (regression: a partial edit must not unlink the customer)", () => {
+    /**
+     * THE DEFECT. editSubmissionDraft derived "did the caller mean to change the customer?" from
+     * Object.prototype.hasOwnProperty.call(input, "customerId"). The route always materialises that
+     * key — `customerId: asStringOrExplicitNull(body.customerId)` — so it was ALWAYS present, and an
+     * omitted customerId coerced to undefined and was written as NULL.
+     *
+     * A partner editing only the intake notes silently lost the customer link, and only found out at
+     * submit, with an error that pointed nowhere near the edit. Found because the tier-disabled test
+     * PATCHed {version, serviceTierCode} and its retry then failed on a missing customer.
+     */
+    it("omitting customerId leaves it intact; explicit null clears it; a string sets it", async () => {
+      const cookie = await login("owner@wfa.com");
+      const draft = await createSubmitReadyPartnerDraft({
+        j, base, cookie, admin, tenantId: A, locationId: L1, storage,
+        cards: [{ cardName: "Tri-state card" }],
+      });
+
+      const readCustomer = async () =>
+        (await j("GET", `/api/partner/submissions/${draft.submissionId}`, cookie)).body.submission.customerId;
+
+      expect(await readCustomer()).toBe(draft.customerId);
+
+      // 1. OMITTED — the regression. Must leave the customer untouched.
+      const untouched = await j("PATCH", `/api/partner/submissions/${draft.submissionId}`, cookie, {
+        version: 1,
+        intakeNotes: "edited notes only",
+      });
+      expect(untouched.status).toBe(200);
+      expect(await readCustomer()).toBe(draft.customerId);
+
+      // 2. EXPLICIT NULL — clearing must still work; the fix must not overcorrect into "never clear".
+      const cleared = await j("PATCH", `/api/partner/submissions/${draft.submissionId}`, cookie, {
+        version: 2,
+        customerId: null,
+      });
+      expect(cleared.status).toBe(200);
+      expect(await readCustomer()).toBeNull();
+
+      // 3. STRING — set it back.
+      const reset = await j("PATCH", `/api/partner/submissions/${draft.submissionId}`, cookie, {
+        version: 3,
+        customerId: draft.customerId,
+      });
+      expect(reset.status).toBe(200);
+      expect(await readCustomer()).toBe(draft.customerId);
+    });
+  });
+
   describe("handoff immutability", () => {
     it("partner_runtime cannot UPDATE a handoff row after it is created (no UPDATE grant)", async () => {
       const cookie = await login("owner@wfa.com");
-      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
-      await j("POST", `/api/partner/submissions/${sub.body.id}/cards`, cookie, { cardName: "Immutable-check" });
+      const draft = await createSubmitReadyPartnerDraft({
+        j, base, cookie, admin, tenantId: A, locationId: L1, storage,
+        cards: [{ cardName: "Immutable-check" }],
+      });
+      const sub = { body: { id: draft.submissionId } };
       const submitted = await j("POST", `/api/partner/submissions/${sub.body.id}/submit`, cookie, {
         idempotencyKey: "immutable-" + sub.body.id,
       });
       expect(submitted.status).toBe(200);
+
+      /**
+       * Anchor the immutability claim to a REAL ROW. PostgreSQL rejects an UPDATE on ACL grounds at
+       * plan time, whether or not any row matches — so without this the assertion below passes
+       * against zero handoffs and proves only that the role lacks a grant, not that a committed
+       * handoff is immutable.
+       */
+      const seeded = await admin.query<{ n: number }>(
+        "SELECT count(*)::int n FROM partner_submission_handoffs WHERE submission_id=$1",
+        [sub.body.id]
+      );
+      expect(seeded.rows[0].n).toBe(1);
 
       // Attempt a direct UPDATE as partner_runtime with the correct tenant context — must fail on
       // privilege, not merely on RLS, proving the grant itself (not just the app layer) blocks it.

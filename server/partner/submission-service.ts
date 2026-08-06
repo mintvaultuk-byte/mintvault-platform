@@ -395,7 +395,27 @@ export async function editSubmissionDraft(
     if (!row) throw NOT_FOUND();
     if (row.status !== "draft") throw NOT_DRAFT();
     if (row.version !== input.version) throw STALE();
-    const customerChanged = Object.prototype.hasOwnProperty.call(input, "customerId");
+    /**
+     * Tri-state on the VALUE, not on key presence.
+     *
+     * hasOwnProperty was defeated by the route, which always materialises the key:
+     * submission-routes.ts builds `customerId: asStringOrExplicitNull(body.customerId)`
+     * unconditionally, so the property exists on EVERY edit — and when the client omits customerId
+     * that coercion yields `undefined`. hasOwnProperty was therefore always true, the CASE WHEN
+     * guard below always fired, and $3 bound to undefined, i.e. NULL.
+     *
+     * Effect in production: any PATCH that did not mention the customer silently UNLINKED it.
+     * Editing only the intake notes wiped the customer, and the submission then failed at submit
+     * with "Select a customer before submitting." — with nothing pointing at the edit that caused
+     * it. Reproduced: create a draft with a customer, PATCH {version, serviceTierCode}, submit → 400.
+     *
+     * Checking the value keeps all three intended states and matches how tierChanged is derived
+     * ten lines below:
+     *   omitted       -> undefined -> leave customer_id untouched
+     *   explicit null -> null      -> clear it
+     *   string        -> validate ownership and set it
+     */
+    const customerChanged = input.customerId !== undefined;
     if (customerChanged) await verifyCustomerOwnership(c, principal.tenantId, input.customerId ?? null);
     // Same rule as create: undefined = not changing the tier; null = explicitly clearing it;
     // any other string (including "") must resolve to an approved, currently-active tier.
