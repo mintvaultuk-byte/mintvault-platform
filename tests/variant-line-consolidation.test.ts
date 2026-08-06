@@ -282,21 +282,8 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        // D) Partner grading bridge — founder-approved 2026-08-04, narrowly. It allows
-        //    adding a caller-supplied SQL predicate to the existing draft writer, assigning
-        //    partner-origin certificates to a partner user, and mirroring approve/reject state
-        //    to partner_grading_work_items. It still must not add scoring helpers, calibration,
-        //    arithmetic formulas, or grade calculation identifiers; the calculation-token guard
-        //    below applies unchanged.
-        const signatureD =
-          addedCode.includes("extraWhere") &&
-          addedCode.includes("export async function assignPartnerCerts") &&
-          addedCode.includes("assigned_partner_grader_id") &&
-          addedCode.includes("certificate_linked_at") &&
-          addedCode.includes("status = 'returned_for_change'") &&
-          addedCode.includes("status = 'approved'");
         expect(
-          signatureA || signatureB || signatureC || signatureD,
+          signatureA || signatureB || signatureC,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
@@ -309,9 +296,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         // those exact identifiers. Bare `centering`, `mvgs`, `pristine`, `gradeNum`,
         // `calculateOverallGrade` and `scoreMvgs` all still fail, in this file and every other.
         const b3Columns = /\b(centering_score|corners_score|edges_score|surface_score)\b/g;
-        const partnerDraftPlumbing =
-          /\b(draftOverall|centerDraft|cornerDraft|edgeDraft|surfaceDraft|grade_centering|grade_corners|grade_edges|grade_surface|gradeCentering|gradeCorners|gradeEdges|gradeSurface)\b/g;
-        expect(addedCode.replace(b3Columns, "").replace(partnerDraftPlumbing, "")).not.toMatch(
+        expect(addedCode.replace(b3Columns, "")).not.toMatch(
           /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
         );
         continue;

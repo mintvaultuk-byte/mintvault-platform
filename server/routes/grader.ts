@@ -31,7 +31,6 @@ import {
   buildCertImagesPayload,
   buildCertGradingPayload,
   applyCertGradeDraft,
-  assignPartnerCerts,
   GradeDraftRejected,
   adminReviewSaveDraft,
   approveGraderCert,
@@ -49,6 +48,9 @@ import {
   isPartnerOriginatedCert,
   checkGradePublishGates,
 } from "../grader";
+// Partner assignment lives in partner-owned code so the protected grader module stays untouched.
+import { assignPartnerCerts } from "../partner/grading-assignment";
+import { mirrorPartnerApproval, mirrorPartnerRejection } from "../partner/grading-review-mirror";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -1077,6 +1079,14 @@ export function registerGraderRoutes(app: Express): void {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await approveGraderCert(certId, adminUser);
       if (!r.ok) return res.status(r.status).json({ error: r.error });
+      // Partner workflow state is mirrored AFTER the engine has gated and committed the approval,
+      // so partner cards pass exactly the same publish gates as HQ cards through the same code.
+      // A conflict is surfaced, never swallowed: reporting a clean approval over a work item that
+      // did not move is the silent-failure shape this codebase guards against elsewhere.
+      const mirror = await mirrorPartnerApproval(certId, adminUser);
+      if (mirror.kind === "conflict") {
+        return res.status(409).json({ error: "Partner work item changed; refresh and try again" });
+      }
       return res.json({ ok: true, gradingStatus: "approved" });
     }
   );
@@ -1087,6 +1097,10 @@ export function registerGraderRoutes(app: Express): void {
     const reason = typeof (req.body || {}).reason === "string" ? (req.body.reason as string).slice(0, 1000) : null;
     const r = await rejectCertGrade(certId, reason, adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
+    const mirror = await mirrorPartnerRejection(certId);
+    if (mirror.kind === "conflict") {
+      return res.status(409).json({ error: "Partner work item changed; refresh and try again" });
+    }
     return res.json({ ok: true, gradingStatus: "assigned" });
   });
 

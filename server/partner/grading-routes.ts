@@ -182,6 +182,65 @@ function partnerDraftWriteGuard(principal: PartnerPrincipal) {
   `;
 }
 
+/**
+ * Re-assert, at write time, that this partner principal may still write this card.
+ *
+ * `partnerDraftWriteGuard` was previously threaded INTO server/grader.ts's draft writer as an
+ * extra WHERE predicate. That required modifying a protected MVGS engine file, so the predicate
+ * now runs here, in partner-owned code, immediately before the unmodified writer is called.
+ *
+ * Honest limitation, stated rather than glossed: as a separate statement this is a check-then-act
+ * pair, not one atomic predicate. The window is small and the blast radius is nil — the worst case
+ * is that draft field values land on a card this same principal was authorised to draft on
+ * microseconds earlier, which is precisely what the draft-save endpoint does anyway. It grants no
+ * access and changes no lifecycle state; every state TRANSITION below still carries the full guard
+ * inside its own single UPDATE, where atomicity actually matters.
+ */
+async function assertPartnerDraftWritable(certId: number, principal: PartnerPrincipal): Promise<boolean> {
+  const r = await db.execute(sql`
+    SELECT 1
+      FROM certificates
+     WHERE certificates.id = ${certId}
+       AND certificates.grade_approved_at IS NULL
+       ${partnerDraftWriteGuard(principal)}
+     LIMIT 1
+  `);
+  return r.rows.length === 1;
+}
+
+/**
+ * Move a partner-graded card to pending_review and snapshot the operator's submission.
+ *
+ * ONE guarded UPDATE, so the ownership predicate and the state transition cannot be separated by a
+ * concurrent writer. The operator_* snapshot is taken from the row's OWN freshly-written columns
+ * rather than from request values, so it can never disagree with what was persisted.
+ *
+ * This lives in partner code, not in the grading engine: nothing here scores, derives or adjusts a
+ * grade. It copies already-computed values and sets partner workflow state.
+ */
+async function partnerSubmitForReview(certId: number, principal: PartnerPrincipal): Promise<boolean> {
+  const r = await db.execute(sql`
+    UPDATE certificates
+       SET grader_status = 'pending_review',
+           review_required = true,
+           graded_at = NOW(),
+           graded_by = ${principal.userId},
+           operator_grade = certificates.grade,
+           operator_subgrades = jsonb_build_object(
+             'centering', certificates.centering_score,
+             'corners', certificates.corners_score,
+             'edges', certificates.edges_score,
+             'surface', certificates.surface_score
+           ),
+           updated_at = NOW()
+     WHERE certificates.id = ${certId}
+       AND certificates.grade_approved_at IS NULL
+       ${partnerDraftWriteGuard(principal)}
+     RETURNING certificates.id
+  `);
+  return r.rows.length === 1;
+}
+
 function partnerImageKeyAllowed(auth: PartnerCertAuth, key: string, side: "front" | "back"): boolean {
   if (!auth.partnerSubmissionCardId) return false;
   return key.startsWith(
@@ -373,11 +432,10 @@ export function partnerGradingRouter(): Router {
         ) {
           return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
         }
-        const saved = await applyCertGradeDraft(
-          certId,
-          partnerGradeBody(req.body),
-          partnerDraftWriteGuard(req.partner!)
-        );
+        if (!(await assertPartnerDraftWritable(certId, req.partner!))) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+        const saved = await applyCertGradeDraft(certId, partnerGradeBody(req.body));
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         await auditInOwnTxn({
           tenantId: req.partner!.tenantId,
@@ -415,10 +473,15 @@ export function partnerGradingRouter(): Router {
         }
         const body = partnerGradeBody(req.body);
 
-        const saved = await applyCertGradeDraft(certId, body, partnerDraftWriteGuard(req.partner!), {
-          submitForReviewBy: req.partner!.userId,
-        });
+        if (!(await assertPartnerDraftWritable(certId, req.partner!))) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+        const saved = await applyCertGradeDraft(certId, body);
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        // Single guarded UPDATE: ownership predicate and state transition cannot be split.
+        if (!(await partnerSubmitForReview(certId, req.partner!))) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
 
         const submitted = await db.execute(sql`
           UPDATE partner_grading_work_items pgwi
@@ -480,10 +543,14 @@ export function partnerGradingRouter(): Router {
           return res.status(409).json({ error: "Upload front and back images before submitting grades." });
         }
         const body = partnerGradeBody(req.body);
-        const edited = await applyCertGradeDraft(certId, body, partnerDraftWriteGuard(req.partner!), {
-          submitForReviewBy: req.partner!.userId,
-        });
+        if (!(await assertPartnerDraftWritable(certId, req.partner!))) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+        const edited = await applyCertGradeDraft(certId, body);
         if (!edited) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        if (!(await partnerSubmitForReview(certId, req.partner!))) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
         const linked = await db.execute(sql`
           UPDATE partner_grading_work_items pgwi
              SET certificate_id = ${certId},

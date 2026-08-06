@@ -14,6 +14,8 @@ const GRADING = read("client/src/pages/partner/grading.tsx");
 const GRADING_ROUTES = read("server/partner/grading-routes.ts");
 const GRADER_ROUTES = read("server/routes/grader.ts");
 const GRADER_SERVICE = read("server/grader.ts");
+const PARTNER_ASSIGNMENT = read("server/partner/grading-assignment.ts");
+const PARTNER_MIRROR = read("server/partner/grading-review-mirror.ts");
 const CREDIT_LIFECYCLE = read("server/partner/partner-submission-credit-lifecycle.ts");
 const IMPORTER = read("server/partner/connector-import-service.ts");
 const VALIDATION = read("server/partner/connector-validation-service.ts");
@@ -135,31 +137,57 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
     expect(GRADING_ROUTES).toContain("function partnerGradeBody");
     expect(GRADING_ROUTES).toContain("delete clean.private_notes");
     expect(GRADING_ROUTES).toContain("delete clean.privateNotes");
-    expect(GRADER_SERVICE).toContain("extraWhere");
-    expect(GRADER_SERVICE).toContain("grade_approved_at IS NULL ${extraWhere}");
-    expect(GRADER_SERVICE).toContain("submitForReviewBy");
-    expect(GRADER_SERVICE).toContain("operator_grade = ${draftOverall}");
-    expect(GRADER_SERVICE).toContain("review_required = true");
-    expect(GRADER_SERVICE).toContain("grader_status = 'pending_review'");
+    // The partner submit-for-review write and the partner assignment query live in PARTNER-OWNED
+    // code. server/grader.ts is a protected MVGS engine file and must stay byte-identical to main.
+    //
+    // An earlier revision of this branch put both inside server/grader.ts and then widened the two
+    // MVGS tripwire tests to accept it — including splitting a literal as 'center' || 'ing' so the
+    // content check could not match the token it exists to catch. These assertions are inverted so
+    // that arrangement can never come back silently.
+    expect(GRADER_SERVICE).not.toContain("extraWhere");
+    expect(GRADER_SERVICE).not.toContain("submitForReviewBy");
+    expect(GRADER_SERVICE).not.toContain("assignPartnerCerts");
+    expect(GRADER_SERVICE).not.toMatch(/partner_grading_work_items|assigned_partner_grader_id|partner\.cards\.assess/);
+    expect(GRADER_SERVICE).not.toMatch(/'center'\s*\|\|\s*'ing'/);
+
+    expect(GRADING_ROUTES).toContain("function assertPartnerDraftWritable");
+    expect(GRADING_ROUTES).toContain("function partnerSubmitForReview");
+    expect(GRADING_ROUTES).toContain("grader_status = 'pending_review'");
+    expect(GRADING_ROUTES).toContain("review_required = true");
+    expect(GRADING_ROUTES).toContain("operator_grade = certificates.grade");
     expect(GRADING_ROUTES).not.toMatch(/applyCertGradeDraft\(certId,\s*req\.body/);
     expect(GRADER_ROUTES).toContain('"/api/admin/graders/assign-partner"');
-    expect(GRADER_SERVICE).toContain("assignPartnerCerts");
-    expect(GRADER_SERVICE).toContain("p.code = 'partner.cards.assess'");
-    expect(GRADER_SERVICE).toContain("partner_grader_assign");
-    expect(GRADER_SERVICE).toContain("pgwi.status IN ('ready_for_assignment','assigned','returned_for_change')");
-    expect(GRADER_SERVICE).toContain("pci.deleted_at IS NULL");
-    expect(GRADER_SERVICE).toContain("LEFT JOIN submission_items si ON si.id = cert.submission_item_id");
+
+    expect(PARTNER_ASSIGNMENT).toContain("assignPartnerCerts");
+    expect(PARTNER_ASSIGNMENT).toContain("p.code = 'partner.cards.assess'");
+    expect(PARTNER_ASSIGNMENT).toContain("partner_grader_assign");
+    expect(PARTNER_ASSIGNMENT).toContain("pgwi.status IN ('ready_for_assignment','assigned','returned_for_change')");
+    expect(PARTNER_ASSIGNMENT).toContain("pci.deleted_at IS NULL");
+    // Approve/reject mirroring is partner workflow state, applied AFTER the engine has gated and
+    // committed the grading decision — so it lives in partner code called from the route layer,
+    // never inside the protected engine.
+    expect(PARTNER_MIRROR).toContain("mirrorPartnerApproval");
+    expect(PARTNER_MIRROR).toContain("mirrorPartnerRejection");
+    expect(PARTNER_MIRROR).toContain("status = 'approved'");
+    expect(PARTNER_MIRROR).toContain("status = 'returned_for_change'");
+    expect(GRADER_ROUTES).toContain("mirrorPartnerApproval(certId, adminUser)");
+    expect(GRADER_ROUTES).toContain("mirrorPartnerRejection(certId)");
+    // The engine must remain the single writer of the approval, so the publish gates cannot be
+    // sidestepped by a duplicated partner approval path.
+    expect(PARTNER_MIRROR).not.toContain("grade_approved_at = NOW()");
     expect(GRADING_ROUTES).not.toMatch(/computeMvgsScore|gradeFromMvgsScore|mvgsTierName/);
   });
 
   it("keeps partner final writes atomic and blocks admin-only/private payload fields", () => {
     expect(GRADING_ROUTES).toContain("partnerGradeBody(req.body)");
-    expect(GRADING_ROUTES).toContain("{ submitForReviewBy: req.partner!.userId }");
+    // The state transition is ONE guarded UPDATE, so the ownership predicate and the status
+    // change cannot be separated by a concurrent writer.
+    expect(GRADING_ROUTES).toContain("partnerSubmitForReview(certId, req.partner!)");
     expect(GRADING_ROUTES).toContain("const FINAL_WORK_ITEM_STATUSES");
     expect(GRADING_ROUTES).toContain("'returned_for_change'");
     expect(GRADING_ROUTES).toContain("pgwi.status IN ${FINAL_WORK_ITEM_STATUSES}");
     expect(GRADING_ROUTES).not.toContain("private_notes     = ${pick(req.body");
-    expect(GRADING_ROUTES).not.toMatch(/UPDATE certificates SET\s+grader_status = 'pending_review'/);
+
   });
 
   it("only exposes the deliberately allowed partner proxy actions", () => {
