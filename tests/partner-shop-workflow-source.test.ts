@@ -279,3 +279,51 @@ describe("the real-storage proof cannot destroy a bucket", () => {
     expect(REAL_STORAGE_PROOF).toContain("ALLOWED_STORAGE_HOSTS.has(host)");
   });
 });
+
+describe("no partner-reachable proxy handler performs schema mutation", () => {
+  const ROUTES = read("server/routes.ts");
+
+  /** Slice a single app.post handler body out of routes.ts by its route literal. */
+  function handlerBody(routeLiteral: string): string {
+    const start = ROUTES.indexOf(routeLiteral);
+    expect(start, `route ${routeLiteral} not found`).toBeGreaterThan(-1);
+    const next = ROUTES.indexOf("app.post(", start + routeLiteral.length);
+    const nextGet = ROUTES.indexOf("app.get(", start + routeLiteral.length);
+    const end = Math.min(next === -1 ? ROUTES.length : next, nextGet === -1 ? ROUTES.length : nextGet);
+    return ROUTES.slice(start, end);
+  }
+
+  // manual-centering carried four `ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_*`
+  // statements, each in an empty catch, running BEFORE the partner write guard. They were the only
+  // request-path DDL in the whole server tree and the only partner-reachable one — and they were
+  // dead: the columns are schema-declared, storage.getCertificate projects every one of them, and
+  // all four were confirmed present on staging. Their sole effect was an ACCESS EXCLUSIVE lock on
+  // the busiest table, reachable from a tenant-facing route at 60 requests/minute/user.
+  it("manual-centering performs no DDL", () => {
+    const body = handlerBody('"/api/admin/certificates/:id/manual-centering"');
+    // Strip comments so the explanatory note above the deletion does not trip its own guard.
+    const code = body.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(code).not.toMatch(/ALTER\s+TABLE/i);
+    expect(code).not.toMatch(/ADD\s+COLUMN/i);
+    expect(code).not.toMatch(/CREATE\s+TABLE/i);
+    expect(code).not.toMatch(/DROP\s+/i);
+  });
+
+  it("manual-centering authorises before acting, like its sibling proxied actions", () => {
+    const body = handlerBody('"/api/admin/certificates/:id/manual-centering"');
+    expect(body).toContain("isPartnerGradingProxy(req)");
+    const preflight = body.indexOf("isPartnerGradingProxy(req)");
+    const update = body.indexOf("UPDATE certificates");
+    expect(preflight).toBeGreaterThan(-1);
+    expect(update).toBeGreaterThan(-1);
+    // The guard must be evaluated before the mutating statement, not only inside its WHERE.
+    expect(preflight).toBeLessThan(update);
+  });
+
+  it("no empty catch blocks remain in the manual-centering handler", () => {
+    const body = handlerBody('"/api/admin/certificates/:id/manual-centering"');
+    // `catch {}` with no binding and no body hides lock timeouts, deadlocks and privilege errors
+    // alike, with no log line and no metric.
+    expect(body).not.toMatch(/catch\s*\{\s*\}/);
+  });
+});

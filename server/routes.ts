@@ -9464,19 +9464,39 @@ Defects (admin-confirmed): ${defectLines}`;
       const lrCol = side === "front" ? "centering_front_lr" : "centering_back_lr";
       const tbCol = side === "front" ? "centering_front_tb" : "centering_back_tb";
 
-      // Add new columns if they don't exist yet
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_front JSONB`);
-      } catch {}
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_front JSONB`);
-      } catch {}
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_back JSONB`);
-      } catch {}
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`);
-      } catch {}
+      // PARTNER WRITE PRE-FLIGHT — matches recrop and identify. Defence in depth: the primary
+      // authorisation (capability, tenant, location, assignment, editable status) already ran in
+      // server/partner/grading-routes.ts before this request was re-dispatched. This makes the four
+      // proxied actions uniform and keeps work out of the TOCTOU window between that check and the
+      // guarded UPDATE below. Gated on the proxy flag so a plain admin runs zero extra statements.
+      if (isPartnerGradingProxy(req)) {
+        const allowed = await db.execute(sql`
+          SELECT 1 FROM certificates WHERE ${partnerGradingWriteGuard(req, id)} LIMIT 1
+        `);
+        if (allowed.rows.length !== 1) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+      }
+
+      // NOTE: four `ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_*` statements used
+      // to sit here, each in an empty catch, and they ran BEFORE the guard below. They were the
+      // only request-path DDL in the entire server tree, and the only partner-reachable one.
+      //
+      // They were also dead. The four columns are declared in shared/schema.ts, and
+      // storage.getCertificate uses db.select(), which compiles to an explicit projection naming
+      // every schema column — so if any were missing, every certificate read in the product would
+      // fail with 42703. Confirmed directly against staging: all four are present. The statements
+      // could therefore never do anything except acquire a lock.
+      //
+      // And they did acquire one. PostgreSQL picks the lock level from the parsed subcommand before
+      // execution, so ADD COLUMN takes ACCESS EXCLUSIVE on `certificates` even when IF NOT EXISTS
+      // makes it a no-op. Each ran in its own autocommit transaction, so one save meant four
+      // ACCESS EXCLUSIVE acquisitions on the busiest table in the system — reachable from a
+      // tenant-facing request path, under the privileged HQ role, at 60 requests/minute/user.
+      // The empty catches would have hidden a lock timeout, a deadlock or a privilege error alike.
+      //
+      // Deleted rather than reordered: moving guaranteed-no-op DDL behind the guard would keep a
+      // request-path ALTER TABLE on the hottest table for no benefit.
 
       // Parameterized — outer/inner/lr/tb/id are BOUND params (never interpolated
       // into SQL text); column names come from the fixed front/back allowlist via
