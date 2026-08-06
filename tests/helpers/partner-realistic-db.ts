@@ -603,8 +603,25 @@ export async function alignCertificatesTableToSchema(
       )
     ).rows.map((r) => r.column_name)
   );
+  /**
+   * Columns the LIVE certificates table has but the Drizzle model does NOT declare, because some
+   * production code reads them through raw SQL rather than the model. Deriving from
+   * getTableColumns() alone therefore under-builds the table and the raw query 42703s.
+   *
+   * `claim_code` is the confirmed case: storage.getOrGenerateClaimCode() SELECTs it directly
+   * (server/storage.ts), createBatchAtomic's renderer calls that per certificate, and
+   * shared/schema.ts declares only claim_code_hash / _created_at / _used_at. Verified against the
+   * live staging schema, which has all four.
+   */
+  const RAW_SQL_ONLY_COLUMNS: Array<[string, string]> = [["claim_code", "text"]];
+
   const added: string[] = [];
   const unsupported: string[] = [];
+  for (const [name, type] of RAW_SQL_ONLY_COLUMNS) {
+    if (existing.has(name)) continue;
+    await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS "${name}" ${type}`);
+    added.push(name);
+  }
   for (const col of Object.values(columns)) {
     if (existing.has(col.name)) continue;
     try {
@@ -647,4 +664,49 @@ export async function certificatesSchemaDrift(admin: pg.Client): Promise<string[
     .map((c) => c.name)
     .filter((n) => !existing.has(n))
     .sort();
+}
+
+/**
+ * Generic form of the certificates alignment: bring ANY test table up to the columns its Drizzle
+ * model declares. `createMintvaultLabelPrintsTable` is the second confirmed divergence — it
+ * declares (certificate_id, cert_id, printed_at, created_at) while both shared/schema.ts and the
+ * live staging schema declare (id, cert_id, sheet_ref, queued_at, printed_at). createBatchAtomic
+ * INSERTs sheet_ref, so the print path 42703s on the fixture rather than on anything real.
+ *
+ * Same contract as alignCertificatesTableToSchema: additive, opt-in, columns added NULLABLE with
+ * no default, per-column tolerance with a text fallback for types the disposable cluster lacks.
+ */
+export async function alignTableToDrizzleModel(
+  admin: pg.Client,
+  tableName: string,
+  model: unknown
+): Promise<{ added: string[]; unsupported: string[] }> {
+  const { getTableColumns } = await import("drizzle-orm");
+  const columns = getTableColumns(model as never) as Record<string, { name: string; getSQLType(): string }>;
+  const existing = new Set(
+    (
+      await admin.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",
+        [tableName]
+      )
+    ).rows.map((r) => r.column_name)
+  );
+  const added: string[] = [];
+  const unsupported: string[] = [];
+  for (const col of Object.values(columns)) {
+    if (existing.has(col.name)) continue;
+    try {
+      await admin.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${col.name}" ${col.getSQLType()}`);
+      added.push(col.name);
+    } catch {
+      try {
+        await admin.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${col.name}" text`);
+        added.push(col.name);
+        unsupported.push(`${col.name} (declared ${col.getSQLType()}, created as text)`);
+      } catch (inner) {
+        unsupported.push(`${col.name}: ${(inner as Error).message}`);
+      }
+    }
+  }
+  return { added, unsupported };
 }

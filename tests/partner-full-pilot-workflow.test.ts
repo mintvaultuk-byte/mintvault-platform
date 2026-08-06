@@ -46,6 +46,7 @@ import {
   createMintvaultCertificatesTable,
   createMintvaultLabelPrintsTable,
   alignCertificatesTableToSchema,
+  alignTableToDrizzleModel,
   certificatesSchemaDrift,
   PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
 } from "./helpers/partner-realistic-db";
@@ -136,6 +137,14 @@ async function seedMintVaultTables(): Promise<void> {
   // helper declares ~55 columns; production declares ~150, and storage.listCertificates() SELECTs
   // every one of them - which is why the print path was unreachable from any fixture until now.
   await alignCertificatesTableToSchema(admin);
+  {
+    const schema = await import("../shared/schema");
+    await alignTableToDrizzleModel(admin, "label_prints", schema.labelPrints);
+    // The Drizzle model marks cert_id .unique(); createBatchAtomic relies on it for its
+    // ON CONFLICT (cert_id) upsert, which is what makes a replayed batch idempotent rather than
+    // duplicating label rows. Column alignment adds columns, not constraints, so pin it here.
+    await admin.query("CREATE UNIQUE INDEX IF NOT EXISTS uq_label_prints_cert_id ON label_prints (cert_id)");
+  }
 
   for (const t of [
     "users",
@@ -821,5 +830,103 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
       []
     );
     expect(Number(declared)).toBe(10);
+  });
+
+  it("P9: after settlement the real print workflow batches, prints and completes both cards", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    await approveAsSuperAdmin(f.certIds[1]);
+
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='needs_printing'",
+        [f.destinationSubmissionId]
+      ),
+      "approval moves both certificates awaiting_approval -> needs_printing"
+    ).toBe("2");
+
+    const actor = { actor: SUPER_ADMIN, role: "admin" as const };
+
+    // A PARTIAL selection must be refused before anything is written.
+    const partial = await printWorkflow.createBatchAtomic({ certIds: [f.certNumbers[0]], identity: actor });
+    expect(partial.applied, "a one-card Partner batch must write nothing").toEqual([]);
+    expect(partial.rejected.map((r) => r.code)).toContain("partner_submission_incomplete");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='needs_printing'",
+        [f.destinationSubmissionId]
+      ),
+      "the refused partial batch leaves both cards retryable"
+    ).toBe("2");
+
+    const batch = await printWorkflow.createBatchAtomic({ certIds: f.certNumbers, identity: actor });
+    expect(batch.rejected, JSON.stringify(batch.rejected)).toEqual([]);
+    expect(batch.applied.sort()).toEqual([...f.certNumbers].sort());
+    expect(batch.batchId).toBeTruthy();
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printing'",
+        [f.destinationSubmissionId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM label_prints WHERE cert_id = ANY($1::text[])", [f.certNumbers]),
+      "exactly one label_prints row per certificate"
+    ).toBe("2");
+
+    const printed = await printWorkflow.markBatchPrinted(batch.batchId as string, actor);
+    expect(printed.rejected).toEqual([]);
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+        f.destinationSubmissionId,
+      ])
+    ).toBe("2");
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId])
+    ).not.toBe("completed");
+
+    const completed = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: actor });
+    expect(completed.rejected, JSON.stringify(completed.rejected)).toEqual([]);
+    expect(completed.applied.sort()).toEqual([...f.certNumbers].sort());
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM print_events WHERE cert_id = ANY($1::text[]) AND action='complete' AND actor=$2",
+        [f.certNumbers, SUPER_ADMIN]
+      ),
+      "print_events is the authoritative completion trail"
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='completed'",
+        [f.destinationSubmissionId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status='completed'",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("2");
+    expect(await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId])).toBe(
+      "completed"
+    );
+
+    // Printing must not disturb settled money.
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+
+    // Replay: no duplicate completion evidence.
+    const replay = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: actor });
+    expect(replay.applied).toEqual([]);
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM print_events WHERE cert_id = ANY($1::text[]) AND action='complete'",
+        [f.certNumbers]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM label_prints WHERE cert_id = ANY($1::text[])", [f.certNumbers])
+    ).toBe("2");
   });
 });

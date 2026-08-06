@@ -46,7 +46,7 @@ const SUITES = [
    * two must NOT settle. The earlier acceptance wording asserted 8/2/0 after BOTH approvals, which
    * production does not do — mirrorPartnerApproval fires on the COMPLETE approved set.
    */
-  { file: "tests/partner-full-pilot-workflow.test.ts", min: 7 },
+  { file: "tests/partner-full-pilot-workflow.test.ts", min: 8 },
 ];
 
 let report;
