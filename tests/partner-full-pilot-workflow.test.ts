@@ -144,6 +144,13 @@ async function seedMintVaultTables(): Promise<void> {
     // ON CONFLICT (cert_id) upsert, which is what makes a replayed batch idempotent rather than
     // duplicating label rows. Column alignment adds columns, not constraints, so pin it here.
     await admin.query("CREATE UNIQUE INDEX IF NOT EXISTS uq_label_prints_cert_id ON label_prints (cert_id)");
+    // requestReprint appends to reprint_log; no partner migration creates it.
+    await admin.query(
+      `CREATE TABLE IF NOT EXISTS reprint_log (
+         id serial PRIMARY KEY, cert_id text NOT NULL, reprint_time timestamptz NOT NULL DEFAULT now()
+       )`
+    );
+    await admin.query("ALTER TABLE reprint_log OWNER TO pn_migrator");
   }
 
   for (const t of [
@@ -928,5 +935,80 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(
       await scalar<string>("SELECT count(*)::text FROM label_prints WHERE cert_id = ANY($1::text[])", [f.certNumbers])
     ).toBe("2");
+  });
+
+  it("P10: reprint requires a real reason and writes audited evidence", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    await approveAsSuperAdmin(f.certIds[1]);
+    const actor = { actor: SUPER_ADMIN, role: "admin" as const };
+    const batch = await printWorkflow.createBatchAtomic({ certIds: f.certNumbers, identity: actor });
+    await printWorkflow.markBatchPrinted(batch.batchId as string, actor);
+
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+        f.destinationSubmissionId,
+      ]),
+      "precondition: both cards printed, so reprint has a legitimate source state"
+    ).toBe("2");
+
+    // A reason below the 10-character floor must be refused, and must write NOTHING.
+    const tooShort = await printWorkflow.requestReprint({
+      certIds: f.certNumbers,
+      reason: "too short",
+      reasonCategory: "damaged_label",
+      identity: actor,
+    });
+    expect(tooShort.applied, "a sub-minimum reason must not reprint anything").toEqual([]);
+    expect(tooShort.rejected.map((r) => r.code)).toEqual(["reason_required", "reason_required"]);
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+        f.destinationSubmissionId,
+      ]),
+      "the refused reprint must leave print_state untouched"
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM print_events WHERE cert_id = ANY($1::text[]) AND action='reprint'",
+        [f.certNumbers]
+      )
+    ).toBe("0");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM reprint_log WHERE cert_id = ANY($1::text[])", [f.certNumbers])
+    ).toBe("0");
+
+    // A valid reason reprints, and the reason itself is persisted as audit evidence.
+    const reason = "Label peeled off in transit and must be reprinted for the customer.";
+    const ok = await printWorkflow.requestReprint({
+      certIds: f.certNumbers,
+      reason,
+      reasonCategory: "damaged_label",
+      identity: actor,
+    });
+    expect(ok.rejected, JSON.stringify(ok.rejected)).toEqual([]);
+    expect(ok.applied.sort()).toEqual([...f.certNumbers].sort());
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='reprint_required'",
+        [f.destinationSubmissionId]
+      )
+    ).toBe("2");
+    // The audited actor trail carries the actor AND the verbatim reason — not just a state change.
+    expect(
+      await scalar<string>(
+        `SELECT count(*)::text FROM print_events
+          WHERE cert_id = ANY($1::text[]) AND action='reprint' AND actor=$2
+            AND from_state='printed' AND to_state='reprint_required' AND reason=$3`,
+        [f.certNumbers, SUPER_ADMIN, reason]
+      ),
+      "every reprint must be attributable to an actor and carry its reason"
+    ).toBe("2");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM reprint_log WHERE cert_id = ANY($1::text[])", [f.certNumbers])
+    ).toBe("2");
+
+    // Settled money is untouched by a reprint.
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
   });
 });
