@@ -284,6 +284,47 @@ export async function provisionRealisticRoles(admin: pg.Client): Promise<void> {
        END$$;`
     );
     await admin.query("GRANT partner_definer TO " + MIGRATOR_ROLE);
+    /**
+     * G6D credit-lifecycle roles, provisioned HERE rather than left to whichever suite happens to
+     * run first.
+     *
+     * pg_roles and pg_auth_members are CLUSTER-GLOBAL. Every partner suite in CI shares one
+     * PostgreSQL 17 server, and only partner-management-migration created these roles inline. So
+     * the connector migration suites passed only when that suite had already run on the same
+     * server: under CI's flat `vitest run`, applyEveryMigrationRealistic()'s
+     * `GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE` had no role to
+     * grant, and migration 0042 then failed closed with "pn_migrator lacks INHERIT membership".
+     * Reproduced from clean databases: 2 of 5 connector suites failed that way with 21 tests
+     * skipped, and the outcome flipped purely on suite order.
+     *
+     * ADMIN TRUE gives applyEveryMigrationRealistic() the admin option its INHERIT grant needs.
+     *
+     * INHERIT stays FALSE, deliberately and load-bearingly: applyMigrationsRealistic() asserts this
+     * membership is ABSENT when a suite applies 0041 WITHOUT 0042, and applyEveryMigrationRealistic()
+     * grants INHERIT itself only around the full-set apply and revokes it in a finally. Granting
+     * INHERIT here would silently disarm that assertion — a weakened proof dressed up as a fix.
+     * SET is never granted.
+     *
+     * This models Neon's provider-granted membership row; the INHERIT step models the
+     * owner-approved staging repair 0042 documents as its prerequisite.
+     */
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_credit_lifecycle_definer
+           NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE pn_credit_schema_owner
+           NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    await admin.query(
+      `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`
+    );
     // pn_migrator owns the schema (as a managed-PG project owner would) so it can grant schema USAGE.
     await admin.query("ALTER SCHEMA public OWNER TO " + MIGRATOR_ROLE);
     const { rows } = await admin.query<{ db: string }>("SELECT current_database() AS db");
