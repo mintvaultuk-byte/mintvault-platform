@@ -7672,6 +7672,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Invalid crop coordinates" });
       }
 
+      // PARTNER WRITE PRE-FLIGHT — must run before the first byte is fetched or written.
+      //
+      // Partner authorisation for this handler was expressed ONLY as a WHERE predicate on the
+      // terminal UPDATE below. But the side effects it gates are R2 PutObject calls that happen
+      // earlier: three objects — including the customer-visible images/{cert}/{side}.jpg — were
+      // overwritten before the predicate was ever evaluated, and the 409 was a report rather than a
+      // prevention. R2 writes cannot join the database transaction and cannot be rolled back, so on
+      // an unversioned bucket the previous crop was destroyed by a request that was then refused.
+      //
+      // This closes the DETERMINISTIC class outright: any state already inconsistent with the guard
+      // at request arrival now returns 409 having written nothing. That class is genuinely
+      // reachable — rejectCertGrade commits grader_status='assigned' and only THEN calls
+      // mirrorPartnerRejection as a separate statement, so a mirror conflict strands the work item
+      // at 'pending_review' while the certificate reads 'assigned'. Every partner-router
+      // precondition then passes while the guard fails, repeatably, on every retry.
+      //
+      // It does NOT close the concurrent case: authorisation revoked mid-request still lets the
+      // uploads land before the guarded UPDATE refuses. That window now spans the fetch and the
+      // image transforms, so this converts an always-loses deterministic bug into a real but
+      // time-bounded race. Fully closing it needs staging keys promoted only after the guarded
+      // UPDATE succeeds — a larger change with its own orphan-object questions, deliberately not
+      // bundled here.
+      //
+      // Gated on isPartnerGradingProxy so a plain admin runs zero extra statements and follows
+      // byte-identical control flow. The guarded UPDATE below is unchanged and remains the atomic
+      // authority; this is additive, not a replacement.
+      if (isPartnerGradingProxy(req)) {
+        const writable = await db.execute(sql`
+          SELECT 1 FROM certificates WHERE ${partnerGradingWriteGuard(req, id)} LIMIT 1
+        `);
+        if (writable.rows.length !== 1) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+      }
+
       const c = cert as any;
       const certIdStr = normalizeCertId(cert.certId);
       const origKey =
@@ -9137,6 +9172,20 @@ Defects (admin-confirmed): ${defectLines}`;
       const c = cert as any;
       const frontKey = c.gradingFrontOriginal || c.frontImagePath;
       if (!frontKey) return res.status(400).json({ error: "No front image available for identification" });
+
+      // Same pre-flight as recrop, for the same reason one step removed. identifyCard is a PAID
+      // model call and verifyAndEnrichCardData makes outbound provider lookups; both ran before the
+      // guard, so a partner in the deterministic guard-mismatch state could drive unbounded spend
+      // that always ended in 409. No state was corrupted — the UPDATE below is correctly guarded —
+      // but cost and outbound-request amplification are worth closing with the same three lines.
+      if (isPartnerGradingProxy(req)) {
+        const writable = await db.execute(sql`
+          SELECT 1 FROM certificates WHERE ${partnerGradingWriteGuard(req, id)} LIMIT 1
+        `);
+        if (writable.rows.length !== 1) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+      }
 
       const rawId = await identifyCard(frontKey);
       const enriched = await verifyAndEnrichCardData(rawId);
