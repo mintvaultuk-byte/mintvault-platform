@@ -387,10 +387,15 @@ jobs:
           done
           echo "MinIO never became healthy"; docker logs --tail 50 mv-ci-minio; exit 1
 
+      - run: npm ci
+
+      # MUST stay after `npm ci`: the script imports @aws-sdk/client-s3, so running it before the
+      # install fails with ERR_MODULE_NOT_FOUND. That is not hypothetical — this step sat above the
+      # install on the first attempt and CI failed exactly that way. It passed locally only because
+      # node_modules already existed there, which is precisely the kind of "green on my machine"
+      # difference CI is supposed to catch. Do not move it back above the install.
       - name: Create the storage proof bucket
         run: node scripts/ci/ensure-proof-bucket.mjs
-
-      - run: npm ci
 
       - name: Prepare disposable test database
         run: |
