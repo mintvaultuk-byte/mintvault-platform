@@ -60,6 +60,14 @@ export interface PartnerTestStorage {
   exists(key: string): Promise<boolean>;
   /** Write bytes at an exact key (for fixtures that cannot go through the HTTP upload route). */
   put(key: string, body: Buffer, contentType?: string): Promise<void>;
+  /**
+   * Delete ONE object, so a test can prove storage verification is actually ENFORCED.
+   *
+   * Without this, a suite that always uploads real objects cannot tell "headR2 is checked" from
+   * "headR2 was deleted from the code" — verified: removing the headR2 call from submitSubmission
+   * left the mount suite fully green. Proving the gate needs an object that is genuinely absent.
+   */
+  remove(key: string): Promise<void>;
 }
 
 /** Is a disposable local MinIO configured for this run? Suites use this to fail closed in CI. */
@@ -152,6 +160,10 @@ export async function setupPartnerTestStorage(opts: { bucketSuffix: string }): P
     },
     track(key: string) {
       tracked.add(key);
+    },
+    async remove(key: string) {
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      tracked.delete(key);
     },
     async put(key: string, body: Buffer, contentType = "image/png") {
       tracked.add(key);

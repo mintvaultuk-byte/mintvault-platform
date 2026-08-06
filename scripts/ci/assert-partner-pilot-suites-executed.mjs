@@ -30,6 +30,7 @@ const reportPath = process.argv[2] ?? "vitest-report.json";
 const SUITES = [
   { file: "tests/partner-submission-workflow.test.ts", min: 40 },
   { file: "tests/partner-portal-mount-integration.test.ts", min: 28 },
+  { file: "tests/partner-connector-runtime.test.ts", min: 15 },
   { file: "tests/partner-real-r2-storage.test.ts", min: 2 },
   { file: "tests/partner-grading-bridge-migration.test.ts", min: 12 },
 ];
