@@ -1073,8 +1073,13 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
                 AND r.status <> 'consumed'
            )
         )
+        -- NOTE: partner_submissions has NO completed_at column (0007 creates the table, 0044 adds
+        -- only location_name_snapshot; verified against the live staging schema). An earlier
+        -- revision of this statement set completed_at here, which raised 42703 undefined_column
+        -- and rolled back the ENTIRE completion transaction — the certificate never completed.
+        -- status='completed' + updated_at is the full record of completion for this table.
         UPDATE partner_submissions ps
-           SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+           SET status = 'completed', updated_at = NOW()
           FROM complete_partner_submissions cps
          WHERE ps.id = cps.partner_submission_id
            AND ps.tenant_id = cps.tenant_id

@@ -245,3 +245,68 @@ Consequences for the pilot test, either way:
   * checkpoint-A assertions should pin the AGGREGATE surfaces (which do gate correctly) rather than
     `/api/cert/:id`;
   * CERT1 should target the approval predicate on an aggregate query, where one demonstrably exists.
+
+---
+
+## F11 (BLOCKER, FIXED) — `markCompleted` wrote a column that does not exist
+
+`server/print-workflow.ts` (introduced by this PR at `e8d0a350`, NOT on origin/main) ended the
+partner-submission level of the completion cascade with:
+
+```sql
+UPDATE partner_submissions ps
+   SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+```
+
+`partner_submissions` has **no `completed_at` column**. 0007 creates the table without it; the only
+later `ADD COLUMN` on that table (0044) adds `location_name_snapshot`. Verified three ways:
+
+1. `grep` over every migration — zero hits for `partner_submissions` + `completed_at`;
+2. live STAGING schema — 20 columns, `completed_at` absent (`information_schema.columns`);
+3. executed on a real PostgreSQL 17 against the exact staging column list:
+   `ERROR: column "completed_at" does not exist`.
+
+Impact: Postgres raises `42703` at parse time, which aborts the enclosing `db.transaction` in
+`markCompleted`. That rolls back the `certificates.print_state='completed'` updates, the `complete`
+`print_events` rows AND the work-item update, and returns a 500. **No Partner submission could ever
+complete.** It was invisible because no DB-backed test creates `partner_grading_work_items`, so the
+whole cascade is skipped by the `to_regclass` guard in every existing suite.
+
+**Fix applied:** drop `completed_at` from the SET list. `status='completed'` + `updated_at` is the
+complete record of completion for this table, matching how `cancelled_at`/`submitted_at` are the
+only other lifecycle stamps. No migration, no schema change. Re-proved on PostgreSQL 17: `UPDATE 1`.
+
+---
+
+## F12 (CORRECTION to F1) — approving the FINAL card DOES settle, in the same request
+
+F1 above says "approval does not consume credits". That is true of the **route handler** but NOT of
+the **approval as a whole**, and the difference is load-bearing for the pilot test.
+
+`mirrorPartnerApproval` (`server/partner/grading-review-mirror.ts`, new in this PR — not on
+origin/main) checks `bool_and(pgwi.status = 'approved')` across the destination's non-void work
+items and, when they are all approved, calls:
+
+```ts
+if (outcome.allApproved && outcome.destinationSubmissionId) {
+  await storage.updateSubmissionStatus(outcome.destinationSubmissionId, "ready_to_return", {...});
+}
+```
+
+and `server/storage.ts:786` routes `ready_to_return` straight into
+`settlePartnerCreditForDestinationStatus`. So the destination status transition IS still the
+settlement trigger — it is simply driven automatically by the last approval rather than by a
+separate admin action.
+
+**Corrected two-card wallet progression — this is what the pilot test must assert:**
+
+| Step | available / reserved / consumed |
+|---|---|
+| funded, draft only | 10 / 0 / 0 |
+| after submit (2 physical units) | 8 / 2 / 0 |
+| after approving card 1 of 2 | 8 / 2 / 0  ← not all approved, mirror does not fire |
+| after approving card 2 of 2 | 8 / 0 / 2  ← mirror fires → ready_to_return → settlement |
+
+An assertion of "8/2/0 after BOTH approvals" would be asserting behaviour this branch does not have.
+The `APPROVAL-SETTLE1` mutation must therefore target the **card-1-of-2** assertion (the only point
+where approval provably does not settle), not the post-both-approvals state.
