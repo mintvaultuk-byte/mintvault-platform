@@ -126,6 +126,15 @@ export const SUITES = [
     note: "ensureWallet had no caller in server/, so no ACTIVE org ever got a wallet and every credit path 404'd; own cluster.",
   },
   {
+    file: "tests/partner-completion-cascade.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note:
+      "the only suite that runs the partner completion cascade — applies 0045 so the " +
+      "to_regclass guard opens, then calls the real markCompleted; own disposable cluster.",
+  },
+  {
     file: "tests/partner-submission-lifecycle-migration.test.ts",
     topology: TOPOLOGY.SELF,
     critical: true,

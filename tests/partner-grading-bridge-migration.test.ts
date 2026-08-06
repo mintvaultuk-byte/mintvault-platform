@@ -281,7 +281,14 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       try {
         const plan = await planMigrations(migrator, listMigrationFiles());
         expect(plan.pending).not.toContain(MIGRATION);
-        expect(plan.changed ?? [], "no applied migration may have drifted from its checksum").toEqual([]);
+        // The field is `checksumMismatches`. An earlier revision read `plan.changed`, which does
+        // not exist on MigratePlan — `undefined ?? []` made the assertion unfailable, so the
+        // checksum-drift proof for 0045 proved nothing. Test files are excluded from `npm run
+        // check` (tsconfig `exclude: **/*.test.ts`), so tsc never flagged the bad property.
+        expect(plan.checksumMismatches, "no applied migration may have drifted from its checksum").toEqual([]);
+        // Non-vacuity: the plan really did inspect the journal, so an empty mismatch list is a
+        // finding rather than an artefact of nothing having been read.
+        expect(plan.alreadyApplied, "the plan must have observed applied migrations").toContain(MIGRATION);
       } finally {
         await migrator.end();
       }

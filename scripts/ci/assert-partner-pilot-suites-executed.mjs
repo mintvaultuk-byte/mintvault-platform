@@ -33,6 +33,14 @@ const SUITES = [
   { file: "tests/partner-connector-runtime.test.ts", min: 15 },
   { file: "tests/partner-real-r2-storage.test.ts", min: 2 },
   { file: "tests/partner-grading-bridge-migration.test.ts", min: 12 },
+  /**
+   * The ONLY suite that executes the partner completion cascade. Everything else stops at the
+   * `to_regclass('public.partner_grading_work_items')` guard, because no other DB-backed test
+   * creates that table — which is exactly how a cascade that wrote a non-existent column
+   * (partner_submissions.completed_at, SQLSTATE 42703) reached a PR with every suite green.
+   * If this floor is ever missing, that entire code path is unproven again.
+   */
+  { file: "tests/partner-completion-cascade.test.ts", min: 7 },
 ];
 
 let report;
