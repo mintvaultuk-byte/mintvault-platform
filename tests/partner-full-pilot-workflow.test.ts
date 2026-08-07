@@ -58,6 +58,7 @@ let creditReservations: typeof import("../server/partner/partner-credit-reservat
 let wallet: typeof import("../server/partner/partner-wallet-service");
 let submissions: typeof import("../server/partner/submission-service");
 let printWorkflow: typeof import("../server/print-workflow");
+let lifecycle: typeof import("../server/partner/partner-submission-credit-lifecycle");
 let storage: PartnerTestStorage;
 
 const ADMIN_ACTOR = { actorUserId: null, actorEmail: "full-pilot-admin@example.test" };
@@ -531,6 +532,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     wallet = await import("../server/partner/partner-wallet-service");
     submissions = await import("../server/partner/submission-service");
     printWorkflow = await import("../server/print-workflow");
+    lifecycle = await import("../server/partner/partner-submission-credit-lifecycle");
   }, 180_000);
 
   afterAll(async () => {
@@ -1009,6 +1011,85 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     ).toBe("2");
 
     // Settled money is untouched by a reprint.
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+  });
+
+  it("P11: a failure AFTER card one has settled rolls the whole transaction back — no partial consume", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    // Deterministic failure INSIDE the settlement transaction, after card one has already been
+    // consumed. CREDIT1 proves refusal BEFORE any money moves; this proves rollback once it has.
+    //
+    // The consume loop runs in reservation (created_at, id) order and writes one ledger row per
+    // card with correlation_id = that reservation's id. A CHECK constraint rejecting card TWO's
+    // correlation_id therefore fires only on the second iteration — card one's UPDATE, ledger row
+    // and consumed event are already written when it raises. This is a database-level condition,
+    // not a production code path, so nothing client-reachable is added.
+    await admin.query(
+      `ALTER TABLE partner_credit_ledger
+         ADD CONSTRAINT tmp_settle2_block_card_two
+         CHECK (correlation_id IS NULL OR correlation_id <> '${f.reservationIds[1]}')`
+    );
+    try {
+      await expect(approveAsSuperAdmin(f.certIds[1])).rejects.toThrow();
+
+      // The whole transaction must have rolled back — including card one's already-written work.
+      expect(
+        await scalar<string>(
+          "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='active'",
+          [f.partnerSubmissionId]
+        ),
+        "BOTH reservations must still be active; card one's consume must have been undone"
+      ).toBe("2");
+      expect(
+        await scalar<string>(
+          "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='consumed'",
+          [f.partnerSubmissionId]
+        ),
+        "a one-card consumed state is the exact corruption this guard exists to prevent"
+      ).toBe("0");
+      expect(
+        await scalar<string>(
+          "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='consumed'",
+          [f.tenantId]
+        )
+      ).toBe("0");
+      expect(
+        await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0", [
+          f.tenantId,
+        ]),
+        "not one debit may survive a rolled-back settlement"
+      ).toBe("0");
+      expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+      expect(
+        await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+        "the destination must stay retryable, not stranded mid-settlement"
+      ).toBe("in_grading");
+    } finally {
+      await admin.query("ALTER TABLE partner_credit_ledger DROP CONSTRAINT tmp_settle2_block_card_two");
+    }
+
+    // RECOVERY IS NOT THROUGH RE-APPROVAL, and asserting that it was would have been wrong.
+    // approveAsSuperAdmin's certificate publish and mirrorPartnerApproval's work-item update each
+    // COMMIT before settlement runs on a separate pool. So after the injected failure the cards are
+    // already approved: a replayed approval matches no pending_review work item, the mirror returns
+    // not_partner, and updateSubmissionStatus is never reached. The submission would sit unsettled
+    // forever if approval were the only route.
+    const replay = await approveAsSuperAdmin(f.certIds[1]);
+    expect(replay.kind, "the approval route cannot re-drive a failed settlement").toBe("not_partner");
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    // The real recovery is the destination status transition — the same entry point the mirror
+    // would have used. With the injected failure gone it settles cleanly, which is what proves the
+    // rollback left recoverable state rather than a stranded submission.
+    const settled = await lifecycle.settlePartnerCreditForDestinationStatus(
+      f.destinationSubmissionId,
+      "ready_to_return",
+      {}
+    );
+    expect(settled, "the documented operator recovery must actually settle").not.toBeNull();
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
   });
 });
