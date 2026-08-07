@@ -54,6 +54,7 @@ import bcrypt from "bcryptjs";
 // nothing here re-implements any part of the scoring.
 import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
 import { gradeFromMvgsScore } from "@shared/mvgs-scoring";
+import { isBlackLabel } from "@shared/pristine";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import {
   setupPartnerTestStorage,
@@ -770,33 +771,19 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
   });
 
   // =====================================================================================
-  // A1/A2 — WHERE DOES THE GRADE COME FROM?
+  // SERVER AUTHORITY — A1/A2 (rewritten) plus proofs B, D, E, F.
   //
-  // The standing architecture is "ONE MVGS engine, server-authoritative". PR #288 satisfies the
-  // first half and not the second, and no test in this repository observed the difference. Every
-  // existing assertion about the partner grading path (including G1–G5 above) sends a
-  // self-consistent `overall_grade` and therefore cannot tell "the server computed 9" apart from
-  // "the client asserted 9 and the server wrote it down".
+  // These tests previously CHARACTERISED the defect: the partner path persisted whatever
+  // overall grade and sub-grades the browser claimed, and the one MVGS engine — run over the
+  // evidence the server itself had just stored — disagreed. That behaviour is now fixed, so
+  // the two tests are inverted DELIBERATELY: every expectation that used to read "OBSERVED:
+  // the client authored this" now reads "the server authored this, and it equals the engine's
+  // own verdict on the stored evidence".
   //
-  // These two tests separate those cases by OBSERVATION, not by reading the source. They send a
-  // grade that CONTRADICTS the grading evidence on the very same request, then run the one real
-  // engine (shared/mvgs-input-builder → shared/mvgs-scoring, imported read-only) over the evidence
+  // The method is unchanged and is still observation, not source-reading: send a grade that
+  // CONTRADICTS the evidence on the very same request, then run the one real engine
+  // (shared/mvgs-input-builder → shared/mvgs-scoring, imported read-only) over the evidence
   // the SERVER persisted, and compare.
-  //
-  //   • If grading were server-authoritative, the persisted grade would follow the evidence and the
-  //     client's contradictory number would be ignored or refused.
-  //   • If the client is authoritative, the persisted grade is the client's number and disagrees
-  //     with the engine's own verdict on the server's own stored evidence.
-  //
-  // This is not a hypothetical injection: `GradingWorkstation` (client/src/pages/partner/grading.tsx
-  // mounts it with apiBase="/api/partner/grading") computes the grade IN THE BROWSER and PUTs the
-  // result, so the number that reaches the database is authored client-side by construction. The
-  // partner adapter widens the set of principals who can author it from HQ staff to external
-  // partner-shop operators.
-  //
-  // These tests deliberately assert the CURRENT behaviour so the architecture question has a
-  // permanent, executable answer. If server authority is ever introduced, they turn red — which is
-  // the correct signal, and the comment on each expectation says so.
   // =====================================================================================
 
   /** Centering so bad the engine cannot rate it highly, expressed in the persisted string form. */
@@ -807,44 +794,89 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     centering_back_tb: "90/10",
   } as const;
 
-  /** Run the ONE engine over the columns the server actually stored for this certificate. */
-  async function engineVerdictFromPersistedEvidence(certId: number): Promise<number> {
-    const row = await admin.query<{
-      centering_front_lr: string | null;
-      centering_front_tb: string | null;
-      centering_back_lr: string | null;
-      centering_back_tb: string | null;
-      defects: unknown;
-      dark_border_front: boolean | null;
-      dark_border_back: boolean | null;
-      eye_appeal_modifier: number | string | null;
-    }>(
+  /** Flawless centering — the engine's own top outcome, used to prove the gates are
+   *  EVIDENCE-driven rather than merely "always refuse the client". */
+  const PERFECT_CENTERING = {
+    centering_front_lr: "50/50",
+    centering_front_tb: "50/50",
+    centering_back_lr: "50/50",
+    centering_back_tb: "50/50",
+  } as const;
+
+  /** One real MVGS-classified surface pin — enough to force a non-zero deduction. */
+  const REAL_SURFACE_PIN = [{ mvgsCode: "SC", tier: "D2", zone: "FA", x: 0.5, y: 0.5 }];
+
+  /** A SEVERE surface pin: SP D1 in the art zone, which the engine weights heavily enough to
+   *  move the surface SUB-GRADE off its top bucket (not just the score). */
+  const SEVERE_SURFACE_PIN = [{ mvgsCode: "SP", tier: "D1", zone: "FA", x: 0.4, y: 0.4 }];
+
+  interface EngineVerdict {
+    score: number;
+    grade: number;
+    deductions: Record<string, number>;
+  }
+
+  /**
+   * Run the ONE engine over the columns the server actually stored, using the SAME input
+   * shape the HQ admin approve route builds (server/routes.ts, "MVGS scoring on approve").
+   * `pipeline_settings` does not exist on this disposable cluster, so `loadMvgsCalibration()`
+   * inside the server falls back to DEFAULT_MVGS_CALIBRATION — which is what scoreMvgsV2 uses
+   * here when no calibration is passed. Both sides therefore use identical calibration.
+   */
+  async function engineOverPersistedEvidence(certId: number): Promise<EngineVerdict> {
+    const row = await admin.query<Record<string, any>>(
       `SELECT centering_front_lr, centering_front_tb, centering_back_lr, centering_back_tb,
-              defects, dark_border_front, dark_border_back, eye_appeal_modifier
+              defects, surface_values, dark_border_front, dark_border_back, eye_appeal_modifier,
+              whitening_lines, crease_lines, crease_span_pct, wrinkle_severity, tear_severity
          FROM certificates WHERE id=$1`,
       [certId]
     );
     const c = row.rows[0];
+    const surfaceFlags = (c.surface_values ?? {}) as Record<string, unknown>;
     const result = scoreMvgsV2({
       centeringFrontLr: c.centering_front_lr,
       centeringFrontTb: c.centering_front_tb,
       centeringBackLr: c.centering_back_lr,
       centeringBackTb: c.centering_back_tb,
-      defects: Array.isArray(c.defects) ? (c.defects as never[]) : [],
+      defects: (Array.isArray(c.defects) ? c.defects : [])
+        .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
+        .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) })),
       darkBorderFront: !!c.dark_border_front,
       darkBorderBack: !!c.dark_border_back,
       eyeAppealModifier: Number(c.eye_appeal_modifier ?? 0) || 0,
+      whiteningLines: Array.isArray(c.whitening_lines) ? c.whitening_lines : null,
+      creaseLines: Array.isArray(c.crease_lines) ? c.crease_lines : null,
+      creaseSpanPct: c.crease_span_pct != null ? Number(c.crease_span_pct) : null,
+      wrinkleSeverity: c.wrinkle_severity ?? null,
+      tearSeverity: c.tear_severity ?? null,
+      hasCrease: !!(surfaceFlags as any).hasCrease,
+      hasTear: !!(surfaceFlags as any).hasTear,
     });
-    return gradeFromMvgsScore(result.score);
+    return { score: result.score, grade: gradeFromMvgsScore(result.score), deductions: result.deductions };
   }
 
-  it("A1: a partner draft save stores the CLIENT's overall grade verbatim — the server never re-derives it from the evidence it just persisted", async () => {
+  /** Every authority-bearing column the partner must not be able to author. */
+  async function authorityColumns(certId: number) {
+    const r = await admin.query<Record<string, any>>(
+      `SELECT grade::text, grade_type, label_type, card_name,
+              centering_score::text, corners_score::text, edges_score::text, surface_score::text,
+              centering_front_lr, grade_strength_score, private_notes, auth_status,
+              grade_approved_at, print_state, operator_grade::text, operator_subgrades
+         FROM certificates WHERE id=$1`,
+      [certId]
+    );
+    return r.rows[0];
+  }
+
+  // ── PROOF A — a manipulated client grade is ignored ─────────────────────────────────────
+
+  it("A1: a manipulated client grade is IGNORED — the server re-derives the grade from the evidence it persisted", async () => {
     const f = await seedGradingFixture({ privateNotes: "engine-authority" });
     const cookie = await login(f.graderEmail);
     const certId = f.certIds[0];
 
-    // A perfect 10 asserted on top of catastrophic centering, in ONE request. No implementation of
-    // MVGS can produce 10 from this evidence, so the persisted value identifies its own author.
+    // A perfect 10 asserted on top of catastrophic centering, in ONE request. No implementation
+    // of MVGS can produce 10 from this evidence, so the persisted value identifies its author.
     const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
       cookie,
       body: {
@@ -859,52 +891,44 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    const after = await admin.query<{
-      grade: string | null;
-      card_name: string | null;
-      centering_front_lr: string | null;
-      centering_score: string | null;
-    }>("SELECT grade, card_name, centering_front_lr, centering_score FROM certificates WHERE id=$1", [certId]);
+    const after = await authorityColumns(certId);
 
     // Positive control — the request really did write this row, so nothing below passes vacuously.
-    expect(after.rows[0].card_name, "positive control: the request reached the certificate").toBe(
-      "Engine Authority Card"
-    );
-    // The contradictory EVIDENCE was persisted exactly as sent, alongside the contradictory grade.
-    expect(
-      after.rows[0].centering_front_lr,
-      "the server stored the centering measurement the client supplied"
-    ).toBe("90/10");
+    expect(after.card_name, "positive control: the request reached the certificate").toBe("Engine Authority Card");
+    // The EVIDENCE was persisted exactly as sent: it is evidence, and evidence is the partner's
+    // to supply. Only the CONCLUSION is the server's.
+    expect(after.centering_front_lr, "the server stored the centering measurement the client supplied").toBe("90/10");
 
-    const engineGrade = await engineVerdictFromPersistedEvidence(certId);
-    const persistedGrade = Number(after.rows[0].grade);
-
-    // THE ARCHITECTURE FACT. The one engine, run over the server's OWN stored evidence, returns a
-    // grade nowhere near what the server accepted and stored.
-    expect(engineGrade, "sanity: the engine must rate this evidence poorly, or the test proves nothing").toBeLessThan(
+    const engine = await engineOverPersistedEvidence(certId);
+    expect(engine.grade, "sanity: the engine must rate this evidence poorly, or the test proves nothing").toBeLessThan(
       5
     );
-    expect(
-      persistedGrade,
-      "OBSERVED: the persisted grade is the number the CLIENT sent, not one derived server-side"
-    ).toBe(10);
-    expect(
-      persistedGrade,
-      "OBSERVED: the stored grade disagrees with the one MVGS engine's verdict on the stored evidence — " +
-        "grading is client-authoritative on the partner path. If server authority is ever introduced, " +
-        "this expectation is the one that must be updated, deliberately."
-    ).not.toBe(engineGrade);
 
-    // The sub-grades are equally client-authored: the client claimed centering 10 while persisting
-    // 90/10 centering, and the server stored the claim.
+    // THE ARCHITECTURE FACT, inverted from what this test used to assert. Changed deliberately:
+    // the previous expectation was `.toBe(10)` / `.not.toBe(engineGrade)`, characterising the
+    // client-authoritative defect. It is now equality with the engine's own verdict.
     expect(
-      Number(after.rows[0].centering_score),
-      "OBSERVED: the centering SUB-grade is also stored verbatim from the request, unrelated to the " +
-        "centering measurement stored on the same row"
-    ).toBe(10);
+      Number(after.grade),
+      "the persisted grade is the ONE engine's verdict on the server's own stored evidence, " +
+        "not the number the client sent"
+    ).toBe(engine.grade);
+    expect(Number(after.grade), "the client's contradictory claim of 10 was not persisted").not.toBe(10);
+
+    // Sub-grades are server-authored too. The client claimed centering 10 while supplying 90/10
+    // centering; the server stored the chart's answer for 90/10 instead.
+    expect(
+      Number(after.centering_score),
+      "the centering SUB-grade follows the stored centering measurement, not the client's claim"
+    ).toBeLessThan(10);
+
+    // And the response the partner receives is the SERVER's result, not an echo of their input.
+    expect((res.body as any).authority, "the partner is shown the server's outcome").toMatchObject({
+      source: "server",
+      overallGrade: String(engine.grade),
+    });
   });
 
-  it("A2: the client-authored grade is what SUPER ADMIN REVIEW receives — the contradiction survives submit-for-review as operator_grade", async () => {
+  it("A2: SUPER ADMIN REVIEW receives the SERVER's grade — operator_grade is the engine verdict, not the browser's claim", async () => {
     const f = await seedGradingFixture({ privateNotes: "engine-authority-review" });
     const cookie = await login(f.graderEmail);
     const certId = f.certIds[0];
@@ -924,37 +948,333 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.gradingStatus).toBe("pending_review");
 
-    const after = await admin.query<{
-      grader_status: string;
-      operator_grade: string | null;
-      operator_subgrades: { centering?: number } | null;
-      grade_approved_at: Date | null;
-    }>(
-      "SELECT grader_status, operator_grade, operator_subgrades, grade_approved_at FROM certificates WHERE id=$1",
+    const after = await authorityColumns(certId);
+    const grader = await admin.query<{ grader_status: string }>(
+      "SELECT grader_status FROM certificates WHERE id=$1",
       [certId]
     );
 
     // Positive control — the submit transition really happened.
-    expect(after.rows[0].grader_status, "positive control: the card really did move to review").toBe("pending_review");
+    expect(grader.rows[0].grader_status, "positive control: the card really did move to review").toBe("pending_review");
     // The mandatory-review gate still holds; this test is about WHAT is reviewed, not whether.
-    expect(after.rows[0].grade_approved_at, "a partner submit must still never publish").toBeNull();
+    expect(after.grade_approved_at, "a partner submit must still never publish").toBeNull();
 
-    const engineGrade = await engineVerdictFromPersistedEvidence(certId);
-    expect(engineGrade, "sanity: the engine must rate this evidence poorly").toBeLessThan(5);
+    const engine = await engineOverPersistedEvidence(certId);
+    expect(engine.grade, "sanity: the engine must rate this evidence poorly").toBeLessThan(5);
 
-    // OBSERVED: the operator snapshot a Super Admin approves against is the CLIENT's number.
+    // Changed deliberately: was `.toBe(10)` / `.not.toBe(engineGrade)`.
     expect(
-      Number(after.rows[0].operator_grade),
-      "OBSERVED: operator_grade — the record of 'what the partner operator graded' — is the number the " +
-        "browser sent, not a server-derived one"
-    ).toBe(10);
+      Number(after.operator_grade),
+      "operator_grade — the record a Super Admin reviews — is the SERVER's derived grade"
+    ).toBe(engine.grade);
+    expect(Number(after.operator_grade), "the browser's claim of 10 never reached review").not.toBe(10);
     expect(
-      Number(after.rows[0].operator_grade),
-      "OBSERVED: the reviewed operator grade contradicts the one engine's verdict on the same row's evidence"
-    ).not.toBe(engineGrade);
+      Number((after.operator_subgrades as any)?.centering),
+      "the snapshotted sub-grades are the server's, not the client's claims"
+    ).toBeLessThan(10);
+  });
+
+  // ── PROOF B — partner path and HQ/server path agree on identical evidence ───────────────
+
+  it("B: identical evidence through the PARTNER path and the HQ engine writer yields an IDENTICAL authoritative result", async () => {
+    const f = await seedGradingFixture({ privateNotes: "parity" });
+    const cookie = await login(f.graderEmail);
+    const partnerCert = f.certIds[0];
+    const hqCert = f.certIds[1];
+
+    const EVIDENCE = {
+      centering_front_lr: "60/40",
+      centering_front_tb: "55/45",
+      centering_back_lr: "70/30",
+      centering_back_tb: "50/50",
+      defects: REAL_SURFACE_PIN,
+      dark_border_front: true,
+      dark_border_back: false,
+      eye_appeal_modifier: 0,
+      wrinkle_severity: null,
+      tear_severity: null,
+    };
+
+    // PARTNER PATH — over real HTTP, through the mounted production router. The client also
+    // sends a contradictory grade, which must be discarded.
+    const res = await req("PUT", `/api/partner/grading/certificates/${partnerCert}/grade`, {
+      cookie,
+      body: { ...EVIDENCE, overall_grade: "1", grade_centering: 1, grade_corners: 1, grade_edges: 1, grade_surface: 1 },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    // HQ PATH — the SAME evidence through the unmodified grading engine writer that every HQ
+    // grading surface calls (server/grader.ts::applyCertGradeDraft). No partner adapter involved.
+    const { applyCertGradeDraft } = await import("../server/grader");
+    expect(await applyCertGradeDraft(hqCert, { ...EVIDENCE, overall_grade: "4" })).toBe(true);
+
+    // The authoritative result on each row, computed the way the HQ approve route computes it.
+    const partnerEngine = await engineOverPersistedEvidence(partnerCert);
+    const hqEngine = await engineOverPersistedEvidence(hqCert);
+
+    // 1. Identical evidence ⇒ identical engine verdict on both rows.
+    expect(partnerEngine.score, "same evidence ⇒ same engine score on both paths").toBe(hqEngine.score);
+    expect(partnerEngine.grade, "same evidence ⇒ same engine grade on both paths").toBe(hqEngine.grade);
+    expect(partnerEngine.deductions, "same evidence ⇒ same deduction breakdown").toEqual(hqEngine.deductions);
+
+    // 2. Sanity: the engine's verdict is neither of the two numbers a client asserted, so the
+    //    comparison below is not tautological.
+    expect(partnerEngine.grade).not.toBe(1);
+    expect(partnerEngine.grade).not.toBe(4);
+
+    // 3. The PARTNER row PERSISTED that authoritative result. The HQ row persisted its
+    //    operator's number (9) — that is HQ's existing, unchanged behaviour and is precisely
+    //    why the partner surface needed the adapter: an external shop is not an HQ operator.
+    const partnerRow = await authorityColumns(partnerCert);
+    const hqRow = await authorityColumns(hqCert);
+    expect(Number(partnerRow.grade), "the partner path persisted the shared authoritative verdict").toBe(
+      hqEngine.grade
+    );
+    expect(Number(hqRow.grade), "control: the HQ writer is untouched and still persists its caller's grade").toBe(4);
+  });
+
+  // ── PROOF D — Black Label / Pristine cannot be client-forced ────────────────────────────
+
+  it("D: Black Label / Pristine cannot be forced by the client, and is granted only by the evidence", async () => {
+    const forced = await seedGradingFixture({ privateNotes: "pristine-forced" });
+    const forcedCookie = await login(forced.graderEmail);
+    const forcedCert = forced.certIds[0];
+
+    // The client claims a flawless card AND tries to set the label columns directly, while
+    // supplying evidence that carries a real defect deduction.
+    const res = await req("PUT", `/api/partner/grading/certificates/${forcedCert}/grade`, {
+      cookie: forcedCookie,
+      body: {
+        ...PERFECT_CENTERING,
+        defects: SEVERE_SURFACE_PIN,
+        overall_grade: "10",
+        grade_centering: 10,
+        grade_corners: 10,
+        grade_edges: 10,
+        grade_surface: 10,
+        label_type: "black",
+        card_name: "Forced Pristine",
+      },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const row = await authorityColumns(forcedCert);
+    expect(row.card_name, "positive control: the request reached the certificate").toBe("Forced Pristine");
+    expect(row.label_type, "a partner client cannot write label_type — Black Label is not theirs to set").not.toBe(
+      "black"
+    );
+
+    const engine = await engineOverPersistedEvidence(forcedCert);
+    // The shared Pristine/Black-Label gate, evaluated over what was PERSISTED. It must refuse,
+    // because the evidence carries a real deduction — exactly as it would for an HQ card.
     expect(
-      after.rows[0].operator_subgrades?.centering,
-      "OBSERVED: the snapshotted sub-grades are the client's claims too"
-    ).toBe(10);
+      isBlackLabel(
+        {
+          centering: Number(row.centering_score),
+          corners: Number(row.corners_score),
+          edges: Number(row.edges_score),
+          surface: Number(row.surface_score),
+        },
+        Number(row.grade),
+        engine.deductions
+      ),
+      "the shared Pristine gate refuses the persisted row: the client's claim of four 10s was discarded"
+    ).toBe(false);
+    expect(
+      Number(row.surface_score),
+      "the surface SUB-grade reflects the real pin, not the client's 10"
+    ).toBeLessThan(10);
+
+    // NEGATIVE CONTROL — the gate is evidence-driven, not merely "always refuse".
+    const clean = await seedGradingFixture({ privateNotes: "pristine-earned" });
+    const cleanCookie = await login(clean.graderEmail);
+    const cleanCert = clean.certIds[0];
+    const cleanRes = await req("PUT", `/api/partner/grading/certificates/${cleanCert}/grade`, {
+      cookie: cleanCookie,
+      // The client here claims a POOR grade. Genuinely flawless evidence must still earn 10.
+      body: { ...PERFECT_CENTERING, defects: [], overall_grade: "2", grade_centering: 2 },
+    });
+    expect(cleanRes.status, JSON.stringify(cleanRes.body)).toBe(200);
+    const cleanRow = await authorityColumns(cleanCert);
+    const cleanEngine = await engineOverPersistedEvidence(cleanCert);
+    expect(Number(cleanRow.grade), "flawless evidence earns the engine's top grade despite the client claiming 2").toBe(
+      cleanEngine.grade
+    );
+    expect(
+      isBlackLabel(
+        {
+          centering: Number(cleanRow.centering_score),
+          corners: Number(cleanRow.corners_score),
+          edges: Number(cleanRow.edges_score),
+          surface: Number(cleanRow.surface_score),
+        },
+        Number(cleanRow.grade),
+        cleanEngine.deductions
+      ),
+      "Pristine is GRANTED by the evidence on the same shared gate — proving D is not a blanket refusal"
+    ).toBe(true);
+  });
+
+  // ── PROOF E — a partner cannot author B3 (nor any grading gate) ─────────────────────────
+
+  it("E: a partner cannot author the B3 sub-grade gate, the grade kind, or any other publish gate input", async () => {
+    // B3 (owner-approved 2026-07-02, server/grader.ts::checkGradePublishGates) is the rule that
+    // a NUMERIC grade may not publish while any of centering_score / corners_score /
+    // edges_score / surface_score is NULL. Its inputs are therefore the four sub-grade columns
+    // and the grade kind. Both are now server-authored.
+    //
+    // (B1 and B2 are not grading rules in this codebase — they are local test-case and
+    // review-finding labels. Stated here rather than fabricating an assertion for them.)
+    const f = await seedGradingFixture({ privateNotes: "b3" });
+    const cookie = await login(f.graderEmail);
+    const certId = f.certIds[0];
+
+    const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: {
+        ...CATASTROPHIC_CENTERING,
+        defects: REAL_SURFACE_PIN,
+        // The client tries to satisfy B3 with fabricated sub-grades, and to reclassify the card
+        // as non-numeric so the gate would exempt it entirely.
+        grade_centering: 10,
+        grade_corners: 10,
+        grade_edges: 10,
+        grade_surface: 10,
+        grade_type: "non_numeric",
+        overall_grade: "AA",
+        // …and to reach past grading into workflow / provenance / settlement state.
+        grader_status: "approved",
+        review_required: false,
+        grade_approved_at: "2020-01-01T00:00:00Z",
+        print_state: "printed",
+        origin_type: "HQ",
+        origin_partner_legal_name: "Someone Else Ltd",
+        operator_grade: 10,
+        verified_defects: [],
+        grade_strength_score: 100,
+        card_name: "B3 Probe",
+      },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const row = await authorityColumns(certId);
+    const engine = await engineOverPersistedEvidence(certId);
+    expect(row.card_name, "positive control: the request reached the certificate").toBe("B3 Probe");
+
+    // The grade kind stayed numeric — the client could not reclassify the card to dodge B3.
+    expect(row.grade_type, "a partner cannot change the grade KIND").toBe("numeric");
+    expect(Number(row.grade), "the grade is the engine's numeric verdict, not the client's 'AA'").toBe(engine.grade);
+
+    // B3's four inputs are all present (so the gate can run) AND all server-derived.
+    for (const col of ["centering_score", "corners_score", "edges_score", "surface_score"] as const) {
+      expect(row[col], `B3 input ${col} must be populated by the server`).not.toBeNull();
+    }
+    expect(
+      [row.centering_score, row.corners_score, row.edges_score, row.surface_score].every((v) => Number(v) === 10),
+      "the client's four fabricated 10s did not become the B3 inputs"
+    ).toBe(false);
+
+    // Workflow, provenance and settlement state were untouched by the request.
+    const wf = await admin.query<Record<string, any>>(
+      `SELECT grader_status, review_required, print_state, origin_type, origin_partner_legal_name,
+              operator_grade, verified_defects
+         FROM certificates WHERE id=$1`,
+      [certId]
+    );
+    expect(wf.rows[0].grader_status, "a partner cannot self-approve").toBe("assigned");
+    expect(row.grade_approved_at, "a partner cannot backdate publication").toBeNull();
+    expect(wf.rows[0].print_state, "a partner cannot advance the print lifecycle").toBe("awaiting_approval");
+    expect(wf.rows[0].origin_type, "a partner cannot rewrite provenance").toBe("PARTNER");
+    expect(wf.rows[0].origin_partner_legal_name).not.toBe("Someone Else Ltd");
+    expect(wf.rows[0].operator_grade, "a partner cannot pre-seed the review snapshot").toBeNull();
+  });
+
+  // ── PROOF F — the authority decision is persisted and auditable ─────────────────────────
+
+  it("F: the server-authority version and the engine verdict are PERSISTED and AUDITABLE", async () => {
+    const f = await seedGradingFixture({ privateNotes: "audit" });
+    const cookie = await login(f.graderEmail);
+    const certId = f.certIds[0];
+
+    const res = await req("POST", `/api/partner/grading/certificates/${certId}/submit`, {
+      cookie,
+      body: { ...CATASTROPHIC_CENTERING, defects: REAL_SURFACE_PIN, overall_grade: "10", card_name: "Audit Card" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const row = await authorityColumns(certId);
+    const engine = await engineOverPersistedEvidence(certId);
+
+    // 1. PERSISTED — the engine score that produced the grade is on the row, in the same column
+    //    the HQ approve route writes it to.
+    expect(
+      Number(row.grade_strength_score),
+      "grade_strength_score records WHICH engine verdict produced the stored grade"
+    ).toBe(engine.score);
+    expect(Number(row.grade)).toBe(engine.grade);
+
+    // 2. AUDITABLE — the partner audit trail carries the authority decision, its version, and
+    //    the derived values, on an append-only table the runtime role cannot UPDATE or DELETE.
+    const audit = await admin.query<{ after_value: Record<string, any> }>(
+      `SELECT after_value FROM partner_audit_events
+        WHERE record_type='certificate' AND record_id=$1 AND action='grading.submitted_for_review'
+        ORDER BY created_at DESC LIMIT 1`,
+      [String(certId)]
+    );
+    expect(audit.rows.length, "an audit event was written for the submit").toBe(1);
+    const detail = audit.rows[0].after_value;
+    expect(detail.grade_authority, "the audit records that the SERVER authored the grade").toBe("server");
+    expect(typeof detail.grade_authority_version, "the authority contract version is recorded").toBe("number");
+    expect(detail.mvgs_score, "the audited score matches the persisted score").toBe(engine.score);
+    expect(detail.overall_grade, "the audited grade matches the persisted grade").toBe(String(engine.grade));
+
+    // 3. The audit trail must not leak HQ-private state.
+    expect(JSON.stringify(detail)).not.toContain("audit");
+  });
+
+  // ── The whitelist itself ────────────────────────────────────────────────────────────────
+
+  it("W: partnerGradeBody is a WHITELIST — unknown and authority-bearing keys never cross the boundary", async () => {
+    const { partnerGradeBody, PARTNER_GRADE_SERVER_AUTHORED_FIELDS } = await import(
+      "../server/partner/grading-authority"
+    );
+    const out = partnerGradeBody({
+      centering_front_lr: "50/50",
+      card_name: "kept",
+      defects: [],
+      // authority
+      overall_grade: "10",
+      grade_centering: 10,
+      grade_corners: 10,
+      grade_edges: 10,
+      grade_surface: 10,
+      grade_type: "non_numeric",
+      label_type: "black",
+      // HQ-private / auth state
+      private_notes: "x",
+      privateNotes: "x",
+      auth_status: "authentic_altered",
+      auth_notes: "x",
+      // provenance / approval / settlement / print
+      origin_type: "HQ",
+      grade_approved_at: "2020-01-01",
+      grade_approved_by: "someone",
+      grader_status: "approved",
+      review_required: false,
+      operator_grade: 10,
+      operator_subgrades: {},
+      print_state: "printed",
+      verified_defects: [],
+      grade_strength_score: 100,
+      deleted_at: null,
+      // an unknown key invented by an attacker
+      totally_made_up_column: 1,
+    });
+    expect(Object.keys(out).sort(), "only evidence/identity keys survive").toEqual(
+      ["card_name", "centering_front_lr", "defects"].sort()
+    );
+    for (const f of PARTNER_GRADE_SERVER_AUTHORED_FIELDS) {
+      expect(out, `${f} is server-authored and must never come from the client`).not.toHaveProperty(f);
+    }
   });
 });
