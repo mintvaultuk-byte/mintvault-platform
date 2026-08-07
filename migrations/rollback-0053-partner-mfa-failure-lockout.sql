@@ -53,4 +53,17 @@ BEGIN
   END IF;
 END$$;
 
+-- De-journal, so the runner treats 0053 as pending again. Without this the row survives, the
+-- runner classifies 0053 as alreadyApplied (scripts/db/migrate.ts planMigrations), and it will
+-- never re-apply the lockout columns — the MFA brute-force ceiling would stay off behind a green
+-- migration status. `to_regclass` first, so this cannot 42P01 on a database with no journal
+-- table. Same shape as rollback-0049/0051/0052/0054/0055/0056.
+DO $$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $q$DELETE FROM schema_migrations
+                WHERE filename = '0053_partner_mfa_failure_lockout.sql'$q$;
+  END IF;
+END$$;
+
 COMMIT;
