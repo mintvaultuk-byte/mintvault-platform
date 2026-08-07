@@ -14,6 +14,7 @@ import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-dif
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape, stripNonCode } from "./helpers/strip-non-code";
+import { diffProtectedEngineReach } from "./helpers/protected-module-refs";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import {
   STRUCTURED_VARIANT_VERSION,
@@ -258,6 +259,18 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         const addedCode = addedCodeOf(diff, "+");
         const addedJs = addedJsOf(diff, "+");
         expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
+        // A module SPECIFIER is a StringLiteral, so `stripNonCode`/`stripToJs` blank it in BOTH
+        // modes — correctly, since that is what stops prose and SQL faking a signature (N5). The
+        // side effect, proven by hostile review on 2026-08-07, is that a dynamic reach into a
+        // protected CALCULATION engine leaves no token for the identifier scans below:
+        //     const seg = ["@shared", "cent" + "ering"].join("/");
+        //     const eng = await import(seg);
+        // Resolving specifiers is therefore done in a SEPARATE pass whose output never reaches
+        // the signature regexes — see tests/helpers/protected-module-refs.ts for why that is
+        // strictly safer than un-blanking literals (and why un-blanking would not even catch the
+        // concatenated form). Nothing in strip-non-code.ts changed.
+        const engineReach = diffProtectedEngineReach(diff, "+");
+        expect(engineReach, `server/grader.ts reaches the protected calculation engine: ${engineReach}`).toBe("");
         const signatureA =
           /\bvalidateGradeDraftIdentityAndVariant\s*\(/.test(addedJs) &&
           /rarity_code\s*=\s*\$\{/.test(addedCode) &&
