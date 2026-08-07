@@ -37,7 +37,9 @@
  * miss the concatenated form).
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { execFileSync } from "child_process";
 import { join } from "path";
 import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
 import { stripNonCode } from "./helpers/strip-non-code";
@@ -617,7 +619,7 @@ describe("shared/mvgs-scoring.ts — the visibility-only export exemption is gen
     expect(v.reason).toBe("pure visibility-only export change");
     expect(v.ok).toBe(true);
     expect(v.hasNumericLiteral).toBe(false);
-    expect(v.bodyUnchanged).toBe(true);
+    expect(v.imageIdentical).toBe(true);
     expect(v.exportWidened).toBe(true);
   });
 
@@ -670,12 +672,12 @@ describe("shared/mvgs-scoring.ts — the visibility-only export exemption is gen
       asDiff(["  if (remaining >= LIMIT) return TOP;"], ["  if (remaining > LIMIT) return TOP;"])
     );
     expect(v.ok).toBe(false);
-    expect(v.bodyUnchanged).toBe(false);
+    expect(v.imageIdentical).toBe(false);
   });
 
   it("PROOF 3: REORDERING the bucket returns is still REJECTED", () => {
-    // Digit-free reordering — condition 1 alone would not see this; the multiset body-identity
-    // check does. Order matters because the buckets are evaluated top-down.
+    // Digit-free reordering. Order matters because the buckets are evaluated top-down. Note the
+    // multiset predicate says TRUE here — it is image identity that rejects it.
     const v = visibilityOnlyExportChange(
       asDiff(
         ["  if (remaining >= HIGH) return TOP;", "  if (remaining >= MID) return MIDGRADE;"],
@@ -683,14 +685,15 @@ describe("shared/mvgs-scoring.ts — the visibility-only export exemption is gen
       )
     );
     expect(v.ok).toBe(false);
-    expect(v.exportWidened).toBe(false);
+    expect(v.bodyUnchanged, "the defeated multiset predicate is blind to a reorder").toBe(true);
+    expect(v.imageIdentical, "image identity is what rejects a reorder").toBe(false);
   });
 
   it("PROOF 3: a digit-free ARITHMETIC change is still REJECTED", () => {
     const v = visibilityOnlyExportChange(asDiff(["  const g = base;"], ["  const g = base - penalty;"]));
     expect(v.ok).toBe(false);
     expect(v.hasNumericLiteral).toBe(false); // the owner's condition alone would MISS this…
-    expect(v.bodyUnchanged).toBe(false); // …the body-identity condition catches it
+    expect(v.imageIdentical).toBe(false); // …image identity catches it
   });
 
   it("PROOF 3: a dynamic import into a protected module is still caught by the specifier resolver", () => {
@@ -747,12 +750,13 @@ describe("shared/mvgs-scoring.ts — the visibility-only export exemption is gen
     expect(mathsNoDigits.hasNumericLiteral, "owner's condition alone sees nothing here").toBe(false);
     expect(mathsNoDigits.ok, "the full conjunction still rejects it").toBe(false);
 
-    // (c) EXPORT-WIDENED condition. Without it, a pure reordering (body multiset identical,
-    //     no digits) would qualify — and bucket order is evaluation order.
+    // (c) IMAGE-IDENTITY condition. This is the one the hostile reviewer defeated when it was
+    //     a sorted multiset comparison. A pure reordering is digit-free AND multiset-identical,
+    //     so ONLY image identity rejects it — and bucket order is evaluation order.
     const reorder = visibilityOnlyExportChange(asDiff(["  a();", "  b();"], ["  b();", "  a();"]));
-    expect(reorder.hasNumericLiteral).toBe(false);
-    expect(reorder.bodyUnchanged, "a reorder IS body-identical as a multiset").toBe(true);
-    expect(reorder.exportWidened, "…so only condition 3 rejects it").toBe(false);
+    expect(reorder.hasNumericLiteral, "condition 1 sees nothing in a reorder").toBe(false);
+    expect(reorder.bodyUnchanged, "the OLD multiset predicate is blind to a reorder").toBe(true);
+    expect(reorder.imageIdentical, "…image identity is what rejects it").toBe(false);
     expect(reorder.ok).toBe(false);
   });
 
@@ -781,5 +785,141 @@ describe("shared/mvgs-scoring.ts — the visibility-only export exemption is gen
       }
       expect(src).toContain("server/grader.ts changed but matches no founder-authorised signature");
     }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// REGRESSION — the hostile reviewer's reorder bypass (HIGH, 2026-08-07)
+//
+// The first exemption compared added/removed line bodies as SORTED multisets, so a pure
+// REORDERING was "body-identical". Bundled with the authorised `export` addition it satisfied
+// every condition and the guard returned ok:true on a payload that removes the structural
+// ceiling from the final grade. These tests pin the closure permanently, using REAL git diffs
+// against the REAL engine file rather than synthetic strings.
+// ───────────────────────────────────────────────────────────────────────────────────────────
+
+describe("REGRESSION: the reorder bypass of the mvgs-scoring exemption is closed", () => {
+  const ENGINE = "shared/mvgs-scoring.ts";
+
+  /** A genuine `git diff` between the real engine file and a mutated copy of it. */
+  const realDiff = (mutate: (src: string) => string): string => {
+    const original = read(ENGINE);
+    const mutated = mutate(original);
+    expect(mutated, "the mutation did not apply — the anchor text has moved").not.toBe(original);
+    const dir = mkdtempSync(join(tmpdir(), "mv-guard-"));
+    const a = join(dir, "before.ts");
+    const b = join(dir, "after.ts");
+    try {
+      writeFileSync(a, original);
+      writeFileSync(b, mutated);
+      try {
+        // --no-index always exits 1 when files differ, so the diff arrives via the error.
+        execFileSync("git", ["diff", "--no-index", "--unified=3", a, b], { encoding: "utf8" });
+        return "";
+      } catch (e: any) {
+        return String(e.stdout ?? "");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  /** The reviewer's exact payload: export worstCeiling AND move the ceiling cap below finalGrade. */
+  const CEILING_LINE = "  if (ceiling) maxGrade = Math.min(maxGrade, ceiling.grade);";
+  const reviewerPayload = (src: string): string =>
+    src
+      .replace(
+        "function worstCeiling(...ceilings: Array<MvgsCeiling | null>): MvgsCeiling | null {",
+        "export function worstCeiling(...ceilings: Array<MvgsCeiling | null>): MvgsCeiling | null {"
+      )
+      .replace(
+        [
+          CEILING_LINE,
+          "",
+          "  const scoreGrade = gradeFromMvgsScore(score);",
+          "  const finalGrade = Math.min(scoreGrade, maxGrade);",
+        ].join("\n"),
+        [
+          "",
+          "  const scoreGrade = gradeFromMvgsScore(score);",
+          "  const finalGrade = Math.min(scoreGrade, maxGrade);",
+          CEILING_LINE,
+        ].join("\n")
+      );
+
+  it("PROOF 1: the reviewer's exact reorder payload is REJECTED", () => {
+    const diff = realDiff(reviewerPayload);
+    // The payload really is what the reviewer described: the ceiling line moves below finalGrade.
+    expect(diff).toContain("-  if (ceiling) maxGrade = Math.min(maxGrade, ceiling.grade);");
+    expect(diff).toContain("+  if (ceiling) maxGrade = Math.min(maxGrade, ceiling.grade);");
+    expect(diff).toContain("+export function worstCeiling(");
+
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.ok, `the reorder payload must be rejected — got: ${v.reason}`).toBe(false);
+    expect(v.imageIdentical, "image identity must be what rejects it").toBe(false);
+    expect(v.reason).toMatch(/moved or changed/);
+  });
+
+  it("PROOF 4: order sensitivity is LOAD-BEARING — without it the payload slips through", () => {
+    // Evaluate the exemption with the ordering condition removed, i.e. exactly the pre-fix
+    // predicate (digit-free AND multiset-identical AND export-widened). It passes — which is
+    // precisely the bypass the reviewer exploited.
+    const v = visibilityOnlyExportChange(realDiff(reviewerPayload));
+    const preFixVerdict = !v.hasNumericLiteral && v.bodyUnchanged && v.exportWidened;
+    expect(preFixVerdict, "the PRE-FIX conjunction must demonstrably admit the payload").toBe(true);
+    // …and the shipped conjunction, which adds image identity, rejects it.
+    expect(v.ok).toBe(false);
+  });
+
+  it("the reviewer's two SUGGESTED fixes would NOT have closed this, which is why context is used", () => {
+    // "compare added/removed as ORDERED sequences" and "strict line-for-line pairing" both fail
+    // here: the moved line is TEXTUALLY IDENTICAL on both sides, so removed[0] === added[0].
+    // Only comparing against the unchanged CONTEXT reveals that its position changed.
+    const diff = realDiff(reviewerPayload);
+    const added = diff
+      .split("\n")
+      .filter((l) => l[0] === "+" && !l.startsWith("+++"))
+      .map((l) => l.slice(1));
+    const removed = diff
+      .split("\n")
+      .filter((l) => l[0] === "-" && !l.startsWith("---"))
+      .map((l) => l.slice(1));
+    const norm = (s: string) => s.replace(/\bexport\s+/g, "").replace(/\s+$/, "");
+    const orderedPairingPasses = added.length === removed.length && added.every((v, i) => norm(v) === norm(removed[i]));
+    expect(orderedPairingPasses, "ordered pairing alone would have PASSED the payload").toBe(true);
+    // The shipped check, which reads context, rejects it.
+    expect(visibilityOnlyExportChange(diff).ok).toBe(false);
+  });
+
+  it("PROOF 2: adding `export` to a function is ACCEPTED as a real git diff with context", () => {
+    // A faithful reproduction of commit 5bedfd2f's diff against the REAL engine file, with real
+    // context lines: the file as it stands has no export on remainingToGrade, and the authorised
+    // change adds one. Over-tightening would show up here as a false rejection.
+    const diff = realDiff((src) =>
+      src.replace(
+        "function remainingToGrade(remaining: number): number {",
+        "export function remainingToGrade(remaining: number): number {"
+      )
+    );
+    expect(diff).toContain("-function remainingToGrade(remaining: number): number {");
+    expect(diff).toContain("+export function remainingToGrade(remaining: number): number {");
+    // real context lines are present, so this exercises the image comparison properly
+    expect(diff).toContain("  if (remaining >= 23) return 10;");
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.ok, `the authorised export must still be accepted - got: ${v.reason}`).toBe(true);
+    expect(v.imageIdentical).toBe(true);
+    expect(v.hasNumericLiteral, "context lines carry digits but are NOT changed lines").toBe(false);
+  });
+
+  it("a reorder that does NOT ride alongside an export is rejected too (context, not luck)", () => {
+    const diff = realDiff((src) =>
+      src.replace(
+        [CEILING_LINE, "", "  const scoreGrade = gradeFromMvgsScore(score);"].join("\n"),
+        ["", "  const scoreGrade = gradeFromMvgsScore(score);", CEILING_LINE].join("\n")
+      )
+    );
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.ok).toBe(false);
+    expect(v.imageIdentical).toBe(false);
   });
 });
