@@ -35,8 +35,25 @@
 -- refusal would also defeat its only purpose: it exists to unblock an emergency, and by then later
 -- migrations will certainly exist. Recorded explicitly so the absence reads as a decision rather
 -- than an omission. This mirrors rollback-0051's reasoning verbatim.
+--
+-- LOCK SAFETY — ADDED 2026-08-07. Every statement below takes ACCESS EXCLUSIVE: DROP POLICY,
+-- ALTER TABLE ... DISABLE ROW LEVEL SECURITY, GRANT/REVOKE and CREATE POLICY all do, on
+-- partner_internal_notes, partner_management_audit, partner_service_tiers and cert_counter.
+-- ACCESS EXCLUSIVE blocks READS as well as writes, and a request that has to QUEUE behind an
+-- existing AccessShareLock also blocks every reader that arrives after it. partner_service_tiers
+-- is on the pricing-resolution path and cert_counter is the platform-wide certificate-number
+-- allocator shared by HQ grading and the partner connector, so an unbounded wait here stalls
+-- certificate issuance for both. The numbered runner NEVER executes rollback files
+-- (scripts/db/migrate.ts's FILE_RE matches only `NNNN_*.sql`), so its lock_timeout machinery does
+-- not apply and an unbounded wait is genuinely unbounded. The bound goes inside this file's own
+-- transaction, before the first lock is taken — the shape rollback-0049 established. SET LOCAL is
+-- discarded at COMMIT/ROLLBACK so it cannot leak into the operator's psql session; if it fires the
+-- whole file aborts atomically and nothing is changed.
 
 BEGIN;
+
+-- MUST be the first statement inside this transaction: it must be in force before the first lock.
+SET LOCAL lock_timeout = '5s';
 
 -- ---- 1. Undo the evidence-table repair (both halves) ------------------------------------------
 DROP POLICY IF EXISTS partner_internal_notes_tenant_isolation  ON partner_internal_notes;

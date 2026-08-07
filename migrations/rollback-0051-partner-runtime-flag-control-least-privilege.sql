@@ -24,11 +24,36 @@
 -- structurally invalidated by it. A blanket refusal would instead defeat this file's only purpose:
 -- it exists to unblock an emergency, and by then later migrations will certainly exist. Recorded
 -- explicitly so the absence reads as a decision rather than an omission.
+--
+-- LOCK SAFETY — ADDED 2026-08-07, AND THE PROFILE IS WORSE THAN "GRANTS ONLY" SUGGESTS.
+-- DROP POLICY, CREATE POLICY and GRANT all take ACCESS EXCLUSIVE on partner_feature_flags, which
+-- blocks READS, not merely writes. That table is on the hottest partner path there is:
+-- server/partner/mount.ts:119 and :132 call resolveGlobalFlag('partner_emergency_stop') and
+-- resolveGlobalFlag('partner_portal_enabled') on EVERY partner portal request, uncached
+-- (server/partner/flags.ts:54-64), and resolveGlobalFlag FAILS CLOSED on any error. So a queued
+-- ACCESS EXCLUSIVE here does not merely slow the portal — requests stall on the flag read, and any
+-- that error out resolve partner_portal_enabled = false and serve the kill-switch response, with
+-- nothing in the logs pointing at this file. Run it in a quiet window.
+--
+-- The numbered runner NEVER executes rollback files (scripts/db/migrate.ts's FILE_RE matches only
+-- `NNNN_*.sql`), so the runner's own lock_timeout machinery does not apply here and an unbounded
+-- wait is genuinely unbounded. The bound is deliberately TIGHTER than the 5 s the other rollbacks
+-- in this series use: on this table a long queue is an outage, and failing fast to be re-run is
+-- strictly better than holding the portal down. SET LOCAL is discarded at COMMIT/ROLLBACK so it
+-- cannot leak into the operator's psql session; if it fires, the whole file aborts atomically and
+-- nothing is changed.
 
 BEGIN;
 
+-- MUST be the first statement inside this transaction: it must be in force before the first lock.
+SET LOCAL lock_timeout = '2s';
+
 DROP POLICY IF EXISTS partner_feature_flags_global_read  ON partner_feature_flags;
 DROP POLICY IF EXISTS partner_feature_flags_tenant_write ON partner_feature_flags;
+-- Drop the name we are about to CREATE, not only the ones we are replacing. Without this a second
+-- run of this file raises 42710 "policy already exists" — which matters in a DR restore and in any
+-- per-file `psql -f` sequence, where re-running the last step is the normal recovery move.
+DROP POLICY IF EXISTS partner_feature_flags_tenant_isolation ON partner_feature_flags;
 
 CREATE POLICY partner_feature_flags_tenant_isolation ON partner_feature_flags
   USING (tenant_id IS NULL OR tenant_id = partner_current_tenant())
