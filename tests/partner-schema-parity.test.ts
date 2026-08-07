@@ -146,11 +146,17 @@ describe("partner schema ↔ migration parity", () => {
       // `tenant_id IS NULL` branch governs SELECT only. It adds no table or column, so
       // the Drizzle-parity assertions above are unaffected by design.
       //
-      // NUMBER IS PROVISIONAL. 0046 is claimed twice across parallel branches
-      // (partner_connector_profile_read and partner_mfa_pending_lifecycle) and 0047-0049
-      // are claimed by the concurrent migration-renumbering work. 0050 was chosen to clear
-      // all of them; the coordinated release review assigns the final sequence.
-      "0050_partner_runtime_flag_control_least_privilege.sql",
+      // NUMBER ARBITRATED by the release coordinator against staging's schema_migrations
+      // (36 rows applied), after an initial collision at 0050:
+      //   0045 permanently unused — anything placed there is born un-rollbackable, because
+      //        0046 is already applied on staging
+      //   0046 partner_mfa_pending_lifecycle          APPLIED ON STAGING
+      //   0047 partner_owner_invariant_tenants RLS    (concurrent renumbering branch)
+      //   0048 location snapshot search_path          (concurrent renumbering branch)
+      //   0049 grading bridge, renumbered from 0045   (concurrent renumbering branch)
+      //   0050 connector profile-read GRANT           (committed on the origin-trading-name branch)
+      //   0051 this file
+      "0051_partner_runtime_flag_control_least_privilege.sql",
     ]);
   });
 

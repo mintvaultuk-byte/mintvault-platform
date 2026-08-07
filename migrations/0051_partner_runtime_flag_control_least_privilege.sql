@@ -1,4 +1,4 @@
--- 0050_partner_runtime_flag_control_least_privilege.sql
+-- 0051_partner_runtime_flag_control_least_privilege.sql
 -- SECURITY REPAIR — partner_runtime must not be able to WRITE the platform kill switches.
 --
 -- ============================================================================================
@@ -83,7 +83,7 @@
 -- clause, but partner_runtime holds only SELECT on it, so there is no write to leak — verified in
 -- the same inventory and left alone rather than churned.
 --
--- ROLLBACK: migrations/rollback-0050-partner-runtime-flag-control-least-privilege.sql restores
+-- ROLLBACK: migrations/rollback-0051-partner-runtime-flag-control-least-privilege.sql restores
 -- both the grants and the single combined policy exactly as 0001 left them.
 
 -- --------------------------------------------------------------------------------------------
@@ -104,16 +104,16 @@ BEGIN
     FROM pg_roles WHERE rolname = 'partner_runtime';
 
   IF is_super IS NULL THEN
-    RAISE EXCEPTION '0050: role partner_runtime does not exist; 0001 must be applied first';
+    RAISE EXCEPTION '0051: role partner_runtime does not exist; 0001 must be applied first';
   END IF;
   IF is_super THEN
     RAISE EXCEPTION
-      '0050: partner_runtime is SUPERUSER. Revoking privileges from a superuser changes nothing — '
+      '0051: partner_runtime is SUPERUSER. Revoking privileges from a superuser changes nothing — '
       'it would ignore both the revoked grants and every row-level policy. Fix the role first.';
   END IF;
   IF is_bypass THEN
     RAISE EXCEPTION
-      '0050: partner_runtime is BYPASSRLS. The policy split below would be unenforceable against '
+      '0051: partner_runtime is BYPASSRLS. The policy split below would be unenforceable against '
       'it, so this repair cannot deliver the isolation it claims. Fix the role first.';
   END IF;
 
@@ -122,7 +122,7 @@ BEGIN
       SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public' AND c.relname = t AND c.relkind = 'r'
     ) THEN
-      RAISE EXCEPTION '0050: table public.% is missing', t;
+      RAISE EXCEPTION '0051: table public.% is missing', t;
     END IF;
   END LOOP;
 END$$;
@@ -173,14 +173,14 @@ BEGIN
      AND table_name   IN ('partner_feature_flags', 'partner_emergency_controls')
      AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES');
   IF leaked IS NOT NULL THEN
-    RAISE EXCEPTION '0050: partner_runtime still holds write privileges: %', leaked;
+    RAISE EXCEPTION '0051: partner_runtime still holds write privileges: %', leaked;
   END IF;
 
   -- (b) SELECT is RETAINED. Losing it would fail every portal gate closed and take the portal down;
   --     an over-tightening must fail here rather than in production.
   FOREACH t IN ARRAY ARRAY['partner_feature_flags', 'partner_emergency_controls'] LOOP
     IF NOT has_table_privilege('partner_runtime', format('public.%I', t), 'SELECT') THEN
-      RAISE EXCEPTION '0050: partner_runtime lost SELECT on %, which every portal gate depends on', t;
+      RAISE EXCEPTION '0051: partner_runtime lost SELECT on %, which every portal gate depends on', t;
     END IF;
   END LOOP;
 
@@ -191,7 +191,7 @@ BEGIN
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'public' AND c.relname = t;
     IF NOT enabled OR NOT forced THEN
-      RAISE EXCEPTION '0050: % must remain ENABLE + FORCE ROW LEVEL SECURITY (enabled=%, forced=%)',
+      RAISE EXCEPTION '0051: % must remain ENABLE + FORCE ROW LEVEL SECURITY (enabled=%, forced=%)',
         t, enabled, forced;
     END IF;
   END LOOP;
@@ -202,7 +202,7 @@ BEGIN
     FROM pg_policies
    WHERE schemaname = 'public' AND tablename = 'partner_feature_flags';
   IF npolicy <> 2 THEN
-    RAISE EXCEPTION '0050: expected exactly 2 policies on partner_feature_flags, found %', npolicy;
+    RAISE EXCEPTION '0051: expected exactly 2 policies on partner_feature_flags, found %', npolicy;
   END IF;
   IF EXISTS (
     SELECT 1 FROM pg_policies
@@ -210,7 +210,7 @@ BEGIN
        AND cmd <> 'SELECT' AND qual LIKE '%IS NULL%'
   ) THEN
     RAISE EXCEPTION
-      '0050: a non-SELECT policy on partner_feature_flags still admits the global (tenant_id IS NULL) '
+      '0051: a non-SELECT policy on partner_feature_flags still admits the global (tenant_id IS NULL) '
       'row into its USING clause — DELETE would remain reachable if the grant were restored';
   END IF;
 END$$;
