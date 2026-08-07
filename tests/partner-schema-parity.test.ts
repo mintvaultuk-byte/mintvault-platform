@@ -146,6 +146,13 @@ describe("partner schema ↔ migration parity", () => {
       "0047_partner_owner_invariant_tenants_rls.sql",
       "0048_partner_location_snapshot_search_path.sql",
       "0049_partner_grading_work_items.sql",
+      // 0050 is GRANT-ONLY: it gives partner_connector_runtime an RLS-scoped, column-level SELECT
+      // on partner_profiles(tenant_id, trading_name) so the connector importer can record the
+      // approved partner trading name in the immutable certificate origin snapshot 0035 created.
+      // It creates no object, modifies no row, and grants no write privilege. Its rollback is
+      // intentionally named rollback-0050-partner-connector-profile-read.sql (non-numbered) so the
+      // runner never applies it.
+      "0050_partner_connector_profile_read.sql",
     ]);
   });
 

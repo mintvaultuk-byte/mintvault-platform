@@ -182,10 +182,19 @@ export const PARTNER_MIGRATIONS_WITH_SECURITY_REPAIRS = [
   "0048_partner_location_snapshot_search_path",
 ] as const;
 
-/** 0049 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
+/**
+ * 0049 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table.
+ *
+ * 0050 grants partner_connector_runtime the RLS-scoped, column-level SELECT on
+ * partner_profiles(tenant_id, trading_name) that the importer's origin-snapshot query needs to
+ * record the approved partner trading name. Included here rather than in a separate list because
+ * every suite that drives a real connector import already uses this list, and without 0050 that
+ * import fails 42501 — exactly the production condition this harness exists to reproduce.
+ */
 export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
   ...PARTNER_MIGRATIONS_WITH_SECURITY_REPAIRS,
   "0049_partner_grading_work_items",
+  "0050_partner_connector_profile_read",
 ] as const;
 /**
  * Create the MintVault `certificates` table a partner migration needs.

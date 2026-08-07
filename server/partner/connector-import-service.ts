@@ -78,6 +78,33 @@ async function createPartnerCertificateForWorkItem(
     backImageKey: string;
   }
 ): Promise<{ id: number; certificateNumber: string }> {
+  // ORIGIN SNAPSHOT SOURCE — server-side only, never client-supplied.
+  //
+  // Every value below is read from the database using ids the SERVER already holds: the
+  // organisation id is the connector record's own `tenant_id` (never a request field), and the
+  // location id is re-qualified here by `l.tenant_id = o.id`, so a location belonging to any other
+  // tenant yields zero rows rather than a foreign shop's name. No column of any partner-writable
+  // table (partner_submissions, partner_submission_cards, partner_customers,
+  // partner_submission_handoffs.snapshot) reaches this query, so nothing a Partner client can post
+  // can influence what the certificate says about who graded the card.
+  //
+  // TRADING NAME: partner_profiles.trading_name is the approved, customer-facing shop name.
+  //   * migrations/0035_partner_certificate_origin.sql names it explicitly as the source of
+  //     origin_partner_trading_name ("partner_profiles.trading_name at capture. THE value rendered
+  //     as 'Graded by <X>'"), as does shared/schema.ts's CertificateOriginInput.
+  //   * server/labels.ts certificateOrigin() renders trading name first, legal name second.
+  //   * partner_profiles is written ONLY by the internal super-admin partner-management service on
+  //     the privileged admin pool (migration 0015 grants the partner-facing runtime SELECT and
+  //     nothing else). A row in it therefore already IS the MintVault-approved display name; there
+  //     is no separate approval/verification flag on partner_profiles to respect.
+  //   * partner_profiles.tenant_id is NOT NULL UNIQUE REFERENCES partner_organisations(id)
+  //     (0015), so this LEFT JOIN can add at most one row and can never fan the result out.
+  //   * LEFT (not inner) JOIN: a partner with no profile row yet must still import, falling back to
+  //     the legal name exactly as 0035 and certificateOrigin() document. A permission or RLS
+  //     failure is NOT silently absorbed by the LEFT JOIN — a missing grant raises 42501 and aborts
+  //     the whole import transaction. Migration 0050 grants partner_connector_runtime the
+  //     RLS-scoped SELECT this needs; the `app.tenant_id` GUC is already set for this transaction
+  //     by the caller before any FORCE-RLS'd partner table is read.
   const origin = await client.query<{
     partner_public_ref: string | null;
     partner_legal_name: string | null;
@@ -88,17 +115,36 @@ async function createPartnerCertificateForWorkItem(
   }>(
     `SELECT o.public_ref AS partner_public_ref,
             o.legal_name AS partner_legal_name,
-            NULL::text AS partner_trading_name,
+            p.trading_name AS partner_trading_name,
             l.public_ref AS location_public_ref,
             l.name AS location_name,
             l.address AS location_address
        FROM partner_organisations o
        JOIN partner_locations l ON l.id = $2 AND l.tenant_id = o.id
+       LEFT JOIN partner_profiles p ON p.tenant_id = o.id
       WHERE o.id = $1`,
     [params.partnerOrganisationId, params.partnerLocationId]
   );
   const snapshot = origin.rows[0];
-  if (!snapshot || !(snapshot.partner_trading_name || snapshot.partner_legal_name)) {
+
+  // FAIL CLOSED, and on the SAME definition of "named" the database and the renderer use.
+  //
+  // The previous guard was dead code: partner_organisations.legal_name is `text NOT NULL`
+  // (migrations/0001_partner_foundation.sql), so `partner_legal_name` was never falsy and the
+  // condition could not fire — which is how a NULL trading name reached a permanent, immutable
+  // certificate snapshot unnoticed.
+  //
+  // JS `.trim()` is deliberate: migration 0035's chk_certificates_origin_partner_complete spells
+  // out ECMAScript's exact trim set precisely so the CHECK and server/labels.ts's
+  // certificateOrigin() (which uses `.trim()`) agree in every locale. Applying the same trim here
+  // means a whitespace-only name is rejected BEFORE it is frozen, instead of being stored and then
+  // rendered as UNNAMED_PARTNER_ORIGIN_NAME forever.
+  //
+  // The trimmed values (or NULL when blank) are what get stored — a name is normalised on the way
+  // in, because the 0035 ENABLE ALWAYS immutability trigger means it can never be tidied later.
+  const tradingName = (snapshot?.partner_trading_name ?? "").trim() || null;
+  const legalName = (snapshot?.partner_legal_name ?? "").trim() || null;
+  if (!snapshot || !(tradingName || legalName)) {
     throw new ConnectorError("import_blocking_findings", "Partner certificate origin snapshot is incomplete.");
   }
 
@@ -149,8 +195,8 @@ async function createPartnerCertificateForWorkItem(
       integrityHash,
       params.partnerOrganisationId,
       snapshot.partner_public_ref,
-      snapshot.partner_legal_name,
-      snapshot.partner_trading_name,
+      legalName,
+      tradingName,
       params.partnerLocationId,
       snapshot.location_public_ref,
       snapshot.location_name,
