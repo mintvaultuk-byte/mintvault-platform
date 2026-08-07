@@ -1070,6 +1070,53 @@ describe("Partner RLS isolation coverage is wired up", () => {
     "partner_grading_work_items",
   ] as const;
 
+  /**
+   * RLS-LESS EXCEPTION REGISTER — the pinned counterpart to the catalogue-driven coverage sweep
+   * below.
+   *
+   * WHY THIS EXISTS (A8-F4): the sweep used to be scoped `AND c.relname = ANY(TENANT_TABLES)`, an
+   * 11-name INCLUSION allowlist, while its own comment claimed it "catches a NEW tenant-scoped
+   * table landing in a future migration with the RLS block forgotten". It could not: a table
+   * absent from the list was absent from the query, so it could never fail. The live catalogue in
+   * this fixture has 34 tenant-keyed `partner_%` tables, not 11. That gap is exactly how A8-F1
+   * survived every green run of this file.
+   *
+   * The sweep is now catalogue-driven — it asks the catalogue which tenant-keyed tables exist and
+   * checks ALL of them — and this register is an EXCLUSION list asserted in BOTH directions. A new
+   * unprotected table fails closed (not in the register). Protecting a table listed here ALSO
+   * fails, which forces the fix to delete its entry rather than leave a stale exception behind.
+   *
+   * `partnerRuntimeGrants` is the load-bearing half. An RLS-less table is only reachable by a
+   * partner session if `partner_runtime` holds a grant on it, so the grant set is pinned per entry
+   * and asserted separately below. Three of these four are genuinely unreachable (no grant); the
+   * fourth is an OPEN HIGH.
+   */
+  const RLS_EXEMPT_TENANT_TABLES: Record<string, { partnerRuntimeGrants: string[]; why: string }> = {
+    partner_connector_records: {
+      partnerRuntimeGrants: [],
+      why: "connector-plane table; reached only by partner_connector_runtime, never granted to partner_runtime",
+    },
+    partner_internal_notes: {
+      partnerRuntimeGrants: [],
+      why: "MintVault-staff-only table; no partner_runtime grant, so RLS is not the boundary",
+    },
+    partner_management_audit: {
+      partnerRuntimeGrants: [],
+      why: "HQ management audit trail; admin-pool only, no partner_runtime grant",
+    },
+    partner_owner_invariant_tenants: {
+      // OPEN HIGH — A8-F1. migrations/0032_partner_final_owner_invariant.sql creates this table at
+      // :9 and grants SELECT, INSERT to partner_runtime at :117, but never issues ENABLE ROW LEVEL
+      // SECURITY and never creates a policy. Every one of the file's five RLS statements concerns
+      // partner_users / partner_user_roles. The behavioural consequence is proved, not narrated,
+      // by the "KNOWN OPEN" test below. Repair needs a new migration number, which this branch is
+      // not authorised to allocate — the entry stays, the leak stays visible, and the fix will
+      // turn BOTH pinned tests red and force this entry's deletion.
+      partnerRuntimeGrants: ["INSERT", "SELECT"],
+      why: "A8-F1 OPEN HIGH: 0032 grants partner_runtime SELECT+INSERT with no RLS and no policy",
+    },
+  };
+
   const FP_A = "a".repeat(64);
   const FP_B = "b".repeat(64);
   let client: Client;
@@ -1483,10 +1530,11 @@ describe("Partner RLS isolation coverage is wired up", () => {
     });
   });
 
-  it("every partner table carrying tenant_id has RLS ENABLED, FORCED and an isolation policy", async () => {
-    // Coverage sweep, not shape-checking for its own sake: this is what catches a NEW tenant-scoped
-    // table landing in a future migration with the RLS block forgotten. FORCE matters because
-    // without it the table OWNER is exempt from its own policies.
+  /**
+   * The catalogue itself — asked once, reused by the three sweep assertions below so they cannot
+   * drift apart. NO allowlist filter: whatever the migration chain created is what gets checked.
+   */
+  async function tenantKeyedPartnerTables() {
     const { rows } = await client.query<{
       relname: string;
       relrowsecurity: boolean;
@@ -1497,17 +1545,137 @@ describe("Partner RLS isolation coverage is wired up", () => {
               (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'partner\\_%'
-          AND c.relname = ANY($1::text[])
           AND EXISTS (SELECT 1 FROM pg_attribute a
                        WHERE a.attrelid = c.oid AND a.attname = 'tenant_id'
                          AND a.attnum > 0 AND NOT a.attisdropped)
-        ORDER BY c.relname`,
-      [[...TENANT_TABLES]]
+        ORDER BY c.relname`
     );
-    const unprotected = rows.filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1);
-    expect(unprotected.map((r) => r.relname)).toEqual([]);
-    // Floor, so deleting tables from the chain cannot quietly shrink the sweep to nothing.
-    expect(rows.length).toBe(TENANT_TABLES.length);
+    return rows;
+  }
+
+  it("every partner table carrying tenant_id has RLS ENABLED, FORCED and an isolation policy", async () => {
+    // Coverage sweep, driven by the CATALOGUE rather than by an inclusion allowlist: this is what
+    // catches a NEW tenant-scoped table landing in a future migration with the RLS block
+    // forgotten. FORCE matters because without it the table OWNER is exempt from its own policies.
+    // See RLS_EXEMPT_TENANT_TABLES for why an exclusion register replaced the old TENANT_TABLES
+    // scoping, and for the one entry that is an open defect rather than a real exception.
+    const rows = await tenantKeyedPartnerTables();
+    const unprotected = rows
+      .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
+      .map((r) => r.relname);
+
+    // Both directions. Left-to-right: a new unprotected tenant table fails closed. Right-to-left:
+    // an exception that has since been fixed (or whose table was dropped) fails too, so the
+    // register cannot rot into a permanent blanket amnesty.
+    expect(unprotected.sort()).toEqual(Object.keys(RLS_EXEMPT_TENANT_TABLES).sort());
+
+    // Floors, so neither the chain shrinking nor a table being dropped can quietly reduce the
+    // sweep to a vacuous pass.
+    const names = rows.map((r) => r.relname);
+    expect(TENANT_TABLES.filter((t) => !names.includes(t))).toEqual([]);
+    expect(rows.length).toBeGreaterThanOrEqual(TENANT_TABLES.length);
+    // The sweep must be materially wider than the 11-name list it replaced — the whole point of
+    // A8-F4. If a future refactor reintroduces allowlist scoping, this is what notices.
+    expect(rows.length).toBeGreaterThan(TENANT_TABLES.length);
+  });
+
+  it("no RLS-less tenant table is reachable by partner_runtime except the pinned open defect", async () => {
+    // The grant is what turns "no RLS" into "cross-tenant read". Pinning the grant set per exempt
+    // table means a future migration handing partner_runtime access to any currently-unreachable
+    // exempt table fails here, even though the RLS sweep above would still pass.
+    const rows = await tenantKeyedPartnerTables();
+    const exempt = rows
+      .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
+      .map((r) => r.relname);
+
+    const { rows: grants } = await client.query<{ table_name: string; privilege_type: string }>(
+      `SELECT table_name, privilege_type FROM information_schema.table_privileges
+        WHERE grantee = 'partner_runtime' AND table_name = ANY($1::text[])`,
+      [exempt]
+    );
+
+    const actual = Object.fromEntries(exempt.map((t) => [t, [] as string[]]));
+    for (const g of grants) actual[g.table_name].push(g.privilege_type);
+    for (const t of exempt) actual[t] = [...new Set(actual[t])].sort();
+
+    const expected = Object.fromEntries(
+      exempt.map((t) => [t, [...(RLS_EXEMPT_TENANT_TABLES[t]?.partnerRuntimeGrants ?? [])].sort()])
+    );
+    expect(actual).toEqual(expected);
+  });
+
+  it("KNOWN OPEN (A8-F1): partner_owner_invariant_tenants leaks every tenant to partner_runtime", async () => {
+    // This asserts the DEFECT, deliberately. It is the behavioural counterpart to the register
+    // entry above: as long as 0032's omission is live, the leak is reproduced on every run instead
+    // of being a line in a document. When the repair migration lands, this test goes RED — which
+    // is the intended signal to delete it together with the register entry.
+    //
+    // Contrast arm: partner_organisations, an RLS-protected table on the same connection with the
+    // same GUC, returns only tenant A's row. So this is not a fixture artefact or a missing tenant
+    // context — it is the table ignoring tenant context entirely.
+    //
+    // FIXTURE PROVENANCE: the two rows this reads are NOT hand-inserted into
+    // partner_owner_invariant_tenants. They are produced by 0032's own trigger function
+    // partner_enforce_final_owner_invariant() — the only writer that exists in production — fired
+    // by an ordinary partner_user_roles INSERT that makes an ACTIVE user a PARTNER_OWNER. Two
+    // throwaway tenants are used so the shared A/B fixture is untouched. (The PARTNER_OWNER role
+    // row is created here because 0034's seed uses ON COMMIT DROP temp tables and leaves
+    // partner_roles empty under this suite's statement-at-a-time migration application.)
+    const C = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    const D = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    const ownerRole = "eeeeeeee-0000-0000-0000-00000000000e";
+    await client.query(
+      `INSERT INTO partner_roles (id, code, label) VALUES ($1,'PARTNER_OWNER','Partner Owner')
+         ON CONFLICT (code) DO NOTHING`,
+      [ownerRole]
+    );
+    const roleId = (await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code='PARTNER_OWNER'"))
+      .rows[0].id;
+    for (const [tenant, tag] of [
+      [C, "c"],
+      [D, "d"],
+    ] as const) {
+      await client.query(
+        `INSERT INTO partner_organisations (id, public_ref, legal_name, status)
+           VALUES ($1, $2, $3, 'ACTIVE') ON CONFLICT (id) DO NOTHING`,
+        [tenant, `ref${tag.toUpperCase()}`, `${tag.toUpperCase()} Ltd`]
+      );
+      const userId = `ffff0000-0000-0000-0000-00000000000${tag === "c" ? "1" : "2"}`;
+      await client.query(
+        `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status)
+           VALUES ($1, $2, $3, $3, $4, 'ACTIVE') ON CONFLICT (id) DO NOTHING`,
+        [userId, `u${tag}`, tenant, `${tag}@owner.test`]
+      );
+      // THIS is the production write path. The trigger on partner_user_roles is what inserts into
+      // partner_owner_invariant_tenants; nothing in this test writes to that table directly.
+      await client.query(
+        `INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)
+           ON CONFLICT (user_id, role_id) DO NOTHING`,
+        [tenant, userId, roleId]
+      );
+    }
+    const seeded = await client.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_owner_invariant_tenants WHERE tenant_id = ANY($1::uuid[])",
+      [[C, D]]
+    );
+    // Precondition, not the assertion: if the production trigger did not populate the table, the
+    // leak assertion below would pass or fail for the wrong reason.
+    expect(seeded.rows[0].n).toBe(2);
+
+    await asPartner(A, async () => {
+      const isolated = await client.query<{ n: number }>(
+        "SELECT count(*)::int n FROM partner_organisations WHERE id = ANY($1::uuid[])",
+        [[C, D]]
+      );
+      expect(isolated.rows[0].n).toBe(0);
+
+      const leaked = await client.query<{ n: number }>(
+        "SELECT count(*)::int n FROM partner_owner_invariant_tenants WHERE tenant_id = ANY($1::uuid[])",
+        [[C, D]]
+      );
+      // Tenant A holds no relationship whatsoever to C or D, yet reads both.
+      expect(leaked.rows[0].n).toBe(2);
+    });
   });
 
   // =========================================================================================
