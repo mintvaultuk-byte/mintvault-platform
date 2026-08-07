@@ -13,7 +13,13 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { parseLockTimeoutDirective, parseLockTimeoutFlag } from "../scripts/db/migrate";
+import {
+  describeMigrationFailure,
+  hasNoTransactionDirective,
+  parseLockTimeoutDirective,
+  parseLockTimeoutFlag,
+  parseToFlag,
+} from "../scripts/db/migrate";
 
 const MIGRATIONS = join(process.cwd(), "migrations");
 const RUNNER = readFileSync(join(process.cwd(), "scripts", "db", "migrate.ts"), "utf8");
@@ -50,8 +56,14 @@ describe("per-file and per-run overrides", () => {
   it("parses ms and s forms, and treats absence as 'use the run default'", () => {
     expect(parseLockTimeoutDirective("-- migrate:lock-timeout 30s\nSELECT 1;")).toBe(30_000);
     expect(parseLockTimeoutDirective("-- migrate:lock-timeout 2500ms\nSELECT 1;")).toBe(2500);
-    expect(parseLockTimeoutDirective("-- migrate:lock-timeout 750\nSELECT 1;")).toBe(750);
     expect(parseLockTimeoutDirective("SELECT 1;")).toBeUndefined();
+  });
+
+  it("REJECTS a unit-less directive instead of silently reading it as milliseconds", () => {
+    // `-- migrate:lock-timeout 30` used to mean 30 MILLISECONDS, which aborts essentially every
+    // migration. The author plainly meant seconds. An ambiguous bound is worse than none because
+    // it looks configured.
+    expect(() => parseLockTimeoutDirective("-- migrate:lock-timeout 30\n", "0099_x.sql")).toThrow(/without a unit/);
   });
 
   it("allows an explicit 0 (wait forever) only as a deliberate declaration", () => {
@@ -69,7 +81,123 @@ describe("per-file and per-run overrides", () => {
     expect(parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=30s"])).toBe(30_000);
     expect(parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=250ms"])).toBe(250);
     expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=soon"])).toThrow(/Invalid/);
-    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=99999999"])).toThrow(/out-of-range/);
+    // Out-of-range is still caught, but the value must carry a unit to get that far.
+    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=99999999ms"])).toThrow(/out-of-range/);
+    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=7200s"])).toThrow(/out-of-range/);
+  });
+
+  it("accepts the SPACE form too — it used to be ignored silently", () => {
+    // `--lock-timeout 30s` matched no `startsWith("--lock-timeout=")`, so it fell back to 5000 ms
+    // with no error: an operator who believed they had widened the maintenance window had not.
+    expect(parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout", "30s"])).toBe(30_000);
+    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout"])).toThrow(/requires a value/);
+    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout", "--apply"])).toThrow(/requires a value/);
+    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=1s", "--lock-timeout", "2s"])).toThrow(
+      /twice/
+    );
+  });
+
+  it("rejects a unit-less --lock-timeout, but allows a bare 0", () => {
+    expect(() => parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=30"])).toThrow(/unit is required/);
+    expect(parseLockTimeoutFlag(["node", "migrate.ts", "--lock-timeout=0"])).toBe(0);
+  });
+
+  it("--to truncates the pending tail and never reorders or skips", () => {
+    expect(parseToFlag(["node", "migrate.ts", "--apply"])).toBeUndefined();
+    expect(parseToFlag(["node", "migrate.ts", "--to=0048"])).toBe(48);
+    expect(parseToFlag(["node", "migrate.ts", "--to", "0048"])).toBe(48);
+    expect(() => parseToFlag(["node", "migrate.ts", "--to=junk"])).toThrow(/Invalid --to/);
+    expect(() => parseToFlag(["node", "migrate.ts", "--to"])).toThrow(/requires a migration number/);
+    // Filtering is `<= toNumber` over the ALREADY numerically ordered pending list, so the
+    // journal can only ever be a gap-free prefix. Pin the comparison, not just the parser.
+    expect(RUNNER).toContain("plan.pending.filter((name) => Number(byName.get(name)!.number) <= opts.toNumber!)");
+  });
+});
+
+describe("migrate:no-transaction directive must be anchored", () => {
+  it("matches only a comment line of its own", () => {
+    expect(hasNoTransactionDirective("-- migrate:no-transaction\nSELECT 1;")).toBe(true);
+    expect(hasNoTransactionDirective("  --  migrate:no-transaction  \nSELECT 1;")).toBe(true);
+    expect(hasNoTransactionDirective("SELECT 1;")).toBe(false);
+  });
+
+  it("does NOT match prose that merely mentions the directive", () => {
+    // The exact defect: 0022's own header explains it needs "no CONCURRENTLY, no
+    // migrate:no-transaction directive needed" and the sentence wraps, so a line BEGINS with the
+    // directive text. The unanchored detector took a 12-statement DDL migration out of the
+    // runner's transaction.
+    expect(hasNoTransactionDirective("-- migrate:no-transaction directive needed).\n")).toBe(false);
+    expect(hasNoTransactionDirective("-- we need no migrate:no-transaction here\n")).toBe(false);
+  });
+
+  it("0022 is transactional again, and its explanatory prose is untouched", () => {
+    const sql = readFileSync(join(MIGRATIONS, "0022_print_workflow_lifecycle.sql"), "utf8");
+    expect(sql, "the prose that triggered the bug must still be there").toMatch(/migrate:no-transaction directive/);
+    expect(hasNoTransactionDirective(sql)).toBe(false);
+  });
+
+  it("0018 — a real CONCURRENTLY migration — is still detected", () => {
+    const sql = readFileSync(join(MIGRATIONS, "0018_correction_audit_index.sql"), "utf8");
+    expect(hasNoTransactionDirective(sql)).toBe(true);
+  });
+
+  it("exactly one migration in the repo opts out of the transaction", () => {
+    const optedOut = readdirSync(MIGRATIONS)
+      .filter((f) => /^\d{4,}_.+\.sql$/.test(f))
+      .filter((f) => hasNoTransactionDirective(readFileSync(join(MIGRATIONS, f), "utf8")));
+    expect(optedOut).toEqual(["0018_correction_audit_index.sql"]);
+  });
+});
+
+describe("no-transaction failures tell the truth and stay recoverable", () => {
+  const LOCK_ERR = { code: "55P03", message: "canceling statement due to lock timeout" };
+
+  it("the transactional path may claim nothing was applied", () => {
+    const msg = describeMigrationFailure(LOCK_ERR, { lockTimeoutMs: 5000, transactional: true });
+    expect(msg).toContain("Nothing was applied and the transaction was rolled back");
+    expect(msg).toContain("no journal row was written");
+  });
+
+  it("the no-transaction path must NOT claim that — there is no transaction to roll back", () => {
+    const msg = describeMigrationFailure(LOCK_ERR, {
+      lockTimeoutMs: 5000,
+      transactional: false,
+      selfHealing: true,
+      indexName: "public.idx_audit_log_cert_correction_recent",
+    });
+    expect(msg).not.toContain("Nothing was applied");
+    expect(msg).toContain("ran OUTSIDE a transaction");
+    expect(msg).toContain("HAS taken effect");
+    // An invalid index is maintained on every write and used for no read — say so, and name it.
+    expect(msg).toContain("INVALID index (public.idx_audit_log_cert_correction_recent)");
+    // And tell the operator it recovers by itself, so nobody hand-edits the journal in an incident.
+    expect(msg).toContain("REPAIR it automatically on the next run");
+    expect(msg).toContain("No manual journal edit is needed");
+  });
+
+  it("a non-self-healing no-transaction failure says the runner cannot prove what survived", () => {
+    const msg = describeMigrationFailure(LOCK_ERR, { lockTimeoutMs: 5000, transactional: false, selfHealing: false });
+    expect(msg).toContain("cannot prove what survived");
+    expect(msg).toContain("protected action");
+    expect(msg).not.toContain("REPAIR it automatically");
+  });
+
+  it("a non-lock error is passed through untouched on both paths", () => {
+    const other = { code: "42P07", message: 'relation "x" already exists' };
+    expect(describeMigrationFailure(other, { lockTimeoutMs: 5000, transactional: true })).toBe(other.message);
+    expect(describeMigrationFailure(other, { lockTimeoutMs: 5000, transactional: false })).toBe(other.message);
+  });
+
+  it("only a self-healing file may be resumed, and only at an unchanged checksum", () => {
+    // Fail-closed is narrowed, not removed: everything the runner cannot verifiably repair stays
+    // fatal. Pin both halves of the condition.
+    expect(RUNNER).toContain("if (isSelfHealing(f) && row.checksum === f.checksum) {");
+    expect(RUNNER).toContain("plan.resumable.push({ filename: f.filename, status: row.status });");
+    expect(RUNNER).toContain("return f.noTransaction && ensureValidConcurrentIndexTarget(f.sql) !== null;");
+  });
+
+  it("a resumed row's checksum is refreshed, so a later run cannot compare against a stale one", () => {
+    expect(RUNNER).toContain("checksum=EXCLUDED.checksum");
   });
 });
 
