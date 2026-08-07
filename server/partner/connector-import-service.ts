@@ -102,7 +102,7 @@ async function createPartnerCertificateForWorkItem(
   //   * LEFT (not inner) JOIN: a partner with no profile row yet must still import, falling back to
   //     the legal name exactly as 0035 and certificateOrigin() document. A permission or RLS
   //     failure is NOT silently absorbed by the LEFT JOIN — a missing grant raises 42501 and aborts
-  //     the whole import transaction. Migration 0046 grants partner_connector_runtime the
+  //     the whole import transaction. Migration 0050 grants partner_connector_runtime the
   //     RLS-scoped SELECT this needs; the `app.tenant_id` GUC is already set for this transaction
   //     by the caller before any FORCE-RLS'd partner table is read.
   const origin = await client.query<{

@@ -1,4 +1,4 @@
--- 0046 — let the Trusted Intake Connector read the APPROVED partner trading name.
+-- 0050 — let the Trusted Intake Connector read the APPROVED partner trading name.
 --
 -- WHY THIS EXISTS
 -- ---------------------------------------------------------------------------
@@ -50,15 +50,15 @@
 -- write privilege leaked in. If anything is off the migration RAISES and the runner rolls back,
 -- rather than leaving the importer to discover the missing privilege mid-import in production.
 --
--- ROLLBACK: migrations/rollback-0046-partner-connector-profile-read.sql.
+-- ROLLBACK: migrations/rollback-0050-partner-connector-profile-read.sql.
 
 DO $$
 BEGIN
   IF to_regclass('public.partner_profiles') IS NULL THEN
-    RAISE EXCEPTION '0046 requires partner_profiles (migration 0015), which does not exist in this database.';
+    RAISE EXCEPTION '0050 requires partner_profiles (migration 0015), which does not exist in this database.';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'partner_connector_runtime') THEN
-    RAISE EXCEPTION '0046 requires the partner_connector_runtime role (migration 0008), which does not exist.';
+    RAISE EXCEPTION '0050 requires the partner_connector_runtime role (migration 0008), which does not exist.';
   END IF;
 
   -- A BYPASSRLS connector role would turn this read into a cross-tenant one. That is not the
@@ -66,7 +66,7 @@ BEGIN
   -- granting the privilege without re-checking would silently widen the blast radius.
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'partner_connector_runtime' AND (rolsuper OR rolbypassrls)) THEN
     RAISE EXCEPTION
-      '0046 refuses to grant partner_profiles access to partner_connector_runtime while it is SUPERUSER or BYPASSRLS — RLS tenant isolation would not apply.';
+      '0050 refuses to grant partner_profiles access to partner_connector_runtime while it is SUPERUSER or BYPASSRLS — RLS tenant isolation would not apply.';
   END IF;
 END$$;
 
@@ -80,10 +80,10 @@ DECLARE
   leaked text;
 BEGIN
   IF NOT has_column_privilege('partner_connector_runtime', 'public.partner_profiles', 'trading_name', 'SELECT') THEN
-    RAISE EXCEPTION '0046 assertion failed: partner_connector_runtime cannot SELECT partner_profiles.trading_name.';
+    RAISE EXCEPTION '0050 assertion failed: partner_connector_runtime cannot SELECT partner_profiles.trading_name.';
   END IF;
   IF NOT has_column_privilege('partner_connector_runtime', 'public.partner_profiles', 'tenant_id', 'SELECT') THEN
-    RAISE EXCEPTION '0046 assertion failed: partner_connector_runtime cannot SELECT partner_profiles.tenant_id.';
+    RAISE EXCEPTION '0050 assertion failed: partner_connector_runtime cannot SELECT partner_profiles.tenant_id.';
   END IF;
 
   -- No write privilege may exist on this table for the connector role, at table OR column level.
@@ -96,20 +96,20 @@ BEGIN
           AND has_column_privilege('partner_connector_runtime', 'public.partner_profiles', 'trading_name', p));
   IF leaked IS NOT NULL THEN
     RAISE EXCEPTION
-      '0046 assertion failed: partner_connector_runtime holds write privilege(s) on partner_profiles: %. The connector must never author a trading name.',
+      '0050 assertion failed: partner_connector_runtime holds write privilege(s) on partner_profiles: %. The connector must never author a trading name.',
       leaked;
   END IF;
 
   -- RLS must still be on and forced, or the grant above becomes a cross-tenant read.
   IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = 'public.partner_profiles'::regclass
                    AND relrowsecurity AND relforcerowsecurity) THEN
-    RAISE EXCEPTION '0046 assertion failed: partner_profiles no longer has ENABLE + FORCE ROW LEVEL SECURITY.';
+    RAISE EXCEPTION '0050 assertion failed: partner_profiles no longer has ENABLE + FORCE ROW LEVEL SECURITY.';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies
                   WHERE schemaname = 'public' AND tablename = 'partner_profiles'
                     AND policyname = 'partner_profiles_tenant_isolation') THEN
-    RAISE EXCEPTION '0046 assertion failed: partner_profiles_tenant_isolation policy is missing.';
+    RAISE EXCEPTION '0050 assertion failed: partner_profiles_tenant_isolation policy is missing.';
   END IF;
 
-  RAISE NOTICE '0046: partner_connector_runtime granted RLS-scoped SELECT (tenant_id, trading_name) on partner_profiles. No rows modified.';
+  RAISE NOTICE '0050: partner_connector_runtime granted RLS-scoped SELECT (tenant_id, trading_name) on partner_profiles. No rows modified.';
 END$$;
