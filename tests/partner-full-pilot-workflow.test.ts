@@ -1092,4 +1092,75 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(settled, "the documented operator recovery must actually settle").not.toBeNull();
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
   });
+
+  it("P12: SETTLE2 — a JS throw after card ONE has settled still rolls both cards back", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    // P11 injects a CHECK violation, which proves rollback at the DATABASE layer: once Postgres
+    // aborts, nothing else can run, so no application-level mutation can produce a partial commit.
+    // A plain JS throw leaves the transaction healthy, so this is the only injection that actually
+    // exercises the SAVEPOINT/rollback CODE.
+    let fired = 0;
+    lifecycle.__setSettlementFailPointForTest(({ index }) => {
+      fired += 1;
+      if (index === 0) throw new Error("SETTLE2 injected failure after card one");
+    });
+    try {
+      await expect(approveAsSuperAdmin(f.certIds[1])).rejects.toThrow();
+      expect(fired, "the failpoint must have fired exactly once, on card one").toBe(1);
+
+      expect(
+        await scalar<string>(
+          "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='active'",
+          [f.partnerSubmissionId]
+        ),
+        "card one's consume must be undone even though it had already succeeded"
+      ).toBe("2");
+      expect(
+        await scalar<string>(
+          "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='consumed'",
+          [f.partnerSubmissionId]
+        )
+      ).toBe("0");
+      expect(
+        await scalar<string>(
+          "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='consumed'",
+          [f.tenantId]
+        )
+      ).toBe("0");
+      expect(
+        await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0", [
+          f.tenantId,
+        ]),
+        "a partial one-card debit is the exact corruption SETTLE2 guards against"
+      ).toBe("0");
+      expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+      expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId])).toBe(
+        "in_grading"
+      );
+    } finally {
+      lifecycle.__clearSettlementFailPointForTest();
+    }
+
+    // Recoverable, not stranded: with the failpoint cleared the documented operator route settles.
+    const settled = await lifecycle.settlePartnerCreditForDestinationStatus(
+      f.destinationSubmissionId,
+      "ready_to_return",
+      {}
+    );
+    expect(settled).not.toBeNull();
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+  });
+
+  it("P13: the settlement failpoint is refused outside the test runner", async () => {
+    const prior = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      expect(() => lifecycle.__setSettlementFailPointForTest(() => {})).toThrow(/only available under the test runner/);
+    } finally {
+      process.env.NODE_ENV = prior;
+    }
+  });
 });

@@ -28,6 +28,39 @@ const CREDIT_SOURCE = "portal" as const;
 // Partner cancel after intake and submit a free replacement grading.
 const PRE_GRADING_DESTINATION_STATUSES = new Set(["draft", "new", "paid"]);
 const GRADE_COMPLETION_STATUSES = new Set(["ready_to_return", "completed"]);
+
+/**
+ * TEST-ONLY settlement failpoint.
+ *
+ * Proving that the SAVEPOINT/rollback CODE holds two cards together needs a failure that happens
+ * after card one's financial writes and leaves the PostgreSQL transaction HEALTHY. A constraint
+ * violation cannot do that: once Postgres aborts, every later statement fails until a savepoint
+ * rollback, so the database enforces atomicity below the application and no application-level
+ * mutation can produce a partial commit. A plain JS throw is the only injection that reaches the
+ * application's own guard.
+ *
+ * Guarded exactly like server/partner/partner-management-service.ts's failpoints: hard-refuses
+ * under NODE_ENV=production, allowed only under the test runner, defaults to null, and is settable
+ * only via an in-process import. Nothing in the HTTP surface or in request data can reach it.
+ */
+type SettlementFailPoint = (ctx: { reservationId: string; index: number }) => void;
+let settlementFailPointForTest: SettlementFailPoint | null = null;
+
+function settlementTestHooksAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  return process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+}
+
+export function __setSettlementFailPointForTest(point: SettlementFailPoint | null): void {
+  if (!settlementTestHooksAllowed()) {
+    throw new Error("settlement test hooks are only available under the test runner.");
+  }
+  settlementFailPointForTest = point;
+}
+
+export function __clearSettlementFailPointForTest(): void {
+  settlementFailPointForTest = null;
+}
 const PARTNER_SUBMISSION_CREDIT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
 export class PartnerSubmissionCreditLifecycleError extends Error {
@@ -1104,6 +1137,7 @@ export async function settlePartnerCreditForDestinationStatus(
        */
       await client.query("SAVEPOINT g6d_credit_consume");
       try {
+        let settlementCardIndex = 0;
         for (const reservation of pending) {
           const consumed = await consumeReservedCreditInTransaction(
             client,
@@ -1133,6 +1167,11 @@ export async function settlePartnerCreditForDestinationStatus(
               "reservation_link_inconsistent"
             );
           }
+          // Fires AFTER this card's consume is fully written to the transaction, so a throw here
+          // leaves earlier cards' writes present-but-uncommitted and exercises the SAVEPOINT
+          // rollback rather than Postgres's own abort behaviour.
+          settlementFailPointForTest?.({ reservationId: reservation.id, index: settlementCardIndex });
+          settlementCardIndex += 1;
         }
         await client.query("RELEASE SAVEPOINT g6d_credit_consume");
       } catch (err) {
