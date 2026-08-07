@@ -53,8 +53,14 @@ const SUITES = [
    * matrix proved those are evadable: GRADE1 deleted the private_notes strip at one call site and
    * survived the entire suite. Without this floor, one env-var slip or one edited gate silently
    * removes the only test that would notice.
+   *
+   * Raised 8 -> 9 with the D-1 repair (2026-08-07). G1b was inverted from a characterisation of
+   * the data-destroying defect into a preservation assertion, and G1c was added for the other two
+   * undeclared columns. A floor sitting BELOW the real count permits silent test deletion
+   * (finding A10-F5), which is exactly what must not happen to the only end-to-end evidence that
+   * a partner save no longer destroys admin-internal data.
    */
-  { file: "tests/partner-grading-http-routes.test.ts", min: 8 },
+  { file: "tests/partner-grading-http-routes.test.ts", min: 9 },
   /**
    * The Super Admin control shell: requireAdmin rejection, partner/location/user suspend, session
    * revoke, feature-flag writes, emergency stop, MFA reset, read-endpoint authorisation and the

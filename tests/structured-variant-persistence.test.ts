@@ -1006,9 +1006,22 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
+        // D) D-1 undeclared-column preservation — founder-approved 2026-08-07, narrowly, for
+        //    that repair ONLY. Same five required tokens as the sibling guard in
+        //    variant-line-consolidation, kept identical so neither guard can drift into being
+        //    the weaker one. Rationale and the exhaustive list of what it does NOT authorise
+        //    are written out there; the short form is that it admits preservation of three
+        //    columns shared/schema.ts does not declare, and nothing else.
+        const signatureD =
+          /\bkeepStoredText\s*\(/.test(addedJs) &&
+          /\breadUndeclaredAuthColumns\s*\(/.test(addedJs) &&
+          /auth_status\s*=\s*COALESCE\(/.test(addedCode) &&
+          /auth_notes\s*=\s*COALESCE\(/.test(addedCode) &&
+          /private_notes\s*=\s*COALESCE\(/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC || signatureD,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
         expect(addedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
