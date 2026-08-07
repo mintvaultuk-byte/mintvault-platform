@@ -986,6 +986,95 @@ export async function requestReprint(params: {
 }
 
 /**
+ * PARTNER COMPLETION MONEY GATE — "every physical graded unit is paid for".
+ *
+ * WHAT WAS WRONG (finding H3). The three completion CTEs below used to refuse completion whenever
+ * ANY reservation for the Partner submission was `status <> 'consumed'`. Migration 0017 defines
+ * FOUR statuses (active, consumed, released, expired) and `released`/`expired` are TERMINAL SETTLED
+ * states, not outstanding ones. The authorised Super Admin recovery path
+ * (`recoverPartnerDestinationCreditHold`) deliberately leaves the RELEASED predecessor carrying the
+ * same `submission_reference` as its live replacement, so after ANY recovery that predicate was
+ * permanently true and the submission could never complete — the cards were stranded forever.
+ * `cancelSubmission` independently refuses the same mixed state, so there was no exit at all.
+ *
+ * WHY THE OBVIOUS FIX IS WRONG. Narrowing the predicate to `r.status = 'active'` would let an
+ * ORDINARY CANCELLATION complete: a submission whose reservations are ALL `released` has no active
+ * row, so the gate would open and N cards would be graded, printed and completed for ZERO consumed
+ * credits. That is free grading. Reservation STATUS alone cannot distinguish "settled by grading"
+ * (MintVault was paid) from "settled by cancellation" (the credit went back to the partner).
+ *
+ * THE PREDICATE. Completion is gated on POSITIVE, PER-UNIT FINANCIAL EVIDENCE instead: the number
+ * of physical graded units (non-void `partner_grading_work_items` for this exact
+ * tenant/partner-submission/destination triple) must equal the number of reservations for that
+ * submission that carry CANONICAL CONSUMED EVIDENCE. "Canonical" is the same definition settlement
+ * itself uses in `hasExactConsumedEvidence()` (server/partner/partner-submission-credit-lifecycle.ts):
+ *
+ *   - the reservation is `status = 'consumed'` and `source = 'portal'` (0017 lines 23-45), and
+ *   - it has EXACTLY ONE terminal row in the append-only `partner_credit_reservation_events`
+ *     (0017's `uq_partner_credit_reservation_events_terminal`), and
+ *   - that row is `event_type = 'consumed'` carrying a `ledger_entry_id` (0017's
+ *     `chk_partner_credit_reservation_events_ledger_link` makes the link mandatory for consumes and
+ *     forbidden otherwise), and
+ *   - the linked `partner_credit_ledger` row is the real DEBIT: same wallet + tenant,
+ *     `amount = -1`, `correlation_id = <reservation id>` and
+ *     `idempotency_key = 'reservation-consume:<reservation id>'`, exactly as written by
+ *     `transitionReservationInTransaction()`.
+ *
+ * That resolves the three cases:
+ *   A. consumed with evidence               -> counted -> counts match -> COMPLETE.
+ *   B. recovery: released predecessor + live replacement that was later consumed -> the predecessor
+ *      contributes nothing and the REPLACEMENT's debit is counted -> counts match -> COMPLETE.
+ *   C. released/expired without a replacement, never-paid, still-active, or a `consumed` row whose
+ *      debit evidence is missing or malformed -> not counted -> counts differ -> REFUSED.
+ *
+ * A released/expired row can never be mistaken for payment because a release NEVER writes a ledger
+ * debit (0017's accounting model note), and a stray extra reservation cannot mask a missing one
+ * because 0017's `uq_partner_credit_reserve_card_live` makes (tenant_id, card_reference) unique
+ * across live+consumed rows, so consumed rows are one-per-card by construction.
+ *
+ * This is DEFINED ONCE and interpolated into all three CTEs; the three copies of the old predicate
+ * were free to drift apart.
+ */
+const partnerGradedUnitsFullySettled = sql`
+           AND (
+             SELECT count(*)
+               FROM partner_grading_work_items unit
+              WHERE unit.tenant_id = t.tenant_id
+                AND unit.partner_submission_id = t.partner_submission_id
+                AND unit.destination_submission_id = t.destination_submission_id
+                AND unit.status <> 'void'
+           ) = (
+             SELECT count(*)
+               FROM partner_credit_reservations r
+              WHERE r.tenant_id = t.tenant_id
+                AND r.source = 'portal'
+                AND r.submission_reference = t.partner_submission_id::text
+                AND r.status = 'consumed'
+                AND (
+                  SELECT count(*)
+                    FROM partner_credit_reservation_events te
+                   WHERE te.reservation_id = r.id
+                     AND te.tenant_id = r.tenant_id
+                     AND te.event_type IN ('consumed','released','expired')
+                ) = 1
+                AND EXISTS (
+                  SELECT 1
+                    FROM partner_credit_reservation_events e
+                    JOIN partner_credit_ledger l
+                      ON l.id = e.ledger_entry_id
+                     AND l.wallet_id = e.wallet_id
+                     AND l.tenant_id = e.tenant_id
+                     AND l.correlation_id = r.id::text
+                     AND l.amount = -1
+                     AND l.idempotency_key = 'reservation-consume:' || r.id::text
+                   WHERE e.reservation_id = r.id
+                     AND e.tenant_id = r.tenant_id
+                     AND e.wallet_id = r.wallet_id
+                     AND e.event_type = 'consumed'
+                )
+           )`;
+
+/**
  * Mark certs completed (terminal). Admin-only enforcement happens in the route;
  * the state machine still guards the transition (must be printed/reprinted).
  */
@@ -1065,13 +1154,7 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
                 AND pending.destination_submission_id = t.destination_submission_id
                 AND pending.status NOT IN ('completed','void')
            )
-           AND NOT EXISTS (
-             SELECT 1
-               FROM partner_credit_reservations r
-              WHERE r.tenant_id = t.tenant_id
-                AND r.submission_reference = t.partner_submission_id::text
-                AND r.status <> 'consumed'
-           )
+           ${partnerGradedUnitsFullySettled}
         )
         -- NOTE: partner_submissions has NO completed_at column (0007 creates the table, 0044 adds
         -- only location_name_snapshot; verified against the live staging schema). An earlier
@@ -1105,13 +1188,7 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
                 AND pending.destination_submission_id = t.destination_submission_id
                 AND pending.status NOT IN ('completed','void')
            )
-           AND NOT EXISTS (
-             SELECT 1
-               FROM partner_credit_reservations r
-              WHERE r.tenant_id = t.tenant_id
-                AND r.submission_reference = t.partner_submission_id::text
-                AND r.status <> 'consumed'
-           )
+           ${partnerGradedUnitsFullySettled}
         )
         UPDATE submissions s
            SET status = 'shipped',
@@ -1142,13 +1219,7 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
                 AND pending.destination_submission_id = t.destination_submission_id
                 AND pending.status NOT IN ('completed','void')
            )
-           AND NOT EXISTS (
-             SELECT 1
-               FROM partner_credit_reservations r
-              WHERE r.tenant_id = t.tenant_id
-                AND r.submission_reference = t.partner_submission_id::text
-                AND r.status <> 'consumed'
-           )
+           ${partnerGradedUnitsFullySettled}
         )
         UPDATE submissions s
            SET status = 'completed',
