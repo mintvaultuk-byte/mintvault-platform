@@ -28,19 +28,72 @@
  * CONSUMED BY: scripts/ci/run-partner-suite.mjs
  */
 
-/** Disposable loopback clusters. Ports are fixed by the CI container provisioning step. */
+/**
+ * Disposable loopback clusters. Ports are fixed by the CI container provisioning step.
+ *
+ * The PARTNER_MATRIX_* overrides exist so the SAME matrix can be run twice against two clusters
+ * that share no state (independent A/B reproducibility runs). They are strictly opt-in: with none
+ * of them set, every coordinate below is byte-identical to what CI has always used, so CI
+ * behaviour is unchanged. `assertDisposable()` still validates whatever they resolve to, and the
+ * host is deliberately NOT overridable — an override can move the port, the login role and the
+ * database name, but can never move the target off loopback.
+ */
+const num = (name, fallback) => {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1024 || parsed > 65535) {
+    throw new Error(`${name}='${raw}' is not a usable TCP port`);
+  }
+  return parsed;
+};
+const ident = (name, fallback) => {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(raw)) throw new Error(`${name}='${raw}' is not a safe role name`);
+  return raw;
+};
+
 export const CLUSTERS = {
   /** PostgreSQL 16 + pgvector — the MintVault-compatible shared cluster. */
-  pg16: { host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres" },
+  pg16: {
+    host: "127.0.0.1",
+    port: num("PARTNER_MATRIX_PG16_PORT", 55432),
+    user: ident("PARTNER_MATRIX_PG16_USER", "postgres"),
+    password: process.env.PARTNER_MATRIX_PG16_PASSWORD || "postgres",
+  },
   /** PostgreSQL 17.10 — Partner accounting, RBAC, connector and migration suites. */
-  pg17: { host: "127.0.0.1", port: 55433, user: "postgres", password: "postgres" },
+  pg17: {
+    host: "127.0.0.1",
+    port: num("PARTNER_MATRIX_PG17_PORT", 55433),
+    user: ident("PARTNER_MATRIX_PG17_USER", "postgres"),
+    password: process.env.PARTNER_MATRIX_PG17_PASSWORD || "postgres",
+  },
 };
+
+/**
+ * Optional per-run database-name prefix, so two independent matrix runs can never collide on a
+ * database name even on one host. NEVER applied to the maintenance database `postgres`, which
+ * run-partner-suite.mjs connects to in order to DROP/CREATE each suite's database.
+ */
+const DATABASE_PREFIX = (() => {
+  const raw = process.env.PARTNER_MATRIX_DB_PREFIX;
+  if (!raw) return "";
+  if (!/^[a-z][a-z0-9_]{0,15}$/.test(raw)) {
+    throw new Error(`PARTNER_MATRIX_DB_PREFIX='${raw}' is not a safe database-name prefix`);
+  }
+  return raw;
+})();
+
+export function databaseName(database) {
+  return database === "postgres" ? database : `${DATABASE_PREFIX}${database}`;
+}
 
 /** Build a connection URL for a database on a named cluster. */
 export function urlFor(cluster, database) {
   const c = CLUSTERS[cluster];
   if (!c) throw new Error(`unknown cluster '${cluster}'`);
-  return `postgresql://${c.user}:${c.password}@${c.host}:${c.port}/${database}`;
+  return `postgresql://${c.user}:${encodeURIComponent(c.password)}@${c.host}:${c.port}/${databaseName(database)}`;
 }
 
 /**
@@ -140,6 +193,17 @@ export const SUITES = [
     critical: true,
     isolate: true,
     note: "FULL-PILOT-LOCAL-01 approval/settlement lifecycle; own disposable cluster.",
+  },
+  {
+    file: "tests/partner-grading-http-routes.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note:
+      "the ONLY suite that issues a real HTTP request to /api/partner/grading/*. Before it, the " +
+      "whole partner grading adapter rested on source-string pins, and the PR #288 mutation matrix " +
+      "showed GRADE1 (deleting the private_notes strip) survived them outright. Own disposable " +
+      "cluster; needs the CI MinIO because the submit route verifies both images with a live headR2.",
   },
   {
     file: "tests/partner-submission-lifecycle-migration.test.ts",
