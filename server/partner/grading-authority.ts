@@ -4,98 +4,128 @@
  * WHAT THIS IS
  * ------------
  * A partner-shop operator's browser is not a trusted grader. It may submit grading
- * EVIDENCE (centering measurements, MVGS-classified defect pins, whitening/crease
- * measurements, dark-border flags, eye-appeal modifier, card identity). It may NOT
- * author the authoritative outcome: the overall grade, the four sub-grades, the grade
- * kind, Pristine/Black-Label status, printability, or any HQ-private state.
+ * EVIDENCE (centering measurements, MVGS-classified defect pins, per-zone corner/edge
+ * steppers, whitening/crease measurements, dark-border flags, eye-appeal modifier, the
+ * authentication verdict, card identity). It may NOT author the authoritative outcome:
+ * the overall grade, the four sub-grades, the grade kind, Pristine/Black-Label status,
+ * printability, or any HQ-private state.
  *
- * This module closes that gap in TWO parts:
+ * THE INVARIANT
+ * -------------
+ *     the stored grade is always what the shared grading maths says about the STORED ROW
  *
- *   1. `partnerGradeBody()` — an explicit WHITELIST (default-deny) over the request
- *      body. It replaces the previous two-key blacklist, which deleted only
- *      `private_notes`/`privateNotes` and passed everything else straight through to
- *      the grading engine's draft writer.
+ * Version 1 tried to hold that by scoring a simulation of the post-write row. Hostile
+ * review broke it twice, and both breaks were the same shape — an input that was SCORED
+ * but did not end up on the row:
  *
- *   2. `computePartnerGradeAuthority()` — runs the ONE existing MVGS engine
- *      (`shared/mvgs-input-builder.ts::scoreMvgsV2`, which routes through
- *      `shared/mvgs-scoring.ts::computeMvgsScore`) over the evidence that WILL be
- *      persisted, and returns the authoritative outcome. The caller then writes that
- *      outcome instead of whatever the client claimed.
+ *   F1  `crease_span_pct` was whitelisted and fed to the engine, but server/grader.ts
+ *       never writes that column. A body of {crease_lines: [], crease_span_pct: 0,
+ *       surface:{hasCrease:true}} suppressed the crease ceiling at scoring time while the
+ *       row that landed still read "crease present, no span" — a 4.5 cap. Stored 10,
+ *       engine-over-row 4.5.
+ *   F7  the simulation read the row once, and server/grader.ts read it again. Anything
+ *       writing in between (a second tab, or the proxied manual-centering action, which
+ *       rewrites the centering columns and does not recompute authority) desynchronised
+ *       the two.
  *
- * ONE ENGINE — NOTHING HERE SCORES
- * --------------------------------
- * There is no scoring in this file. No threshold, deduction, centering table,
- * calibration value, Pristine rule or bracket is defined, copied or adjusted here.
- * Every number comes out of the shared engine:
+ * So the authority is no longer a function of the request at all. It is computed from the
+ * PERSISTED ROW, after the write, and re-asserted against the columns that actually
+ * landed. `computeAuthorityFromRow` is the only function that decides a grade;
+ * `computePartnerGradeAuthority(certId, body)` exists solely to give the unmodified engine
+ * writer an `overall_grade` on its first pass, and its answer is discarded if the row
+ * disagrees. An input that is scored but not persisted can no longer change the outcome,
+ * because the outcome is read back from the row either way.
  *
- *   • overall grade        ← `gradeFromMvgsScore(result.score)`   (shared/mvgs-scoring.ts)
- *   • centering sub-grade  ← `centeringSubgrade(...).subgrade`    (shared/centering.ts)
- *   • corners/edges/surface← `remainingToGrade(25 - |deduction|)` (shared/mvgs-scoring.ts)
- *   • non-numeric outcome  ← `result.tearForceNotGraded`          (engine output field)
- *   • calibration          ← `loadMvgsCalibration()`              (server/lib/mvgs-calibration.ts)
+ * ONE ENGINE / ONE FALLBACK — NOTHING HERE SCORES
+ * -----------------------------------------------
+ * No threshold, deduction, weight, centering table, calibration value, Pristine rule or
+ * bracket is defined, copied or adjusted here. Every number comes from shared code:
  *
- * Those are exactly the derivations the HQ surfaces already use — the same engine call
- * shape as the admin approve route (server/routes.ts, "MVGS scoring on approve"), and
- * the same sub-grade derivations the grading workstation displays
- * (client/src/components/grading/grading-panel.tsx: `mvgsCenteringGrade`,
- * `mvgsCornersGrade`, `mvgsEdgesGrade`, `mvgsSurfaceGrade`, `mvgsGrade`). So the partner
- * path and the HQ path cannot diverge: they are the same function of the same evidence.
+ *   • MVGS overall        ← `gradeFromMvgsScore(scoreMvgsV2(...).score)`  (shared/mvgs-scoring)
+ *   • centering sub-grade ← `centeringSubgrade` / `centeringSubgradeStrict` (shared/centering)
+ *   • corners/edges/surf  ← `remainingToGrade(25 - |deduction|)`          (shared/mvgs-scoring)
+ *   • no-pin fallback     ← `calcCornerSubgrade` / `calcEdgeSubgrade` /
+ *                           `calculateOverallGrade`            (shared/legacy-grade-fallback)
+ *   • non-numeric outcome ← the authentication verdict, and the engine's own
+ *                           `tearForceNotGraded`
+ *   • calibration         ← `loadMvgsCalibration()`            (server/lib/mvgs-calibration)
  *
- * EFFECTIVE EVIDENCE
- * ------------------
- * `applyCertGradeDraft` MERGES an incoming draft over the stored row (an omitted field
- * preserves the stored value). Authority must therefore be computed over the POST-WRITE
- * evidence, not over the request alone — otherwise a request that omits centering would
- * be scored as if the card had no centering measurement at all. `effectiveEvidence()`
- * below reproduces the engine writer's own preservation semantics field-by-field
- * (`pick`/`jb`/`num` in server/grader.ts) so the evidence scored here is byte-for-byte
- * the evidence that lands in the row.
+ * PRECEDENCE IS THE WORKSTATION'S, NOT A NEW ONE
+ * ----------------------------------------------
+ * F2: the MVGS engine scores from CLASSIFIED PINS. The grading workstation only uses the
+ * engine's headline grade when at least one pin is classified
+ * (client/src/components/grading/grading-panel.tsx: `mvgsGrade = hasMvgsPins ? … : null;
+ * overall = mvgsGrade ?? calculateOverallGrade(sub, hasCrease, hasTear)`). Applying the
+ * engine unconditionally inflated every zone-stepper-graded card to 10 — an ordinary
+ * workflow, no attacker required. This module now mirrors that precedence exactly, using
+ * the very same functions, which is why they were moved into shared/ rather than copied.
  */
 
 import { sql } from "drizzle-orm";
 import { db } from "../db";
-import { storage } from "../storage";
 import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
 import { gradeFromMvgsScore, remainingToGrade, mvgsTierName, mvgsGradeLabel } from "@shared/mvgs-scoring";
-import { centeringSubgrade } from "@shared/centering";
+import { centeringSubgrade, centeringSubgradeStrict } from "@shared/centering";
+import {
+  calcCornerSubgrade,
+  calcEdgeSubgrade,
+  calculateOverallGrade,
+  type CornerValues,
+  type EdgeValues,
+} from "@shared/legacy-grade-fallback";
 import { loadMvgsCalibration } from "../lib/mvgs-calibration";
 
 /**
- * Bumped whenever the shape of the authority contract changes (which fields the server
- * derives, or which evidence it derives them from). Persisted on every partner grade
- * write so a stored grade can be traced to the adapter that produced it. This is NOT an
- * MVGS standard version — the standard's version lives with the engine and calibration.
+ * Bumped whenever the authority contract changes — which fields the server derives, or
+ * which evidence it derives them from. Persisted on every partner grade write so a stored
+ * grade can be traced to the adapter that produced it. NOT an MVGS standard version.
+ *
+ *   v1 — engine applied unconditionally; authority simulated from the request.
+ *   v2 — authority derived from the PERSISTED ROW; workstation pin/no-pin precedence
+ *        honoured; authentication verdict accepted as evidence.
  */
-export const PARTNER_GRADE_AUTHORITY_VERSION = 1;
+export const PARTNER_GRADE_AUTHORITY_VERSION = 2;
 
 /**
  * EVIDENCE + INPUT WHITELIST — default-deny.
  *
  * Derived by reading what the partner grading UI actually sends, not by guessing:
  * `client/src/pages/partner/grading.tsx` mounts `GradingWorkstation` with
- * `apiBase="/api/partner/grading"` and `graderMode`, and every partner write
- * (`saveDraft`, `autoSaveNow`, `/submit`, `/edit-submission`) posts exactly
- * `buildPayload()` from `client/src/components/grading/grading-panel.tsx`. Each key
- * below is a key that function emits AND that is legitimately operator input.
+ * `apiBase="/api/partner/grading"` and `graderMode`, and every partner write posts exactly
+ * `buildPayload()` from `client/src/components/grading/grading-panel.tsx`.
+ *
+ * TWO RULES govern membership, and both exist because of a real defect:
+ *   1. If it is SCORED, it must be PERSISTED by server/grader.ts. Otherwise the stored row
+ *      and the scored evidence can disagree — that was F1.
+ *   2. If the shared panel lets a partner operator set it, it must either be accepted or
+ *      be visibly refused. Silently dropping operator input was F3.
  *
  * Every `buildPayload()` key deliberately EXCLUDED, with the reason:
- *   overall_grade      — authoritative grade. Server derives it.
- *   grade_centering    ┐
- *   grade_corners      │ authoritative sub-grades. Server derives them.
- *   grade_edges        │
- *   grade_surface      ┘
- *   auth_status        — HQ authentication verdict (genuine / authentic_altered /
- *   auth_notes           not_original) and its private notes. Drives the non-numeric
- *                        AA/NO outcome; a partner may not author it.
- *   private_notes      — HQ-private operator notes, never partner-visible or writable.
+ *   overall_grade        — authoritative grade. Server derives it.
+ *   grade_centering      ┐
+ *   grade_corners        │ authoritative sub-grades. Server derives them.
+ *   grade_edges          │
+ *   grade_surface        ┘
+ *   auth_notes           — HQ-private commentary on the authentication verdict. The
+ *                          VERDICT is accepted (below); the private notes are not.
+ *   private_notes        — HQ-private operator notes, never partner-visible or writable.
+ *   crease_span_pct      — F1. server/grader.ts does not write this column
+ *                          (`grep -c crease_span_pct server/grader.ts` → 0), so anything
+ *                          scored from it is unrecoverable from the row. The UI sends it
+ *                          only as a derived mirror of `crease_lines` (max spanPct), and
+ *                          `crease_lines` IS persisted and takes precedence over it inside
+ *                          shared/mvgs-input-builder. Dropping it loses no operator input.
+ *   ai_defect_candidates — same class as F1: accepted but never written by
+ *                          applyCertGradeDraft. It is not scored, so it was harmless, but
+ *                          "whitelisted yet unpersisted" is the exact shape of the bug and
+ *                          is not worth keeping for a no-op.
  *
- * And, by default-deny, everything a partner client might invent that is NOT in the
- * list: `grade_type` (authoritative kind), `label_type` (Black Label / Pristine),
- * `grade_strength_score`, `verified_defects`, `grade_approved_at|by`, `grader_status`,
- * `review_required`, `operator_grade`, `operator_subgrades`, `print_state`,
- * `origin_*` (provenance), settlement/credit columns, `deleted_at`, `privateNotes`.
- * None of them can cross this boundary because they are absent, not because they were
- * individually blacklisted.
+ * And, by default-deny, everything a partner client might invent that is NOT in the list:
+ * `grade_type`, `label_type`, `grade_strength_score`, `verified_defects`,
+ * `grade_approved_at|by`, `grader_status`, `review_required`, `operator_grade`,
+ * `operator_subgrades`, `print_state`, `origin_*`, settlement columns, `deleted_at`,
+ * `privateNotes`. None of them can cross this boundary because they are absent, not
+ * because they were individually blacklisted.
  */
 export const PARTNER_GRADE_EVIDENCE_FIELDS = [
   // ── Centering measurement (four axes, "L/R" ratio strings) ──────────────────
@@ -103,22 +133,24 @@ export const PARTNER_GRADE_EVIDENCE_FIELDS = [
   "centering_front_tb",
   "centering_back_lr",
   "centering_back_tb",
-  // ── Per-zone raw observations ───────────────────────────────────────────────
+  // ── Per-zone operator steppers. These DRIVE the grade on the no-pin path. ───
   "corners",
   "edges",
   "surface",
-  // ── Defect pins (MVGS-classified) + unconfirmed AI candidates ───────────────
+  // ── Defect pins (MVGS-classified) ───────────────────────────────────────────
   "defects",
-  "ai_defect_candidates",
   // ── MVGS v2 measurement inputs ──────────────────────────────────────────────
   "dark_border_front",
   "dark_border_back",
   "eye_appeal_modifier",
   "whitening_lines",
   "crease_lines",
-  "crease_span_pct",
   "wrinkle_severity",
   "tear_severity",
+  // ── Authentication VERDICT (F3). An observation about the physical card, and the
+  //    shared panel renders the control to partner operators unconditionally. Accepted
+  //    as evidence; the server, not the client, turns it into an AA/NO grade. ────
+  "auth_status",
   // ── Card identity the partner operator legitimately types ───────────────────
   "card_name",
   "set_name",
@@ -152,9 +184,9 @@ export const PARTNER_GRADE_SERVER_AUTHORED_FIELDS = [
 /**
  * WHITELIST the partner request body down to evidence/input only.
  *
- * Replaces the former two-key blacklist. Anything not explicitly allowed is dropped
- * silently (the UI never sends it, so a 400 would only ever fire on an attack or a
- * stale client, and failing closed-but-quiet keeps honest clients working).
+ * Anything not explicitly allowed is dropped silently (the UI never sends it, so a 400
+ * would only ever fire on an attack or a stale client). The rejected claim IS recorded in
+ * the audit trail by the caller — see `rejectedClientClaim` (F8).
  */
 export function partnerGradeBody(body: unknown): Record<string, unknown> {
   if (!body || typeof body !== "object" || Array.isArray(body)) return {};
@@ -166,7 +198,25 @@ export function partnerGradeBody(body: unknown): Record<string, unknown> {
   return clean;
 }
 
-/** The authoritative outcome, as computed by the one engine over stored evidence. */
+/**
+ * F8 — what the client TRIED to author, if anything. Recorded alongside the server's
+ * decision so a tampered save is distinguishable from an honest one in the audit trail.
+ * Returns null for an honest request, so honest saves stay quiet.
+ */
+export function rejectedClientClaim(body: unknown): Record<string, unknown> | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const src = body as Record<string, unknown>;
+  const claim: Record<string, unknown> = {};
+  for (const key of Object.keys(src)) {
+    if (!EVIDENCE_ALLOWED.has(key)) claim[key] = src[key];
+  }
+  return Object.keys(claim).length ? claim : null;
+}
+
+/** How the authoritative grade was reached. Recorded for review and audit. */
+export type PartnerGradeBasis = "mvgs-engine" | "legacy-zone-fallback" | "authentication" | "engine-tear-rule";
+
+/** The authoritative outcome, as computed by the shared maths over the persisted row. */
 export interface PartnerGradeAuthority {
   /** Engine score (already floor-rule- and ceiling-capped by the engine itself). */
   score: number;
@@ -174,7 +224,7 @@ export interface PartnerGradeAuthority {
   scoreLabel: string;
   /** Authoritative overall, as the string `applyCertGradeDraft` expects. */
   overallGrade: string;
-  /** Authoritative numeric overall, or null when the engine forced a non-numeric outcome. */
+  /** Authoritative numeric overall, or null for a non-numeric outcome. */
   overallNumeric: number | null;
   /** Tier name for the numeric overall, or null for a non-numeric outcome. */
   tier: string | null;
@@ -182,15 +232,62 @@ export interface PartnerGradeAuthority {
   subgrades: { centering: number; corners: number; edges: number; surface: number } | null;
   /** Raw engine deduction breakdown — what Pristine/Black-Label is decided from. */
   deductions: Record<string, number>;
-  /** True when the engine's own `tearForceNotGraded` fired (major tear ⇒ NO). */
-  forcedNotGraded: boolean;
+  /** True when the outcome is non-numeric (AA / NO). */
+  nonNumeric: boolean;
+  /** Which shared decision produced it. */
+  basis: PartnerGradeBasis;
   version: number;
 }
 
-type CertRow = Record<string, unknown>;
+// ── The row ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Everything the authority depends on, read in ONE statement straight from the row.
+ *
+ * Deliberately raw SQL rather than `storage.getCertificate()`: `auth_status` is a real
+ * column that shared/schema.ts does not declare, so the Drizzle model returns `undefined`
+ * for it (the same gap the D-1 repair closed on the write side). Reading the columns by
+ * name means the authority can never be computed from a silently-absent field.
+ */
+interface AuthorityRow {
+  centering_front_lr: string | null;
+  centering_front_tb: string | null;
+  centering_back_lr: string | null;
+  centering_back_tb: string | null;
+  defects: unknown;
+  corner_values: unknown;
+  edge_values: unknown;
+  surface_values: unknown;
+  dark_border_front: boolean | null;
+  dark_border_back: boolean | null;
+  dark_border: boolean | null;
+  eye_appeal_modifier: number | string | null;
+  whitening_lines: unknown;
+  crease_lines: unknown;
+  crease_span_pct: number | string | null;
+  wrinkle_severity: string | null;
+  tear_severity: string | null;
+  auth_status: string | null;
+  grade_type: string | null;
+}
+
+async function loadAuthorityRow(certId: number): Promise<AuthorityRow> {
+  const r = await db.execute(sql`
+    SELECT centering_front_lr, centering_front_tb, centering_back_lr, centering_back_tb,
+           defects, corner_values, edge_values, surface_values,
+           dark_border_front, dark_border_back, dark_border, eye_appeal_modifier,
+           whitening_lines, crease_lines, crease_span_pct, wrinkle_severity, tear_severity,
+           auth_status, grade_type
+      FROM certificates
+     WHERE id = ${certId}
+  `);
+  const row = r.rows[0] as unknown as AuthorityRow | undefined;
+  if (!row) throw new Error("Certificate not found");
+  return row;
+}
 
 /** `pick` semantics from server/grader.ts: an OMITTED key preserves the stored value. */
-function keep<T>(incoming: unknown, stored: T): unknown {
+function keep(incoming: unknown, stored: unknown): unknown {
   return incoming === undefined ? (stored ?? null) : incoming;
 }
 
@@ -199,112 +296,222 @@ function keepNum(incoming: unknown, stored: unknown): unknown {
   return incoming === undefined || incoming === null || incoming === "" ? (stored ?? null) : incoming;
 }
 
+const ZERO_CORNERS: CornerValues = {
+  frontTL: 0,
+  frontTR: 0,
+  frontBL: 0,
+  frontBR: 0,
+  backTL: 0,
+  backTR: 0,
+  backBL: 0,
+  backBR: 0,
+};
+const ZERO_EDGES: EdgeValues = {
+  frontTop: 0,
+  frontBottom: 0,
+  frontLeft: 0,
+  frontRight: 0,
+  backTop: 0,
+  backBottom: 0,
+  backLeft: 0,
+  backRight: 0,
+};
+
 /**
- * The evidence the row WILL hold after `applyCertGradeDraft` merges this body, expressed
- * in the engine's input shape. Mirrors the admin approve route's engine call
- * (server/routes.ts) field-for-field, so the two paths score identically.
+ * The evidence the authority is computed from.
+ *
+ * With `body = {}` (the normal case, post-write) this is purely the row. The body overlay
+ * exists only for the pre-write pass that hands `applyCertGradeDraft` an `overall_grade`,
+ * and mirrors that writer's own preservation semantics field-for-field.
  */
-function effectiveEvidence(cert: CertRow, body: Record<string, unknown>) {
-  const c = cert as any;
-  const defectsRaw = keep(body.defects, c.defects);
-  const surfaceFlagsRaw = keep(body.surface, c.surfaceValues) as any;
-  const surfaceFlags = surfaceFlagsRaw && typeof surfaceFlagsRaw === "object" ? surfaceFlagsRaw : {};
-  const whitening = keep(body.whitening_lines, c.whiteningLines);
-  const creases = keep(body.crease_lines, c.creaseLines);
-  const creaseSpan = keepNum(body.crease_span_pct, c.creaseSpanPct);
-  const darkFront = keep(body.dark_border_front, c.darkBorderFront ?? !!c.darkBorder);
-  const darkBack = keep(body.dark_border_back, c.darkBorderBack ?? !!c.darkBorder);
+function effectiveEvidence(row: AuthorityRow, body: Record<string, unknown>) {
+  const defectsRaw = keep(body.defects, row.defects);
+  const surfaceRaw = keep(body.surface, row.surface_values);
+  const surfaceFlags = (surfaceRaw && typeof surfaceRaw === "object" ? surfaceRaw : {}) as Record<string, unknown>;
+  const cornersRaw = keep(body.corners, row.corner_values);
+  const edgesRaw = keep(body.edges, row.edge_values);
+  const whitening = keep(body.whitening_lines, row.whitening_lines);
+  const creases = keep(body.crease_lines, row.crease_lines);
+  // NOT overlaid from the body: crease_span_pct is not whitelisted and is not written by
+  // the engine writer, so only the row's own value may influence the outcome (F1).
+  const creaseSpan = row.crease_span_pct;
+  const legacyDark = !!row.dark_border;
+  const authStatus = String(keep(body.auth_status, row.auth_status) ?? "genuine") || "genuine";
 
   return {
-    centeringFrontLr: (keep(body.centering_front_lr, c.centeringFrontLr) as string | null) ?? null,
-    centeringFrontTb: (keep(body.centering_front_tb, c.centeringFrontTb) as string | null) ?? null,
-    centeringBackLr: (keep(body.centering_back_lr, c.centeringBackLr) as string | null) ?? null,
-    centeringBackTb: (keep(body.centering_back_tb, c.centeringBackTb) as string | null) ?? null,
-    // Only MVGS-CLASSIFIED pins reach the engine — identical filter to the admin
-    // approve route and the workstation panel.
+    centeringFrontLr: (keep(body.centering_front_lr, row.centering_front_lr) as string | null) ?? null,
+    centeringFrontTb: (keep(body.centering_front_tb, row.centering_front_tb) as string | null) ?? null,
+    centeringBackLr: (keep(body.centering_back_lr, row.centering_back_lr) as string | null) ?? null,
+    centeringBackTb: (keep(body.centering_back_tb, row.centering_back_tb) as string | null) ?? null,
+    // Only MVGS-CLASSIFIED pins reach the engine — identical filter to the admin approve
+    // route and the workstation panel.
     defects: (Array.isArray(defectsRaw) ? defectsRaw : [])
       .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
       .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) })),
-    darkBorderFront: !!darkFront,
-    darkBorderBack: !!darkBack,
-    eyeAppealModifier: Number(keepNum(body.eye_appeal_modifier, c.eyeAppealModifier) ?? 0) || 0,
+    darkBorderFront: !!keep(body.dark_border_front, row.dark_border_front ?? legacyDark),
+    darkBorderBack: !!keep(body.dark_border_back, row.dark_border_back ?? legacyDark),
+    eyeAppealModifier: Number(keepNum(body.eye_appeal_modifier, row.eye_appeal_modifier) ?? 0) || 0,
     whiteningLines: Array.isArray(whitening) ? (whitening as any) : null,
     creaseLines: Array.isArray(creases) ? (creases as any) : null,
     creaseSpanPct: creaseSpan != null ? Number(creaseSpan) : null,
-    wrinkleSeverity: (keep(body.wrinkle_severity, c.wrinkleSeverity) as any) ?? null,
-    tearSeverity: (keep(body.tear_severity, c.tearSeverity) as any) ?? null,
-    hasCrease: !!(surfaceFlags as any).hasCrease,
-    hasTear: !!(surfaceFlags as any).hasTear,
+    wrinkleSeverity: (keep(body.wrinkle_severity, row.wrinkle_severity) as any) ?? null,
+    tearSeverity: (keep(body.tear_severity, row.tear_severity) as any) ?? null,
+    hasCrease: !!surfaceFlags.hasCrease,
+    hasTear: !!surfaceFlags.hasTear,
+    // Non-engine inputs — the zone steppers and the authentication verdict.
+    cornerValues: { ...ZERO_CORNERS, ...(cornersRaw && typeof cornersRaw === "object" ? cornersRaw : {}) },
+    edgeValues: { ...ZERO_EDGES, ...(edgesRaw && typeof edgesRaw === "object" ? edgesRaw : {}) },
+    authStatus,
+    storedGradeType: row.grade_type,
   };
 }
 
-/**
- * Run the ONE engine over the evidence this write will leave on the certificate and
- * return the authoritative outcome. Throws only if the certificate does not exist —
- * every route below has already authorised the id by the time this is called.
- */
-export async function computePartnerGradeAuthority(
-  certId: number,
-  evidenceBody: Record<string, unknown>
-): Promise<PartnerGradeAuthority> {
-  const cert = (await storage.getCertificate(certId)) as CertRow | undefined;
-  if (!cert) throw new Error("Certificate not found");
+type Evidence = ReturnType<typeof effectiveEvidence>;
 
-  const calibration = await loadMvgsCalibration();
-  const result = scoreMvgsV2(effectiveEvidence(cert, evidenceBody), calibration);
-
-  // Non-numeric outcome is the ENGINE's call (major tear ⇒ Not Graded), never the
-  // client's. `NO` is the short form `applyCertGradeDraft` already understands.
-  if (result.tearForceNotGraded) {
-    return {
-      score: result.score,
-      scoreLabel: mvgsGradeLabel(result.score),
-      overallGrade: "NO",
-      overallNumeric: null,
-      tier: null,
-      subgrades: null,
-      deductions: result.deductions,
-      forcedNotGraded: true,
-      version: PARTNER_GRADE_AUTHORITY_VERSION,
-    };
-  }
-
-  const overall = gradeFromMvgsScore(result.score);
-  const evidence = effectiveEvidence(cert, evidenceBody);
-  const subgrades = {
-    // Centering comes straight from the shared PSA chart (worst of four axes) — the
-    // same number that scores the card and that the workstation chip displays.
-    centering: centeringSubgrade(
-      evidence.centeringFrontLr,
-      evidence.centeringFrontTb,
-      evidence.centeringBackLr,
-      evidence.centeringBackTb
-    ).subgrade,
-    corners: remainingToGrade(25 - Math.abs(result.deductions.corners ?? 0)),
-    edges: remainingToGrade(25 - Math.abs(result.deductions.edges ?? 0)),
-    surface: remainingToGrade(25 - Math.abs(result.deductions.surface ?? 0)),
-  };
-
+function nonNumericOutcome(
+  overallGrade: "AA" | "NO",
+  basis: PartnerGradeBasis,
+  score: number,
+  deductions: Record<string, number>
+): PartnerGradeAuthority {
   return {
-    score: result.score,
-    scoreLabel: mvgsGradeLabel(result.score),
-    overallGrade: String(overall),
-    overallNumeric: overall,
-    tier: mvgsTierName(overall),
-    subgrades,
-    deductions: result.deductions,
-    forcedNotGraded: false,
+    score,
+    scoreLabel: mvgsGradeLabel(score),
+    overallGrade,
+    overallNumeric: null,
+    tier: null,
+    subgrades: null,
+    deductions,
+    nonNumeric: true,
+    basis,
     version: PARTNER_GRADE_AUTHORITY_VERSION,
   };
 }
 
 /**
- * Overlay the server's authoritative outcome onto the whitelisted evidence body, so the
- * unmodified engine writer (`applyCertGradeDraft`) persists the SERVER's numbers.
+ * THE decision. Pure: same evidence in, same authority out.
  *
- * The client's own values were already dropped by `partnerGradeBody()`; this is what
- * puts the authoritative ones in their place. Assignment order matters only in the sense
- * that these keys can never be present beforehand — the whitelist excludes all six.
+ * Order of precedence mirrors the shared grading workstation exactly:
+ *   1. authentication verdict (panel's `finalGradeOverall`) — AA / NO short-circuit
+ *   2. the engine's own major-tear rule
+ *   3. MVGS engine, but ONLY when a pin is classified (panel's `hasMvgsPins`)
+ *   4. otherwise the legacy zone-stepper fallback (panel's `calculateOverallGrade`)
+ */
+function deriveAuthority(ev: Evidence, engine: ReturnType<typeof scoreMvgsV2>): PartnerGradeAuthority {
+  // 1. The operator's authentication verdict. Mirrors grading-panel.tsx:
+  //    `isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original"`
+  //    `finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : …`
+  if (ev.authStatus === "authentic_altered") return nonNumericOutcome("AA", "authentication", engine.score, engine.deductions);
+  if (ev.authStatus === "not_original") return nonNumericOutcome("NO", "authentication", engine.score, engine.deductions);
+
+  // A row already classified non-numeric stays non-numeric on the partner surface even if
+  // its auth_status column disagrees (a legacy inconsistency). Fail closed: a partner may
+  // never quietly convert a Not-Graded card into a numeric grade. HQ Correction Mode owns
+  // that transition. Long-form and short-form aliases both handled.
+  const storedKind = String(ev.storedGradeType ?? "numeric").trim().toLowerCase();
+  if (storedKind === "authentic_altered" || storedKind === "aa") {
+    return nonNumericOutcome("AA", "authentication", engine.score, engine.deductions);
+  }
+  if (storedKind === "not_original" || storedKind === "no" || storedKind === "non_numeric") {
+    return nonNumericOutcome("NO", "authentication", engine.score, engine.deductions);
+  }
+
+  // 2. The engine's own major-tear rule.
+  if (engine.tearForceNotGraded) return nonNumericOutcome("NO", "engine-tear-rule", engine.score, engine.deductions);
+
+  const hasMvgsPins = ev.defects.length > 0;
+
+  if (hasMvgsPins) {
+    // 3. MVGS path. Identical derivations to grading-panel.tsx's mvgsCenteringGrade /
+    //    mvgsCornersGrade / mvgsEdgesGrade / mvgsSurfaceGrade / mvgsGrade.
+    const overall = gradeFromMvgsScore(engine.score);
+    return {
+      score: engine.score,
+      scoreLabel: mvgsGradeLabel(engine.score),
+      overallGrade: String(overall),
+      overallNumeric: overall,
+      tier: mvgsTierName(overall),
+      subgrades: {
+        centering: centeringSubgrade(
+          ev.centeringFrontLr,
+          ev.centeringFrontTb,
+          ev.centeringBackLr,
+          ev.centeringBackTb
+        ).subgrade,
+        corners: remainingToGrade(25 - Math.abs(engine.deductions.corners ?? 0)),
+        edges: remainingToGrade(25 - Math.abs(engine.deductions.edges ?? 0)),
+        surface: remainingToGrade(25 - Math.abs(engine.deductions.surface ?? 0)),
+      },
+      deductions: engine.deductions,
+      nonNumeric: false,
+      basis: "mvgs-engine",
+      version: PARTNER_GRADE_AUTHORITY_VERSION,
+    };
+  }
+
+  // 4. No classified pin → the legacy zone-stepper fallback, exactly as the workstation
+  //    does it. `centering` uses the STRICT variant (null until all four axes are present)
+  //    defaulting to 10, matching the panel's `centeringOverride ?? centeringCalc ?? 10`;
+  //    `surface` is the engine's own no-pin surface bucket, matching `mvgsSurfaceGrade`.
+  const subgrades = {
+    centering:
+      centeringSubgradeStrict(ev.centeringFrontLr, ev.centeringFrontTb, ev.centeringBackLr, ev.centeringBackTb)
+        ?.subgrade ?? 10,
+    corners: calcCornerSubgrade(ev.cornerValues as CornerValues).grade,
+    edges: calcEdgeSubgrade(ev.edgeValues as EdgeValues).grade,
+    surface: remainingToGrade(25 - Math.abs(engine.deductions.surface ?? 0)),
+  };
+  const overall = calculateOverallGrade(subgrades, ev.hasCrease, ev.hasTear);
+  return {
+    score: engine.score,
+    scoreLabel: mvgsGradeLabel(engine.score),
+    overallGrade: String(overall),
+    overallNumeric: overall,
+    tier: mvgsTierName(overall),
+    subgrades,
+    deductions: engine.deductions,
+    nonNumeric: false,
+    basis: "legacy-zone-fallback",
+    version: PARTNER_GRADE_AUTHORITY_VERSION,
+  };
+}
+
+/**
+ * Compute the authority. With no body (the post-write case) this is a pure function of the
+ * PERSISTED ROW — which is the property the whole design rests on.
+ */
+export async function computePartnerGradeAuthority(
+  certId: number,
+  evidenceBody: Record<string, unknown> = {}
+): Promise<PartnerGradeAuthority> {
+  const row = await loadAuthorityRow(certId);
+  const calibration = await loadMvgsCalibration();
+  const ev = effectiveEvidence(row, evidenceBody);
+  return deriveAuthority(ev, scoreMvgsV2(ev, calibration));
+}
+
+/** Authority as read back from the row, with no request influence whatsoever. */
+export function computePartnerGradeAuthorityFromRow(certId: number): Promise<PartnerGradeAuthority> {
+  return computePartnerGradeAuthority(certId, {});
+}
+
+/** Do two authority computations agree on everything that gets persisted? */
+export function sameAuthority(a: PartnerGradeAuthority, b: PartnerGradeAuthority): boolean {
+  return (
+    a.overallGrade === b.overallGrade &&
+    a.nonNumeric === b.nonNumeric &&
+    JSON.stringify(a.subgrades) === JSON.stringify(b.subgrades)
+  );
+}
+
+/**
+ * Overlay the server's authoritative outcome onto the whitelisted evidence body, so the
+ * unmodified engine writer (`applyCertGradeDraft`) persists the SERVER's numbers. The
+ * client's own values were already dropped by `partnerGradeBody()`.
+ *
+ * A non-numeric outcome sends no sub-grades: `applyCertGradeDraft` nulls `grade` for a
+ * non-numeric kind but writes the sub-grade columns regardless, so omitting them preserves
+ * whatever was there rather than stamping fabricated numbers onto a Not-Graded card.
  */
 export function applyGradeAuthority(
   body: Record<string, unknown>,
@@ -321,21 +528,67 @@ export function applyGradeAuthority(
 }
 
 /**
+ * Read back the columns the authority is supposed to have written, so the caller can prove
+ * the row really carries the server's decision before reporting success (F4: never return
+ * success-shaped output for a write that did not land).
+ */
+export async function readPersistedAuthorityColumns(certId: number): Promise<{
+  grade: number | null;
+  gradeType: string | null;
+  subgrades: { centering: number | null; corners: number | null; edges: number | null; surface: number | null };
+}> {
+  const r = await db.execute(sql`
+    SELECT grade::text AS grade, grade_type,
+           centering_score::text AS centering, corners_score::text AS corners,
+           edges_score::text AS edges, surface_score::text AS surface
+      FROM certificates WHERE id = ${certId}
+  `);
+  const row = r.rows[0] as unknown as Record<string, string | null> | undefined;
+  if (!row) throw new Error("Certificate not found");
+  const n = (v: string | null) => (v == null ? null : Number(v));
+  return {
+    grade: n(row.grade),
+    gradeType: row.grade_type,
+    subgrades: {
+      centering: n(row.centering),
+      corners: n(row.corners),
+      edges: n(row.edges),
+      surface: n(row.surface),
+    },
+  };
+}
+
+/** Does the persisted row actually carry this authority? */
+export function persistedMatchesAuthority(
+  persisted: Awaited<ReturnType<typeof readPersistedAuthorityColumns>>,
+  authority: PartnerGradeAuthority
+): boolean {
+  if (authority.nonNumeric) return persisted.grade == null;
+  if (persisted.grade !== authority.overallNumeric) return false;
+  const s = authority.subgrades;
+  if (!s) return true;
+  return (
+    persisted.subgrades.centering === s.centering &&
+    persisted.subgrades.corners === s.corners &&
+    persisted.subgrades.edges === s.edges &&
+    persisted.subgrades.surface === s.surface
+  );
+}
+
+/**
  * Persist the engine score alongside the grade, in the SAME column the HQ approve route
- * writes it to (`grade_strength_score`). Two reasons:
- *   • it is the auditable record of WHICH engine verdict produced the stored grade, and
- *   • it means a partner-graded row already carries the score HQ would otherwise only
- *     compute at approval time, so review sees the number rather than re-deriving it.
+ * writes it to (`grade_strength_score`).
  *
- * Scoped `grade_approved_at IS NULL` so this can never touch a published certificate.
- * A non-numeric outcome leaves the column alone (mirrors the approve route, which skips
- * the score write entirely when the grade is non-numeric).
+ * Skipped entirely for a non-numeric outcome — the HQ approve route deliberately leaves
+ * that column alone when the grade is non-numeric (F4), and a strength score for a card
+ * that is Not Graded is meaningless. Scoped `grade_approved_at IS NULL` so this can never
+ * touch a published certificate.
  */
 export async function persistPartnerGradeAuthorityScore(
   certId: number,
   authority: PartnerGradeAuthority
 ): Promise<void> {
-  if (authority.forcedNotGraded) return;
+  if (authority.nonNumeric) return;
   await db.execute(sql`
     UPDATE certificates
        SET grade_strength_score = ${authority.score}::int,
@@ -346,15 +599,22 @@ export async function persistPartnerGradeAuthorityScore(
 }
 
 /** Compact, log-safe record of the authority decision for the audit trail. */
-export function gradeAuthorityAuditDetail(authority: PartnerGradeAuthority) {
+export function gradeAuthorityAuditDetail(
+  authority: PartnerGradeAuthority,
+  rejectedClaim: Record<string, unknown> | null
+) {
   return {
     grade_authority: "server",
     grade_authority_version: authority.version,
+    grade_authority_basis: authority.basis,
     mvgs_score: authority.score,
     mvgs_score_label: authority.scoreLabel,
     overall_grade: authority.overallGrade,
     subgrades: authority.subgrades,
     deductions: authority.deductions,
-    forced_not_graded: authority.forcedNotGraded,
+    non_numeric: authority.nonNumeric,
+    // F8 — what the client tried to author, so a tampered save is distinguishable from an
+    // honest one. Null on an honest request.
+    rejected_client_claim: rejectedClaim,
   };
 }

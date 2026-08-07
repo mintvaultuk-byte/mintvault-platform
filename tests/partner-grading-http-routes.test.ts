@@ -53,7 +53,9 @@ import bcrypt from "bcryptjs";
 // server itself persisted, purely to establish what that engine says. Neither file is modified, and
 // nothing here re-implements any part of the scoring.
 import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
-import { gradeFromMvgsScore } from "@shared/mvgs-scoring";
+import { gradeFromMvgsScore, remainingToGrade } from "@shared/mvgs-scoring";
+import { centeringSubgrade, centeringSubgradeStrict } from "@shared/centering";
+import { calcCornerSubgrade, calcEdgeSubgrade, calculateOverallGrade } from "@shared/legacy-grade-fallback";
 import { isBlackLabel } from "@shared/pristine";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import {
@@ -812,8 +814,12 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
 
   interface EngineVerdict {
     score: number;
-    grade: number;
+    /** Numeric authoritative grade, or null when the outcome is AA/NO. */
+    grade: number | null;
+    nonNumericGrade: "AA" | "NO" | null;
+    subgrades: { centering: number; corners: number; edges: number; surface: number } | null;
     deductions: Record<string, number>;
+    basis: string;
   }
 
   /**
@@ -823,24 +829,43 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
    * inside the server falls back to DEFAULT_MVGS_CALIBRATION — which is what scoreMvgsV2 uses
    * here when no calibration is passed. Both sides therefore use identical calibration.
    */
+  /**
+   * The SHARED grading maths, run over the columns the server actually stored, with the
+   * SAME precedence the grading workstation uses. This is the oracle for every proof below.
+   *
+   * Precedence mirrors client/src/components/grading/grading-panel.tsx verbatim:
+   *   authentication verdict → engine major-tear rule → MVGS engine WHEN A PIN IS
+   *   CLASSIFIED → otherwise the zone-stepper fallback (calculateOverallGrade).
+   *
+   * Hostile review's F2 landed precisely because the earlier version of this helper applied
+   * the engine unconditionally, so a card graded with the zone steppers and no pins "agreed"
+   * with an implementation that was inflating it to 10.
+   *
+   * Everything here is imported, not reimplemented: scoreMvgsV2, gradeFromMvgsScore,
+   * centeringSubgrade(Strict), remainingToGrade, calcCornerSubgrade, calcEdgeSubgrade,
+   * calculateOverallGrade.
+   */
   async function engineOverPersistedEvidence(certId: number): Promise<EngineVerdict> {
     const row = await admin.query<Record<string, any>>(
       `SELECT centering_front_lr, centering_front_tb, centering_back_lr, centering_back_tb,
-              defects, surface_values, dark_border_front, dark_border_back, eye_appeal_modifier,
-              whitening_lines, crease_lines, crease_span_pct, wrinkle_severity, tear_severity
+              defects, corner_values, edge_values, surface_values,
+              dark_border_front, dark_border_back, eye_appeal_modifier,
+              whitening_lines, crease_lines, crease_span_pct, wrinkle_severity, tear_severity,
+              auth_status, grade_type
          FROM certificates WHERE id=$1`,
       [certId]
     );
     const c = row.rows[0];
     const surfaceFlags = (c.surface_values ?? {}) as Record<string, unknown>;
+    const pins = (Array.isArray(c.defects) ? c.defects : [])
+      .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
+      .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
     const result = scoreMvgsV2({
       centeringFrontLr: c.centering_front_lr,
       centeringFrontTb: c.centering_front_tb,
       centeringBackLr: c.centering_back_lr,
       centeringBackTb: c.centering_back_tb,
-      defects: (Array.isArray(c.defects) ? c.defects : [])
-        .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
-        .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) })),
+      defects: pins,
       darkBorderFront: !!c.dark_border_front,
       darkBorderBack: !!c.dark_border_back,
       eyeAppealModifier: Number(c.eye_appeal_modifier ?? 0) || 0,
@@ -852,7 +877,96 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
       hasCrease: !!(surfaceFlags as any).hasCrease,
       hasTear: !!(surfaceFlags as any).hasTear,
     });
-    return { score: result.score, grade: gradeFromMvgsScore(result.score), deductions: result.deductions };
+
+    const nonNum = (grade: "AA" | "NO"): EngineVerdict => ({
+      score: result.score,
+      grade: null,
+      nonNumericGrade: grade,
+      subgrades: null,
+      deductions: result.deductions,
+      basis: "authentication",
+    });
+    const storedKind = String(c.grade_type ?? "numeric").trim().toLowerCase();
+    if (c.auth_status === "authentic_altered") return nonNum("AA");
+    if (c.auth_status === "not_original") return nonNum("NO");
+    if (storedKind === "authentic_altered" || storedKind === "aa") return nonNum("AA");
+    if (storedKind === "not_original" || storedKind === "no" || storedKind === "non_numeric") return nonNum("NO");
+    if (result.tearForceNotGraded) return { ...nonNum("NO"), basis: "engine-tear-rule" };
+
+    const surface = remainingToGrade(25 - Math.abs(result.deductions.surface ?? 0));
+    if (pins.length > 0) {
+      const subgrades = {
+        centering: centeringSubgrade(
+          c.centering_front_lr,
+          c.centering_front_tb,
+          c.centering_back_lr,
+          c.centering_back_tb
+        ).subgrade,
+        corners: remainingToGrade(25 - Math.abs(result.deductions.corners ?? 0)),
+        edges: remainingToGrade(25 - Math.abs(result.deductions.edges ?? 0)),
+        surface,
+      };
+      return {
+        score: result.score,
+        grade: gradeFromMvgsScore(result.score),
+        nonNumericGrade: null,
+        subgrades,
+        deductions: result.deductions,
+        basis: "mvgs-engine",
+      };
+    }
+
+    const zeroC = {
+      frontTL: 0, frontTR: 0, frontBL: 0, frontBR: 0, backTL: 0, backTR: 0, backBL: 0, backBR: 0,
+    };
+    const zeroE = {
+      frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0,
+      backTop: 0, backBottom: 0, backLeft: 0, backRight: 0,
+    };
+    const subgrades = {
+      centering:
+        centeringSubgradeStrict(
+          c.centering_front_lr,
+          c.centering_front_tb,
+          c.centering_back_lr,
+          c.centering_back_tb
+        )?.subgrade ?? 10,
+      corners: calcCornerSubgrade({ ...zeroC, ...(c.corner_values ?? {}) }).grade,
+      edges: calcEdgeSubgrade({ ...zeroE, ...(c.edge_values ?? {}) }).grade,
+      surface,
+    };
+    return {
+      score: result.score,
+      grade: calculateOverallGrade(subgrades, !!(surfaceFlags as any).hasCrease, !!(surfaceFlags as any).hasTear),
+      nonNumericGrade: null,
+      subgrades,
+      deductions: result.deductions,
+      basis: "legacy-zone-fallback",
+    };
+  }
+
+  /** THE INVARIANT, as one reusable assertion: the stored row carries what the shared
+   *  maths says about that same stored row. Every proof below leans on it. */
+  async function assertRowMatchesSharedMaths(certId: number, why: string): Promise<EngineVerdict> {
+    const oracle = await engineOverPersistedEvidence(certId);
+    const stored = await authorityColumns(certId);
+    if (oracle.grade == null) {
+      expect(stored.grade, `${why}: a non-numeric outcome must store a NULL grade`).toBeNull();
+    } else {
+      expect(Number(stored.grade), `${why}: stored grade must equal the shared maths over the stored row`).toBe(
+        oracle.grade
+      );
+      expect(
+        {
+          centering: Number(stored.centering_score),
+          corners: Number(stored.corners_score),
+          edges: Number(stored.edges_score),
+          surface: Number(stored.surface_score),
+        },
+        `${why}: stored sub-grades must equal the shared maths over the stored row`
+      ).toEqual(oracle.subgrades);
+    }
+    return oracle;
   }
 
   /** Every authority-bearing column the partner must not be able to author. */
@@ -900,9 +1014,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     expect(after.centering_front_lr, "the server stored the centering measurement the client supplied").toBe("90/10");
 
     const engine = await engineOverPersistedEvidence(certId);
-    expect(engine.grade, "sanity: the engine must rate this evidence poorly, or the test proves nothing").toBeLessThan(
-      5
-    );
+    expect(engine.grade!, "sanity: the maths must rate this evidence poorly, or the test proves nothing").toBeLessThan(5);
 
     // THE ARCHITECTURE FACT, inverted from what this test used to assert. Changed deliberately:
     // the previous expectation was `.toBe(10)` / `.not.toBe(engineGrade)`, characterising the
@@ -960,7 +1072,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     expect(after.grade_approved_at, "a partner submit must still never publish").toBeNull();
 
     const engine = await engineOverPersistedEvidence(certId);
-    expect(engine.grade, "sanity: the engine must rate this evidence poorly").toBeLessThan(5);
+    expect(engine.grade!, "sanity: the maths must rate this evidence poorly").toBeLessThan(5);
 
     // Changed deliberately: was `.toBe(10)` / `.not.toBe(engineGrade)`.
     expect(
@@ -1271,7 +1383,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
       totally_made_up_column: 1,
     });
     expect(Object.keys(out).sort(), "only evidence/identity keys survive").toEqual(
-      ["card_name", "centering_front_lr", "defects"].sort()
+      ["auth_status", "card_name", "centering_front_lr", "defects"].sort()
     );
     for (const f of PARTNER_GRADE_SERVER_AUTHORED_FIELDS) {
       expect(out, `${f} is server-authored and must never come from the client`).not.toHaveProperty(f);
