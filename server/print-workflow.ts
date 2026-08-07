@@ -410,6 +410,63 @@ export async function requireCompletePartnerSubmissionSet(
   return rejected;
 }
 
+/**
+ * F2. The SINGLE-CERTIFICATE settlement gate.
+ *
+ * `requireCompletePartnerSubmissionSet(..., "batch")` refuses to render labels for a Partner
+ * submission whose credits have not settled — but it only ever runs on the batch path. Two
+ * admin routes rendered labels directly, with no partner lookup at all:
+ *
+ *   GET /api/admin/certificates/:id/label/:side          (server/routes.ts)
+ *   GET /api/admin/certificates/label/:certId/:filename  (server/routes.ts)
+ *
+ * Both call generateLabelPNG/generateLabelPDF and return the bytes. The PNG they return is the
+ * SAME artefact the batch renders, so an admin could produce a print-ready label for a Partner card
+ * MintVault had not been paid for, entirely outside the gate. That is the hole this closes.
+ *
+ * WHY THE SETTLED SET IS WIDER HERE THAN ON THE BATCH PATH. The batch gate accepts
+ * `ready_to_return`/`completed`. This one also accepts `shipped`, because a destination can only
+ * reach `shipped` from `ready_to_return` (see the completion cascade in `markCompleted`), so it is
+ * unambiguously post-settlement — and refusing there would break reprint-label lookups for cards
+ * already out of the door. It is never LOOSER at the pre-settlement end: `in_grading`, `received`
+ * and `new` are refused exactly as the batch gate refuses them.
+ *
+ * Returns null for HQ cards, for unknown certificates, and on a deployment with no partner bridge
+ * table — i.e. it fails OPEN only where there is provably no partner money at stake.
+ */
+export interface PartnerSettlementBlock {
+  code: "partner_settlement_required";
+  message: string;
+  destinationStatus: string;
+}
+
+export async function partnerSettlementBlockForCert(certNumber: string): Promise<PartnerSettlementBlock | null> {
+  if (!certNumber) return null;
+  const exists = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`);
+  if (!(exists.rows[0] as { rel?: string | null } | undefined)?.rel) return null;
+  const rows = await db.execute(sql`
+    SELECT s.status::text AS destination_status
+      FROM certificates c
+      JOIN partner_grading_work_items pgwi
+        ON pgwi.certificate_id = c.id
+       AND pgwi.submission_item_id = c.submission_item_id
+       AND pgwi.destination_submission_id = c.submission_id
+      JOIN submissions s ON s.id = pgwi.destination_submission_id
+     WHERE c.certificate_number = ANY(${pgTextArray(certIdStorageVariants([certNumber]))}::text[])
+       AND pgwi.status <> 'void'
+     LIMIT 1
+  `);
+  const row = rows.rows[0] as { destination_status?: string } | undefined;
+  if (!row) return null;
+  const destinationStatus = String(row.destination_status ?? "");
+  if (["ready_to_return", "shipped", "completed"].includes(destinationStatus)) return null;
+  return {
+    code: "partner_settlement_required",
+    message: "Partner credits must be settled before labels are rendered.",
+    destinationStatus,
+  };
+}
+
 // ── Transition results ───────────────────────────────────────────────────────
 
 export interface WorkflowResult {
@@ -1036,6 +1093,24 @@ export async function requestReprint(params: {
  * were free to drift apart.
  */
 const partnerGradedUnitsFullySettled = sql`
+           -- F3. THE PREDICATE IS NOT ALLOWED TO BE VACUOUSLY TRUE. The equality below compares
+           -- two counts. At ZERO non-void work items both sides are 0, 0 = 0 holds, and the gate
+           -- OPENS: the submission and its destination cascade to completed having consumed ZERO
+           -- credits. "Nothing was graded" would read as "fully settled" — the one direction a
+           -- money gate must never fail. Nothing writes 'void' today (it exists only in 0049's
+           -- CHECK constraint and in read-side status <> 'void' predicates), so the shape is
+           -- currently unreachable; it goes live the day a void/withdraw path is added, which is
+           -- exactly the change least likely to re-derive this gate's arithmetic. Requiring at
+           -- least one live graded unit makes the equality carry positive evidence on BOTH sides:
+           -- N units matched by N canonical debits, with N never 0.
+           AND (
+             SELECT count(*)
+               FROM partner_grading_work_items unit
+              WHERE unit.tenant_id = t.tenant_id
+                AND unit.partner_submission_id = t.partner_submission_id
+                AND unit.destination_submission_id = t.destination_submission_id
+                AND unit.status <> 'void'
+           ) > 0
            AND (
              SELECT count(*)
                FROM partner_grading_work_items unit

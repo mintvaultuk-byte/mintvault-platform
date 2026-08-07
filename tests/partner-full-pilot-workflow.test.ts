@@ -840,7 +840,9 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
 
     // The certificate is already approved, so the mirror finds no pending_review work item.
     const replay = await approveAsSuperAdmin(f.certIds[1]);
-    expect(replay.kind).toBe("not_partner");
+    // F1: the replay of an already-settled destination is now NAMED, not collapsed into the same
+    // `not_partner` an ordinary HQ card returns. That indistinguishability WAS the finding.
+    expect(replay.kind).toBe("already_settled");
 
     expect(await triple(f.tenantId), "a replayed approval must not move money").toEqual({
       available: 8,
@@ -1483,6 +1485,185 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
 
     await expectSettledExactlyOnce(f);
   }, 120_000);
+
+  /**
+   * P19 / P20 / P21 / P22 — FINDING F1, the commit-then-act window.
+   *
+   * THE DEFECT. `mirrorPartnerApproval` mirrors the work item to `approved` in a transaction, that
+   * transaction COMMITS, and only then is settlement driven — deliberately outside it, because
+   * pulling settlement inside would give this module the lock order
+   * `partner_grading_work_items -> submissions -> partner_credit_*` against settlement's and
+   * `markCompleted`'s opposite order, i.e. an ABBA deadlock cycle. That design is correct and is
+   * NOT changed here.
+   *
+   * What was broken is what happens when the window is interrupted. The entry gate was
+   * `pgwi.status = 'pending_review'`, which is PRE-commit state: once the mirror committed it was
+   * false forever, so every retry returned `not_partner` and the route reported HTTP 200. A
+   * submission whose settlement had thrown was left with every work item approved, every
+   * certificate published, the destination stuck in `in_grading`, N credits reserved and ZERO
+   * debits — held for the full 365-day reservation TTL — and no retry could tell anyone.
+   *
+   * THE FIX. The gate now keys on POST-COMMIT state, and the re-drive takes NO lock of its own:
+   * three read-committed SELECTs, then the SAME settlement entry point on its own connection with
+   * its own unchanged lock order. No new edge in the wait-for graph.
+   */
+  it("P19: F1 — an interrupted settlement strands the submission, and the retry RE-DRIVES it instead of reporting 200", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    expect(await triple(f.tenantId), "precondition: card one mirrored, nothing settled").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+
+    /**
+     * Open the window. Any fail-closed settlement condition does this; a crash, a pod restart or a
+     * transient DB loss between the mirror COMMIT and the settlement call opens the identical
+     * window with no injection at all. `reconciliation_required` is a real operational state of
+     * partner_connector_imports (0010), so this is production-shaped, not a synthetic poke.
+     */
+    await admin.query(
+      "UPDATE partner_connector_imports SET state='reconciliation_required' WHERE destination_submission_id=$1",
+      [f.destinationSubmissionId]
+    );
+
+    // The final approval commits the work item, then settlement refuses.
+    await expect(approveAsSuperAdmin(f.certIds[1])).rejects.toThrow(/reconciliation/i);
+
+    // ── THE STRANDED STATE, exactly as the hostile review reproduced it ──────────────────────
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status='approved'",
+        [f.partnerSubmissionId]
+      ),
+      "both work items committed approved"
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+        [f.destinationSubmissionId]
+      ),
+      "both certificates published"
+    ).toBe("2");
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "the destination is stuck short of settlement"
+    ).toBe("in_grading");
+    expect(await triple(f.tenantId), "2 credits still reserved, 0 debits").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount = -1", [
+        f.tenantId,
+      ]),
+      "zero debits"
+    ).toBe("0");
+
+    /**
+     * RETRY WITH THE CAUSE STILL PRESENT. This is the assertion the whole finding turns on: the
+     * OLD code answered `not_partner` here and the route turned that into 200 {ok:true} over money
+     * that had not moved. It must now name the condition instead.
+     */
+    const blocked = (await mirror.mirrorPartnerApproval(f.certIds[1], SUPER_ADMIN)) as {
+      kind: string;
+      reasonCode?: string;
+      destinationSubmissionId?: number | null;
+    };
+    expect(blocked.kind, "a retry over unmoved money must never read as success").toBe("settlement_failed");
+    expect(blocked.reasonCode, "the refusal names the fail-closed condition").toBe("credit_settlement_required");
+    expect(blocked.destinationSubmissionId).toBe(f.destinationSubmissionId);
+    expect(await triple(f.tenantId), "a refused retry moves nothing").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_accounting_exceptions WHERE destination_submission_id=$1 AND reason_code='partner_mapping_not_completed'",
+        [f.destinationSubmissionId]
+      ),
+      "the refused retry leaves durable evidence naming the reason"
+    ).toBe("1");
+
+    // ── OPERATOR FIXES THE CAUSE AND RETRIES ────────────────────────────────────────────────
+    await admin.query("UPDATE partner_connector_imports SET state='completed' WHERE destination_submission_id=$1", [
+      f.destinationSubmissionId,
+    ]);
+    const redriven = (await mirror.mirrorPartnerApproval(f.certIds[1], SUPER_ADMIN)) as { kind: string };
+    expect(redriven.kind, "the same retry now DRIVES settlement to completion").toBe("settled_on_retry");
+
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "the destination is settled"
+    ).toBe("ready_to_return");
+    await expectSettledExactlyOnce(f);
+
+    // And a THIRD call is a no-op that still does not claim to have settled anything new.
+    const replay = (await mirror.mirrorPartnerApproval(f.certIds[1], SUPER_ADMIN)) as { kind: string };
+    expect(replay.kind).toBe("already_settled");
+    await expectSettledExactlyOnce(f);
+  }, 180_000);
+
+  it("P20: F1 — the stranded submission is VISIBLE to an operator, and disappears once it settles", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+
+    // Not stranded yet: card two is still pending_review, so there is nothing to settle.
+    expect(
+      (await mirror.findStrandedPartnerSettlements()).map((s) => s.destinationSubmissionId),
+      "a half-graded submission is not stranded — it is simply not finished"
+    ).not.toContain(f.destinationSubmissionId);
+
+    await admin.query(
+      "UPDATE partner_connector_imports SET state='reconciliation_required' WHERE destination_submission_id=$1",
+      [f.destinationSubmissionId]
+    );
+    await expect(approveAsSuperAdmin(f.certIds[1])).rejects.toThrow();
+
+    const stranded = await mirror.findStrandedPartnerSettlements();
+    const row = stranded.find((s) => s.destinationSubmissionId === f.destinationSubmissionId);
+    expect(row, "an approved-but-unsettled destination must be nameable by a query").toBeDefined();
+    expect(row?.destinationStatus).toBe("in_grading");
+    expect(row?.liveUnits).toBe(2);
+    expect(row?.tenantId).toBe(f.tenantId);
+    expect(row?.partnerSubmissionId).toBe(f.partnerSubmissionId);
+
+    await admin.query("UPDATE partner_connector_imports SET state='completed' WHERE destination_submission_id=$1", [
+      f.destinationSubmissionId,
+    ]);
+    expect((await mirror.mirrorPartnerApproval(f.certIds[1], SUPER_ADMIN)).kind).toBe("settled_on_retry");
+    expect(
+      (await mirror.findStrandedPartnerSettlements()).map((s) => s.destinationSubmissionId),
+      "once settled it must leave the stranded list"
+    ).not.toContain(f.destinationSubmissionId);
+  }, 180_000);
+
+  it("P21: F1 — a card whose SIBLINGS are still outstanding is reported as such, never as settled", async () => {
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+
+    const outcome = (await mirror.mirrorPartnerApproval(f.certIds[0], SUPER_ADMIN)) as {
+      kind: string;
+      outstandingUnits?: number;
+    };
+    expect(outcome.kind).toBe("settlement_pending_other_cards");
+    expect(outcome.outstandingUnits, "card two is still pending_review").toBe(1);
+    expect(await triple(f.tenantId), "re-approving a done card must not settle a half-graded set").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+    expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId])).toBe(
+      "in_grading"
+    );
+  }, 120_000);
+
+  it("P22: F1 — a certificate with no partner work item is still an ordinary HQ card", async () => {
+    // NEGATIVE CONTROL. The re-drive must not turn every non-partner approval into partner work.
+    expect((await mirror.mirrorPartnerApproval(2_147_000_001, SUPER_ADMIN)).kind).toBe("not_partner");
+  });
 
   it("P13: the settlement failpoint is refused outside the test runner", async () => {
     const prior = process.env.NODE_ENV;
