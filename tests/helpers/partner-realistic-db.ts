@@ -164,19 +164,37 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0044_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
 
-/** 0045 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
-export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
+/**
+ * 0047/0048 — the two hostile-review security repairs, in the order they land on a real database.
+ *
+ * 0047 closes A8-F1: partner_owner_invariant_tenants (created by 0032, granted to partner_runtime
+ * by 0032:117) had no RLS and no policy, so it returned every tenant to every partner session.
+ * 0048 closes A8-F2: 0044's location-snapshot trigger function had no `SET search_path` and read
+ * partner_locations unqualified, so it was pg_temp-shadowable.
+ *
+ * 0045 is deliberately absent and must stay absent — 0046 is already journalled on staging, and
+ * every rollback in this series refuses while a higher-numbered row exists, so anything at 0045
+ * would be born un-rollbackable there. See docs/migration-ownership-partner-0049.md.
+ */
+export const PARTNER_MIGRATIONS_WITH_SECURITY_REPAIRS = [
   ...PARTNER_MIGRATIONS_WITH_LIFECYCLE,
-  "0045_partner_grading_work_items",
+  "0047_partner_owner_invariant_tenants_rls",
+  "0048_partner_location_snapshot_search_path",
+] as const;
+
+/** 0049 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
+export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
+  ...PARTNER_MIGRATIONS_WITH_SECURITY_REPAIRS,
+  "0049_partner_grading_work_items",
 ] as const;
 /**
  * Create the MintVault `certificates` table a partner migration needs.
  *
- * WHY THIS EXISTS: migration 0045 both creates
+ * WHY THIS EXISTS: migration 0049 both creates
  *   CREATE UNIQUE INDEX ... ON certificates(id, submission_id, submission_item_id)
  * and issues COLUMN-LEVEL grants naming 38 distinct certificates columns. `IF NOT EXISTS` on the
  * index guards its NAME, not its columns, and a column-level GRANT naming a missing column is a
- * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0045 fail and
+ * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0049 fail and
  * the whole suite abort inside beforeAll. vitest renders a beforeAll throw as "N skipped", which
  * reads exactly like a benign env gate; that is how two critical suites sat red while looking
  * merely unconfigured.

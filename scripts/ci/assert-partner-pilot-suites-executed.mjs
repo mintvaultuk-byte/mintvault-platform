@@ -34,6 +34,13 @@ const SUITES = [
   { file: "tests/partner-real-r2-storage.test.ts", min: 2 },
   { file: "tests/partner-grading-bridge-migration.test.ts", min: 12 },
   /**
+   * The ONLY proof of the two hostile-review security repairs (A8-F1 RLS, A8-F2 search_path). It
+   * needs a floor more than most files here: 11 of its 16 tests are pre-fix controls and mutations
+   * whose whole job is to fail if the repair regresses. A silent skip would remove the only thing
+   * standing between a rolled-back 0047 and a live cross-tenant enumeration hole.
+   */
+  { file: "tests/partner-security-repairs-0047-0048.test.ts", min: 16 },
+  /**
    * The ONLY suite that executes the partner completion cascade. Everything else stops at the
    * `to_regclass('public.partner_grading_work_items')` guard, because no other DB-backed test
    * creates that table — which is exactly how a cascade that wrote a non-existent column

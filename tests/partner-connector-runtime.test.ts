@@ -247,14 +247,14 @@ const partnerIntakeSubmissionCount = () =>
       /**
        * The importer creates a certificate (allocating from cert_counter) and a
        * partner_grading_work_items row for every imported card, so the destination tables must
-       * exist and the migration set must include 0045 — PARTNER_MIGRATIONS_WITH_G4 stops at 0014.
+       * exist and the migration set must include 0049 — PARTNER_MIGRATIONS_WITH_G4 stops at 0014.
        *
-       * ORDER IS LOAD-BEARING: 0045 grants on cert_counter only inside
+       * ORDER IS LOAD-BEARING: 0049 grants on cert_counter only inside
        * `IF to_regclass('public.cert_counter') IS NOT NULL`, so a cert_counter created AFTER the
        * migrations would leave partner_connector_runtime with no grant and the import would fail
        * on permissions. Tables first, migrations second.
        *
-       * The shared certificates helper is used rather than a hand-rolled table because 0045 issues
+       * The shared certificates helper is used rather than a hand-rolled table because 0049 issues
        * column-level grants naming 38 certificates columns, and a missing column is a hard 42703
        * that aborts beforeAll — which vitest then reports as "skipped".
        */

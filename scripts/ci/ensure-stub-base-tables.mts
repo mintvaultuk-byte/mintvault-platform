@@ -3,11 +3,11 @@
  * applies the FULL migration set.
  *
  * WHY THIS REPLACED INLINE psql IN ci.yml. The workflow used to create the stub inline as
- * `certificates (id serial, cert_id text, secret text)`. Migration 0045 then landed, and it
+ * `certificates (id serial, cert_id text, secret text)`. Migration 0049 then landed, and it
  * references certificates.submission_id and submission_item_id (a unique index, a composite FK, and
  * 38 column-level grants). Every one of the six full-set appliers died in beforeAll with
  *
- *     Migration 0045_partner_grading_work_items.sql failed and was rolled back:
+ *     Migration 0049_partner_grading_work_items.sql failed and was rolled back:
  *     column "submission_id" does not exist
  *
  * and because a failed beforeAll makes vitest report the file's tests as SKIPPED, the surface
@@ -96,7 +96,7 @@ for (const varName of varNames) {
       await admin.query(`ALTER TABLE ${table} OWNER TO ${MIGRATOR_ROLE}`);
     }
 
-    // Prove the columns 0045 actually needs are present, rather than trusting that the helper ran.
+    // Prove the columns 0049 actually needs are present, rather than trusting that the helper ran.
     const { rows } = await admin.query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'certificates'

@@ -204,7 +204,7 @@ async function seedMintVaultTables(): Promise<void> {
   await admin.query(
     "CREATE TABLE cert_counter (id integer PRIMARY KEY DEFAULT 1, last_issued integer NOT NULL DEFAULT 0)"
   );
-  // The composite FK target migration 0045 needs on the MintVault side.
+  // The composite FK target migration 0049 needs on the MintVault side.
   await admin.query("CREATE UNIQUE INDEX uq_submission_items_submission ON submission_items (submission_id, id)");
   for (const t of [
     "users",
@@ -242,7 +242,7 @@ async function setGlobalFlag(flag: string, enabled: boolean): Promise<void> {
 /**
  * One partner tenant with one ACTIVE owner-grader, one destination submission and TWO cards whose
  * work items sit at `assigned` — the state the adapter is allowed to act on. Both card images are
- * written to the disposable MinIO under the SERVER-GENERATED key shape 0045's CHECK constraints
+ * written to the disposable MinIO under the SERVER-GENERATED key shape 0049's CHECK constraints
  * require, so the submit route's live headR2 verification passes for real.
  */
 async function seedGradingFixture(opts: { privateNotes: string }): Promise<GradingFixture> {

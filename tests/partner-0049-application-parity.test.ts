@@ -1,7 +1,7 @@
 /**
- * Migration 0045 ⇄ application parity.
+ * Migration 0049 ⇄ application parity.
  *
- * WHAT THIS IS FOR. 0045 owns `partner_grading_work_items`, and seven production modules read or
+ * WHAT THIS IS FOR. 0049 owns `partner_grading_work_items`, and seven production modules read or
  * write it. Nothing checked that the columns those modules name actually exist with the shape they
  * assume. That is not hypothetical: this branch already shipped one column that did not exist
  * (`partner_submissions.completed_at`, fixed in 5e620fa), and it reached a real database before
@@ -10,9 +10,9 @@
  *
  * HOW THE PROOF WORKS, AND WHAT IT IS NOT. Column names are DISCOVERED from production source by
  * pattern — that part is textual, and on its own would prove nothing. Every discovered name is then
- * VERIFIED against `information_schema` / `pg_catalog` on a real database with 0045 applied. So the
+ * VERIFIED against `information_schema` / `pg_catalog` on a real database with 0049 applied. So the
  * assertion is "the database really provides what production really names", not "these two strings
- * look alike". A production module gaining a reference to a column 0045 does not supply turns this
+ * look alike". A production module gaining a reference to a column 0049 does not supply turns this
  * RED without anyone remembering to update a list.
  *
  * Discovery is scoped to the two constructs that name columns unambiguously — INSERT column lists
@@ -36,7 +36,7 @@ import {
 
 const TABLE = "partner_grading_work_items";
 
-/** Every production module that reads or writes the 0045 table. */
+/** Every production module that reads or writes the 0049 table. */
 const CONSUMERS = [
   "server/partner/connector-import-service.ts",
   "server/partner/grading-assignment.ts",
@@ -99,9 +99,9 @@ function writtenColumns(): Map<string, string[]> {
   return found;
 }
 
-describe("migration 0045 ⇄ application parity", () => {
+describe("migration 0049 ⇄ application parity", () => {
   beforeAll(async () => {
-    cluster = await startPostgres17("partner-0045-parity");
+    cluster = await startPostgres17("partner-0049-parity");
     admin = new Client({ connectionString: cluster.url });
     await admin.connect();
     await provisionRealisticRoles(admin);
@@ -148,7 +148,7 @@ describe("migration 0045 ⇄ application parity", () => {
   });
 
   it("A1: the table exists with a non-trivial column set", async () => {
-    expect(dbColumns.size, "0045 must actually have created the table").toBeGreaterThan(15);
+    expect(dbColumns.size, "0049 must actually have created the table").toBeGreaterThan(15);
     // Spot-pin the identity columns the whole bridge is built on, so a table that existed but was
     // gutted could not satisfy the size check alone.
     for (const c of [
@@ -161,7 +161,7 @@ describe("migration 0045 ⇄ application parity", () => {
       "status",
       "card_ordinal",
     ]) {
-      expect(dbColumns.has(c), `0045 must provide ${c}`).toBe(true);
+      expect(dbColumns.has(c), `0049 must provide ${c}`).toBe(true);
     }
   });
 
@@ -176,7 +176,7 @@ describe("migration 0045 ⇄ application parity", () => {
     const missing = [...written.entries()]
       .filter(([name]) => !dbColumns.has(name))
       .map(([name, files]) => `${name} (written by ${files.join(", ")})`);
-    expect(missing, `production writes columns 0045 does not supply: ${missing.join("; ")}`).toEqual([]);
+    expect(missing, `production writes columns 0049 does not supply: ${missing.join("; ")}`).toEqual([]);
   });
 
   it("A3: the identity columns are NOT NULL, so a work item cannot exist unattached", () => {
@@ -215,7 +215,7 @@ describe("migration 0045 ⇄ application parity", () => {
     expect(rows.length, "index count on the bridge table").toBe(7);
   });
 
-  it("A5: every foreign key 0045 declares is really present in pg_catalog", async () => {
+  it("A5: every foreign key 0049 declares is really present in pg_catalog", async () => {
     const { rows } = await admin.query<{ conname: string; def: string }>(
       `SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
         WHERE conrelid = $1::regclass AND contype='f'`,
@@ -228,7 +228,7 @@ describe("migration 0045 ⇄ application parity", () => {
     expect(defs.some((d) => d.includes("(tenant_id, partner_submission_id)"))).toBe(true);
     expect(defs.some((d) => d.includes("(partner_submission_id, partner_submission_card_id)"))).toBe(true);
     expect(defs.some((d) => d.includes("(certificate_id, destination_submission_id, submission_item_id)"))).toBe(true);
-    expect(rows.length, "0045 declares a large FK set").toBeGreaterThan(10);
+    expect(rows.length, "0049 declares a large FK set").toBeGreaterThan(10);
   });
 
   it("A6: RLS is ENABLED and FORCED, with a tenant policy on both USING and WITH CHECK", async () => {
