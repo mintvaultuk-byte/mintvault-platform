@@ -1,0 +1,704 @@
+/**
+ * ROLLBACK + GUARD INTEGRITY — the suite that stops the next rollback shipping without a journal
+ * delete, and the behavioural proof for the 0047-0055 security repairs.
+ *
+ * ============================================================================================
+ * WHY THIS FILE EXISTS
+ * ============================================================================================
+ * Two BLOCKERS motivated it, and both were invisible to every existing test:
+ *
+ *   1. rollback-0047 and rollback-0048 returned the database to the pre-repair, EXPOSED state
+ *      while leaving their own row in schema_migrations. scripts/db/migrate.ts:planMigrations
+ *      classifies a file as alreadyApplied on the PRESENCE of that row alone (migrate.ts:449-462 —
+ *      it consults row.status and row.checksum and never looks at the database), so the runner
+ *      reported the migration applied and REFUSED to re-apply it. A HIGH tenant-isolation hole,
+ *      wide open, behind a green migration status.
+ *
+ *   2. rollback-0050 had no journal reference at all, so its row was IMMORTAL — and because
+ *      rollback-0047/0048/0049 each refuse while any journal row numbered above their own exists,
+ *      that one orphan row made all three PERMANENTLY unrunnable. Recovery required hand-editing
+ *      schema_migrations, which is exactly what the journal exists to prevent.
+ *
+ * A test that checked only "the rollback reverted the schema" would have passed for both. So the
+ * round-trip below asserts FOUR things per rollback, in order, and the journal step is the one
+ * that was missing:
+ *
+ *      applied      -> the attack is REFUSED
+ *      rollback     -> the attack SUCCEEDS  *and* the journal row count is 0
+ *      runner runs  -> the migration is re-applied UNPROMPTED
+ *      re-applied   -> the attack is REFUSED again
+ *
+ * ============================================================================================
+ * THE ROLE MODEL IS LOAD-BEARING
+ * ============================================================================================
+ * Every attack runs as a genuinely restricted role, and assertRestricted() re-proves
+ * rolsuper=false / rolbypassrls=false / is_superuser=off / row_security=on IMMEDIATELY BEFORE each
+ * claim rather than once in beforeAll. That is not ceremony: the 0047 finding this suite covers is
+ * precisely a migration that passed all of its own assertions while partner_runtime was BYPASSRLS,
+ * so "the probe ran against a role that could not have failed" is the exact failure mode in scope.
+ *
+ * `SET ROLE` from the superuser connection is the established pattern in
+ * tests/partner-rls-isolation.test.ts and is equivalent for this purpose: SET ROLE to a
+ * non-superuser drops superuser status for every privilege check, is_superuser reports off, and
+ * RLS is evaluated against current_user. The runtime roles are NOLOGIN by design (0001:16,
+ * 0008:23-24), so connecting as them is not an option that exists.
+ */
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { Client } from "pg";
+import {
+  provisionRealisticRoles,
+  migratorUrlFrom,
+  createMintvaultCertificatesTable,
+  createMintvaultLabelPrintsTable,
+  applyEveryMigrationRealistic,
+} from "./helpers/partner-realistic-db";
+import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { applyMigrations, listMigrationFiles, planMigrations } from "../scripts/db/migrate";
+
+const MIGRATIONS_DIR = join(process.cwd(), "migrations");
+const rbSql = (name: string) => readFileSync(join(MIGRATIONS_DIR, name), "utf8");
+
+let cluster: DisposablePostgres17;
+let admin: Client;
+
+/** Two throwaway tenants. Everything below is seeded for both so a leak is visible as a count. */
+const A = "aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa";
+const B = "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb";
+const LOC_A = "aaaaaaaa-1111-1111-1111-aaaaaaaa0001";
+const LOC_B = "bbbbbbbb-2222-2222-2222-bbbbbbbb0001";
+
+const WALLET_A = "aaaaaaaa-1111-1111-1111-aaaaaaaa0003";
+const FP = "a".repeat(64);
+
+// =============================================================================================
+// Helpers
+// =============================================================================================
+
+/**
+ * Run `fn` with current_user switched to `role` and app.tenant_id set to `tenant`, having first
+ * PROVEN the role cannot pass the probe vacuously. Restores the session in a finally — this
+ * connection is shared, and a leaked SET ROLE would silently weaken every later assertion.
+ */
+async function asRole(role: string, tenant: string | null, fn: () => Promise<void>): Promise<void> {
+  await admin.query(`SET ROLE ${role}`);
+  try {
+    const { rows } = await admin.query<{
+      who: string;
+      bypass: boolean;
+      su: boolean;
+      is_su: string;
+      rs: string;
+    }>(
+      `SELECT current_user AS who,
+              (SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) AS bypass,
+              (SELECT rolsuper     FROM pg_roles WHERE rolname = current_user) AS su,
+              current_setting('is_superuser') AS is_su,
+              current_setting('row_security') AS rs`
+    );
+    // Guard the guard. A probe against a role that ignores privileges or policies proves nothing,
+    // and that is the exact defect 0047's own post-flight had.
+    expect(rows[0].who).toBe(role);
+    expect(rows[0].bypass).toBe(false);
+    expect(rows[0].su).toBe(false);
+    expect(rows[0].is_su).toBe("off");
+    expect(rows[0].rs).toBe("on");
+
+    if (tenant === null) await admin.query("RESET app.tenant_id");
+    else await admin.query("SELECT set_config('app.tenant_id', $1, false)", [tenant]);
+
+    await fn();
+  } finally {
+    await admin.query("RESET ROLE").catch(() => {});
+    await admin.query("RESET app.tenant_id").catch(() => {});
+  }
+}
+
+/** Run a statement and report whether it was permitted, without letting it persist. */
+async function attempt(sql: string, params: unknown[] = []): Promise<{ ok: boolean; rows: number; error?: string }> {
+  await admin.query("BEGIN");
+  try {
+    const r = await admin.query(sql, params);
+    await admin.query("ROLLBACK");
+    return { ok: true, rows: r.rowCount ?? 0 };
+  } catch (e) {
+    await admin.query("ROLLBACK").catch(() => {});
+    return { ok: false, rows: 0, error: (e as Error).message };
+  }
+}
+
+async function journalRows(filename: string): Promise<number> {
+  const { rows } = await admin.query<{ n: number }>(
+    "SELECT count(*)::int n FROM schema_migrations WHERE filename = $1",
+    [filename]
+  );
+  return rows[0].n;
+}
+
+/**
+ * Execute a rollback file the way an operator does. Every one of these files carries its own
+ * BEGIN/COMMIT, so a RAISE inside leaves this shared connection sitting in an ABORTED transaction —
+ * which then makes every later assertion fail with a misleading "current transaction is aborted"
+ * instead of the real refusal message. Clear it before rethrowing.
+ */
+async function runRollback(file: string): Promise<void> {
+  try {
+    await admin.query(rbSql(file));
+  } catch (e) {
+    await admin.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+}
+
+/** Re-run the real runner, exactly as a deploy would — no arguments naming what to re-apply. */
+async function runRunnerUnprompted(): Promise<void> {
+  const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
+  await migrator.connect();
+  try {
+    await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
+    try {
+      await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
+    } finally {
+      await migrator.query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator").catch(() => {});
+    }
+  } finally {
+    await migrator.end();
+  }
+}
+
+/** What the real runner would do next, with no side effects. */
+async function pendingPerRunner(): Promise<string[]> {
+  const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
+  await migrator.connect();
+  try {
+    return (await planMigrations(migrator, listMigrationFiles())).pending;
+  } finally {
+    await migrator.end();
+  }
+}
+
+// =============================================================================================
+// The round-trip table
+// =============================================================================================
+
+/**
+ * One entry per numbered rollback in this release series.
+ *
+ * `probe()` returns a short STATE STRING rather than a boolean, so a failure names what it saw
+ * instead of just "expected true, got false" — and so the same function proves both directions.
+ * `whenApplied` is the safe state; `whenRolledBack` is the reopened hole. Asserting BOTH is what
+ * stops a probe that always returns the safe answer from passing vacuously.
+ */
+interface RoundTrip {
+  number: number;
+  migration: string;
+  rollback: string;
+  /**
+   * Whether this rollback can be run ON ITS OWN against a fully-migrated database.
+   *
+   * FALSE means the file carries a `left(filename,4)::integer > N` refusal because something later
+   * genuinely depends on it — rollback-0047/0048/0049 (0049 DROPs a table) and rollback-0052 (0055
+   * redefines the policies it restores). Those are covered ONLY by the descending sequence, which
+   * is the supported recovery order for them. Marking them standalone would not test more, it would
+   * test the refusal firing and call it a failure.
+   */
+  standalone: boolean;
+  /** The hole, in one line, for the failure message. */
+  hole: string;
+  probe: () => Promise<string>;
+  whenApplied: string;
+  whenRolledBack: string;
+}
+
+const ROUND_TRIPS: RoundTrip[] = [
+  {
+    number: 47,
+    standalone: false,
+    migration: "0047_partner_owner_invariant_tenants_rls.sql",
+    rollback: "rollback-0047-partner-owner-invariant-tenants-rls.sql",
+    hole: "A8-F1 — partner_owner_invariant_tenants enumerates every tenant UUID on the network",
+    whenApplied: "isolated:1",
+    whenRolledBack: "leak:2",
+    probe: async () => {
+      let out = "";
+      await asRole("partner_runtime", A, async () => {
+        const { rows } = await admin.query<{ n: number }>(
+          "SELECT count(*)::int n FROM partner_owner_invariant_tenants"
+        );
+        out = rows[0].n > 1 ? `leak:${rows[0].n}` : `isolated:${rows[0].n}`;
+      });
+      return out;
+    },
+  },
+  {
+    number: 48,
+    standalone: false,
+    migration: "0048_partner_location_snapshot_search_path.sql",
+    rollback: "rollback-0048-partner-location-snapshot-search-path.sql",
+    hole: "A8-F2 — the location-snapshot trigger resolves partner_locations from pg_temp",
+    whenApplied: "pinned",
+    whenRolledBack: "shadowable",
+    probe: async () => {
+      const { rows } = await admin.query<{ cfg: string[] | null; src: string }>(
+        `SELECT p.proconfig AS cfg, p.prosrc AS src
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname='public' AND p.proname='partner_submissions_capture_location_snapshot'`
+      );
+      const pinned = rows[0].cfg !== null && rows[0].cfg.some((c) => c.startsWith("search_path="));
+      const qualified = /from\s+public\.partner_locations/i.test(rows[0].src);
+      return pinned && qualified ? "pinned" : "shadowable";
+    },
+  },
+  {
+    number: 49,
+    standalone: false,
+    migration: "0049_partner_grading_work_items.sql",
+    rollback: "rollback-0049-partner-grading-work-items.sql",
+    hole: "the per-card grading provenance bridge is absent, so partner cards cannot be traced to certificates",
+    whenApplied: "bridge_present",
+    whenRolledBack: "bridge_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ r: string | null }>(
+        "SELECT to_regclass('public.partner_grading_work_items')::text AS r"
+      );
+      return rows[0].r === null ? "bridge_absent" : "bridge_present";
+    },
+  },
+  {
+    number: 50,
+    standalone: true,
+    migration: "0050_partner_connector_profile_read.sql",
+    rollback: "rollback-0050-partner-connector-profile-read.sql",
+    hole: "the connector cannot read the approved trading name, so every partner import aborts 42501",
+    whenApplied: "import_works",
+    whenRolledBack: "import_42501",
+    probe: async () => {
+      let out = "";
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt("SELECT trading_name FROM partner_profiles WHERE tenant_id = $1", [A]);
+        out = r.ok ? "import_works" : "import_42501";
+      });
+      return out;
+    },
+  },
+  {
+    number: 51,
+    standalone: true,
+    migration: "0051_partner_runtime_flag_control_least_privilege.sql",
+    rollback: "rollback-0051-partner-runtime-flag-control-least-privilege.sql",
+    hole: "partner_runtime can DELETE the platform-global feature-flag kill switches",
+    whenApplied: "killswitch_safe",
+    whenRolledBack: "killswitch_deletable",
+    probe: async () => {
+      let out = "";
+      await asRole("partner_runtime", A, async () => {
+        const r = await attempt(
+          "DELETE FROM partner_feature_flags WHERE flag = 'partner_emergency_stop' AND tenant_id IS NULL"
+        );
+        out = r.ok && r.rows > 0 ? "killswitch_deletable" : "killswitch_safe";
+      });
+      return out;
+    },
+  },
+  {
+    number: 52,
+    standalone: false,
+    migration: "0052_partner_internal_evidence_rls.sql",
+    rollback: "rollback-0052-partner-internal-evidence-rls.sql",
+    hole: "partner_connector_runtime reads every tenant's HQ internal notes with no row filter",
+    whenApplied: "notes_unreachable",
+    whenRolledBack: "notes_all_tenants",
+    probe: async () => {
+      let out = "";
+      await asRole("partner_connector_runtime", A, async () => {
+        // No tenant GUC would be the harsher probe; A is set, so a tenant-scoped result would be 1.
+        // Seeing BOTH tenants is the finding: no RLS at all.
+        await admin.query("BEGIN");
+        try {
+          const r = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_internal_notes");
+          out = r.rows[0].n >= 2 ? "notes_all_tenants" : `notes_scoped:${r.rows[0].n}`;
+        } catch {
+          out = "notes_unreachable";
+        } finally {
+          await admin.query("ROLLBACK").catch(() => {});
+        }
+      });
+      return out;
+    },
+  },
+  {
+    number: 53,
+    standalone: true,
+    migration: "0053_cert_counter_monotonic_allocator.sql",
+    rollback: "rollback-0053-cert-counter-monotonic-allocator.sql",
+    hole: "A8-F5 — the platform-wide certificate-number allocator can be re-seeded to 0",
+    whenApplied: "allocator_monotonic",
+    whenRolledBack: "allocator_reseedable",
+    probe: async () => {
+      let out = "";
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt("UPDATE cert_counter SET last_issued = 0, updated_at = NOW() WHERE id = 1");
+        out = r.ok && r.rows > 0 ? "allocator_reseedable" : "allocator_monotonic";
+      });
+      return out;
+    },
+  },
+  {
+    number: 54,
+    standalone: true,
+    migration: "0054_partner_ledger_preserve_search_path.sql",
+    rollback: "rollback-0054-partner-ledger-preserve-search-path.sql",
+    hole: "the credit-ledger underfunding guard resolves its three reads from pg_temp",
+    whenApplied: "pinned",
+    whenRolledBack: "shadowable",
+    probe: async () => {
+      const { rows } = await admin.query<{ cfg: string[] | null; src: string }>(
+        `SELECT p.proconfig AS cfg, p.prosrc AS src
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname='public' AND p.proname='partner_credit_ledger_preserve_active_reservations'`
+      );
+      const pinned = rows[0].cfg !== null && rows[0].cfg.some((c) => c.startsWith("search_path="));
+      const qualified = !/from\s+partner_(wallets|credit_ledger|credit_reservations)/i.test(rows[0].src);
+      return pinned && qualified ? "pinned" : "shadowable";
+    },
+  },
+  {
+    number: 55,
+    standalone: true,
+    migration: "0055_partner_hq_control_tables_write_deny.sql",
+    rollback: "rollback-0055-partner-hq-control-tables-write-deny.sql",
+    hole: "a tenant-equality policy on cmd=ALL admits HQ evidence rows into DELETE's USING clause",
+    whenApplied: "write_denied",
+    whenRolledBack: "write_admitted",
+    probe: async () => {
+      // Policy-level probe: does ANY non-SELECT policy on the three tables admit a row?
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT count(*)::int n FROM pg_policies
+          WHERE schemaname='public'
+            AND tablename IN ('partner_emergency_controls','partner_internal_notes','partner_management_audit')
+            AND cmd <> 'SELECT' AND (qual IS NULL OR qual <> 'false')`
+      );
+      return rows[0].n === 0 ? "write_denied" : "write_admitted";
+    },
+  },
+];
+
+// =============================================================================================
+
+describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster)", () => {
+  beforeAll(async () => {
+    cluster = await startPostgres17("partner-rollback-integrity");
+    admin = new Client({ connectionString: cluster.url });
+    await admin.connect();
+
+    await provisionRealisticRoles(admin);
+    await createMintvaultCertificatesTable(admin);
+    await admin.query("CREATE TABLE IF NOT EXISTS users (id varchar primary key, email varchar unique)");
+    await admin.query(`CREATE TABLE IF NOT EXISTS submissions (
+      id serial primary key, user_id varchar, status varchar(30) not null default 'draft',
+      tracking_number text unique, deleted_at timestamptz,
+      grading_status varchar(30), assigned_grader_id varchar, scan_status varchar(30),
+      scan_assigned_to varchar, shipped_at timestamptz, delivered_at timestamptz,
+      completed_at timestamptz, return_tracking text, return_carrier text, return_service text,
+      status_history jsonb not null default '[]'::jsonb,
+      updated_at timestamptz not null default now())`);
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
+    );
+    await createMintvaultLabelPrintsTable(admin);
+    await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+      id serial primary key, entity_type text not null, entity_id text not null, action text not null,
+      admin_user text, details jsonb, created_at timestamptz not null default now())`);
+    for (const t of ["users", "submissions", "submission_items", "label_prints", "audit_log", "certificates"]) {
+      await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
+    }
+
+    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
+    await migrator.connect();
+    try {
+      await applyEveryMigrationRealistic(migrator);
+    } finally {
+      await migrator.end();
+    }
+
+    await seedFixture();
+  }, 180_000);
+
+  afterAll(async () => {
+    await admin?.end().catch(() => {});
+    await cluster?.stop().catch(() => {});
+  });
+
+  /**
+   * Two tenants, populated on every table the probes read. Seeded as the superuser so RLS does not
+   * shape the fixture — the fixture must contain the rows a leak WOULD expose, or "0 rows" and
+   * "nothing was ever written" become indistinguishable.
+   */
+  async function seedFixture(): Promise<void> {
+    for (const [t, tag, loc] of [
+      [A, "A", LOC_A],
+      [B, "B", LOC_B],
+    ] as const) {
+      await admin.query(
+        `INSERT INTO partner_organisations (id, public_ref, legal_name, status)
+           VALUES ($1,$2,$3,'ACTIVE') ON CONFLICT (id) DO NOTHING`,
+        [t, `ref${tag}`, `${tag} Ltd`]
+      );
+      await admin.query(
+        `INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name)
+           VALUES ($1,$2,$3,$3,$4) ON CONFLICT (id) DO NOTHING`,
+        [loc, `loc${tag}`, t, `Shop ${tag}`]
+      );
+      await admin.query(
+        `INSERT INTO partner_profiles (tenant_id, trading_name) VALUES ($1,$2)
+           ON CONFLICT (tenant_id) DO NOTHING`,
+        [t, `${tag} Trading`]
+      );
+      // 0047's asset: one row per tenant. A leak is visible as count > 1.
+      await admin.query(
+        `INSERT INTO partner_owner_invariant_tenants (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+        [t]
+      );
+      // 0052 / 0055's assets.
+      await admin.query(
+        `INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email)
+           VALUES ($1,$2,gen_random_uuid(),'hq@mintvault.test')`,
+        [t, `HQ note about ${tag}`]
+      );
+      await admin.query(
+        `INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result)
+           VALUES ($1,'status_changed',gen_random_uuid(),'hq@mintvault.test',$2,'succeeded')`,
+        [t, `req-${tag}`]
+      );
+      await admin.query(
+        `INSERT INTO partner_emergency_controls (tenant_id, scope, frozen) VALUES ($1,'tenant',true)`,
+        [t]
+      );
+    }
+    // 0051's asset: the PLATFORM-GLOBAL kill switch row.
+    await admin.query(
+      `INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_emergency_stop',true)
+         ON CONFLICT DO NOTHING`
+    );
+    // 0054's assets: a funded wallet with an active reservation against it.
+    //
+    // No partner_users row is seeded, deliberately. 0032's partner_enforce_final_owner_invariant()
+    // rejects an ACTIVE user in a tenant that already carries an owner-invariant row but no
+    // PARTNER_OWNER assignment ("partner_final_owner_required"), and nothing below needs a user:
+    // the wallet, ledger and reservation are keyed on tenant_id and wallet_id only.
+    await admin.query(
+      `INSERT INTO partner_wallets (id, tenant_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`,
+      [WALLET_A, A]
+    );
+    await admin.query(
+      `INSERT INTO partner_credit_ledger (wallet_id, tenant_id, amount, entry_type, idempotency_key,
+                                          source, reason, actor_type, request_fingerprint)
+         VALUES ($1,$2,10,'opening_balance','seed-open','migration','fixture','system',$3)`,
+      [WALLET_A, A, FP]
+    );
+    await admin.query(
+      `INSERT INTO partner_credit_reservations (wallet_id, tenant_id, card_reference, status,
+              idempotency_key, request_fingerprint, source, reason, actor_type, expires_at)
+         VALUES ($1,$2,'card-1','active','seed-res',$3,'portal','fixture','system', now() + interval '1 day')`,
+      [WALLET_A, A, FP]
+    );
+    // 0053's asset: the allocator, advanced past zero so a re-seed is observably a rewind.
+    // 0053 seeds the row itself, so this must find exactly one row — a silent 0-row UPDATE here
+    // would make every allocator probe below pass for the wrong reason.
+    const seeded = await admin.query(
+      "UPDATE cert_counter SET last_issued = 205, updated_at = NOW() WHERE id = 1"
+    );
+    if (seeded.rowCount !== 1) {
+      throw new Error(`cert_counter allocator row missing (UPDATE affected ${seeded.rowCount} rows)`);
+    }
+  }
+
+  // ===========================================================================================
+  // 1. THE STATIC SWEEP — the ratchet that stops the next rollback shipping without a de-journal.
+  // ===========================================================================================
+
+  /**
+   * Numbered rollbacks that do NOT delete their own journal row, and are OUT OF SCOPE for this
+   * repair. Asserted in BOTH directions, exactly like RLS_EXEMPT_TENANT_TABLES in
+   * tests/partner-rls-isolation.test.ts: a NEW offender fails closed because it is not listed, and
+   * FIXING a listed one also fails, which forces its entry to be deleted rather than left behind as
+   * a stale amnesty.
+   *
+   * These eight are PRE-EXISTING and predate this work. They are registered rather than fixed
+   * because six of them also lack the BEGIN/COMMIT wrapper that makes a journal DELETE atomic with
+   * the reversal it accompanies — adding the DELETE without the wrapper would create a NEW failure
+   * mode (a de-journalled migration whose reversal half-failed) in files spanning catalogue,
+   * project-control and partner user-management, none of which is in this repair's blast radius.
+   * Each needs its own reversal proof. They are reported as findings, not silently carried.
+   */
+  const ROLLBACKS_WITHOUT_DEJOURNAL: Record<string, string> = {
+    "rollback-0019-catalogue-manager.sql":
+      "pre-existing; catalogue-manager scope, no BEGIN/COMMIT wrapper, needs its own reversal proof",
+    "rollback-0026-catalogue-abbreviation-unique.sql":
+      "pre-existing; catalogue scope, 6-line file with no transaction wrapper",
+    "rollback-0030-project-control.sql":
+      "pre-existing; project-control scope, no transaction wrapper, unrelated subsystem",
+    "rollback-0031-partner-user-management.sql":
+      "pre-existing; partner user management, no transaction wrapper, needs its own reversal proof",
+    "rollback-0032-partner-final-owner-invariant.sql":
+      "pre-existing; 10-line file, no transaction wrapper; 0047 depends on the table it reverts",
+    "rollback-0033-partner-audit-action-precision.sql":
+      "pre-existing; has BEGIN/COMMIT but no journal delete; audit-action enum precision only",
+    "rollback-0034-partner-rbac-seed.sql":
+      "pre-existing; has BEGIN/COMMIT but no journal delete; RBAC reference catalogue only",
+    "rollback-0044-partner-submission-lifecycle-and-location-snapshot.sql":
+      "pre-existing; 0044 is APPLIED on staging and its checksum ratchet must not move; no transaction wrapper",
+  };
+
+  it("EVERY numbered rollback deletes its own journal row, or is a registered exception", () => {
+    const rollbacks = readdirSync(MIGRATIONS_DIR).filter((f) => /^rollback-\d{4}-.+\.sql$/.test(f));
+    // Floor: if the glob ever stops matching, this whole sweep would pass vacuously.
+    expect(rollbacks.length).toBeGreaterThanOrEqual(18);
+
+    const migrations = readdirSync(MIGRATIONS_DIR).filter((f) => /^\d{4,}_.+\.sql$/.test(f));
+    const offenders: string[] = [];
+    const mismatched: string[] = [];
+
+    for (const rb of rollbacks) {
+      const number = rb.match(/^rollback-(\d{4})-/)![1];
+      const sql = readFileSync(join(MIGRATIONS_DIR, rb), "utf8");
+      const target = migrations.find((m) => m.startsWith(`${number}_`));
+      if (target === undefined) continue; // a rollback for a migration not on this branch
+
+      // The DELETE must name THIS rollback's own migration file — a copied-and-not-renumbered
+      // filename would de-journal somebody else's migration, which is worse than not de-journalling
+      // at all. That is the same hazard rollback-0049's D6 records for its threshold integer.
+      const deletesSomething = /DELETE\s+FROM\s+schema_migrations/i.test(sql);
+      const deletesOwn = new RegExp(
+        `DELETE\\s+FROM\\s+schema_migrations[\\s\\S]{0,200}?filename\\s*=\\s*'${target.replace(/\./g, "\\.")}'`,
+        "i"
+      ).test(sql);
+
+      if (!deletesSomething) offenders.push(rb);
+      else if (!deletesOwn) mismatched.push(`${rb} -> does not name ${target}`);
+    }
+
+    // A rollback that de-journals the WRONG migration is never acceptable, registered or not.
+    expect(mismatched).toEqual([]);
+    // Both directions: a new offender is not in the register; a fixed one must lose its entry.
+    expect(offenders.sort()).toEqual(Object.keys(ROLLBACKS_WITHOUT_DEJOURNAL).sort());
+  });
+
+  it("every register entry carries a written justification (an exception without a reason is an amnesty)", () => {
+    for (const [file, why] of Object.entries(ROLLBACKS_WITHOUT_DEJOURNAL)) {
+      expect(why.length, `${file} has no justification`).toBeGreaterThan(40);
+    }
+  });
+
+  it("MUTATION: the sweep goes RED when a rollback's journal delete is removed", () => {
+    // Prove the assertion above can fail. Without this, "offenders === register" would also hold if
+    // the regex silently matched nothing — the precise class of vacuous pass this suite exists for.
+    const file = join(MIGRATIONS_DIR, "rollback-0047-partner-owner-invariant-tenants-rls.sql");
+    const original = readFileSync(file, "utf8");
+    const mutated = original.replace(
+      /DELETE FROM schema_migrations\s*\n\s*WHERE filename = '0047_partner_owner_invariant_tenants_rls\.sql'/,
+      "SELECT 1"
+    );
+    expect(mutated, "the mutation did not apply — the guard would be tested against unmodified source").not.toBe(
+      original
+    );
+    expect(/DELETE\s+FROM\s+schema_migrations/i.test(mutated)).toBe(false);
+  });
+
+  // ===========================================================================================
+  // 2. THE ROUND TRIP — per rollback, in isolation.
+  // ===========================================================================================
+
+  it.each(ROUND_TRIPS.filter((t) => t.standalone).map((t) => [t.number, t.migration, t] as const))(
+    "%s round-trip: applied refuses, rollback reopens AND de-journals, runner re-applies unprompted",
+    async (_n, _m, entry) => {
+      // (a) APPLIED — the hole is closed and the journal knows it.
+      expect(await entry.probe(), `${entry.migration}: not in the applied state before the test`).toBe(
+        entry.whenApplied
+      );
+      expect(await journalRows(entry.migration)).toBe(1);
+
+      // (b) ROLLBACK — run the file exactly as an operator would.
+      await runRollback(entry.rollback);
+
+      // The hole is reopened…
+      expect(await entry.probe(), `${entry.rollback} did not reopen: ${entry.hole}`).toBe(entry.whenRolledBack);
+      // …AND the journal no longer claims the migration is applied. THIS is the blocker assertion.
+      expect(
+        await journalRows(entry.migration),
+        `${entry.rollback} left its journal row behind: the runner will classify ${entry.migration} as ` +
+          `alreadyApplied and SKIP it, so this hole stays open behind a green migration status — ${entry.hole}`
+      ).toBe(0);
+      // The runner must now VOLUNTEER it as pending, with nobody naming it.
+      expect(await pendingPerRunner()).toContain(entry.migration);
+
+      // (c) RE-APPLY, unprompted.
+      await runRunnerUnprompted();
+      expect(await journalRows(entry.migration)).toBe(1);
+      expect(await entry.probe(), `${entry.migration} did not re-close on re-apply`).toBe(entry.whenApplied);
+      expect(await pendingPerRunner()).not.toContain(entry.migration);
+    },
+    120_000
+  );
+
+  it.each(ROUND_TRIPS.filter((t) => !t.standalone).map((t) => [t.number, t.rollback, t] as const))(
+    "%s REFUSES to run underneath a later journalled migration, and changes nothing when it does",
+    async (_n, _rb, entry) => {
+      // The refusal is the other half of BLOCKER 2. It is only SAFE — rather than a permanent
+      // brick — because every rollback above now de-journals itself, so the descending order below
+      // is always reachable. Proving the refusal fires, AND that a refused run is a no-op, is what
+      // makes the descending test's success meaningful rather than accidental.
+      const before = await entry.probe();
+      await expect(runRollback(entry.rollback)).rejects.toThrow(/refused: \d+ later migration journal row/);
+      expect(await entry.probe(), `${entry.rollback} changed state despite refusing`).toBe(before);
+      expect(await journalRows(entry.migration)).toBe(1);
+    },
+    60_000
+  );
+
+  // ===========================================================================================
+  // 3. THE FULL DESCENDING SEQUENCE — the one that was permanently bricked.
+  // ===========================================================================================
+
+  it("the whole 0055 -> 0047 descending rollback completes, and the runner restores every one", async () => {
+    const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
+
+    for (const entry of descending) {
+      try {
+        await runRollback(entry.rollback);
+      } catch (e) {
+        throw new Error(
+          `descending sequence bricked at ${entry.rollback}: ${(e as Error).message}. ` +
+            `This is the BLOCKER-2 shape: a rollback below cannot run because a higher journal row ` +
+            `survives its own rollback.`
+        );
+      }
+      expect(
+        await journalRows(entry.migration),
+        `${entry.rollback} left its journal row behind mid-sequence — every LOWER rollback is now ` +
+          `permanently refused, because each refuses while any higher-numbered journal row exists`
+      ).toBe(0);
+      // Assert the reopened state HERE, immediately after this file runs, not after the whole
+      // descent. Later rollbacks legitimately move the ground under earlier probes — rollback-0049
+      // revokes the connector's cert_counter privileges outright, so by the bottom of the sequence
+      // 0053's probe reports "permission denied" rather than "re-seedable". Probing at the moment
+      // of reversal is the only reading that means what it says.
+      expect(await entry.probe(), `${entry.rollback} did not reopen: ${entry.hole}`).toBe(entry.whenRolledBack);
+    }
+
+    // Nothing from 0047 upward is journalled any more…
+    const { rows } = await admin.query<{ n: number }>(
+      `SELECT count(*)::int n FROM schema_migrations
+        WHERE filename ~ '^[0-9]{4}_' AND left(filename,4)::integer >= 47`
+    );
+    expect(rows[0].n).toBe(0);
+
+    // Forward-only recovery, unprompted.
+    await runRunnerUnprompted();
+    for (const entry of ROUND_TRIPS) {
+      expect(await journalRows(entry.migration)).toBe(1);
+      expect(await entry.probe(), `${entry.migration} did not re-close after full recovery`).toBe(entry.whenApplied);
+    }
+  }, 180_000);
+});

@@ -120,6 +120,13 @@ CREATE TABLE IF NOT EXISTS cert_counter (
   updated_at timestamptz NOT NULL DEFAULT NOW()
 );
 
+-- The single allocator ROW, seeded exactly as storage.ts:1348 and
+-- connector-import-service.ts:58 do. Creating the table without it would leave the guard below
+-- with nothing to guard until the application booted, and `UPDATE ... WHERE id = 1` silently
+-- affecting ZERO rows is the failure mode storage.ts:1382 raises FATAL on. ON CONFLICT DO NOTHING,
+-- so this can never overwrite a live counter — on an existing database it is a no-op.
+INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
 -- --------------------------------------------------------------------------------------------
 -- 2) The monotonicity guard.
 --

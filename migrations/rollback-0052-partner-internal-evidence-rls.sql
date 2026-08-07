@@ -26,15 +26,26 @@
 -- this file: it is the one place the number appears as DATA rather than as a comment, so a
 -- rename-by-grep would miss it.
 --
--- NO "LATER MIGRATIONS" REFUSAL, DELIBERATELY — and therefore NO JOURNAL-THRESHOLD INTEGER.
--- rollback-0045 refuses to run while any higher-numbered journal row exists, because it DROPS a
--- table later migrations depend on; a copied-and-not-renumbered threshold there is a live hazard
--- precisely because the integer is invisible to a grep for the migration's name. This file drops
--- nothing and changes only privileges, two RLS flags and three policy definitions, so nothing later
--- can be structurally invalidated by it, and it contains no such integer to get wrong. A blanket
--- refusal would also defeat its only purpose: it exists to unblock an emergency, and by then later
--- migrations will certainly exist. Recorded explicitly so the absence reads as a decision rather
--- than an omission. This mirrors rollback-0051's reasoning verbatim.
+-- "LATER MIGRATIONS" REFUSAL — ADDED 2026-08-07, CORRECTING THIS FILE'S OWN HEADER.
+--
+-- This file previously carried the same "no refusal, deliberately" note as rollback-0051, on the
+-- reasoning that it drops nothing structural and so nothing later can be invalidated by it. That
+-- reasoning was correct when it was written and is now WRONG, because 0055 landed:
+--
+--   0055_partner_hq_control_tables_write_deny.sql REPLACES the very policies 0052 creates, on the
+--   SAME two tables. It drops partner_internal_notes_tenant_isolation and
+--   partner_management_audit_tenant_isolation and installs *_no_tenant_access in their place.
+--
+-- So running this file underneath 0055 leaves each of those tables carrying BOTH policies, and
+-- re-applying 0052 then fails its own post-flight ("expected exactly 1 policy on %, found 2") — a
+-- migration that can be rolled back but not rolled forward, which is the one-way door
+-- rollback-0049's D6 exists to prevent. Caught by the round-trip in
+-- tests/partner-rollback-integrity.test.ts, not by inspection.
+--
+-- The threshold is always this file's OWN number; if this file is ever renumbered, the integer
+-- moves with it. rollback-0055 de-journals itself, so the correct order — 0055 then 0052 — is
+-- always available and this refusal is never a dead end. That property is exactly what BLOCKER 2
+-- destroyed and what this series restores.
 --
 -- LOCK SAFETY — ADDED 2026-08-07. Every statement below takes ACCESS EXCLUSIVE: DROP POLICY,
 -- ALTER TABLE ... DISABLE ROW LEVEL SECURITY, GRANT/REVOKE and CREATE POLICY all do, on
@@ -54,6 +65,28 @@ BEGIN;
 
 -- MUST be the first statement inside this transaction: it must be in force before the first lock.
 SET LOCAL lock_timeout = '5s';
+
+-- ---- 0. Refuse while any migration numbered above 52 is journalled ------------------------------
+-- Reach the journal only through EXECUTE: PL/pgSQL plans a whole IF expression up front, so a
+-- direct reference raises 42P01 on any database that has no schema_migrations table.
+DO $$
+DECLARE
+  later_migrations bigint := 0;
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $q$SELECT count(*) FROM schema_migrations
+                WHERE filename ~ '^[0-9]{4}_' AND left(filename,4)::integer > 52$q$
+      INTO later_migrations;
+    IF later_migrations > 0 THEN
+      RAISE EXCEPTION
+        'rollback-0052 refused: % later migration journal row(s) exist. 0055 redefines the policies '
+        'this file restores on partner_internal_notes and partner_management_audit, so running '
+        'underneath it leaves both policies in place and 0052 can never be re-applied. Roll back the '
+        'newer migrations first (each de-journals itself, so the order is always available).',
+        later_migrations;
+    END IF;
+  END IF;
+END$$;
 
 -- ---- 1. Undo the evidence-table repair (both halves) ------------------------------------------
 DROP POLICY IF EXISTS partner_internal_notes_tenant_isolation  ON partner_internal_notes;
