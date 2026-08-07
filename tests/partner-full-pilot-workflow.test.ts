@@ -526,6 +526,14 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     // stubbed store would make the storage gate — and the reservation cardinality behind it —
     // unproven. Must precede every server/* import: server/r2 memoises its client at module scope.
     storage = await setupPartnerTestStorage({ bucketSuffix: "fpilot" });
+    /**
+     * P9/P10 drive the REAL createBatchAtomic, which uploads four rendered assets per batch under
+     * `print-batches/<batchId>-...` from inside server/print-batch.ts. This suite never sees those
+     * keys, so `track()` cannot cover them and `cleanup()` used to miss all of them: an independent
+     * A/B storage audit measured exactly 16 orphaned objects left behind after every run, in both
+     * matrices. Registering the prefix is what makes this suite clean up after itself.
+     */
+    storage.trackPrefix("print-batches/");
 
     mirror = await import("../server/partner/grading-review-mirror");
     creditReservations = await import("../server/partner/partner-credit-reservation-service");
@@ -1151,6 +1159,108 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
       {}
     );
     expect(settled).not.toBeNull();
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+  }, 120_000);
+
+  /**
+   * P14 / P15 — the SETTLEMENT-SIDE grading approval gate.
+   *
+   * MUTATION TARGETS (PR #288 mutation matrix, WORKITEM1 and CERT1). Both survived behaviourally:
+   *
+   *   • WORKITEM1 disabled `assertPartnerGradingApprovedForSettlement`'s cardinality comparison
+   *     (`n !== expectedUnits` made unreachable) — 104/104 green.
+   *   • CERT1 stripped its two certificate predicates (`cert.grader_status = 'approved'` and
+   *     `cert.grade_approved_at IS NOT NULL`) — caught ONLY by a source-string pin; re-running
+   *     without that pin gave 78/78 green.
+   *
+   * This is a genuine SECOND layer behind the mirror's `bool_and` completeness check (which P2
+   * already proves), so the product was not at risk — but the layer itself carried no evidence, so
+   * it could be deleted silently. These two tests are that evidence, and they are behavioural: they
+   * drive the real `settlePartnerCreditForDestinationStatus` and assert the money does not move.
+   */
+  it("P14: settlement REFUSES while any work item is still pending_review (WORKITEM1)", async () => {
+    const f = await seedPilotAtPendingReview();
+    // No approval at all: both work items are pending_review, so the approved count is 0 and the
+    // expected count is 2. This is the comparison WORKITEM1 disabled.
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status='approved'",
+        [f.partnerSubmissionId]
+      ),
+      "precondition: nothing is approved yet"
+    ).toBe("0");
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    await expect(
+      lifecycle.settlePartnerCreditForDestinationStatus(f.destinationSubmissionId, "ready_to_return", {}),
+      "unreviewed grading must never settle credits"
+    ).rejects.toThrow(/reconciliation/i);
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_accounting_exceptions WHERE destination_submission_id=$1 AND reason_code='partner_grading_approval_missing'",
+        [f.destinationSubmissionId]
+      ),
+      "the refusal must leave durable evidence naming the reason"
+    ).toBe("1");
+    expect(await triple(f.tenantId), "not one credit may move").toEqual({ available: 8, reserved: 2, consumed: 0 });
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "the destination must stay where it was, not advance on a refused settlement"
+    ).toBe("in_grading");
+  });
+
+  it("P15: settlement REFUSES when work items are approved but the CERTIFICATES are not published (CERT1)", async () => {
+    const f = await seedPilotAtPendingReview();
+
+    /**
+     * The exact state CERT1's two predicates exist for: the partner-facing work items say
+     * "approved", but no Super Admin ever published the certificate — `grader_status` is still
+     * pending_review and `grade_approved_at` is NULL. Set directly rather than through the approval
+     * route, because the approval route would (correctly) publish the certificates too; the point is
+     * to reach the gate with work-item state and certificate state DISAGREEING.
+     */
+    await admin.query("UPDATE partner_grading_work_items SET status='approved' WHERE partner_submission_id=$1", [
+      f.partnerSubmissionId,
+    ]);
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status='approved'",
+        [f.partnerSubmissionId]
+      ),
+      "precondition: the cardinality check ALONE would now be satisfied — only the certificate predicates can refuse"
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE id = ANY($1::int[]) AND grader_status='approved' AND grade_approved_at IS NOT NULL",
+        [f.certIds]
+      ),
+      "precondition: neither certificate is published"
+    ).toBe("0");
+
+    await expect(
+      lifecycle.settlePartnerCreditForDestinationStatus(f.destinationSubmissionId, "ready_to_return", {}),
+      "an unpublished certificate must never settle credits, however the work item is labelled"
+    ).rejects.toThrow(/reconciliation/i);
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_accounting_exceptions WHERE destination_submission_id=$1 AND reason_code='partner_grading_approval_missing'",
+        [f.destinationSubmissionId]
+      )
+    ).toBe("1");
+    expect(await triple(f.tenantId), "not one credit may move").toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    // POSITIVE CONTROL: publish both certificates and the SAME call settles. Without this, both
+    // tests above would still pass if the gate simply refused everything.
+    await approveAsSuperAdmin(f.certIds[0]);
+    await approveAsSuperAdmin(f.certIds[1]);
+    const settled = await lifecycle.settlePartnerCreditForDestinationStatus(
+      f.destinationSubmissionId,
+      "ready_to_return",
+      {}
+    );
+    expect(settled, "with the certificates genuinely published, settlement proceeds").not.toBeNull();
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
   }, 120_000);
 

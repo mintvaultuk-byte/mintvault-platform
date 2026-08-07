@@ -119,9 +119,17 @@ async function applyPrintLifecycle(): Promise<void> {
  * certificates in `printed`, two approved work items, and two CONSUMED reservations. Every row is
  * the real table with the real constraints — 0045's composite FKs reject any shortcut here.
  */
-async function seedCompletionReadyPilot(opts?: { reservationStatus?: string }): Promise<PilotFixture> {
+async function seedCompletionReadyPilot(opts?: {
+  reservationStatus?: string;
+  /**
+   * The DESTINATION submission's status. Default `ready_to_return` is the settled state. T7 needs
+   * an UNsettled destination, which is the only way to exercise the batch-phase settlement gate.
+   */
+  destinationStatus?: string;
+}): Promise<PilotFixture> {
   const n = ++sequence;
   const reservationStatus = opts?.reservationStatus ?? "consumed";
+  const destinationStatus = opts?.destinationStatus ?? "ready_to_return";
 
   const tenantId = (
     await admin.query<{ id: string }>(
@@ -219,8 +227,8 @@ async function seedCompletionReadyPilot(opts?: { reservationStatus?: string }): 
   // completion cascade's level 3 advances from.
   const destinationSubmissionId = (
     await admin.query<{ id: number }>(
-      `INSERT INTO submissions (user_id, tracking_number, status) VALUES ('cc-owner',$1,'ready_to_return') RETURNING id`,
-      [`MV-CC-${n}`]
+      `INSERT INTO submissions (user_id, tracking_number, status) VALUES ('cc-owner',$1,$2) RETURNING id`,
+      [`MV-CC-${n}`, destinationStatus]
     )
   ).rows[0].id;
 
@@ -590,5 +598,69 @@ describe("Partner completion cascade — real markCompleted with migration 0045 
       await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
       "one outstanding work item must keep the submission incomplete"
     ).toBe("submitted_to_mintvault");
+  });
+
+  /**
+   * T7 — `partner_settlement_required`.
+   *
+   * MUTATION TARGET (PR #288 mutation matrix, PRINT2). Widening the batch-phase destination-status
+   * allow-list to admit `in_grading` / `received` SURVIVED the whole suite: 73/73 green. Searching
+   * `tests/` for the rejection code returned nothing — only `partner_submission_incomplete` had a
+   * test. This is the gate that stops labels being rendered for a Partner submission whose credits
+   * have not settled, i.e. printing work the partner has not paid for.
+   */
+  it("T7: labels cannot be BATCHED for a Partner submission whose credits have not settled", async () => {
+    const f = await seedCompletionReadyPilot({ destinationStatus: "in_grading" });
+
+    const rejected = await printWorkflow.requireCompletePartnerSubmissionSet(f.certNumbers, "batch");
+    expect(
+      rejected.map((r) => r.code).sort(),
+      "every certificate in an unsettled Partner submission must be refused at the batch phase"
+    ).toEqual(["partner_settlement_required", "partner_settlement_required"]);
+    expect(rejected.map((r) => r.certId).sort()).toEqual([...f.certNumbers].sort());
+
+    // PHASE-SPECIFIC, and deliberately so: completion runs AFTER settlement, so the same set must
+    // not be refused there for this reason. Without this half, widening the gate to every phase
+    // would still pass.
+    const atComplete = await printWorkflow.requireCompletePartnerSubmissionSet(f.certNumbers, "complete");
+    expect(atComplete.map((r) => r.code)).not.toContain("partner_settlement_required");
+
+    // POSITIVE CONTROL: the identical selection on a SETTLED destination is accepted, so the
+    // assertion above cannot be passing because the gate refuses everything.
+    const settled = await seedCompletionReadyPilot();
+    expect(
+      await printWorkflow.requireCompletePartnerSubmissionSet(settled.certNumbers, "batch"),
+      "a settled Partner submission must batch cleanly"
+    ).toEqual([]);
+  });
+
+  /**
+   * T8 — `cross_tenant_partner_batch`.
+   *
+   * MUTATION TARGET (PR #288 mutation matrix, CERT2). Changing the guard from `size > 1` to
+   * `size > 99` SURVIVED: 45/45 green, and the code appeared nowhere in `tests/`. Two partners'
+   * cards on one print sheet is a physical mis-shipment risk, not a cosmetic one.
+   */
+  it("T8: two tenants' certificates cannot be printed in one batch", async () => {
+    const one = await seedCompletionReadyPilot();
+    const two = await seedCompletionReadyPilot();
+    expect(one.tenantId, "the two fixtures must be genuinely different tenants").not.toBe(two.tenantId);
+
+    const mixed = [...one.certNumbers, ...two.certNumbers];
+    const rejected = await printWorkflow.requireCompletePartnerSubmissionSet(mixed, "batch");
+    const codes = rejected.map((r) => r.code);
+    expect(codes, "a mixed-tenant batch must be refused").toContain("cross_tenant_partner_batch");
+    expect(
+      rejected.filter((r) => r.code === "cross_tenant_partner_batch").map((r) => r.certId).sort(),
+      "the refusal must cover EVERY certificate in the batch, not just the intruders"
+    ).toEqual([...mixed].sort());
+
+    // POSITIVE CONTROL: each tenant's own complete set alone is accepted.
+    for (const f of [one, two]) {
+      expect(
+        await printWorkflow.requireCompletePartnerSubmissionSet(f.certNumbers, "batch"),
+        "a single-tenant complete set must not trip the cross-tenant guard"
+      ).toEqual([]);
+    }
   });
 });

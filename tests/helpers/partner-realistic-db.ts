@@ -612,8 +612,19 @@ export async function alignCertificatesTableToSchema(
    * (server/storage.ts), createBatchAtomic's renderer calls that per certificate, and
    * shared/schema.ts declares only claim_code_hash / _created_at / _used_at. Verified against the
    * live staging schema, which has all four.
+   *
+   * `private_notes`, `auth_status` and `auth_notes` are the same story one level deeper:
+   * server/grader.ts's applyCertGradeDraft UPDATE writes all three in raw SQL and shared/schema.ts
+   * declares none of them. All three are present on the live certificates table (`text`, with
+   * auth_status defaulting to 'genuine'). Without them any suite that drives a real grading draft
+   * save dies with 42703 — which is exactly how the partner grading adapter went unproven.
    */
-  const RAW_SQL_ONLY_COLUMNS: Array<[string, string]> = [["claim_code", "text"]];
+  const RAW_SQL_ONLY_COLUMNS: Array<[string, string]> = [
+    ["claim_code", "text"],
+    ["private_notes", "text"],
+    ["auth_status", "text"],
+    ["auth_notes", "text"],
+  ];
 
   const added: string[] = [];
   const unsupported: string[] = [];

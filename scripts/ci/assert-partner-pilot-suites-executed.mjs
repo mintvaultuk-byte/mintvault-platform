@@ -40,13 +40,31 @@ const SUITES = [
    * (partner_submissions.completed_at, SQLSTATE 42703) reached a PR with every suite green.
    * If this floor is ever missing, that entire code path is unproven again.
    */
-  { file: "tests/partner-completion-cascade.test.ts", min: 7 },
+  { file: "tests/partner-completion-cascade.test.ts", min: 9 },
   /**
    * FULL-PILOT-LOCAL-01. Pins the corrected approval/settlement lifecycle: approving card ONE of
    * two must NOT settle. The earlier acceptance wording asserted 8/2/0 after BOTH approvals, which
    * production does not do — mirrorPartnerApproval fires on the COMPLETE approved set.
    */
-  { file: "tests/partner-full-pilot-workflow.test.ts", min: 12 },
+  { file: "tests/partner-full-pilot-workflow.test.ts", min: 14 },
+  /**
+   * The ONLY behavioural coverage of /api/partner/grading/*. Every other assertion about the
+   * partner grading adapter in this repository is a source-string pin, and the PR #288 mutation
+   * matrix proved those are evadable: GRADE1 deleted the private_notes strip at one call site and
+   * survived the entire suite. Without this floor, one env-var slip or one edited gate silently
+   * removes the only test that would notice.
+   */
+  { file: "tests/partner-grading-http-routes.test.ts", min: 8 },
+  /**
+   * The Super Admin control shell: requireAdmin rejection, partner/location/user suspend, session
+   * revoke, feature-flag writes, emergency stop, MFA reset, read-endpoint authorisation and the
+   * suspend concurrency proof. Its two environment variables were absent from ci.yml since the file
+   * was written, so all 11 tests reported as a passing FILE while executing nothing. Wiring the
+   * variables fixes today; this floor is what stops it recurring.
+   *
+   * 12 = 11 real tests + the CI-wiring guard that now sits outside the gate.
+   */
+  { file: "tests/partner-admin-control-shell-integration.test.ts", min: 12 },
 ];
 
 let report;
