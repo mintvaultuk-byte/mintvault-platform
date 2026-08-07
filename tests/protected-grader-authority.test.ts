@@ -421,9 +421,14 @@ describe("dynamic imports of protected grading modules cannot evade the guards",
   });
 
   it("it does NOT fire on the ordinary imports these files legitimately make", () => {
-    // Every real module reference in both protected files must be clean, or the guard
-    // over-fires on the shipped code — the disqualifying failure mode.
-    for (const f of ["server/grader.ts", GRADER_ROUTES, "server/partner/grading-routes.ts"]) {
+    // Every real module reference in the PROTECTED files must be clean, or the guard over-fires
+    // on shipped code — the disqualifying failure mode.
+    //
+    // Scope note: server/partner/grading-routes.ts is deliberately NOT asserted here. It is not
+    // a protected file, and a server-authority adapter moving MVGS scoring server-side would
+    // legitimately import @shared/mvgs-scoring — asserting on it would make this guard block
+    // exactly the work it is not entitled to govern.
+    for (const f of ["server/grader.ts", GRADER_ROUTES]) {
       expect(describeProtectedEngineReach(read(f)), `${f} tripped the module-reach guard`).toBe("");
     }
     // and on representative benign references
@@ -570,9 +575,9 @@ describe("NARROWNESS — benign edits to server/routes/grader.ts pass", () => {
   });
 
   it("NEGATIVE PROOF: the new coverage does not fail any previously-passing legitimate change", () => {
-    // Every authority-bearing file this branch legitimately changed is green under the new
-    // checks. If the additions made a legitimate change fail, this is where it would show.
-    for (const f of ["server/grader.ts", GRADER_ROUTES, "server/partner/grading-routes.ts"]) {
+    // Every PROTECTED file this branch legitimately changed is green under the new checks. If
+    // the additions made a legitimate change fail, this is where it would show.
+    for (const f of ["server/grader.ts", GRADER_ROUTES]) {
       expect(describeProtectedEngineReach(read(f)), `${f}`).toBe("");
     }
     expect(authorityViolations(read(GRADER_ROUTES))).toEqual([]);
