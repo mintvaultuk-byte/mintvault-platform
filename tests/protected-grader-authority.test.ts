@@ -43,6 +43,7 @@ import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-dif
 import { stripNonCode } from "./helpers/strip-non-code";
 import { describeProtectedEngineReach, diffProtectedEngineReach } from "./helpers/protected-module-refs";
 import { routeRegistrations, authorityOperationsOf, routeKey, type RouteRegistration } from "./helpers/route-auth-map";
+import { visibilityOnlyExportChange } from "./helpers/visibility-only-change";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const GRADER_ROUTES = "server/routes/grader.ts";
@@ -584,6 +585,201 @@ describe("NARROWNESS — benign edits to server/routes/grader.ts pass", () => {
     // …and PR #288's real diff — the change that motivated this file — passes it.
     if (protectedChangedFiles().includes(GRADER_ROUTES)) {
       expect(diffProtectedEngineReach(protectedDiffFor(GRADER_ROUTES), "both")).toBe("");
+    }
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// The shared/mvgs-scoring.ts visibility-only exemption (owner-approved 2026-08-07)
+//
+// The exemption admits ONE shape of change — an `export` keyword being added — and nothing
+// else. These are the permanent self-tests that stop it silently widening, in the same idiom
+// as the signature-D self-test in tests/variant-line-consolidation.test.ts.
+// ───────────────────────────────────────────────────────────────────────────────────────────
+
+describe("shared/mvgs-scoring.ts — the visibility-only export exemption is genuinely narrow", () => {
+  /** Build a unified diff body from paired removed/added lines. */
+  const asDiff = (removed: string[], added: string[]) =>
+    ["--- a/shared/mvgs-scoring.ts", "+++ b/shared/mvgs-scoring.ts", "@@ -315,7 +315,7 @@"]
+      .concat(removed.map((l) => `-${l}`))
+      .concat(added.map((l) => `+${l}`))
+      .join("\n");
+
+  /** The REAL authorised change, verbatim from rep/server-authority (commit 5bedfd2f). */
+  const REAL = asDiff(
+    ["function remainingToGrade(remaining: number): number {"],
+    ["export function remainingToGrade(remaining: number): number {"]
+  );
+
+  // ── PROOF 1 ───────────────────────────────────────────────────────────────────────────
+  it("PROOF 1: the actual remainingToGrade export change is ACCEPTED", () => {
+    const v = visibilityOnlyExportChange(REAL);
+    expect(v.reason).toBe("pure visibility-only export change");
+    expect(v.ok).toBe(true);
+    expect(v.hasNumericLiteral).toBe(false);
+    expect(v.bodyUnchanged).toBe(true);
+    expect(v.exportWidened).toBe(true);
+  });
+
+  // ── PROOF 2 — numeric changes stay REJECTED ───────────────────────────────────────────
+  it("PROOF 2: a bucket THRESHOLD change is still REJECTED", () => {
+    const v = visibilityOnlyExportChange(
+      asDiff(["  if (remaining >= 23) return 10;"], ["  if (remaining >= 22) return 10;"])
+    );
+    expect(v.ok).toBe(false);
+    expect(v.hasNumericLiteral).toBe(true);
+    expect(v.reason).toMatch(/numeric literal/);
+  });
+
+  it("PROOF 2: a DEDUCTION constant change is still REJECTED", () => {
+    const v = visibilityOnlyExportChange(
+      asDiff(["const SURFACE_MAJOR_DEDUCTION = 3.5;"], ["const SURFACE_MAJOR_DEDUCTION = 2.5;"])
+    );
+    expect(v.ok).toBe(false);
+    expect(v.hasNumericLiteral).toBe(true);
+  });
+
+  it("PROOF 2: a threshold change RIDING ALONGSIDE the authorised export is still REJECTED", () => {
+    // The realistic attack: bundle the maths change with the approved one.
+    const v = visibilityOnlyExportChange(
+      asDiff(
+        ["function remainingToGrade(remaining: number): number {", "  if (remaining >= 23) return 10;"],
+        ["export function remainingToGrade(remaining: number): number {", "  if (remaining >= 22) return 10;"]
+      )
+    );
+    expect(v.ok).toBe(false);
+  });
+
+  it("PROOF 2: a number smuggled as a string, template, hex or unicode escape is still REJECTED", () => {
+    // Raw-text digit scanning (rather than an AST NumericLiteral scan) is what closes these.
+    for (const line of [
+      '  if (remaining >= parseInt("23")) return 10;',
+      "  if (remaining >= Number(`23`)) return 10;",
+      "  if (remaining >= 0x17) return 10;",
+      '  if (remaining >= Number("\\u0032\\u0033")) return 10;',
+    ]) {
+      const v = visibilityOnlyExportChange(asDiff(["  if (remaining >= LIMIT) return TEN;"], [line]));
+      expect(v.ok, `should have been rejected: ${line}`).toBe(false);
+      expect(v.hasNumericLiteral, `digit not seen in: ${line}`).toBe(true);
+    }
+  });
+
+  // ── PROOF 3 — non-numeric but dangerous changes stay REJECTED ─────────────────────────
+  it("PROOF 3: a COMPARISON-OPERATOR flip is still REJECTED", () => {
+    const v = visibilityOnlyExportChange(
+      asDiff(["  if (remaining >= LIMIT) return TOP;"], ["  if (remaining > LIMIT) return TOP;"])
+    );
+    expect(v.ok).toBe(false);
+    expect(v.bodyUnchanged).toBe(false);
+  });
+
+  it("PROOF 3: REORDERING the bucket returns is still REJECTED", () => {
+    // Digit-free reordering — condition 1 alone would not see this; the multiset body-identity
+    // check does. Order matters because the buckets are evaluated top-down.
+    const v = visibilityOnlyExportChange(
+      asDiff(
+        ["  if (remaining >= HIGH) return TOP;", "  if (remaining >= MID) return MIDGRADE;"],
+        ["  if (remaining >= MID) return MIDGRADE;", "  if (remaining >= HIGH) return TOP;"]
+      )
+    );
+    expect(v.ok).toBe(false);
+    expect(v.exportWidened).toBe(false);
+  });
+
+  it("PROOF 3: a digit-free ARITHMETIC change is still REJECTED", () => {
+    const v = visibilityOnlyExportChange(asDiff(["  const g = base;"], ["  const g = base - penalty;"]));
+    expect(v.ok).toBe(false);
+    expect(v.hasNumericLiteral).toBe(false); // the owner's condition alone would MISS this…
+    expect(v.bodyUnchanged).toBe(false); // …the body-identity condition catches it
+  });
+
+  it("PROOF 3: a dynamic import into a protected module is still caught by the specifier resolver", () => {
+    // The exemption is conjunctive with the module-reach check at both call sites, so a
+    // digit-free, export-shaped diff that ALSO reaches into another engine still fails.
+    const sneaky = asDiff(
+      ["function remainingToGrade(remaining: number): number {"],
+      [
+        "export function remainingToGrade(remaining: number): number {",
+        '  const seg = ["@shared", "cent" + "ering"].join("/");',
+        "  void import(seg);",
+      ]
+    );
+    // …the visibility check alone rejects it (the body changed)…
+    expect(visibilityOnlyExportChange(sneaky).ok).toBe(false);
+    // …and independently, the specifier resolver bites.
+    expect(diffProtectedEngineReach(sneaky, "both")).toMatch(/@shared\/centering/);
+  });
+
+  it("PROOF 3: REMOVING an export (narrowing) or swapping another keyword is REJECTED", () => {
+    expect(
+      visibilityOnlyExportChange(
+        asDiff(
+          ["export function remainingToGrade(r: number): number {"],
+          ["function remainingToGrade(r: number): number {"]
+        )
+      ).ok
+    ).toBe(false);
+    expect(visibilityOnlyExportChange(asDiff(["const bucket = table;"], ["let bucket = table;"])).ok).toBe(false);
+    // an empty diff is not an exemption
+    expect(visibilityOnlyExportChange("").ok).toBe(false);
+  });
+
+  // ── PROOF 4 — every condition is individually load-bearing ────────────────────────────
+  it("PROOF 4: each condition is load-bearing — dropping it lets something through", () => {
+    // The signature-D idiom: prove the conjunction is real by removing one term at a time.
+
+    // (a) NUMERIC-LITERAL condition. Without it, a digit-bearing line rides in on the
+    //     export shape. `export const BUCKET_TOP = 23;` is body-identical and export-widening,
+    //     so ONLY condition 1 stops it — and a line that carries a threshold constant is
+    //     exactly where a threshold gets edited.
+    const digitBearing = visibilityOnlyExportChange(
+      asDiff(["const BUCKET_TOP = 23;"], ["export const BUCKET_TOP = 23;"])
+    );
+    expect(digitBearing.ok, "condition 1 must reject a digit-bearing line").toBe(false);
+    expect(digitBearing.bodyUnchanged && digitBearing.exportWidened, "…and only condition 1 rejects it").toBe(true);
+
+    // (b) BODY-IDENTITY condition. Without it, the owner's numeric condition ALONE admits a
+    //     real, digit-free mathematics change. This is why the implementation is stricter than
+    //     the stated minimum, and it is declared rather than assumed.
+    const mathsNoDigits = visibilityOnlyExportChange(
+      asDiff(["  const g = base;"], ["export const noop = 0;", "  const g = base - penalty;"].slice(1))
+    );
+    expect(mathsNoDigits.hasNumericLiteral, "owner's condition alone sees nothing here").toBe(false);
+    expect(mathsNoDigits.ok, "the full conjunction still rejects it").toBe(false);
+
+    // (c) EXPORT-WIDENED condition. Without it, a pure reordering (body multiset identical,
+    //     no digits) would qualify — and bucket order is evaluation order.
+    const reorder = visibilityOnlyExportChange(asDiff(["  a();", "  b();"], ["  b();", "  a();"]));
+    expect(reorder.hasNumericLiteral).toBe(false);
+    expect(reorder.bodyUnchanged, "a reorder IS body-identical as a multiset").toBe(true);
+    expect(reorder.exportWidened, "…so only condition 3 rejects it").toBe(false);
+    expect(reorder.ok).toBe(false);
+  });
+
+  it("PROOF 4: the exemption is wired to shared/mvgs-scoring.ts ONLY", () => {
+    // The other protected engine files are NOT exempted. Both guards must still block them by
+    // path, with no exemption branch of their own.
+    for (const f of ["tests/variant-line-consolidation.test.ts", "tests/structured-variant-persistence.test.ts"]) {
+      const src = read(f);
+      expect(src, `${f} is missing the mvgs-scoring exemption`).toContain('f === "shared/mvgs-scoring.ts"');
+      for (const other of ["shared/centering.ts", "shared/pristine.ts", "shared/mvgs-input-builder.ts"]) {
+        expect(src, `${f} must NOT exempt ${other}`).not.toContain(`f === "${other}"`);
+      }
+      // the path block itself is untouched — the exemption is conditional, not a removal
+      expect(src).toContain("mvgs-scoring");
+      expect(src).toContain("visibilityOnlyExportChange");
+    }
+    // …and the exemption helper is generic, so this is the only thing keeping scope narrow.
+    expect(read("tests/helpers/visibility-only-change.ts")).toContain("WIRED to `shared/mvgs-scoring.ts` alone");
+  });
+
+  it("PROOF 4: the exemption did not disturb founder signatures A-D", () => {
+    for (const f of ["tests/variant-line-consolidation.test.ts", "tests/structured-variant-persistence.test.ts"]) {
+      const src = read(f);
+      for (const sig of ["signatureA", "signatureB", "signatureC", "signatureD"]) {
+        expect(src, `${f} lost ${sig}`).toContain(sig);
+      }
+      expect(src).toContain("server/grader.ts changed but matches no founder-authorised signature");
     }
   });
 });
