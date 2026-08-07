@@ -1,4 +1,4 @@
--- 0054_partner_ledger_preserve_search_path.sql
+-- 0055_partner_ledger_preserve_search_path.sql
 -- SECURITY REPAIR — the pg_temp shadowing CLASS, not one more instance of it.
 --
 -- ============================================================================================
@@ -57,7 +57,7 @@
 -- was found by running the sweep before writing it — four of the five initial "offenders" were
 -- this.
 --
--- ROLLBACK: migrations/rollback-0054-partner-ledger-preserve-search-path.sql.
+-- ROLLBACK: migrations/rollback-0055-partner-ledger-preserve-search-path.sql.
 
 -- --------------------------------------------------------------------------------------------
 -- PRE-FLIGHT.
@@ -65,12 +65,12 @@
 DO $$
 BEGIN
   IF to_regprocedure('public.partner_credit_ledger_preserve_active_reservations()') IS NULL THEN
-    RAISE EXCEPTION '0054: partner_credit_ledger_preserve_active_reservations() is missing; 0017 must be applied first';
+    RAISE EXCEPTION '0055: partner_credit_ledger_preserve_active_reservations() is missing; 0017 must be applied first';
   END IF;
   IF to_regclass('public.partner_wallets') IS NULL
      OR to_regclass('public.partner_credit_ledger') IS NULL
      OR to_regclass('public.partner_credit_reservations') IS NULL THEN
-    RAISE EXCEPTION '0054: the credit tables 0017 creates are missing; 0016/0017 must be applied first';
+    RAISE EXCEPTION '0055: the credit tables 0017 creates are missing; 0016/0017 must be applied first';
   END IF;
 END$$;
 
@@ -129,10 +129,10 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public' AND p.proname = 'partner_credit_ledger_preserve_active_reservations';
   IF cfg IS NULL OR NOT (cfg @> ARRAY['search_path=pg_catalog, public, pg_temp']) THEN
-    RAISE EXCEPTION '0054: search_path is not pinned to "pg_catalog, public, pg_temp" (proconfig = %)', cfg;
+    RAISE EXCEPTION '0055: search_path is not pinned to "pg_catalog, public, pg_temp" (proconfig = %)', cfg;
   END IF;
   IF body ~* 'from\s+partner_(wallets|credit_ledger|credit_reservations)' THEN
-    RAISE EXCEPTION '0054: an unqualified credit-table read survives in the function body';
+    RAISE EXCEPTION '0055: an unqualified credit-table read survives in the function body';
   END IF;
 
   -- (b) The trigger survived CREATE OR REPLACE — no window in which ledger INSERTs ran unguarded.
@@ -142,7 +142,7 @@ BEGIN
      AND tgname  = 'trg_partner_credit_ledger_preserve_active_reservations'
      AND tgrelid = 'public.partner_credit_ledger'::regclass;
   IF ntrg <> 1 THEN
-    RAISE EXCEPTION '0054: expected trg_partner_credit_ledger_preserve_active_reservations, found %', ntrg;
+    RAISE EXCEPTION '0055: expected trg_partner_credit_ledger_preserve_active_reservations, found %', ntrg;
   END IF;
 
   -- (c) THE CLASS. No plpgsql/sql function in `public` may combine proconfig IS NULL with an
@@ -162,7 +162,7 @@ BEGIN
      );
   IF offenders IS NOT NULL THEN
     RAISE EXCEPTION
-      '0054: function(s) with NO pinned search_path still read a relation unqualified and are '
+      '0055: function(s) with NO pinned search_path still read a relation unqualified and are '
       'therefore pg_temp-shadowable: %. Pin `SET search_path = pg_catalog, public, pg_temp` and '
       'schema-qualify every read, as 0048 and this file do.', offenders;
   END IF;

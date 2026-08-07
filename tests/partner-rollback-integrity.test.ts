@@ -1,6 +1,6 @@
 /**
  * ROLLBACK + GUARD INTEGRITY — the suite that stops the next rollback shipping without a journal
- * delete, and the behavioural proof for the 0047-0055 security repairs.
+ * delete, and the behavioural proof for the 0047-0056 security repairs.
  *
  * ============================================================================================
  * WHY THIS FILE EXISTS
@@ -73,7 +73,7 @@ const WALLET_A = "aaaaaaaa-1111-1111-1111-aaaaaaaa0003";
 const FP = "a".repeat(64);
 
 /**
- * THE pg_temp CLASS SWEEP — the same query 0054's post-flight runs, kept here so it executes on
+ * THE pg_temp CLASS SWEEP — the same query 0055's post-flight runs, kept here so it executes on
  * EVERY CI pass rather than once at migration time. A migration assertion fires when the migration
  * is applied and never again; that is a checkpoint, not a ratchet, and the whole point of MEDIUM-5
  * is that 0048 fixed one instance of this class and nothing stopped it regrowing.
@@ -227,7 +227,7 @@ interface RoundTrip {
    * Whether this rollback can be run ON ITS OWN against a fully-migrated database.
    *
    * FALSE means the file carries a `left(filename,4)::integer > N` refusal because something later
-   * genuinely depends on it — rollback-0047/0048/0049 (0049 DROPs a table) and rollback-0052 (0055
+   * genuinely depends on it — rollback-0047/0048/0049 (0049 DROPs a table) and rollback-0052 (0056
    * redefines the policies it restores). Those are covered ONLY by the descending sequence, which
    * is the supported recovery order for them. Marking them standalone would not test more, it would
    * test the refusal firing and call it a failure.
@@ -357,10 +357,10 @@ const ROUND_TRIPS: RoundTrip[] = [
     },
   },
   {
-    number: 53,
+    number: 54,
     standalone: true,
-    migration: "0053_cert_counter_monotonic_allocator.sql",
-    rollback: "rollback-0053-cert-counter-monotonic-allocator.sql",
+    migration: "0054_cert_counter_monotonic_allocator.sql",
+    rollback: "rollback-0054-cert-counter-monotonic-allocator.sql",
     hole: "A8-F5 — the platform-wide certificate-number allocator can be re-seeded to 0",
     whenApplied: "allocator_monotonic",
     whenRolledBack: "allocator_reseedable",
@@ -374,10 +374,10 @@ const ROUND_TRIPS: RoundTrip[] = [
     },
   },
   {
-    number: 54,
+    number: 55,
     standalone: true,
-    migration: "0054_partner_ledger_preserve_search_path.sql",
-    rollback: "rollback-0054-partner-ledger-preserve-search-path.sql",
+    migration: "0055_partner_ledger_preserve_search_path.sql",
+    rollback: "rollback-0055-partner-ledger-preserve-search-path.sql",
     hole: "the credit-ledger underfunding guard resolves its three reads from pg_temp",
     whenApplied: "pinned",
     whenRolledBack: "shadowable",
@@ -393,10 +393,10 @@ const ROUND_TRIPS: RoundTrip[] = [
     },
   },
   {
-    number: 55,
+    number: 56,
     standalone: true,
-    migration: "0055_partner_hq_control_tables_write_deny.sql",
-    rollback: "rollback-0055-partner-hq-control-tables-write-deny.sql",
+    migration: "0056_partner_hq_control_tables_write_deny.sql",
+    rollback: "rollback-0056-partner-hq-control-tables-write-deny.sql",
     hole: "a tenant-equality policy on cmd=ALL admits HQ evidence rows into DELETE's USING clause",
     whenApplied: "write_denied",
     whenRolledBack: "write_admitted",
@@ -489,7 +489,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
         `INSERT INTO partner_owner_invariant_tenants (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING`,
         [t]
       );
-      // 0052 / 0055's assets.
+      // 0052 / 0056's assets.
       await admin.query(
         `INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email)
            VALUES ($1,$2,gen_random_uuid(),'hq@mintvault.test')`,
@@ -510,7 +510,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
       `INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_emergency_stop',true)
          ON CONFLICT DO NOTHING`
     );
-    // 0054's assets: a funded wallet with an active reservation against it.
+    // 0055's assets: a funded wallet with an active reservation against it.
     //
     // No partner_users row is seeded, deliberately. 0032's partner_enforce_final_owner_invariant()
     // rejects an ACTIVE user in a tenant that already carries an owner-invariant row but no
@@ -532,8 +532,8 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
          VALUES ($1,$2,'card-1','active','seed-res',$3,'portal','fixture','system', now() + interval '1 day')`,
       [WALLET_A, A, FP]
     );
-    // 0053's asset: the allocator, advanced past zero so a re-seed is observably a rewind.
-    // 0053 seeds the row itself, so this must find exactly one row — a silent 0-row UPDATE here
+    // 0054's asset: the allocator, advanced past zero so a re-seed is observably a rewind.
+    // 0054 seeds the row itself, so this must find exactly one row — a silent 0-row UPDATE here
     // would make every allocator probe below pass for the wrong reason.
     const seeded = await admin.query(
       "UPDATE cert_counter SET last_issued = 205, updated_at = NOW() WHERE id = 1"
@@ -690,7 +690,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
   // 3. THE FULL DESCENDING SEQUENCE — the one that was permanently bricked.
   // ===========================================================================================
 
-  it("the whole 0055 -> 0047 descending rollback completes, and the runner restores every one", async () => {
+  it("the whole 0056 -> 0047 descending rollback completes, and the runner restores every one", async () => {
     const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
 
     for (const entry of descending) {
@@ -711,7 +711,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
       // Assert the reopened state HERE, immediately after this file runs, not after the whole
       // descent. Later rollbacks legitimately move the ground under earlier probes — rollback-0049
       // revokes the connector's cert_counter privileges outright, so by the bottom of the sequence
-      // 0053's probe reports "permission denied" rather than "re-seedable". Probing at the moment
+      // 0054's probe reports "permission denied" rather than "re-seedable". Probing at the moment
       // of reversal is the only reading that means what it says.
       expect(await entry.probe(), `${entry.rollback} did not reopen: ${entry.hole}`).toBe(entry.whenRolledBack);
     }
@@ -735,10 +735,10 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
   // 4. cert_counter — the HIGH that 0052's column narrowing does NOT close.
   // ===========================================================================================
 
-  describe("0053 — the allocator advances or nothing happens", () => {
+  describe("0054 — the allocator advances or nothing happens", () => {
     /**
      * Every case below runs as partner_connector_runtime: NOT a superuser, NOT BYPASSRLS, holding
-     * exactly the column grants 0052/0053 leave it — INCLUDING UPDATE(last_issued), which it must
+     * exactly the column grants 0052/0054 leave it — INCLUDING UPDATE(last_issued), which it must
      * have, because that is the increment. That is the whole difficulty: the privilege the
      * connector legitimately needs is the same privilege the attack uses, so no grant can separate
      * them and the constraint has to be expressed as a relationship between OLD and NEW.
@@ -947,7 +947,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
   // 6. The pg_temp class — control / attack pair, and the sweep that stops it regrowing.
   // ===========================================================================================
 
-  describe("0054 — pg_temp shadowing of the credit-ledger underfunding guard", () => {
+  describe("0055 — pg_temp shadowing of the credit-ledger underfunding guard", () => {
     /**
      * These run on the ADMIN pool, and that is the honest scope rather than a shortcut: neither
      * restricted runtime role holds INSERT on partner_credit_ledger (0052's catalogue sweep
@@ -996,11 +996,11 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
     });
 
     it("MUTATION: the same shadow DOES defeat the un-pinned 0017 body", async () => {
-      // RED-without-it. rollback-0054 restores 0017's body verbatim and the identical attack then
-      // succeeds. rollback-0055 goes first because it is journalled above 0054 — the descending
+      // RED-without-it. rollback-0055 restores 0017's body verbatim and the identical attack then
+      // succeeds. rollback-0056 goes first because it is journalled above 0055 — the descending
       // discipline this whole file exists to make possible.
-      await runRollback("rollback-0055-partner-hq-control-tables-write-deny.sql");
-      await runRollback("rollback-0054-partner-ledger-preserve-search-path.sql");
+      await runRollback("rollback-0056-partner-hq-control-tables-write-deny.sql");
+      await runRollback("rollback-0055-partner-ledger-preserve-search-path.sql");
       try {
         await admin.query(
           `CREATE TEMP TABLE partner_credit_reservations
@@ -1019,12 +1019,12 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
       } finally {
         await runRunnerUnprompted();
       }
-      expect(await ROUND_TRIPS.find((t) => t.number === 54)!.probe()).toBe("pinned");
-      expect(await ROUND_TRIPS.find((t) => t.number === 55)!.probe()).toBe("write_denied");
+      expect(await ROUND_TRIPS.find((t) => t.number === 55)!.probe()).toBe("pinned");
+      expect(await ROUND_TRIPS.find((t) => t.number === 56)!.probe()).toBe("write_denied");
     });
 
     it("the CLASS is swept: no unpinned function in public reads a relation unqualified", async () => {
-      // The sweep from 0054's post-flight, re-run on every CI pass against the whole chain. A
+      // The sweep from 0055's post-flight, re-run on every CI pass against the whole chain. A
       // migration assertion fires once, and once is not a ratchet. 0048 fixed one instance and did
       // not sweep, which is how the same primitive sat in 0017 — guarding money — the whole time.
       const { rows } = await admin.query<{ proname: string }>(UNPINNED_FUNCTION_SWEEP);
@@ -1069,7 +1069,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
   // 7. The HQ control / evidence tables — attacked with the blanket GRANT restored.
   // ===========================================================================================
 
-  describe("0055 — a restored blanket GRANT still reaches nothing", () => {
+  describe("0056 — a restored blanket GRANT still reaches nothing", () => {
     /**
      * The entire claim of a defence-in-depth layer is that it holds WHEN STEP ONE IS UNDONE. So the
      * battery below restores the exact grant 0001's DO loop hands out and then attacks. If the
@@ -1131,27 +1131,27 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
       });
     });
 
-    it("MUTATION: with 0055 rolled back, the identical battery succeeds on all three tables", async () => {
+    it("MUTATION: with 0056 rolled back, the identical battery succeeds on all three tables", async () => {
       // RED-without-it. 0052's tenant-equality policy on cmd=ALL admits the tenant's OWN rows into
       // DELETE's USING clause — and on these tables the tenant's own rows ARE the asset.
-      await runRollback("rollback-0055-partner-hq-control-tables-write-deny.sql");
+      await runRollback("rollback-0056-partner-hq-control-tables-write-deny.sql");
       try {
         await withBlanketGrant(async () => {
           await asRole("partner_runtime", A, async () => {
             const freeze = await attempt("DELETE FROM partner_emergency_controls WHERE tenant_id = $1", [A]);
-            expect(freeze.ok && freeze.rows, "expected the freeze to be self-liftable without 0055").toBe(1);
+            expect(freeze.ok && freeze.rows, "expected the freeze to be self-liftable without 0056").toBe(1);
 
             const audit = await attempt("DELETE FROM partner_management_audit WHERE tenant_id = $1", [A]);
-            expect(audit.ok && audit.rows, "expected HQ evidence to be destructible without 0055").toBe(1);
+            expect(audit.ok && audit.rows, "expected HQ evidence to be destructible without 0056").toBe(1);
 
             const { rows } = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_internal_notes");
-            expect(rows[0].n, "expected HQ notes to be readable without 0055").toBe(1);
+            expect(rows[0].n, "expected HQ notes to be readable without 0056").toBe(1);
           });
         });
       } finally {
         await runRunnerUnprompted();
       }
-      expect(await ROUND_TRIPS.find((t) => t.number === 55)!.probe()).toBe("write_denied");
+      expect(await ROUND_TRIPS.find((t) => t.number === 56)!.probe()).toBe("write_denied");
     });
   });
 });

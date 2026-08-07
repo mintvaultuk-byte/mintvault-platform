@@ -1,4 +1,4 @@
--- 0053_cert_counter_monotonic_allocator.sql
+-- 0054_cert_counter_monotonic_allocator.sql
 -- SECURITY REPAIR — A8-F5 (HIGH), the half 0052's column-level grant does NOT close.
 --
 -- ============================================================================================
@@ -82,7 +82,7 @@
 -- them here is what makes the connector's import path work at all; on an existing database the
 -- GRANT is idempotent and changes nothing.
 --
--- ROLLBACK: migrations/rollback-0053-cert-counter-monotonic-allocator.sql. It removes the triggers
+-- ROLLBACK: migrations/rollback-0054-cert-counter-monotonic-allocator.sql. It removes the triggers
 -- and the function, leaves the table and its data alone, and deletes its own journal row.
 
 -- --------------------------------------------------------------------------------------------
@@ -96,7 +96,7 @@ BEGIN
   SELECT rolsuper, rolbypassrls INTO is_super, is_bypass
     FROM pg_roles WHERE rolname = 'partner_connector_runtime';
   IF is_super IS NULL THEN
-    RAISE EXCEPTION '0053: role partner_connector_runtime does not exist; 0008 must be applied first';
+    RAISE EXCEPTION '0054: role partner_connector_runtime does not exist; 0008 must be applied first';
   END IF;
   -- A trigger binds a superuser too, so BYPASSRLS/SUPERUSER does NOT make this repair cosmetic the
   -- way it does for 0047 and 0051. It is still refused: a connector role with those attributes
@@ -104,7 +104,7 @@ BEGIN
   -- be fixed before anything here is certified.
   IF is_super OR is_bypass THEN
     RAISE EXCEPTION
-      '0053: partner_connector_runtime is SUPERUSER or BYPASSRLS (super=%, bypass=%). The '
+      '0054: partner_connector_runtime is SUPERUSER or BYPASSRLS (super=%, bypass=%). The '
       'column-level allocator grants re-asserted by this file would be meaningless against it. '
       'Fix the role first.', is_super, is_bypass;
   END IF;
@@ -132,7 +132,7 @@ INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOT
 --
 -- Reads no table, so it cannot be pg_temp-shadowed through a relation reference; search_path is
 -- pinned regardless, with pg_temp LAST, because that is the house convention from 0006 and because
--- an unpinned function is what MEDIUM-5 (0054) exists to sweep for. Only NEW/OLD and the error
+-- an unpinned function is what MEDIUM-5 (0055) exists to sweep for. Only NEW/OLD and the error
 -- machinery are touched.
 -- --------------------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION cert_counter_monotonic_guard() RETURNS trigger
@@ -229,7 +229,7 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public' AND p.proname = 'cert_counter_monotonic_guard';
   IF cfg IS NULL OR NOT (cfg @> ARRAY['search_path=pg_catalog, pg_temp']) THEN
-    RAISE EXCEPTION '0053: cert_counter_monotonic_guard() search_path is not pinned (proconfig = %)', cfg;
+    RAISE EXCEPTION '0054: cert_counter_monotonic_guard() search_path is not pinned (proconfig = %)', cfg;
   END IF;
 
   SELECT count(*) INTO ntrg
@@ -238,7 +238,7 @@ BEGIN
      AND tgrelid = 'public.cert_counter'::regclass
      AND tgname IN ('trg_cert_counter_monotonic', 'trg_cert_counter_no_truncate');
   IF ntrg <> 2 THEN
-    RAISE EXCEPTION '0053: expected both cert_counter guard triggers, found %', ntrg;
+    RAISE EXCEPTION '0054: expected both cert_counter guard triggers, found %', ntrg;
   END IF;
 
   -- 'A' = ENABLE ALWAYS. 'O' (origin) would be silently skipped under session_replication_role.
@@ -249,7 +249,7 @@ BEGIN
        AND tgname IN ('trg_cert_counter_monotonic', 'trg_cert_counter_no_truncate')
        AND tgenabled <> 'A'
   ) THEN
-    RAISE EXCEPTION '0053: a cert_counter guard trigger is not ENABLE ALWAYS and could be skipped by a replica session';
+    RAISE EXCEPTION '0054: a cert_counter guard trigger is not ENABLE ALWAYS and could be skipped by a replica session';
   END IF;
 
   -- The allocator must still be usable by the connector, or partner imports fail 42501.
@@ -262,19 +262,19 @@ BEGIN
     has_column_privilege('partner_connector_runtime', 'public.cert_counter', 'updated_at',  'UPDATE')
   ) THEN
     RAISE EXCEPTION
-      '0053: the connector lost a column privilege the certificate-number allocator needs '
+      '0054: the connector lost a column privilege the certificate-number allocator needs '
       '(connector-import-service.ts:57-61); partner imports would fail 42501';
   END IF;
 
   -- …and still must not be able to re-point it.
   IF has_column_privilege('partner_connector_runtime', 'public.cert_counter', 'id', 'UPDATE') THEN
-    RAISE EXCEPTION '0053: partner_connector_runtime can UPDATE cert_counter.id; 0052''s narrowing was undone';
+    RAISE EXCEPTION '0054: partner_connector_runtime can UPDATE cert_counter.id; 0052''s narrowing was undone';
   END IF;
   IF EXISTS (
     SELECT 1 FROM information_schema.role_table_grants
      WHERE table_schema = 'public' AND table_name = 'cert_counter'
        AND grantee = 'partner_connector_runtime'
   ) THEN
-    RAISE EXCEPTION '0053: a TABLE-level privilege on cert_counter survives for partner_connector_runtime';
+    RAISE EXCEPTION '0054: a TABLE-level privilege on cert_counter survives for partner_connector_runtime';
   END IF;
 END$$;

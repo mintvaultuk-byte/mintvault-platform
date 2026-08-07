@@ -1,16 +1,16 @@
--- rollback-0055-partner-hq-control-tables-write-deny.sql
+-- rollback-0056-partner-hq-control-tables-write-deny.sql
 --
--- Restores the pre-0055 policies exactly:
+-- Restores the pre-0056 policies exactly:
 --   * partner_emergency_controls  -> 0001's single combined FOR ALL tenant-isolation policy;
 --   * partner_internal_notes      -> 0052's FOR ALL tenant-isolation policy;
 --   * partner_management_audit    -> 0052's FOR ALL tenant-isolation policy.
 --
--- ⚠️ APPLYING THIS RE-OPENS THE DEFECT 0055 CLOSED. Afterwards a tenant-equality policy on
+-- ⚠️ APPLYING THIS RE-OPENS THE DEFECT 0056 CLOSED. Afterwards a tenant-equality policy on
 -- cmd = ALL again admits a tenant's OWN rows into the USING clause of UPDATE and DELETE on all
 -- three tables — and on these tables the tenant's own rows ARE the asset. If any blanket DML grant
 -- is ever restored, a partner can self-lift an HQ-imposed emergency freeze, read HQ's internal
 -- notes about itself, and delete the audit ledger of what HQ did to it. Use this only to unblock
--- an unrelated failure, and re-apply 0055 immediately afterwards.
+-- an unrelated failure, and re-apply 0056 immediately afterwards.
 --
 -- Not destructive to data: no row is read, written or removed — this file only replaces policy
 -- definitions. It does NOT restore any grant: 0051 revoked partner_runtime's writes on
@@ -20,14 +20,14 @@
 -- "restore the previous policy shape".
 --
 -- JOURNAL HANDLING. The final block DELETEs this migration's own journal row. Without it
--- scripts/db/migrate.ts:planMigrations (migrate.ts:449-462) would still classify 0055 as
+-- scripts/db/migrate.ts:planMigrations (migrate.ts:449-462) would still classify 0056 as
 -- alreadyApplied and SKIP it on the next run, so the database would sit in the rolled-back state
 -- behind a green migration status. The filename there is DATA, not a comment — it must track any
 -- renumbering of this file, because a rename-by-grep would miss it.
 --
 -- NO "LATER MIGRATIONS" REFUSAL, DELIBERATELY: this file drops nothing structural and changes only
 -- policy definitions, so nothing later can be structurally invalidated by it. Same reasoning as
--- rollback-0050/0051/0052/0053/0054.
+-- rollback-0050/0051/0052/0054/0055.
 --
 -- LOCK SAFETY. DROP POLICY and CREATE POLICY take ACCESS EXCLUSIVE, which blocks READS as well as
 -- writes. partner_emergency_controls is read on the RUNTIME pool by readEmergencyState()
@@ -76,7 +76,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['partner_emergency_controls', 'partner_internal_notes', 'partner_management_audit'] LOOP
     SELECT count(*) INTO npolicy FROM pg_policies WHERE schemaname = 'public' AND tablename = t;
     IF npolicy <> 1 THEN
-      RAISE EXCEPTION 'rollback-0055: expected exactly 1 policy on %, found %', t, npolicy;
+      RAISE EXCEPTION 'rollback-0056: expected exactly 1 policy on %, found %', t, npolicy;
     END IF;
     IF NOT EXISTS (
       SELECT 1 FROM pg_policies
@@ -85,12 +85,12 @@ BEGIN
          AND qual       LIKE '%partner_current_tenant()%'
          AND with_check LIKE '%partner_current_tenant()%'
     ) THEN
-      RAISE EXCEPTION 'rollback-0055: the restored policy on % is not the combined tenant-isolation policy', t;
+      RAISE EXCEPTION 'rollback-0056: the restored policy on % is not the combined tenant-isolation policy', t;
     END IF;
   END LOOP;
 END$$;
 
--- ---- 4. De-journal, so the runner re-applies 0055 instead of skipping it as applied ------------
+-- ---- 4. De-journal, so the runner re-applies 0056 instead of skipping it as applied ------------
 -- Reach the journal only through EXECUTE: PL/pgSQL plans a whole expression up front, so a direct
 -- reference inside an IF does not short-circuit and raises 42P01 on a database with no journal
 -- table. That is defect D4 from rollback-0045's header, avoided here rather than repeated.
@@ -98,7 +98,7 @@ DO $$
 BEGIN
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
     EXECUTE $q$DELETE FROM schema_migrations
-                WHERE filename = '0055_partner_hq_control_tables_write_deny.sql'$q$;
+                WHERE filename = '0056_partner_hq_control_tables_write_deny.sql'$q$;
   END IF;
 END$$;
 

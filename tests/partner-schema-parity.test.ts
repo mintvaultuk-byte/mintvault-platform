@@ -180,6 +180,40 @@ describe("partner schema ↔ migration parity", () => {
       // 0052 continues the arbitrated numbering recorded above: 0045 stays permanently unused, and
       // 0046 (staging-applied) through 0051 are taken, so the next free number is 0052.
       "0052_partner_internal_evidence_rls.sql",
+      // 0053 is deliberately absent from THIS branch and must stay absent: it belongs to the
+      // partner MFA brute-force repair (0053_partner_mfa_failure_lockout.sql — failed_mfa_count /
+      // mfa_locked_until on partner_users), which landed on the integration branch first and keeps
+      // the number. The three files below were authored at 0053-0055 and renumbered up by one when
+      // that collision was arbitrated. A gap here is normal and is not an omission: 0045 is
+      // likewise permanently unused. See the numbering ledger above.
+      //
+      // 0054 closes the half of A8-F5 that 0052's column-level narrowing does NOT reach. 0052
+      // revoked UPDATE(id) so the allocator row cannot be RE-POINTED, but `last_issued` must keep
+      // UPDATE because that IS the increment — so re-seeding it to 0, rewinding it, or upserting
+      // `ON CONFLICT (id) DO UPDATE SET last_issued = 0` all still produced the identical
+      // platform-wide certificate-number collision, HQ's own certificates included. A privilege
+      // cannot express "increment only", so the constraint lives where OLD and NEW exist: an
+      // ENABLE ALWAYS BEFORE UPDATE OR DELETE trigger, plus a TRUNCATE guard. It also CREATEs
+      // cert_counter when absent (it is otherwise created at application boot by
+      // storage.ts:ensureCertCounterTable), because a silently absent integrity guard is the
+      // failure mode it exists to remove — so unlike its two siblings this file is NOT purely a
+      // privilege change, though it adds no column to any Drizzle-modelled table.
+      "0054_cert_counter_monotonic_allocator.sql",
+      // Security repair, not a schema change: pins search_path and schema-qualifies 0017's
+      // partner_credit_ledger_preserve_active_reservations(), which was SECURITY INVOKER with
+      // proconfig NULL and three unqualified reads and so was pg_temp-shadowable. Its post-flight
+      // additionally SWEEPS THE CLASS — no plpgsql/sql function in public may combine a NULL
+      // proconfig with an unqualified relation reference — because 0048 fixed one instance of this
+      // primitive and did not sweep, which is how the same defect sat in 0017 guarding money.
+      "0055_partner_ledger_preserve_search_path.sql",
+      // Security repair, not a schema change: completes the defence-in-depth layer 0051 described
+      // ("if a future blanket GRANT hands DELETE back, the row is still unreachable") but applied
+      // only to partner_feature_flags. partner_emergency_controls, partner_internal_notes and
+      // partner_management_audit kept FOR ALL tenant-equality policies, which admit the tenant's
+      // OWN rows into UPDATE/DELETE — and on those three tables the tenant's own rows ARE the
+      // asset. Emergency controls keep the tenant-scoped SELECT readEmergencyState() depends on;
+      // the two evidence tables are denied entirely. Adds no table and no column.
+      "0056_partner_hq_control_tables_write_deny.sql",
     ]);
   });
 

@@ -30,20 +30,20 @@
 --
 -- This file previously carried the same "no refusal, deliberately" note as rollback-0051, on the
 -- reasoning that it drops nothing structural and so nothing later can be invalidated by it. That
--- reasoning was correct when it was written and is now WRONG, because 0055 landed:
+-- reasoning was correct when it was written and is now WRONG, because 0056 landed:
 --
---   0055_partner_hq_control_tables_write_deny.sql REPLACES the very policies 0052 creates, on the
+--   0056_partner_hq_control_tables_write_deny.sql REPLACES the very policies 0052 creates, on the
 --   SAME two tables. It drops partner_internal_notes_tenant_isolation and
 --   partner_management_audit_tenant_isolation and installs *_no_tenant_access in their place.
 --
--- So running this file underneath 0055 leaves each of those tables carrying BOTH policies, and
+-- So running this file underneath 0056 leaves each of those tables carrying BOTH policies, and
 -- re-applying 0052 then fails its own post-flight ("expected exactly 1 policy on %, found 2") — a
 -- migration that can be rolled back but not rolled forward, which is the one-way door
 -- rollback-0049's D6 exists to prevent. Caught by the round-trip in
 -- tests/partner-rollback-integrity.test.ts, not by inspection.
 --
 -- The threshold is always this file's OWN number; if this file is ever renumbered, the integer
--- moves with it. rollback-0055 de-journals itself, so the correct order — 0055 then 0052 — is
+-- moves with it. rollback-0056 de-journals itself, so the correct order — 0056 then 0052 — is
 -- always available and this refusal is never a dead end. That property is exactly what BLOCKER 2
 -- destroyed and what this series restores.
 --
@@ -79,7 +79,7 @@ BEGIN
       INTO later_migrations;
     IF later_migrations > 0 THEN
       RAISE EXCEPTION
-        'rollback-0052 refused: % later migration journal row(s) exist. 0055 redefines the policies '
+        'rollback-0052 refused: % later migration journal row(s) exist. 0056 redefines the policies '
         'this file restores on partner_internal_notes and partner_management_audit, so running '
         'underneath it leaves both policies in place and 0052 can never be re-applied. Roll back the '
         'newer migrations first (each de-journals itself, so the order is always available).',

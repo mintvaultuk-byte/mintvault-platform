@@ -1,23 +1,23 @@
--- rollback-0054-partner-ledger-preserve-search-path.sql
+-- rollback-0055-partner-ledger-preserve-search-path.sql
 --
--- ⚠️ APPLYING THIS RE-OPENS THE DEFECT 0054 CLOSED. It restores
+-- ⚠️ APPLYING THIS RE-OPENS THE DEFECT 0055 CLOSED. It restores
 -- partner_credit_ledger_preserve_active_reservations() to 0017's body — no search_path pin, three
 -- unqualified reads of partner_wallets / partner_credit_ledger / partner_credit_reservations — so
 -- any session that can CREATE TEMP TABLE can shadow them and drive a wallet balance to zero while
 -- an active reservation still exists, defeating the exact invariant the trigger enforces. Run it
--- only to unblock an incident, and re-apply 0054 immediately afterwards.
+-- only to unblock an incident, and re-apply 0055 immediately afterwards.
 --
 -- Not destructive to data: no row is read, written or removed — this file replaces one function
 -- body and clears one proconfig entry.
 --
 -- JOURNAL HANDLING. The final block DELETEs this migration's own journal row. Without it
--- scripts/db/migrate.ts:planMigrations (migrate.ts:449-462) would still classify 0054 as
+-- scripts/db/migrate.ts:planMigrations (migrate.ts:449-462) would still classify 0055 as
 -- alreadyApplied and SKIP it on the next run, leaving the database shadowable behind a green
 -- migration status. The filename there is DATA, not a comment — it must track any renumbering.
 --
 -- NO "LATER MIGRATIONS" REFUSAL, DELIBERATELY: this file drops nothing and changes one function
 -- body, so nothing later can be structurally invalidated by it. Same reasoning as
--- rollback-0050/0051/0052/0053.
+-- rollback-0050/0051/0052/0054.
 --
 -- LOCK SAFETY. CREATE OR REPLACE FUNCTION and ALTER FUNCTION ... RESET ALL each take ACCESS
 -- EXCLUSIVE on the pg_proc row, and because this function backs
@@ -34,7 +34,7 @@ SET LOCAL lock_timeout = '5s';
 DO $$
 BEGIN
   IF to_regprocedure('public.partner_credit_ledger_preserve_active_reservations()') IS NULL THEN
-    RAISE NOTICE 'rollback-0054: partner_credit_ledger_preserve_active_reservations() absent; nothing to do.';
+    RAISE NOTICE 'rollback-0055: partner_credit_ledger_preserve_active_reservations() absent; nothing to do.';
   END IF;
 END$$;
 
@@ -89,7 +89,7 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public' AND p.proname = 'partner_credit_ledger_preserve_active_reservations';
   IF cfg IS NOT NULL THEN
-    RAISE EXCEPTION 'rollback-0054: proconfig survives (%); the search_path pin was not reset', cfg;
+    RAISE EXCEPTION 'rollback-0055: proconfig survives (%); the search_path pin was not reset', cfg;
   END IF;
 
   SELECT count(*) INTO ntrg
@@ -98,16 +98,16 @@ BEGIN
      AND tgname  = 'trg_partner_credit_ledger_preserve_active_reservations'
      AND tgrelid = 'public.partner_credit_ledger'::regclass;
   IF ntrg <> 1 THEN
-    RAISE EXCEPTION 'rollback-0054: expected the ledger guard trigger to survive, found %', ntrg;
+    RAISE EXCEPTION 'rollback-0055: expected the ledger guard trigger to survive, found %', ntrg;
   END IF;
 END$$;
 
--- De-journal, so the runner re-applies 0054 on its next run instead of skipping it as applied.
+-- De-journal, so the runner re-applies 0055 on its next run instead of skipping it as applied.
 DO $$
 BEGIN
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
     EXECUTE $q$DELETE FROM schema_migrations
-                WHERE filename = '0054_partner_ledger_preserve_search_path.sql'$q$;
+                WHERE filename = '0055_partner_ledger_preserve_search_path.sql'$q$;
   END IF;
 END$$;
 

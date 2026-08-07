@@ -1,4 +1,4 @@
--- 0055_partner_hq_control_tables_write_deny.sql
+-- 0056_partner_hq_control_tables_write_deny.sql
 -- SECURITY REPAIR — finish the defence-in-depth layer 0051 described and only half-delivered.
 --
 -- ============================================================================================
@@ -62,8 +62,8 @@
 -- ADMIN POOL UNAFFECTED: BYPASSRLS outranks FORCE ROW LEVEL SECURITY, so every HQ read and write
 -- above continues to work unchanged. Verified in the post-flight by attribute, not assumed.
 --
--- ROLLBACK: migrations/rollback-0055-partner-hq-control-tables-write-deny.sql restores the three
--- pre-0055 policies exactly as 0001 and 0052 left them, and deletes its own journal row.
+-- ROLLBACK: migrations/rollback-0056-partner-hq-control-tables-write-deny.sql restores the three
+-- pre-0056 policies exactly as 0001 and 0052 left them, and deletes its own journal row.
 
 -- --------------------------------------------------------------------------------------------
 -- PRE-FLIGHT. A policy is meaningless against BYPASSRLS, so refuse rather than certify.
@@ -77,13 +77,13 @@ BEGIN
             WHERE rolname IN ('partner_runtime', 'partner_connector_runtime') LOOP
     IF r.rolsuper OR r.rolbypassrls THEN
       RAISE EXCEPTION
-        '0055: % is SUPERUSER or BYPASSRLS (super=%, bypass=%). The write-deny policies below would '
+        '0056: % is SUPERUSER or BYPASSRLS (super=%, bypass=%). The write-deny policies below would '
         'be unenforceable against it, so this repair cannot deliver the containment it claims. '
         'Fix the role first.', r.rolname, r.rolsuper, r.rolbypassrls;
     END IF;
   END LOOP;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'partner_runtime') THEN
-    RAISE EXCEPTION '0055: role partner_runtime does not exist; 0001 must be applied first';
+    RAISE EXCEPTION '0056: role partner_runtime does not exist; 0001 must be applied first';
   END IF;
 
   FOREACH t IN ARRAY ARRAY['partner_emergency_controls', 'partner_internal_notes', 'partner_management_audit'] LOOP
@@ -91,7 +91,7 @@ BEGIN
       SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public' AND c.relname = t AND c.relkind = 'r'
     ) THEN
-      RAISE EXCEPTION '0055: table public.% is missing', t;
+      RAISE EXCEPTION '0056: table public.% is missing', t;
     END IF;
     -- RLS must already be ENABLE + FORCE (0001 for emergency controls, 0052 for the other two).
     -- A policy on a table without RLS is decoration.
@@ -99,12 +99,12 @@ BEGIN
       SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public' AND c.relname = t AND c.relrowsecurity AND c.relforcerowsecurity
     ) THEN
-      RAISE EXCEPTION '0055: % is not ENABLE + FORCE ROW LEVEL SECURITY; 0001/0052 must be applied first', t;
+      RAISE EXCEPTION '0056: % is not ENABLE + FORCE ROW LEVEL SECURITY; 0001/0052 must be applied first', t;
     END IF;
   END LOOP;
 
   IF to_regprocedure('public.partner_current_tenant()') IS NULL THEN
-    RAISE EXCEPTION '0055: partner_current_tenant() is missing; the read policy below would be invalid';
+    RAISE EXCEPTION '0056: partner_current_tenant() is missing; the read policy below would be invalid';
   END IF;
 END$$;
 
@@ -168,7 +168,7 @@ BEGIN
      AND (qual IS NULL OR qual <> 'false');
   IF bad IS NOT NULL THEN
     RAISE EXCEPTION
-      '0055: a non-SELECT policy still admits rows on an HQ control/evidence table: %. '
+      '0056: a non-SELECT policy still admits rows on an HQ control/evidence table: %. '
       'A restored blanket GRANT would reach them.', bad;
   END IF;
 
@@ -180,25 +180,25 @@ BEGIN
        AND cmd = 'SELECT' AND qual LIKE '%partner_current_tenant()%'
   ) THEN
     RAISE EXCEPTION
-      '0055: the tenant-scoped READ branch on partner_emergency_controls was lost; '
+      '0056: the tenant-scoped READ branch on partner_emergency_controls was lost; '
       'readEmergencyState() (server/partner/emergency.ts:30-33) runs on the runtime pool';
   END IF;
   IF NOT has_table_privilege('partner_runtime', 'public.partner_emergency_controls', 'SELECT') THEN
-    RAISE EXCEPTION '0055: partner_runtime lost SELECT on partner_emergency_controls';
+    RAISE EXCEPTION '0056: partner_runtime lost SELECT on partner_emergency_controls';
   END IF;
 
   -- (c) The two evidence tables carry exactly one policy each, and it is the deny-all one.
   FOREACH t IN ARRAY ARRAY['partner_internal_notes', 'partner_management_audit'] LOOP
     SELECT count(*) INTO npolicy FROM pg_policies WHERE schemaname = 'public' AND tablename = t;
     IF npolicy <> 1 THEN
-      RAISE EXCEPTION '0055: expected exactly 1 policy on %, found %', t, npolicy;
+      RAISE EXCEPTION '0056: expected exactly 1 policy on %, found %', t, npolicy;
     END IF;
     IF NOT EXISTS (
       SELECT 1 FROM pg_policies
        WHERE schemaname = 'public' AND tablename = t
          AND cmd = 'ALL' AND qual = 'false' AND with_check = 'false'
     ) THEN
-      RAISE EXCEPTION '0055: the policy on % is not the deny-all policy this file installs', t;
+      RAISE EXCEPTION '0056: the policy on % is not the deny-all policy this file installs', t;
     END IF;
   END LOOP;
 
@@ -206,7 +206,7 @@ BEGIN
   SELECT count(*) INTO npolicy
     FROM pg_policies WHERE schemaname = 'public' AND tablename = 'partner_emergency_controls';
   IF npolicy <> 2 THEN
-    RAISE EXCEPTION '0055: expected exactly 2 policies on partner_emergency_controls, found %', npolicy;
+    RAISE EXCEPTION '0056: expected exactly 2 policies on partner_emergency_controls, found %', npolicy;
   END IF;
 
   -- (e) 0051's revoke must not have been undone by anything between then and now — otherwise the
@@ -217,6 +217,6 @@ BEGIN
        AND table_name = 'partner_emergency_controls'
        AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')
   ) THEN
-    RAISE EXCEPTION '0055: partner_runtime holds a write grant on partner_emergency_controls; 0051''s revoke was undone';
+    RAISE EXCEPTION '0056: partner_runtime holds a write grant on partner_emergency_controls; 0051''s revoke was undone';
   END IF;
 END$$;

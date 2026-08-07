@@ -1040,9 +1040,9 @@ describe("Partner RLS isolation coverage is wired up", () => {
     ...PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
     "0051_partner_runtime_flag_control_least_privilege",
     "0052_partner_internal_evidence_rls",
-    "0053_cert_counter_monotonic_allocator",
-    "0054_partner_ledger_preserve_search_path",
-    "0055_partner_hq_control_tables_write_deny",
+    "0054_cert_counter_monotonic_allocator",
+    "0055_partner_ledger_preserve_search_path",
+    "0056_partner_hq_control_tables_write_deny",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */
