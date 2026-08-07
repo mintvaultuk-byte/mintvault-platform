@@ -115,12 +115,94 @@ async function applyPrintLifecycle(): Promise<void> {
 }
 
 /**
+ * CANONICAL SETTLEMENT EVIDENCE, written exactly as production writes it.
+ *
+ * `transitionReservationInTransaction()` (server/partner/partner-credit-reservation-service.ts)
+ * writes a consume as TWO rows, not one status flip:
+ *   - `partner_credit_ledger`: amount -1, `idempotency_key = 'reservation-consume:<id>'`,
+ *     `correlation_id = <id>`; and
+ *   - `partner_credit_reservation_events`: `event_type='consumed'` carrying that ledger row's id
+ *     (0017's `chk_partner_credit_reservation_events_ledger_link` makes the link mandatory).
+ * Releases and expiries write the event ONLY — a release never debits the wallet, which is the
+ * whole reason a released reservation can never be mistaken for payment.
+ *
+ * The fixture previously wrote a bare `status='consumed'` reservation with NEITHER row, so it
+ * asserted completion against a submission that had no debit anywhere in the ledger. That is
+ * exactly the shape finding H3's repaired gate must refuse, so the fixture is corrected here
+ * rather than the gate weakened to accommodate it.
+ */
+async function writeTerminalEvidence(params: {
+  walletId: string;
+  tenantId: string;
+  reservationId: string;
+  eventType: "consumed" | "released" | "expired";
+  key: string;
+  /**
+   * `malformed` writes the consume event with a debit that is NOT the one
+   * `transitionReservationInTransaction()` writes — same wallet, same amount, same correlation, but
+   * a hand-made idempotency key. It is what a manual "let me just fix the balance" SQL adjustment
+   * looks like, and it must NOT be accepted as settlement evidence.
+   */
+  ledger?: "canonical" | "malformed";
+}): Promise<void> {
+  const { walletId, tenantId, reservationId, eventType, key } = params;
+  const ledgerShape = params.ledger ?? "canonical";
+  let ledgerEntryId: string | null = null;
+  if (eventType === "consumed") {
+    // 0017's chk_..._ledger_link makes the link MANDATORY for a consume event, so a malformed case
+    // still has to point at some ledger row — it just must not be the canonical debit.
+    ledgerEntryId = (
+      await admin.query<{ id: string }>(
+        `INSERT INTO partner_credit_ledger
+           (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
+            actor_type, request_fingerprint)
+         VALUES ($1,$2,-1,'admin_adjustment',$3,$4,'system','MintVault grading completed for Partner submission card.',
+                 'admin',$5)
+         RETURNING id`,
+        [
+          walletId,
+          tenantId,
+          ledgerShape === "canonical"
+            ? `reservation-consume:${reservationId}`
+            : `manual-balance-fix:${reservationId}`,
+          reservationId,
+          "d".repeat(64),
+        ]
+      )
+    ).rows[0].id;
+  }
+  await admin.query(
+    `INSERT INTO partner_credit_reservation_events
+       (reservation_id, wallet_id, tenant_id, event_type, amount, idempotency_key, request_fingerprint,
+        source, reason, actor_type, ledger_entry_id)
+     VALUES ($1,$2,$3,$4,1,$5,$6,'system','completion cascade fixture','system',$7::uuid)`,
+    [reservationId, walletId, tenantId, eventType, key, "e".repeat(64), ledgerEntryId]
+  );
+}
+
+/**
  * Build the exact shape production leaves behind at the moment before completion: two approved
- * certificates in `printed`, two approved work items, and two CONSUMED reservations. Every row is
- * the real table with the real constraints — 0045's composite FKs reject any shortcut here.
+ * certificates in `printed`, two approved work items, and two CONSUMED reservations each carrying
+ * canonical debit evidence. Every row is the real table with the real constraints — 0045's
+ * composite FKs reject any shortcut here.
  */
 async function seedCompletionReadyPilot(opts?: {
   reservationStatus?: string;
+  /**
+   * FINDING H3 KNOBS.
+   *
+   * `evidence` controls whether a `consumed` reservation carries its canonical consumed event +
+   * -1 ledger debit. `"none"` is the money-missing shape: the reservation SAYS consumed but no
+   * debit exists anywhere. `"partial"` gives card one its evidence and leaves card two bare.
+   *
+   * `recovery` reproduces the authorised Super Admin recovery: each card's ORIGINAL reservation is
+   * released (terminal, settled by cancellation) and linked by a released
+   * `partner_submission_credit_holds` row to a REPLACEMENT reservation that was subsequently
+   * consumed with full evidence. This is the shape the old `status <> 'consumed'` predicate
+   * stranded forever.
+   */
+  evidence?: "canonical" | "none" | "partial" | "malformed";
+  recovery?: boolean;
   /**
    * The DESTINATION submission's status. Default `ready_to_return` is the settled state. T7 needs
    * an UNsettled destination, which is the only way to exercise the batch-phase settlement gate.
@@ -130,6 +212,17 @@ async function seedCompletionReadyPilot(opts?: {
   const n = ++sequence;
   const reservationStatus = opts?.reservationStatus ?? "consumed";
   const destinationStatus = opts?.destinationStatus ?? "ready_to_return";
+  const evidence = opts?.evidence ?? "canonical";
+  const recovery = opts?.recovery ?? false;
+  /** 0017's chk_..._terminal_times pairs each status with exactly one timestamp column. */
+  const terminalColumn = (status: string): string =>
+    status === "consumed"
+      ? "consumed_at"
+      : status === "released"
+        ? "released_at"
+        : status === "expired"
+          ? "expired_at"
+          : "";
 
   const tenantId = (
     await admin.query<{ id: string }>(
@@ -308,25 +401,96 @@ async function seedCompletionReadyPilot(opts?: {
     certNumbers.push(certNumber);
     certIds.push(certId);
 
-    const reservationId = (
-      await admin.query<{ id: string }>(
-        `INSERT INTO partner_credit_reservations
-           (wallet_id, tenant_id, source, submission_reference, card_reference, reserved_credits,
-            status, consumed_at, idempotency_key, request_fingerprint, reason, actor_type, expires_at)
-         VALUES ($1,$2,'portal',$3,$4,1,$5, CASE WHEN $5 = 'consumed' THEN now() ELSE NULL END,$6,$7,
-                 'completion cascade fixture','system', now() + interval '30 days')
-         RETURNING id`,
+    const cardReference = `partner-submission-card:${cardIds[i]}:1`;
+    const insertReservation = async (status: string, key: string): Promise<string> => {
+      const col = terminalColumn(status);
+      return (
+        await admin.query<{ id: string }>(
+          `INSERT INTO partner_credit_reservations
+             (wallet_id, tenant_id, source, submission_reference, card_reference, reserved_credits,
+              status,${col ? ` ${col},` : ""} idempotency_key, request_fingerprint, reason, actor_type, expires_at)
+           VALUES ($1,$2,'portal',$3,$4,1,$5,${col ? " now()," : ""} $6,$7,
+                   'completion cascade fixture','system', now() + interval '30 days')
+           RETURNING id`,
+          [walletId, tenantId, partnerSubmissionId, cardReference, status, key, "c".repeat(64)]
+        )
+      ).rows[0].id;
+    };
+
+    /**
+     * RECOVERY SHAPE. The authorised Super Admin path releases the ORIGINAL reservation and issues a
+     * REPLACEMENT for the same card, linked by a RELEASED `partner_submission_credit_holds` row. Both
+     * rows keep the same `submission_reference`, which is exactly why the old
+     * `r.status <> 'consumed'` predicate stranded every recovered submission forever.
+     * `uq_partner_credit_reserve_card_live` permits the shared `card_reference` because the
+     * predecessor is no longer live.
+     */
+    let reservationId: string;
+    if (recovery) {
+      const predecessorId = await insertReservation("released", `cc-reserve-${n}-${i}`);
+      await writeTerminalEvidence({
+        walletId,
+        tenantId,
+        reservationId: predecessorId,
+        eventType: "released",
+        key: `cc-ev-rel-${n}-${i}`,
+      });
+      reservationId = await insertReservation("consumed", `cc-recover-${n}-${i}`);
+      await writeTerminalEvidence({
+        walletId,
+        tenantId,
+        reservationId,
+        eventType: "consumed",
+        key: `cc-ev-con-${n}-${i}`,
+      });
+      await admin.query(
+        `INSERT INTO partner_submission_credit_holds
+           (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
+            connector_record_id, connector_import_id, reason_code, released_at,
+            recovery_reservation_id, recovery_idempotency_key)
+         VALUES ($1,$2,$3,$4,$5,$6,'reservation_not_consumable', now(), $7, $8)`,
         [
-          walletId,
           tenantId,
           partnerSubmissionId,
-          `partner-submission-card:${cardIds[i]}:1`,
-          reservationStatus,
-          `cc-reserve-${n}-${i}`,
-          "c".repeat(64),
+          destinationSubmissionId,
+          predecessorId,
+          connectorId,
+          importId,
+          reservationId,
+          `cc-recovery-${n}-${i}`,
         ]
-      )
-    ).rows[0].id;
+      );
+      reservationIds.push(predecessorId);
+    } else {
+      reservationId = await insertReservation(reservationStatus, `cc-reserve-${n}-${i}`);
+      if (reservationStatus === "consumed") {
+        // `partial` gives card ONE its debit and leaves card TWO bare — one unpaid card in an
+        // otherwise-settled set must still refuse the whole submission.
+        const wantsCanonical = evidence === "canonical" || (evidence === "partial" && i === 0);
+        if (wantsCanonical || evidence === "malformed") {
+          await writeTerminalEvidence({
+            walletId,
+            tenantId,
+            reservationId,
+            eventType: "consumed",
+            key: `cc-ev-con-${n}-${i}`,
+            ledger: wantsCanonical ? "canonical" : "malformed",
+          });
+        }
+      } else if (reservationStatus === "released" || reservationStatus === "expired") {
+        // Canonical for these two: the terminal event exists, and NO ledger debit does — a release
+        // never debits the wallet (0017's accounting-model note).
+        await writeTerminalEvidence({
+          walletId,
+          tenantId,
+          reservationId,
+          eventType: reservationStatus,
+          key: `cc-ev-term-${n}-${i}`,
+        });
+      }
+      // `active` reservations have only their `reserved` event in production; the gate never looks
+      // at it, so the fixture leaves the event log empty for that case.
+    }
     reservationIds.push(reservationId);
 
     const workItemId = (
@@ -662,5 +826,183 @@ describe("Partner completion cascade — real markCompleted with migration 0045 
         "a single-tenant complete set must not trip the cross-tenant guard"
       ).toEqual([]);
     }
+  });
+
+  /**
+   * ============================================================================================
+   * FINDING H3 — the completion money gate.
+   * ============================================================================================
+   *
+   * T9-T14 pin `partnerGradedUnitsFullySettled` in server/print-workflow.ts. The old predicate was
+   * `NOT EXISTS (… r.status <> 'consumed')`, three copies. Both hostile reviewers proposed narrowing
+   * it to `r.status = 'active'`; the issue register recorded that as NOT obviously safe. These six
+   * cases hold both directions at once:
+   *
+   *   MUTATION COMPLETE-FREE1 — replace the gate with `NOT EXISTS (… r.status = 'active')`.
+   *   T9 and T10 turn RED (free grading), while every other case stays green. That is the proof the
+   *   one-word fix would have shipped a hole, and the reason the repair counts POSITIVE per-unit
+   *   financial evidence instead of reading reservation status.
+   *
+   *   MUTATION COMPLETE-STRAND1 — restore `r.status <> 'consumed'`.
+   *   T11 turns RED: the authorised recovery shape can never complete, which is finding H3 itself.
+   */
+
+  it("T9: COMPLETE-FREE1 — a fully CANCELLED submission must not complete for zero consumed credits", async () => {
+    // Every reservation is `released`: terminal, settled, and the credit went BACK to the partner.
+    // `r.status = 'active'` is satisfied by nothing here, so the one-word fix would open the gate
+    // and grade, print and complete two cards that MintVault was never paid for.
+    const f = await seedCompletionReadyPilot({ reservationStatus: "released" });
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='active'",
+        [f.partnerSubmissionId]
+      ),
+      "the free-grading direction only exists when NO active reservation remains"
+    ).toBe("0");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_ledger l JOIN partner_credit_reservations r ON l.correlation_id = r.id::text WHERE r.submission_reference=$1 AND l.amount=-1",
+        [f.partnerSubmissionId]
+      ),
+      "a release never debits the wallet, so there is no money for these two cards anywhere"
+    ).toBe("0");
+
+    const result = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: ACTOR });
+    expect(result.rejected).toEqual([]);
+    expect(result.applied.sort()).toEqual([...f.certNumbers].sort());
+
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
+      "a cancelled submission with zero consumed credits must NOT reach 'completed'"
+    ).toBe("submitted_to_mintvault");
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "and the destination must not be walked to completed either"
+    ).toBe("ready_to_return");
+  });
+
+  it("T10: COMPLETE-FREE1 — EXPIRED reservations are terminal but unpaid, and must not complete", async () => {
+    // The fourth 0017 status. Like `released` it is terminal and writes no debit, so `status =
+    // 'active'` would wave it through exactly as it waves T9 through.
+    const f = await seedCompletionReadyPilot({ reservationStatus: "expired" });
+
+    const result = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: ACTOR });
+    expect(result.applied.sort()).toEqual([...f.certNumbers].sort());
+
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
+      "an expired reservation is not payment"
+    ).toBe("submitted_to_mintvault");
+  });
+
+  it("T11: COMPLETE-STRAND1 — an authorised credit recovery COMPLETES (the H3 defect itself)", async () => {
+    // Each card: released predecessor + consumed replacement carrying the canonical debit, linked by
+    // a released hold. The old `r.status <> 'consumed'` predicate saw the released predecessors and
+    // refused forever, while cancelSubmission refused the same mixed state — no exit at all.
+    const f = await seedCompletionReadyPilot({ recovery: true });
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='released'",
+        [f.partnerSubmissionId]
+      ),
+      "the recovery shape must genuinely leave released predecessors behind, or T11 proves nothing"
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_submission_credit_holds WHERE partner_submission_id=$1 AND released_at IS NOT NULL AND recovery_reservation_id IS NOT NULL",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_ledger l JOIN partner_credit_reservations r ON l.idempotency_key = 'reservation-consume:' || r.id::text WHERE r.submission_reference=$1 AND l.amount=-1",
+        [f.partnerSubmissionId]
+      ),
+      "two cards, two real debits — the partner DID pay for this grading"
+    ).toBe("2");
+
+    const result = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: ACTOR });
+    expect(result.rejected).toEqual([]);
+
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
+      "a recovered, fully-paid submission must complete"
+    ).toBe("completed");
+    expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId])).toBe(
+      "completed"
+    );
+  });
+
+  it("T12: a reservation that merely SAYS consumed, with no debit anywhere, must not complete", async () => {
+    const f = await seedCompletionReadyPilot({ evidence: "none" });
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='consumed'",
+        [f.partnerSubmissionId]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_reservation_events e JOIN partner_credit_reservations r ON r.id=e.reservation_id WHERE r.submission_reference=$1",
+        [f.partnerSubmissionId]
+      ),
+      "status alone: no consume event, and therefore no ledger link"
+    ).toBe("0");
+
+    const result = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: ACTOR });
+    expect(result.applied.sort()).toEqual([...f.certNumbers].sort());
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
+      "a status flip with no money behind it is not settlement"
+    ).toBe("submitted_to_mintvault");
+  });
+
+  it("T13: ONE unpaid card in an otherwise-settled set blocks the whole submission", async () => {
+    const f = await seedCompletionReadyPilot({ evidence: "partial" });
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_ledger l JOIN partner_credit_reservations r ON l.idempotency_key = 'reservation-consume:' || r.id::text WHERE r.submission_reference=$1 AND l.amount=-1",
+        [f.partnerSubmissionId]
+      ),
+      "exactly one of the two cards was really paid for"
+    ).toBe("1");
+
+    const result = await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: ACTOR });
+    expect(result.applied.sort()).toEqual([...f.certNumbers].sort());
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
+      "1 debit for 2 graded units must refuse — the gate counts units, not submissions"
+    ).toBe("submitted_to_mintvault");
+  });
+
+  it("T14: a hand-made ledger adjustment is not settlement evidence — and the canonical one is", async () => {
+    // Same wallet, same -1, same correlation_id, WRONG idempotency key. This is what someone
+    // patching a balance by hand produces, and it must not unlock completion.
+    const bad = await seedCompletionReadyPilot({ evidence: "malformed" });
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_credit_ledger l JOIN partner_credit_reservations r ON l.correlation_id = r.id::text WHERE r.submission_reference=$1 AND l.amount=-1",
+        [bad.partnerSubmissionId]
+      ),
+      "the malformed debit really exists — only its idempotency key differs"
+    ).toBe("2");
+
+    await printWorkflow.markCompleted({ certIds: bad.certNumbers, identity: ACTOR });
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [bad.partnerSubmissionId]),
+      "only the debit transitionReservationInTransaction() writes counts as payment"
+    ).toBe("submitted_to_mintvault");
+
+    // POSITIVE CONTROL: the identical fixture with the canonical key completes, so T14 cannot be
+    // passing because the gate refuses everything.
+    const good = await seedCompletionReadyPilot();
+    await printWorkflow.markCompleted({ certIds: good.certNumbers, identity: ACTOR });
+    expect(await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [good.partnerSubmissionId])).toBe(
+      "completed"
+    );
   });
 });
