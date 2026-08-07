@@ -140,6 +140,17 @@ describe("partner schema ↔ migration parity", () => {
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
       "0045_partner_grading_work_items.sql",
+      // Security repair, not a schema change: revokes the INSERT/UPDATE/DELETE that
+      // 0001's blanket grant loop gave partner_runtime on the two super-admin-write-only
+      // kill-switch tables, and splits the feature-flag policy so its permissive
+      // `tenant_id IS NULL` branch governs SELECT only. It adds no table or column, so
+      // the Drizzle-parity assertions above are unaffected by design.
+      //
+      // NUMBER IS PROVISIONAL. 0046 is claimed twice across parallel branches
+      // (partner_connector_profile_read and partner_mfa_pending_lifecycle) and 0047-0049
+      // are claimed by the concurrent migration-renumbering work. 0050 was chosen to clear
+      // all of them; the coordinated release review assigns the final sequence.
+      "0050_partner_runtime_flag_control_least_privilege.sql",
     ]);
   });
 
