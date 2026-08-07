@@ -30,8 +30,12 @@
  * So CI asserts EXECUTION, not merely configuration: each file must appear in the report, must run
  * at least its floor of tests, and must report ZERO skipped.
  *
- * Floors are set just below the current counts so adding tests never breaks the build, while
- * deleting or gating-out a block does.
+ * Floors are the MEASURED counts, not a margin below them. `>= min` still lets a suite grow
+ * freely, while a margin only ever buys silent room to delete evidence — which is how the pilot
+ * floor came to permit deleting all seven of this PR's server-authority proofs. Re-measure and
+ * raise the number when you add tests.
+ *
+ * Re-measured 2026-08-07: mfa-enrolment-mandatory 12 -> 13, lockout-recovery 13 -> 16.
  *
  * Usage: node scripts/ci/assert-partner-auth-suites-executed.mjs <vitest-json-report>
  */
@@ -42,10 +46,10 @@ const EXPECTED = [
   // requirePartnerAuth/requirePartnerCapability), the bootstrap path staying reachable so a user who
   // MUST enrol still CAN (the lockout-trap case), and that /mfa/disable no longer clears the
   // requirement (F2) and authenticator replacement demands a current factor (F3).
-  { file: "tests/partner-mfa-enrolment-mandatory.test.ts", min: 12 },
+  { file: "tests/partner-mfa-enrolment-mandatory.test.ts", min: 13 },
   // P0-F: lockout recovery. Covers reset clearing failed_login_count/locked_until, the reset token
   // remaining single-use, and the suspended branch no longer arming the lock.
-  { file: "tests/partner-lockout-recovery.test.ts", min: 13 },
+  { file: "tests/partner-lockout-recovery.test.ts", min: 16 },
 ];
 
 const reportPath = process.argv[2];

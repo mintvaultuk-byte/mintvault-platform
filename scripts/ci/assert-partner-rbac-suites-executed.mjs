@@ -21,6 +21,11 @@
  * deleting or gating-out a block does.
  *
  * Usage: node scripts/ci/assert-partner-rbac-suites-executed.mjs <vitest-json-report>
+ *
+ * Floors re-measured 2026-08-07: rbac-migration 20 -> 21, rbac-bootstrap 26 -> 27,
+ * definer-ownership 15 -> 16, management-migration 10 -> 13 (that suite gained three tests when it
+ * was repinned onto the post-0052 grant/RLS reality). A floor is the MEASURED count, never a
+ * margin below it.
  */
 import { readFileSync } from "node:fs";
 
@@ -28,10 +33,10 @@ const EXPECTED = [
   // Migration 0034 driven through the REAL runner: catalogue counts, idempotency, journal +
   // checksum pin, runner transaction wrapping, planMigrations pending->applied, and the read-only
   // validator reporting incomplete BEFORE / ready AFTER under a SELECT-only role.
-  { file: "tests/partner-rbac-migration.test.ts", min: 20 },
+  { file: "tests/partner-rbac-migration.test.ts", min: 21 },
   // First-owner-invitation blocker runtime regression proofs + migration 0033 audit-action
   // precision. The ONLY coverage that reproduces the unseeded estate instead of hand-seeding.
-  { file: "tests/partner-rbac-bootstrap.test.ts", min: 26 },
+  { file: "tests/partner-rbac-bootstrap.test.ts", min: 27 },
   // Partner Admin BYPASSRLS capability gate, which fails every Super Admin route closed. Its
   // PostgreSQL-17 half is gated on PARTNER_CAPABILITY_RT_ADMIN and can vanish the same way.
   { file: "tests/partner-admin-capability.test.ts", min: 5 },
@@ -39,8 +44,8 @@ const EXPECTED = [
   // they reported `describe.skip` and 37 tests never ran while the build stayed green. Floors are
   // set at the counts observed once their databases existed, minus nothing — these suites are
   // stable, and a floor below the real count is how coverage silently drains away.
-  { file: "tests/partner-definer-ownership.test.ts", min: 15 },
-  { file: "tests/partner-management-migration.test.ts", min: 10 },
+  { file: "tests/partner-definer-ownership.test.ts", min: 16 },
+  { file: "tests/partner-management-migration.test.ts", min: 13 },
   { file: "tests/super-admin-correction-mode-behaviour.test.ts", min: 12 },
 ];
 

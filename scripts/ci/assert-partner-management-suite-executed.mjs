@@ -6,11 +6,14 @@
  * must never report green while the transactional invitation-management evidence did not run.
  *
  * Usage: node scripts/ci/assert-partner-management-suite-executed.mjs <vitest-json-report>
+ *
+ * Floor re-measured 2026-08-07: 24 -> 28, the suite's true executed count. A floor is the
+ * MEASURED count, never a margin below it — a margin is silent room to delete evidence.
  */
 import { readFileSync } from "node:fs";
 
 const EXPECTED_FILE = "tests/partner-management-integration.test.ts";
-const MIN_EXECUTED = 24;
+const MIN_EXECUTED = 28;
 
 const reportPath = process.argv[2];
 if (!reportPath) {
