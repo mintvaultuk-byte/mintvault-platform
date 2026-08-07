@@ -76,6 +76,7 @@ const GATED_SUITES: Record<string, string[]> = {
   "partner-definer-ownership.test.ts": ["PARTNER_DEFINER_ADMIN"],
   "partner-final-owner-invariant.test.ts": ["PARTNER_FINAL_OWNER_ADMIN"],
   "partner-grading-bridge-migration.test.ts": ["PARTNER_GRADING_BRIDGE_MIGRATION_ADMIN"],
+  "partner-grading-get-readonly.test.ts": [],
   "partner-grading-http-routes.test.ts": [],
   "partner-integration-seams.test.ts": ["PARTNER_MOUNT_RT_ADMIN", "PARTNER_MOUNT_RT_RUNTIME"],
   "partner-lockout-decay.test.ts": ["PARTNER_LOCKOUT_DECAY_RT_ADMIN", "PARTNER_LOCKOUT_DECAY_RT_RUNTIME"],
@@ -95,6 +96,7 @@ const GATED_SUITES: Record<string, string[]> = {
   "partner-reset-delivery-integration.test.ts": ["PARTNER_PUBLIC_RT_ADMIN", "PARTNER_PUBLIC_RT_RUNTIME"],
   "partner-rls-isolation.test.ts": ["PARTNER_RLS_DB"],
   "partner-runtime-integration.test.ts": ["PARTNER_RT_ADMIN", "PARTNER_RT_RUNTIME"],
+  "partner-security-repairs-0047-0048.test.ts": ["PARTNER_SECURITY_REPAIRS_ADMIN"],
   "partner-submission-workflow.test.ts": ["PARTNER_RT_ADMIN", "PARTNER_RT_RUNTIME"],
   "partner-user-management-migration.test.ts": ["PARTNER_USER_MGMT_MIGRATION_ADMIN"],
   "partner-workflow-apis.test.ts": ["PARTNER_RT_ADMIN", "PARTNER_RT_RUNTIME"],
@@ -128,10 +130,12 @@ const GATED_SUITES: Record<string, string[]> = {
 };
 
 /**
- * The two entries above with an empty list are gated on something that is NOT an environment
+ * The entries above with an empty list are gated on something that is NOT an environment
  * variable, and are recorded here so "empty" can never be mistaken for "the parser lost it".
  */
 const NON_ENV_GATES: Record<string, string> = {
+  "partner-grading-get-readonly.test.ts":
+    "gated on `storageReady` (a live MinIO/S3 endpoint), same as its sibling below. Its own CI wiring guard sits OUTSIDE that gate, so an absent MinIO cannot turn the only behavioural evidence for H2 into a silent skip on a green build.",
   "partner-grading-http-routes.test.ts":
     "gated on `storageReady` (a live MinIO/S3 endpoint). Its own CI wiring guard already sits OUTSIDE that gate.",
   "printable-grade-safety.test.ts": "gated on process.platform/process.arch — the linux/amd64 golden-render arm.",
