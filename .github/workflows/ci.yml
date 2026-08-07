@@ -306,6 +306,11 @@ jobs:
       PARTNER_DEFINER_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_definer
       PARTNER_MANAGEMENT_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mgmt_mig
       PARTNER_GRADING_BRIDGE_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_bridge_mig
+      # The 0047/0048 security repairs. Its own PostgreSQL 17 database, because it rolls the two
+      # repairs back and re-applies them mid-suite to reproduce the pre-fix vulnerabilities — a
+      # shared database would leave every other suite briefly running against an un-forced RLS
+      # table and an un-pinned trigger function.
+      PARTNER_SECURITY_REPAIRS_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_sec_repairs
       # The correction-mode suite refuses any database whose name is not the throwaway it expects.
       CORRECTION_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55433/mintvault_correction_test
       #
@@ -487,6 +492,7 @@ jobs:
                             mintvault_partner_definer mintvault_partner_mgmt_mig \
                             mintvault_partner_admin_shell \
                             mintvault_partner_bridge_mig \
+                            mintvault_partner_sec_repairs \
                             mintvault_correction_test; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
@@ -615,7 +621,8 @@ jobs:
             PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN \
             PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN \
             PARTNER_MANAGEMENT_MIGRATION_ADMIN \
-            PARTNER_GRADING_BRIDGE_MIGRATION_ADMIN
+            PARTNER_GRADING_BRIDGE_MIGRATION_ADMIN \
+            PARTNER_SECURITY_REPAIRS_ADMIN
 
       - name: Lint
         run: npm run lint

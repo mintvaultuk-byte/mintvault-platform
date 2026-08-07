@@ -139,6 +139,12 @@ describe("partner schema ↔ migration parity", () => {
       // 0044 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+      // 0045 is deliberately absent and must stay absent: 0046 is already journalled on staging and
+      // every rollback in this series refuses while a higher-numbered row exists, so anything at
+      // 0045 would be born un-rollbackable there. 0046 belongs to the partner MFA repair branch.
+      // See docs/migration-ownership-partner-0049.md.
+      "0047_partner_owner_invariant_tenants_rls.sql",
+      "0048_partner_location_snapshot_search_path.sql",
       "0049_partner_grading_work_items.sql",
     ]);
   });

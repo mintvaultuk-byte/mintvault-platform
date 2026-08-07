@@ -183,10 +183,7 @@ async function seedTenant(tenant: string, ref: string, locationName: string): Pr
     [tenant, owner[0].id]
   );
 
-  const seen = await admin.query(
-    "SELECT 1 FROM partner_owner_invariant_tenants WHERE tenant_id = $1",
-    [tenant]
-  );
+  const seen = await admin.query("SELECT 1 FROM partner_owner_invariant_tenants WHERE tenant_id = $1", [tenant]);
   expect(
     seen.rows,
     "0032's invariant trigger must have registered this tenant — the fixture depends on it"
@@ -275,7 +272,15 @@ describe.skipIf(!isLocal)("partner security repairs 0047 + 0048 (disposable Post
     await admin.query(
       "CREATE TABLE IF NOT EXISTS cert_counter (id integer PRIMARY KEY DEFAULT 1, value integer NOT NULL DEFAULT 0)"
     );
-    for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates", "label_prints", "cert_counter"]) {
+    for (const t of [
+      "users",
+      "submissions",
+      "submission_items",
+      "audit_log",
+      "certificates",
+      "label_prints",
+      "cert_counter",
+    ]) {
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }
 
@@ -366,9 +371,7 @@ describe.skipIf(!isLocal)("partner security repairs 0047 + 0048 (disposable Post
       expect(rows.map((r) => r.tenant_id)).toEqual([A]);
 
       // The control surface: partner_organisations was ALWAYS isolated. Both must now agree.
-      const { rows: orgs } = await probe.query<{ id: string }>(
-        "SELECT id FROM partner_organisations ORDER BY id"
-      );
+      const { rows: orgs } = await probe.query<{ id: string }>("SELECT id FROM partner_organisations ORDER BY id");
       expect(orgs.map((r) => r.id)).toEqual([A]);
     } finally {
       await probe.end();
@@ -424,7 +427,7 @@ describe.skipIf(!isLocal)("partner security repairs 0047 + 0048 (disposable Post
     await runRollbackAsMigrator(RLS_ROLLBACK, 47);
 
     const probe = await probeClient(A);
-    let leaked: string[] = [];
+    let leaked: string[];
     try {
       const { rows } = await probe.query<{ tenant_id: string }>(
         "SELECT tenant_id FROM partner_owner_invariant_tenants WHERE tenant_id IN ($1,$2) ORDER BY tenant_id",
@@ -520,7 +523,10 @@ describe.skipIf(!isLocal)("partner security repairs 0047 + 0048 (disposable Post
 
     // pg_temp must be LAST. pg_temp first would re-open the attack even with a pin present.
     const cfg = rows[0].proconfig!.find((c) => c.startsWith("search_path="))!;
-    const parts = cfg.slice("search_path=".length).split(",").map((s) => s.trim());
+    const parts = cfg
+      .slice("search_path=".length)
+      .split(",")
+      .map((s) => s.trim());
     expect(parts[parts.length - 1]).toBe("pg_temp");
   });
 
