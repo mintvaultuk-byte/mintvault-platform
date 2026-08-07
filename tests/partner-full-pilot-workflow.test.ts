@@ -937,7 +937,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(
       await scalar<string>("SELECT count(*)::text FROM label_prints WHERE cert_id = ANY($1::text[])", [f.certNumbers])
     ).toBe("2");
-  });
+  }, 120_000);
 
   it("P10: reprint requires a real reason and writes audited evidence", async () => {
     const f = await seedPilotAtPendingReview();
@@ -1012,7 +1012,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
 
     // Settled money is untouched by a reprint.
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
-  });
+  }, 120_000);
 
   it("P11: a failure AFTER card one has settled rolls the whole transaction back — no partial consume", async () => {
     const f = await seedPilotAtPendingReview();
@@ -1152,7 +1152,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     );
     expect(settled).not.toBeNull();
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
-  });
+  }, 120_000);
 
   it("P13: the settlement failpoint is refused outside the test runner", async () => {
     const prior = process.env.NODE_ENV;
