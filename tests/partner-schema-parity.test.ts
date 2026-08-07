@@ -180,6 +180,10 @@ describe("partner schema ↔ migration parity", () => {
       // 0052 continues the arbitrated numbering recorded above: 0045 stays permanently unused, and
       // 0046 (staging-applied) through 0051 are taken, so the next free number is 0052.
       "0052_partner_internal_evidence_rls.sql",
+      // 0053 adds failed_mfa_count / mfa_locked_until to partner_users. Deliberately NOT reusing
+      // failed_login_count/locked_until: a successful login zeroes those, so an attacker holding a
+      // phished password owns a counter-reset primitive and the shared lock would never arm.
+      "0053_partner_mfa_failure_lockout.sql",
     ]);
   });
 

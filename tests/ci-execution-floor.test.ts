@@ -85,6 +85,7 @@ const GATED_SUITES: Record<string, string[]> = {
   "partner-management-integration.test.ts": ["PARTNER_MANAGEMENT_RT_ADMIN"],
   "partner-management-migration.test.ts": ["PARTNER_MANAGEMENT_MIGRATION_ADMIN"],
   "partner-management-ux-runtime.test.ts": ["PARTNER_UX_RT_ADMIN"],
+  "partner-mfa-bruteforce-hardening.test.ts": ["PARTNER_MFA_BF_RT_ADMIN", "PARTNER_MFA_BF_RT_RUNTIME"],
   "partner-mfa-enrolment-mandatory.test.ts": ["PARTNER_MFA_ENROL_RT_ADMIN", "PARTNER_MFA_ENROL_RT_RUNTIME"],
   "partner-mfa-factor-hardening.test.ts": ["PARTNER_MFA_HARDENING_RT_ADMIN", "PARTNER_MFA_HARDENING_RT_RUNTIME"],
   "partner-onboarding-matrix.test.ts": ["PARTNER_MOUNT_RT_ADMIN", "PARTNER_MOUNT_RT_RUNTIME"],

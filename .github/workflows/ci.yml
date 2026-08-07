@@ -324,6 +324,8 @@ jobs:
       # not depend on which file vitest scheduled first.
       PARTNER_MFA_ENROL_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mfa_enrol
       PARTNER_MFA_ENROL_RT_RUNTIME: postgres://partner_app_test_mfa_enrol:synthetic@127.0.0.1:55433/mintvault_partner_mfa_enrol
+      PARTNER_MFA_BF_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mfa_bf
+      PARTNER_MFA_BF_RT_RUNTIME: postgres://partner_app_test_mfa_bf:synthetic@127.0.0.1:55433/mintvault_partner_mfa_bf
       PARTNER_LOCKOUT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_lockout
       PARTNER_LOCKOUT_RT_RUNTIME: postgres://partner_app_test_lockout:synthetic@127.0.0.1:55433/mintvault_partner_lockout
       # ---- Partner MFA current-factor hardening (recovery regeneration / disable / replacement) ----
@@ -569,7 +571,7 @@ jobs:
           # backslash to the server and died with `syntax error at or near "\"` before any test ran.
           # Existence is queried first via command substitution, whose exit status propagates under
           # set -e instead of being swallowed by a pipe.
-          for auth_db in mintvault_partner_mfa_enrol mintvault_partner_lockout mintvault_partner_mfa_hardening mintvault_partner_lockout_decay; do
+          for auth_db in mintvault_partner_mfa_enrol mintvault_partner_lockout mintvault_partner_mfa_hardening mintvault_partner_lockout_decay mintvault_partner_mfa_bf; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$auth_db'")"
             if [ "$present" != "1" ]; then
@@ -577,7 +579,7 @@ jobs:
             fi
             echo "[ci-db] partner auth suite database ready: $auth_db"
           done
-          for auth_admin in "$PARTNER_MFA_ENROL_RT_ADMIN" "$PARTNER_LOCKOUT_RT_ADMIN" "$PARTNER_MFA_HARDENING_RT_ADMIN" "$PARTNER_LOCKOUT_DECAY_RT_ADMIN"; do
+          for auth_admin in "$PARTNER_MFA_ENROL_RT_ADMIN" "$PARTNER_LOCKOUT_RT_ADMIN" "$PARTNER_MFA_HARDENING_RT_ADMIN" "$PARTNER_LOCKOUT_DECAY_RT_ADMIN" "$PARTNER_MFA_BF_RT_ADMIN"; do
             psql "$auth_admin" -v ON_ERROR_STOP=1 -tAc \
               "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           done
