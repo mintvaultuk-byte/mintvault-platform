@@ -159,3 +159,85 @@ A7-F11 (`R2_FORCE_PATH_STYLE` test switch on the production client).
 - A3-F2's pool-starvation reproduction (reviewer ran it; Lead did not re-run).
 - A3-F3's fingerprint collision (reviewer computed it; Lead did not re-run).
 - All MEDIUM/LOW findings above are recorded on reviewer evidence only.
+
+---
+
+# ADDENDUM — Agents 9 and 10 (A8 RLS/RBAC still running)
+
+## BLOCKER B1 · The reviewed code has never been through CI (A10-F2)
+**Lead-verified with read-only `gh` calls:**
+```
+PR #288 head                = f6b840fe38e6cc9bde196993b1edec99fa491ec8   (OPEN)
+check-runs for 2ee13763     = HTTP 422 "No commit found for SHA"
+git diff --stat f6b840fe HEAD = 125 files changed, 13365 insertions(+), 34 deletions(-)
+```
+The last three commits do not exist on GitHub at all. **PR #288's green tick certifies a tree
+13,365 lines behind the one under review.** Everything never executed by CI includes:
+`tests/partner-grading-http-routes.test.ts` (+734 — the only behavioural coverage of
+`/api/partner/grading/*`), the D-2 `ci.yml` wiring, the new `mintvault_partner_admin_shell`
+database and CREATEROLE preflight, and every raised/new execution floor.
+
+**This invalidates the premise of the assurance figures in the task brief.** "281 files / 5136
+passed / all six CI execution floors pass" are *local-machine* results. Under the governance
+Definition of Proof they are **Local Proof**, not Integration Proof. Resolving this needs a push —
+a protected action the Lead cannot self-authorise.
+
+## BLOCKER B2 · `main` has no branch protection; every execution floor is advisory (A10-F1)
+**Lead-verified:**
+```
+gh api repos/:owner/:repo/branches/main/protection -> 404 "Branch not protected"
+gh api repos/:owner/:repo/rulesets                 -> []
+repo visibility                                    -> PUBLIC (mintvaultuk-byte/mintvault-platform)
+```
+Six assert-executed scripts, ~34 execution floors, the `if: always()` wiring and the amd64 boot
+proof are enforced **only** by the CI job's exit code, and nothing converts that into a merge
+block. A red build, a missing floor, a failed `tsc`, a failed amd64 proof — all mergeable today.
+This is the load-bearing gate under every other assurance claim in the PR. Repository-settings
+change; owner action.
+
+## HIGH · A9-F1 — migration 0045 is a ONE-WAY DOOR on staging as reported
+`rollback-0045-partner-grading-work-items.sql:53-60` refuses if **any** journal row is numbered
+> 45. Staging is reported to have journalled `0046_partner_mfa_pending_lifecycle.sql`. The
+reviewer reproduced the refusal on a disposable cluster (table survives — fails closed, correctly).
+**One read-only query settles it and the Lead should run it on BOTH hosts before authorising:**
+```sql
+SELECT filename, status, completed_at FROM schema_migrations
+ WHERE filename ~ '^[0-9]{4}_' AND left(filename,4)::integer >= 44 ORDER BY filename;
+```
+
+## HIGH · A9-F2 — 0045 write-blocks the PROTECTED `certificates` table for its whole transaction
+Eleven non-`CONCURRENTLY` unique indexes on nine pre-existing tables, no `-- migrate:no-transaction`
+marker, so the runner wraps the entire file in one transaction. `pg_locks` measured mid-flight:
+`certificates`, `submission_items`, `submissions` all hold `ShareLock` + `ShareRowExclusiveLock`,
+which conflict with the `RowExclusiveLock` every INSERT/UPDATE takes. No certificate can be issued
+for the duration. Reads (the public trust surface) stay available. Likely sub-second at pilot
+volume — but nothing bounds it, and it must be **measured**, not assumed.
+
+## Also from A9/A10 (MEDIUM)
+- A9-F3 — `partner-grading-bridge-migration.test.ts` (12 tests, the only forward+rollback+reapply
+  proof) has **no execution floor and no in-file CI guard**. One line fixes it.
+- A9-F4 — every main-pool write to the FORCE-RLS 0045 table depends on an unasserted `BYPASSRLS`
+  attribute; the route tests connect as `postgres` (superuser) so they structurally cannot detect
+  it. Silent failure mode is a permanent 409. Settle with
+  `SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user;` on each host.
+- A10-F4 — **15 gated partner suites (273 tests) have no execution floor**; 7 of them (101 tests)
+  also have no in-file CI guard. Includes `partner-workflow-apis` (49 tests — the sole behavioural
+  detector for mutation `CUSTOMER1`) and `partner-dashboard-integration` (28 tests, which `ci.yml`'s
+  own prose calls load-bearing). This is the *fifth* instance of the repo's recurring failure class,
+  and it is structural rather than a missing variable.
+- A10-F5 — two floors sit **below** their real counts (`partner-management-integration` 24 vs 28,
+  `partner-lockout-recovery` 13 vs 16), permitting silent test deletion. Two scripts carry
+  contradictory floor policies.
+- A10-F6/F7 — the "every grading route is rate limited" regex cannot see a named handler and its
+  floor equals the exact current count; 155 source-text pins carry the grading adapter's contract
+  and the PR's own matrix proves that class is evadable.
+- A10-F8 — `G1b` (the D-1 characterisation test) is inside a must-pass floor asserting an open
+  data-destroying defect as expected behaviour; fixing D-1 turns CI red.
+
+## Agent 9's positive verdict on 0045 itself, recorded because it is signal
+Applied + re-applied: a 6,611-object snapshot was **byte-identical**. Rollback: *"PERFECT REVERSAL —
+zero schema residue across 6319 objects."* Grants least-privilege and column-scoped; no migration
+other than 0045 grants to `partner_connector_runtime` on the affected tables; RLS `ENABLE`+`FORCE`
+with `USING` and `WITH CHECK`; destructive-lint clean; duplicate migration *numbers* fail closed
+before any DB contact. The reviewer could not break the SQL body. The two open questions are
+external to it (A9-F1, A9-F2).
