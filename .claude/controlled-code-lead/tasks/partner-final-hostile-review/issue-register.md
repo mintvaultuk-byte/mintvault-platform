@@ -241,3 +241,100 @@ other than 0045 grants to `partner_connector_runtime` on the affected tables; RL
 with `USING` and `WITH CHECK`; destructive-lint clean; duplicate migration *numbers* fail closed
 before any DB contact. The reviewer could not break the SQL body. The two open questions are
 external to it (A9-F1, A9-F2).
+
+---
+
+# ADDENDUM 2 — Agent 8 (RLS / RBAC / tenant isolation). ALL TEN REVIEWERS NOW REPORTED.
+
+Agent 8 built a disposable local cluster, applied all 28 partner migrations as the **non-superuser**
+`pn_migrator`, and probed as real `NOSUPERUSER NOBYPASSRLS` roles. No Neon host contacted.
+
+## HIGH · A8-F1 — `partner_owner_invariant_tenants` has NO RLS and is granted to `partner_runtime`
+**Lead-verified in `migrations/0032_partner_final_owner_invariant.sql`:**
+- table created at `:9`; `GRANT SELECT, INSERT ON partner_owner_invariant_tenants TO partner_runtime` at `:117`
+- the file's five `ROW LEVEL SECURITY` statements (`:26,27,38,39`) all concern
+  `partner_users` / `partner_user_roles` — a FORCE toggle around a backfill. **This table never gets
+  `ENABLE ROW LEVEL SECURITY` and never gets a policy.**
+
+Reviewer's live probe as `partner_runtime` with a *correct* tenant-A GUC: `partner_organisations`
+returns 1 row (isolated), `partner_owner_invariant_tenants` returns **both tenants**. With no GUC and
+with a malformed GUC, every RLS table returns 0 and this one still returns 2 — it ignores tenant
+context entirely.
+
+Impact: any authenticated partner session that reaches SQL can enumerate every tenant UUID on the
+network plus each one's onboarding timestamp; the `INSERT` grant lets one tenant pin another into the
+owner invariant. **Pre-existing (0032), not introduced by PR #288**, but live on the partner surface.
+It is the only tenant-keyed table that both lacks RLS *and* is granted to `partner_runtime`; the
+other three RLS-less tenant tables are documented exceptions with no `partner_runtime` grant.
+
+## HIGH · A8-F2 — 0044's location-snapshot trigger is `pg_temp`-shadowable
+**Lead-verified**, `migrations/0044_…:131-158`: `CREATE OR REPLACE FUNCTION
+partner_submissions_capture_location_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$` — **no
+`SET search_path`** — and the body reads `FROM partner_locations l` **unqualified**.
+
+Migration 0006 documents this exact attack and pins `search_path` on every definer function; 0044 did
+not carry it forward. Reviewer's live probe: `CREATE TEMP TABLE partner_locations …` then an ordinary
+insert produced `location_name_snapshot = 'FORGED ORIGIN — Tenant B Shop'`, bypassing the
+`AND l.tenant_id = NEW.tenant_id` guard (evaluated against the attacker's temp table).
+
+`SECURITY INVOKER`, so no privilege escalation — this is a **provenance/integrity** defeat of the
+snapshot the migration header says exists so submission origin cannot disagree with the certificate's
+`ENABLE ALWAYS` origin snapshot. One-line fix. `definer-guard.ts` does not cover INVOKER trigger
+functions, so nothing detects it.
+
+## HIGH · A8-F3 — six FORCE-RLS work-item writes never set `app.tenant_id`
+Independently corroborates **A9-F4** from a second angle, and sharpens it: `grep` for
+`set_config|app.tenant_id` across `grading-routes.ts`, `grading-assignment.ts` and
+`grading-review-mirror.ts` returns **nothing**. Correctness rests entirely on `BYPASSRLS`, and
+`partnerGradingRouter()` is the first tenant-facing router on the admin pool that does **not** call
+`getPartnerAdminCapability()` — the gate every other admin router carries.
+
+The repo contradicts itself on the production fact: `tests/partner-rls-isolation.test.ts:1475`
+says the runtime role is `rolbypassrls = FALSE`, while `partner-submission-credit-lifecycle.ts:1042`
+says the `MINTVAULT_DATABASE_URL` owner is **NOT** BYPASSRLS — and `db.ts` falls back to that URL while
+`partnerAdminDbConfigured()` still returns true. Failure is silent at `grading-routes.ts:384` (result
+discarded) and splits state at `grading-assignment.ts:93` (the `certificates` UPDATE succeeds, the
+work-item mirror writes nothing).
+
+## HIGH · A8-F4 — the "every partner table has RLS" sweep is an 11-entry allowlist
+**Lead-verified** at `tests/partner-rls-isolation.test.ts:1059-1071`: `TENANT_TABLES` is a hardcoded
+11-name list, and the sweep is scoped `AND c.relname = ANY($1::text[])`. Its own comment claims it
+"catches a NEW tenant-scoped table landing in a future migration with the RLS block forgotten" — it
+cannot. The reviewer's catalogue shows **34** tenant-keyed tables. This is exactly how A8-F1 survived.
+
+Second half: `tests/partner-grading-http-routes.test.ts:455-457` and
+`tests/partner-full-pilot-workflow.test.ts:514-517` assign the **superuser** cluster URL to
+`MINTVAULT_DATABASE_URL`, `PARTNER_ADMIN_DATABASE_URL` and `PARTNER_CONNECTOR_DATABASE_URL`. So the
+734-line grading suite and the 1,276-line pilot suite exercise every A8-F3 path with **RLS fully
+bypassed**, and neither carries the `expect(rolsuper).toBe(false)` guard the RLS harness has.
+
+## MEDIUM (A8)
+- **A8-F5** — 0045 grants `partner_connector_runtime` table-level `UPDATE` on `cert_counter` and
+  `USAGE, SELECT` on `certificates_id_seq`, reversing the policy 0001:273-277 states in writing
+  ("an isolation leak — so it is deliberately omitted"). Reviewer rewound the counter 165 → 1 as that
+  role. The grant is inside `IF to_regclass('public.cert_counter') IS NOT NULL`, so it is a **no-op in
+  the test fixture** (which has no `cert_counter`) and **will fire on staging and prod**.
+- **A8-F6** — the partner allocator holds the `cert_counter` row lock for the whole import
+  transaction; the reviewer measured an HQ/scanner allocation timing out at 2s against it. Production
+  has no `lock_timeout` on the HQ pool, so it would block indefinitely.
+- **A8-F7** — `ensureDefaultGlobalServiceTiers()` inserts `tenant_id = NULL` against a policy whose
+  `WITH CHECK` is `tenant_id = partner_current_tenant()`; `NULL = NULL` → not true → violation.
+  First-use-only, so it surfaces when the pilot's first shop opens the wizard.
+- **A8-F8 (LOW)** — `app.location_id` is set by `db.ts` and **read by nothing**: zero policies
+  reference location. Location isolation is application-predicate-only. The app predicates are correct
+  and fail-closed, but the GUC makes it look like a DB boundary exists when it does not.
+- **A8-F9 (LOW)** — `definer-guard.ts:151-157` asserts `NOBYPASSRLS` for `partner_runtime` only, not
+  `partner_connector_runtime`, whose attribute 0008 leans on and which 0045 now makes load-bearing twice.
+
+## Agent 8's refuted hypothesis, recorded because it is signal
+The reviewer suspected `withConnectorTx` never sets the tenant GUC, then **proved itself wrong**:
+`connector-import-service.ts:402` sets `app.tenant_id` from the connector's own row before the
+work-item insert, and `tests/partner-connector-import-service.test.ts:254-261` drives it as a real
+restricted role. Claim withdrawn.
+
+## Agent 8's clean findings
+0045's RLS block is correct and self-proving; role attributes and the role graph are clean (no
+membership of either runtime role in a definer role); all 8 SECURITY DEFINER functions pin
+`search_path` with `pg_temp` last and revoke PUBLIC EXECUTE; fail-closed on missing/malformed tenant
+context is real (0 rows, not all rows); `grading-routes.ts` carries explicit tenant **and** location
+predicates everywhere RLS is bypassed; MVGS protected files byte-identical.
