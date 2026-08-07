@@ -1,0 +1,12 @@
+{
+  "label": "B",
+  "capturedFor": "independent matrix B",
+  "containers": {
+    "pg16": {"container": "mvmx-b-pg16", "id": "d742b889da56fdf9b92c60370f57bcd98ba312c44b5605138385b029e8fac02a", "image": "pgvector/pgvector:pg16", "imageId": "sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b", "created": "2026-08-07T10:34:32.432043421Z", "volumes": "e2d574391c22c457e41e3693e2350e8a504e576b5e3e19baa89a097ae60db06a "},
+    "pg17": {"container": "mvmx-b-pg17", "id": "aeb6d5530936ee88c42307a5a3704b7f687df473de129f6bb5d585e65d182dc0", "image": "postgres:17.10", "imageId": "sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317", "created": "2026-08-07T10:34:32.566462529Z", "volumes": "ced729d9e0ca5e55e6148522536f7d8feb0ec0bf9f9380edba3319aec864b38f "},
+    "minio": {"container": "mvmx-b-minio", "id": "135c3d17bb7093ffc72457ac38cb26c2dc4d869cc44d336bad5064f5d12dc4b1", "image": "quay.io/minio/minio:latest", "imageId": "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e", "created": "2026-08-07T10:34:32.70758734Z", "volumes": "36b942bf61f9a42c48593c87e890fb4ba3fdb8c9f9e30ce341606db411ec89a1 "}
+  },
+  "pg16": {"port": 55432, "systemIdentifier": "7671236245242359845", "version": "16.14 (Debian 16.14-1.pgdg12+1)"},
+  "pg17": {"port": 55453, "systemIdentifier": "7671236245777305638", "version": "17.10 (Debian 17.10-1.pgdg13+1)"},
+  "adminRole": "mxadmin_b", "databasePrefix": "mxb_", "minioPort": 9030
+}

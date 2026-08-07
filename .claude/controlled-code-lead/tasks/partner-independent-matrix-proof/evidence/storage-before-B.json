@@ -1,0 +1,13 @@
+{
+  "matrix": "B",
+  "phase": "before",
+  "endpoint": "http://127.0.0.1:9030",
+  "buckets": [
+    {
+      "name": "partner-real-r2-proof",
+      "objects": 0,
+      "sample": []
+    }
+  ],
+  "totalObjects": 0
+}

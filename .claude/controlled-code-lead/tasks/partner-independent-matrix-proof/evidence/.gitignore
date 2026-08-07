@@ -1,0 +1,8 @@
+# Reproducible bulk artefacts: regenerate with harness/provision.sh + harness/run.sh.
+# The derived summaries, environment fingerprints, comparison and storage inventories ARE committed,
+# because every number in the reports above is cited from them.
+*/full-report.json
+*/*/full-report.json
+*-console.log
+*/*.log
+*/*/*.log

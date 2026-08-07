@@ -1,0 +1,27 @@
+=============== MATRIX A vs MATRIX B ===============
+environment:
+  A  pg16 sysid 7671234363192156197  pg17 sysid 7671234363701538853  pg17 :55443  admin mxadmin_a  prefix mxa_  minio :9020
+  B  pg16 sysid 7671236245242359845  pg17 sysid 7671236245777305638  pg17 :55453  admin mxadmin_b  prefix mxb_  minio :9030
+  shared identity between A and B: none
+
+┌─────────┬─────────────────────────────┬──────┬──────┬───────┐
+│ (index) │ metric                      │ A    │ B    │ equal │
+├─────────┼─────────────────────────────┼──────┼──────┼───────┤
+│ 0       │ 'full-suite: files'         │ 281  │ 281  │ true  │
+│ 1       │ 'full-suite: passed'        │ 5136 │ 5136 │ true  │
+│ 2       │ 'full-suite: failed'        │ 0    │ 0    │ true  │
+│ 3       │ 'full-suite: skipped'       │ 13   │ 13   │ true  │
+│ 4       │ 'full-suite: env aborts'    │ 0    │ 0    │ true  │
+│ 5       │ 'full-suite: exit'          │ 0    │ 0    │ true  │
+│ 6       │ 'per-suite matrix: suites'  │ 21   │ 21   │ true  │
+│ 7       │ 'per-suite matrix: passed'  │ 423  │ 423  │ true  │
+│ 8       │ 'per-suite matrix: failed'  │ 0    │ 0    │ true  │
+│ 9       │ 'per-suite matrix: skipped' │ 0    │ 0    │ true  │
+│ 10      │ 'per-suite matrix: exit'    │ 0    │ 0    │ true  │
+│ 11      │ 'execution floors: exit'    │ 0    │ 0    │ true  │
+│ 12      │ 'green'                     │ true │ true │ true  │
+└─────────┴─────────────────────────────┴──────┴──────┴───────┘
+per-file differences in the full suite: 0
+per-suite matrix differences: 0
+
+VERDICT: A and B are IDENTICAL from two independent environments.

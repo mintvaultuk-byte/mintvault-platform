@@ -1,0 +1,20 @@
+=== [B] STATE BEFORE TEARDOWN ===
+mvmx-b-minio quay.io/minio/minio:latest Up 23 minutes
+mvmx-b-pg17 postgres:17.10 Up 23 minutes
+mvmx-b-pg16 pgvector/pgvector:pg16 Up 23 minutes
+volumes attached:
+  /mvmx-b-pg16: e2d574391c22c457e41e3693e2350e8a504e576b5e3e19baa89a097ae60db06a 
+  /mvmx-b-pg17: ced729d9e0ca5e55e6148522536f7d8feb0ec0bf9f9380edba3319aec864b38f 
+  /mvmx-b-minio: 36b942bf61f9a42c48593c87e890fb4ba3fdb8c9f9e30ce341606db411ec89a1 
+
+=== [B] DESTROY (containers AND their volumes) ===
+  removed mvmx-b-pg16 (with volumes)
+  removed mvmx-b-pg17 (with volumes)
+  removed mvmx-b-minio (with volumes)
+
+=== [B] PROOF OF DESTRUCTION ===
+containers matching mvmx-b-*: 0 (must be 0)
+port 55432: closed
+port 55453: closed
+port 9030: closed
+matrix B state destroyed: no containers, no volumes, no listeners
