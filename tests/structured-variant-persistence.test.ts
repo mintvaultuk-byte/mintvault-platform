@@ -25,6 +25,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape } from "./helpers/strip-non-code";
 import { diffProtectedEngineReach } from "./helpers/protected-module-refs";
+import { visibilityOnlyExportChange } from "./helpers/visibility-only-change";
 import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
 import {
   validateStructuredVariant,
@@ -1055,6 +1056,27 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
         ).toBe(true);
         expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
+        continue;
+      }
+      if (f === "shared/mvgs-scoring.ts") {
+        // The ONE narrowly-authorised exemption (owner, 2026-08-07): `remainingToGrade` gains an
+        // `export` keyword so the server-authoritative partner adapter can reuse the ONE engine
+        // instead of forking the bracket table. Rationale, the three required conditions, and
+        // the scope limits are written out in the sibling guard
+        // (tests/variant-line-consolidation.test.ts) and in tests/helpers/visibility-only-change.ts.
+        // Kept identical here so neither guard can drift into being the weaker one.
+        //
+        // shared/mvgs-scoring.ts REMAINS inside `engine` above — a conditional exemption, not a
+        // removal — and this is CONJUNCTIVE with the checks that follow it.
+        const diff = protectedDiffFor(f);
+        const verdict = visibilityOnlyExportChange(diff);
+        expect(
+          verdict.ok,
+          `shared/mvgs-scoring.ts changed and is NOT a pure visibility-only export: ${verdict.reason}`
+        ).toBe(true);
+        expect(hasMalformedEscape(diff), "shared/mvgs-scoring.ts contains a malformed escape sequence").toBe(false);
+        const mvgsReach = diffProtectedEngineReach(diff, "both");
+        expect(mvgsReach, `shared/mvgs-scoring.ts gained a protected-engine module reach: ${mvgsReach}`).toBe("");
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

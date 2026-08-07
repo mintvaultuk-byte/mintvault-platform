@@ -15,6 +15,7 @@ import { execFileSync } from "child_process";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape, stripNonCode } from "./helpers/strip-non-code";
 import { diffProtectedEngineReach } from "./helpers/protected-module-refs";
+import { visibilityOnlyExportChange } from "./helpers/visibility-only-change";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import {
   STRUCTURED_VARIANT_VERSION,
@@ -342,6 +343,37 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         expect(addedCode.replace(b3Columns, "")).not.toMatch(
           /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
         );
+        continue;
+      }
+      if (f === "shared/mvgs-scoring.ts") {
+        // ── The ONE narrowly-authorised exemption (owner, 2026-08-07) ────────────────────
+        // The server-authoritative partner MVGS adapter needs the engine's bucket function
+        // `remainingToGrade` to derive sub-grades. Forking the bracket table into partner code
+        // violates the owner's "ONE MVGS engine, do not fork" rule; skipping the sub-grades
+        // makes B3 block every partner publish. The owner therefore approved the export
+        // keyword, and ONLY a pure visibility widening:
+        //
+        //     -function remainingToGrade(remaining: number): number {
+        //     +export function remainingToGrade(remaining: number): number {
+        //
+        // shared/mvgs-scoring.ts REMAINS in `calcEngine` above — this is a conditional
+        // exemption, not a removal, and it is CONJUNCTIVE with the malformed-escape and
+        // module-reach checks below. Thresholds, deductions, calibration, the centering maths,
+        // Pristine and Black Label are all still frozen: any added or removed line containing a
+        // digit, or any change to a line body beyond the `export` keyword, fails.
+        //
+        // Scope is exactly one file. shared/centering.ts, shared/pristine.ts,
+        // shared/mvgs-input-builder.ts, grading-prompt and server/grader.ts are NOT exempted.
+        const diff = protectedDiffFor(f);
+        const verdict = visibilityOnlyExportChange(diff);
+        expect(
+          verdict.ok,
+          `shared/mvgs-scoring.ts changed and is NOT a pure visibility-only export: ${verdict.reason}`
+        ).toBe(true);
+        // Conjunctive with the pre-existing protections — the exemption replaces nothing.
+        expect(hasMalformedEscape(diff), "shared/mvgs-scoring.ts contains a malformed escape sequence").toBe(false);
+        const mvgsReach = diffProtectedEngineReach(diff, "both");
+        expect(mvgsReach, `shared/mvgs-scoring.ts gained a protected-engine module reach: ${mvgsReach}`).toBe("");
         continue;
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
