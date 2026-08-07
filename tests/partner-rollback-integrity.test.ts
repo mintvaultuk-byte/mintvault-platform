@@ -44,7 +44,7 @@
  * 0008:23-24), so connecting as them is not an option that exists.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
 import {
