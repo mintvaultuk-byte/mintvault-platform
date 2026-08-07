@@ -54,7 +54,22 @@ export interface PartnerTestStorage {
    * nothing: a local run left 62 orphaned objects behind, which in CI would grow every build.
    */
   track(key: string): void;
-  /** Delete exactly the objects this run created — tracked keys plus anything under runPrefix. */
+  /**
+   * Register a whole KEY PREFIX that production will write under during this run.
+   *
+   * `track()` cannot cover keys a fixture never sees. `createBatchAtomic` uploads its rendered
+   * sheet under `print-batches/<batchId>-<layout>...` from inside server/print-batch.ts, so the
+   * suite only ever learns the batch id — not the four asset keys derived from it. An independent
+   * A/B storage audit measured the result: tests/partner-full-pilot-workflow.test.ts left exactly
+   * 16 orphaned objects behind on EVERY run, in both matrices, despite calling cleanup(). Same
+   * class of miss as the runPrefix-only cleanup documented in this file's header, one key family
+   * further out.
+   *
+   * Bounded by construction: cleanup lists ONLY under the registered prefix and deletes one object
+   * at a time. No DeleteObjects, no DeleteBucket, and still never an unprefixed list.
+   */
+  trackPrefix(prefix: string): void;
+  /** Delete exactly the objects this run created — tracked keys, runPrefix, and tracked prefixes. */
   cleanup(): Promise<void>;
   /** True when the object exists — used to prove an upload really landed. */
   exists(key: string): Promise<boolean>;
@@ -144,6 +159,7 @@ export async function setupPartnerTestStorage(opts: { bucketSuffix: string }): P
 
   const runPrefix = `fixtures/${process.env.GITHUB_RUN_ID ?? "local"}-${process.pid}-${randomUUID()}/`;
   const tracked = new Set<string>();
+  const trackedPrefixes = new Set<string>();
 
   return {
     bucket,
@@ -160,6 +176,12 @@ export async function setupPartnerTestStorage(opts: { bucketSuffix: string }): P
     },
     track(key: string) {
       tracked.add(key);
+    },
+    trackPrefix(prefix: string) {
+      // An empty prefix would turn cleanup into the unprefixed list-and-delete this file exists to
+      // make impossible, so it is refused outright rather than normalised.
+      if (!prefix || prefix.startsWith("/")) throw new Error(`refusing to track prefix ${JSON.stringify(prefix)}`);
+      trackedPrefixes.add(prefix);
     },
     async remove(key: string) {
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
@@ -182,19 +204,26 @@ export async function setupPartnerTestStorage(opts: { bucketSuffix: string }): P
       }
       tracked.clear();
 
-      let token: string | undefined;
-      do {
-        const page: Awaited<ReturnType<typeof client.send>> = await client.send(
-          new ListObjectsV2Command({ Bucket: bucket, Prefix: runPrefix, ContinuationToken: token })
-        );
-        const listed = page as { Contents?: { Key?: string }[]; NextContinuationToken?: string; IsTruncated?: boolean };
-        for (const obj of listed.Contents ?? []) {
-          const key = obj.Key ?? "";
-          if (!key.startsWith(runPrefix)) continue; // belt and braces
-          await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-        }
-        token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
-      } while (token);
+      for (const prefix of [runPrefix, ...trackedPrefixes]) {
+        if (!prefix) continue; // never list the whole bucket, whatever ends up in the set
+        let token: string | undefined;
+        do {
+          const page: Awaited<ReturnType<typeof client.send>> = await client.send(
+            new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token })
+          );
+          const listed = page as {
+            Contents?: { Key?: string }[];
+            NextContinuationToken?: string;
+            IsTruncated?: boolean;
+          };
+          for (const obj of listed.Contents ?? []) {
+            const key = obj.Key ?? "";
+            if (!key.startsWith(prefix)) continue; // belt and braces
+            await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+          }
+          token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+        } while (token);
+      }
     },
   };
 }

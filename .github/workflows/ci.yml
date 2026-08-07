@@ -285,6 +285,22 @@ jobs:
       # this variable and carries a fail-loud in-CI guard. B touched no CI file, so the D+E ci.yml
       # union audit could not have noticed the gap — without this the branch reddens CI.
       PARTNER_CERT_ORIGIN_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_cert_origin
+      # ---- Super Admin control shell (tests/partner-admin-control-shell-integration.test.ts) ----
+      # FOURTH suite of the same class, found by an independent Matrix A/B assurance run rather than
+      # by CI: the file gates on PARTNER_ADMIN_TEST / PARTNER_ADMIN_TEST_RUNTIME, and NEITHER name
+      # has ever appeared in this workflow. The similarly-spelled PARTNER_CONNECTOR_ADMIN_TEST pair
+      # below belongs to a different suite, which is what made the omission easy to miss. Result:
+      # 11 tests — requireAdmin rejection, partner/location/user suspend, session revoke, the
+      # feature-flag write path, emergency stop, MFA reset, read-endpoint authorisation and the
+      # suspend concurrency proof — reported as a passing FILE while executing nothing, with no
+      # in-file guard and no execution floor to notice. Both are added alongside this.
+      #
+      # PostgreSQL 17 and its OWN database, same one-database-per-suite rule as every Partner block
+      # above: it calls applyMigrationsRealistic(), which hands `public` schema ownership to the
+      # non-superuser pn_migrator. It creates its own login role (partner_app_test_shell), so the
+      # admin connection needs CREATEROLE — asserted in the prepare step below.
+      PARTNER_ADMIN_TEST: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_admin_shell
+      PARTNER_ADMIN_TEST_RUNTIME: postgres://partner_app_test_shell:synthetic@127.0.0.1:55433/mintvault_partner_admin_shell
       # Three suites that shipped with a self-gate but were never wired here, so they reported
       # `describe.skip` and the build stayed green on 48 tests that never ran. Wired 2026-08-03.
       PARTNER_DEFINER_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_definer
@@ -469,6 +485,7 @@ jobs:
                             mintvault_partner_rbac_mig mintvault_partner_rbac_rt \
                             mintvault_partner_ux_rt mintvault_partner_rls mintvault_partner_cert_origin \
                             mintvault_partner_definer mintvault_partner_mgmt_mig \
+                            mintvault_partner_admin_shell \
                             mintvault_partner_bridge_mig \
                             mintvault_correction_test; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
@@ -511,6 +528,9 @@ jobs:
           # carry CREATEROLE. Assert it here so a misconfiguration fails loudly at setup instead of
           # deep inside beforeAll. The bootstrap suite also asserts PostgreSQL 17 itself, which is
           # already guaranteed by the pg17 service check above.
+          # The control-shell suite CREATEs and DROPs its own partner_app_test_shell login role.
+          psql "$PARTNER_ADMIN_TEST" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           for rbac_admin in "$PARTNER_RBAC_MIG_ADMIN" "$PARTNER_RBAC_RT_ADMIN"; do
             psql "$rbac_admin" -v ON_ERROR_STOP=1 -tAc \
               "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
