@@ -53,7 +53,9 @@ import bcrypt from "bcryptjs";
 // server itself persisted, purely to establish what that engine says. Neither file is modified, and
 // nothing here re-implements any part of the scoring.
 import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
-import { gradeFromMvgsScore } from "@shared/mvgs-scoring";
+import { gradeFromMvgsScore, remainingToGrade } from "@shared/mvgs-scoring";
+import { centeringSubgrade, centeringSubgradeStrict } from "@shared/centering";
+import { calcCornerSubgrade, calcEdgeSubgrade, calculateOverallGrade } from "@shared/legacy-grade-fallback";
 import { isBlackLabel } from "@shared/pristine";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import {
@@ -246,8 +248,9 @@ async function setGlobalFlag(flag: string, enabled: boolean): Promise<void> {
  * written to the disposable MinIO under the SERVER-GENERATED key shape 0049's CHECK constraints
  * require, so the submit route's live headR2 verification passes for real.
  */
-async function seedGradingFixture(opts: { privateNotes: string }): Promise<GradingFixture> {
+async function seedGradingFixture(opts: { privateNotes: string; cards?: number }): Promise<GradingFixture> {
   const n = ++sequence;
+  const cardCount = opts.cards ?? 2;
 
   const tenantId = await scalar<string>(
     "INSERT INTO partner_organisations (public_ref, legal_name, status) VALUES ($1,$2,'ACTIVE') RETURNING id",
@@ -288,14 +291,14 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
   const partnerSubmissionId = await scalar<string>(
     `INSERT INTO partner_submissions
        (tenant_id, location_id, created_by, card_count, status, customer_id, service_tier_code, submitted_at)
-     VALUES ($1,$2,$3,2,'submitted_to_mintvault',$4,$5, now()) RETURNING id`,
-    [tenantId, locationId, graderId, customerId, tierCode]
+     VALUES ($1,$2,$3,$6,'submitted_to_mintvault',$4,$5, now()) RETURNING id`,
+    [tenantId, locationId, graderId, customerId, tierCode, cardCount]
   );
 
   const cardIds: string[] = [];
   const frontKeys: string[] = [];
   const backKeys: string[] = [];
-  for (let i = 1; i <= 2; i++) {
+  for (let i = 1; i <= cardCount; i++) {
     const cardId = randomUUID();
     const front = `partner-submissions/${tenantId}/${partnerSubmissionId}/${cardId}/front-gh.jpg`;
     const back = `partner-submissions/${tenantId}/${partnerSubmissionId}/${cardId}/back-gh.jpg`;
@@ -316,7 +319,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
   const handoffId = await scalar<string>(
     `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot)
      VALUES ($1,$2,'pending',$3::jsonb) RETURNING id`,
-    [tenantId, partnerSubmissionId, JSON.stringify({ cards: 2, fixture: "grading-http" })]
+    [tenantId, partnerSubmissionId, JSON.stringify({ cards: cardCount, fixture: "grading-http" })]
   );
   const connectorId = await scalar<string>(
     `INSERT INTO partner_connector_records (tenant_id, partner_submission_id, handoff_id, state, attempt_count)
@@ -355,7 +358,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
 
   const certIds: number[] = [];
   const submissionItemIds: number[] = [];
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < cardCount; i++) {
     const itemId = await scalar<number>(
       "INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id",
       [destinationSubmissionId]
@@ -373,7 +376,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
                'PARTNER',$4,$5,$6,$7,$8,$9, now(), 1)
        RETURNING id`,
       [
-        `MVGH${9000 + n * 10 + i}`,
+        `MVGH${9000 + n * 1000 + i}`,
         destinationSubmissionId,
         itemId,
         tenantId,
@@ -812,8 +815,12 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
 
   interface EngineVerdict {
     score: number;
-    grade: number;
+    /** Numeric authoritative grade, or null when the outcome is AA/NO. */
+    grade: number | null;
+    nonNumericGrade: "AA" | "NO" | null;
+    subgrades: { centering: number; corners: number; edges: number; surface: number } | null;
     deductions: Record<string, number>;
+    basis: string;
   }
 
   /**
@@ -823,24 +830,43 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
    * inside the server falls back to DEFAULT_MVGS_CALIBRATION — which is what scoreMvgsV2 uses
    * here when no calibration is passed. Both sides therefore use identical calibration.
    */
+  /**
+   * The SHARED grading maths, run over the columns the server actually stored, with the
+   * SAME precedence the grading workstation uses. This is the oracle for every proof below.
+   *
+   * Precedence mirrors client/src/components/grading/grading-panel.tsx verbatim:
+   *   authentication verdict → engine major-tear rule → MVGS engine WHEN A PIN IS
+   *   CLASSIFIED → otherwise the zone-stepper fallback (calculateOverallGrade).
+   *
+   * Hostile review's F2 landed precisely because the earlier version of this helper applied
+   * the engine unconditionally, so a card graded with the zone steppers and no pins "agreed"
+   * with an implementation that was inflating it to 10.
+   *
+   * Everything here is imported, not reimplemented: scoreMvgsV2, gradeFromMvgsScore,
+   * centeringSubgrade(Strict), remainingToGrade, calcCornerSubgrade, calcEdgeSubgrade,
+   * calculateOverallGrade.
+   */
   async function engineOverPersistedEvidence(certId: number): Promise<EngineVerdict> {
     const row = await admin.query<Record<string, any>>(
       `SELECT centering_front_lr, centering_front_tb, centering_back_lr, centering_back_tb,
-              defects, surface_values, dark_border_front, dark_border_back, eye_appeal_modifier,
-              whitening_lines, crease_lines, crease_span_pct, wrinkle_severity, tear_severity
+              defects, corner_values, edge_values, surface_values,
+              dark_border_front, dark_border_back, eye_appeal_modifier,
+              whitening_lines, crease_lines, crease_span_pct, wrinkle_severity, tear_severity,
+              auth_status, grade_type
          FROM certificates WHERE id=$1`,
       [certId]
     );
     const c = row.rows[0];
     const surfaceFlags = (c.surface_values ?? {}) as Record<string, unknown>;
+    const pins = (Array.isArray(c.defects) ? c.defects : [])
+      .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
+      .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
     const result = scoreMvgsV2({
       centeringFrontLr: c.centering_front_lr,
       centeringFrontTb: c.centering_front_tb,
       centeringBackLr: c.centering_back_lr,
       centeringBackTb: c.centering_back_tb,
-      defects: (Array.isArray(c.defects) ? c.defects : [])
-        .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
-        .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) })),
+      defects: pins,
       darkBorderFront: !!c.dark_border_front,
       darkBorderBack: !!c.dark_border_back,
       eyeAppealModifier: Number(c.eye_appeal_modifier ?? 0) || 0,
@@ -852,13 +878,102 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
       hasCrease: !!(surfaceFlags as any).hasCrease,
       hasTear: !!(surfaceFlags as any).hasTear,
     });
-    return { score: result.score, grade: gradeFromMvgsScore(result.score), deductions: result.deductions };
+
+    const nonNum = (grade: "AA" | "NO"): EngineVerdict => ({
+      score: result.score,
+      grade: null,
+      nonNumericGrade: grade,
+      subgrades: null,
+      deductions: result.deductions,
+      basis: "authentication",
+    });
+    const storedKind = String(c.grade_type ?? "numeric").trim().toLowerCase();
+    if (c.auth_status === "authentic_altered") return nonNum("AA");
+    if (c.auth_status === "not_original") return nonNum("NO");
+    if (storedKind === "authentic_altered" || storedKind === "aa") return nonNum("AA");
+    if (storedKind === "not_original" || storedKind === "no" || storedKind === "non_numeric") return nonNum("NO");
+    if (result.tearForceNotGraded) return { ...nonNum("NO"), basis: "engine-tear-rule" };
+
+    const surface = remainingToGrade(25 - Math.abs(result.deductions.surface ?? 0));
+    if (pins.length > 0) {
+      const subgrades = {
+        centering: centeringSubgrade(
+          c.centering_front_lr,
+          c.centering_front_tb,
+          c.centering_back_lr,
+          c.centering_back_tb
+        ).subgrade,
+        corners: remainingToGrade(25 - Math.abs(result.deductions.corners ?? 0)),
+        edges: remainingToGrade(25 - Math.abs(result.deductions.edges ?? 0)),
+        surface,
+      };
+      return {
+        score: result.score,
+        grade: gradeFromMvgsScore(result.score),
+        nonNumericGrade: null,
+        subgrades,
+        deductions: result.deductions,
+        basis: "mvgs-engine",
+      };
+    }
+
+    const zeroC = {
+      frontTL: 0, frontTR: 0, frontBL: 0, frontBR: 0, backTL: 0, backTR: 0, backBL: 0, backBR: 0,
+    };
+    const zeroE = {
+      frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0,
+      backTop: 0, backBottom: 0, backLeft: 0, backRight: 0,
+    };
+    const subgrades = {
+      centering:
+        centeringSubgradeStrict(
+          c.centering_front_lr,
+          c.centering_front_tb,
+          c.centering_back_lr,
+          c.centering_back_tb
+        )?.subgrade ?? 10,
+      corners: calcCornerSubgrade({ ...zeroC, ...(c.corner_values ?? {}) }).grade,
+      edges: calcEdgeSubgrade({ ...zeroE, ...(c.edge_values ?? {}) }).grade,
+      surface,
+    };
+    return {
+      score: result.score,
+      grade: calculateOverallGrade(subgrades, !!(surfaceFlags as any).hasCrease, !!(surfaceFlags as any).hasTear),
+      nonNumericGrade: null,
+      subgrades,
+      deductions: result.deductions,
+      basis: "legacy-zone-fallback",
+    };
+  }
+
+  /** THE INVARIANT, as one reusable assertion: the stored row carries what the shared
+   *  maths says about that same stored row. Every proof below leans on it. */
+  async function assertRowMatchesSharedMaths(certId: number, why: string): Promise<EngineVerdict> {
+    const oracle = await engineOverPersistedEvidence(certId);
+    const stored = await authorityColumns(certId);
+    if (oracle.grade == null) {
+      expect(stored.grade, `${why}: a non-numeric outcome must store a NULL grade`).toBeNull();
+    } else {
+      expect(Number(stored.grade), `${why}: stored grade must equal the shared maths over the stored row`).toBe(
+        oracle.grade
+      );
+      expect(
+        {
+          centering: Number(stored.centering_score),
+          corners: Number(stored.corners_score),
+          edges: Number(stored.edges_score),
+          surface: Number(stored.surface_score),
+        },
+        `${why}: stored sub-grades must equal the shared maths over the stored row`
+      ).toEqual(oracle.subgrades);
+    }
+    return oracle;
   }
 
   /** Every authority-bearing column the partner must not be able to author. */
   async function authorityColumns(certId: number) {
     const r = await admin.query<Record<string, any>>(
-      `SELECT grade::text, grade_type, label_type, card_name,
+      `SELECT grade::text, grade_type, label_type, card_name, crease_span_pct::text,
               centering_score::text, corners_score::text, edges_score::text, surface_score::text,
               centering_front_lr, grade_strength_score, private_notes, auth_status,
               grade_approved_at, print_state, operator_grade::text, operator_subgrades
@@ -900,9 +1015,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     expect(after.centering_front_lr, "the server stored the centering measurement the client supplied").toBe("90/10");
 
     const engine = await engineOverPersistedEvidence(certId);
-    expect(engine.grade, "sanity: the engine must rate this evidence poorly, or the test proves nothing").toBeLessThan(
-      5
-    );
+    expect(engine.grade!, "sanity: the maths must rate this evidence poorly, or the test proves nothing").toBeLessThan(5);
 
     // THE ARCHITECTURE FACT, inverted from what this test used to assert. Changed deliberately:
     // the previous expectation was `.toBe(10)` / `.not.toBe(engineGrade)`, characterising the
@@ -960,7 +1073,7 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
     expect(after.grade_approved_at, "a partner submit must still never publish").toBeNull();
 
     const engine = await engineOverPersistedEvidence(certId);
-    expect(engine.grade, "sanity: the engine must rate this evidence poorly").toBeLessThan(5);
+    expect(engine.grade!, "sanity: the maths must rate this evidence poorly").toBeLessThan(5);
 
     // Changed deliberately: was `.toBe(10)` / `.not.toBe(engineGrade)`.
     expect(
@@ -1271,10 +1384,449 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
       totally_made_up_column: 1,
     });
     expect(Object.keys(out).sort(), "only evidence/identity keys survive").toEqual(
-      ["card_name", "centering_front_lr", "defects"].sort()
+      ["auth_status", "card_name", "centering_front_lr", "defects"].sort()
     );
     for (const f of PARTNER_GRADE_SERVER_AUTHORED_FIELDS) {
       expect(out, `${f} is server-authored and must never come from the client`).not.toHaveProperty(f);
     }
+  });
+  // =====================================================================================
+  // THE FIELD MATRIX — the test gap that let F1 and F2 through.
+  //
+  // A1/A2 only ever exercised centering and defect pins, so two whole classes of evidence
+  // (the crease measurement group, and the zone steppers) were never checked against the
+  // invariant. This matrix sends a NON-DEFAULT value for EVERY whitelisted evidence field,
+  // one field at a time, and asserts the invariant each time:
+  //
+  //     stored grade == what the shared grading maths says about the STORED ROW
+  //
+  // Run against the real router over real PostgreSQL, so a field that is scored but never
+  // persisted (F1) or routed through the wrong maths (F2) fails here by construction rather
+  // than needing someone to think of it.
+  // =====================================================================================
+
+  /**
+   * ONE tenant, ONE login, many cards — shared by every proof below.
+   *
+   * `/api/partner/auth/login` is rate-limited per SOURCE IP (server/partner/rate-limit.ts:
+   * "Keying on req.ip alone removes the escape"), so seeding a fresh operator per assertion
+   * trips a 429 partway through the matrix. One login, one fresh certificate per assertion.
+   */
+  let sharedCookie = "";
+  let sharedCerts: number[] = [];
+  let sharedCursor = 0;
+  async function nextSharedCert(): Promise<{ cookie: string; certId: number }> {
+    if (!sharedCookie) {
+      const f = await seedGradingFixture({ privateNotes: "shared-proof-fixture", cards: 30 });
+      sharedCookie = await login(f.graderEmail);
+      sharedCerts = f.certIds;
+    }
+    const certId = sharedCerts[sharedCursor++];
+    if (certId == null) throw new Error("shared fixture exhausted — raise the card count");
+    return { cookie: sharedCookie, certId };
+  }
+
+  /** Every whitelisted evidence field, with a value that is NOT the column default. */
+  const EVIDENCE_MATRIX: { field: string; body: Record<string, unknown>; why: string }[] = [
+    { field: "centering_front_lr", body: { centering_front_lr: "80/20" }, why: "front L/R measurement" },
+    { field: "centering_front_tb", body: { centering_front_tb: "75/25" }, why: "front T/B measurement" },
+    { field: "centering_back_lr", body: { centering_back_lr: "85/15" }, why: "back L/R measurement" },
+    { field: "centering_back_tb", body: { centering_back_tb: "70/30" }, why: "back T/B measurement" },
+    {
+      field: "corners",
+      body: { corners: { frontTL: 4, frontTR: 0, frontBL: 0, frontBR: 0, backTL: 0, backTR: 0, backBL: 0, backBR: 0 } },
+      why: "zone stepper — F2's blind spot",
+    },
+    {
+      field: "edges",
+      body: {
+        edges: {
+          frontTop: 5,
+          frontBottom: 0,
+          frontLeft: 0,
+          frontRight: 0,
+          backTop: 0,
+          backBottom: 0,
+          backLeft: 0,
+          backRight: 0,
+        },
+      },
+      why: "zone stepper — F2's blind spot",
+    },
+    { field: "surface", body: { surface: { hasCrease: true, hasTear: false } }, why: "legacy structural flags" },
+    { field: "defects", body: { defects: SEVERE_SURFACE_PIN }, why: "MVGS-classified pin" },
+    { field: "dark_border_front", body: { dark_border_front: true }, why: "per-side dark border" },
+    { field: "dark_border_back", body: { dark_border_back: true }, why: "per-side dark border" },
+    { field: "eye_appeal_modifier", body: { eye_appeal_modifier: -3 }, why: "operator eye-appeal adjustment" },
+    {
+      field: "whitening_lines",
+      body: { whitening_lines: [{ edge: "frontTop", affectedPct: 60 }] },
+      why: "v2 whitening measurement",
+    },
+    {
+      field: "crease_lines",
+      body: { crease_lines: [{ spanPct: 70, side: "front" }] },
+      why: "v2 crease measurement — F1's neighbour",
+    },
+    { field: "wrinkle_severity", body: { wrinkle_severity: "moderate" }, why: "v2 wrinkle ceiling input" },
+    { field: "tear_severity", body: { tear_severity: "minor" }, why: "v2 tear ceiling input" },
+    { field: "auth_status", body: { auth_status: "authentic_altered" }, why: "authentication verdict — F3" },
+  ];
+
+  it("MATRIX: for EVERY whitelisted evidence field, the stored grade equals the shared maths over the stored row", async () => {
+    // One tenant, one card per field, so a field cannot be masked by another's state.
+    for (const entry of EVIDENCE_MATRIX) {
+      const { cookie, certId } = await nextSharedCert();
+
+      const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+        cookie,
+        // Every request also carries a contradictory authoritative claim, so the matrix
+        // doubles as a per-field tamper test.
+        body: {
+          ...entry.body,
+          overall_grade: "10",
+          grade_centering: 10,
+          grade_corners: 10,
+          grade_edges: 10,
+          grade_surface: 10,
+          card_name: `Matrix ${entry.field}`,
+        },
+      });
+      expect(res.status, `${entry.field}: ${JSON.stringify(res.body)}`).toBe(200);
+
+      const stored = await authorityColumns(certId);
+      expect(stored.card_name, `${entry.field}: positive control — the request reached the row`).toBe(
+        `Matrix ${entry.field}`
+      );
+
+      // THE INVARIANT.
+      const oracle = await assertRowMatchesSharedMaths(certId, `${entry.field} (${entry.why})`);
+
+      // …and the response the partner saw describes that same row (F4).
+      const shown = (res.body as any).authority;
+      expect(shown.source, `${entry.field}: the partner is shown a server-authored result`).toBe("server");
+      expect(shown.overallGrade, `${entry.field}: the response must not contradict the row`).toBe(
+        oracle.grade == null ? oracle.nonNumericGrade : String(oracle.grade)
+      );
+      expect(shown.basis, `${entry.field}: the response records WHICH shared decision was used`).toBe(oracle.basis);
+    }
+  }, 120_000);
+
+  it("MATRIX: every whitelisted field that the shared maths READS is also PERSISTED by the engine writer", async () => {
+    // The generalisation of F1, asserted directly rather than only through behaviour.
+    // A field the authority computation reads but server/grader.ts never writes makes the
+    // stored row and the scored evidence permanently divergent.
+    const { PARTNER_GRADE_EVIDENCE_FIELDS } = await import("../server/partner/grading-authority");
+    const graderSource = readFileSync(join(process.cwd(), "server", "grader.ts"), "utf8");
+
+    // Fields that feed the grading maths (as opposed to identity/narrative, which do not).
+    const SCORED = [
+      "centering_front_lr",
+      "centering_front_tb",
+      "centering_back_lr",
+      "centering_back_tb",
+      "corners",
+      "edges",
+      "surface",
+      "defects",
+      "dark_border_front",
+      "dark_border_back",
+      "eye_appeal_modifier",
+      "whitening_lines",
+      "crease_lines",
+      "wrinkle_severity",
+      "tear_severity",
+      "auth_status",
+    ] as const;
+
+    // The zone/pin bodies land in differently-named columns; everything else is 1:1.
+    const COLUMN: Record<string, string> = {
+      corners: "corner_values",
+      edges: "edge_values",
+      surface: "surface_values",
+      defects: "defects",
+    };
+
+    for (const field of SCORED) {
+      expect(PARTNER_GRADE_EVIDENCE_FIELDS as readonly string[], `${field} must be whitelisted`).toContain(field);
+      const column = COLUMN[field] ?? field;
+      expect(
+        graderSource.includes(`${column} `) || graderSource.includes(`${column}=`),
+        `${field} is SCORED, so server/grader.ts must persist column ${column} — otherwise the ` +
+          `stored row and the scored evidence can disagree (this is exactly finding F1)`
+      ).toBe(true);
+    }
+
+    // And the converse: the two fields removed after F1/F9 must stay out.
+    for (const gone of ["crease_span_pct", "ai_defect_candidates"]) {
+      expect(
+        PARTNER_GRADE_EVIDENCE_FIELDS as readonly string[],
+        `${gone} is not persisted by the engine writer and must not be whitelisted`
+      ).not.toContain(gone);
+      expect(graderSource, `sanity: server/grader.ts really does not write ${gone}`).not.toContain(gone);
+    }
+  });
+
+  // ── F1 regression — the crease probe, reproduced ────────────────────────────────────────
+
+  it("F1: a crease-span body cannot suppress the structural ceiling (the scored/persisted split is closed)", async () => {
+    const { cookie, certId } = await nextSharedCert();
+
+    // Hostile review's PROBE-1: empty crease_lines + crease_span_pct 0 + hasCrease true.
+    // Under v1 this scored as "no crease" (10) while the row said "crease, no span" (4.5).
+    const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: {
+        ...PERFECT_CENTERING,
+        crease_lines: [],
+        crease_span_pct: 0,
+        surface: { hasCrease: true, hasTear: false },
+        overall_grade: "10",
+        grade_centering: 10,
+        grade_corners: 10,
+        grade_edges: 10,
+        grade_surface: 10,
+        card_name: "F1 Probe",
+      },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const stored = await authorityColumns(certId);
+    expect(stored.card_name, "positive control").toBe("F1 Probe");
+    // The unpersistable field never reached the row, and never reached the maths either.
+    expect(stored.crease_span_pct, "crease_span_pct is not a column the engine writer persists").toBeNull();
+    // The stored flag is honoured: the shared maths caps a creased card.
+    const oracle = await assertRowMatchesSharedMaths(certId, "F1 crease probe");
+    expect(Number(stored.grade), "a card the row says is creased cannot store a 10").toBeLessThan(10);
+    expect(oracle.grade, "sanity: the shared maths really does cap this card").toBeLessThan(10);
+
+    // Negative values behave identically (review confirmed -999 also worked under v1).
+    const neg = await nextSharedCert();
+    const negRes = await req("PUT", `/api/partner/grading/certificates/${neg.certId}/grade`, {
+      cookie: neg.cookie,
+      body: {
+        ...PERFECT_CENTERING,
+        crease_span_pct: -999,
+        surface: { hasCrease: true, hasTear: false },
+        overall_grade: "10",
+      },
+    });
+    expect(negRes.status, JSON.stringify(negRes.body)).toBe(200);
+    await assertRowMatchesSharedMaths(neg.certId, "F1 negative-span probe");
+    expect(Number((await authorityColumns(neg.certId)).grade)).toBeLessThan(10);
+  });
+
+  // ── F2 regression — the ordinary no-pin workflow ────────────────────────────────────────
+
+  it("F2: a card graded with the ZONE STEPPERS and no pins gets the HQ fallback grade, not an engine 10", async () => {
+    const { cookie, certId } = await nextSharedCert();
+
+    // Hostile review's PROBE-2, verbatim: corners all 4, edges all 5, no classified pin.
+    const corners = { frontTL: 4, frontTR: 4, frontBL: 4, frontBR: 4, backTL: 4, backTR: 4, backBL: 4, backBR: 4 };
+    const edges = {
+      frontTop: 5,
+      frontBottom: 5,
+      frontLeft: 5,
+      frontRight: 5,
+      backTop: 5,
+      backBottom: 5,
+      backLeft: 5,
+      backRight: 5,
+    };
+    const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: { ...PERFECT_CENTERING, corners, edges, defects: [], overall_grade: "10", card_name: "F2 Probe" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const stored = await authorityColumns(certId);
+    expect(stored.card_name, "positive control").toBe("F2 Probe");
+
+    // The zone values really are on the row — so the assertion below is about the MATHS,
+    // not about the write being dropped.
+    const zones = await admin.query<Record<string, any>>(
+      "SELECT corner_values, edge_values FROM certificates WHERE id=$1",
+      [certId]
+    );
+    expect(zones.rows[0].corner_values.frontTL, "the operator's corner stepper was persisted").toBe(4);
+    expect(zones.rows[0].edge_values.frontTop, "the operator's edge stepper was persisted").toBe(5);
+
+    // The HQ maths, run verbatim on the same sub-grades.
+    const hqSubs = {
+      centering: 10,
+      corners: calcCornerSubgrade(corners).grade,
+      edges: calcEdgeSubgrade(edges).grade,
+      surface: 10,
+    };
+    const hqGrade = calculateOverallGrade(hqSubs, false, false);
+    expect(hqGrade, "sanity: the HQ fallback rates this card well below 10").toBeLessThan(10);
+
+    expect(Number(stored.grade), "the partner path used the SAME fallback the HQ panel uses").toBe(hqGrade);
+    expect(Number(stored.grade), "and did NOT inflate a stepper-graded card to a bare engine 10").not.toBe(10);
+    expect((res.body as any).authority.basis, "the response says which decision was used").toBe(
+      "legacy-zone-fallback"
+    );
+    await assertRowMatchesSharedMaths(certId, "F2 zone-stepper probe");
+
+    // Secondary from the review: the row must not carry the Pristine shape.
+    const oracle = await engineOverPersistedEvidence(certId);
+    expect(
+      isBlackLabel(oracle.subgrades!, Number(stored.grade), oracle.deductions),
+      "a visibly corner-damaged card must not carry the Black Label shape"
+    ).toBe(false);
+  });
+
+  // ── F3 regression — the authentication verdict ──────────────────────────────────────────
+
+  it("F3: an operator's Not-Original / Authentic-Altered verdict is HONOURED, not silently discarded", async () => {
+    for (const [status, expected] of [
+      ["not_original", "NO"],
+      ["authentic_altered", "AA"],
+    ] as const) {
+      const { cookie, certId } = await nextSharedCert();
+
+      const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+        cookie,
+        body: {
+          ...PERFECT_CENTERING,
+          auth_status: status,
+          // The panel derives overall_grade from the verdict; the server must derive it too,
+          // and must not be taking the client's word for it.
+          overall_grade: "10",
+          grade_centering: 10,
+          auth_notes: "partner-supplied private commentary",
+          card_name: `F3 ${status}`,
+        },
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+      const stored = await authorityColumns(certId);
+      expect(stored.card_name, "positive control").toBe(`F3 ${status}`);
+      expect(stored.auth_status, "the operator's verdict was persisted").toBe(status);
+      expect(stored.grade, "a non-numeric outcome stores no numeric grade").toBeNull();
+      expect(stored.grade_type, "the row is reclassified by the SERVER from the verdict").not.toBe("numeric");
+      expect((res.body as any).authority, "the partner is told the card is not graded").toMatchObject({
+        notGraded: true,
+        overallGrade: expected,
+        basis: "authentication",
+      });
+      // auth_notes remains HQ-private and refused.
+      const notes = await admin.query<{ auth_notes: string | null }>(
+        "SELECT auth_notes FROM certificates WHERE id=$1",
+        [certId]
+      );
+      expect(notes.rows[0].auth_notes, "auth_notes stays refused — the verdict is evidence, the notes are not").toBeNull();
+      // grade_strength_score is left alone for a non-numeric card, matching the HQ approve route.
+      expect(stored.grade_strength_score, "no strength score for a Not-Graded card").toBeNull();
+      await assertRowMatchesSharedMaths(certId, `F3 ${status}`);
+    }
+  });
+
+  // ── F4 regression — the response can never contradict the row ───────────────────────────
+
+  it("F4: the response describes the POST-WRITE row, never a computation that did not land", async () => {
+    const { cookie, certId } = await nextSharedCert();
+
+    // Put the row into the non-numeric state first…
+    const first = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: { ...PERFECT_CENTERING, auth_status: "authentic_altered", overall_grade: "AA" },
+    });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect((await authorityColumns(certId)).grade_type).not.toBe("numeric");
+
+    // …then send flawless evidence and a numeric claim. Under v1 this returned
+    // overallGrade "10" / tier "Gem Mint" / notGraded false with HTTP 200, while the row
+    // kept grade_type authentic_altered and grade NULL.
+    const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: { ...PERFECT_CENTERING, defects: [], overall_grade: "10", grade_centering: 10, card_name: "F4 Probe" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const stored = await authorityColumns(certId);
+    expect(stored.card_name, "positive control: the evidence write did land").toBe("F4 Probe");
+    const shown = (res.body as any).authority;
+    expect(shown.notGraded, "the response reports the row's actual kind").toBe(true);
+    expect(shown.overallGrade, "the response reports the row's actual grade").toBe("AA");
+    expect(shown.tier, "no tier is claimed for a Not-Graded card").toBeNull();
+    expect(stored.grade, "and the row really does carry no numeric grade").toBeNull();
+    expect(stored.grade_strength_score, "no strength score written for a non-numeric row").toBeNull();
+    await assertRowMatchesSharedMaths(certId, "F4 kind-contradiction probe");
+  });
+
+  // ── F7 regression — authority is a function of the row, not of the request ──────────────
+
+  it("F7: evidence written between the computation and the write cannot leave a stale grade", async () => {
+    const { cookie, certId } = await nextSharedCert();
+
+    // Simulate the concurrent writer (a second tab, or the proxied manual-centering action)
+    // by seeding evidence directly on the row that the request itself never mentions.
+    await admin.query(
+      `UPDATE certificates
+          SET centering_front_lr='90/10', centering_front_tb='90/10',
+              centering_back_lr='90/10', centering_back_tb='90/10'
+        WHERE id=$1`,
+      [certId]
+    );
+
+    // A request that says nothing about centering at all.
+    const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: { defects: SEVERE_SURFACE_PIN, overall_grade: "10", card_name: "F7 Probe" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const stored = await authorityColumns(certId);
+    expect(stored.card_name, "positive control").toBe("F7 Probe");
+    expect(stored.centering_front_lr, "the concurrent writer's evidence is still on the row").toBe("90/10");
+    // The grade follows the ROW's centering, not the request's silence about it.
+    await assertRowMatchesSharedMaths(certId, "F7 concurrent-evidence probe");
+    expect(Number(stored.grade), "the stored grade reflects the row's real centering").toBeLessThan(10);
+  });
+
+  // ── F8 — a tampered save is distinguishable from an honest one ──────────────────────────
+
+  it("F8: the audit trail records WHAT the client tried to author, not just what the server decided", async () => {
+    const { cookie: tCookie, certId: tCert } = await nextSharedCert();
+    expect(
+      (
+        await req("PUT", `/api/partner/grading/certificates/${tCert}/grade`, {
+          cookie: tCookie,
+          body: { ...PERFECT_CENTERING, overall_grade: "10", grade_centering: 10, private_notes: "leak me" },
+        })
+      ).status
+    ).toBe(200);
+
+    const tAudit = await admin.query<{ after_value: Record<string, any> }>(
+      `SELECT after_value FROM partner_audit_events
+        WHERE record_type='certificate' AND record_id=$1 AND action='grading.draft_saved'
+        ORDER BY created_at DESC LIMIT 1`,
+      [String(tCert)]
+    );
+    const claim = tAudit.rows[0].after_value.rejected_client_claim;
+    expect(claim, "the rejected claim is recorded").toBeTruthy();
+    expect(claim.overall_grade, "including the grade the client tried to author").toBe("10");
+    expect(claim.grade_centering).toBe(10);
+    // The PII redactor still applies to the recorded claim.
+    expect(claim.private_notes, "a recorded claim must never carry the private note itself").toBe("[redacted]");
+
+    // An honest save records no claim, so tampering stands out.
+    const { cookie: hCookie, certId: hCert } = await nextSharedCert();
+    expect(
+      (
+        await req("PUT", `/api/partner/grading/certificates/${hCert}/grade`, {
+          cookie: hCookie,
+          body: { ...PERFECT_CENTERING, defects: [] },
+        })
+      ).status
+    ).toBe(200);
+    const hAudit = await admin.query<{ after_value: Record<string, any> }>(
+      `SELECT after_value FROM partner_audit_events
+        WHERE record_type='certificate' AND record_id=$1 AND action='grading.draft_saved'
+        ORDER BY created_at DESC LIMIT 1`,
+      [String(hCert)]
+    );
+    expect(hAudit.rows[0].after_value.rejected_client_claim, "an honest save records no claim").toBeNull();
   });
 });
