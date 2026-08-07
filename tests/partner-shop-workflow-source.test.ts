@@ -186,11 +186,14 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
   });
 
   it("keeps partner final writes atomic and blocks admin-only/private payload fields", () => {
-    // Every partner write now goes through the server-authority adapter, which whitelists the
-    // evidence AND overwrites the authoritative grade with the engine's own verdict. Pinning the
-    // adapter rather than the raw whitelist is what stops a future edit reinstating a write path
-    // that trusts a client-supplied grade.
-    expect(GRADING_ROUTES).toContain("partnerAuthoritativeBody(certId, req.body)");
+    // Every partner write goes through the server-authority adapter. v2 does NOT simulate the
+    // post-write row — it writes, RE-DERIVES the authority from the row that actually landed, and
+    // refuses to report success unless the stored columns carry the server's decision. Pinning all
+    // three write routes plus the read-back is what stops a future edit reinstating a path that
+    // trusts a client-supplied grade, or reverting to the simulation whose drift was the whole
+    // defect class (a field scored but never persisted, or a concurrent writer between two reads).
+    expect(GRADING_ROUTES.match(/partnerAuthoritativeWrite\(certId, req\.body\)/g) ?? []).toHaveLength(3);
+    expect(GRADING_ROUTES).toContain("persistedMatchesAuthority(persisted, authority)");
     expect(GRADING_ROUTES).not.toContain("partnerGradeBody(req.body)");
     // The state transition is ONE guarded UPDATE, so the ownership predicate and the status
     // change cannot be separated by a concurrent writer.
