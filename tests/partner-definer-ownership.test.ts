@@ -227,6 +227,29 @@ const q = (sql: string, params: unknown[] = []) => admin.query(sql, params);
       await q("ALTER ROLE partner_runtime NOBYPASSRLS");
       expect(await violations()).toEqual([]);
     });
+
+    it("27b (A8-F9): granting BYPASSRLS to partner_connector_runtime is caught too", async () => {
+      // The connector runtime is a runtime role in exactly the same sense as partner_runtime —
+      // 0008 leans on its NOBYPASSRLS attribute for connector-plane tenant isolation and 0045 makes
+      // that attribute load-bearing twice more — but the guard only ever checked partner_runtime.
+      // This asserts the ROLE EXISTS first, so a fixture that lacks it cannot turn this proof into
+      // a vacuous pass (definerModelViolations is silent on a missing role, by design).
+      const present = await q("SELECT 1 FROM pg_roles WHERE rolname = 'partner_connector_runtime'");
+      expect(present.rows.length).toBe(1);
+
+      // try/finally because role attributes are CLUSTER-scoped, not database-scoped: an assertion
+      // failure here would otherwise leave partner_connector_runtime BYPASSRLS for every other
+      // suite sharing the cluster, and those suites would then fail for an unrelated reason.
+      try {
+        await q("ALTER ROLE partner_connector_runtime BYPASSRLS");
+        expect((await violations()).some((v) => /partner_connector_runtime must NOT have BYPASSRLS/.test(v))).toBe(
+          true
+        );
+      } finally {
+        await q("ALTER ROLE partner_connector_runtime NOBYPASSRLS");
+      }
+      expect(await violations()).toEqual([]);
+    });
   });
 
   it("28: re-running migration 0006 is deterministic (no error, model still healthy)", async () => {
