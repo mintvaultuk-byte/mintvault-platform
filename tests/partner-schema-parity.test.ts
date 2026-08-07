@@ -140,6 +140,13 @@ describe("partner schema ↔ migration parity", () => {
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
       "0045_partner_grading_work_items.sql",
+      // 0046 is GRANT-ONLY: it gives partner_connector_runtime an RLS-scoped, column-level SELECT
+      // on partner_profiles(tenant_id, trading_name) so the connector importer can record the
+      // approved partner trading name in the immutable certificate origin snapshot 0035 created.
+      // It creates no object, modifies no row, and grants no write privilege. Its rollback is
+      // intentionally named rollback-0046-partner-connector-profile-read.sql (non-numbered) so the
+      // runner never applies it.
+      "0046_partner_connector_profile_read.sql",
     ]);
   });
 

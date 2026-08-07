@@ -436,6 +436,141 @@ async function seedReadyForImport(
       });
     });
 
+    /**
+     * ORIGIN-TRADING1 — the importer is the ONLY code path that stamps a PARTNER certificate
+     * origin, and migration 0035 makes that stamp immutable (ENABLE ALWAYS trigger). Before the
+     * repair the query selected `NULL::text AS partner_trading_name`, so every partner-graded
+     * certificate froze a NULL trading name — the value server/labels.ts certificateOrigin()
+     * renders FIRST as "Graded by <X>" — and no test noticed, because no test had ever read the
+     * origin columns off a certificate the importer actually created.
+     *
+     * These tests read the real rows the real importer wrote, through the real connector role
+     * (partner_connector_import_test inherits partner_connector_runtime), so a missing GRANT is a
+     * failure here rather than a 42501 discovered in production.
+     */
+    describe("certificate origin snapshot", () => {
+      it("records the APPROVED partner trading name from partner_profiles, not NULL", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        const seeded = await seedReadyForImport(A, L1, U1, { cardCount: 2, claimant: "worker-origin-trading" });
+        const result = await importer.importValidatedConnector({
+          connectorId: seeded.connectorId,
+          claimant: "worker-origin-trading",
+          expectedVersion: seeded.version,
+          tenantId: A,
+        });
+        expect(result.outcome).toBe("imported");
+
+        const { rows } = await admin.query(
+          `SELECT c.origin_type, c.origin_partner_id, c.origin_partner_trading_name,
+                  c.origin_partner_legal_name, c.origin_location_name
+             FROM certificates c
+             JOIN partner_grading_work_items w ON w.certificate_id = c.id
+            WHERE w.destination_submission_id = $1
+            ORDER BY w.card_ordinal`,
+          [result.destinationSubmissionId]
+        );
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+          expect(row.origin_type).toBe("PARTNER");
+          expect(row.origin_partner_id).toBe(A);
+          // seedTenant(A, ..., "impA") writes partner_profiles.trading_name = 'impA Trading'
+          // while partner_organisations.legal_name is 'impA'. The two differ ON PURPOSE: if the
+          // snapshot ever falls back to the legal name the assertion below fails loudly instead
+          // of passing on a coincidentally-equal string.
+          expect(row.origin_partner_trading_name).toBe("impA Trading");
+          expect(row.origin_partner_legal_name).toBe("impA");
+        }
+      });
+
+      it("never reads another tenant's trading name (the location join re-qualifies by tenant)", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        const seeded = await seedReadyForImport(B, LB, UB, { cardCount: 2, claimant: "worker-origin-trading-b" });
+        const result = await importer.importValidatedConnector({
+          connectorId: seeded.connectorId,
+          claimant: "worker-origin-trading-b",
+          expectedVersion: seeded.version,
+          tenantId: B,
+        });
+        expect(result.outcome).toBe("imported");
+
+        const { rows } = await admin.query(
+          `SELECT c.origin_partner_trading_name
+             FROM certificates c
+             JOIN partner_grading_work_items w ON w.certificate_id = c.id
+            WHERE w.destination_submission_id = $1`,
+          [result.destinationSubmissionId]
+        );
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+          expect(row.origin_partner_trading_name).toBe("impB Trading");
+          expect(row.origin_partner_trading_name).not.toBe("impA Trading");
+        }
+      });
+
+      it("normalises a whitespace-only trading name to NULL instead of freezing blank display text", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        // Blanked AFTER validation: the validator has its own separate opinion about a partner
+        // being presentable, and this test is about the IMPORTER's snapshot normalisation, not
+        // about re-testing the validator.
+        const seeded = await seedReadyForImport(A, L1, U1, { cardCount: 2, claimant: "worker-origin-blank" });
+        await admin.query("UPDATE partner_profiles SET trading_name = '   ' WHERE tenant_id = $1", [A]);
+        try {
+          const result = await importer.importValidatedConnector({
+            connectorId: seeded.connectorId,
+            claimant: "worker-origin-blank",
+            expectedVersion: seeded.version,
+            tenantId: A,
+          });
+          expect(result.outcome).toBe("imported");
+          const { rows } = await admin.query(
+            `SELECT c.origin_partner_trading_name, c.origin_partner_legal_name
+               FROM certificates c
+               JOIN partner_grading_work_items w ON w.certificate_id = c.id
+              WHERE w.destination_submission_id = $1`,
+            [result.destinationSubmissionId]
+          );
+          // NULL, not '   '. 0035's snapshot is immutable, and certificateOrigin() would render a
+          // whitespace-only name as an empty "Graded by " line forever.
+          expect(rows).toHaveLength(2);
+          for (const row of rows) {
+            expect(row.origin_partner_trading_name).toBeNull();
+            expect(row.origin_partner_legal_name).toBe("impA");
+          }
+        } finally {
+          await admin.query("UPDATE partner_profiles SET trading_name = 'impA Trading' WHERE tenant_id = $1", [A]);
+        }
+      });
+
+      it("fails closed when BOTH the trading name and the legal name are blank", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        // Blanked AFTER validation — same reason as the test above.
+        const seeded = await seedReadyForImport(A, L1, U1, { cardCount: 2, claimant: "worker-origin-unnamed" });
+        await admin.query("UPDATE partner_profiles SET trading_name = '' WHERE tenant_id = $1", [A]);
+        await admin.query("UPDATE partner_organisations SET legal_name = '   ' WHERE id = $1", [A]);
+        try {
+          await expect(
+            importer.importValidatedConnector({
+              connectorId: seeded.connectorId,
+              claimant: "worker-origin-unnamed",
+              expectedVersion: seeded.version,
+              tenantId: A,
+            })
+          ).rejects.toThrow(/origin snapshot is incomplete/i);
+
+          // The whole import transaction must have rolled back — no orphan certificate, no
+          // half-imported destination submission.
+          const certs = await admin.query(
+            "SELECT count(*)::int AS n FROM certificates WHERE origin_partner_id = $1 AND origin_partner_legal_name IS NULL",
+            [A]
+          );
+          expect(certs.rows[0].n).toBe(0);
+        } finally {
+          await admin.query("UPDATE partner_organisations SET legal_name = 'impA' WHERE id = $1", [A]);
+          await admin.query("UPDATE partner_profiles SET trading_name = 'impA Trading' WHERE tenant_id = $1", [A]);
+        }
+      });
+    });
+
     describe("owner resolution", () => {
       it("two different submissions from the SAME Partner customer resolve to the SAME MintVault user", async () => {
         const importer = await import("../server/partner/connector-import-service");

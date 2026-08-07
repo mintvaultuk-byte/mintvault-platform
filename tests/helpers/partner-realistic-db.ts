@@ -164,10 +164,19 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0044_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
 
-/** 0045 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
+/**
+ * 0045 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table.
+ *
+ * 0046 grants partner_connector_runtime the RLS-scoped SELECT on partner_profiles(tenant_id,
+ * trading_name) that the importer's origin-snapshot query needs to record the approved partner
+ * trading name. Included here rather than in a separate list because every suite that drives a real
+ * connector import already uses this list, and without 0046 that import fails 42501 — which is
+ * exactly the production condition this harness exists to reproduce.
+ */
 export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
   ...PARTNER_MIGRATIONS_WITH_LIFECYCLE,
   "0045_partner_grading_work_items",
+  "0046_partner_connector_profile_read",
 ] as const;
 /**
  * Create the MintVault `certificates` table a partner migration needs.
