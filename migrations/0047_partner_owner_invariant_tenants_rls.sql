@@ -40,6 +40,61 @@
 -- sees exactly the rows it saw before this migration. Admin pools run BYPASSRLS and are unaffected
 -- by both ENABLE and FORCE.
 
+-- --------------------------------------------------------------------------------------------
+-- PRE-FLIGHT. Refuse to run if the repair would be cosmetic.
+--
+-- ADDED 2026-08-07, closing a HIGH finding against this file. The post-flight assertions below
+-- check relrowsecurity, relforcerowsecurity and the policy COUNT — all three of which are true
+-- regardless of whether the policy binds ANYONE. A policy is meaningless against a BYPASSRLS role
+-- and a privilege model is meaningless against a SUPERUSER, so with partner_runtime BYPASSRLS this
+-- migration passed every one of its own assertions, was journalled `applied`, and left the A8-F1
+-- leak FULLY INTACT — the worst possible outcome, because it also consumed the migration number
+-- and closed the finding on paper.
+--
+-- Reproduced: with `ALTER ROLE partner_runtime BYPASSRLS`, 0047 completed green and
+-- partner_owner_invariant_tenants still returned every tenant's UUID to a partner session.
+--
+-- This is 0051's pre-flight, generalised from 0046's, applied to the role THIS file's policy is
+-- supposed to bind. Fail loudly instead of certifying isolation that does not exist.
+-- --------------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  is_super  boolean;
+  is_bypass boolean;
+BEGIN
+  SELECT rolsuper, rolbypassrls INTO is_super, is_bypass
+    FROM pg_roles WHERE rolname = 'partner_runtime';
+
+  IF is_super IS NULL THEN
+    RAISE EXCEPTION '0047: role partner_runtime does not exist; 0001 must be applied first';
+  END IF;
+  IF is_super THEN
+    RAISE EXCEPTION
+      '0047: partner_runtime is SUPERUSER. A superuser ignores every row-level policy, so the '
+      'policy created below would bind nobody and this repair would be journalled as applied while '
+      'partner_owner_invariant_tenants stayed readable network-wide. Fix the role first.';
+  END IF;
+  IF is_bypass THEN
+    RAISE EXCEPTION
+      '0047: partner_runtime is BYPASSRLS. The tenant-isolation policy created below would be '
+      'unenforceable against it, so this repair cannot deliver the isolation it claims. Fix the '
+      'role first.';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'partner_owner_invariant_tenants' AND c.relkind = 'r'
+  ) THEN
+    RAISE EXCEPTION '0047: table public.partner_owner_invariant_tenants is missing; 0032 must be applied first';
+  END IF;
+
+  -- to_regPROCEDURE, not to_regproc: only the former parses an argument list. Without the function
+  -- the policy below would be invalid, and the failure would surface at first use rather than here.
+  IF to_regprocedure('public.partner_current_tenant()') IS NULL THEN
+    RAISE EXCEPTION '0047: partner_current_tenant() is missing; the policy below would be invalid';
+  END IF;
+END$$;
+
 DO $$
 BEGIN
   ALTER TABLE partner_owner_invariant_tenants ENABLE ROW LEVEL SECURITY;

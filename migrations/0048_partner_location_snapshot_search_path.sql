@@ -35,6 +35,49 @@
 --
 -- 0044 itself is NOT edited. It is already applied; its checksum ratchet stays intact.
 
+-- --------------------------------------------------------------------------------------------
+-- PRE-FLIGHT. ADDED 2026-08-07, alongside the same block in 0047.
+--
+-- HONEST SCOPE, because a pre-flight that overstates its own load-bearingness is the sibling of
+-- the defect it is here to prevent. The search_path pin below closes THIS file's attack against
+-- every role, superuser included — pg_temp shadowing is a name-resolution defeat, not a privilege
+-- one — so unlike 0047 this check is NOT what makes 0048's repair real.
+--
+-- It is here because 0048 is one of the two files that write the submission provenance chain, and
+-- the integrity claim that chain rests on ("submission origin cannot disagree with the
+-- certificate's origin snapshot") is void if the portal role ignores every tenant policy: a
+-- BYPASSRLS partner_runtime could resolve, and then insert against, another tenant's location
+-- outright, with no temp table required. Journalling this file as the repair for A8-F2 while that
+-- is true would certify an integrity guarantee the database does not provide. 0052 asserts the
+-- same two attributes on the same role for the same reason. Fail loudly instead.
+-- --------------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  is_super  boolean;
+  is_bypass boolean;
+BEGIN
+  SELECT rolsuper, rolbypassrls INTO is_super, is_bypass
+    FROM pg_roles WHERE rolname = 'partner_runtime';
+
+  IF is_super IS NULL THEN
+    RAISE EXCEPTION '0048: role partner_runtime does not exist; 0001 must be applied first';
+  END IF;
+  IF is_super OR is_bypass THEN
+    RAISE EXCEPTION
+      '0048: partner_runtime is SUPERUSER or BYPASSRLS (super=%, bypass=%). Every tenant policy on '
+      'partner_locations and partner_submissions would be unenforceable against the portal role, so '
+      'the location-snapshot provenance this file repairs would still be forgeable without any '
+      'pg_temp trick. Fix the role before claiming this is integrity.', is_super, is_bypass;
+  END IF;
+
+  IF to_regclass('public.partner_submissions') IS NULL THEN
+    RAISE EXCEPTION '0048: table public.partner_submissions is missing; 0007/0044 must be applied first';
+  END IF;
+  IF to_regclass('public.partner_locations') IS NULL THEN
+    RAISE EXCEPTION '0048: table public.partner_locations is missing; 0001 must be applied first';
+  END IF;
+END$$;
+
 CREATE OR REPLACE FUNCTION partner_submissions_capture_location_snapshot()
 RETURNS trigger
 LANGUAGE plpgsql
