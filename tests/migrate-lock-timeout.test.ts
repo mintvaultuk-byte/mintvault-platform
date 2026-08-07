@@ -7,7 +7,7 @@
  * migration into an outage. These tests pin the guard so it cannot be removed silently.
  *
  * The behavioural proof (real contention, real abort, no partial state) lives in the lock-safety
- * report at docs/db/lock-safety-and-staging-maintenance.md; this file pins the invariants that
+ * report at docs/partner-migration-lock-safety.md; this file pins the invariants that
  * can be checked without a cluster.
  */
 import { describe, it, expect } from "vitest";
