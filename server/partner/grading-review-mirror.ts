@@ -50,8 +50,18 @@ export type PartnerMirrorResult =
    */
   /** The destination had already passed settlement. Nothing to do; the money moved on an earlier call. */
   | { kind: "already_settled"; destinationSubmissionId: number | null }
-  /** This card is done but sibling cards are still outstanding, so there is nothing to settle yet. */
-  | { kind: "settlement_pending_other_cards"; destinationSubmissionId: number | null; outstandingUnits: number }
+  /**
+   * Units on this destination are still outstanding, so there is nothing to settle yet.
+   * `workItemStatus` is THIS card's own status, which distinguishes the ordinary case (this card is
+   * approved, siblings are not) from the partner-submit freeze described on `redriveSettlement`
+   * (this card's own work item is still `assigned` while its certificate says pending_review).
+   */
+  | {
+      kind: "settlement_pending_other_cards";
+      destinationSubmissionId: number | null;
+      outstandingUnits: number;
+      workItemStatus: string;
+    }
   /** The destination was approved-but-unsettled and this call DROVE settlement to completion. */
   | { kind: "settled_on_retry"; destinationSubmissionId: number | null }
   /**
@@ -172,6 +182,23 @@ async function driveSettlement(
  *
  * Only the last case moves money, and it moves it through exactly the same call the happy path
  * uses, so there is one settlement code path, not two.
+ *
+ * WHAT THIS DOES *NOT* REPAIR — the partner-submit entry point, stated explicitly.
+ * -------------------------------------------------------------------------------
+ * A second reviewer found the same `not_partner` freeze reachable from
+ * server/partner/grading-routes.ts `submit` and `edit-submission`. Those are four-statement
+ * sequences with NO enclosing transaction: applyCertGradeDraft -> persistPartnerGradeAuthorityScore
+ * -> partnerSubmitForReview -> UPDATE partner_grading_work_items. If the fourth statement matches
+ * zero rows (a concurrent HQ reassignment, or any DB error) the route returns 409 while the
+ * certificate is ALREADY `pending_review` and the work item is still `assigned`.
+ *
+ * The change here makes that state DIAGNOSABLE but does not fix it. A later approval on such a card
+ * lands in this function, finds `workItemStatus = 'assigned'`, counts it as outstanding and returns
+ * `settlement_pending_other_cards` carrying that status — no longer `not_partner`, and no longer a
+ * 200 that reads as success. But the work item can never reach `pending_review` again by itself, so
+ * the card still cannot be approved or settled without operator intervention. The real repair is to
+ * wrap those four statements in one transaction, which is a change to grading-routes.ts and is
+ * deliberately out of scope for this finding.
  */
 async function redriveSettlement(
   certId: number,
@@ -194,7 +221,12 @@ async function redriveSettlement(
   const liveUnits = Number(row?.live_units ?? 0);
 
   if (outstanding > 0) {
-    return { kind: "settlement_pending_other_cards", destinationSubmissionId, outstandingUnits: outstanding };
+    return {
+      kind: "settlement_pending_other_cards",
+      destinationSubmissionId,
+      outstandingUnits: outstanding,
+      workItemStatus: ctx.workItemStatus,
+    };
   }
   if (liveUnits === 0) {
     // Zero graded units is not "settled" — it is a submission with nothing to charge for. Claiming

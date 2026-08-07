@@ -1667,9 +1667,14 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     const outcome = (await mirror.mirrorPartnerApproval(f.certIds[0], SUPER_ADMIN)) as {
       kind: string;
       outstandingUnits?: number;
+      workItemStatus?: string;
     };
     expect(outcome.kind).toBe("settlement_pending_other_cards");
     expect(outcome.outstandingUnits, "card two is still pending_review").toBe(1);
+    // THIS card's own status is reported too. That is what distinguishes the ordinary case below
+    // from the partner-submit freeze (work item stuck 'assigned' under a pending_review
+    // certificate), which this outcome now names instead of collapsing into `not_partner`.
+    expect(outcome.workItemStatus, "the queried card itself is approved").toBe("approved");
     expect(await triple(f.tenantId), "re-approving a done card must not settle a half-graded set").toEqual({
       available: 8,
       reserved: 2,
