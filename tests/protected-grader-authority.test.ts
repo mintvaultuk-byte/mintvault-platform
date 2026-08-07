@@ -923,3 +923,159 @@ describe("REGRESSION: the reorder bypass of the mvgs-scoring exemption is closed
     expect(v.imageIdentical).toBe(false);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────────────────────
+// REGRESSION — the SECOND reviewer's reorder payloads, and the `++` content blind spot
+//
+// A second independent reviewer confirmed the same ordering hole with two more payloads. Their
+// literal symbol names (`applyFloorRule`, `clampToCeiling`, and PRISTINE/BLACK return branches)
+// do NOT exist in this engine — they describe a different vintage of the file. Reproduced here
+// in KIND against the real source: two adjacent, DIGIT-FREE, order-dependent statements swapped
+// and bundled with the authorised export. Digit-free is what makes them genuine bypasses of the
+// pre-fix guard rather than things condition 1 would have caught anyway.
+// ───────────────────────────────────────────────────────────────────────────────────────────
+
+describe("REGRESSION: the second reviewer's reorder payloads are rejected", () => {
+  const ENGINE = "shared/mvgs-scoring.ts";
+  const EXPORT_WORST = [
+    "function worstCeiling(...ceilings: Array<MvgsCeiling | null>): MvgsCeiling | null {",
+    "export function worstCeiling(...ceilings: Array<MvgsCeiling | null>): MvgsCeiling | null {",
+  ] as const;
+
+  const realDiff = (mutate: (src: string) => string): string => {
+    const original = read(ENGINE);
+    const mutated = mutate(original);
+    expect(mutated, "the mutation did not apply — the anchor text has moved").not.toBe(original);
+    const dir = mkdtempSync(join(tmpdir(), "mv-guard-"));
+    const a = join(dir, "before.ts");
+    const b = join(dir, "after.ts");
+    try {
+      writeFileSync(a, original);
+      writeFileSync(b, mutated);
+      try {
+        execFileSync("git", ["diff", "--no-index", "--unified=3", a, b], { encoding: "utf8" });
+        return "";
+      } catch (e: any) {
+        return String(e.stdout ?? "");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  /** ATTACK1 — floor/ceiling APPLICATION ORDER. Swapping these two makes the clamp read
+   *  `ceiling` before it is assigned, i.e. the structural ceiling stops constraining maxGrade. */
+  const CEILING_DECL = "  const ceiling = worstCeiling(cCrease, cWrinkle, tearResult.ceiling);";
+  const CEILING_CLAMP = "  if (ceiling) maxGrade = Math.min(maxGrade, ceiling.grade);";
+  const attack1 = (src: string) =>
+    src
+      .replace(EXPORT_WORST[0], EXPORT_WORST[1])
+      .replace([CEILING_DECL, CEILING_CLAMP].join("\n"), [CEILING_CLAMP, CEILING_DECL].join("\n"));
+
+  /** ATTACK2 — swap a RETURN branch above the loop that computes it, so worstCeiling() always
+   *  returns null and every crease / wrinkle / tear ceiling disappears. */
+  const WORST_BODY = [
+    "  let worst: MvgsCeiling | null = null;",
+    "  for (const c of ceilings) {",
+    "    if (c && (!worst || c.grade < worst.grade)) worst = c;",
+    "  }",
+    "  return worst;",
+  ];
+  const attack2 = (src: string) =>
+    src
+      .replace(EXPORT_WORST[0], EXPORT_WORST[1])
+      .replace(
+        WORST_BODY.join("\n"),
+        [WORST_BODY[0], WORST_BODY[4], WORST_BODY[1], WORST_BODY[2], WORST_BODY[3]].join("\n")
+      );
+
+  for (const [name, payload] of [
+    ["ATTACK1 (floor/ceiling application order)", attack1],
+    ["ATTACK2 (return branch hoisted above its loop)", attack2],
+  ] as const) {
+    it(`${name} is REJECTED, and image identity is what rejects it`, () => {
+      const diff = realDiff(payload);
+      expect(diff).toContain("+export function worstCeiling(");
+      const v = visibilityOnlyExportChange(diff);
+      expect(v.ok, `${name} must be rejected — got: ${v.reason}`).toBe(false);
+      expect(v.imageIdentical, `${name}: image identity must be the rejecting condition`).toBe(false);
+      expect(v.reason).toMatch(/moved or changed/);
+    });
+
+    it(`${name} DEFEATED the pre-fix guard — proving order sensitivity is load-bearing`, () => {
+      const v = visibilityOnlyExportChange(realDiff(payload));
+      // The pre-fix conjunction: digit-free AND multiset-identical AND export-widened.
+      expect(v.hasNumericLiteral, `${name} is digit-free, so condition 1 never saw it`).toBe(false);
+      expect(v.bodyUnchanged, `${name} is multiset-identical, so the OLD condition 2 passed it`).toBe(true);
+      expect(v.exportWidened, `${name} rides alongside the authorised export`).toBe(true);
+      const preFix = !v.hasNumericLiteral && v.bodyUnchanged && v.exportWidened;
+      expect(preFix, "the PRE-FIX guard must demonstrably have returned ok:true").toBe(true);
+      // …and the shipped guard rejects it.
+      expect(v.ok).toBe(false);
+    });
+  }
+
+  it("the authorised export is STILL accepted alongside these negatives (no over-tightening)", () => {
+    const v = visibilityOnlyExportChange(
+      realDiff((src) =>
+        src.replace(
+          "function remainingToGrade(remaining: number): number {",
+          "export function remainingToGrade(remaining: number): number {"
+        )
+      )
+    );
+    expect(v.ok, `the owner-approved change must still pass — got: ${v.reason}`).toBe(true);
+  });
+});
+
+describe("REGRESSION: a changed line whose CONTENT starts with ++ or -- is not mistaken for a header", () => {
+  // Second reviewer, LOW. The old parser stripped `+++`/`---` by TEXT on every line, so a
+  // column-0 `++someObj.field;` arrived as `+++someObj.field;` and was discarded as a file
+  // header — invisible to BOTH the digit scan and the body check. Header detection is now
+  // POSITIONAL: only the preamble before the first `@@` can hold metadata.
+  const withPreamble = (hunkBody: string[]) =>
+    [
+      "diff --git a/shared/mvgs-scoring.ts b/shared/mvgs-scoring.ts",
+      "index 1111111..2222222 100644",
+      "--- a/shared/mvgs-scoring.ts",
+      "+++ b/shared/mvgs-scoring.ts",
+      "@@ -1,3 +1,3 @@",
+    ]
+      .concat(hunkBody)
+      .join("\n");
+
+  it("an added `++…` line IS seen by the digit scan", () => {
+    const diff = withPreamble([" context();", "+++maxGrade = 9;", "-  const x = y;"]);
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.hasNumericLiteral, "the ++ line carries a digit and must be seen").toBe(true);
+    expect(v.ok).toBe(false);
+  });
+
+  it("an added `++…` line IS seen by the image comparison", () => {
+    // Digit-free, so ONLY the image check can catch it.
+    const diff = withPreamble([" context();", "++maxGrade;"]);
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.hasNumericLiteral).toBe(false);
+    expect(v.imageIdentical, "an inserted line changes the hunk image").toBe(false);
+    expect(v.ok).toBe(false);
+  });
+
+  it("a removed `--…` line is likewise seen", () => {
+    const diff = withPreamble([" context();", "---maxGrade;"]);
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.imageIdentical).toBe(false);
+    expect(v.ok).toBe(false);
+  });
+
+  it("the real `+++`/`---` file headers are still treated as metadata, not content", () => {
+    // The authorised change carries a full git preamble and must still be accepted.
+    const diff = withPreamble([
+      " /** doc */",
+      "-function remainingToGrade(remaining: number): number {",
+      "+export function remainingToGrade(remaining: number): number {",
+      " }",
+    ]);
+    const v = visibilityOnlyExportChange(diff);
+    expect(v.ok, `preamble must not be read as content — got: ${v.reason}`).toBe(true);
+  });
+});

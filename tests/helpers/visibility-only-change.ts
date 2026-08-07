@@ -87,14 +87,35 @@ interface HunkImages {
   after: string[];
 }
 
+interface ParsedDiff {
+  hunks: HunkImages[];
+  added: string[];
+  removed: string[];
+}
+
 /**
- * Split a unified diff into hunks and reconstruct each one's BEFORE and AFTER images.
+ * Parse a unified diff into hunks (BEFORE/AFTER images) and flat added/removed line lists.
  *
- * Context lines (leading space) belong to BOTH images and are what make the check
- * position-aware — they are the anchor a moved line moves relative to.
+ * ── SECOND HOSTILE-REVIEW FINDING (LOW, 2026-08-07) ────────────────────────────────────────
+ * The previous implementation stripped file headers with a bare
+ *
+ *     if (line.startsWith("+++") || line.startsWith("---")) continue;
+ *
+ * applied to EVERY line of the diff. An added line whose CONTENT begins with `++` — e.g. a
+ * column-0 `++someObj.field;` — is emitted by git as `+++someObj.field;` and was therefore
+ * discarded as if it were the `+++ b/file` header, making it invisible to BOTH the digit scan
+ * and the body comparison. Rated LOW only because Prettier re-indents such a line in this repo,
+ * but it is a real blind spot in a protected-system guard.
+ *
+ * The fix is positional rather than textual: `---`, `+++`, `diff --git` and `index …` can only
+ * appear in the PREAMBLE, before the first `@@` hunk header. Once inside a hunk, every line is
+ * content and is classified by its first character alone. Both representations are produced by
+ * this single walk, so they can never disagree about what changed.
  */
-function hunkImages(diff: string): HunkImages[] {
+function parseDiff(diff: string): ParsedDiff {
   const hunks: HunkImages[] = [];
+  const added: string[] = [];
+  const removed: string[] = [];
   let current: HunkImages | null = null;
 
   for (const line of diff.split("\n")) {
@@ -103,22 +124,26 @@ function hunkImages(diff: string): HunkImages[] {
       hunks.push(current);
       continue;
     }
-    // File headers and git metadata sit outside any hunk.
-    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git")) continue;
+    // Preamble — `diff --git`, `index`, `---`, `+++`. Metadata by POSITION, not by text.
     if (current === null) continue;
     if (line.startsWith("\\")) continue; // "\ No newline at end of file"
 
     const marker = line[0];
     const body = line.slice(1);
-    if (marker === "+") current.after.push(body);
-    else if (marker === "-") current.before.push(body);
-    else if (marker === " " || line === "") {
-      // Context — present in both images. An empty string is an empty context line.
+    if (marker === "+") {
+      added.push(body);
+      current.after.push(body);
+    } else if (marker === "-") {
+      removed.push(body);
+      current.before.push(body);
+    } else if (marker === " " || line === "") {
+      // Context — present in BOTH images. Context is what makes this position-aware: it is the
+      // anchor a moved line moves relative to.
       current.before.push(body);
       current.after.push(body);
     }
   }
-  return hunks;
+  return { hunks, added, removed };
 }
 
 /**
@@ -127,18 +152,6 @@ function hunkImages(diff: string): HunkImages[] {
  */
 function normaliseForImage(line: string): string {
   return line.replace(/\bexport\s+/g, "").replace(/\s+$/, "");
-}
-
-/** Added / removed lines of a unified diff, raw, with only the +/- marker dropped. */
-function splitDiff(diff: string): { added: string[]; removed: string[] } {
-  const added: string[] = [];
-  const removed: string[] = [];
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("+++") || line.startsWith("---")) continue; // file headers
-    if (line[0] === "+") added.push(line.slice(1));
-    else if (line[0] === "-") removed.push(line.slice(1));
-  }
-  return { added, removed };
 }
 
 /** The OLD, defeated normalisation — retained only so the self-tests can exhibit its weakness. */
@@ -179,14 +192,13 @@ export interface VisibilityVerdict {
  * each condition in isolation and prove it is load-bearing.
  */
 export function visibilityOnlyExportChange(diff: string): VisibilityVerdict {
-  const { added, removed } = splitDiff(diff);
+  const { hunks, added, removed } = parseDiff(diff);
 
   // Condition 1 — the owner's condition, on RAW text. Nothing is stripped first.
   const digitLine = [...added, ...removed].find((l) => /[0-9]/.test(l));
   const hasNumericLiteral = digitLine !== undefined;
 
   // Condition 2 — per-hunk BEFORE/AFTER image identity (order- and position-sensitive).
-  const hunks = hunkImages(diff);
   let firstImageMismatch = "";
   const imageIdentical =
     hunks.length > 0 &&
