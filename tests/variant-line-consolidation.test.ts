@@ -282,8 +282,38 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
+        // D) D-1 undeclared-column preservation — founder-approved 2026-08-07, narrowly, for
+        //    THAT REPAIR ONLY.
+        //
+        //    What it admits: `auth_status`, `auth_notes` and `private_notes` are real
+        //    `certificates` columns that applyCertGradeDraft writes in raw SQL, but
+        //    shared/schema.ts declares none of them, so `cert.*` was structurally `undefined`
+        //    and pick() collapsed all three to NULL on EVERY grading save — destroying HQ
+        //    private notes and resetting an authenticity verdict. The repair preserves them at
+        //    the SQL layer (the identical COALESCE form server/routes.ts already ships for
+        //    these exact three columns) and reads the two operator-visible ones explicitly
+        //    instead of fabricating "genuine".
+        //
+        //    FIVE independent tokens are required, so an incidental or bundled edit cannot
+        //    satisfy it: two JavaScript implementations proven in JS mode (tagged-template text
+        //    can never fake them — N5), plus all three COALESCE column assignments proven in
+        //    guarded mode. Both halves are mandatory; neither can stand in for the other.
+        //
+        //    What it does NOT authorise, and cannot: no scoring, no MVGS mathematics, no
+        //    centering, no Pristine / Black Label, no B1/B2/B3 rule change, no grading
+        //    threshold, deduction, weighting or calibration change, and no unrelated
+        //    server/grader.ts change of any kind. None of the five tokens names any of those,
+        //    the calculation-token assertion below still applies unchanged, and the sibling
+        //    per-line formula guard in this file still scans every added AND removed line — so
+        //    an unrelated protected-engine change bundled alongside this signature still FAILS.
+        const signatureD =
+          /\bkeepStoredText\s*\(/.test(addedJs) &&
+          /\breadUndeclaredAuthColumns\s*\(/.test(addedJs) &&
+          /auth_status\s*=\s*COALESCE\(/.test(addedCode) &&
+          /auth_notes\s*=\s*COALESCE\(/.test(addedCode) &&
+          /private_notes\s*=\s*COALESCE\(/.test(addedCode);
         expect(
-          signatureA || signatureB || signatureC,
+          signatureA || signatureB || signatureC || signatureD,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
@@ -374,5 +404,52 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     expect(judge('error: "Re-run the MVGS workstation so the grade and 4 sub-grades populate.",')).toBe(true);
     // …but a dynamic import is still caught, because the member access is outside the quotes.
     expect(judge('const sc = (await import("@shared/mvgs-scoring")).computeMvgsScore;')).toBe(false);
+  });
+
+  it("signature D is narrow: all five tokens required, and SQL text cannot fake the JS half (self-test)", () => {
+    // Pins the shape of the 2026-08-07 D-1 authorisation so it cannot silently widen. The
+    // predicate below is the SAME expression the guard above evaluates; only its input changes.
+    const asDiff = (lines: string[]) => lines.map((l) => `+${l}`).join("\n");
+    const matchesD = (lines: string[]): boolean => {
+      const diff = asDiff(lines);
+      const addedCode = addedCodeOf(diff, "+");
+      const addedJs = addedJsOf(diff, "+");
+      return (
+        /\bkeepStoredText\s*\(/.test(addedJs) &&
+        /\breadUndeclaredAuthColumns\s*\(/.test(addedJs) &&
+        /auth_status\s*=\s*COALESCE\(/.test(addedCode) &&
+        /auth_notes\s*=\s*COALESCE\(/.test(addedCode) &&
+        /private_notes\s*=\s*COALESCE\(/.test(addedCode)
+      );
+    };
+    const full = [
+      "const keepStoredText = (v: unknown): string | null => (v == null || v === '' ? null : String(v));",
+      "async function readUndeclaredAuthColumns(certId: number) { return null; }",
+      "const q = sql`UPDATE certificates SET",
+      "  auth_status = COALESCE(${keepStoredText(body.auth_status)}, auth_status, 'genuine'),",
+      "  auth_notes  = COALESCE(${keepStoredText(body.auth_notes)}, auth_notes),",
+      "  private_notes = COALESCE(${keepStoredText(body.private_notes)}, private_notes)`;",
+    ];
+    expect(matchesD(full), "the authorised repair itself must satisfy signature D").toBe(true);
+    // Conjunctive: dropping ANY ONE of the five tokens must stop it matching, so a partial or
+    // unrelated edit can never ride in on this authorisation.
+    const without = (needle: string, replacement: string) => full.map((l) => l.split(needle).join(replacement));
+    for (const [needle, replacement] of [
+      ["keepStoredText", "someOtherHelper"],
+      ["readUndeclaredAuthColumns", "someOtherReader"],
+      ["auth_status = COALESCE(", "auth_status = ("],
+      ["auth_notes  = COALESCE(", "auth_notes  = ("],
+      ["private_notes = COALESCE(", "private_notes = ("],
+    ] as const) {
+      expect(matchesD(without(needle, replacement)), `"${needle}" must be load-bearing`).toBe(false);
+    }
+    // N5: tagged-template TEXT naming the two helpers must NOT satisfy the JavaScript half.
+    expect(
+      matchesD([
+        "const q = sql`keepStoredText( readUndeclaredAuthColumns(",
+        "  auth_status = COALESCE(x, auth_status, 'genuine'),",
+        "  auth_notes = COALESCE(x, auth_notes), private_notes = COALESCE(x, private_notes)`;",
+      ])
+    ).toBe(false);
   });
 });
