@@ -184,7 +184,7 @@ export const SUITES = [
     critical: true,
     isolate: true,
     note:
-      "the only suite that runs the partner completion cascade — applies 0045 so the " +
+      "the only suite that runs the partner completion cascade — applies 0049 so the " +
       "to_regclass guard opens, then calls the real markCompleted; own disposable cluster.",
   },
   {

@@ -14,8 +14,8 @@
  *      reverses a migration. They are run by an operator, by hand, against the database.
  *
  * And the image does not contain them: Dockerfile copies
- * `migrations/[0-9][0-9][0-9][0-9]*_*.sql`, a glob that matches `0045_partner_grading_work_items.sql`
- * but CANNOT match `rollback-0045-partner-grading-work-items.sql` — that filename starts with
+ * `migrations/[0-9][0-9][0-9][0-9]*_*.sql`, a glob that matches `0049_partner_grading_work_items.sql`
+ * but CANNOT match `rollback-0049-partner-grading-work-items.sql` — that filename starts with
  * letters, not four digits.
  *
  * So an operator who has shelled into the running container looking for the rollback file will not
@@ -23,22 +23,22 @@
  * cannot be made silently, and pins that the repository copy exists.
  *
  * DECISION: rollback is REPOSITORY-DRIVEN (option B). See
- * docs/migration-ownership-partner-0045.md for the operator procedure.
+ * docs/migration-ownership-partner-0049.md for the operator procedure.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-const ROLLBACK = "rollback-0045-partner-grading-work-items.sql";
-const FORWARD = "0045_partner_grading_work_items.sql";
+const ROLLBACK = "rollback-0049-partner-grading-work-items.sql";
+const FORWARD = "0049_partner_grading_work_items.sql";
 
 describe("release: rollback SQL packaging", () => {
   const dockerfile = readFileSync(join(process.cwd(), "Dockerfile"), "utf8");
 
   it("the rollback file exists in the repository and is non-trivial", () => {
     const path = join(process.cwd(), "migrations", ROLLBACK);
-    expect(existsSync(path), `${ROLLBACK} must exist in the repo — it is the ONLY thing that undoes 0045`).toBe(true);
+    expect(existsSync(path), `${ROLLBACK} must exist in the repo — it is the ONLY thing that undoes 0049`).toBe(true);
     const sql = readFileSync(path, "utf8");
     expect(sql.length, "rollback file must not be a stub").toBeGreaterThan(500);
     expect(sql).toMatch(/partner_grading_work_items/);

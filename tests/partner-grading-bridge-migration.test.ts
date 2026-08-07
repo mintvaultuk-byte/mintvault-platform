@@ -1,8 +1,8 @@
 /**
- * Partner grading bridge — migration 0045 apply / rollback / reapply proof on a disposable
+ * Partner grading bridge — migration 0049 apply / rollback / reapply proof on a disposable
  * PostgreSQL 17 with the realistic NON-SUPERUSER, NOBYPASSRLS migrator role model.
  *
- * 0045 is the only migration on this branch that has never been applied anywhere real, and its
+ * 0049 is the only migration on this branch that has never been applied anywhere real, and its
  * rollback is the file an operator would reach for at the worst possible moment. So the rollback is
  * tested here at least as hard as the forward migration.
  *
@@ -11,7 +11,7 @@
  * would hide the single worst defect the rollback ever had — see T7 — because a superuser has
  * BYPASSRLS and therefore sees rows the real migrator cannot.
  *
- * T7 is the one to read first. 0045 sets FORCE ROW LEVEL SECURITY, which applies the tenant policy
+ * T7 is the one to read first. 0049 sets FORCE ROW LEVEL SECURITY, which applies the tenant policy
  * to the table OWNER too. With no app.tenant_id set, partner_current_tenant() is NULL, every row is
  * filtered, and the rollback's "is there live grading evidence?" count returned 0 WITH A LINKED ROW
  * PRESENT. The guard was blind: it dropped the table and COMMITTED. This suite pins the repair by
@@ -46,8 +46,8 @@ function isLoopback(u: string | undefined): boolean {
 }
 const isLocal = isLoopback(ADMIN);
 
-const MIGRATION = "0045_partner_grading_work_items.sql";
-const ROLLBACK = "rollback-0045-partner-grading-work-items.sql";
+const MIGRATION = "0049_partner_grading_work_items.sql";
+const ROLLBACK = "rollback-0049-partner-grading-work-items.sql";
 const rb = (name: string) => readFileSync(join(process.cwd(), "migrations", name), "utf8");
 
 /** Two tenants, so RLS isolation is provable rather than assumed. */
@@ -98,12 +98,12 @@ async function runRollbackAsMigrator(): Promise<void> {
   }
 }
 
-/** Apply ONLY 0045 as the migrator (used to prove reapply after a successful rollback). */
+/** Apply ONLY 0049 as the migrator (used to prove reapply after a successful rollback). */
 async function applyGradingBridgeOnly(): Promise<void> {
   const migrator = await migratorClient();
   try {
     const only = listMigrationFiles().filter((f) => f.filename === MIGRATION);
-    expect(only, "0045 must be discoverable by the real migration runner").toHaveLength(1);
+    expect(only, "0049 must be discoverable by the real migration runner").toHaveLength(1);
     await applyMigrations(migrator, only, { allowDestructive: true });
   } finally {
     await migrator.end();
@@ -111,7 +111,7 @@ async function applyGradingBridgeOnly(): Promise<void> {
 }
 
 /**
- * Seed the full FK chain 0045 requires, and return one work-item's identifiers.
+ * Seed the full FK chain 0049 requires, and return one work-item's identifiers.
  *
  * Inserted through the ADMIN connection: this is fixture construction, not the thing under test,
  * and the rows must exist regardless of RLS. What the tests actually prove is what the MIGRATOR can
@@ -177,7 +177,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
     [rec[0].id, tenant, loc[0].id, sub[0].id, handoff[0].id, vr[0].id, dest[0].id, `fp-${suffix}`]
   );
   /**
-   * 0045 links a work item to a certificate through a COMPOSITE foreign key —
+   * 0049 links a work item to a certificate through a COMPOSITE foreign key —
    * REFERENCES certificates(id, submission_id, submission_item_id) — backed by the unique index it
    * creates on the protected certificates table. A certificate row whose submission_id/
    * submission_item_id do not match this work item's destination is rejected, by design: it is what
@@ -222,7 +222,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
 }
 
 (isLocal ? describe : describe.skip)(
-  "Partner grading bridge — migration 0045 apply/rollback/reapply (disposable DB, realistic roles)",
+  "Partner grading bridge — migration 0049 apply/rollback/reapply (disposable DB, realistic roles)",
   () => {
     beforeAll(async () => {
       admin = new Client({ connectionString: ADMIN });
@@ -245,7 +245,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       await createMintvaultCertificatesTable(admin);
       await createMintvaultLabelPrintsTable(admin);
       /**
-       * cert_counter is a MintVault table no migration creates, and 0045 grants against it only
+       * cert_counter is a MintVault table no migration creates, and 0049 grants against it only
        * `IF to_regclass('public.cert_counter') IS NOT NULL`. Without it the grant silently no-ops
        * and T6/T10/T11/T12 would assert on privileges that were never granted — passing or failing
        * for reasons unrelated to the rollback. It must exist for those proofs to mean anything.
@@ -267,7 +267,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       await admin?.end().catch(() => {});
     });
 
-    it("T1: 0045 is applied and journaled with a checksum", async () => {
+    it("T1: 0049 is applied and journaled with a checksum", async () => {
       const { rows } = await admin.query<{ filename: string; checksum: string }>(
         "SELECT filename, checksum FROM schema_migrations WHERE filename = $1",
         [MIGRATION]
@@ -276,14 +276,14 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       expect(rows[0].checksum).toMatch(/^[0-9a-f]{64}$/);
     });
 
-    it("T2: reapplying the full set is a clean no-op — 0045 is not pending", async () => {
+    it("T2: reapplying the full set is a clean no-op — 0049 is not pending", async () => {
       const migrator = await migratorClient();
       try {
         const plan = await planMigrations(migrator, listMigrationFiles());
         expect(plan.pending).not.toContain(MIGRATION);
         // The field is `checksumMismatches`. An earlier revision read `plan.changed`, which does
         // not exist on MigratePlan — `undefined ?? []` made the assertion unfailable, so the
-        // checksum-drift proof for 0045 proved nothing. Test files are excluded from `npm run
+        // checksum-drift proof for 0049 proved nothing. Test files are excluded from `npm run
         // check` (tsconfig `exclude: **/*.test.ts`), so tsc never flagged the bad property.
         expect(plan.checksumMismatches, "no applied migration may have drifted from its checksum").toEqual([]);
         // Non-vacuity: the plan really did inspect the journal, so an empty mismatch list is a
@@ -323,7 +323,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       }
     });
 
-    it("T5: the certificates-scope unique index 0045 creates on the PROTECTED table exists", async () => {
+    it("T5: the certificates-scope unique index 0049 creates on the PROTECTED table exists", async () => {
       const { rows } = await admin.query<{ indexname: string }>(
         `SELECT indexname FROM pg_indexes
           WHERE tablename = 'certificates' AND indexname = 'uq_partner_grading_work_items_certificate_scope'`
@@ -331,7 +331,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       expect(rows).toHaveLength(1);
     });
 
-    it("T6: partner_connector_runtime holds the cert_counter and sequence privileges 0045 grants", async () => {
+    it("T6: partner_connector_runtime holds the cert_counter and sequence privileges 0049 grants", async () => {
       const counter = await admin.query<{ ok: boolean }>(
         "SELECT has_table_privilege('partner_connector_runtime','cert_counter','UPDATE') AS ok"
       );
@@ -347,7 +347,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       // came back 0 with a linked row present, and the rollback dropped the table and COMMITTED.
       await seedWorkItem(A, { linkCertificate: true });
 
-      await expect(runRollbackAsMigrator()).rejects.toThrow(/rollback-0045 refused[\s\S]*live grading evidence/i);
+      await expect(runRollbackAsMigrator()).rejects.toThrow(/rollback-0049 refused[\s\S]*live grading evidence/i);
 
       // The table must still be here. A refusal that dropped anything would be worse than no guard.
       const { rows } = await admin.query<{ present: string | null }>(
@@ -388,7 +388,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       await runRollbackAsMigrator().catch((e: Error) => {
         message = e.message;
       });
-      expect(message).toMatch(/rollback-0045 refused/);
+      expect(message).toMatch(/rollback-0049 refused/);
       // A migration log must not become a customer-data sink.
       expect(message).not.toMatch(/MV-0000000045|Charizard|@example\.test|partner-submissions\//);
     });
@@ -410,7 +410,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       );
       expect(idx).toHaveLength(0);
 
-      // A rolled-back 0045 must not leave the connector runtime able to mutate the certificate counter.
+      // A rolled-back 0049 must not leave the connector runtime able to mutate the certificate counter.
       const counter = await admin.query<{ ok: boolean }>(
         "SELECT has_table_privilege('partner_connector_runtime','cert_counter','UPDATE') AS ok"
       );
@@ -424,7 +424,7 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       expect(journal).toHaveLength(0);
     });
 
-    it("T11: 0045 REAPPLIES cleanly after a successful rollback, restoring table, index and grants", async () => {
+    it("T11: 0049 REAPPLIES cleanly after a successful rollback, restoring table, index and grants", async () => {
       await applyGradingBridgeOnly();
 
       const { rows: tbl } = await admin.query<{ present: string | null }>(

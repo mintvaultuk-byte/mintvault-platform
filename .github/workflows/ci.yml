@@ -601,7 +601,7 @@ jobs:
           # schema has exactly ONE definition shared with the suites.
           #
           # This replaced an inline `certificates (id serial, cert_id text, secret text)`. Migration
-          # 0045 references certificates.submission_id and submission_item_id, so all six full-set
+          # 0049 references certificates.submission_id and submission_item_id, so all six full-set
           # appliers began dying in beforeAll with `column "submission_id" does not exist` — and a
           # failed beforeAll makes vitest report the file as SKIPPED, so it read as configuration
           # rather than breakage. The execution-floor assertions are what caught it.

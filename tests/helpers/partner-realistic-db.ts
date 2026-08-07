@@ -164,19 +164,19 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0044_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
 
-/** 0045 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
+/** 0049 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table. */
 export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
   ...PARTNER_MIGRATIONS_WITH_LIFECYCLE,
-  "0045_partner_grading_work_items",
+  "0049_partner_grading_work_items",
 ] as const;
 /**
  * Create the MintVault `certificates` table a partner migration needs.
  *
- * WHY THIS EXISTS: migration 0045 both creates
+ * WHY THIS EXISTS: migration 0049 both creates
  *   CREATE UNIQUE INDEX ... ON certificates(id, submission_id, submission_item_id)
  * and issues COLUMN-LEVEL grants naming 38 distinct certificates columns. `IF NOT EXISTS` on the
  * index guards its NAME, not its columns, and a column-level GRANT naming a missing column is a
- * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0045 fail and
+ * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0049 fail and
  * the whole suite abort inside beforeAll. vitest renders a beforeAll throw as "N skipped", which
  * reads exactly like a benign env gate; that is how two critical suites sat red while looking
  * merely unconfigured.

@@ -1,6 +1,6 @@
 /**
  * FULL-PILOT-LOCAL-01 — the stitched Partner pilot lifecycle, on a real PostgreSQL 17 with
- * migration 0045 applied, driven through PRODUCTION services end to end.
+ * migration 0049 applied, driven through PRODUCTION services end to end.
  *
  * WHAT THIS PINS THAT NOTHING ELSE DOES
  * -------------------------------------

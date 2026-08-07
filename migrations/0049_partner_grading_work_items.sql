@@ -1,4 +1,4 @@
--- 0045_partner_grading_work_items.sql
+-- 0049_partner_grading_work_items.sql
 -- Partner grading bridge: durable per-card source-unit provenance.
 --
 -- 0010 records submission-level import provenance and 0035 records immutable
@@ -363,7 +363,7 @@ BEGIN
   );
 
   IF missing IS NOT NULL THEN
-    RAISE EXCEPTION '0045 partner_grading_work_items missing required column(s): %', missing;
+    RAISE EXCEPTION '0049 partner_grading_work_items missing required column(s): %', missing;
   END IF;
 
   IF NOT EXISTS (
@@ -372,7 +372,7 @@ BEGIN
        AND c.relrowsecurity
        AND c.relforcerowsecurity
   ) THEN
-    RAISE EXCEPTION '0045 partner_grading_work_items must have ENABLE and FORCE ROW LEVEL SECURITY';
+    RAISE EXCEPTION '0049 partner_grading_work_items must have ENABLE and FORCE ROW LEVEL SECURITY';
   END IF;
 
   IF NOT EXISTS (
@@ -381,6 +381,6 @@ BEGIN
      WHERE polrelid = 'public.partner_grading_work_items'::regclass
        AND polname = 'partner_grading_work_items_tenant_isolation'
   ) THEN
-    RAISE EXCEPTION '0045 partner_grading_work_items tenant isolation policy missing';
+    RAISE EXCEPTION '0049 partner_grading_work_items tenant isolation policy missing';
   END IF;
 END$$;

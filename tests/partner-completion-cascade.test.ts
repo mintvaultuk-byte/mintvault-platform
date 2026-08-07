@@ -1,6 +1,6 @@
 /**
  * Partner completion cascade — REAL production `markCompleted` against a disposable PostgreSQL 17
- * with migration 0045 applied.
+ * with migration 0049 applied.
  *
  * WHY THIS SUITE EXISTS.
  * ---------------------
@@ -19,7 +19,7 @@
  * column that does not exist.
  *
  * So the only thing that can pin this is what this file does: build the real four-level shape
- * (certificate -> work item -> partner submission -> destination submission), apply 0045 so the
+ * (certificate -> work item -> partner submission -> destination submission), apply 0049 so the
  * guard opens, and call the real production function. T2 is the mutation target: reintroducing
  * `completed_at = NOW()` must turn T1 RED with SQLSTATE 42703.
  *
@@ -86,7 +86,7 @@ async function seedMintVaultTables(): Promise<void> {
   await admin.query(
     "CREATE TABLE cert_counter (id integer PRIMARY KEY DEFAULT 1, last_issued integer NOT NULL DEFAULT 0)"
   );
-  // The composite FK targets 0045 needs on the MintVault side.
+  // The composite FK targets 0049 needs on the MintVault side.
   await admin.query("CREATE UNIQUE INDEX uq_submission_items_submission ON submission_items (submission_id, id)");
   for (const t of [
     "users",
@@ -117,7 +117,7 @@ async function applyPrintLifecycle(): Promise<void> {
 /**
  * Build the exact shape production leaves behind at the moment before completion: two approved
  * certificates in `printed`, two approved work items, and two CONSUMED reservations. Every row is
- * the real table with the real constraints — 0045's composite FKs reject any shortcut here.
+ * the real table with the real constraints — 0049's composite FKs reject any shortcut here.
  */
 async function seedCompletionReadyPilot(opts?: {
   reservationStatus?: string;
@@ -375,7 +375,7 @@ async function scalar<T>(sql: string, params: unknown[]): Promise<T> {
   return Object.values(r.rows[0])[0] as T;
 }
 
-describe("Partner completion cascade — real markCompleted with migration 0045 applied", () => {
+describe("Partner completion cascade — real markCompleted with migration 0049 applied", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-completion-cascade");
     admin = new Client({ connectionString: cluster.url });
@@ -398,7 +398,7 @@ describe("Partner completion cascade — real markCompleted with migration 0045 
     await cluster?.stop().catch(() => {});
   });
 
-  it("T0: the 0045 bridge table exists, so the completion cascade is NOT skipped by its to_regclass guard", async () => {
+  it("T0: the 0049 bridge table exists, so the completion cascade is NOT skipped by its to_regclass guard", async () => {
     // Without this, every assertion below would pass against a cascade that never executed — which
     // is precisely how the completed_at defect survived the existing print-workflow suite.
     const rel = await scalar<string | null>("SELECT to_regclass('public.partner_grading_work_items')::text", []);
