@@ -1204,26 +1204,46 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
       await admin.query("ALTER TABLE partner_credit_ledger DROP CONSTRAINT tmp_settle2_block_card_two");
     }
 
-    // RECOVERY IS NOT THROUGH RE-APPROVAL, and asserting that it was would have been wrong.
-    // approveAsSuperAdmin's certificate publish and mirrorPartnerApproval's work-item update each
-    // COMMIT before settlement runs on a separate pool. So after the injected failure the cards are
-    // already approved: a replayed approval matches no pending_review work item, the mirror returns
-    // not_partner, and updateSubmissionStatus is never reached. The submission would sit unsettled
-    // forever if approval were the only route.
+    /**
+     * RECOVERY IS NOW THROUGH RE-APPROVAL — FINDING F1.
+     *
+     * This block previously asserted the OPPOSITE, and documented why: the certificate publish and
+     * the work-item update each COMMIT before settlement runs on a separate pool, so after the
+     * injected failure both cards are already approved, a replayed approval matched no
+     * `pending_review` work item, the mirror returned `not_partner`, and `updateSubmissionStatus`
+     * was never reached. The comment ended "the submission would sit unsettled forever if approval
+     * were the only route" — and the route reported HTTP 200 the whole time, so nobody would know
+     * to use the other route.
+     *
+     * The mirror now keys on POST-COMMIT state, so this exact replay re-drives settlement. The
+     * injected CHECK constraint has been dropped in the `finally` above, which is precisely the
+     * "operator fixes the cause and retries" sequence.
+     */
     const replay = await approveAsSuperAdmin(f.certIds[1]);
-    expect(replay.kind, "the approval route cannot re-drive a failed settlement").toBe("not_partner");
-    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+    expect(replay.kind, "a replayed approval must RE-DRIVE the failed settlement").toBe("settled_on_retry");
+    expect(await triple(f.tenantId), "the re-drive settles both cards, exactly once").toEqual({
+      available: 8,
+      reserved: 0,
+      consumed: 2,
+    });
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId])
+    ).toBe("ready_to_return");
 
-    // The real recovery is the destination status transition — the same entry point the mirror
-    // would have used. With the injected failure gone it settles cleanly, which is what proves the
-    // rollback left recoverable state rather than a stranded submission.
+    // The pre-existing operator recovery — the destination status transition — must STILL work and
+    // must still be idempotent on top of the re-drive. Both routes now converge on the same money.
     const settled = await lifecycle.settlePartnerCreditForDestinationStatus(
       f.destinationSubmissionId,
       "ready_to_return",
       {}
     );
-    expect(settled, "the documented operator recovery must actually settle").not.toBeNull();
-    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+    expect(settled, "the documented operator recovery must still settle").not.toBeNull();
+    expect(await triple(f.tenantId), "and must not double-consume on top of the re-drive").toEqual({
+      available: 8,
+      reserved: 0,
+      consumed: 2,
+    });
+    await expectSettledExactlyOnce(f);
   });
 
   it("P12: SETTLE2 — a JS throw after card ONE has settled still rolls both cards back", async () => {
