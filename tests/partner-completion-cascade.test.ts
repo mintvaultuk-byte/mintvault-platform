@@ -1005,4 +1005,148 @@ describe("Partner completion cascade — real markCompleted with migration 0049 
       "completed"
     );
   });
+  /**
+   * ============================================================================================
+   * FINDING F2 — the single-certificate label render bypassed the settlement gate entirely.
+   * ============================================================================================
+   *
+   * `requireCompletePartnerSubmissionSet(..., "batch")` refuses to render labels for a Partner
+   * submission whose credits have not settled (T7). But it only ever ran on the BATCH path. Two
+   * admin routes rendered the identical artefact with no partner lookup at all:
+   *
+   *   GET /api/admin/certificates/:id/label/:side
+   *   GET /api/admin/certificates/label/:certId/:filename
+   *
+   * Both are `requireAdmin` and both called generateLabelPNG/generateLabelPDF directly, so an
+   * admin could produce a print-ready label for a Partner card MintVault had not been paid for.
+   * `partnerSettlementBlockForCert` is the shared gate that closes it.
+   */
+  it("T15: F2 — an UNSETTLED Partner card cannot be label-rendered through the single-certificate path", async () => {
+    const unsettled = await seedCompletionReadyPilot({ destinationStatus: "in_grading" });
+
+    for (const certNumber of unsettled.certNumbers) {
+      const block = await printWorkflow.partnerSettlementBlockForCert(certNumber);
+      expect(block, `an unsettled Partner card must be refused: ${certNumber}`).not.toBeNull();
+      expect(block?.code).toBe("partner_settlement_required");
+      expect(block?.destinationStatus).toBe("in_grading");
+    }
+
+    // POSITIVE CONTROL — a SETTLED Partner card still renders, so the gate is not refusing
+    // everything. Without this half, hard-coding a refusal would pass.
+    const settled = await seedCompletionReadyPilot();
+    for (const certNumber of settled.certNumbers) {
+      expect(
+        await printWorkflow.partnerSettlementBlockForCert(certNumber),
+        `a settled Partner card must still render: ${certNumber}`
+      ).toBeNull();
+    }
+
+    // An HQ card — no partner work item — is never touched by the gate.
+    expect(await printWorkflow.partnerSettlementBlockForCert("MV-0009999999")).toBeNull();
+  });
+
+  it("T16: F2 — BOTH bypass routes actually call the gate before rendering", async () => {
+    /**
+     * T15 proves the gate. This proves it is WIRED. The two routes live in server/routes.ts and
+     * booting the whole Express app inside this cluster-owning suite would prove less for far more
+     * moving parts, so the wiring is pinned at the source: each handler must reach
+     * partnerSettlementBlockForCert BEFORE it reaches generateLabelPNG/generateLabelPDF.
+     */
+    const source = readFileSync(join(process.cwd(), "server", "routes.ts"), "utf8");
+    const handlers = [
+      '/api/admin/certificates/:id/label/:side',
+      '/api/admin/certificates/label/:certId/:filename',
+    ];
+    for (const path of handlers) {
+      // Anchor on the REGISTRATION, not the bare path: the path string also appears in a route
+      // inventory earlier in the file, and anchoring there would slice the wrong handler body.
+      const start = source.indexOf(`app.get("${path}"`);
+      expect(start, `route ${path} not found in server/routes.ts`).toBeGreaterThan(-1);
+      // The handler body up to the next route registration.
+      const rest = source.slice(start);
+      const end = rest.indexOf('\n  app.', 1);
+      const body = end === -1 ? rest : rest.slice(0, end);
+      const gate = body.indexOf('partnerSettlementBlockForCert');
+      const render = Math.min(
+        ...['generateLabelPNG', 'generateLabelPDF'].map((f) => {
+          const i = body.indexOf(f);
+          return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+        })
+      );
+      expect(gate, `${path} does not call partnerSettlementBlockForCert`).toBeGreaterThan(-1);
+      expect(render, `${path} no longer renders a label — this pin is stale`).toBeLessThan(Number.MAX_SAFE_INTEGER);
+      expect(gate, `${path} renders the label BEFORE consulting the settlement gate`).toBeLessThan(render);
+    }
+  });
+
+  /**
+   * ============================================================================================
+   * FINDING F3 — the completion predicate was vacuously true at zero graded units.
+   * ============================================================================================
+   *
+   * `partnerGradedUnitsFullySettled` gates completion on
+   * `count(non-void work items) = count(reservations with canonical consumed evidence)`. At ZERO
+   * non-void work items both sides are 0, the equality holds, and the gate OPENS — cascading the
+   * Partner submission and its destination to `completed` for ZERO consumed credits.
+   *
+   * Nothing writes `void` today (it exists only in 0049's CHECK constraint and in read-side
+   * `<> 'void'` predicates), so the shape is currently unreachable. It goes live the day a
+   * void/withdraw path is added — which is exactly the change least likely to re-derive this
+   * gate's arithmetic. This test is the pin that makes that day safe.
+   */
+  it("T17: F3 — ZERO non-void graded units is NOT 'fully settled', and must not complete", async () => {
+    // `evidence: "none"` means the reservations SAY consumed but carry no debit anywhere, so the
+    // consumed side of the equality is 0 too. Voiding every work item makes the unit side 0 as
+    // well: 0 = 0, which is precisely the vacuous shape.
+    const f = await seedCompletionReadyPilot({ evidence: "none" });
+    await admin.query("UPDATE partner_grading_work_items SET status='void' WHERE partner_submission_id=$1", [
+      f.partnerSubmissionId,
+    ]);
+
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status <> 'void'",
+        [f.partnerSubmissionId]
+      ),
+      "precondition: zero live graded units"
+    ).toBe("0");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount = -1", [
+        f.tenantId,
+      ]),
+      "precondition: zero debits — nothing was ever paid for"
+    ).toBe("0");
+    expect(await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId])).toBe(
+      "submitted_to_mintvault"
+    );
+
+    await printWorkflow.markCompleted({ certIds: f.certNumbers, identity: ACTOR });
+
+    expect(
+      await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [f.partnerSubmissionId]),
+      "zero graded units must never read as fully settled"
+    ).not.toBe("completed");
+    expect(
+      await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+      "and the destination must not cascade past settlement either"
+    ).toBe("ready_to_return");
+    expect(
+      await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount = -1", [
+        f.tenantId,
+      ]),
+      "and no money may have appeared"
+    ).toBe("0");
+
+    // POSITIVE CONTROL: the same call on a genuinely settled, genuinely graded set still completes,
+    // so the hardening cannot be passing by refusing everything (that would be weakening H3's gate
+    // in the other direction).
+    const good = await seedCompletionReadyPilot();
+    await printWorkflow.markCompleted({ certIds: good.certNumbers, identity: ACTOR });
+    expect(await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [good.partnerSubmissionId])).toBe(
+      "completed"
+    );
+    expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [good.destinationSubmissionId])).toBe(
+      "completed"
+    );
+  });
 });
