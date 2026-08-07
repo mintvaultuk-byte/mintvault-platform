@@ -38,7 +38,46 @@
 -- D5 (medium) — privilege reversal was nested inside "IF the table EXISTS", so a partial or
 --   repeated rollback left the connector runtime holding certificates privileges forever.
 
+-- ==================== LOCK SAFETY ====================
+-- D7 (lock-safety review, 2026-08-07) — this file takes ACCESS EXCLUSIVE on `certificates`,
+-- the table behind PUBLIC certificate lookup (the QR/NFC verify path). Measured ~16 ms on a
+-- disposable PostgreSQL 17 cluster and it does NOT scale with row count — but hold time is not
+-- the hazard. The hazard is the QUEUE: proven on the same cluster, if ANY session is already
+-- holding a mere AccessShareLock on `certificates` (one idle-in-transaction SELECT is enough),
+-- the ACCESS EXCLUSIVE request goes to the back of the lock queue, and every plain SELECT that
+-- arrives AFTER it is blocked too. Public certificate lookup stops for as long as the original
+-- holder lives. Unbounded, that is an outage.
+--
+-- This file keeps its own BEGIN/COMMIT. That is DELIBERATE and it is the repo's rollback
+-- convention (20 of the rollback-*.sql files are shaped this way), and the numbered runner
+-- never executes it — scripts/db/migrate.ts only picks up files matching /^(\d{4,})_.+\.sql$/,
+-- so `rollback-0049-*.sql` is invisible to it. Rollbacks are run by an operator with
+-- `psql -f`. Dropping BEGIN/COMMIT would make this file non-atomic under `psql -f` (autocommit,
+-- statement by statement) — a partial rollback of a FORCE-RLS table drop is far worse than a
+-- bounded wait.
+--
+-- The problem the previous shape caused: an operator trying to bound the wait with
+--   BEGIN; SET LOCAL lock_timeout='5s'; \i rollback-0049...sql; COMMIT;
+-- got NOTHING, because the file's own COMMIT discarded the SET LOCAL before any lock was taken
+-- (and left the operator's outer BEGIN dangling). The fix is to put the bound INSIDE this
+-- file's own transaction, on the first line after BEGIN, where it governs every lock the file
+-- goes on to take.
+--
+-- SET LOCAL is used, not SET: it is scoped to THIS transaction and discarded at COMMIT/ROLLBACK,
+-- so it cannot leak into the operator's psql session and silently bound unrelated later work.
+-- lock_timeout bounds only the WAIT TO ACQUIRE — it never interrupts a statement that already
+-- holds its locks, so the rollback's own work is unaffected. If it fires, the whole transaction
+-- rolls back atomically and NOTHING is dropped: re-run when the blocker is gone.
+--
+-- To deliberately wait longer inside an agreed maintenance window, an operator overrides it
+-- AFTER \i is not possible — instead edit nothing and run:
+--   psql -v ON_ERROR_STOP=1 -f migrations/rollback-0049-partner-grading-work-items.sql
+-- having first confirmed pg_stat_activity is quiet. The 5 s bound is the safe default.
 BEGIN;
+
+-- MUST be the first statement inside this transaction: it must be in force before the first
+-- lock is taken.
+SET LOCAL lock_timeout = '5s';
 
 DO $$
 DECLARE
