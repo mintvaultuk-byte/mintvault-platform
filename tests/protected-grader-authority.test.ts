@@ -802,6 +802,33 @@ describe("REGRESSION: the reorder bypass of the mvgs-scoring exemption is closed
   const ENGINE = "shared/mvgs-scoring.ts";
 
   /** A genuine `git diff` between the real engine file and a mutated copy of it. */
+  /**
+   * Like `realDiff`, but derives BOTH sides from the engine source. Needed for any proof whose
+   * "before" state is not the file as it currently stands — e.g. the authorised export, which is
+   * already applied once its commit is merged.
+   */
+  const realDiffFrom = (pre: (src: string) => string, post: (src: string) => string): string => {
+    const original = read(ENGINE);
+    const before = pre(original);
+    const after = post(original);
+    expect(before, "the pre-transform did not apply — the anchor text has moved").not.toBe(after);
+    const dir = mkdtempSync(join(tmpdir(), "mv-guard-"));
+    const a = join(dir, "before.ts");
+    const b = join(dir, "after.ts");
+    try {
+      writeFileSync(a, before);
+      writeFileSync(b, after);
+      try {
+        execFileSync("git", ["diff", "--no-index", "--unified=3", a, b], { encoding: "utf8" });
+        return "";
+      } catch (e: any) {
+        return String(e.stdout ?? "");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
   const realDiff = (mutate: (src: string) => string): string => {
     const original = read(ENGINE);
     const mutated = mutate(original);
@@ -893,13 +920,17 @@ describe("REGRESSION: the reorder bypass of the mvgs-scoring exemption is closed
 
   it("PROOF 2: adding `export` to a function is ACCEPTED as a real git diff with context", () => {
     // A faithful reproduction of commit 5bedfd2f's diff against the REAL engine file, with real
-    // context lines: the file as it stands has no export on remainingToGrade, and the authorised
-    // change adds one. Over-tightening would show up here as a false rejection.
-    const diff = realDiff((src) =>
-      src.replace(
-        "function remainingToGrade(remaining: number): number {",
-        "export function remainingToGrade(remaining: number): number {"
-      )
+    // context lines. Built as (engine WITHOUT the export) -> (engine AS IT STANDS) rather than by
+    // adding an export to the live file, because once 5bedfd2f is merged the live file ALREADY
+    // carries it — deriving the "before" keeps this proof valid on both sides of that merge
+    // instead of silently mutating `export` into `export export`.
+    const diff = realDiffFrom(
+      (src) =>
+        src.replace(
+          "export function remainingToGrade(remaining: number): number {",
+          "function remainingToGrade(remaining: number): number {"
+        ),
+      (src) => src
     );
     expect(diff).toContain("-function remainingToGrade(remaining: number): number {");
     expect(diff).toContain("+export function remainingToGrade(remaining: number): number {");
