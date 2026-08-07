@@ -1040,6 +1040,9 @@ describe("Partner RLS isolation coverage is wired up", () => {
     ...PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
     "0051_partner_runtime_flag_control_least_privilege",
     "0052_partner_internal_evidence_rls",
+    "0054_cert_counter_monotonic_allocator",
+    "0055_partner_ledger_preserve_search_path",
+    "0056_partner_hq_control_tables_write_deny",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */
@@ -1595,26 +1598,54 @@ describe("Partner RLS isolation coverage is wired up", () => {
   });
 
   /**
-   * The catalogue itself — asked once, reused by the three sweep assertions below so they cannot
-   * drift apart. NO allowlist filter: whatever the migration chain created is what gets checked.
+   * The catalogue itself — asked once, reused by the sweep assertions below so they cannot drift
+   * apart.
+   *
+   * NO INCLUSION FILTER OF ANY KIND, and that is the whole point (A8-F4, finished here).
+   *
+   * The previous version still carried TWO. `c.relname LIKE 'partner\\_%'` meant a tenant-keyed
+   * table that did not happen to be named partner_* could never fail this sweep, and
+   * `c.relkind = 'r'` meant VIEWS were outside it entirely. An inclusion filter is precisely what
+   * let A8-F1 survive every green run of this file, and leaving two smaller ones in place while
+   * congratulating the register on being exclusion-driven was the same mistake at a smaller scale.
+   *
+   * Both are gone. relkind now covers ordinary tables, PARTITIONED tables ('p' — a partitioned
+   * parent carries its own RLS flags and policies, and a future partitioned partner table would
+   * otherwise be invisible), views and materialised views.
+   *
+   * `partner_wallet_balances` and `partner_credit_availability` are the live cases: both carry
+   * tenant_id, both are SELECT-granted to partner_runtime, and both were outside the sweep. They
+   * are safe TODAY because 0016/0017 declare them WITH (security_invoker = true), so they execute
+   * with the CALLER's privileges and the underlying tables' policies apply. Nothing asserted that,
+   * so a future view landing without it — the default is security_definer semantics, i.e. the
+   * VIEW OWNER's privileges, which would bypass every tenant policy underneath — would have gone
+   * unnoticed. It is asserted now.
    */
-  async function tenantKeyedPartnerTables() {
+  async function tenantKeyedRelations() {
     const { rows } = await client.query<{
       relname: string;
+      relkind: string;
       relrowsecurity: boolean;
       relforcerowsecurity: boolean;
       policies: number;
+      security_invoker: boolean;
     }>(
-      `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
-              (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
+      `SELECT c.relname, c.relkind::text AS relkind, c.relrowsecurity, c.relforcerowsecurity,
+              (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies,
+              COALESCE(c.reloptions, '{}') @> '{security_invoker=true}' AS security_invoker
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'partner\\_%'
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'p')
           AND EXISTS (SELECT 1 FROM pg_attribute a
                        WHERE a.attrelid = c.oid AND a.attname = 'tenant_id'
                          AND a.attnum > 0 AND NOT a.attisdropped)
         ORDER BY c.relname`
     );
     return rows;
+  }
+
+  /** The RLS sweep applies to relations that CAN carry policies: tables and partitioned tables. */
+  async function tenantKeyedPartnerTables() {
+    return (await tenantKeyedRelations()).filter((r) => r.relkind === "r" || r.relkind === "p");
   }
 
   it("every partner table carrying tenant_id has RLS ENABLED, FORCED and an isolation policy", async () => {
@@ -1686,6 +1717,77 @@ describe("Partner RLS isolation coverage is wired up", () => {
   it("every register entry carries a written justification (an exception without a reason is an amnesty)", () => {
     for (const [table, entry] of Object.entries(RLS_EXEMPT_TENANT_TABLES)) {
       expect(entry.why.length, `${table} has no justification`).toBeGreaterThan(40);
+    }
+  });
+
+  it("every tenant-keyed VIEW is security_invoker, so the tables' policies still apply through it", async () => {
+    // A8-F4, the half the relkind='r' filter hid. A view is not policy-bearing, so it can never
+    // appear in the RLS sweep above — but it is absolutely a way to READ tenant rows. PostgreSQL's
+    // default is security_DEFINER semantics: the view executes with the VIEW OWNER's privileges,
+    // and the owner here is the migrator, so every tenant policy underneath would be evaluated
+    // against a role the fixture never intended. `security_invoker = true` is what makes the
+    // underlying policies bind the CALLER instead.
+    const views = (await tenantKeyedRelations()).filter((r) => r.relkind === "v");
+
+    // Floor: these two exist today and are the reason this test does. If the query stops finding
+    // them the assertion below becomes vacuous, which is exactly the failure mode being removed.
+    expect(views.map((v) => v.relname).sort()).toEqual(
+      expect.arrayContaining(["partner_credit_availability", "partner_wallet_balances"])
+    );
+
+    const leaky = views.filter((v) => !v.security_invoker).map((v) => v.relname);
+    expect(
+      leaky,
+      "a tenant-keyed view is NOT security_invoker: it reads with the view owner's privileges, so " +
+        "the tenant policies on its base tables do not bind the caller"
+    ).toEqual([]);
+  });
+
+  it("no tenant-keyed MATERIALISED view exists — it could carry neither RLS nor security_invoker", async () => {
+    // A matview is a stored copy: it has no security_invoker option and policies on its sources do
+    // not apply to reads of it. If one ever lands carrying tenant_id it is a cross-tenant snapshot
+    // by construction, and it needs a deliberate decision rather than a silent pass. Fail closed.
+    const matviews = (await tenantKeyedRelations()).filter((r) => r.relkind === "m").map((r) => r.relname);
+    expect(matviews).toEqual([]);
+  });
+
+  it("MUTATION: the view sweep goes RED on a tenant-keyed view without security_invoker", async () => {
+    // Prove the assertion can fail. Without this, "leaky === []" would also hold if the catalogue
+    // query silently matched nothing — the same vacuous-pass class as the original inclusion filter.
+    await client.query(
+      "CREATE VIEW planted_leaky_tenant_view AS SELECT tenant_id, id FROM partner_locations"
+    );
+    try {
+      const views = (await tenantKeyedRelations()).filter((r) => r.relkind === "v");
+      const leaky = views.filter((v) => !v.security_invoker).map((v) => v.relname);
+      expect(leaky).toContain("planted_leaky_tenant_view");
+    } finally {
+      await client.query("DROP VIEW IF EXISTS planted_leaky_tenant_view");
+    }
+    // …and clean again, so the mutation cannot leave the guard permanently red.
+    const after = (await tenantKeyedRelations()).filter((r) => r.relkind === "v" && !r.security_invoker);
+    expect(after).toEqual([]);
+  });
+
+  it("MUTATION: the table sweep no longer depends on the `partner_%` name filter", async () => {
+    // The dropped inclusion filter, proven dropped. A tenant-keyed table under any other name must
+    // now be swept — before this change it was structurally incapable of failing.
+    await client.query(
+      "CREATE TABLE planted_offboard_tenant_table (id serial primary key, tenant_id uuid not null)"
+    );
+    try {
+      const rows = await tenantKeyedPartnerTables();
+      expect(
+        rows.map((r) => r.relname),
+        "a tenant-keyed table outside the partner_ namespace was not swept"
+      ).toContain("planted_offboard_tenant_table");
+
+      const unprotected = rows
+        .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
+        .map((r) => r.relname);
+      expect(unprotected).toContain("planted_offboard_tenant_table");
+    } finally {
+      await client.query("DROP TABLE IF EXISTS planted_offboard_tenant_table");
     }
   });
 

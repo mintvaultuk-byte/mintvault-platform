@@ -184,6 +184,33 @@ describe("partner schema ↔ migration parity", () => {
       // failed_login_count/locked_until: a successful login zeroes those, so an attacker holding a
       // phished password owns a counter-reset primitive and the shared lock would never arm.
       "0053_partner_mfa_failure_lockout.sql",
+      // 0054 closes the half of A8-F5 that 0052's column-level narrowing does NOT reach. 0052
+      // revoked UPDATE(id) so the allocator row cannot be RE-POINTED, but `last_issued` must keep
+      // UPDATE because that IS the increment — so re-seeding it to 0, rewinding it, or upserting
+      // `ON CONFLICT (id) DO UPDATE SET last_issued = 0` all still produced the identical
+      // platform-wide certificate-number collision, HQ's own certificates included. A privilege
+      // cannot express "increment only", so the constraint lives where OLD and NEW exist: an
+      // ENABLE ALWAYS BEFORE UPDATE OR DELETE trigger, plus a TRUNCATE guard. It also CREATEs
+      // cert_counter when absent (it is otherwise created at application boot by
+      // storage.ts:ensureCertCounterTable), because a silently absent integrity guard is the
+      // failure mode it exists to remove — so unlike its two siblings this file is NOT purely a
+      // privilege change, though it adds no column to any Drizzle-modelled table.
+      "0054_cert_counter_monotonic_allocator.sql",
+      // Security repair, not a schema change: pins search_path and schema-qualifies 0017's
+      // partner_credit_ledger_preserve_active_reservations(), which was SECURITY INVOKER with
+      // proconfig NULL and three unqualified reads and so was pg_temp-shadowable. Its post-flight
+      // additionally SWEEPS THE CLASS — no plpgsql/sql function in public may combine a NULL
+      // proconfig with an unqualified relation reference — because 0048 fixed one instance of this
+      // primitive and did not sweep, which is how the same defect sat in 0017 guarding money.
+      "0055_partner_ledger_preserve_search_path.sql",
+      // Security repair, not a schema change: completes the defence-in-depth layer 0051 described
+      // ("if a future blanket GRANT hands DELETE back, the row is still unreachable") but applied
+      // only to partner_feature_flags. partner_emergency_controls, partner_internal_notes and
+      // partner_management_audit kept FOR ALL tenant-equality policies, which admit the tenant's
+      // OWN rows into UPDATE/DELETE — and on those three tables the tenant's own rows ARE the
+      // asset. Emergency controls keep the tenant-scoped SELECT readEmergencyState() depends on;
+      // the two evidence tables are denied entirely. Adds no table and no column.
+      "0056_partner_hq_control_tables_write_deny.sql",
     ]);
   });
 

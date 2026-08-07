@@ -8,8 +8,33 @@
 --
 -- Journal guard: refuse while any migration numbered above 48 is journalled. The threshold is
 -- always this file's OWN number; if this file is ever renumbered, the integer moves with it.
+--
+-- JOURNAL HANDLING — ADDED 2026-08-07, CLOSING A BLOCKER. This file previously left
+-- `0048_partner_location_snapshot_search_path.sql` in schema_migrations while returning the
+-- function to 0044's un-pinned, pg_temp-shadowable body. scripts/db/migrate.ts:planMigrations
+-- classifies a file as alreadyApplied on the PRESENCE of its journal row alone (migrate.ts:449-462),
+-- so the runner reported 0048 applied and REFUSED to re-apply it: proconfig NULL, the unqualified
+-- `FROM partner_locations` read live again, and the origin-forgery attack fully open behind a green
+-- migration status. The DELETE at the end of this file is what makes a re-apply automatic and
+-- unprompted. It sits inside this file's own transaction, AFTER the reversal assertions, so a
+-- refused or failed rollback never de-journals a migration that is in fact still applied. The
+-- filename there is DATA, not a comment — a rename-by-grep would miss it, so it must track any
+-- renumbering exactly as the `> 48` threshold does.
+--
+-- LOCK SAFETY — ADDED 2026-08-07. `CREATE OR REPLACE FUNCTION` takes ACCESS EXCLUSIVE on the
+-- pg_proc row and, because the function backs trg_partner_submissions_location_snapshot, every
+-- partner_submissions INSERT waits behind it. `ALTER FUNCTION ... RESET ALL` is a second such lock.
+-- The numbered runner NEVER executes this file (scripts/db/migrate.ts's FILE_RE matches only
+-- `NNNN_*.sql`), so the runner's own lock_timeout machinery does not apply and an unbounded wait
+-- here is genuinely unbounded. Bound it inside this file's own transaction, before the first lock
+-- is taken, following the shape rollback-0049 established. SET LOCAL is discarded at
+-- COMMIT/ROLLBACK so it cannot leak into the operator's psql session; if it fires, the whole
+-- rollback aborts atomically and nothing is changed.
 
 BEGIN;
+
+-- MUST be the first statement inside this transaction: it must be in force before the first lock.
+SET LOCAL lock_timeout = '5s';
 
 DO $$
 DECLARE
@@ -86,6 +111,16 @@ BEGIN
      AND tgrelid = 'public.partner_submissions'::regclass;
   IF ntrg <> 1 THEN
     RAISE EXCEPTION 'rollback-0048: expected the snapshot trigger to survive, found %', ntrg;
+  END IF;
+END$$;
+
+-- De-journal, so the runner re-applies 0048 on its next run instead of skipping it as applied.
+-- EXECUTE-only journal access, for the reason recorded in rollback-0045's D4.
+DO $$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $q$DELETE FROM schema_migrations
+                WHERE filename = '0048_partner_location_snapshot_search_path.sql'$q$;
   END IF;
 END$$;
 
