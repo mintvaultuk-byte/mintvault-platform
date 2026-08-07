@@ -170,6 +170,16 @@ describe("partner schema ↔ migration parity", () => {
       //   0050 connector profile-read GRANT           (committed on the origin-trading-name branch)
       //   0051 this file
       "0051_partner_runtime_flag_control_least_privilege.sql",
+      // Security repair, not a schema change: revokes the dead partner_connector_runtime grant on
+      // the two internal-evidence tables and adds RLS to them, splits the partner_service_tiers
+      // policy so its permissive `tenant_id IS NULL` branch governs SELECT only (A8-F7), and
+      // replaces 0049's table-level cert_counter grant with column-level grants that exclude
+      // UPDATE(id) (A8-F5). It adds no table and no column, so the Drizzle-parity assertions above
+      // are unaffected by design.
+      //
+      // 0052 continues the arbitrated numbering recorded above: 0045 stays permanently unused, and
+      // 0046 (staging-applied) through 0051 are taken, so the next free number is 0052.
+      "0052_partner_internal_evidence_rls.sql",
     ]);
   });
 

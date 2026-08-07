@@ -1025,7 +1025,22 @@ describe("Partner RLS isolation coverage is wired up", () => {
    * table, so before this list existed the pilot's actual data surface had ZERO tenant-isolation
    * coverage. Verified to apply cleanly, in this order, onto an empty database.
    */
-  const PARTNER_MIGRATIONS = PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE.map((name) => `${name}.sql`);
+  /**
+   * The chain this suite applies.
+   *
+   * 0051 and 0052 are appended HERE rather than added to
+   * PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE in tests/helpers/partner-realistic-db.ts, because that
+   * exported list is consumed by a dozen other suites whose fixtures assert exact grant sets; both
+   * files revoke privileges, so widening the shared list would turn unrelated suites red for
+   * reasons that have nothing to do with what they test. The security sweep needs the FULL chain —
+   * an RLS audit that stops two migrations short of head is auditing a database nobody runs — so it
+   * extends the list locally.
+   */
+  const PARTNER_MIGRATIONS = [
+    ...PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
+    "0051_partner_runtime_flag_control_least_privilege",
+    "0052_partner_internal_evidence_rls",
+  ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */
   const ID = {
@@ -1086,35 +1101,69 @@ describe("Partner RLS isolation coverage is wired up", () => {
    * unprotected table fails closed (not in the register). Protecting a table listed here ALSO
    * fails, which forces the fix to delete its entry rather than leave a stale exception behind.
    *
-   * `partnerRuntimeGrants` is the load-bearing half. An RLS-less table is only reachable by a
-   * partner session if `partner_runtime` holds a grant on it, so the grant set is pinned per entry
-   * and asserted separately below. Three of these four are genuinely unreachable (no grant); the
-   * fourth is an OPEN HIGH.
+   * THE GRANT SET IS PINNED FOR **BOTH** RUNTIME ROLES — THIS IS THE HALF THAT WAS WRONG.
+   * The previous version of this register pinned `partnerRuntimeGrants` only, and cleared three
+   * entries with the reasoning "no partner_runtime grant, so RLS is not the boundary". That
+   * checked the WRONG ROLE. All three were granted to `partner_connector_runtime`, which the
+   * catalogue confirms is rolsuper=f / rolbypassrls=f — a genuinely restricted role, so its grants
+   * are real reach, and with no RLS the reach was every tenant at once. An exception register that
+   * asks about one role while the exposure sits on another is worse than no register: it
+   * manufactures confidence. Every entry now pins BOTH roles and both are asserted below.
    */
-  const RLS_EXEMPT_TENANT_TABLES: Record<string, { partnerRuntimeGrants: string[]; why: string }> = {
+  const RLS_EXEMPT_TENANT_TABLES: Record<
+    string,
+    { partnerRuntimeGrants: string[]; connectorRuntimeGrants: string[]; why: string }
+  > = {
     partner_connector_records: {
+      // GENUINE, ARCHITECTURAL EXCEPTION — not an amnesty, and not a deferral for want of a
+      // migration number (0052 exists and deliberately does not touch this table).
+      //
+      // This table is a CROSS-TENANT WORK QUEUE by design. server/partner/connector-service.ts:332
+      // `claimNextConnectorRecord` is the connector's central claim loop; it runs on the connector
+      // pool inside withConnectorTx(fn) with NO tenant argument and selects across every tenant at
+      // once (state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1).
+      // `listRetryableConnectorRecords` (:755) is a second such sweep on connectorQuery, which
+      // opens no transaction and sets no GUC at all (connector-db.ts:93-103).
+      //
+      // A `tenant_id = partner_current_tenant()` policy would make both return zero rows FOREVER:
+      // the worker would claim nothing, imports would stop, and partner submissions would never
+      // become certificates — silently, behind a green migration status. Fail-closed is right for
+      // a data boundary and exactly wrong for a queue drain. Hardening here means moving queue
+      // DISCOVERY onto the privileged BYPASSRLS pool that connector-runtime.ts:44-52 already uses
+      // for handoff discovery, so the connector pool only ever touches one named tenant. That is
+      // real follow-up work needing its own FOR UPDATE SKIP LOCKED concurrency proof, not a
+      // migration.
+      //
+      // WHY THE EXPOSURE IS CONTAINED MEANWHILE, verified rather than asserted:
+      //   * partner_runtime — the role every partner-authenticated portal request uses — holds
+      //     NOTHING on this table. Pinned as [] below and asserted, so a future grant fails here.
+      //   * No partner-facing route reaches the connector pool at all: `getConnectorStatus`
+      //     (connector-service.ts:292), the only connector read taking a caller-supplied tenant id,
+      //     has ZERO callers anywhere in the repository, and server/partner/routes.ts and mount.ts
+      //     contain no connector surface.
+      //   * The whole connector plane beneath this table (_events, _imports, _import_attempts,
+      //     _validation_runs, _validation_findings, _customer_links, _admin_actions) carries no
+      //     tenant_id column at all and is keyed on connector_record_id, so RLS on the root alone
+      //     would buy partial containment at full breakage cost.
       partnerRuntimeGrants: [],
-      why: "connector-plane table; reached only by partner_connector_runtime, never granted to partner_runtime",
+      connectorRuntimeGrants: ["INSERT", "SELECT", "UPDATE"],
+      why:
+        "cross-tenant work queue: claimNextConnectorRecord (connector-service.ts:332) claims across " +
+        "all tenants with no GUC, so a tenant policy would drain-lock the connector rather than " +
+        "harden it. Contained by the ROLE boundary — partner_runtime holds nothing on it and no " +
+        "partner-facing route reaches the connector pool. Fix = move queue discovery to the " +
+        "BYPASSRLS admin pool; needs its own concurrency proof.",
     },
-    partner_internal_notes: {
-      partnerRuntimeGrants: [],
-      why: "MintVault-staff-only table; no partner_runtime grant, so RLS is not the boundary",
-    },
-    partner_management_audit: {
-      partnerRuntimeGrants: [],
-      why: "HQ management audit trail; admin-pool only, no partner_runtime grant",
-    },
-    partner_owner_invariant_tenants: {
-      // OPEN HIGH — A8-F1. migrations/0032_partner_final_owner_invariant.sql creates this table at
-      // :9 and grants SELECT, INSERT to partner_runtime at :117, but never issues ENABLE ROW LEVEL
-      // SECURITY and never creates a policy. Every one of the file's five RLS statements concerns
-      // partner_users / partner_user_roles. The behavioural consequence is proved, not narrated,
-      // by the "KNOWN OPEN" test below. Repair needs a new migration number, which this branch is
-      // not authorised to allocate — the entry stays, the leak stays visible, and the fix will
-      // turn BOTH pinned tests red and force this entry's deletion.
-      partnerRuntimeGrants: ["INSERT", "SELECT"],
-      why: "A8-F1 OPEN HIGH: 0032 grants partner_runtime SELECT+INSERT with no RLS and no policy",
-    },
+    // partner_internal_notes and partner_management_audit were HERE and are deliberately GONE:
+    // migration 0052 revoked the dead partner_connector_runtime grant (every reference in the repo
+    // runs on the BYPASSRLS admin pool) AND added ENABLE + FORCE RLS with a tenant policy. Because
+    // this register is asserted in both directions, leaving the entries behind would now fail the
+    // sweep — which is the ratchet working: a fixed table must lose its amnesty, not keep it.
+    //
+    // partner_owner_invariant_tenants was HERE too, as OPEN HIGH A8-F1, and is deliberately GONE:
+    // migration 0047_partner_owner_invariant_tenants_rls.sql closed it. The behavioural
+    // counterpart — a test that REPRODUCED the leak on every run — has been replaced by the
+    // positive proof below, for the same reason.
   };
 
   const FP_A = "a".repeat(64);
@@ -1197,6 +1246,21 @@ describe("Partner RLS isolation coverage is wired up", () => {
       "INSERT INTO certificates (certificate_number, cert_id, secret) VALUES ('MV1','MV1','MV-DATA') ON CONFLICT DO NOTHING"
     );
     await client.query("CREATE TABLE IF NOT EXISTS label_prints (id serial primary key, certificate_id integer)");
+    // The certificate-number allocator, created here BEFORE the chain runs.
+    //
+    // In production storage.ts:ensureCertCounterTable() creates it at application boot, so both
+    // 0049 (which grants on it) and 0052 (which tightens that grant to column level) guard
+    // themselves with to_regclass. If this fixture created it AFTER the chain, 0052's allocator
+    // clause would correctly skip, and the A8-F5 test below would have to re-issue the grants
+    // itself — which would make it a test of its own setup rather than of the migration. Creating
+    // it first means 0052 does the tightening, and deleting that clause from 0052 turns the test
+    // RED. Verified by mutation.
+    await client.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+      id integer PRIMARY KEY DEFAULT 1,
+      last_issued integer NOT NULL DEFAULT 0,
+      updated_at timestamptz NOT NULL DEFAULT NOW())`);
+    await client.query("INSERT INTO cert_counter (id,last_issued) VALUES (1,0) ON CONFLICT (id) DO NOTHING");
+
     // apply the authoritative migrations (idempotent), in dependency order
     for (const file of PARTNER_MIGRATIONS) {
       await client.query(readFileSync(join(process.cwd(), "migrations", file), "utf8"));
@@ -1579,48 +1643,83 @@ describe("Partner RLS isolation coverage is wired up", () => {
     expect(rows.length).toBeGreaterThan(TENANT_TABLES.length);
   });
 
-  it("no RLS-less tenant table is reachable by partner_runtime except the pinned open defect", async () => {
-    // The grant is what turns "no RLS" into "cross-tenant read". Pinning the grant set per exempt
-    // table means a future migration handing partner_runtime access to any currently-unreachable
-    // exempt table fails here, even though the RLS sweep above would still pass.
+  it("every RLS-less tenant table has its reach pinned for BOTH runtime roles, not just partner_runtime", async () => {
+    // The grant is what turns "no RLS" into "cross-tenant read". The previous version of this test
+    // asked only about partner_runtime, which is how three RLS-less tables sat exempt for being
+    // "unreachable" while partner_connector_runtime — equally restricted — held SELECT/INSERT/
+    // UPDATE on all three. Both roles are pinned now, so a grant appearing on EITHER of them
+    // against an RLS-less table fails here even though the RLS sweep above would still pass.
     const rows = await tenantKeyedPartnerTables();
     const exempt = rows
       .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
       .map((r) => r.relname);
 
-    const { rows: grants } = await client.query<{ table_name: string; privilege_type: string }>(
-      `SELECT table_name, privilege_type FROM information_schema.table_privileges
-        WHERE grantee = 'partner_runtime' AND table_name = ANY($1::text[])`,
-      [exempt]
-    );
+    for (const role of ["partner_runtime", "partner_connector_runtime"] as const) {
+      // Guard the guard: a probe against a role that ignores privileges proves nothing. This is
+      // the same class of mistake the register itself made — checking something that cannot fail.
+      const { rows: attrs } = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = $1",
+        [role]
+      );
+      expect(attrs).toHaveLength(1);
+      expect(attrs[0].rolsuper).toBe(false);
+      expect(attrs[0].rolbypassrls).toBe(false);
 
-    const actual = Object.fromEntries(exempt.map((t) => [t, [] as string[]]));
-    for (const g of grants) actual[g.table_name].push(g.privilege_type);
-    for (const t of exempt) actual[t] = [...new Set(actual[t])].sort();
+      const { rows: grants } = await client.query<{ table_name: string; privilege_type: string }>(
+        `SELECT table_name, privilege_type FROM information_schema.table_privileges
+          WHERE grantee = $1 AND table_name = ANY($2::text[])`,
+        [role, exempt]
+      );
 
-    const expected = Object.fromEntries(
-      exempt.map((t) => [t, [...(RLS_EXEMPT_TENANT_TABLES[t]?.partnerRuntimeGrants ?? [])].sort()])
-    );
-    expect(actual).toEqual(expected);
+      const actual = Object.fromEntries(exempt.map((t) => [t, [] as string[]]));
+      for (const g of grants) actual[g.table_name].push(g.privilege_type);
+      for (const t of exempt) actual[t] = [...new Set(actual[t])].sort();
+
+      const key = role === "partner_runtime" ? "partnerRuntimeGrants" : "connectorRuntimeGrants";
+      const expected = Object.fromEntries(
+        exempt.map((t) => [t, [...(RLS_EXEMPT_TENANT_TABLES[t]?.[key] ?? [])].sort()])
+      );
+      expect(actual).toEqual(expected);
+    }
   });
 
-  it("KNOWN OPEN (A8-F1): partner_owner_invariant_tenants leaks every tenant to partner_runtime", async () => {
-    // This asserts the DEFECT, deliberately. It is the behavioural counterpart to the register
-    // entry above: as long as 0032's omission is live, the leak is reproduced on every run instead
-    // of being a line in a document. When the repair migration lands, this test goes RED — which
-    // is the intended signal to delete it together with the register entry.
+  it("every register entry carries a written justification (an exception without a reason is an amnesty)", () => {
+    for (const [table, entry] of Object.entries(RLS_EXEMPT_TENANT_TABLES)) {
+      expect(entry.why.length, `${table} has no justification`).toBeGreaterThan(40);
+    }
+  });
+
+  it("A8-F1 CLOSED by 0047: partner_owner_invariant_tenants is RLS-enabled, FORCED and policy-bearing", async () => {
+    // This REPLACES a test that deliberately reproduced the leak on every run. That test was
+    // correct while 0032's omission was live; migration 0047 closed it, so the ratchet designed
+    // into this file fired exactly as intended — the fix turned the defect-reproducing test red
+    // and forced the register entry's deletion rather than leaving a stale amnesty behind. The
+    // negative claim is replaced by the positive one rather than simply deleted, so the table
+    // stays covered.
+    const { rows } = await client.query<{ rls: boolean; forced: boolean; policies: number }>(
+      `SELECT c.relrowsecurity AS rls, c.relforcerowsecurity AS forced,
+              (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'partner_owner_invariant_tenants'`
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].rls).toBe(true);
+    expect(rows[0].forced).toBe(true);
+    expect(rows[0].policies).toBeGreaterThanOrEqual(1);
+  });
+
+  it("A8-F1 CLOSED by 0047: tenant A cannot enumerate tenants it has no relationship to", async () => {
+    // The BEHAVIOURAL half — the same probe the old KNOWN-OPEN test made, with the expectation
+    // inverted. Fixture provenance is unchanged and still load-bearing: the two rows are NOT
+    // hand-inserted. They are produced by 0032's own trigger partner_enforce_final_owner_invariant()
+    // — the only writer that exists in production — fired by an ordinary partner_user_roles INSERT
+    // that makes an ACTIVE user a PARTNER_OWNER. Two throwaway tenants keep the shared A/B fixture
+    // untouched. (The PARTNER_OWNER role row is created here because 0034's seed uses ON COMMIT
+    // DROP temp tables and leaves partner_roles empty under this suite's file-at-a-time apply.)
     //
-    // Contrast arm: partner_organisations, an RLS-protected table on the same connection with the
-    // same GUC, returns only tenant A's row. So this is not a fixture artefact or a missing tenant
-    // context — it is the table ignoring tenant context entirely.
-    //
-    // FIXTURE PROVENANCE: the two rows this reads are NOT hand-inserted into
-    // partner_owner_invariant_tenants. They are produced by 0032's own trigger function
-    // partner_enforce_final_owner_invariant() — the only writer that exists in production — fired
-    // by an ordinary partner_user_roles INSERT that makes an ACTIVE user a PARTNER_OWNER. Two
-    // throwaway tenants are used so the shared A/B fixture is untouched. (The PARTNER_OWNER role
-    // row is created here because 0034's seed uses ON COMMIT DROP temp tables and leaves
-    // partner_roles empty under this suite's statement-at-a-time migration application.)
+    // Without the precondition below, "0 rows" would be indistinguishable from "the trigger never
+    // wrote anything" — a vacuous pass, which is precisely the failure mode this suite exists to
+    // avoid.
     const C = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     const D = "dddddddd-dddd-dddd-dddd-dddddddddddd";
     const ownerRole = "eeeeeeee-0000-0000-0000-00000000000e";
@@ -1658,24 +1757,182 @@ describe("Partner RLS isolation coverage is wired up", () => {
       "SELECT count(*)::int n FROM partner_owner_invariant_tenants WHERE tenant_id = ANY($1::uuid[])",
       [[C, D]]
     );
-    // Precondition, not the assertion: if the production trigger did not populate the table, the
-    // leak assertion below would pass or fail for the wrong reason.
     expect(seeded.rows[0].n).toBe(2);
 
     await asPartner(A, async () => {
+      // Contrast arm: an RLS-protected table on the same connection with the same GUC.
       const isolated = await client.query<{ n: number }>(
         "SELECT count(*)::int n FROM partner_organisations WHERE id = ANY($1::uuid[])",
         [[C, D]]
       );
       expect(isolated.rows[0].n).toBe(0);
 
+      // The claim: tenant A holds no relationship to C or D and now reads NEITHER.
       const leaked = await client.query<{ n: number }>(
         "SELECT count(*)::int n FROM partner_owner_invariant_tenants WHERE tenant_id = ANY($1::uuid[])",
         [[C, D]]
       );
-      // Tenant A holds no relationship whatsoever to C or D, yet reads both.
-      expect(leaked.rows[0].n).toBe(2);
+      expect(leaked.rows[0].n).toBe(0);
     });
+  });
+
+  // =========================================================================================
+  // 0052 — the repairs this branch landed, each proved as the RESTRICTED CONNECTOR role.
+  //
+  // Every claim below runs under SET ROLE partner_connector_runtime, and each one first asserts
+  // that the acting role is not a superuser and does not hold BYPASSRLS. Without that assertion a
+  // probe passes whether or not the fix exists, which is exactly how the original finding survived.
+  // =========================================================================================
+
+  async function asConnector(tenant: string | null, fn: () => Promise<void>) {
+    await client.query("SET ROLE partner_connector_runtime");
+    try {
+      const { rows } = await client.query<{ su: string; rs: string; bypass: boolean; sup: boolean }>(
+        `SELECT current_setting('is_superuser') AS su, current_setting('row_security') AS rs,
+                r.rolbypassrls AS bypass, r.rolsuper AS sup
+           FROM pg_roles r WHERE r.rolname = current_user`
+      );
+      expect(current_user_is(rows[0])).toBe(true);
+      if (tenant === null) await client.query("RESET app.tenant_id");
+      else await client.query("SELECT set_config('app.tenant_id', $1, false)", [tenant]);
+      await fn();
+    } finally {
+      await client.query("RESET ROLE");
+    }
+  }
+
+  /** Harness integrity in one place: the acting role must be genuinely bound by privileges + RLS. */
+  function current_user_is(r: { su: string; rs: string; bypass: boolean; sup: boolean }): boolean {
+    return r.su === "off" && r.rs === "on" && r.bypass === false && r.sup === false;
+  }
+
+  for (const table of ["partner_internal_notes", "partner_management_audit"] as const) {
+    it(`0052: ${table} is unreachable by partner_connector_runtime — the dead grant is gone`, async () => {
+      // PRIMARY repair: the 0015:159 grant was never used by any code path (every reference runs on
+      // the BYPASSRLS admin pool), so it was revoked outright. The expected outcome is therefore
+      // 42501 permission-denied, which is strictly stronger than "zero rows": a revoked privilege
+      // cannot be defeated by a policy mistake.
+      await asConnector(null, async () => {
+        await expect(client.query(`SELECT * FROM ${table}`)).rejects.toMatchObject({ code: "42501" });
+      });
+      // …and with a perfectly valid tenant context too, so this is not a missing-GUC artefact.
+      await asConnector(A, async () => {
+        await expect(client.query(`SELECT * FROM ${table}`)).rejects.toMatchObject({ code: "42501" });
+      });
+    });
+
+    it(`0052: ${table} is ALSO tenant-scoped by RLS, so a restored grant is still not a leak`, async () => {
+      // DEFENCE IN DEPTH: 0001's blanket GRANT loop is exactly how the kill-switch defect 0051 had
+      // to repair came about, so the repair must survive the grant coming back. Restoring it inside
+      // this test and re-attacking is the only way to prove the second layer exists at all — the
+      // catalogue flags alone would not show that the policy actually binds.
+      await client.query(`GRANT SELECT ON ${table} TO partner_connector_runtime`);
+      try {
+        await asConnector(null, async () => {
+          const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int n FROM ${table}`);
+          expect(rows[0].n).toBe(0); // missing context fails CLOSED — no rows, not all rows
+        });
+        await asConnector(B, async () => {
+          const { rows } = await client.query<{ a_rows: number; b_rows: number; total: number }>(
+            `SELECT count(*) FILTER (WHERE tenant_id = $1)::int AS a_rows,
+                    count(*) FILTER (WHERE tenant_id = $2)::int AS b_rows,
+                    count(*)::int AS total FROM ${table}`,
+            [A, B]
+          );
+          expect(rows[0].a_rows).toBe(0); // tenant B cannot enumerate tenant A
+          // Nothing outside B is visible at all — and the query carries NO tenant predicate, so a
+          // pass here means RLS did the filtering rather than the WHERE clause.
+          expect(rows[0].total).toBe(rows[0].b_rows);
+        });
+      } finally {
+        await client.query(`REVOKE ALL ON ${table} FROM partner_connector_runtime`);
+      }
+      // The finally block must have actually restored the pinned state, or every later test in this
+      // file is running against a database this one silently widened.
+      const { rows } = await client.query<{ n: number }>(
+        `SELECT count(*)::int n FROM information_schema.table_privileges
+          WHERE grantee = 'partner_connector_runtime' AND table_name = $1`,
+        [table]
+      );
+      expect(rows[0].n).toBe(0);
+    });
+  }
+
+  it("0052 / A8-F7: a global service tier is READABLE by a tenant but not DELETABLE, even with a DML grant", async () => {
+    // PostgreSQL governs DELETE by the USING clause ALONE — WITH CHECK is never consulted for a row
+    // being removed — so the pre-0052 combined policy's permissive `tenant_id IS NULL` read branch
+    // doubled as a permissive DELETE branch over the platform-wide pricing rows. The grant is
+    // deliberately restored here: the whole point of the policy split is that the repair holds even
+    // when the privilege does, so testing it without the grant would prove nothing.
+    await client.query(
+      `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days)
+         VALUES (NULL, 'global0052', 'Global Tier', 1234, 5) ON CONFLICT DO NOTHING`
+    );
+    await client.query("GRANT SELECT, INSERT, UPDATE, DELETE ON partner_service_tiers TO partner_runtime");
+    try {
+      await asPartner(A, async () => {
+        const read = await client.query<{ n: number }>(
+          "SELECT count(*)::int n FROM partner_service_tiers WHERE tenant_id IS NULL AND tier_code='global0052'"
+        );
+        expect(read.rows[0].n).toBe(1); // the global read branch must SURVIVE, or pricing breaks
+
+        const del = await client.query("DELETE FROM partner_service_tiers WHERE tenant_id IS NULL");
+        expect(del.rowCount).toBe(0); // …but it must not govern writes
+
+        const upd = await client.query(
+          "UPDATE partner_service_tiers SET price_per_card_pence = 1 WHERE tenant_id IS NULL"
+        );
+        expect(upd.rowCount).toBe(0);
+      });
+    } finally {
+      await client.query("REVOKE INSERT, UPDATE, DELETE ON partner_service_tiers FROM partner_runtime");
+      await client.query("REVOKE SELECT ON partner_service_tiers FROM partner_runtime");
+      await client.query("GRANT SELECT ON partner_service_tiers TO partner_runtime");
+    }
+    const survived = await client.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_service_tiers WHERE tenant_id IS NULL AND tier_code='global0052'"
+    );
+    expect(survived.rows[0].n).toBe(1);
+  });
+
+  it("0052 / A8-F5: the connector can drive the certificate allocator but cannot re-point it", async () => {
+    // cert_counter is the single-row, platform-global certificate-number allocator, created at
+    // application boot (storage.ts:1336) rather than by a migration. The fixture creates it before
+    // the chain runs so 0052's to_regclass-guarded allocator clause actually fires — see beforeAll.
+    // NOTHING is granted here on purpose. cert_counter exists before the chain runs (see
+    // beforeAll), so 0049 granted table-level and 0052 tightened it to column level. Re-issuing
+    // the grants here would test this test's own setup instead of the migration.
+
+    await asConnector(null, async () => {
+      // The ATTACK: re-point the allocator row, then re-seed id=1 at zero. Every certificate number
+      // issued afterwards would collide with already-printed slabs — platform-wide, HQ's included.
+      await expect(client.query("UPDATE cert_counter SET id = 2 WHERE id = 1")).rejects.toMatchObject({
+        code: "42501",
+      });
+
+      // The LEGITIMATE path must still work, or partner imports fail 42501 in production. This is
+      // the arm that stops the repair from being "secure because it is broken".
+      await client.query("INSERT INTO cert_counter (id,last_issued) VALUES (1,0) ON CONFLICT (id) DO NOTHING");
+      const inc = await client.query<{ last_issued: number }>(
+        "UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued"
+      );
+      expect(inc.rows[0].last_issued).toBeGreaterThan(0);
+    });
+
+    // No table-level privilege survives — a table-level grant would silently re-confer UPDATE(id).
+    const { rows } = await client.query<{ n: number }>(
+      `SELECT count(*)::int n FROM information_schema.table_privileges
+        WHERE grantee = 'partner_connector_runtime' AND table_name = 'cert_counter'`
+    );
+    expect(rows[0].n).toBe(0);
+    const { rows: colp } = await client.query<{ upd_id: boolean; upd_last: boolean; sel_id: boolean }>(
+      `SELECT has_column_privilege('partner_connector_runtime','public.cert_counter','id','UPDATE')          AS upd_id,
+              has_column_privilege('partner_connector_runtime','public.cert_counter','last_issued','UPDATE') AS upd_last,
+              has_column_privilege('partner_connector_runtime','public.cert_counter','id','SELECT')          AS sel_id`
+    );
+    expect(colp[0].upd_id).toBe(false); // the primary key — the re-point vector
+    expect(colp[0].upd_last).toBe(true); // …while the increment the importer needs survives
+    expect(colp[0].sel_id).toBe(true); // …and `WHERE id = 1` still resolves
   });
 
   // =========================================================================================
