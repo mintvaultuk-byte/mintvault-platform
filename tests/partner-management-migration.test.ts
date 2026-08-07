@@ -16,7 +16,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom, createMintvaultCertificatesTable, createMintvaultLabelPrintsTable } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, createMintvaultCertificatesTable, createMintvaultLabelPrintsTable, MIGRATOR_ROLE } from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -174,16 +174,46 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     ]);
   });
 
-  it("grants: data tables SELECT to partner_runtime; evidence tables SELECT+INSERT to partner_connector_runtime; no PUBLIC", async () => {
+  it("grants: data tables SELECT to partner_runtime; evidence tables reachable by NO role but their owner (0052); no PUBLIC", async () => {
     const grantsFor = async (t: string, grantee: string) =>
       (await admin.query("SELECT privilege_type FROM information_schema.role_table_grants WHERE table_name=$1 AND grantee=$2 ORDER BY privilege_type", [t, grantee])).rows.map((r) => r.privilege_type);
     for (const t of ["partner_profiles", "partner_contacts", "partner_branding"]) {
       expect(await grantsFor(t, "partner_runtime")).toEqual(["SELECT"]);
       expect(await grantsFor(t, "partner_connector_runtime")).toEqual([]);
     }
+    /**
+     * 0052 REVOKEd the 0015:159 `GRANT SELECT, INSERT … TO partner_connector_runtime` on both
+     * internal-evidence tables. It was dead privilege: every reference to either table in the
+     * repository runs on the privileged admin pool, so nothing lost reach.
+     *
+     * The pin below is deliberately STRONGER than "the connector grant is now []". Pinning only
+     * that would go green again the moment some future blanket GRANT loop (which is exactly how
+     * the kill-switch defect 0051 had to repair came about) handed the privilege to a DIFFERENT
+     * role. What 0052 actually establishes is that NO role other than the table OWNER holds any
+     * privilege on these tables, by any route, at TABLE or COLUMN level — so that is what is
+     * asserted, as an allowlist of one. A table-level REVOKE does not remove column grants, which
+     * is why column_privileges is swept separately rather than trusted to follow.
+     */
     for (const t of ["partner_internal_notes", "partner_management_audit"]) {
-      expect(await grantsFor(t, "partner_connector_runtime")).toEqual(["INSERT", "SELECT"]);
+      expect(await grantsFor(t, "partner_connector_runtime")).toEqual([]);
       expect(await grantsFor(t, "partner_runtime")).toEqual([]); // never partner-visible
+      const otherGrantees = (
+        await admin.query<{ grantee: string }>(
+          "SELECT DISTINCT grantee FROM information_schema.role_table_grants WHERE table_schema='public' AND table_name=$1 AND grantee <> $2 ORDER BY grantee",
+          [t, MIGRATOR_ROLE]
+        )
+      ).rows.map((r) => r.grantee);
+      expect(otherGrantees, `${t}: a non-owner role holds a table privilege on an internal-evidence table`).toEqual([]);
+      const otherColumnGrantees = (
+        await admin.query<{ grantee: string }>(
+          "SELECT DISTINCT grantee FROM information_schema.column_privileges WHERE table_schema='public' AND table_name=$1 AND grantee <> $2 ORDER BY grantee",
+          [t, MIGRATOR_ROLE]
+        )
+      ).rows.map((r) => r.grantee);
+      expect(otherColumnGrantees, `${t}: column-level privilege residue survives the 0052 REVOKE`).toEqual([]);
+      // The owner keeps full DML — it is the identity the privileged admin pool connects as, and
+      // it is the ONLY principal that legitimately writes these tables after 0052.
+      expect(await grantsFor(t, MIGRATOR_ROLE)).toEqual(["DELETE", "INSERT", "REFERENCES", "SELECT", "TRIGGER", "TRUNCATE", "UPDATE"]);
     }
     const pub = await admin.query(
       "SELECT count(*)::int n FROM information_schema.role_table_grants WHERE grantee='PUBLIC' AND table_name IN ('partner_profiles','partner_contacts','partner_branding','partner_internal_notes','partner_management_audit')"
@@ -205,9 +235,37 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
       "partner_contacts_tenant_isolation",
       "partner_profiles_tenant_isolation",
     ]);
-    // evidence tables have NO RLS (internal, admin-written)
-    const noRls = await admin.query("SELECT relrowsecurity FROM pg_class WHERE relname IN ('partner_internal_notes','partner_management_audit')");
-    for (const r of noRls.rows) expect(r.relrowsecurity).toBe(false);
+  });
+
+  /**
+   * 0052 gave the two internal-evidence tables the SAME treatment 0015:138-149 gave the three data
+   * tables. This test previously pinned `relrowsecurity === false` on them and described that as
+   * intentional ("evidence tables have NO RLS, internal, admin-written"). That was true when 0015
+   * was the newest migration; it is now the pre-repair state, and pinning it would mean the suite
+   * demands the vulnerability back.
+   *
+   * The shape asserted here is exactly what 0052's own post-flight requires, restated from the
+   * catalogue rather than trusted from the migration: ENABLE **and** FORCE (ENABLE alone leaves the
+   * owner unbound), exactly ONE policy per table, and that policy tenant-scoped in BOTH directions.
+   * USING alone would leave INSERT unconstrained; WITH CHECK alone would leave SELECT unconstrained.
+   */
+  it("0052: FORCE RLS + a both-directions tenant policy on the 2 internal-evidence tables", async () => {
+    for (const t of ["partner_internal_notes", "partner_management_audit"]) {
+      const { rows } = await admin.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname='public' AND c.relname=$1",
+        [t]
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].relrowsecurity, `${t}: RLS is not enabled`).toBe(true);
+      expect(rows[0].relforcerowsecurity, `${t}: RLS is enabled but not FORCEd — the owner stays unbound`).toBe(true);
+      const pol = await admin.query<{ policyname: string; qual: string; with_check: string }>(
+        "SELECT policyname, qual, with_check FROM pg_policies WHERE schemaname='public' AND tablename=$1",
+        [t]
+      );
+      expect(pol.rows.map((r) => r.policyname)).toEqual([`${t}_tenant_isolation`]);
+      expect(pol.rows[0].qual).toContain("partner_current_tenant()");
+      expect(pol.rows[0].with_check).toContain("partner_current_tenant()");
+    }
   });
 
   it("RLS cross-tenant SELECT isolation for partner_runtime on partner_contacts", async () => {
@@ -225,18 +283,148 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     });
   });
 
-  it("append-only: partner_connector_runtime INSERT/SELECT ok; UPDATE/DELETE/TRUNCATE reject 42501", async () => {
-    await admin.query("SET ROLE partner_connector_runtime");
+  /**
+   * ==========================================================================================
+   * THE APPEND-ONLY PROOF, AFTER 0052
+   * ==========================================================================================
+   * Before 0052 the append-only property of the two internal-evidence tables was enforced by the
+   * SHAPE OF A GRANT: 0015:159 gave partner_connector_runtime SELECT + INSERT and nothing else, so
+   * UPDATE / DELETE / TRUNCATE came back 42501. That is what this block used to assert.
+   *
+   * 0052 REVOKEd that grant outright, because it was dead privilege — every reference to either
+   * table in the repository runs on the privileged admin pool. So the old assertion now fails on
+   * the very FIRST statement with "permission denied for table partner_internal_notes", and the
+   * connector role is no longer a principal that writes these tables at all.
+   *
+   * Simply flipping the expected values to "42501 on everything" would record the weaker half of
+   * what changed. The three tests below pin the whole of it:
+   *
+   *   (1) LOCKOUT — the primary repair. Neither restricted role can touch either table by any DML
+   *       verb. A revoked privilege beats a policy: it cannot be defeated by a policy mistake.
+   *   (2) APPEND-ONLY UNDER A RESTORED GRANT — the defence in depth. 0001's blanket GRANT loop is
+   *       precisely how the kill-switch defect 0051 had to repair came about, so the repair has to
+   *       survive the grant coming back. Restoring the exact 0015:159 grant inside the test and
+   *       re-attacking is the ONLY way to show the second layer binds at all; the catalogue flags
+   *       alone would not. Append-only AND tenant-scoping are both proved, then the grant is
+   *       removed again and the post-0052 catalogue re-asserted, so the test cannot leave the
+   *       database in the pre-repair state for anything that runs after it.
+   *   (3) THE LEGITIMATE WRITER — the admin pool. It is the only principal that still writes these
+   *       tables, and after 0052 its cross-tenant reads work ONLY because it holds BYPASSRLS: FORCE
+   *       ROW LEVEL SECURITY binds even the table OWNER, so an owner-privileged NOBYPASSRLS
+   *       connection would see zero rows and HQ's notes/audit reads would silently return nothing.
+   *       That makes the pool's BYPASSRLS load-bearing rather than incidental, and (3) proves both
+   *       sides of it against real roles instead of taking 0052's header comment on trust.
+   */
+  it("0052 (1): both restricted roles are locked out of the evidence tables entirely — no DML verb reaches them", async () => {
+    for (const role of ["partner_connector_runtime", "partner_runtime"]) {
+      await admin.query(`SET ROLE ${role}`);
+      try {
+        for (const t of ["partner_internal_notes", "partner_management_audit"]) {
+          await expect(admin.query(`SELECT * FROM ${t}`), `${role} can SELECT ${t}`).rejects.toMatchObject({ code: "42501" });
+          await expect(admin.query(`DELETE FROM ${t}`), `${role} can DELETE ${t}`).rejects.toMatchObject({ code: "42501" });
+          await expect(admin.query(`TRUNCATE ${t}`), `${role} can TRUNCATE ${t}`).rejects.toMatchObject({ code: "42501" });
+        }
+        await expect(
+          admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'x',gen_random_uuid(),'a@e.com')", [A])
+        ).rejects.toMatchObject({ code: "42501" });
+        await expect(admin.query("UPDATE partner_internal_notes SET body='y'")).rejects.toMatchObject({ code: "42501" });
+        await expect(
+          admin.query(
+            "INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result) VALUES ($1,'note_added',gen_random_uuid(),'a@e.com','r1','attempted')",
+            [A]
+          )
+        ).rejects.toMatchObject({ code: "42501" });
+        await expect(admin.query("UPDATE partner_management_audit SET result='succeeded'")).rejects.toMatchObject({ code: "42501" });
+      } finally {
+        await admin.query("RESET ROLE");
+      }
+    }
+  });
+
+  it("0052 (2): with the 0015 grant restored, writes stay append-only AND tenant-scoped — then the grant is gone again", async () => {
+    // The exact statement 0052 revoked, restored verbatim.
+    await admin.query("GRANT SELECT, INSERT ON partner_internal_notes, partner_management_audit TO partner_connector_runtime");
     try {
-      await admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'x',gen_random_uuid(),'a@e.com')", [A]);
-      await admin.query("INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result) VALUES ($1,'note_added',gen_random_uuid(),'a@e.com','r1','attempted')", [A]);
+      await admin.query("SET ROLE partner_connector_runtime");
+      await admin.query("SELECT set_config('app.tenant_id', $1, false)", [A]);
+      // INSERT of an OWN-tenant row is admitted by WITH CHECK.
+      await admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'own-tenant note',gen_random_uuid(),'a@e.com')", [A]);
+      await admin.query(
+        "INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result) VALUES ($1,'note_added',gen_random_uuid(),'a@e.com','r1','attempted')",
+        [A]
+      );
+      // …an OTHER-tenant row is not. Without 0052's policy this would have succeeded: the grant
+      // alone carries no tenant scope, which is the whole reason the second layer exists.
+      await expect(
+        admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'cross-tenant forge',gen_random_uuid(),'b@e.com')", [B])
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        admin.query(
+          "INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result) VALUES ($1,'note_added',gen_random_uuid(),'b@e.com','r-forge','attempted')",
+          [B]
+        )
+      ).rejects.toMatchObject({ code: "42501" });
+      // …and the reads are confined to the acting tenant, so a restored grant is not a leak either.
+      const seen = await admin.query<{ n: number }>("SELECT count(*) FILTER (WHERE tenant_id <> $1)::int AS n FROM partner_internal_notes", [A]);
+      expect(seen.rows[0].n, "a restored grant let the connector role read another tenant's notes").toBe(0);
+      // APPEND-ONLY: the restored grant carries SELECT + INSERT only, so mutation is still 42501.
       await expect(admin.query("UPDATE partner_internal_notes SET body='y'")).rejects.toMatchObject({ code: "42501" });
       await expect(admin.query("DELETE FROM partner_internal_notes")).rejects.toMatchObject({ code: "42501" });
       await expect(admin.query("TRUNCATE partner_management_audit")).rejects.toMatchObject({ code: "42501" });
       await expect(admin.query("UPDATE partner_management_audit SET result='succeeded'")).rejects.toMatchObject({ code: "42501" });
     } finally {
-      await admin.query("RESET ROLE");
+      await admin.query("RESET ROLE").catch(() => {});
+      await admin.query("REVOKE ALL ON partner_internal_notes, partner_management_audit FROM partner_connector_runtime").catch(() => {});
     }
+    // The database is back in the post-0052 state this suite asserts everywhere else.
+    const residue = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM information_schema.role_table_grants WHERE table_schema='public' AND grantee='partner_connector_runtime' AND table_name IN ('partner_internal_notes','partner_management_audit')"
+    );
+    expect(residue.rows[0].n, "this test left the pre-0052 grant behind").toBe(0);
+  });
+
+  it("0052 (3): the admin pool still writes and reads both tables across tenants — and only because it holds BYPASSRLS", async () => {
+    // Seed one row per tenant on the superuser connection (which models the privileged pool).
+    await admin.query("SELECT set_config('app.tenant_id', '', false)");
+    for (const t of [A, B]) {
+      await admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'pool-written',gen_random_uuid(),'hq@e.com')", [t]);
+    }
+    const both = await admin.query<{ n: number }>("SELECT count(DISTINCT tenant_id)::int n FROM partner_internal_notes WHERE body='pool-written'");
+    expect(both.rows[0].n).toBe(2);
+
+    /**
+     * Now the same reach through two roles that differ ONLY in BYPASSRLS, both holding identical
+     * table privileges. partner_definer is the estate's BYPASSRLS role (provisioned by
+     * partner-realistic-db); pn_migrator OWNS these tables and is NOBYPASSRLS.
+     */
+    const roleFacts = await admin.query<{ rolname: string; rolbypassrls: boolean; rolsuper: boolean }>(
+      "SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname IN ('partner_definer', $1) ORDER BY rolname",
+      [MIGRATOR_ROLE]
+    );
+    expect(roleFacts.rows.find((r) => r.rolname === "partner_definer")).toMatchObject({ rolbypassrls: true, rolsuper: false });
+    expect(roleFacts.rows.find((r) => r.rolname === MIGRATOR_ROLE)).toMatchObject({ rolbypassrls: false, rolsuper: false });
+
+    await admin.query("GRANT SELECT, INSERT, UPDATE, DELETE ON partner_internal_notes TO partner_definer");
+    try {
+      // No tenant context at all — exactly how the admin pool reads, with its own WHERE clause.
+      await admin.query("SELECT set_config('app.tenant_id', '', false)");
+      await admin.query("SET ROLE partner_definer");
+      const bypass = await admin.query<{ n: number }>("SELECT count(DISTINCT tenant_id)::int n FROM partner_internal_notes");
+      expect(bypass.rows[0].n, "BYPASSRLS did not outrank FORCE RLS — the admin pool's cross-tenant reads are broken").toBe(2);
+      await admin.query("RESET ROLE");
+
+      // The OWNER, with strictly more table privilege but no BYPASSRLS, is bound by FORCE RLS.
+      await admin.query(`SET ROLE ${MIGRATOR_ROLE}`);
+      const owned = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_internal_notes");
+      expect(owned.rows[0].n, "FORCE ROW LEVEL SECURITY is not binding the table owner").toBe(0);
+    } finally {
+      await admin.query("RESET ROLE").catch(() => {});
+      await admin.query("REVOKE ALL ON partner_internal_notes FROM partner_definer").catch(() => {});
+    }
+    const residue = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM information_schema.role_table_grants WHERE table_schema='public' AND grantee='partner_definer' AND table_name='partner_internal_notes'"
+    );
+    expect(residue.rows[0].n, "this test left a grant on partner_definer behind").toBe(0);
   });
 
   it("contact-primary partial-unique blocks a 2nd active primary; audit idempotency blocks a 2nd succeeded key", async () => {
