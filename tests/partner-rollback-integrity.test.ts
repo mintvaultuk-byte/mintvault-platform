@@ -72,6 +72,35 @@ const LOC_B = "bbbbbbbb-2222-2222-2222-bbbbbbbb0001";
 const WALLET_A = "aaaaaaaa-1111-1111-1111-aaaaaaaa0003";
 const FP = "a".repeat(64);
 
+/**
+ * THE pg_temp CLASS SWEEP — the same query 0054's post-flight runs, kept here so it executes on
+ * EVERY CI pass rather than once at migration time. A migration assertion fires when the migration
+ * is applied and never again; that is a checkpoint, not a ratchet, and the whole point of MEDIUM-5
+ * is that 0048 fixed one instance of this class and nothing stopped it regrowing.
+ *
+ * Any plpgsql/sql function in `public` with NO pinned search_path (proconfig IS NULL) that reads a
+ * relation UNQUALIFIED can be shadowed via pg_temp by anyone who can CREATE TEMP TABLE — a default
+ * PUBLIC privilege on the database.
+ *
+ * `old` and `new` are excluded because `IS DISTINCT FROM OLD.x` matches a naive FROM regex without
+ * being a relation reference at all. Four of the five hits in the first run of this sweep were
+ * exactly that, and a sweep that cries wolf is one that gets an exclusion list bolted onto it.
+ */
+const UNPINNED_FUNCTION_SWEEP = `
+  SELECT p.proname
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language  l ON l.oid = p.prolang
+   WHERE n.nspname = 'public'
+     AND l.lanname IN ('plpgsql', 'sql')
+     AND p.proconfig IS NULL
+     AND EXISTS (
+       SELECT 1
+         FROM regexp_matches(p.prosrc, '(?:from|join)\\s+([a-z_][a-z0-9_]*)', 'gi') AS m
+        WHERE lower(m[1]) NOT IN ('old', 'new')
+     )
+   ORDER BY p.proname`;
+
 // =============================================================================================
 // Helpers
 // =============================================================================================
@@ -701,4 +730,428 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
       expect(await entry.probe(), `${entry.migration} did not re-close after full recovery`).toBe(entry.whenApplied);
     }
   }, 180_000);
+
+  // ===========================================================================================
+  // 4. cert_counter — the HIGH that 0052's column narrowing does NOT close.
+  // ===========================================================================================
+
+  describe("0053 — the allocator advances or nothing happens", () => {
+    /**
+     * Every case below runs as partner_connector_runtime: NOT a superuser, NOT BYPASSRLS, holding
+     * exactly the column grants 0052/0053 leave it — INCLUDING UPDATE(last_issued), which it must
+     * have, because that is the increment. That is the whole difficulty: the privilege the
+     * connector legitimately needs is the same privilege the attack uses, so no grant can separate
+     * them and the constraint has to be expressed as a relationship between OLD and NEW.
+     */
+    it("re-seed to 0 is REFUSED", async () => {
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt("UPDATE cert_counter SET last_issued = 0, updated_at = NOW() WHERE id = 1");
+        expect(r.ok, "re-seeding the platform-wide allocator to 0 was permitted").toBe(false);
+        expect(r.error).toMatch(/strictly monotonic/);
+      });
+    });
+
+    it("a rewind (decrement) is REFUSED", async () => {
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt(
+          "UPDATE cert_counter SET last_issued = last_issued - 100, updated_at = NOW() WHERE id = 1"
+        );
+        expect(r.ok, "rewinding the allocator was permitted").toBe(false);
+        expect(r.error).toMatch(/strictly monotonic/);
+      });
+    });
+
+    it("a no-op (same value) is REFUSED — 'may only advance' means strictly", async () => {
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt("UPDATE cert_counter SET last_issued = last_issued, updated_at = NOW() WHERE id = 1");
+        expect(r.ok).toBe(false);
+      });
+    });
+
+    it("INSERT ... ON CONFLICT (id) DO UPDATE SET last_issued = 0 is REFUSED", async () => {
+      // The upsert route reaches the SAME row without the statement ever containing the word
+      // UPDATE, which is why the column-grant fix looked complete until someone tried it.
+      // ON CONFLICT DO UPDATE fires the BEFORE UPDATE trigger, which is what catches it.
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt(
+          "INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO UPDATE SET last_issued = 0"
+        );
+        expect(r.ok, "the upsert re-seed route was permitted").toBe(false);
+        expect(r.error).toMatch(/strictly monotonic/);
+      });
+    });
+
+    it("DELETE of the allocator row is REFUSED (delete-then-insert is re-seeding by another name)", async () => {
+      const r = await attempt("DELETE FROM cert_counter WHERE id = 1");
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/must not be deleted/);
+    });
+
+    it("re-pointing the row (UPDATE id) is REFUSED", async () => {
+      await asRole("partner_connector_runtime", A, async () => {
+        const r = await attempt("UPDATE cert_counter SET id = 2 WHERE id = 1");
+        expect(r.ok).toBe(false);
+      });
+    });
+
+    it("THE REAL INCREMENT STILL WORKS — storage.ts:1377-1379 and connector-import-service.ts:57-61", async () => {
+      /**
+       * A guard that breaks issuance is worse than the hole it closes. These are the two allocator
+       * call sites verbatim: the HQ grading path on the application pool, then the partner
+       * connector path on the RESTRICTED role, which is the harder case.
+       */
+      const before = Number(
+        (await admin.query<{ n: number }>("SELECT last_issued AS n FROM cert_counter WHERE id = 1")).rows[0].n
+      );
+
+      await admin.query("INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING");
+      const hq = await admin.query<{ last_issued: number }>(
+        "UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued"
+      );
+      expect(hq.rowCount, "storage.ts:1382 raises FATAL when this returns no rows").toBe(1);
+      expect(Number(hq.rows[0].last_issued)).toBe(before + 1);
+
+      await asRole("partner_connector_runtime", A, async () => {
+        await admin.query("INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING");
+        const c = await admin.query<{ last_issued: number }>(
+          "UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued"
+        );
+        expect(c.rowCount, "connector-import-service.ts:62 throws FATAL on an invalid number").toBe(1);
+        expect(Number(c.rows[0].last_issued)).toBe(before + 2);
+      });
+    });
+
+    it("MUTATION: every refusal above becomes a SUCCESS once the guard trigger is disabled", async () => {
+      // RED-without-it, on the real object rather than a copy. If this ever stops showing the
+      // attacks succeeding, the assertions above are passing for some other reason and have stopped
+      // being evidence for the guard.
+      await admin.query("ALTER TABLE cert_counter DISABLE TRIGGER trg_cert_counter_monotonic");
+      try {
+        await asRole("partner_connector_runtime", A, async () => {
+          const reseed = await attempt("UPDATE cert_counter SET last_issued = 0, updated_at = NOW() WHERE id = 1");
+          expect(reseed.ok, "re-seed should succeed without the guard").toBe(true);
+          expect(reseed.rows).toBe(1);
+
+          const upsert = await attempt(
+            "INSERT INTO cert_counter (id, last_issued) VALUES (1,0) ON CONFLICT (id) DO UPDATE SET last_issued = 0"
+          );
+          expect(upsert.ok, "upsert re-seed should succeed without the guard").toBe(true);
+        });
+      } finally {
+        // ALWAYS restore, and back to ENABLE ALWAYS rather than the default ENABLE ORIGIN —
+        // cert_counter is shared by every later test in this file.
+        await admin.query("ALTER TABLE cert_counter ENABLE ALWAYS TRIGGER trg_cert_counter_monotonic");
+      }
+      await asRole("partner_connector_runtime", A, async () => {
+        expect((await attempt("UPDATE cert_counter SET last_issued = 0 WHERE id = 1")).ok).toBe(false);
+      });
+    });
+  });
+
+  // ===========================================================================================
+  // 5. 0047 / 0048 pre-flight — a migration must not journal `applied` while delivering nothing.
+  // ===========================================================================================
+
+  describe("0047 / 0048 refuse to certify isolation against a BYPASSRLS role", () => {
+    /**
+     * pg_roles is CLUSTER-GLOBAL. This suite owns a dedicated disposable cluster (startPostgres17
+     * creates one per suite), but the attribute is restored in a finally on every path AND the
+     * restoration is itself asserted — a leaked BYPASSRLS would make every RLS assertion in this
+     * file pass vacuously, which is precisely the defect under test.
+     */
+    async function withBypassRls(role: string, fn: () => Promise<void>): Promise<void> {
+      await admin.query(`ALTER ROLE ${role} BYPASSRLS`);
+      try {
+        const { rows } = await admin.query<{ b: boolean }>(
+          "SELECT rolbypassrls AS b FROM pg_roles WHERE rolname = $1",
+          [role]
+        );
+        expect(rows[0].b, "the mutation did not take — the assertion below would prove nothing").toBe(true);
+        await fn();
+      } finally {
+        await admin.query(`ALTER ROLE ${role} NOBYPASSRLS`);
+        const { rows } = await admin.query<{ b: boolean }>(
+          "SELECT rolbypassrls AS b FROM pg_roles WHERE rolname = $1",
+          [role]
+        );
+        expect(rows[0].b, `FAILED TO RESTORE ${role} NOBYPASSRLS — every later assertion is void`).toBe(false);
+      }
+    }
+
+    it("0047 RAISES instead of journalling when partner_runtime is BYPASSRLS", async () => {
+      const sql = readFileSync(join(MIGRATIONS_DIR, "0047_partner_owner_invariant_tenants_rls.sql"), "utf8");
+      await withBypassRls("partner_runtime", async () => {
+        await admin.query("BEGIN");
+        try {
+          await expect(admin.query(sql)).rejects.toThrow(/0047: partner_runtime is BYPASSRLS/);
+        } finally {
+          await admin.query("ROLLBACK").catch(() => {});
+        }
+      });
+    });
+
+    it("0048 RAISES instead of journalling when partner_runtime is BYPASSRLS", async () => {
+      const sql = readFileSync(join(MIGRATIONS_DIR, "0048_partner_location_snapshot_search_path.sql"), "utf8");
+      await withBypassRls("partner_runtime", async () => {
+        await admin.query("BEGIN");
+        try {
+          await expect(admin.query(sql)).rejects.toThrow(/0048: partner_runtime is SUPERUSER or BYPASSRLS/);
+        } finally {
+          await admin.query("ROLLBACK").catch(() => {});
+        }
+      });
+    });
+
+    it("MUTATION: without the pre-flight, 0047 passes ALL of its own assertions while the leak is intact", async () => {
+      /**
+       * THE FINDING, REPRODUCED. Strip the pre-flight and 0047 runs GREEN against a BYPASSRLS
+       * partner_runtime — relrowsecurity true, relforcerowsecurity true, exactly one policy: every
+       * claim the file makes about itself is satisfied — while partner_owner_invariant_tenants
+       * still returns every tenant on the network. It would be journalled `applied`, consuming the
+       * migration number and closing the finding on paper.
+       */
+      const sql = readFileSync(join(MIGRATIONS_DIR, "0047_partner_owner_invariant_tenants_rls.sql"), "utf8");
+      const marker = "DO $$\nBEGIN\n  ALTER TABLE partner_owner_invariant_tenants";
+      expect(sql).toContain(marker);
+      const withoutPreflight = sql.slice(sql.indexOf(marker));
+      expect(
+        withoutPreflight,
+        "the pre-flight excision failed; the mutation would not be testing what it claims"
+      ).not.toContain("is BYPASSRLS");
+
+      await withBypassRls("partner_runtime", async () => {
+        // The un-guarded migration completes without error…
+        await admin.query(withoutPreflight);
+        // …and the hole it claims to close is WIDE OPEN, because no policy binds a role that
+        // bypasses RLS. This deliberately does NOT use asRole(): asRole asserts rolbypassrls=false,
+        // which is exactly the condition being violated here.
+        await admin.query("SET ROLE partner_runtime");
+        try {
+          await admin.query("SELECT set_config('app.tenant_id', $1, false)", [A]);
+          const { rows } = await admin.query<{ n: number }>(
+            "SELECT count(*)::int n FROM partner_owner_invariant_tenants"
+          );
+          expect(rows[0].n, "expected the A8-F1 leak to be intact under BYPASSRLS").toBe(2);
+        } finally {
+          await admin.query("RESET ROLE").catch(() => {});
+          await admin.query("RESET app.tenant_id").catch(() => {});
+        }
+      });
+
+      // Role restored — and the real, guarded migration is still correct.
+      expect(await ROUND_TRIPS.find((t) => t.number === 47)!.probe()).toBe("isolated:1");
+    });
+  });
+
+  // ===========================================================================================
+  // 6. The pg_temp class — control / attack pair, and the sweep that stops it regrowing.
+  // ===========================================================================================
+
+  describe("0054 — pg_temp shadowing of the credit-ledger underfunding guard", () => {
+    /**
+     * These run on the ADMIN pool, and that is the honest scope rather than a shortcut: neither
+     * restricted runtime role holds INSERT on partner_credit_ledger (0052's catalogue sweep
+     * confirms it), so the admin pool is the only place this trigger fires today. That is exactly
+     * why the finding is MEDIUM rather than HIGH — and exactly why it is still worth closing, since
+     * the primitive is one blanket GRANT away from mattering.
+     *
+     * The fixture is a wallet with 10 credits and ONE active reservation, so a -10 debit leaves a
+     * balance of 0 against 1 reserved credit and the guard must refuse it.
+     */
+    const DEBIT = `INSERT INTO partner_credit_ledger (wallet_id, tenant_id, amount, entry_type,
+                     idempotency_key, source, reason, actor_type, request_fingerprint)
+                   VALUES ($1, $2, -10, 'admin_adjustment', $3, 'admin', 'attack', 'admin', $4)`;
+
+    const debitAttempt = (key: string) => attempt(DEBIT, [WALLET_A, A, key, FP]);
+
+    it("CONTROL: the guard refuses an underfunding debit with no shadowing in play", async () => {
+      const r = await debitAttempt("control-1");
+      expect(r.ok, "the guard did not fire at all — the attack below would prove nothing").toBe(false);
+      expect(r.error).toMatch(/underfund active reservations/);
+    });
+
+    it("ATTACK: a pg_temp shadow does NOT defeat the pinned function", async () => {
+      await admin.query(
+        `CREATE TEMP TABLE partner_credit_reservations
+           (wallet_id uuid, tenant_id uuid, reserved_credits bigint, status text)`
+      );
+      try {
+        // Prove the shadow really is ahead of public in THIS session, or a negative result would be
+        // indistinguishable from "the temp table was never in the way".
+        const { rows } = await admin.query<{ ns: string }>(
+          `SELECT n.nspname AS ns FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.oid = 'partner_credit_reservations'::regclass`
+        );
+        expect(rows[0].ns).toMatch(/^pg_temp/);
+
+        const r = await debitAttempt("attack-1");
+        expect(
+          r.ok,
+          "the shadowed table was consulted: the wallet was driven to 0 while an active reservation existed"
+        ).toBe(false);
+        expect(r.error).toMatch(/underfund active reservations/);
+      } finally {
+        await admin.query("DROP TABLE IF EXISTS pg_temp.partner_credit_reservations");
+      }
+    });
+
+    it("MUTATION: the same shadow DOES defeat the un-pinned 0017 body", async () => {
+      // RED-without-it. rollback-0054 restores 0017's body verbatim and the identical attack then
+      // succeeds. rollback-0055 goes first because it is journalled above 0054 — the descending
+      // discipline this whole file exists to make possible.
+      await runRollback("rollback-0055-partner-hq-control-tables-write-deny.sql");
+      await runRollback("rollback-0054-partner-ledger-preserve-search-path.sql");
+      try {
+        await admin.query(
+          `CREATE TEMP TABLE partner_credit_reservations
+             (wallet_id uuid, tenant_id uuid, reserved_credits bigint, status text)`
+        );
+        try {
+          const r = await debitAttempt("mutation-1");
+          expect(
+            r.ok,
+            "expected the un-pinned body to be defeated by the shadow — if this is false, the " +
+              "control/attack pair above proves nothing about the pin"
+          ).toBe(true);
+        } finally {
+          await admin.query("DROP TABLE IF EXISTS pg_temp.partner_credit_reservations");
+        }
+      } finally {
+        await runRunnerUnprompted();
+      }
+      expect(await ROUND_TRIPS.find((t) => t.number === 54)!.probe()).toBe("pinned");
+      expect(await ROUND_TRIPS.find((t) => t.number === 55)!.probe()).toBe("write_denied");
+    });
+
+    it("the CLASS is swept: no unpinned function in public reads a relation unqualified", async () => {
+      // The sweep from 0054's post-flight, re-run on every CI pass against the whole chain. A
+      // migration assertion fires once, and once is not a ratchet. 0048 fixed one instance and did
+      // not sweep, which is how the same primitive sat in 0017 — guarding money — the whole time.
+      const { rows } = await admin.query<{ proname: string }>(UNPINNED_FUNCTION_SWEEP);
+      expect(rows.map((r) => r.proname)).toEqual([]);
+    });
+
+    it("MUTATION: the class sweep goes RED on a planted unqualified function", async () => {
+      await admin.query(
+        `CREATE FUNCTION planted_unqualified_reader() RETURNS bigint LANGUAGE plpgsql AS $f$
+           DECLARE n bigint;
+           BEGIN SELECT count(*) INTO n FROM partner_wallets; RETURN n; END $f$`
+      );
+      try {
+        const { rows } = await admin.query<{ proname: string }>(UNPINNED_FUNCTION_SWEEP);
+        expect(rows.map((r) => r.proname)).toContain("planted_unqualified_reader");
+      } finally {
+        await admin.query("DROP FUNCTION IF EXISTS planted_unqualified_reader()");
+      }
+      // Clean again, so the mutation cannot leave the guard permanently red.
+      const { rows } = await admin.query<{ proname: string }>(UNPINNED_FUNCTION_SWEEP);
+      expect(rows.map((r) => r.proname)).toEqual([]);
+    });
+
+    it("MUTATION: the sweep does NOT false-alarm on `IS DISTINCT FROM OLD.x`", async () => {
+      // Four of the five functions the first draft of this sweep flagged were immutability triggers
+      // matching `FROM OLD`. A sweep that cries wolf gets an exclusion list bolted on, and an
+      // exclusion list is how A8-F1 survived every green run. Prove the exclusion is deliberate.
+      await admin.query(
+        `CREATE FUNCTION planted_old_reference() RETURNS trigger LANGUAGE plpgsql AS $f$
+           BEGIN IF NEW.id IS DISTINCT FROM OLD.id THEN RAISE EXCEPTION 'no'; END IF; RETURN NEW; END $f$`
+      );
+      try {
+        const { rows } = await admin.query<{ proname: string }>(UNPINNED_FUNCTION_SWEEP);
+        expect(rows.map((r) => r.proname)).not.toContain("planted_old_reference");
+      } finally {
+        await admin.query("DROP FUNCTION IF EXISTS planted_old_reference()");
+      }
+    });
+  });
+
+  // ===========================================================================================
+  // 7. The HQ control / evidence tables — attacked with the blanket GRANT restored.
+  // ===========================================================================================
+
+  describe("0055 — a restored blanket GRANT still reaches nothing", () => {
+    /**
+     * The entire claim of a defence-in-depth layer is that it holds WHEN STEP ONE IS UNDONE. So the
+     * battery below restores the exact grant 0001's DO loop hands out and then attacks. If the
+     * policies are right every write is DELETE 0 and every evidence read is 0 rows — refused by the
+     * POLICY, with the privilege demonstrably present.
+     */
+    const TABLES = ["partner_emergency_controls", "partner_internal_notes", "partner_management_audit"] as const;
+
+    async function withBlanketGrant(fn: () => Promise<void>): Promise<void> {
+      for (const t of TABLES) {
+        await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO partner_runtime`);
+      }
+      try {
+        await fn();
+      } finally {
+        // Restore the exact pre-test privilege shape: 0051 revoked writes on emergency controls and
+        // deliberately left SELECT; partner_runtime never held anything on the two evidence tables,
+        // which 0052's post-flight (c) asserts.
+        await admin.query("REVOKE INSERT, UPDATE, DELETE ON partner_emergency_controls FROM partner_runtime");
+        await admin.query("REVOKE ALL ON partner_internal_notes   FROM partner_runtime");
+        await admin.query("REVOKE ALL ON partner_management_audit FROM partner_runtime");
+      }
+    }
+
+    it("with DELETE handed back: the HQ freeze cannot be self-lifted and HQ evidence cannot be destroyed", async () => {
+      await withBlanketGrant(async () => {
+        await asRole("partner_runtime", A, async () => {
+          // Guard the guard: the privilege really is present, so a refusal below is the POLICY
+          // doing the work and not a leftover revoke.
+          const { rows: priv } = await admin.query<{ d: boolean }>(
+            "SELECT has_table_privilege('partner_runtime','public.partner_emergency_controls','DELETE') AS d"
+          );
+          expect(priv[0].d, "the grant was not actually restored — this test would pass vacuously").toBe(true);
+
+          const freeze = await attempt("DELETE FROM partner_emergency_controls WHERE tenant_id = $1", [A]);
+          expect(freeze.ok && freeze.rows, "an HQ-imposed emergency freeze was SELF-LIFTED").toBe(0);
+
+          const audit = await attempt("DELETE FROM partner_management_audit WHERE tenant_id = $1", [A]);
+          expect(audit.ok && audit.rows, "HQ's admin-action audit evidence was DESTROYED").toBe(0);
+
+          const notes = await attempt("DELETE FROM partner_internal_notes WHERE tenant_id = $1", [A]);
+          expect(notes.ok && notes.rows, "HQ internal notes were DELETED").toBe(0);
+        });
+      });
+    });
+
+    it("with SELECT handed back: HQ internal notes and the audit ledger read 0 rows", async () => {
+      await withBlanketGrant(async () => {
+        await asRole("partner_runtime", A, async () => {
+          for (const t of ["partner_internal_notes", "partner_management_audit"] as const) {
+            const { rows } = await admin.query<{ n: number }>(`SELECT count(*)::int n FROM ${t}`);
+            expect(rows[0].n, `${t} is readable by a tenant-scoped role`).toBe(0);
+          }
+          // The emergency-control READ is deliberately RETAINED and must still work, or every
+          // portal gate fails closed. Over-tightening has to fail here rather than in production.
+          const { rows } = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_emergency_controls");
+          expect(rows[0].n, "readEmergencyState() would stop seeing this tenant's freeze").toBe(1);
+        });
+      });
+    });
+
+    it("MUTATION: with 0055 rolled back, the identical battery succeeds on all three tables", async () => {
+      // RED-without-it. 0052's tenant-equality policy on cmd=ALL admits the tenant's OWN rows into
+      // DELETE's USING clause — and on these tables the tenant's own rows ARE the asset.
+      await runRollback("rollback-0055-partner-hq-control-tables-write-deny.sql");
+      try {
+        await withBlanketGrant(async () => {
+          await asRole("partner_runtime", A, async () => {
+            const freeze = await attempt("DELETE FROM partner_emergency_controls WHERE tenant_id = $1", [A]);
+            expect(freeze.ok && freeze.rows, "expected the freeze to be self-liftable without 0055").toBe(1);
+
+            const audit = await attempt("DELETE FROM partner_management_audit WHERE tenant_id = $1", [A]);
+            expect(audit.ok && audit.rows, "expected HQ evidence to be destructible without 0055").toBe(1);
+
+            const { rows } = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_internal_notes");
+            expect(rows[0].n, "expected HQ notes to be readable without 0055").toBe(1);
+          });
+        });
+      } finally {
+        await runRunnerUnprompted();
+      }
+      expect(await ROUND_TRIPS.find((t) => t.number === 55)!.probe()).toBe("write_denied");
+    });
+  });
 });
