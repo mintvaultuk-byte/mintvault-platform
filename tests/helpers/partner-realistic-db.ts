@@ -81,10 +81,24 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT = [
   "0031_partner_user_management",
 ] as const;
 
-/** Partner user management plus the DB-level final-owner invariant. */
+/**
+ * Partner user management plus the DB-level final-owner invariant.
+ *
+ * 0053 (second-factor failure counters on partner_users) is appended here rather than in a leaf
+ * list of its own BECAUSE every suite that drives POST /auth/mfa reaches this list through one
+ * inheritance chain or another, and the route now writes failed_mfa_count on every failed
+ * verification. A fixture without those columns makes a wrong code raise 42703 instead of
+ * returning 401 — the challenge fails CLOSED, which is the correct production behaviour but would
+ * show up here as an unrelated-looking test failure.
+ *
+ * It sits OUT of numeric order (before 0033/0034 in the derived lists) and that is safe: 0053 is
+ * two ADD COLUMN IF NOT EXISTS statements against partner_users, which 0001 creates. It depends on
+ * nothing between 0002 and 0052 and nothing between 0002 and 0052 depends on it.
+ */
 export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
   "0032_partner_final_owner_invariant",
+  "0053_partner_mfa_failure_lockout",
 ] as const;
 
 /**
@@ -100,6 +114,10 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
   "0031_partner_user_management",
   "0032_partner_final_owner_invariant",
   "0041_partner_submission_credit_lifecycle",
+  // 0053 — see the note on PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT. This chain branches
+  // off G6B rather than inheriting that list, so it needs its own copy; suites on it
+  // (partner-portal-mount-integration) drive a real MFA challenge.
+  "0053_partner_mfa_failure_lockout",
 ] as const;
 
 /** 0033 — additive audit-action precision (partner_user_mfa_reset et al). */

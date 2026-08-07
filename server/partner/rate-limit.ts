@@ -211,11 +211,95 @@ export const partnerLoginLimiter = partnerRateLimit({
   failClosed: true,
   keyFn: acct,
 });
+/**
+ * The bucket key for the SECOND-FACTOR limiters below: the authenticated identity carried by the
+ * session cookie, never anything from the request body.
+ *
+ * Every route these guard runs behind partnerSessionMiddleware (server/partner/mount.ts:154), so
+ * `req.partner` is already resolved by the time the limiter executes — resolvePartnerSession has
+ * validated the session hash, its credential version, the user's ACTIVE status, the org's status
+ * and the emergency state before setting it. The caller therefore cannot choose its own bucket:
+ * moving to a different `userId` requires completing a different account's password login.
+ *
+ * `userId`, deliberately NOT `sessionId`. partnerLogin revokes any prior live session before
+ * minting a new one, but an attacker holding the password can still log in repeatedly; keying on
+ * the session would hand it a fresh budget per login and bound nothing. The user id survives
+ * re-login, so the ceiling holds across the whole attack.
+ *
+ * The `anon|<ip>` fallback covers the unauthenticated case (no cookie, or a session that failed
+ * validation). Those requests are refused 401 by the handler anyway; the fallback exists so they
+ * still land in SOME bucket rather than sharing one literal key. This is the same shape actorKey
+ * already uses for the team-mutation limiters below.
+ */
+const mfaActorKey = (req: Request): string => req.partner?.userId ?? `anon|${partnerRateLimitClientKey(req)}`;
+
+/**
+ * MFA CHALLENGE, IP bucket. Applied to POST /auth/mfa only (the four /mfa/* management routes now
+ * have their own namespace — see partnerMfaManagementLimiter). Value and key are UNCHANGED from
+ * the original single limiter; nothing here is loosened.
+ */
 export const partnerMfaLimiter = partnerRateLimit({
   name: "partner_mfa",
   windowMs: 15 * 60_000,
   max: 20,
   failClosed: true,
+});
+/**
+ * MFA CHALLENGE, per-ACCOUNT bucket — defence in depth, applied IN ADDITION to the IP bucket above
+ * (never instead of it), exactly as partnerLoginLimiter layers behind partnerLoginIpLimiter.
+ *
+ * WHAT THIS FIXES. The challenge previously had ONLY the IP bucket. An attacker holding a phished
+ * or credential-stuffed password logs in, receives an mfa-pending session, and then grinds TOTP
+ * codes: verifyTotp accepts a ±1 step window, so 3 of 10^6 codes are live at any moment. Twenty
+ * guesses from one address is negligible, but the ceiling was PER SOURCE — across a hundred proxy
+ * addresses the same victim account absorbed ~2,000 guesses per validity window, and the success
+ * probability accumulates. The password was, in effect, the only real factor. This bucket is keyed
+ * on the victim rather than the attacker, so rotating addresses no longer buys attempts.
+ *
+ * 10 per 15 minutes, matching partnerLoginLimiter. It sits deliberately ABOVE the 5-failure MFA
+ * lockout in server/partner/auth.ts, so for a genuinely wrong code the LOCKOUT arms first and this
+ * bucket is the backstop that also counts successes, replays and malformed bodies — the classes a
+ * failure counter cannot see. A legitimate user fumbling one code is nowhere near either.
+ *
+ * SAME CAVEAT AS EVERY OTHER LIMITER IN THIS FILE: the backing store is the in-process
+ * MemoryRateLimitStore, so the real ceiling is 10 per account per window PER MACHINE and a deploy
+ * clears it. The account LOCKOUT is the control that is genuinely global, because it is a column
+ * in PostgreSQL — that is why this finding is repaired with both and not with a limiter alone.
+ */
+export const partnerMfaAccountLimiter = partnerRateLimit({
+  name: "partner_mfa_acct",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
+  keyFn: mfaActorKey,
+});
+/**
+ * MFA MANAGEMENT (enrol / confirm / recovery-code regenerate / disable).
+ *
+ * Its OWN namespace, for the reason the partner_reset_request / partner_accept split already
+ * documents: these four routes previously shared the single `partner_mfa` IP bucket with the
+ * challenge, so the two flows could starve each other outright.
+ *
+ * Keyed on the AUTHENTICATED ACTOR rather than the source IP, which is the availability half of
+ * this repair. All four handlers require a resolved session (enrol/confirm check `req.partner`
+ * directly; regenerate/disable sit behind requirePartnerAuth), so the actor is always available
+ * for a request that can do anything at all. Under the old IP-only key a partner shop behind one
+ * NAT egress shared ONE 20-per-15-minute enrolment budget across all its staff — a rollout day
+ * exhausted it by itself, and a co-located actor could deny enrolment to the entire shop by
+ * spending it deliberately. Per-actor keying removes both: each member of staff has their own
+ * budget and cannot consume anyone else's.
+ *
+ * This is not a loosening. Enrolment and recovery-code minting already demand the account
+ * password (and, for a REPLACEMENT, the current factor) inside mfa-service.ts, so the bucket is
+ * not the control that stops an attacker here — it is a flood ceiling. Unauthenticated callers
+ * fall back to `anon|<ip>` and are bounded per address as before.
+ */
+export const partnerMfaManagementLimiter = partnerRateLimit({
+  name: "partner_mfa_mgmt",
+  windowMs: 15 * 60_000,
+  max: 20,
+  failClosed: true,
+  keyFn: mfaActorKey,
 });
 /**
  * Password-reset CONSUME. Keyed on IP only (no keyFn). A consume body carries a token, not an
