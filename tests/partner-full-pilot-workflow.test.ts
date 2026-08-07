@@ -499,6 +499,129 @@ async function approveAsSuperAdmin(certId: number): Promise<{ kind: string; allA
   return (await mirror.mirrorPartnerApproval(certId, SUPER_ADMIN)) as { kind: string; allApproved?: boolean };
 }
 
+type MirrorOutcome = { kind: string; allApproved?: boolean };
+
+/**
+ * FORCED OVERLAP — how P16/P18 stop being a coin flip.
+ *
+ * Two `mirrorPartnerApproval` calls fired with `Promise.all` on a fast local cluster routinely
+ * finish one after the other; a test built that way would pass on the broken code most runs and
+ * prove nothing. So the interleaving is FORCED, not hoped for:
+ *
+ *   1. A third connection opens a transaction and takes `FOR UPDATE` on every work item of the one
+ *      destination under test. Nothing in production is changed by this — it is the test holding a
+ *      row lock, exactly as a slow concurrent actor would.
+ *   2. Both approvals are launched. Each one runs to the FIRST statement that needs one of those
+ *      rows and stops there, inside its own open transaction.
+ *   3. We WAIT until PostgreSQL itself reports both backends parked on `wait_event_type = 'Lock'`.
+ *      That is the non-vacuity evidence: the overlap is observed in `pg_stat_activity`, not assumed.
+ *   4. The blocker rolls back. Both actors wake in the same instant, maximally overlapped.
+ *
+ * Crucially the barrier is chosen so it works on BOTH the fixed code and the mutant. The fixed
+ * mirror parks on its own destination-scoped `FOR UPDATE`; the mutant (which has no such lock) parks
+ * on its per-card `UPDATE ... WHERE certificate_id = $1`. Either way both actors are provably
+ * in-flight together before either can proceed — so when the mutant settles zero times, that is the
+ * real defect and not a scheduling artefact.
+ */
+async function runWithForcedOverlap(
+  destinationSubmissionId: number,
+  actors: Array<() => Promise<MirrorOutcome>>
+): Promise<{ outcomes: MirrorOutcome[]; observedBlocked: number }> {
+  const blocker = new Client({ connectionString: cluster.url });
+  const watcher = new Client({ connectionString: cluster.url });
+  await blocker.connect();
+  await watcher.connect();
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query(
+      "SELECT 1 FROM partner_grading_work_items WHERE destination_submission_id = $1 ORDER BY id FOR UPDATE",
+      [destinationSubmissionId]
+    );
+
+    const inflight = actors.map((actor) => actor());
+    // Never let an early rejection surface as an unhandled rejection while we are still polling.
+    const settled = Promise.allSettled(inflight);
+
+    let observedBlocked = 0;
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const r = await watcher.query<{ n: string }>(
+        `SELECT count(*)::text AS n
+           FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND pid <> pg_backend_pid()
+            AND wait_event_type = 'Lock'`
+      );
+      observedBlocked = Math.max(observedBlocked, Number(r.rows[0].n));
+      if (observedBlocked >= actors.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    // Release the barrier only once every actor is provably parked, so they resume together.
+    await blocker.query("ROLLBACK");
+
+    const results = await settled;
+    const outcomes = results.map((r) => {
+      if (r.status === "rejected") throw r.reason;
+      return r.value;
+    });
+    return { outcomes, observedBlocked };
+  } finally {
+    await blocker.end().catch(() => {});
+    await watcher.end().catch(() => {});
+  }
+}
+
+/** The complete settled end state: 2 approved cards, ready_to_return, 2/2/2, wallet 8/0/2. */
+async function expectSettledExactlyOnce(f: Pilot): Promise<void> {
+  expect(
+    await scalar<string>(
+      "SELECT count(*)::text FROM partner_grading_work_items WHERE partner_submission_id=$1 AND status='approved'",
+      [f.partnerSubmissionId]
+    ),
+    "both cards must end approved"
+  ).toBe("2");
+  expect(
+    await scalar<string>(
+      "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+      [f.destinationSubmissionId]
+    ),
+    "both certificates must end published"
+  ).toBe("2");
+  expect(
+    await scalar<string>("SELECT status FROM submissions WHERE id=$1", [f.destinationSubmissionId]),
+    "the destination must have transitioned — a fully graded, unbilled submission stuck in in_grading is the defect"
+  ).toBe("ready_to_return");
+  expect(
+    await scalar<string>(
+      "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='consumed'",
+      [f.partnerSubmissionId]
+    ),
+    "exactly two consumed reservations"
+  ).toBe("2");
+  expect(
+    await scalar<string>(
+      "SELECT count(*)::text FROM partner_credit_reservations WHERE submission_reference=$1 AND status='active'",
+      [f.partnerSubmissionId]
+    ),
+    "no reservation may be left active"
+  ).toBe("0");
+  expect(
+    await scalar<string>(
+      "SELECT count(*)::text FROM partner_credit_reservation_events WHERE tenant_id=$1 AND event_type='consumed'",
+      [f.tenantId]
+    ),
+    "exactly one terminal consumed event per physical card — two, never four"
+  ).toBe("2");
+  expect(
+    await scalar<string>("SELECT count(*)::text FROM partner_credit_ledger WHERE tenant_id=$1 AND amount = -1", [
+      f.tenantId,
+    ]),
+    "exactly one -1 debit per physical card — double settlement would show as four"
+  ).toBe("2");
+  expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+}
+
 describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the corrected wallet progression", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-full-pilot-workflow");
@@ -1262,6 +1385,103 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     );
     expect(settled, "with the certificates genuinely published, settlement proceeds").not.toBeNull();
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
+  }, 120_000);
+
+  /**
+   * P16 / P17 / P18 — APPROVAL-CROSSCARD1, the cross-card write skew.
+   *
+   * THE DEFECT. The mirror's completeness test is a SUBMISSION-level decision assembled from
+   * PER-CARD writes. Two Super Admins approving two DIFFERENT cards of the same submission update
+   * two different rows, so under READ COMMITTED they never block each other and each reads the
+   * other's card as still `pending_review`. Both return `mirrored` with `allApproved: false`, every
+   * card ends approved, and NOBODY settles: the submission is fully graded, unbilled, and stranded
+   * in `in_grading` with two credits reserved forever. Textbook write skew — no row is written
+   * twice, yet the invariant "the complete approved set settles exactly once" is broken.
+   *
+   * THE FIX. A destination-scoped `SELECT ... ORDER BY id FOR UPDATE` taken BEFORE the per-card
+   * UPDATE. It serialises the two actors onto the one submission they share, so exactly one of them
+   * observes the complete approved set and exactly one settles.
+   */
+  it("P16: FORCED OVERLAP — two Super Admins approving DIFFERENT cards settle exactly once (APPROVAL-CROSSCARD1)", async () => {
+    const f = await seedPilotAtPendingReview();
+    expect(await triple(f.tenantId), "precondition: nothing settled").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+
+    const { outcomes, observedBlocked } = await runWithForcedOverlap(f.destinationSubmissionId, [
+      () => approveAsSuperAdmin(f.certIds[0]),
+      () => approveAsSuperAdmin(f.certIds[1]),
+    ]);
+
+    // NON-VACUITY OF THE OVERLAP ITSELF. If this is not 2, the two approvals did not actually
+    // overlap and every assertion below would be a sequential run wearing a concurrency costume.
+    expect(
+      observedBlocked,
+      "PostgreSQL must have reported BOTH approval backends parked on a lock at the same instant"
+    ).toBe(2);
+
+    // Both actors succeed — neither is asked to retry — but only one sees the complete set.
+    expect(outcomes.map((o) => o.kind).sort()).toEqual(["mirrored", "mirrored"]);
+    expect(
+      outcomes.filter((o) => o.allApproved === true),
+      "EXACTLY ONE actor may observe the complete approved set; two = double settlement, zero = the stranded-submission defect"
+    ).toHaveLength(1);
+
+    await expectSettledExactlyOnce(f);
+  }, 120_000);
+
+  it("P17: SEQUENTIAL CONTROL — the same two approvals, un-overlapped, reach the identical end state", async () => {
+    // The control that makes P16 falsifiable in the other direction. If the barrier machinery
+    // itself (the third connection, the row lock, the rollback) were what produced the single
+    // settlement, this run — which uses none of it — would settle a different number of times.
+    const f = await seedPilotAtPendingReview();
+
+    const first = await approveAsSuperAdmin(f.certIds[0]);
+    expect(first.kind).toBe("mirrored");
+    expect(first.allApproved, "card one of two is not the complete set").toBe(false);
+    expect(await triple(f.tenantId), "still unsettled between the two approvals").toEqual({
+      available: 8,
+      reserved: 2,
+      consumed: 0,
+    });
+
+    const second = await approveAsSuperAdmin(f.certIds[1]);
+    expect(second.kind).toBe("mirrored");
+    expect(second.allApproved).toBe(true);
+
+    await expectSettledExactlyOnce(f);
+  }, 120_000);
+
+  it("P18: FORCED OVERLAP — the SAME card approved twice at once still cannot double-settle", async () => {
+    // The same-card race, re-proved against the new lock. Card one is already approved, so this is
+    // the final approval — the one that settles — being driven twice simultaneously.
+    const f = await seedPilotAtPendingReview();
+    await approveAsSuperAdmin(f.certIds[0]);
+    expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    const { outcomes, observedBlocked } = await runWithForcedOverlap(f.destinationSubmissionId, [
+      () => approveAsSuperAdmin(f.certIds[1]),
+      () => approveAsSuperAdmin(f.certIds[1]),
+    ]);
+
+    expect(observedBlocked, "both same-card actors must have been provably in flight together").toBe(2);
+
+    // One wins the row; the loser finds its card already `approved` under the lock and reports the
+    // final state as success WITHOUT settling again. Neither is a 409 — the card genuinely IS
+    // approved, and the route only converts `conflict` into 409.
+    expect(outcomes.map((o) => o.kind).sort()).toEqual(["already_approved", "mirrored"]);
+    expect(
+      outcomes.filter((o) => o.allApproved === true),
+      "the winner settles; the loser must not"
+    ).toHaveLength(1);
+    expect(
+      outcomes.some((o) => o.kind === "conflict"),
+      "a genuinely approved card must never be reported to the operator as a conflict"
+    ).toBe(false);
+
+    await expectSettledExactlyOnce(f);
   }, 120_000);
 
   it("P13: the settlement failpoint is refused outside the test runner", async () => {
