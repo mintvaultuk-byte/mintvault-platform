@@ -839,9 +839,17 @@ describe("Partner completion cascade — real markCompleted with migration 0049 
    * cases hold both directions at once:
    *
    *   MUTATION COMPLETE-FREE1 — replace the gate with `NOT EXISTS (… r.status = 'active')`.
-   *   T9 and T10 turn RED (free grading), while every other case stays green. That is the proof the
-   *   one-word fix would have shipped a hole, and the reason the repair counts POSITIVE per-unit
-   *   financial evidence instead of reading reservation status.
+   *   FIVE cases turn RED: T9, T10, T12, T13 and T14. (This line previously recorded "T9 and T10 …
+   *   while every other case stays green", which was written from the intent rather than from a
+   *   re-run: T12, T13 and T14 were added afterwards and were never remeasured. Re-run 2026-08-07 —
+   *   passed=10 failed=5 — and corrected. The proof is STRONGER than it claimed, not weaker.)
+   *
+   *   The five are the whole free-grading surface, not two instances of it: T9 and T10 are the
+   *   terminal-but-unpaid reservation states (released / expired), T12 is a reservation that merely
+   *   SAYS consumed with no debit anywhere, T13 is one unpaid card inside an otherwise-settled set,
+   *   and T14 is a hand-made ledger adjustment offered as settlement evidence. Reading reservation
+   *   STATUS admits all five; counting POSITIVE per-unit financial evidence admits none, which is
+   *   why the repair is shaped the way it is rather than as the proposed one-word narrowing.
    *
    *   MUTATION COMPLETE-STRAND1 — restore `r.status <> 'consumed'`.
    *   T11 turns RED: the authorised recovery shape can never complete, which is finding H3 itself.
