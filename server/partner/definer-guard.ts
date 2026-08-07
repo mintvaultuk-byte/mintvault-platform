@@ -148,12 +148,21 @@ export async function definerModelViolations(query: DbQuery): Promise<string[]> 
   //     definer while being (partially) guarded on the credit definer.
   v.push(...(await definerReachabilityViolations(query, DEFINER_ROLE)));
 
-  // 2) Runtime role must never bypass RLS or be a superuser.
-  const runtime = await query(`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = $1`, [RUNTIME_ROLE]);
-  if (runtime.rows.length === 1) {
-    const r = runtime.rows[0] as Record<string, boolean>;
-    if (r.rolbypassrls) v.push(`${RUNTIME_ROLE} must NOT have BYPASSRLS`);
-    if (r.rolsuper) v.push(`${RUNTIME_ROLE} must NOT be a superuser`);
+  // 2) No runtime role may ever bypass RLS or be a superuser.
+  //
+  //    A8-F9: this used to check RUNTIME_ROLE only. partner_connector_runtime is a runtime role in
+  //    exactly the same sense — 0008 leans on its NOBYPASSRLS attribute for connector-plane tenant
+  //    isolation, and 0045 makes that attribute load-bearing twice more — yet a single
+  //    `ALTER ROLE partner_connector_runtime BYPASSRLS` would have passed this guard silently while
+  //    dissolving every connector-side tenant boundary. The same list already used for definer
+  //    reachability is reused here so the two checks cannot drift apart again.
+  for (const runtimeRole of RUNTIME_ROLES_THAT_MUST_NOT_REACH_DEFINERS) {
+    const runtime = await query(`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = $1`, [runtimeRole]);
+    if (runtime.rows.length === 1) {
+      const r = runtime.rows[0] as Record<string, boolean>;
+      if (r.rolbypassrls) v.push(`${runtimeRole} must NOT have BYPASSRLS`);
+      if (r.rolsuper) v.push(`${runtimeRole} must NOT be a superuser`);
+    }
   }
 
   // 3) Each pre-auth function exists, is SECURITY DEFINER, owned by partner_definer, has a set
