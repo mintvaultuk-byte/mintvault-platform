@@ -180,6 +180,88 @@ interface MigrationFile {
   sql: string;
   checksum: string;
   noTransaction: boolean;
+  /** Per-file override in milliseconds; 0 = wait forever. undefined = use the run default. */
+  lockTimeoutMs?: number;
+}
+
+/**
+ * Default `lock_timeout` for every migration file, in milliseconds.
+ *
+ * WHY (lock-safety review, 2026-08-07): the runner wraps each transaction-safe file in ONE
+ * BEGIN..COMMIT, so every lock a file takes is held for the WHOLE FILE, not the statement.
+ * Measured on a disposable PostgreSQL 17 cluster:
+ *   - 0049 (grading bridge) takes ShareRowExclusive+Share on certificates/submissions/
+ *     submission_items and 9 partner tables. Blocks WRITES only. 13 ms @ 3k rows,
+ *     253 ms @ 600k, ~0.9-1.6 s @ 3M.
+ *   - 0047 (RLS repair) takes ACCESS EXCLUSIVE on partner_owner_invariant_tenants (2.4-7.9 ms).
+ *     Blocks reads AND writes, and a SECURITY INVOKER trigger on partner_users /
+ *     partner_user_roles / partner_organisations writes that table, so partner user
+ *     management stalls behind it too.
+ *   - rollback-0049 takes ACCESS EXCLUSIVE on `certificates` — the table behind PUBLIC
+ *     certificate lookup (~16 ms, does not scale with rows).
+ *
+ * The danger is not the hold time, it is the QUEUE. Proven: with a pre-existing transaction
+ * holding a mere AccessShareLock, an ACCESS EXCLUSIVE request queues — and a plain SELECT
+ * arriving BEHIND that waiter is blocked too. That is the mechanism that turns a 3 ms
+ * migration into an outage: one idle-in-transaction session is enough.
+ *
+ * `lock_timeout` bounds ONLY the wait to ACQUIRE a lock; it never interrupts a statement that
+ * already holds one. So a legitimately slow migration is unaffected — only a CONTENDED one
+ * aborts. Five seconds is long enough to ride out ordinary short transactions and far shorter
+ * than a user-visible outage.
+ *
+ * This is a behaviour change for EVERY future migration: a migration that cannot get its lock
+ * within the timeout now FAILS and ROLLS BACK instead of queueing production traffic behind
+ * itself. That is deliberate and it is the safe default — the failure mode is "re-run it",
+ * which is strictly better than "the site is down and nobody knows why". A migration that
+ * genuinely needs to wait longer must say so explicitly with
+ * `-- migrate:lock-timeout 30s` (or `0` to disable, for an owner-approved maintenance window).
+ */
+const DEFAULT_LOCK_TIMEOUT_MS = 5_000;
+
+const LOCK_TIMEOUT_DIRECTIVE_RE = /^\s*--\s*migrate:lock-timeout\s+(\d+)\s*(ms|s)?\s*$/gim;
+
+/** PostgreSQL SQLSTATE raised when `lock_timeout` expires. */
+const LOCK_NOT_AVAILABLE = "55P03";
+
+/**
+ * Parse an optional `-- migrate:lock-timeout <N>[ms|s]` directive. `0` means "wait forever"
+ * (PostgreSQL's own semantics for lock_timeout = 0) and must be declared deliberately.
+ * More than one directive in a file is a hard error — an ambiguous bound is worse than none.
+ */
+export function parseLockTimeoutDirective(sql: string, filename = "migration"): number | undefined {
+  const matches = [...sql.matchAll(LOCK_TIMEOUT_DIRECTIVE_RE)];
+  if (matches.length === 0) return undefined;
+  if (matches.length > 1) {
+    throw new Error(`Migration ${filename} declares migrate:lock-timeout more than once. Refusing to guess.`);
+  }
+  const value = Number(matches[0][1]);
+  const ms = matches[0][2] === "s" ? value * 1000 : value;
+  if (!Number.isInteger(ms) || ms < 0) {
+    throw new Error(`Migration ${filename} declares an invalid migrate:lock-timeout value.`);
+  }
+  return ms;
+}
+
+/**
+ * `--lock-timeout=<N>[ms|s]` — a run-wide override for an owner-approved maintenance window.
+ * Absent, the run uses DEFAULT_LOCK_TIMEOUT_MS. `0` disables the bound entirely.
+ */
+export function parseLockTimeoutFlag(argv: readonly string[]): number {
+  const arg = argv.find((a) => a.startsWith("--lock-timeout="));
+  if (!arg) return DEFAULT_LOCK_TIMEOUT_MS;
+  const raw = arg.slice("--lock-timeout=".length).trim();
+  const m = /^(\d+)(ms|s)?$/.exec(raw);
+  if (!m) throw new Error(`Invalid --lock-timeout value: ${raw}. Use e.g. --lock-timeout=5s or --lock-timeout=5000ms.`);
+  return assertSafeTimeoutMs(m[2] === "s" ? Number(m[1]) * 1000 : Number(m[1]));
+}
+
+/** Guard every value that reaches a `SET` statement — SET does not accept bind parameters. */
+function assertSafeTimeoutMs(ms: number): number {
+  if (!Number.isInteger(ms) || ms < 0 || ms > 3_600_000) {
+    throw new Error(`Refusing to apply an out-of-range lock_timeout: ${String(ms)}`);
+  }
+  return ms;
 }
 
 const ENSURE_VALID_CONCURRENT_INDEX_RE =
@@ -280,6 +362,7 @@ export function listMigrationFiles(dir: string = MIGRATIONS_DIR): MigrationFile[
         sql,
         checksum: sha256(sql),
         noTransaction: /--\s*migrate:no-transaction/i.test(sql),
+        lockTimeoutMs: parseLockTimeoutDirective(sql, filename),
       };
     })
     // Deterministic NUMERIC ordering by the integer prefix (not lexical), then filename as a
@@ -380,11 +463,34 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
   return plan;
 }
 
+/**
+ * Turn a raw driver error into something an operator can act on. A `lock_timeout` abort is
+ * NOT a broken migration — it means live traffic was holding a conflicting lock, the runner
+ * refused to queue behind it, and NOTHING was applied. Say exactly that.
+ */
+export function describeMigrationFailure(e: unknown, lockTimeoutMs: number): string {
+  const err = e as { code?: string; message?: string };
+  const message = err?.message ?? String(e);
+  if (err?.code === LOCK_NOT_AVAILABLE) {
+    return (
+      `${message} — lock_timeout (${lockTimeoutMs} ms) expired while WAITING for a lock. ` +
+      "Nothing was applied and the transaction was rolled back. This is the guard working: " +
+      "a conflicting session held a lock, and continuing to wait would have queued live " +
+      "traffic behind this migration. Find the blocker (SELECT pid, state, query, " +
+      "state_change FROM pg_stat_activity WHERE state <> 'idle' OR xact_start IS NOT NULL), " +
+      "clear it or wait for a quieter moment, then re-run. Only raise the timeout with " +
+      "`-- migrate:lock-timeout <N>s` (or --lock-timeout) inside an agreed maintenance window."
+    );
+  }
+  return message;
+}
+
 export async function applyMigrations(
   client: PgClientLike,
   files: MigrationFile[],
-  opts: { allowDestructive?: boolean } = {}
+  opts: { allowDestructive?: boolean; lockTimeoutMs?: number } = {}
 ): Promise<{ applied: string[] }> {
+  const runLockTimeoutMs = assertSafeTimeoutMs(opts.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS);
   // Serialise concurrent runners: a second runner fails fast instead of double-applying.
   // Capture the backend identity FIRST, so lock ownership can be proven against a specific
   // server process rather than assumed from a boolean.
@@ -469,6 +575,7 @@ export async function applyMigrations(
       // rather than applying the remainder without a provable lock.
       await assertLockOwned(`before ${filename}`);
       const f = byName.get(filename)!;
+      const fileLockTimeoutMs = assertSafeTimeoutMs(f.lockTimeoutMs ?? runLockTimeoutMs);
       if (f.noTransaction) {
         // Non-transactional migration (e.g. CREATE INDEX CONCURRENTLY): cannot run in a txn.
         // Record intent, run, then mark complete. Must be individually idempotent.
@@ -477,17 +584,31 @@ export async function applyMigrations(
           [f.filename, f.checksum]
         );
         try {
-          await applyNonTransactionalMigration(client, f);
+          // No enclosing transaction here, so SET LOCAL would be a no-op: set the GUC at
+          // session scope and put it back afterwards, whatever happens.
+          await client.query(`SET lock_timeout = ${fileLockTimeoutMs}`);
+          try {
+            await applyNonTransactionalMigration(client, f);
+          } finally {
+            await client.query("SET lock_timeout = DEFAULT");
+          }
           await client.query("UPDATE schema_migrations SET status='applied', completed_at=now() WHERE filename=$1", [
             f.filename,
           ]);
         } catch (e) {
           await client.query("UPDATE schema_migrations SET status='failed' WHERE filename=$1", [f.filename]);
-          throw new Error(`Non-transactional migration ${f.filename} failed: ${(e as Error).message}`);
+          throw new Error(
+            `Non-transactional migration ${f.filename} failed: ${describeMigrationFailure(e, fileLockTimeoutMs)}`
+          );
         }
       } else {
         await client.query("BEGIN");
         try {
+          // Bound the wait to ACQUIRE every lock this file takes. SET LOCAL is scoped to this
+          // transaction and is discarded at COMMIT/ROLLBACK, so it cannot leak into the
+          // journal write or the next file. It never interrupts a statement that already
+          // holds its locks — only a CONTENDED acquisition aborts.
+          await client.query(`SET LOCAL lock_timeout = ${fileLockTimeoutMs}`);
           await client.query(f.sql);
           await client.query(
             "INSERT INTO schema_migrations (filename, checksum, status, completed_at) VALUES ($1,$2,'applied',now())",
@@ -496,7 +617,9 @@ export async function applyMigrations(
           await client.query("COMMIT");
         } catch (e) {
           await client.query("ROLLBACK");
-          throw new Error(`Migration ${f.filename} failed and was rolled back: ${(e as Error).message}`);
+          throw new Error(
+            `Migration ${f.filename} failed and was rolled back: ${describeMigrationFailure(e, fileLockTimeoutMs)}`
+          );
         }
       }
       applied.push(f.filename);
@@ -526,6 +649,14 @@ async function main(): Promise<void> {
   }
   const apply = process.argv.includes("--apply");
   const allowDestructive = process.argv.includes("--allow-destructive");
+  let lockTimeoutMs: number;
+  try {
+    lockTimeoutMs = parseLockTimeoutFlag(process.argv);
+  } catch (e) {
+    console.error(`🚫 ${(e as Error).message}`);
+    process.exit(2);
+    return;
+  }
   const { Client } = await import("pg");
   // The lock-owning session must be a dedicated backend — see resolveMigrationEndpoint.
   // Throws rather than falling back to a pooled connection.
@@ -587,7 +718,14 @@ async function main(): Promise<void> {
       console.log(`(dry-run) pending: ${plan.pending.join(", ") || "none"}. Re-run with --apply to execute.`);
       process.exit(0);
     }
-    const { applied } = await applyMigrations(client as unknown as PgClientLike, files, { allowDestructive });
+    console.log(
+      `🔒 lock_timeout for this run: ${lockTimeoutMs === 0 ? "DISABLED (will wait forever)" : `${lockTimeoutMs} ms`}` +
+        " (per-file `-- migrate:lock-timeout` overrides this)"
+    );
+    const { applied } = await applyMigrations(client as unknown as PgClientLike, files, {
+      allowDestructive,
+      lockTimeoutMs,
+    });
     console.log(`✓ Applied ${applied.length}: ${applied.join(", ") || "none"}`);
   } finally {
     await client.end();

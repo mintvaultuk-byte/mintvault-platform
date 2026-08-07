@@ -10,7 +10,19 @@
 -- run underneath 0048 or 0049. The threshold is always this file's OWN number; if this file is ever
 -- renumbered, the integer moves with it.
 
+-- Lock safety (2026-08-07): this file takes ACCESS EXCLUSIVE on
+-- partner_owner_invariant_tenants (ALTER TABLE ... DISABLE ROW LEVEL SECURITY / DROP POLICY),
+-- which blocks READS as well as writes. Blast radius is wider than the table name suggests: a
+-- SECURITY INVOKER trigger on partner_users, partner_user_roles and partner_organisations
+-- writes that table, so partner user management stalls behind it too. Held time is 2.4-7.9 ms,
+-- but an ACCESS EXCLUSIVE request that has to QUEUE behind an existing AccessShareLock also
+-- blocks every reader that arrives after it. Bound the wait, inside this file's own
+-- transaction, before the first lock is taken. SET LOCAL is discarded at COMMIT/ROLLBACK so it
+-- cannot leak into the operator's session; if it fires, the whole rollback aborts atomically
+-- and nothing is changed.
 BEGIN;
+
+SET LOCAL lock_timeout = '5s';
 
 DO $$
 DECLARE
