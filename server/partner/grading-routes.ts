@@ -373,25 +373,36 @@ export function partnerGradingRouter(): Router {
     }
   });
 
+  /**
+   * READ-ONLY, deliberately. This handler must never write.
+   *
+   * It used to run an unpredicated `UPDATE partner_grading_work_items ... status = CASE WHEN
+   * assigned_partner_grader_id IS NULL THEN status ELSE 'assigned' END`. `authorizeAssigned` only
+   * rejects an APPROVED certificate, so a card at `pending_review` passed the gate and merely
+   * LOOKING at its images knocked the work item back to `assigned` — permanently. From there
+   * `mirrorPartnerApproval` (which keys on `pgwi.status = 'pending_review'`) returns `not_partner`,
+   * server/routes/grader.ts treats that as success, and the operator sees 200 {ok:true} while the
+   * certificate publishes, the work item freezes, the destination never reaches `ready_to_return`,
+   * settlement never runs and the reserved credits are held for 365 days. No in-app recovery.
+   *
+   * Nothing needed the write. `certificate_id`/`certificate_linked_at` are already set when the
+   * work item is INSERTed (server/partner/connector-import-service.ts) and re-asserted by
+   * `assignPartnerCerts` (grading-assignment.ts) and by the submit / edit-submission routes below,
+   * so the link was pure duplication; and the only callers of this route are the workstation's
+   * image queries (client/src/components/grading/grading-panel.tsx and
+   * client/src/components/grading-workflow/CardPreviewPanel.tsx, which share one cache key), which
+   * read signed URLs and depend on no transition. Note that `assignPartnerCerts` performs its own
+   * status = 'assigned' transition, but PREDICATED on status IN ('ready_for_assignment','assigned',
+   * 'returned_for_change') — which is exactly the guard this GET's copy was missing.
+   *
+   * Regression pinned behaviourally by tests/partner-grading-get-readonly.test.ts.
+   */
   r.get("/grading/certificates/:id/images", partnerGradingReadLimiter, requirePartnerCapability("partner.cards.assess"), async (req, res) => {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
       const auth = authorizeAssigned(req.partner!, await loadPartnerCert(req.partner!, certId));
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      await withPartnerAdminTransaction((client) =>
-        client.query(
-          `UPDATE partner_grading_work_items
-              SET certificate_id = $1,
-                  certificate_linked_at = COALESCE(certificate_linked_at, now()),
-                  status = CASE WHEN assigned_partner_grader_id IS NULL THEN status ELSE 'assigned' END,
-                  updated_at = now()
-            WHERE submission_item_id = $2
-              AND tenant_id = $3
-              AND (certificate_id IS NULL OR certificate_id = $1)`,
-          [certId, auth.auth.submissionItemId, auth.auth.tenantId]
-        )
-      );
       res.json(await imagesForPartnerCert(auth.auth));
     } catch (err) {
       sendPartnerGradingError(res, err);
