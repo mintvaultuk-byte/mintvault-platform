@@ -652,11 +652,37 @@ export async function buildCertImagesPayload(
   return { urls, quality: c.imageQualityChecks || {} };
 }
 
+/**
+ * Read the two operator-visible authenticity columns DIRECTLY.
+ *
+ * `auth_status` and `auth_notes` are real `certificates` columns that this module writes in raw
+ * SQL, but shared/schema.ts does not declare them, so Drizzle's `select()` never materialises
+ * them and `cert.authStatus` is structurally `undefined` — not null, absent. The same root cause
+ * is documented in the codebase's own words at server/routes.ts:2582-2597.
+ *
+ * The consequence on the read side was that buildCertGradingPayload's `c.authStatus || "genuine"`
+ * handed EVERY operator the fallback `"genuine"`, including a certificate an HQ operator had
+ * recorded as Authentic Altered, and the grading panel then wrote that fabricated verdict back.
+ * Reading the columns explicitly is the minimal repair; `"genuine"` survives only as the
+ * genuinely-null fallback at the call site.
+ *
+ * `private_notes` is deliberately NOT read here — a grader must never receive admin-internal
+ * notes, and `privateNotes: ""` below is correct and unchanged.
+ */
+async function readUndeclaredAuthColumns(
+  certId: number
+): Promise<{ authStatus: string | null; authNotes: string | null }> {
+  const r = await db.execute(sql`SELECT auth_status, auth_notes FROM certificates WHERE id = ${certId}`);
+  const row = (r.rows?.[0] ?? {}) as { auth_status?: string | null; auth_notes?: string | null };
+  return { authStatus: row.auth_status ?? null, authNotes: row.auth_notes ?? null };
+}
+
 /** The grading state for a certificate. NO customer PII — grade/measurement data only. */
 export async function buildCertGradingPayload(certId: number): Promise<any | null> {
   const cert = await storage.getCertificate(certId);
   if (!cert) return null;
   const c = cert as any;
+  const undeclared = await readUndeclaredAuthColumns(certId);
   return {
     // Resolved card identity — the grader panel re-syncs its editable idName/idSet
     // fields from these once the on-open identify has run (the panel mounts before
@@ -686,8 +712,8 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     edges: c.edgeValues || null,
     surface: c.surfaceValues || null,
     defects: c.defects || [],
-    authStatus: c.authStatus || "genuine",
-    authNotes: c.authNotes || "",
+    authStatus: undeclared.authStatus || "genuine",
+    authNotes: undeclared.authNotes || "",
     gradeExplanation: c.gradeExplanation || "",
     // private_notes are admin-internal and may reference the customer — NEVER
     // surface them to a grader. Returned empty; the grader never reads or
@@ -734,6 +760,26 @@ const pick = (a: any, b: any) => (a === undefined ? (b ?? null) : a);
 // who genuinely wants to blank a name uses the admin Manual Override instead.
 const keepStr = (a: any, b: any) =>
   a === undefined || a === null || (typeof a === "string" && a.trim() === "") ? (b ?? null) : a;
+
+/**
+ * SQL-side preservation for the three columns the schema model does NOT declare.
+ *
+ * `auth_status`, `auth_notes` and `private_notes` are written by the UPDATE below but are absent
+ * from the `certificates` Drizzle model, so `cert.authStatus` / `cert.authNotes` /
+ * `cert.privateNotes` are ALWAYS `undefined` and `pick()` collapsed to NULL on EVERY draft save —
+ * silently destroying an HQ operator's private notes and resetting an `authentic_altered` verdict
+ * to nothing. Preserve at the SQL layer instead, so no read shape anywhere has to change: this is
+ * the identical repair server/routes.ts:2677-2680 already ships for these exact three columns on
+ * the admin certificate-update route.
+ *
+ * Returns NULL when the caller sent nothing, so `COALESCE(<expr>, <column>)` keeps the stored
+ * value. `""` is mapped to NULL and therefore PRESERVES rather than blanks — byte-identical to
+ * the admin route's `txt()` helper. That is deliberate: the grading panel seeds these fields
+ * empty before its data arrives, so treating `""` as an instruction to blank is exactly how the
+ * data was being lost. Blanking remains available on the admin certificate-update route, which
+ * is the surface that owns admin-internal fields.
+ */
+const keepStoredText = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
 
 /**
  * Persist a grader's grade as a DRAFT on the certificate (grade_approved_at
@@ -827,10 +873,10 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       defects        = ${jb(body.defects, cert.defects)}::jsonb,
       whitening_lines = ${jb(body.whitening_lines, cert.whiteningLines)}::jsonb,
       crease_lines    = ${jb(body.crease_lines, cert.creaseLines)}::jsonb,
-      auth_status = ${pick(body.auth_status, cert.authStatus)},
-      auth_notes  = ${pick(body.auth_notes, cert.authNotes)},
+      auth_status = COALESCE(${keepStoredText(body.auth_status)}, auth_status, 'genuine'),
+      auth_notes  = COALESCE(${keepStoredText(body.auth_notes)}, auth_notes),
       grade_explanation = ${pick(body.grade_explanation, cert.gradeExplanation)},
-      private_notes     = ${pick(body.private_notes, cert.privateNotes)},
+      private_notes     = COALESCE(${keepStoredText(body.private_notes)}, private_notes),
       dark_border_front = ${pick(body.dark_border_front, cert.darkBorderFront)},
       dark_border_back  = ${pick(body.dark_border_back, cert.darkBorderBack)},
       eye_appeal_modifier = ${num(body.eye_appeal_modifier, cert.eyeAppealModifier)},
