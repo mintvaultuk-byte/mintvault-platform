@@ -135,8 +135,13 @@ const GATED_SUITES: Record<string, string[]> = {
  * `toBeGreaterThan` threshold was not enough. Re-measure with:
  *   node -e '…GATED_SUITES…' (or simply read the failure message, which prints both numbers)
  */
-const EXPECTED_GATED_FILES = 74;
-const EXPECTED_GATE_VARIABLES = 57;
+// 74 -> 75, 57 -> 59: partner-mfa-bruteforce-hardening.test.ts joined the gated surface with the
+// MFA brute-force repair, bringing PARTNER_MFA_BF_RT_ADMIN and PARTNER_MFA_BF_RT_RUNTIME. Both are
+// wired in .github/workflows/ci.yml (env block, the auth-suite CREATE DATABASE loop, and the
+// createrole assertion). This bump is the ratchet working as intended: it refused to accept a new
+// gated suite silently and demanded the count be changed deliberately, with a reason.
+const EXPECTED_GATED_FILES = 75;
+const EXPECTED_GATE_VARIABLES = 59;
 
 /**
  * The entries above with an empty list are gated on something that is NOT an environment
