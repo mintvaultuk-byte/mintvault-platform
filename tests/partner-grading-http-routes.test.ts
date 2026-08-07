@@ -593,32 +593,26 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
   });
 
   /**
-   * G1b — CHARACTERISATION OF AN OPEN PRODUCTION DEFECT. Read the comment before "fixing" this.
+   * G1b — PRESERVATION (was: characterisation of open defect D-1).
    *
-   * A partner draft save does not merely fail to WRITE private_notes — it ERASES whatever was
-   * there. Proven end to end above; the mechanism is:
+   * This test used to assert `toBeNull()` — i.e. it pinned a data-destroying defect as expected
+   * behaviour, inside a must-pass CI floor. Its own comment instructed the swap made here:
+   * "WHEN IT IS FIXED this test goes RED. That is the intended signal: replace it with the
+   * preservation assertion rather than deleting it."
    *
-   *   1. server/grader.ts writes `private_notes = ${pick(body.private_notes, cert.privateNotes)}`
-   *      and `pick(a, b) = a === undefined ? (b ?? null) : a`.
-   *   2. `cert` comes from `storage.getCertificate()`, a Drizzle `select()` over
-   *      `shared/schema.ts`, and that model declares NO `privateNotes` field (only `notes`).
-   *      `cert.privateNotes` is therefore ALWAYS `undefined`.
-   *   3. `partnerGradeBody()` always removes `private_notes` from a partner request — that is its
-   *      entire purpose.
-   *   => `pick(undefined, undefined)` -> `null`, on every partner draft save and every partner
-   *      submit-for-review. Admin-internal notes on a partner-origin certificate are destroyed.
+   * The defect: server/grader.ts wrote `private_notes = ${pick(body.private_notes,
+   * cert.privateNotes)}`, `cert` comes from a Drizzle `select()` over shared/schema.ts, and that
+   * model declares no `privateNotes` field — so `cert.privateNotes` was ALWAYS `undefined`,
+   * `partnerGradeBody()` always strips `private_notes` from a partner request, and
+   * `pick(undefined, undefined)` -> `null` destroyed the admin note on EVERY partner save.
+   * `auth_status` and `auth_notes` sat on the identical construct.
    *
-   * `auth_status` and `auth_notes` sit on the identical construct and are undeclared in the same
-   * way, so they erase too.
-   *
-   * NOT FIXED HERE: the write lives in server/grader.ts, which this task is directed not to modify,
-   * and the clean repair (declaring the columns in `shared/schema.ts`) changes what
-   * `getCertificate()` returns for every caller — an owner-approved change, not an assurance edit.
-   *
-   * WHEN IT IS FIXED this test goes RED. That is the intended signal: replace it with the
-   * preservation assertion (`toBe(sentinel)`) rather than deleting it.
+   * FIXED (owner-approved 2026-08-07) by preserving all three at the SQL layer, the same
+   * `COALESCE` form server/routes.ts already ships for these exact columns on the admin
+   * certificate-update route. The strip itself is unchanged and still proven by G1/G2 above:
+   * a partner STILL cannot write private_notes — it is now merely left alone instead of erased.
    */
-  it("G1b: DEFECT (open) — a partner draft save ERASES private_notes instead of preserving it", async () => {
+  it("G1b: a partner draft save PRESERVES private_notes instead of erasing it", async () => {
     const sentinel = `ADMIN-ONLY-${randomUUID()}`;
     const f = await seedGradingFixture({ privateNotes: sentinel });
     const cookie = await login(f.graderEmail);
@@ -637,8 +631,46 @@ async function seedGradingFixture(opts: { privateNotes: string }): Promise<Gradi
 
     expect(
       await scalar<string | null>("SELECT private_notes FROM certificates WHERE id=$1", [certId]),
-      "OPEN DEFECT: the admin-internal note is destroyed by an unrelated partner draft save"
-    ).toBeNull();
+      "the admin-internal note must survive an unrelated partner draft save"
+    ).toBe(sentinel);
+    // Control: the save really executed, so this cannot pass by the write silently failing.
+    expect(await scalar<string>("SELECT card_name FROM certificates WHERE id=$1", [certId])).toBe(
+      "Erasure Witness Card"
+    );
+  });
+
+  /**
+   * G1c — the other two columns of D-1, over real HTTP.
+   *
+   * `auth_status` is not cosmetic: the grading panel derives grade KIND (AA / NO) from it, so an
+   * `authentic_altered` verdict silently reset to nothing by an unrelated partner save is a
+   * grading-integrity failure, not a display one.
+   */
+  it("G1c: a partner draft save PRESERVES an authentic_altered verdict and its notes", async () => {
+    const f = await seedGradingFixture({ privateNotes: "irrelevant" });
+    const cookie = await login(f.graderEmail);
+    const certId = f.certIds[0];
+    await admin.query("UPDATE certificates SET auth_status=$1, auth_notes=$2 WHERE id=$3", [
+      "authentic_altered",
+      "Trimmed edges observed under UV",
+      certId,
+    ]);
+
+    const res = await req("PUT", `/api/partner/grading/certificates/${certId}/grade`, {
+      cookie,
+      body: { card_name: "Verdict Witness Card", overall_grade: "9" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const after = await admin.query<{ auth_status: string; auth_notes: string; card_name: string }>(
+      "SELECT auth_status, auth_notes, card_name FROM certificates WHERE id=$1",
+      [certId]
+    );
+    expect(after.rows[0].auth_status, "a partner save must not reset the authenticity verdict").toBe(
+      "authentic_altered"
+    );
+    expect(after.rows[0].auth_notes).toBe("Trimmed edges observed under UV");
+    expect(after.rows[0].card_name).toBe("Verdict Witness Card");
   });
 
   // =====================================================================================
