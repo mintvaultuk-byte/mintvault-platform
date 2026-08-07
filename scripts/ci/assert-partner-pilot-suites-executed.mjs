@@ -47,13 +47,13 @@ const SUITES = [
    * (partner_submissions.completed_at, SQLSTATE 42703) reached a PR with every suite green.
    * If this floor is ever missing, that entire code path is unproven again.
    */
-  { file: "tests/partner-completion-cascade.test.ts", min: 9 },
+  { file: "tests/partner-completion-cascade.test.ts", min: 15 },
   /**
    * FULL-PILOT-LOCAL-01. Pins the corrected approval/settlement lifecycle: approving card ONE of
    * two must NOT settle. The earlier acceptance wording asserted 8/2/0 after BOTH approvals, which
    * production does not do — mirrorPartnerApproval fires on the COMPLETE approved set.
    */
-  { file: "tests/partner-full-pilot-workflow.test.ts", min: 14 },
+  { file: "tests/partner-full-pilot-workflow.test.ts", min: 17 },
   /**
    * The ONLY behavioural coverage of /api/partner/grading/*. Every other assertion about the
    * partner grading adapter in this repository is a source-string pin, and the PR #288 mutation
@@ -61,13 +61,30 @@ const SUITES = [
    * survived the entire suite. Without this floor, one env-var slip or one edited gate silently
    * removes the only test that would notice.
    *
-   * Raised 8 -> 9 with the D-1 repair (2026-08-07). G1b was inverted from a characterisation of
-   * the data-destroying defect into a preservation assertion, and G1c was added for the other two
-   * undeclared columns. A floor sitting BELOW the real count permits silent test deletion
-   * (finding A10-F5), which is exactly what must not happen to the only end-to-end evidence that
-   * a partner save no longer destroys admin-internal data.
+   * 9 -> 16 (2026-08-07), MEASURED: `run-partner-suite.mjs tests/partner-grading-http-routes.test.ts`
+   * reports passed=16 failed=0 skipped=0. It was raised 8 -> 9 for the D-1 repair and NOT raised
+   * again when this PR's headline feature added seven more tests, so the floor carried SEVEN of
+   * slack — and those seven were precisely the server-authority proofs A1, A2, B, D, E, F and W.
+   * All seven could have been deleted with the floor still green. The block's own warning already
+   * said a floor below the real count "permits silent test deletion ... which is exactly what must
+   * not happen to the only end-to-end evidence"; it was true of the floor itself.
    */
-  { file: "tests/partner-grading-http-routes.test.ts", min: 9 },
+  { file: "tests/partner-grading-http-routes.test.ts", min: 16 },
+  /**
+   * H2-GET-READONLY — the sole behavioural evidence that a GET on the partner grading adapter does
+   * not strand a `pending_review` work item. It appeared in NONE of the six manifests.
+   *
+   * Its own in-file guard only asserts `storageReady`, so it catches a missing MinIO variable and
+   * nothing else: changing `(storageReady ? describe : describe.skip)` to a hard `describe.skip`
+   * would leave the file reporting as PASSED with the evidence gone. There is no redundancy to fall
+   * back on — the stranding defect is proved here and nowhere else, and the failure it guards has
+   * no in-app recovery (the work item freezes at `assigned`, settlement never runs and the reserved
+   * credits are held for 365 days).
+   *
+   * MEASURED 2 = 1 real end-to-end test + the CI-wiring guard outside the gate. A floor of 2 is
+   * low, but it is the true count, and 0/skip is what actually has to be caught here.
+   */
+  { file: "tests/partner-grading-get-readonly.test.ts", min: 2 },
   /**
    * The Super Admin control shell: requireAdmin rejection, partner/location/user suspend, session
    * revoke, feature-flag writes, emergency stop, MFA reset, read-endpoint authorisation and the
