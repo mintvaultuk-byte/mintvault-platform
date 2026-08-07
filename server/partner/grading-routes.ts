@@ -18,6 +18,14 @@ import { getR2SignedUrl, headR2 } from "../r2";
 import { storage } from "../storage";
 import { applyCertGradeDraft, buildCertGradingPayload, GradeDraftRejected, stripGraderPii } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
+import {
+  applyGradeAuthority,
+  computePartnerGradeAuthority,
+  gradeAuthorityAuditDetail,
+  partnerGradeBody,
+  persistPartnerGradeAuthorityScore,
+  type PartnerGradeAuthority,
+} from "./grading-authority";
 import { auditInOwnTxn } from "./audit";
 import { partnerGradingMutationLimiter, partnerGradingReadLimiter } from "./rate-limit";
 import { withPartnerAdminTransaction } from "./db";
@@ -82,12 +90,43 @@ function sendPartnerGradingError(res: Response, err: unknown): void {
   res.status(500).json({ error: "Partner grading is unavailable." });
 }
 
-function partnerGradeBody(body: unknown): Record<string, unknown> {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
-  const clean = { ...(body as Record<string, unknown>) };
-  delete clean.private_notes;
-  delete clean.privateNotes;
-  return clean;
+/**
+ * Whitelist + server-authoritative grade, in one place.
+ *
+ * `partnerGradeBody` (now an explicit whitelist in ./grading-authority) strips every
+ * authority-bearing and HQ-private key the client might send. `computePartnerGradeAuthority`
+ * then runs the ONE MVGS engine over the evidence this write will leave on the row and
+ * `applyGradeAuthority` puts the SERVER's overall grade + sub-grades into the body that the
+ * unmodified engine writer persists.
+ *
+ * Every partner write path (draft save, submit, edit-submission) goes through this single
+ * function, so no partner route can accidentally persist a client-authored grade.
+ */
+/**
+ * What the partner operator is shown: the server's OUTCOME, never the machinery.
+ *
+ * Deliberately omits `deductions` — the per-category deduction breakdown is the engine's
+ * scoring internals, and echoing it to an external partner client hands them a free oracle
+ * for reverse-engineering the deduction tables one request at a time.
+ */
+function publicAuthority(a: PartnerGradeAuthority) {
+  return {
+    source: "server" as const,
+    version: a.version,
+    overallGrade: a.overallGrade,
+    subgrades: a.subgrades,
+    tier: a.tier,
+    notGraded: a.forcedNotGraded,
+  };
+}
+
+async function partnerAuthoritativeBody(
+  certId: number,
+  rawBody: unknown
+): Promise<{ body: Record<string, unknown>; authority: PartnerGradeAuthority }> {
+  const evidence = partnerGradeBody(rawBody);
+  const authority = await computePartnerGradeAuthority(certId, evidence);
+  return { body: applyGradeAuthority(evidence, authority), authority };
 }
 
 async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Promise<PartnerCertAuth | null> {
@@ -448,8 +487,10 @@ export function partnerGradingRouter(): Router {
         if (!(await assertPartnerDraftWritable(certId, req.partner!))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
-        const saved = await applyCertGradeDraft(certId, partnerGradeBody(req.body));
+        const { body, authority } = await partnerAuthoritativeBody(certId, req.body);
+        const saved = await applyCertGradeDraft(certId, body);
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        await persistPartnerGradeAuthorityScore(certId, authority);
         await auditInOwnTxn({
           tenantId: req.partner!.tenantId,
           locationId: auth.auth.locationId,
@@ -459,8 +500,10 @@ export function partnerGradingRouter(): Router {
           recordId: String(certId),
           sessionId: req.partner!.sessionId,
           correlationId: auth.auth.partnerSubmissionId,
+          after: gradeAuthorityAuditDetail(authority),
         });
-        res.json({ ok: true, gradingStatus: auth.auth.gradingStatus });
+        // The partner sees the SERVER's result, not their own claim.
+        res.json({ ok: true, gradingStatus: auth.auth.gradingStatus, authority: publicAuthority(authority) });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }
@@ -485,13 +528,14 @@ export function partnerGradingRouter(): Router {
         if (!(await requireBothImages(auth.auth))) {
           return res.status(409).json({ error: "Upload front and back images before submitting grades." });
         }
-        const body = partnerGradeBody(req.body);
+        const { body, authority } = await partnerAuthoritativeBody(certId, req.body);
 
         if (!(await assertPartnerDraftWritable(certId, req.partner!))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
         const saved = await applyCertGradeDraft(certId, body);
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        await persistPartnerGradeAuthorityScore(certId, authority);
         // Single guarded UPDATE: ownership predicate and state transition cannot be split.
         if (!(await partnerSubmitForReview(certId, req.partner!))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
@@ -527,9 +571,14 @@ export function partnerGradingRouter(): Router {
           recordId: String(certId),
           sessionId: req.partner!.sessionId,
           correlationId: auth.auth.partnerSubmissionId,
-          after: { gradingStatus: "pending_review", reviewRequired: true },
+          after: { gradingStatus: "pending_review", reviewRequired: true, ...gradeAuthorityAuditDetail(authority) },
         });
-        res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
+        res.json({
+          ok: true,
+          gradingStatus: "pending_review",
+          reviewRequired: true,
+          authority: publicAuthority(authority),
+        });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }
@@ -557,12 +606,13 @@ export function partnerGradingRouter(): Router {
         if (!(await requireBothImages(auth.auth))) {
           return res.status(409).json({ error: "Upload front and back images before submitting grades." });
         }
-        const body = partnerGradeBody(req.body);
+        const { body, authority } = await partnerAuthoritativeBody(certId, req.body);
         if (!(await assertPartnerDraftWritable(certId, req.partner!))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
         const edited = await applyCertGradeDraft(certId, body);
         if (!edited) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        await persistPartnerGradeAuthorityScore(certId, authority);
         if (!(await partnerSubmitForReview(certId, req.partner!))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
@@ -602,9 +652,14 @@ export function partnerGradingRouter(): Router {
           recordId: String(certId),
           sessionId: req.partner!.sessionId,
           correlationId: auth.auth.partnerSubmissionId,
-          after: { gradingStatus: "pending_review", reviewRequired: true },
+          after: { gradingStatus: "pending_review", reviewRequired: true, ...gradeAuthorityAuditDetail(authority) },
         });
-        res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(body) });
+        res.json({
+          ok: true,
+          gradingStatus: "pending_review",
+          changed: Object.keys(body),
+          authority: publicAuthority(authority),
+        });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }
