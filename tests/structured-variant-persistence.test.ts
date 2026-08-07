@@ -24,6 +24,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape } from "./helpers/strip-non-code";
+import { diffProtectedEngineReach } from "./helpers/protected-module-refs";
 import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
 import {
   validateStructuredVariant,
@@ -985,6 +986,13 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         // An escape the analyser cannot decode could hide an identifier, so it is refused
         // outright rather than guessed at (N4).
         expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
+        // A module SPECIFIER is a StringLiteral, so both analysis modes blank it and a dynamic
+        // reach into a protected CALCULATION engine leaves no token for the identifier scan below
+        // (hostile review, 2026-08-07). Specifiers are resolved in a SEPARATE pass that never
+        // feeds the signature regexes — see tests/helpers/protected-module-refs.ts. Kept
+        // identical to the sibling guard so neither can drift into being the weaker one.
+        const engineReach = diffProtectedEngineReach(diff, "+");
+        expect(engineReach, `server/grader.ts reaches the protected calculation engine: ${engineReach}`).toBe("");
         // Signature A: the JavaScript half is proven in JS mode; the SQL column assignments are
         // a tagged-DOMAIN fact and are proven in guarded mode. Neither half can stand in for
         // the other.
@@ -1038,6 +1046,10 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         // unrelated rendering change to this file still fails.
         const diff = protectedDiffFor(f);
         const addedJs = addedJsOf(diff, "+");
+        // Same specifier blind spot as server/grader.ts above — a rendering file must not reach
+        // into the calculation engine by a route the token scan cannot see.
+        const docReach = diffProtectedEngineReach(diff, "+");
+        expect(docReach, `server/certificate-document.ts reaches the protected engine: ${docReach}`).toBe("");
         expect(
           /\bcertificateOrigin\s*\(/.test(addedJs),
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
