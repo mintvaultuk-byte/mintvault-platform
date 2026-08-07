@@ -12,6 +12,7 @@ const API = read("client/src/lib/partner-api.ts");
 const WIZARD = read("client/src/pages/partner/submission-wizard.tsx");
 const GRADING = read("client/src/pages/partner/grading.tsx");
 const GRADING_ROUTES = read("server/partner/grading-routes.ts");
+const GRADING_AUTHORITY = read("server/partner/grading-authority.ts");
 const GRADER_ROUTES = read("server/routes/grader.ts");
 const GRADER_SERVICE = read("server/grader.ts");
 const PARTNER_ASSIGNMENT = read("server/partner/grading-assignment.ts");
@@ -135,9 +136,14 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
     expect(GRADING_ROUTES).toContain("pgwi.destination_submission_id = pci.destination_submission_id");
     expect(GRADING_ROUTES).toContain("pgwi.assigned_partner_grader_id = ${req.partner!.userId}");
     expect(GRADING_ROUTES).toContain("partnerDraftWriteGuard");
-    expect(GRADING_ROUTES).toContain("function partnerGradeBody");
-    expect(GRADING_ROUTES).toContain("delete clean.private_notes");
-    expect(GRADING_ROUTES).toContain("delete clean.privateNotes");
+    // The two-key blacklist became an explicit default-deny WHITELIST, and moved into
+    // server/partner/grading-authority.ts. Pin the stronger property: nothing crosses from the
+    // partner client unless it is named evidence, so a field nobody thought of is refused by
+    // default rather than passed through.
+    expect(GRADING_ROUTES).toContain("partnerGradeBody,");
+    expect(GRADING_AUTHORITY).toContain("export function partnerGradeBody");
+    expect(GRADING_AUTHORITY).toContain("if (EVIDENCE_ALLOWED.has(key)) clean[key] = src[key];");
+    expect(GRADING_AUTHORITY).not.toMatch(/delete\s+clean\.private_?[nN]otes/);
     // The partner submit-for-review write and the partner assignment query live in PARTNER-OWNED
     // code. server/grader.ts is a protected MVGS engine file and must stay byte-identical to main.
     //
@@ -180,7 +186,12 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
   });
 
   it("keeps partner final writes atomic and blocks admin-only/private payload fields", () => {
-    expect(GRADING_ROUTES).toContain("partnerGradeBody(req.body)");
+    // Every partner write now goes through the server-authority adapter, which whitelists the
+    // evidence AND overwrites the authoritative grade with the engine's own verdict. Pinning the
+    // adapter rather than the raw whitelist is what stops a future edit reinstating a write path
+    // that trusts a client-supplied grade.
+    expect(GRADING_ROUTES).toContain("partnerAuthoritativeBody(certId, req.body)");
+    expect(GRADING_ROUTES).not.toContain("partnerGradeBody(req.body)");
     // The state transition is ONE guarded UPDATE, so the ownership predicate and the status
     // change cannot be separated by a concurrent writer.
     expect(GRADING_ROUTES).toContain("partnerSubmitForReview(certId, req.partner!)");
