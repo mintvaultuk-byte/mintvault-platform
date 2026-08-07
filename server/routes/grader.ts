@@ -1083,11 +1083,48 @@ export function registerGraderRoutes(app: Express): void {
       // so partner cards pass exactly the same publish gates as HQ cards through the same code.
       // A conflict is surfaced, never swallowed: reporting a clean approval over a work item that
       // did not move is the silent-failure shape this codebase guards against elsewhere.
-      const mirror = await mirrorPartnerApproval(certId, adminUser);
+      /**
+       * F1. Every non-success mirror outcome is now surfaced with the condition NAMED.
+       *
+       * Previously only `conflict` was checked and everything else fell through to
+       * `{ ok: true }` — including `not_partner`, which the old pending_review-keyed gate returned
+       * for a partner card whose settlement had failed. An operator retrying after fixing the cause
+       * got HTTP 200 over a destination that was still stuck in_grading with every credit reserved
+       * and zero debits. A retry now either completes settlement (`settled_on_retry`) or reports the
+       * fail-closed reason code.
+       *
+       * The first attempt can still THROW out of the mirror when settlement refuses; that is caught
+       * here rather than becoming an unhandled rejection, and reported with the same shape.
+       */
+      let mirror;
+      try {
+        mirror = await mirrorPartnerApproval(certId, adminUser);
+      } catch (err) {
+        const reasonCode =
+          typeof (err as { code?: unknown } | null)?.code === "string"
+            ? String((err as { code: string }).code)
+            : "settlement_unknown_failure";
+        return res.status(409).json({
+          error: "Partner credit settlement did not complete; the certificate is approved but unsettled.",
+          code: "partner_settlement_failed",
+          reason: reasonCode,
+          gradingStatus: "approved",
+        });
+      }
       if (mirror.kind === "conflict") {
         return res.status(409).json({ error: "Partner work item changed; refresh and try again" });
       }
-      return res.json({ ok: true, gradingStatus: "approved" });
+      if (mirror.kind === "settlement_failed") {
+        return res.status(409).json({
+          error: "Partner credit settlement did not complete; the certificate is approved but unsettled.",
+          code: "partner_settlement_failed",
+          reason: mirror.reasonCode,
+          detail: mirror.message,
+          destinationSubmissionId: mirror.destinationSubmissionId,
+          gradingStatus: "approved",
+        });
+      }
+      return res.json({ ok: true, gradingStatus: "approved", partnerMirror: mirror.kind });
     }
   );
 

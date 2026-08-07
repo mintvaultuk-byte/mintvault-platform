@@ -100,7 +100,7 @@ import {
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
-import { reconcileStuckPrintBatches } from "./print-workflow";
+import { reconcileStuckPrintBatches, partnerSettlementBlockForCert } from "./print-workflow";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -5450,6 +5450,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const cert = { ...rawCert, certId: normalizeCertId(rawCert.certId) };
 
+      // F2: the batch gate refuses unsettled Partner cards; this route rendered the identical
+      // artefact with no partner lookup at all. `preview` is not an exemption — a preview PNG is
+      // byte-identical to the print asset.
+      const settlementBlock = await partnerSettlementBlockForCert(cert.certId);
+      if (settlementBlock) {
+        return res.status(409).json({
+          error: settlementBlock.message,
+          code: settlementBlock.code,
+          destinationStatus: settlementBlock.destinationStatus,
+        });
+      }
+
       const disposition = preview ? "inline" : "attachment";
 
       if (format === "png" && side !== "both") {
@@ -6423,6 +6435,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const rawCert = await storage.getCertificateByCertId(certId);
       if (!rawCert) return res.status(404).json({ error: "Certificate not found" });
+
+      // F2: same gate as the batch path. This route feeds the Printing-console thumbnails, so an
+      // unsettled Partner card now shows an explicit refusal instead of a print-ready image.
+      const settlementBlock = await partnerSettlementBlockForCert(normalizeCertId(rawCert.certId));
+      if (settlementBlock) {
+        return res.status(409).json({
+          error: settlementBlock.message,
+          code: settlementBlock.code,
+          destinationStatus: settlementBlock.destinationStatus,
+        });
+      }
 
       const override = await storage.getLabelOverride(certId);
       const cert = applyLabelOverrides({ ...rawCert, certId: normalizeCertId(rawCert.certId) }, override);

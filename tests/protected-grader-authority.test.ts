@@ -157,9 +157,20 @@ export function authorityViolations(source: string): string[] {
   // 5. Approval and rejection run the engine gate and do not swallow a partner mirror conflict.
   //    Reporting a clean approval over a partner work item that did not move is the exact
   //    silent-failure shape this codebase guards against elsewhere.
-  for (const [key, engineCall, mirrorCall] of [
-    ["POST /api/admin/certificates/:id/approve-grader-grade", "approveGraderCert", "mirrorPartnerApproval"],
-    ["POST /api/admin/certificates/:id/reject-grade", "rejectCertGrade", "mirrorPartnerRejection"],
+  /**
+   * `minKindChecks` is the number of DISTINCT mirror outcomes the handler was reviewed as
+   * surfacing, and it is what makes this rule mutation-sensitive.
+   *
+   * It used to be enough for the handler to mention `mirror.kind` and `409` ANYWHERE. That was
+   * adequate while `conflict` was the only surfaced outcome, but finding F1 added a second one
+   * (`settlement_failed`, the approved-but-unsettled retry). With two 409-returning branches the
+   * old predicate stayed green even with the conflict branch deleted — the guard could no longer
+   * detect its own mutation. Pinning the COUNT restores that: deleting either branch drops the
+   * handler below its reviewed number and is reported.
+   */
+  for (const [key, engineCall, mirrorCall, minKindChecks] of [
+    ["POST /api/admin/certificates/:id/approve-grader-grade", "approveGraderCert", "mirrorPartnerApproval", 2],
+    ["POST /api/admin/certificates/:id/reject-grade", "rejectCertGrade", "mirrorPartnerRejection", 1],
   ] as const) {
     const r = routes.find((x) => routeKey(x) === key);
     if (!r) continue; // already reported by rule 4
@@ -173,8 +184,12 @@ export function authorityViolations(source: string): string[] {
       // Mirroring is present — its outcome must be INSPECTED and a conflict surfaced, not
       // discarded. Tested against the JS representation and on the discriminant + status CODE,
       // never on the string literal "conflict" (which strip-non-code blanks, by design).
-      if (!/\bmirror\s*\.\s*kind\b/.test(r.handlerCode) || !/\b409\b/.test(r.handlerCode)) {
-        problems.push(`${key} calls ${mirrorCall}() but does not surface a mirror conflict`);
+      const kindChecks = (r.handlerCode.match(/\bmirror\s*\.\s*kind\s*===/g) ?? []).length;
+      if (kindChecks < minKindChecks || !/\b409\b/.test(r.handlerCode)) {
+        problems.push(
+          `${key} calls ${mirrorCall}() but does not surface a mirror conflict ` +
+            `(${kindChecks} of ${minKindChecks} reviewed outcome branches present)`
+        );
       }
     }
   }
