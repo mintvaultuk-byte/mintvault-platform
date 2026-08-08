@@ -270,7 +270,15 @@ describe.skipIf(!isLocal)("partner security repairs 0047 + 0048 (disposable Post
     await createMintvaultCertificatesTable(admin);
     await createMintvaultLabelPrintsTable(admin);
     await admin.query(
-      "CREATE TABLE IF NOT EXISTS cert_counter (id integer PRIMARY KEY DEFAULT 1, value integer NOT NULL DEFAULT 0)"
+      // MUST match storage.ts:1336-1340 / 0054's definition verbatim. A stand-in with a `value`
+      // column instead of `last_issued` made 0052's column-level GRANT (last_issued, updated_at)
+      // a hard 42703, which failed 0052, aborted the whole chain before 0054, and left this file
+      // reporting "16 skipped" — a beforeAll throw, not a benign env gate.
+      `CREATE TABLE IF NOT EXISTS cert_counter (
+         id integer PRIMARY KEY DEFAULT 1,
+         last_issued integer NOT NULL DEFAULT 0,
+         updated_at timestamptz NOT NULL DEFAULT NOW()
+       )`
     );
     for (const t of [
       "users",

@@ -98,6 +98,34 @@ async function runRollbackAsMigrator(): Promise<void> {
   }
 }
 
+/**
+ * Roll back everything ABOVE 0049, newest first, as the migrator.
+ *
+ * This suite applies the FULL migration set, so 0050-0056 now sit above 0049. Every rollback in
+ * that series refuses while a higher-numbered journal row exists — correctly — so rollback-0049
+ * cannot be exercised in isolation any more, and T7-T12 were failing with
+ * "rollback-0049 refused: 7 later migration journal row(s) exist" instead of the 0049-specific
+ * refusals they exist to pin. Descending order is the supported recovery path (each file
+ * de-journals itself), so this reproduces exactly what an operator would do before touching 0049.
+ */
+async function rollBackEverythingAbove0049(): Promise<void> {
+  const migrator = await migratorClient();
+  try {
+    const higher = [
+      "rollback-0056-partner-hq-control-tables-write-deny.sql",
+      "rollback-0055-partner-ledger-preserve-search-path.sql",
+      "rollback-0054-cert-counter-monotonic-allocator.sql",
+      "rollback-0053-partner-mfa-failure-lockout.sql",
+      "rollback-0052-partner-internal-evidence-rls.sql",
+      "rollback-0051-partner-runtime-flag-control-least-privilege.sql",
+      "rollback-0050-partner-connector-profile-read.sql",
+    ];
+    for (const f of higher) await migrator.query(rb(f));
+  } finally {
+    await migrator.end();
+  }
+}
+
 /** Apply ONLY 0049 as the migrator (used to prove reapply after a successful rollback). */
 async function applyGradingBridgeOnly(): Promise<void> {
   const migrator = await migratorClient();
@@ -250,7 +278,15 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
        * and T6/T10/T11/T12 would assert on privileges that were never granted — passing or failing
        * for reasons unrelated to the rollback. It must exist for those proofs to mean anything.
        */
-      await admin.query("CREATE TABLE IF NOT EXISTS cert_counter (id integer PRIMARY KEY DEFAULT 1, value integer NOT NULL DEFAULT 0)");
+      // MUST match storage.ts:1336-1340 / 0054's definition verbatim — see the note in
+      // tests/partner-security-repairs-0047-0048.test.ts. A `value` column here made 0052's
+      // column-level GRANT (last_issued, updated_at) a hard 42703, aborting the chain in beforeAll
+      // and rendering this suite as "12 skipped" rather than red.
+      await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+         id integer PRIMARY KEY DEFAULT 1,
+         last_issued integer NOT NULL DEFAULT 0,
+         updated_at timestamptz NOT NULL DEFAULT NOW()
+       )`);
       for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates", "label_prints", "cert_counter"]) {
         await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
       }
@@ -332,10 +368,21 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
     });
 
     it("T6: partner_connector_runtime holds the cert_counter and sequence privileges 0049 grants", async () => {
-      const counter = await admin.query<{ ok: boolean }>(
-        "SELECT has_table_privilege('partner_connector_runtime','cert_counter','UPDATE') AS ok"
+      // 0049 grants cert_counter at TABLE level; 0052 then narrows it to columns and 0054
+      // re-asserts that narrowed form. After the full chain the table-level privilege is therefore
+      // GONE by design, and asking has_table_privilege here was asserting the pre-0052 state.
+      // The increment the connector actually performs is UPDATE(last_issued), so that is what must
+      // still hold — and the column form is the stronger assertion, because it also proves the
+      // narrowing landed rather than the blanket grant surviving.
+      const counter = await admin.query<{ ok: boolean; id_locked: boolean }>(
+        `SELECT has_column_privilege('partner_connector_runtime','cert_counter','last_issued','UPDATE') AS ok,
+                NOT has_column_privilege('partner_connector_runtime','cert_counter','id','UPDATE') AS id_locked`
       );
-      expect(counter.rows[0].ok).toBe(true);
+      expect(counter.rows[0].ok, "the connector must still be able to advance the allocator").toBe(true);
+      expect(
+        counter.rows[0].id_locked,
+        "0052/0054 must have removed UPDATE(id) — that is the allocator re-point primitive"
+      ).toBe(true);
       const seq = await admin.query<{ ok: boolean }>(
         "SELECT has_sequence_privilege('partner_connector_runtime','certificates_id_seq','USAGE') AS ok"
       );
@@ -343,6 +390,12 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
     });
 
     it("T7: the rollback REFUSES as the real migrator when a certificate is linked, and drops nothing", async () => {
+      // 0050-0056 sit above 0049 and every one of them refuses while a higher journal row exists,
+      // so they must come off first before 0049's OWN refusal semantics can be reached. T1-T6
+      // above deliberately run against the complete chain; from here down the suite is exercising
+      // rollback-0049 in isolation, which is only a reachable state once the higher rows are gone.
+      await rollBackEverythingAbove0049();
+
       // The defect this pins: FORCE RLS filtered every row from the migrator, the evidence count
       // came back 0 with a linked row present, and the rollback dropped the table and COMMITTED.
       await seedWorkItem(A, { linkCertificate: true });

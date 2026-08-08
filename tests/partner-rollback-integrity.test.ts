@@ -357,6 +357,34 @@ const ROUND_TRIPS: RoundTrip[] = [
     },
   },
   {
+    // 0053 was absent from this list, and its absence was not cosmetic: the descending sequence
+    // rolled 0056 -> 0055 -> 0054 and then hit rollback-0052, which correctly REFUSED because
+    // 0053's journal row was still there ("1 later migration journal row(s) exist"). That bricked
+    // the descent, and because the descent runs before the 0054/0055 attack blocks, every one of
+    // those then ran against a database whose guards had already been rolled back — which is why
+    // the allocator and pg_temp attacks read as "permitted". One missing entry, eight red tests.
+    //
+    // 0053 adds two additive columns to partner_users, so its observable hole is the columns
+    // themselves rather than a privilege: the MFA lockout has nowhere to record state without them.
+    number: 53,
+    // Not standalone: 0054/0055/0056 sit above it and rollback-0053 refuses while any later
+    // journal row exists. Descending order is its supported recovery path, same as 0047-0049/0052.
+    standalone: false,
+    migration: "0053_partner_mfa_failure_lockout.sql",
+    rollback: "rollback-0053-partner-mfa-failure-lockout.sql",
+    hole: "the MFA brute-force lockout has no columns to count failures or hold a lock in",
+    whenApplied: "lockout_columns_present",
+    whenRolledBack: "lockout_columns_absent",
+    probe: async () => {
+      const r = await admin.query<{ n: number }>(
+        `SELECT count(*)::int n FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'partner_users'
+            AND column_name IN ('failed_mfa_count', 'mfa_locked_until')`
+      );
+      return r.rows[0].n === 2 ? "lockout_columns_present" : "lockout_columns_absent";
+    },
+  },
+  {
     number: 54,
     standalone: true,
     migration: "0054_cert_counter_monotonic_allocator.sql",

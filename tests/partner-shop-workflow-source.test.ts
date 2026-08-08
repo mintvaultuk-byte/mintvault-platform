@@ -134,7 +134,11 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
     expect(GRADING_ROUTES).toContain("partnerImageFallback");
     expect(GRADING_ROUTES).toContain("headR2(auth.frontImageKey)");
     expect(GRADING_ROUTES).toContain("pgwi.destination_submission_id = pci.destination_submission_id");
-    expect(GRADING_ROUTES).toContain("pgwi.assigned_partner_grader_id = ${req.partner!.userId}");
+    // The work-item ownership predicate moved into the atomic transition helper, where the
+    // principal is named `principal` rather than `req.partner!`. The PROPERTY being pinned is
+    // unchanged and is the one that matters: the work-item write is still predicated on the
+    // assigned partner grader, so a partner cannot transition a card assigned to someone else.
+    expect(GRADING_ROUTES).toContain("pgwi.assigned_partner_grader_id = ${principal.userId}");
     expect(GRADING_ROUTES).toContain("partnerDraftWriteGuard");
     // The two-key blacklist became an explicit default-deny WHITELIST, and moved into
     // server/partner/grading-authority.ts. Pin the stronger property: nothing crosses from the
@@ -195,9 +199,37 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
     expect(GRADING_ROUTES.match(/partnerAuthoritativeWrite\(certId, req\.body\)/g) ?? []).toHaveLength(3);
     expect(GRADING_ROUTES).toContain("persistedMatchesAuthority(persisted, authority)");
     expect(GRADING_ROUTES).not.toContain("partnerGradeBody(req.body)");
-    // The state transition is ONE guarded UPDATE, so the ownership predicate and the status
-    // change cannot be separated by a concurrent writer.
-    expect(GRADING_ROUTES).toContain("partnerSubmitForReview(certId, req.partner!)");
+    // The state transition is ATOMIC ACROSS BOTH SIDES of the seam, not merely one guarded UPDATE.
+    //
+    // It used to be two auto-commit statements — certificate to pending_review, then work item to
+    // pending_review — so anything that made the SECOND match zero rows (including the ordinary
+    // 409 concurrency path) left the certificate at pending_review with the work item still
+    // 'assigned'. That split state is unrecoverable: both retry doors require 'assigned', and the
+    // approval mirror keys on the work item being 'pending_review'.
+    //
+    // Pin the new shape so the old one cannot come back: both routes call the transition helper
+    // with the work-item id, the helper opens ONE transaction, both writes go through that
+    // transaction handle, and a zero-row match on either side rolls the other back via the
+    // sentinel rather than committing half of it.
+    expect(
+      (GRADING_ROUTES.match(/partnerSubmitForReview\(certId, req\.partner!, auth\.auth\.submissionItemId\)/g) ?? [])
+        .length,
+      "both /submit and /edit-submission must go through the atomic transition helper"
+    ).toBe(2);
+    expect(GRADING_ROUTES, "the two transitions must share ONE transaction").toContain(
+      "await db.transaction(async (tx) => {"
+    );
+    expect(GRADING_ROUTES, "a zero-row match must roll the sibling write back, not return 409 after committing it").toContain(
+      "PartnerSubmitConflict"
+    );
+    expect(
+      (GRADING_ROUTES.match(/tx\.execute\(sql`/g) ?? []).length,
+      "both the certificate and the work-item UPDATE must run on the transaction handle, not the ambient db"
+    ).toBe(2);
+    // The old non-atomic call shape must not return. Note this is NOT a prefix of the new call:
+    // the new one is `(certId, req.partner!, auth.auth.submissionItemId)`, so the closing paren
+    // here makes this an exact check for the two-argument form.
+    expect(GRADING_ROUTES).not.toContain("partnerSubmitForReview(certId, req.partner!)");
     expect(GRADING_ROUTES).toContain("const FINAL_WORK_ITEM_STATUSES");
     expect(GRADING_ROUTES).toContain("'returned_for_change'");
     expect(GRADING_ROUTES).toContain("pgwi.status IN ${FINAL_WORK_ITEM_STATUSES}");

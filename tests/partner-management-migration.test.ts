@@ -262,9 +262,14 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
         "SELECT policyname, qual, with_check FROM pg_policies WHERE schemaname='public' AND tablename=$1",
         [t]
       );
-      expect(pol.rows.map((r) => r.policyname)).toEqual([`${t}_tenant_isolation`]);
-      expect(pol.rows[0].qual).toContain("partner_current_tenant()");
-      expect(pol.rows[0].with_check).toContain("partner_current_tenant()");
+      // FINAL state, after the whole chain: 0052 installs %I_tenant_isolation, and 0056 then
+      // DROPS it and replaces it with a deny-all %I_no_tenant_access (0056:138-142). These are HQ
+      // control tables — no tenant-scoped role may read or write them at all, so the deny-all is
+      // strictly stronger than the tenant policy it supersedes. Asserting the 0052-era name here
+      // was pinning an intermediate state that 0056 deliberately removes.
+      expect(pol.rows.map((r) => r.policyname)).toEqual([`${t}_no_tenant_access`]);
+      expect(pol.rows[0].qual, `${t}: the deny-all must not be readable by any tenant`).toContain("false");
+      expect(pol.rows[0].with_check, `${t}: the deny-all must not be writable by any tenant`).toContain("false");
     }
   });
 
@@ -347,12 +352,19 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     try {
       await admin.query("SET ROLE partner_connector_runtime");
       await admin.query("SELECT set_config('app.tenant_id', $1, false)", [A]);
-      // INSERT of an OWN-tenant row is admitted by WITH CHECK.
-      await admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'own-tenant note',gen_random_uuid(),'a@e.com')", [A]);
-      await admin.query(
-        "INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result) VALUES ($1,'note_added',gen_random_uuid(),'a@e.com','r1','attempted')",
-        [A]
-      );
+      // After 0056 an OWN-tenant row is refused TOO. 0052 made these tables tenant-scoped; 0056
+      // then made them HQ-only outright (deny-all, USING false / WITH CHECK false), so restoring
+      // 0015's grant now buys a tenant-scoped role nothing at all — which is a strictly stronger
+      // outcome than the tenant-scoped write this originally asserted.
+      await expect(
+        admin.query("INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'own-tenant note',gen_random_uuid(),'a@e.com')", [A])
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        admin.query(
+          "INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result) VALUES ($1,'note_added',gen_random_uuid(),'a@e.com','r1','attempted')",
+          [A]
+        )
+      ).rejects.toMatchObject({ code: "42501" });
       // …an OTHER-tenant row is not. Without 0052's policy this would have succeeded: the grant
       // alone carries no tenant scope, which is the whole reason the second layer exists.
       await expect(
