@@ -15,6 +15,15 @@
 
 BEGIN;
 
+-- MUST be the first statement inside this transaction: it must be in force before the first lock.
+-- This file was the only rollback in the 0047-0056 series without a bound. It takes ACCESS
+-- EXCLUSIVE on partner_users (ALTER TABLE ... DROP COLUMN), which blocks READS, and partner_users
+-- is on the authentication path for every partner request. The numbered runner never executes
+-- rollback files, so its own 5s default does not apply here — without this line one idle-in-
+-- transaction AccessShareLock puts the DROP at the back of the queue and every partner login
+-- blocks behind it, indefinitely.
+SET LOCAL lock_timeout = '5s';
+
 DO $$
 DECLARE
   later_migrations bigint := 0;
