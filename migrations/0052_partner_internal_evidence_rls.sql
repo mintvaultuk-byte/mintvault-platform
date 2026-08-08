@@ -227,13 +227,30 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['partner_internal_notes', 'partner_management_audit'] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
-    EXECUTE format('DROP POLICY IF EXISTS %I_tenant_isolation ON %I', t, t);
-    EXECUTE format(
-      'CREATE POLICY %I_tenant_isolation ON %I '
-      'USING (tenant_id = partner_current_tenant()) '
-      'WITH CHECK (tenant_id = partner_current_tenant())',
-      t, t
-    );
+    -- 0056 SUPERSEDES this policy: it drops %I_tenant_isolation and installs a deny-all
+    -- %I_no_tenant_access, because these are HQ control tables no tenant-scoped role may reach at
+    -- all. Postgres OR-s permissive policies, so re-creating the tenant-equality policy ALONGSIDE
+    -- that deny-all would restore own-tenant reach — a silent re-opening of exactly what 0056
+    -- closed. That is reachable whenever 0052 runs above 0056: the apply/rollback/reapply proof, a
+    -- DR restore, or a hand-run recovery. 0052 has no journal ordering guard to stop it.
+    --
+    -- So: if the stricter successor is already present, leave it alone. Skipping is safe in both
+    -- directions — on a fresh chain 0056 has not run yet and this branch does not fire; on a
+    -- re-apply the end state is already stricter than anything this file would produce.
+    IF EXISTS (
+      SELECT 1 FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = t AND policyname = t || '_no_tenant_access'
+    ) THEN
+      RAISE NOTICE '0052: % already carries 0056''s deny-all policy — leaving the stricter state intact.', t;
+    ELSE
+      EXECUTE format('DROP POLICY IF EXISTS %I_tenant_isolation ON %I', t, t);
+      EXECUTE format(
+        'CREATE POLICY %I_tenant_isolation ON %I '
+        'USING (tenant_id = partner_current_tenant()) '
+        'WITH CHECK (tenant_id = partner_current_tenant())',
+        t, t
+      );
+    END IF;
   END LOOP;
 END$$;
 
@@ -343,20 +360,41 @@ BEGIN
     -- 0056's policy is strictly MORE restrictive than this one, so its presence cannot weaken the
     -- guarantee. What must still be impossible is an UNEXPECTED policy, and that is what is
     -- asserted here instead — by name, so a permissive third policy is still a hard failure.
-    SELECT count(*) INTO npolicy
-      FROM pg_policies
-     WHERE schemaname = 'public' AND tablename = t
-       AND policyname NOT IN (t || '_tenant_isolation', t || '_no_tenant_access');
-    IF npolicy <> 0 THEN
-      RAISE EXCEPTION '0052: unexpected policy on % — found % policy(ies) that are neither %_tenant_isolation nor %_no_tenant_access', t, npolicy, t, t;
+    -- EXACTLY ONE policy, and it must be one of the two legitimate end states:
+    --   pre-0056  -> %I_tenant_isolation (tenant equality, checked below)
+    --   post-0056 -> %I_no_tenant_access (deny-all)
+    -- Requiring exactly one is what keeps this fail-closed: the dangerous state is the two
+    -- COEXISTING, because Postgres OR-s permissive policies and the tenant policy would then
+    -- re-open what 0056 shut. Counting one was right; the original defect was only that this file
+    -- also RE-CREATED the weaker policy on a re-apply, which is fixed at the creation site above.
+    SELECT count(*) INTO npolicy FROM pg_policies WHERE schemaname = 'public' AND tablename = t;
+    IF npolicy <> 1 THEN
+      RAISE EXCEPTION
+        '0052: expected exactly 1 policy on %, found % — a tenant policy coexisting with 0056''s '
+        'deny-all is OR-ed by Postgres and re-opens the table', t, npolicy;
     END IF;
     IF NOT EXISTS (
       SELECT 1 FROM pg_policies
-       WHERE schemaname = 'public' AND tablename = t AND policyname = t || '_tenant_isolation'
+       WHERE schemaname = 'public' AND tablename = t
+         AND policyname IN (t || '_tenant_isolation', t || '_no_tenant_access')
     ) THEN
-      RAISE EXCEPTION '0052: the tenant-isolation policy on % is missing', t;
+      RAISE EXCEPTION '0052: the single policy on % is neither %_tenant_isolation nor %_no_tenant_access', t, t, t;
     END IF;
-    IF NOT EXISTS (
+    -- If 0056 has superseded us, the remaining policy must genuinely be the deny-all.
+    IF EXISTS (
+      SELECT 1 FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = t AND policyname = t || '_no_tenant_access'
+         AND (coalesce(qual, '') NOT LIKE '%false%' OR coalesce(with_check, '') NOT LIKE '%false%')
+    ) THEN
+      RAISE EXCEPTION '0052: %_no_tenant_access is present but is not a deny-all in both directions', t;
+    END IF;
+    -- Only meaningful in the pre-0056 state. Once 0056's deny-all is the single policy the table
+    -- is shut to every tenant outright, which is strictly stronger than tenant scoping — demanding
+    -- partner_current_tenant() there would be demanding the WEAKER control.
+    IF EXISTS (
+      SELECT 1 FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = t AND policyname = t || '_tenant_isolation'
+    ) AND NOT EXISTS (
       SELECT 1 FROM pg_policies
        WHERE schemaname = 'public' AND tablename = t
          AND qual LIKE '%partner_current_tenant()%' AND with_check LIKE '%partner_current_tenant()%'

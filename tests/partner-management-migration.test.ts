@@ -346,6 +346,52 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     }
   });
 
+  /**
+   * REGRESSION: re-running 0052 on top of 0056 must not re-open the HQ evidence tables.
+   *
+   * 0056 drops 0052's %I_tenant_isolation and installs a deny-all %I_no_tenant_access. Postgres
+   * OR-s permissive policies, so a 0052 that blindly re-created its tenant-equality policy would
+   * sit ALONGSIDE the deny-all and restore own-tenant reach — silently undoing 0056. That is
+   * reachable from an apply/rollback/reapply proof, a DR restore, or a hand-run recovery, and
+   * 0052 carries no journal ordering guard to stop it.
+   *
+   * 0052 now detects the stricter successor and leaves it alone, and its post-flight still demands
+   * EXACTLY ONE policy — so the coexisting state cannot be committed even if the skip were removed.
+   */
+  it("0052 re-applied ON TOP OF 0056 leaves the deny-all intact and does not re-open the tables", async () => {
+    await admin.query(rb("0052_partner_internal_evidence_rls.sql"));
+
+    for (const t of ["partner_internal_notes", "partner_management_audit"]) {
+      const pol = await admin.query<{ policyname: string }>(
+        "SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename=$1",
+        [t]
+      );
+      expect(
+        pol.rows.map((r) => r.policyname),
+        `${t}: re-applying 0052 must not add a second, weaker policy beside 0056's deny-all`
+      ).toEqual([`${t}_no_tenant_access`]);
+    }
+
+    // And the behavioural consequence: a tenant-scoped role with the grant restored still reaches
+    // nothing, in either direction.
+    await admin.query("GRANT SELECT, INSERT ON partner_internal_notes TO partner_connector_runtime");
+    try {
+      await admin.query("SET ROLE partner_connector_runtime");
+      await admin.query("SELECT set_config('app.tenant_id', $1, false)", [A]);
+      await expect(
+        admin.query(
+          "INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email) VALUES ($1,'reopened?',gen_random_uuid(),'a@e.com')",
+          [A]
+        )
+      ).rejects.toMatchObject({ code: "42501" });
+      const sel = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_internal_notes");
+      expect(sel.rows[0].n, "the deny-all must still hide every row").toBe(0);
+    } finally {
+      await admin.query("RESET ROLE");
+      await admin.query("REVOKE SELECT, INSERT ON partner_internal_notes FROM partner_connector_runtime");
+    }
+  });
+
   it("0052 (2): with the 0015 grant restored, writes stay append-only AND tenant-scoped — then the grant is gone again", async () => {
     // The exact statement 0052 revoked, restored verbatim.
     await admin.query("GRANT SELECT, INSERT ON partner_internal_notes, partner_management_audit TO partner_connector_runtime");
