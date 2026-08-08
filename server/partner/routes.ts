@@ -3,6 +3,9 @@
  * routes are ever mounted here (see app.ts + the route-isolation test).
  */
 import { Router } from "express";
+import { APP_BASE_URL } from "../app-url";
+import { PARTNER_CREDIT_CURRENCY, PARTNER_CREDIT_PACKAGES } from "@shared/partner-credit-packages";
+import { PartnerCreditPurchaseError, createPartnerCreditCheckout } from "./credit-purchase-service";
 import {
   partnerLogin,
   partnerLogout,
@@ -355,6 +358,49 @@ export function partnerApiRouter(): Router {
         .status(500)
         .json({ error: { code: "credit_view_unavailable", message: "Credit information is unavailable." } });
     }
+  });
+
+  /**
+   * Start a Stripe Checkout for a credit package.
+   *
+   * Gated on partner.credits.purchase, NOT partner.credits.view — PARTNER_FINANCE_VIEWER holds the
+   * latter and is a read-only oversight role that must never be able to spend the shop's money.
+   *
+   * The body carries a packageId and an optional returnPath, and nothing else is read from it. The
+   * price, the credit quantity, the currency and the tenant are all derived server-side; see
+   * credit-purchase-service.ts. Crediting happens only in the Stripe webhook — the browser being
+   * redirected to success_url grants nothing.
+   */
+  r.post("/credits/checkout", requirePartnerCapability("partner.credits.purchase"), async (req, res) => {
+    try {
+      const origin = (req.headers.origin as string) || APP_BASE_URL;
+      const checkout = await createPartnerCreditCheckout(req.partner!, req.body?.packageId, {
+        origin,
+        returnPath: req.body?.returnPath,
+      });
+      res.json(checkout);
+    } catch (err) {
+      if (err instanceof PartnerCreditPurchaseError) {
+        return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+      }
+      console.error("[partner credits] checkout failed:", (err as Error).message);
+      res
+        .status(500)
+        .json({ error: { code: "checkout_unavailable", message: "Could not start checkout. Please try again." } });
+    }
+  });
+
+  /** The packages a shop may buy. Server-held, so the UI cannot render a price the server won't charge. */
+  r.get("/credits/packages", requirePartnerCapability("partner.credits.view"), async (_req, res) => {
+    res.json({
+      packages: PARTNER_CREDIT_PACKAGES.map((p) => ({
+        id: p.id,
+        credits: p.credits,
+        pricePence: p.pricePence,
+        label: p.label,
+      })),
+      currency: PARTNER_CREDIT_CURRENCY,
+    });
   });
 
   r.get("/sessions", requirePartnerAuth, async (req, res) => {

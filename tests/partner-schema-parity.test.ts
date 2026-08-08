@@ -211,6 +211,13 @@ describe("partner schema ↔ migration parity", () => {
       // asset. Emergency controls keep the tenant-scoped SELECT readEmergencyState() depends on;
       // the two evidence tables are denied entirely. Adds no table and no column.
       "0056_partner_hq_control_tables_write_deny.sql",
+      // RBAC catalogue extension, not a schema change: adds the single permission
+      // partner.credits.purchase and grants it to PARTNER_OWNER and PARTNER_MANAGER only. Spending
+      // authority is deliberately split from partner.credits.view, which PARTNER_FINANCE_VIEWER
+      // holds — a read-only oversight role must not be able to put £1,000 through Stripe. Written
+      // as a new file rather than an edit to 0034 because 0034 is already applied on staging and
+      // editing it would trip the runner's checksum refusal. Adds no table and no column.
+      "0057_partner_credits_purchase_permission.sql",
     ]);
   });
 

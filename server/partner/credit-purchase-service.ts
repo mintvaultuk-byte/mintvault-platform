@@ -171,7 +171,9 @@ export async function fulfilPartnerCreditPurchase(
   // checkout.session.completed also fires for delayed/async payment methods before funds settle.
   // Fail closed on anything that is not explicitly paid.
   if (session.payment_status && session.payment_status !== "paid") {
-    console.log(`[webhook] partner_credits session ${session.id} payment_status=${session.payment_status} — not fulfilling`);
+    console.log(
+      `[webhook] partner_credits session ${session.id} payment_status=${session.payment_status} — not fulfilling`
+    );
     return { granted: false, reason: "not_paid" };
   }
 
