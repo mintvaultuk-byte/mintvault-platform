@@ -16,6 +16,37 @@ import { sql } from "drizzle-orm";
 import { storage } from "../storage";
 
 /**
+ * SQL predicate: refuse to move a certificate whose PARTNER work item is awaiting HQ review.
+ *
+ * HQ's assign/reassign/unassign writers predicate only on `grader_status <> 'approved'`, which a
+ * card at 'pending_review' passes, and none of them touch partner_grading_work_items. Moving the
+ * certificate therefore strands the pair: the cert leaves 'pending_review' while the work item
+ * stays there. That is terminal — approval requires the cert AT 'pending_review', and every retry
+ * door (partner /submit, /edit-submission, assignPartnerCerts) requires the work item to be in
+ * ('ready_for_assignment','assigned','returned_for_change'). Settlement never runs and the reserved
+ * credits stay held, with no in-app repair path.
+ *
+ * Handed back as a FRAGMENT so the caller can splice it into its existing UPDATE, rather than as a
+ * pre-flight SELECT: the check must not be separable from the write by a concurrent approval.
+ *
+ * It lives in this file, not in server/grader.ts, for the reason in this module's header — the
+ * partner table name is partner-owned knowledge and the protected engine must not carry it.
+ *
+ * Degrades to an empty fragment when 0049 has not been applied, because the callers also run
+ * against HQ databases that predate partner_grading_work_items, where an unconditional reference
+ * would be a parse error.
+ */
+export async function partnerReviewLockGuard() {
+  const t = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS t`);
+  if (!(t.rows[0] as { t?: string | null } | undefined)?.t) return sql``;
+  return sql`AND NOT EXISTS (
+    SELECT 1 FROM partner_grading_work_items pgwi
+     WHERE pgwi.certificate_id = certificates.id
+       AND pgwi.status = 'pending_review'
+  )`;
+}
+
+/**
  * Bind an int[] as ONE parameter.
  *
  * Local copy of the same helper server/grader.ts uses privately. Duplicated rather than exported

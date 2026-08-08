@@ -25,6 +25,9 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
+// Partner-owned predicate. The SQL and the partner table name live in server/partner/, so this
+// protected engine file carries none of that knowledge — see grading-assignment.ts's header.
+import { partnerReviewLockGuard } from "./partner/grading-assignment";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
@@ -1011,34 +1014,6 @@ const intArray = (ids: number[]) =>
     ids.map((id) => sql`${id}`),
     sql`, `
   )}]::int[]`;
-
-/**
- * Refuse to move a certificate whose PARTNER work item is awaiting HQ review.
- *
- * `grader_status <> 'approved'` alone lets a card at 'pending_review' through, and none of the
- * assign/reassign/unassign writers touch partner_grading_work_items. Moving the certificate
- * therefore strands the pair: the cert leaves 'pending_review' while the work item stays there.
- * That is terminal — approval needs the cert AT 'pending_review', and every retry door
- * (partner /submit, /edit-submission, assignPartnerCerts) needs the work item to be in
- * ('ready_for_assignment','assigned','returned_for_change'). Settlement then never runs and the
- * reserved credits stay held, with no in-app repair path.
- *
- * Returned as a single-statement predicate rather than a pre-flight SELECT so the check cannot be
- * separated from the write by a concurrent approval. Degrades to an empty fragment when 0049 has
- * not been applied, because this module also runs against HQ databases that predate the partner
- * work-item table and an unconditional reference would be a parse error there.
- *
- * This is workflow state only — it scores nothing and changes no grade, threshold or bracket.
- */
-async function partnerReviewLockGuard() {
-  const t = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS t`);
-  if (!(t.rows[0] as { t?: string | null } | undefined)?.t) return sql``;
-  return sql`AND NOT EXISTS (
-    SELECT 1 FROM partner_grading_work_items pgwi
-     WHERE pgwi.certificate_id = certificates.id
-       AND pgwi.status = 'pending_review'
-  )`;
-}
 
 /** Assign a batch of CERTIFICATES to a grader. Never touches 'approved' certs. */
 export async function assignCerts(graderId: string, certIds: number[], adminUser: string) {
