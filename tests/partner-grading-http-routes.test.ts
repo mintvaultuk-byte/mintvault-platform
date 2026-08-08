@@ -737,6 +737,62 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
   });
 
   // =====================================================================================
+  // G3-ATOMIC — the submit transition is ALL-OR-NOTHING.
+  //
+  // Submit performs two state transitions: the certificate to pending_review, and the work item to
+  // pending_review. They used to be two auto-commit statements, so anything that made the SECOND
+  // one match zero rows left the certificate at pending_review with the work item still 'assigned'.
+  // That is not a crash-only scenario — it is the ROUTINE concurrency path, because the work-item
+  // miss returns a plain 409.
+  //
+  // The split state is unrecoverable in-app: both retry doors (/submit and /edit-submission)
+  // require gradingStatus 'assigned', and the card now reads pending_review; meanwhile the approval
+  // mirror keys on the work item being pending_review, so it never settles either.
+  //
+  // The lever below is exact rather than incidental: loadPartnerCert derives gradingStatus from
+  // cert.grader_status and does NOT filter on the work item's status or assignee, so clearing the
+  // assignment leaves every earlier gate passing and breaks ONLY the work-item predicate.
+  // Mutation SUBMIT-ATOMIC1 (drop the transaction) turns this RED: 'pending_review' vs 'assigned'.
+  // =====================================================================================
+  it("G3-ATOMIC: when the work-item transition cannot land, the certificate transition is ROLLED BACK", async () => {
+    const f = await seedGradingFixture({ privateNotes: "atomic-gate" });
+    const cookie = await login(f.graderEmail);
+    const certId = f.certIds[0];
+
+    // Break ONLY the work-item predicate. Nothing the certificate guard reads is touched.
+    // assigned_at travels with the assignee (chk_..._assignment_pair), so both clear together.
+    await admin.query(
+      "UPDATE partner_grading_work_items SET assigned_partner_grader_id = NULL, assigned_at = NULL WHERE submission_item_id = $1",
+      [f.submissionItemIds[0]]
+    );
+
+    const res = await req("POST", `/api/partner/grading/certificates/${certId}/submit`, {
+      cookie,
+      body: { overall_grade: "9", card_name: "Atomic Gate Card" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+
+    const after = await admin.query<{
+      grader_status: string;
+      review_required: boolean | null;
+      graded_by: string | null;
+      grade_approved_at: Date | null;
+    }>("SELECT grader_status, review_required, graded_by, grade_approved_at FROM certificates WHERE id=$1", [certId]);
+    expect(
+      after.rows[0].grader_status,
+      "the certificate transition MUST roll back with the work-item transition — otherwise the card is stranded pending_review with an 'assigned' work item, unrecoverable through any route"
+    ).toBe("assigned");
+    expect(after.rows[0].review_required, "review_required must not survive a rolled-back submit").not.toBe(true);
+    expect(after.rows[0].graded_by, "graded_by is set by the same rolled-back UPDATE").toBeNull();
+    expect(after.rows[0].grade_approved_at, "nothing here may ever publish").toBeNull();
+
+    const item = await scalar<string>("SELECT status FROM partner_grading_work_items WHERE submission_item_id=$1", [
+      f.submissionItemIds[0],
+    ]);
+    expect(item, "the work item is untouched, so both sides agree the card is still assigned").toBe("assigned");
+  });
+
+  // =====================================================================================
   // G4/G5 — authorisation, over real HTTP rather than by reading the SQL.
   // =====================================================================================
   it("G4: a partner user cannot grade another tenant's certificate", async () => {

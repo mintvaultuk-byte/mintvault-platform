@@ -291,37 +291,83 @@ async function assertPartnerDraftWritable(certId: number, principal: PartnerPrin
   return r.rows.length === 1;
 }
 
+/** Internal sentinel: rolls the submit transaction back without surfacing as a 500. */
+class PartnerSubmitConflict extends Error {}
+
 /**
- * Move a partner-graded card to pending_review and snapshot the operator's submission.
+ * Move a partner-graded card to pending_review: snapshot the operator's submission AND transition
+ * the work item, as ONE atomic unit.
  *
- * ONE guarded UPDATE, so the ownership predicate and the state transition cannot be separated by a
- * concurrent writer. The operator_* snapshot is taken from the row's OWN freshly-written columns
- * rather than from request values, so it can never disagree with what was persisted.
+ * Both guarded UPDATEs run inside a single transaction. Each statement still carries its own full
+ * ownership + state predicate, so neither can be separated from its authorisation check by a
+ * concurrent writer; the transaction additionally guarantees the two transitions cannot be
+ * separated from EACH OTHER. Previously these were two auto-commit statements, so a failure — or
+ * merely a lost race on the work item, which returns 409 on a NORMAL concurrency path — left the
+ * certificate at pending_review with the work item still 'assigned'. That split state is
+ * unrecoverable in-app: both retry doors require 'assigned', and the approval mirror keys on the
+ * work item being 'pending_review'. Covered by G3-ATOMIC.
+ *
+ * The operator_* snapshot is taken from the row's OWN freshly-written columns rather than from
+ * request values, so it can never disagree with what was persisted.
+ *
+ * Deliberately OUTSIDE this boundary: the MVGS authoritative grade writes (they live in the
+ * protected grading engine, and their partial-failure state is benign — the card stays 'assigned'
+ * and a retry is clean), the two audit writes (different pools/roles, cannot enrol), and
+ * settlement (runs from the admin approval mirror, on its own connection and lock order).
  *
  * This lives in partner code, not in the grading engine: nothing here scores, derives or adjusts a
  * grade. It copies already-computed values and sets partner workflow state.
  */
-async function partnerSubmitForReview(certId: number, principal: PartnerPrincipal): Promise<boolean> {
-  const r = await db.execute(sql`
-    UPDATE certificates
-       SET grader_status = 'pending_review',
-           review_required = true,
-           graded_at = NOW(),
-           graded_by = ${principal.userId},
-           operator_grade = certificates.grade,
-           operator_subgrades = jsonb_build_object(
-             'centering', certificates.centering_score,
-             'corners', certificates.corners_score,
-             'edges', certificates.edges_score,
-             'surface', certificates.surface_score
-           ),
-           updated_at = NOW()
-     WHERE certificates.id = ${certId}
-       AND certificates.grade_approved_at IS NULL
-       ${partnerDraftWriteGuard(principal)}
-     RETURNING certificates.id
-  `);
-  return r.rows.length === 1;
+async function partnerSubmitForReview(
+  certId: number,
+  principal: PartnerPrincipal,
+  // Nullable by design: a null flows into the predicate, matches zero rows, and surfaces as the
+  // same 409 the pre-transaction code produced. Preserved exactly.
+  submissionItemId: number | null
+): Promise<boolean> {
+  try {
+    await db.transaction(async (tx) => {
+      const graded = await tx.execute(sql`
+        UPDATE certificates
+           SET grader_status = 'pending_review',
+               review_required = true,
+               graded_at = NOW(),
+               graded_by = ${principal.userId},
+               operator_grade = certificates.grade,
+               operator_subgrades = jsonb_build_object(
+                 'centering', certificates.centering_score,
+                 'corners', certificates.corners_score,
+                 'edges', certificates.edges_score,
+                 'surface', certificates.surface_score
+               ),
+               updated_at = NOW()
+         WHERE certificates.id = ${certId}
+           AND certificates.grade_approved_at IS NULL
+           ${partnerDraftWriteGuard(principal)}
+         RETURNING certificates.id
+      `);
+      if (graded.rows.length !== 1) throw new PartnerSubmitConflict();
+
+      const linked = await tx.execute(sql`
+        UPDATE partner_grading_work_items pgwi
+           SET certificate_id = ${certId},
+               certificate_linked_at = COALESCE(pgwi.certificate_linked_at, NOW()),
+               status = 'pending_review',
+               updated_at = NOW()
+         WHERE pgwi.submission_item_id = ${submissionItemId}
+           AND pgwi.tenant_id = ${principal.tenantId}
+           AND (pgwi.certificate_id IS NULL OR pgwi.certificate_id = ${certId})
+           AND pgwi.assigned_partner_grader_id = ${principal.userId}
+           AND pgwi.status IN ${FINAL_WORK_ITEM_STATUSES}
+        RETURNING pgwi.certificate_id
+      `);
+      if (linked.rows.length !== 1) throw new PartnerSubmitConflict();
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof PartnerSubmitConflict) return false;
+    throw err;
+  }
 }
 
 function partnerImageKeyAllowed(auth: PartnerCertAuth, key: string, side: "front" | "back"): boolean {
@@ -576,25 +622,9 @@ export function partnerGradingRouter(): Router {
         const written = await partnerAuthoritativeWrite(certId, req.body);
         if (!written.ok) return res.status(written.status).json({ error: written.error });
         const { authority, rejectedClaim } = written.result;
-        // Single guarded UPDATE: ownership predicate and state transition cannot be split.
-        if (!(await partnerSubmitForReview(certId, req.partner!))) {
-          return res.status(409).json({ error: "Card status changed; refresh and try again" });
-        }
-
-        const submitted = await db.execute(sql`
-          UPDATE partner_grading_work_items pgwi
-             SET certificate_id = ${certId},
-                 certificate_linked_at = COALESCE(pgwi.certificate_linked_at, NOW()),
-                 status = 'pending_review',
-                 updated_at = NOW()
-           WHERE pgwi.submission_item_id = ${auth.auth.submissionItemId}
-             AND pgwi.tenant_id = ${req.partner!.tenantId}
-             AND (pgwi.certificate_id IS NULL OR pgwi.certificate_id = ${certId})
-             AND pgwi.assigned_partner_grader_id = ${req.partner!.userId}
-             AND pgwi.status IN ${FINAL_WORK_ITEM_STATUSES}
-          RETURNING pgwi.certificate_id
-        `);
-        if (submitted.rows.length !== 1) {
+        // One transaction: the certificate transition and the work-item transition commit together
+        // or not at all. Each still carries its own ownership + state predicate.
+        if (!(await partnerSubmitForReview(certId, req.partner!, auth.auth.submissionItemId))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
         await storage.writeAuditLog("certificate", String(certId), "partner_grade_submit", req.partner!.userId, {
@@ -656,23 +686,8 @@ export function partnerGradingRouter(): Router {
         const written = await partnerAuthoritativeWrite(certId, req.body);
         if (!written.ok) return res.status(written.status).json({ error: written.error });
         const { authority, rejectedClaim, evidenceKeys } = written.result;
-        if (!(await partnerSubmitForReview(certId, req.partner!))) {
-          return res.status(409).json({ error: "Card status changed; refresh and try again" });
-        }
-        const linked = await db.execute(sql`
-          UPDATE partner_grading_work_items pgwi
-             SET certificate_id = ${certId},
-                 certificate_linked_at = COALESCE(pgwi.certificate_linked_at, NOW()),
-                 status = 'pending_review',
-                 updated_at = NOW()
-           WHERE pgwi.submission_item_id = ${auth.auth.submissionItemId}
-             AND pgwi.tenant_id = ${req.partner!.tenantId}
-             AND (pgwi.certificate_id IS NULL OR pgwi.certificate_id = ${certId})
-             AND pgwi.assigned_partner_grader_id = ${req.partner!.userId}
-             AND pgwi.status IN ${FINAL_WORK_ITEM_STATUSES}
-          RETURNING pgwi.certificate_id
-        `);
-        if (linked.rows.length !== 1) {
+        // Same atomic transition as /submit — see partnerSubmitForReview.
+        if (!(await partnerSubmitForReview(certId, req.partner!, auth.auth.submissionItemId))) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
         await storage.writeAuditLog(
