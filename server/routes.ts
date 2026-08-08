@@ -70,6 +70,10 @@ import { registerPartnerManagementRoutes } from "./partner/partner-management-ro
 import { registerPartnerPublicRoutes } from "./partner/public-routes";
 import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
+import {
+  registerPartnerNetworkPublicRoutes,
+  registerPartnerNetworkAdminRoutes,
+} from "./partner/public-network-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
@@ -2868,6 +2872,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Domain route modules ───────────────────────────────────────────────────
   registerPublicRoutes(app);
+  // ANONYMOUS shop finder + public shop profiles, mounted at /api/shops.
+  // DELIBERATELY NOT under /api/partner: everything on that prefix sits behind
+  // partnerSessionMiddleware and the partner-portal flags, so a consumer looking for a grading
+  // shop would go offline the moment an operator hit the partner-portal emergency stop. The two
+  // surfaces have different audiences and must have independent availability.
+  registerPartnerNetworkPublicRoutes(app);
   registerAuthRoutes(app);
   registerGraderRoutes(app);
   registerCorrectionModeRoutes(app);
@@ -2890,6 +2900,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
   registerPartnerFlagAdminRoutes(app); // GLOBAL partner feature flags (requireSuperAdmin-gated, audited)
+  registerPartnerNetworkAdminRoutes(app); // Public shop listings + quality rating (requireSuperAdmin-gated, audited)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCatalogueRoutes(app);

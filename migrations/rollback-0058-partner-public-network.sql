@@ -94,6 +94,13 @@ DROP FUNCTION IF EXISTS partner_public_listing_transition_guard();
 -- Named explicitly rather than by pattern: a pattern could match an index a later migration added.
 DROP INDEX IF EXISTS uq_partner_public_listings_tenant_location;
 
+-- ---- 3b. The recent-cards index 0058 added to certificates -----------------------------------
+-- 0058 created this ON certificates (a table it does not own) to serve the public shop profile's
+-- "recent cards" query. It is index-only: no column, constraint, trigger or row on certificates is
+-- touched by 0058 or by this file. 0035's idx_certificates_origin_partner and the origin
+-- immutability trigger are NOT this file's to remove, and the proof below asserts they survive.
+DROP INDEX IF EXISTS idx_certificates_origin_location_recent;
+
 -- ---- 4. Prove the reversal before committing --------------------------------------------------
 DO $$
 DECLARE
@@ -116,6 +123,10 @@ BEGIN
     RAISE EXCEPTION 'rollback-0058 incomplete: composite-FK target index still present on partner_locations.';
   END IF;
 
+  IF to_regclass('public.idx_certificates_origin_location_recent') IS NOT NULL THEN
+    RAISE EXCEPTION 'rollback-0058 incomplete: recent-cards index still present on certificates.';
+  END IF;
+
   -- And prove we did NOT overreach: partner_locations must still exist with its 0001 index, and
   -- the certificates origin facility must be exactly as 0035 left it. A rollback that quietly took
   -- a neighbour's index or trigger with it is worse than one that failed.
@@ -124,6 +135,10 @@ BEGIN
   END IF;
   IF to_regclass('public.idx_partner_locations_tenant') IS NULL THEN
     RAISE EXCEPTION 'rollback-0058 overreached: idx_partner_locations_tenant (owned by 0001) was removed.';
+  END IF;
+  IF to_regclass('public.certificates') IS NOT NULL
+     AND to_regclass('public.idx_certificates_origin_partner') IS NULL THEN
+    RAISE EXCEPTION 'rollback-0058 overreached: idx_certificates_origin_partner (owned by 0035) was removed.';
   END IF;
   IF to_regclass('public.certificates') IS NOT NULL
      AND NOT EXISTS (

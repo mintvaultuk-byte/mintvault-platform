@@ -223,6 +223,42 @@ CREATE TABLE IF NOT EXISTS partner_public_listings (
   public_opening_info text,
   public_description text,
 
+  -- CURRENT EFFECTIVE RATING, denormalised onto the listing.
+  --
+  -- WHY THIS IS NOT A JOIN TO partner_public_rating_snapshots. Two independent reasons, both
+  -- load-bearing:
+  --
+  --  1. THE FINDER IS ANONYMOUS. partner_public_rating_snapshots carries only a tenant-scoped read
+  --     policy, so an anonymous reader (no app.tenant_id) gets ZERO rows from it — silently, behind
+  --     an HTTP 200. A public join to snapshots would render every shop as unrated, forever, with
+  --     no error anywhere. Giving snapshots their own public policy was the alternative and was
+  --     rejected: it would need a correlated subquery back to the listing's status in the USING
+  --     clause, evaluated per row on an unauthenticated hot path.
+  --
+  --  2. SORTING. The finder sorts by quality. A denormalised column can carry a partial index
+  --     (idx_..._active_rating below); "latest snapshot per listing" cannot be indexed for an
+  --     ORDER BY without a lateral join per row.
+  --
+  -- These are the EFFECTIVE values — computed, then override applied if one is active. The
+  -- computed figure is never destroyed; it stays in the snapshot history, and
+  -- current_rating_is_override tells a reader which they are looking at.
+  --
+  -- The internal 0-100 score is deliberately NOT here. It is HQ's working number, and this row is
+  -- publicly readable; only the values a visitor is meant to see live on it.
+  --
+  -- WRITTEN BY THE ADMIN POOL ONLY. None of these columns is in the partner UPDATE grant
+  -- (section 7), so a partner cannot set its own rating, label, or sample size — that is COUNT1
+  -- and RATING1 closed at the grant layer rather than in a route handler.
+  current_rating_version text,
+  current_public_rating numeric(3,2),
+  current_rating_label text,
+  current_rating_available boolean NOT NULL DEFAULT false,
+  current_sample_size integer NOT NULL DEFAULT 0,
+  current_minimum_sample integer NOT NULL DEFAULT 0,
+  current_rating_is_override boolean NOT NULL DEFAULT false,
+  current_rating_calculated_at timestamptz,
+  current_rating_snapshot_id uuid,
+
   listing_status text NOT NULL DEFAULT 'DRAFT',
 
   verified_at timestamptz,
@@ -282,6 +318,29 @@ CREATE TABLE IF NOT EXISTS partner_public_listings (
   -- while JS .trim() reduced it to empty and the finder rendered a blank card. This list is
   -- exactly ECMAScript String.prototype.trim's set, so the database and the renderer agree in
   -- every locale. Identical reasoning and identical list to 0035's origin-name constraint.
+  -- THE SAME ANTI-FABRICATION RULE AS THE SNAPSHOT TABLE, applied to the denormalised copy.
+  -- Without it the two could disagree: a snapshot could honestly say "rating building" while the
+  -- publicly-read listing row carried a number. An available rating must carry a value, a label,
+  -- a version and enough sample; an unavailable one must carry no number at all. RATING2
+  -- (missing evidence scored as perfect) and RATING3 (minimum sample removed) therefore have to
+  -- defeat a CHECK constraint here as well as in the snapshot history.
+  CONSTRAINT chk_partner_public_listings_current_rating CHECK (
+    (current_rating_available = true
+       AND current_public_rating IS NOT NULL
+       AND current_rating_label IS NOT NULL
+       AND current_rating_version IS NOT NULL
+       AND current_sample_size >= current_minimum_sample)
+    OR
+    (current_rating_available = false
+       AND current_public_rating IS NULL)
+  ),
+  CONSTRAINT chk_partner_public_listings_current_rating_range CHECK (
+    current_public_rating IS NULL OR (current_public_rating >= 0 AND current_public_rating <= 5)
+  ),
+  CONSTRAINT chk_partner_public_listings_current_sample CHECK (
+    current_sample_size >= 0 AND current_minimum_sample >= 0
+  ),
+
   CONSTRAINT chk_partner_public_listings_display_name_present CHECK (
     btrim(public_display_name, E'\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF') <> ''
   )
@@ -352,6 +411,27 @@ CREATE INDEX IF NOT EXISTS idx_partner_public_listings_active_name
 CREATE INDEX IF NOT EXISTS idx_partner_public_listings_active_coords
   ON partner_public_listings(latitude, longitude)
   WHERE listing_status = 'ACTIVE' AND latitude IS NOT NULL AND longitude IS NOT NULL;
+-- Quality sort. Partial on ACTIVE + actually-rated, so shops still building a rating never occupy
+-- index space and never appear ahead of a rated shop by accident.
+CREATE INDEX IF NOT EXISTS idx_partner_public_listings_active_rating
+  ON partner_public_listings(current_public_rating DESC)
+  WHERE listing_status = 'ACTIVE' AND current_rating_available = true;
+
+-- RECENT PUBLIC CARDS, on the certificates table.
+--
+-- The shop profile lists "cards recently graded by this shop", attributed through the IMMUTABLE
+-- 0035 origin snapshot (origin_location_id), never through the shop's current address. 0035's own
+-- index is on origin_partner_id with no time component, which does not serve
+-- "WHERE origin_location_id = $1 ORDER BY grade_approved_at DESC LIMIT n" — that would seq-scan
+-- certificates on every public profile view.
+--
+-- ADDITIVE AND PARTIAL: index-only, no column touched, and restricted to rows that can actually
+-- appear (partner-originated AND approved), so it stays small against a table that is
+-- overwhelmingly HQ-originated. Created here rather than in 0035 because 0035 predates the public
+-- profile and its checksum is frozen.
+CREATE INDEX IF NOT EXISTS idx_certificates_origin_location_recent
+  ON certificates (origin_location_id, grade_approved_at DESC)
+  WHERE origin_location_id IS NOT NULL AND grade_approved_at IS NOT NULL;
 
 COMMENT ON TABLE partner_public_listings IS
   'Approved PUBLIC identity of one partner location. Snapshot, not a view over partner_locations. Only listing_status=ACTIVE is publicly readable.';
@@ -798,6 +878,9 @@ DECLARE
     'chk_partner_public_listings_slug_shape',
     'chk_partner_public_listings_country',
     'chk_partner_public_listings_display_name_present',
+    'chk_partner_public_listings_current_rating',
+    'chk_partner_public_listings_current_rating_range',
+    'chk_partner_public_listings_current_sample',
     'fk_partner_public_listings_location_tenant',
     'chk_partner_public_rating_snapshots_sample',
     'chk_partner_public_rating_snapshots_internal_range',
@@ -825,6 +908,8 @@ DECLARE
     'idx_partner_public_listings_active_county',
     'idx_partner_public_listings_active_name',
     'idx_partner_public_listings_active_coords',
+    'idx_partner_public_listings_active_rating',
+    'idx_certificates_origin_location_recent',
     'idx_partner_public_rating_snapshots_tenant',
     'idx_partner_public_rating_snapshots_latest',
     'idx_partner_public_rating_snapshots_location',
@@ -848,7 +933,10 @@ DECLARE
   forbidden_update_cols text[] := ARRAY[
     'listing_status','slug','tenant_id','location_id','latitude','longitude',
     'address_line_1','address_line_2','town_city','county','postcode','country',
-    'public_display_name','verified_at','approved_at','approved_by','public_since'
+    'public_display_name','verified_at','approved_at','approved_by','public_since',
+    'current_rating_version','current_public_rating','current_rating_label',
+    'current_rating_available','current_sample_size','current_minimum_sample',
+    'current_rating_is_override','current_rating_calculated_at','current_rating_snapshot_id'
   ];
   fresh_install boolean;
   seeded bigint;
