@@ -793,6 +793,73 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
   });
 
   // =====================================================================================
+  // G3-HQLOCK — an HQ unassign/reassign cannot strand a partner card awaiting review.
+  //
+  // The mirror image of G3-ATOMIC, on the HQ side of the same seam. assign/reassign/unassign
+  // predicate only on `grader_status <> 'approved'`, which a card at 'pending_review' passes, and
+  // none of them touch partner_grading_work_items. Moving the certificate therefore left the work
+  // item behind at 'pending_review' — terminal, because approval needs the cert AT 'pending_review'
+  // and every retry door needs the work item back in an assignable state.
+  //
+  // Mutation HQ-LOCK1: drop `${await partnerReviewLockGuard()}` from the three UPDATEs → RED.
+  // =====================================================================================
+  it("G3-HQLOCK: HQ unassign/reassign REFUSES a partner card that is awaiting HQ review", async () => {
+    const f = await seedGradingFixture({ privateNotes: "hq-lock" });
+    const cookie = await login(f.graderEmail);
+    const certId = f.certIds[0];
+
+    const submit = await req("POST", `/api/partner/grading/certificates/${certId}/submit`, {
+      cookie,
+      body: { overall_grade: "9", card_name: "HQ Lock Card" },
+    });
+    expect(submit.status, JSON.stringify(submit.body)).toBe(200);
+
+    const { unassignCerts } = await import("../server/grader");
+    const r = await unassignCerts([certId], "admin@test");
+    expect(r.ok).toBe(true);
+    expect(
+      (r as { count: number }).count,
+      "a card awaiting HQ review must not be unassignable — moving it strands the work item"
+    ).toBe(0);
+
+    const after = await admin.query<{ grader_status: string }>(
+      "SELECT grader_status FROM certificates WHERE id=$1",
+      [certId]
+    );
+    expect(after.rows[0].grader_status, "the certificate must stay at pending_review").toBe("pending_review");
+    const item = await scalar<string>("SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [certId]);
+    expect(item, "and the work item stays in lockstep with it").toBe("pending_review");
+  });
+
+  // =====================================================================================
+  // G1d — auth_notes is HQ-private on the READ side too, not only the write side.
+  //
+  // The write side was already refused (auth_notes is not on the partner evidence whitelist, pinned
+  // by W and F3). The read side was not: buildCertGradingPayload returned authNotes verbatim one
+  // line below the hard-blanked privateNotes, and GRADER_PII_KEYS stripped privateNotes but not
+  // authNotes. Mutation PII-AUTHNOTES1: remove "authNotes"/"auth_notes" from GRADER_PII_KEYS → RED.
+  // =====================================================================================
+  it("G1d: HQ-private auth_notes NEVER reaches a partner operator's grading payload", async () => {
+    const f = await seedGradingFixture({ privateNotes: "authnotes-read" });
+    const cookie = await login(f.graderEmail);
+    const certId = f.certIds[0];
+
+    const secret = "HQ-INTERNAL: suspected trimmed edge, escalate before slabbing";
+    await admin.query("UPDATE certificates SET auth_notes=$2 WHERE id=$1", [certId, secret]);
+
+    const res = await req("GET", `/api/partner/grading/certificates/${certId}/grading`, { cookie });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const blob = JSON.stringify(res.body);
+    expect(blob, "HQ authentication commentary must never reach a partner shop operator").not.toContain(secret);
+    expect(blob).not.toMatch(/"authNotes"\s*:\s*"(?!")/);
+    // The sibling protection must still hold, and the card must still be gradeable.
+    // …and the payload is still a real grading payload, not an empty object that would pass
+    // the negative assertions vacuously.
+    expect(Object.keys(res.body as Record<string, unknown>).length).toBeGreaterThan(5);
+  });
+
+  // =====================================================================================
   // G4/G5 — authorisation, over real HTTP rather than by reading the SQL.
   // =====================================================================================
   it("G4: a partner user cannot grade another tenant's certificate", async () => {

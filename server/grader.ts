@@ -187,6 +187,12 @@ const GRADER_PII_KEYS = new Set<string>([
   "claimCodeHash",
   "claimCodeUsedAt",
   "privateNotes",
+  // authNotes is HQ-private commentary on the authentication verdict and may record forgery or
+  // alteration suspicions, and may name the customer. It sat one line below privateNotes in the
+  // grading payload but in neither this list nor the hard-blank beside it, so it reached partner
+  // shop operators verbatim. The write side was already refused (auth_notes is not on the partner
+  // evidence whitelist); this closes the read side to match.
+  "authNotes",
   "customerEmail",
   "customerFirstName",
   "customerLastName",
@@ -204,6 +210,7 @@ const GRADER_PII_KEYS = new Set<string>([
   "claim_code_hash",
   "claim_code_used_at",
   "private_notes",
+  "auth_notes", // snake_case twin of authNotes above — both spellings, as with private_notes.
   "customer_email",
   "customer_first_name",
   "customer_last_name",
@@ -1005,6 +1012,34 @@ const intArray = (ids: number[]) =>
     sql`, `
   )}]::int[]`;
 
+/**
+ * Refuse to move a certificate whose PARTNER work item is awaiting HQ review.
+ *
+ * `grader_status <> 'approved'` alone lets a card at 'pending_review' through, and none of the
+ * assign/reassign/unassign writers touch partner_grading_work_items. Moving the certificate
+ * therefore strands the pair: the cert leaves 'pending_review' while the work item stays there.
+ * That is terminal — approval needs the cert AT 'pending_review', and every retry door
+ * (partner /submit, /edit-submission, assignPartnerCerts) needs the work item to be in
+ * ('ready_for_assignment','assigned','returned_for_change'). Settlement then never runs and the
+ * reserved credits stay held, with no in-app repair path.
+ *
+ * Returned as a single-statement predicate rather than a pre-flight SELECT so the check cannot be
+ * separated from the write by a concurrent approval. Degrades to an empty fragment when 0049 has
+ * not been applied, because this module also runs against HQ databases that predate the partner
+ * work-item table and an unconditional reference would be a parse error there.
+ *
+ * This is workflow state only — it scores nothing and changes no grade, threshold or bracket.
+ */
+async function partnerReviewLockGuard() {
+  const t = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS t`);
+  if (!(t.rows[0] as { t?: string | null } | undefined)?.t) return sql``;
+  return sql`AND NOT EXISTS (
+    SELECT 1 FROM partner_grading_work_items pgwi
+     WHERE pgwi.certificate_id = certificates.id
+       AND pgwi.status = 'pending_review'
+  )`;
+}
+
 /** Assign a batch of CERTIFICATES to a grader. Never touches 'approved' certs. */
 export async function assignCerts(graderId: string, certIds: number[], adminUser: string) {
   if (!(await isGrader(graderId))) return { ok: false as const, status: 400, error: "Not a valid grader" };
@@ -1015,6 +1050,7 @@ export async function assignCerts(graderId: string, certIds: number[], adminUser
     SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
     WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
+      ${await partnerReviewLockGuard()}
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_assign", adminUser, {
@@ -1039,6 +1075,7 @@ export async function reassignCerts(graderId: string, certIds: number[], adminUs
     SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
     WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
+      ${await partnerReviewLockGuard()}
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_reassign", adminUser, {
@@ -1062,6 +1099,7 @@ export async function unassignCerts(certIds: number[], adminUser: string) {
     UPDATE certificates
     SET assigned_grader_id = NULL, grader_status = 'unassigned', assigned_at = NULL, updated_at = NOW()
     WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
+      ${await partnerReviewLockGuard()}
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_unassign", adminUser, {
