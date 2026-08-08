@@ -28,6 +28,7 @@ import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly } from
 import { getPartnerAdminCapability } from "./admin-capability";
 import { withTenant, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { writePartnerAudit } from "./audit";
+import { SELF_SERVICE_VALIDATORS, SelfServiceValidationError } from "./public-network-validation";
 import { storage } from "../storage";
 import {
   findShops,
@@ -48,6 +49,13 @@ const MAX_TEXT = 200;
 function sendError(res: Response, err: unknown): void {
   if (err instanceof PublicNetworkError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  // A rejected self-service VALUE is a 400 the partner can act on, and it names the offending field
+  // so the portal can mark the right input rather than showing a form-level error. Handled here
+  // rather than converted at each call site so a future field cannot be added without the mapping.
+  if (err instanceof SelfServiceValidationError) {
+    res.status(400).json({ error: { code: err.code, message: err.message, field: err.field } });
     return;
   }
   // Log code+message only. A pg error object's `detail` can carry row values, i.e. PII.
@@ -632,6 +640,19 @@ const SELF_SERVICE_FIELDS: Record<string, string> = {
   description: "public_description",
 };
 
+/**
+ * The allowlist above answers "may this column be written". It does NOT answer "may this VALUE be
+ * published", and those are different questions with different consequences.
+ *
+ * Every one of these five fields is rendered to anonymous visitors. Before validation was added the
+ * only content rule was `typeof v === "string" && v.length <= 500`, so
+ * `{"website":"javascript:..."}` was a legitimate, audited, 200-OK edit whose value landed in a
+ * public `href`. The column-level GRANT in 0058 is no defence at all here — the partner is fully
+ * entitled to write this column; the danger is entirely in the value.
+ *
+ * See server/partner/public-network-validation.ts for the rules and why each one is shaped as it is.
+ */
+
 export function partnerNetworkSelfServeRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
@@ -693,16 +714,17 @@ export function partnerNetworkSelfServeRouter(): Router {
 
         const sets: string[] = [];
         const params: unknown[] = [principal.tenantId, listingId];
-        for (const [key, col] of Object.entries(SELF_SERVICE_FIELDS)) {
+        for (const [key, { column, validate }] of Object.entries(SELF_SERVICE_VALIDATORS)) {
           if (!(key in body)) continue;
           const v = body[key];
           if (v !== null && typeof v !== "string") {
             throw new PublicNetworkError("INVALID_INPUT", `The "${key}" field must be a string or null.`);
           }
-          if (typeof v === "string" && v.length > 500) {
-            throw new PublicNetworkError("INVALID_INPUT", `The "${key}" field is too long.`);
-          }
-          sets.push(`${col} = $${params.push(v === null ? null : String(v).trim())}`);
+          // The validator OWNS normalisation as well as rejection: it trims, collapses "" to null,
+          // and for a website returns the URL parser's own serialisation. The value stored is
+          // therefore exactly the value that was judged safe, with no residue of the raw input for a
+          // downstream consumer to re-interpret differently.
+          sets.push(`${column} = $${params.push(validate(v as string | null))}`);
         }
         if (sets.length === 0) throw new PublicNetworkError("INVALID_INPUT", "No editable fields were supplied.");
 

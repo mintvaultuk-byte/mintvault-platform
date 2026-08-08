@@ -319,6 +319,19 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(ev.sampleSize).toBe(1);
     });
 
+    it("EXCLUDES a card with no grade — dropping `grade IS NOT NULL` from the predicate turns this red", async () => {
+      // PUBLIC_CARD_PREDICATE has four conjuncts and three of them had a dedicated killer test.
+      // `grade IS NOT NULL` had none: every insertCert call site took the 9.0 default, so the
+      // conjunct could be deleted from the shipped predicate with the whole suite still green.
+      // That is the exact vacuity this file exists to prevent, so the gap is closed here.
+      const { locationId } = await seedListing(T_A, "Evidence No Grade", "evidence-no-grade");
+      await insertCert(locationId, {});
+      await insertCert(locationId, { grade: null });
+
+      const ev = await svc.measureEvidence(locationId);
+      expect(ev.sampleSize).toBe(1);
+    });
+
     it("attributes only this location's cards", async () => {
       const a = await seedListing(T_A, "Evidence Loc A", "evidence-loc-a");
       const b = await seedListing(T_A, "Evidence Loc B", "evidence-loc-b");

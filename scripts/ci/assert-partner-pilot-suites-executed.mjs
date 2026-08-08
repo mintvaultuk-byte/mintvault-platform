@@ -86,6 +86,24 @@ const SUITES = [
    */
   { file: "tests/partner-grading-get-readonly.test.ts", min: 2 },
   /**
+   * The Public Partner Network behavioural harness: the ONLY suite that executes the shipped
+   * denominator SQL (measureEvidence), the real recalculateRating and the real getShopProfile
+   * against a live PostgreSQL 17 with the full migration chain, plus the cancellation
+   * evidence-lock state machine.
+   *
+   * It had NO floor. It is ungated and self-provisions its own cluster, so it is correctly absent
+   * from GATED_SUITES in tests/ci-execution-floor.test.ts — but that also meant nothing in CI
+   * noticed if it were deleted, or if tests were removed from it. Breakage was loud (a beforeAll
+   * throw exits non-zero); DELETION was silent. Several sibling self-provisioning suites
+   * (partner-full-pilot-workflow, partner-completion-cascade) are floored, so "it self-provisions"
+   * was never the reason to omit one.
+   *
+   * MEASURED 19 = 8 denominator/predicate tests (one per conjunct of PUBLIC_CARD_PREDICATE plus
+   * attribution and rework), 2 abandonment-gaming tests, 6 cancellation state-machine tests,
+   * 3 sample-gate/public-exposure tests.
+   */
+  { file: "tests/partner-public-network-behavioural.test.ts", min: 19 },
+  /**
    * The Super Admin control shell: requireAdmin rejection, partner/location/user suspend, session
    * revoke, feature-flag writes, emergency stop, MFA reset, read-endpoint authorisation and the
    * suspend concurrency proof. Its two environment variables were absent from ci.yml since the file
