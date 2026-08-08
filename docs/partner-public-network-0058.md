@@ -1,10 +1,11 @@
 # Partner Public Network — migration 0058 and the quality-rating evidence base
 
-Status: **schema landed, service layer not yet built.** This document records the decisions that
-0058 encodes, and the evidence findings that constrain what the rating may claim. It is the
-starting point for the rating service, the finder/profile APIs and the Codex UI contract.
+Status: **schema and service layer landed.** Rating engine, shop finder, public profile, Super
+Admin management and partner self-service are implemented; see
+`docs/partner-public-network-codex-contract.md` for the API contracts. Section 11 records the
+hostile-panel findings that remain OPEN.
 
-Branch: `opus/partner-final-integration`. Baseline `74f5296e` (CI green).
+Branch: `opus/partner-final-integration`.
 Migration: `0058_partner_public_network.sql` / `rollback-0058-partner-public-network.sql`.
 Not applied to staging. Not applied to production.
 
@@ -218,17 +219,18 @@ Below threshold: `ratingAvailable = false`, `rating = null`,
 Public label is **"MintVault Quality Rating"** — an operational rating derived from our own review
 outcomes, explicitly **not** a customer-review score.
 
-## 9. What is NOT built yet
+## 9. What is built
 
-The schema is landed and proven. Still to build:
+- `server/partner/public-network-rating.ts` — evidence extractor, `PARTNER_QUALITY_V1`, postcode
+  normalisation, Haversine, bounding box
+- `server/partner/public-network-service.ts` — finder, profile, recent cards, evidence measurement,
+  snapshot + override recalculation
+- `server/partner/public-network-routes.ts` — anonymous `/api/shops`, Super Admin
+  `/api/super-admin/partner-listings`, partner `/api/partner/public-listings`
+- `docs/partner-public-network-codex-contract.md` — the frontend handoff
 
-- evidence extractor + `PARTNER_QUALITY_V1` service + recalculation endpoint
-- `GET /api/partners/public/shops` (finder, Haversine distance, sort/pagination)
-- `GET /api/partners/public/shops/:slug` (profile, allowlist DTO, recent eligible cards)
-- Super Admin listing/rating management APIs
-- Partner safe self-service endpoints
-- behavioural test suites, the 12-mutation matrix, execution floors
-- Codex frontend contract
+Still to build: automatic/scheduled recalculation (see L2), and route-level integration tests
+driving real HTTP through the finder and profile.
 
 ## 10. Proof performed
 
@@ -245,3 +247,92 @@ The schema is landed and proven. Still to build:
   + `partner-grading-bridge-migration` (101), `partner-schema-parity` and 5 further migration
   suites all green.
 - `npm run check` clean; eslint clean on changed files; `git diff --check` clean.
+
+
+---
+
+## 11. Known limitations — hostile panel findings NOT fixed in this pass
+
+A ten-agent adversarial panel reviewed the shipped code. Every BLOCKER/HIGH it found was
+reproduced and fixed (see commit `0373ddac`). The findings below are **real and unfixed**. They are
+recorded here rather than left implicit, because several of them limit what the rating may honestly
+claim, and the public methodology text must not over-sell it.
+
+### L1 — A shop partly controls its own denominator (fairness, HIGH)
+
+Evidence counts cards with `grade_approved_at IS NOT NULL`. A rejected card only re-enters review
+when the **partner** resubmits it; nothing auto-resubmits and there is no timeout. So a card that is
+rejected and simply abandoned is in neither the numerator nor the denominator, and its accumulated
+`redo_count` is discarded with it.
+
+Measured on the real engine: 20 cards of which 10 bounced once scores **2.9 / "Good"**; abandon the
+10 bouncers and the same body of work scores **5.0 / "Exceptional"**.
+
+Friction, not a control: abandoning a card strands its grading credits and blocks settlement of its
+whole destination submission. Fixing it properly needs a durable "reached review" counter, which the
+schema does not have — `partner_grading_work_items.status` is current-state-only.
+
+**Consequence for the public methodology: do not describe the rating as a complete measure of a
+shop's work. It measures the work the shop carried through to approval.**
+
+### L2 — Ratings are stale by default; override expiry is advisory only (HIGH)
+
+`recalculateRating` has three call sites, all manual Super Admin routes. There is no cron, job,
+trigger or approval-time hook. Every published rating is frozen at whenever an admin last pressed
+recalculate — a shop that degrades keeps its old stars, and one that improves keeps them too.
+`calculatedAt` is exposed publicly so the staleness is at least visible, but nothing bounds it.
+
+Consequently `expiresAt` on an override **does not automatically fire**. It is stored and shown to
+Super Admin as a review-by date; an expired override keeps publishing until someone recalculates.
+Treat it as a reminder, not an enforcement.
+
+### L3 — Attribution is by card origin, not by who graded it (MEDIUM)
+
+Evidence filters on `origin_location_id`, never on `assigned_grader_id`. If HQ reassigns a
+partner-originated card to an in-house grader and that grade is rejected, the rework is charged to
+the partner. At the minimum sample of 10 one such card costs ~0.4 of a public star. Whether HQ
+reassignment of partner cards happens in practice is an operational question, not a code one.
+
+### L4 — No recency window (MEDIUM)
+
+Both scored components are means over unbounded history, so accumulated volume dilutes current
+performance without limit. Measured: 1000 clean historical cards plus 100 recent cards that each
+bounced twice scores **4.5 / "Exceptional"**, while those 100 recent cards alone score **0.0 /
+"Under Review"**. The per-grader metric this design follows windows to 30 days; this one does not.
+A window is `PARTNER_QUALITY_V2` territory — it changes every published value.
+
+### L5 — Both scored components derive from the same column (MEDIUM)
+
+`first_pass_approval_rate` and `rework_intensity` are both functions of `redo_count` over the same
+rows. `MIN_AVAILABLE_COMPONENTS = 2` counts components, not independent signals, so with
+`correction_cleanliness` unavailable in v1 the entire rating rests on one column. The guard is also
+unreachable as configured: the two components become unavailable together (zero approved cards), so
+there is no state with exactly one live component.
+
+### L6 — The anonymous profile route drives the privileged admin pool (HIGH, infrastructure)
+
+`GET /api/shops/:slug` issues two `partnerAdminQuery` calls (recent cards, card count), because
+`certificates` is not readable by `partner_runtime`. The admin pool is `max: 4` with no acquire or
+query timeout, and it is shared with every Super Admin surface. Eight concurrent anonymous profile
+requests exhaust it, and the rate limiter is per-machine. **This should be addressed before the
+finder is exposed to real traffic** — either by bounding the admin pool's waits, or by denormalising
+`cardsGraded`/recent cards onto the listing row as the rating already is.
+
+### L7 — Geo search truncates at 500 and reports a derived total (MEDIUM)
+
+The geo path applies `LIMIT 500` ordered by `slug`, then computes `total` from that truncated set.
+Beyond 500 in-box listings the retained set is an arbitrary alphabetical slice, so the nearest shops
+can be excluded while the API reports a confident, wrong `total`. Latent at pilot scale.
+
+### L8 — Minor
+
+- `override_rating_label` is unbounded free text with no vocabulary check, and is published
+  verbatim. Every neighbouring field caps at 200–500 chars.
+- Override create/remove are not atomic with the recalculation that publishes them; a failure
+  between the two leaves the listing and the override table out of step with no reconciler.
+- Recalculation appends a snapshot row per call with no dedupe or retention.
+- `public_website` / `public_email` have no format validation at any layer. No client renders them
+  yet; whoever builds the UI must treat them as untrusted (`javascript:` in an `href` would be
+  stored XSS on an unauthenticated page).
+- `0058` builds the `certificates` index non-concurrently, so applying it takes a brief write lock
+  on the busiest table in the product. Worth a maintenance window on production.

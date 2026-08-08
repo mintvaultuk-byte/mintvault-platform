@@ -221,7 +221,7 @@ warning, it means the change committed but the audit write failed.
 | `POST` | `/:id/verify` | `{ verified, reason }` |
 | `GET` | `/:id/rating` | Evidence + last 20 snapshots + override history. **Read-only, persists nothing** |
 | `POST` | `/:id/rating/recalculate` | Recompute and persist |
-| `POST` | `/:id/rating/override` | `{ rating?, label?, reason, expiresAt? }` |
+| `POST` | `/:id/rating/override` | `{ rating?, label?, reason, expiresAt? }`. `expiresAt` is an **advisory review-by date** — nothing recalculates on a schedule, so it does not auto-expire. Label it "review by", not "expires". |
 | `DELETE` | `/:id/rating/override` | `{ reason }` — retire the active override |
 
 Legal transitions (the API returns **409 `ILLEGAL_TRANSITION`** otherwise; the database enforces
@@ -245,6 +245,8 @@ enters coordinates by hand. A listing without them is valid.
 { "metric": "correction_rate", "available": false, "rawValue": null, "normalised": null,
   "source": "audit_log entity_id has two incompatible conventions …", "sampleSize": 0 }
 ```
+
+Ratings are recalculated **only** when an admin presses recalculate — `calculatedAt` is the age of the figure, and it is worth surfacing.
 
 Render unavailable metrics as **"Not measurable"** with the `source` text as the explanation.
 Never render them as 0, 100% or a dash implying perfection.

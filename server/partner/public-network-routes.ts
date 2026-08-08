@@ -528,6 +528,9 @@ export function partnerNetworkAdminRouter(): Router {
           throw new PublicNetworkError("INVALID_INPUT", "An override rating must be between 0 and 5.");
         }
       }
+      // ADVISORY ONLY. Nothing recalculates on a schedule, so an expiry cannot fire by itself:
+      // the value is a review-by reminder for Super Admin, not an enforcement. Stored and shown
+      // rather than silently pretending to expire. See docs/partner-public-network-0058.md L2.
       let expiresAt: string | null = null;
       if (typeof body.expiresAt === "string" && body.expiresAt.trim() !== "") {
         const d = new Date(body.expiresAt);
