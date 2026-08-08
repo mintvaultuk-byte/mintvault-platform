@@ -112,6 +112,12 @@ async function rollBackEverythingAbove0049(): Promise<void> {
   const migrator = await migratorClient();
   try {
     const higher = [
+      // NEWEST FIRST, and every file above 0049 must be listed. Several of these carry their own
+      // descending-order guard (rollback-0052 refuses while anything >52 is journalled,
+      // rollback-0053 while anything >53), so omitting a newer file does not merely leave one
+      // stray row — it makes the middle of this list refuse too, and 0049 then reports several
+      // remaining rows rather than the one that was actually forgotten. Add new rollbacks here.
+      "rollback-0057-partner-credits-purchase-permission.sql",
       "rollback-0056-partner-hq-control-tables-write-deny.sql",
       "rollback-0055-partner-ledger-preserve-search-path.sql",
       "rollback-0054-cert-counter-monotonic-allocator.sql",

@@ -439,6 +439,26 @@ const ROUND_TRIPS: RoundTrip[] = [
       return rows[0].n === 0 ? "write_denied" : "write_admitted";
     },
   },
+  {
+    number: 57,
+    standalone: true,
+    migration: "0057_partner_credits_purchase_permission.sql",
+    rollback: "rollback-0057-partner-credits-purchase-permission.sql",
+    hole: "without the permission row, no role can be granted spending authority at all",
+    whenApplied: "purchase_seeded",
+    whenRolledBack: "purchase_absent",
+    // MUST be listed here, not merely de-journalled elsewhere: this suite applies the FULL
+    // migration set, and every rollback from 0052 downward refuses while ANY higher-numbered
+    // journal row survives. A newest migration missing from this table does not just skip its own
+    // round trip — it bricks the entire descending sequence beneath it, which is exactly the
+    // BLOCKER-2 shape the sequence test exists to catch.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT count(*)::int n FROM partner_permissions WHERE code = 'partner.credits.purchase'`
+      );
+      return rows[0].n === 1 ? "purchase_seeded" : "purchase_absent";
+    },
+  },
 ];
 
 // =============================================================================================
