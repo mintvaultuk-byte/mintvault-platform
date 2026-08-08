@@ -95,6 +95,32 @@ function getPool(): pg.Pool {
       connectionString: process.env.PARTNER_DATABASE_URL,
       max: Number(process.env.PARTNER_DB_POOL_MAX ?? 8),
       // no SSL for local/disposable; real infra provides its own sslmode in the URL.
+      //
+      // Bounded waits are a SECURITY control here, not just a latency one. The kill-switch and
+      // portal-enabled gates read partner_feature_flags on this pool on EVERY request, uncached,
+      // and they fail closed via `catch`. A fail-closed branch only runs if an error actually
+      // arrives — so an unbounded wait does not fail closed, it hangs: with no acquire timeout and
+      // no query timeout, an ACCESS EXCLUSIVE lock on that table (a migration, or a stuck admin
+      // writer) parks every request on a pool slot, exhausts all `max` of them, and then parks the
+      // rest in the pool queue forever. The user sees a proxy-level timeout with no body and the
+      // logs say nothing. These bounds convert that hang into an error, so the EXISTING
+      // fail-closed `unavailable(res)` branches in mount.ts/public-routes.ts execute as designed.
+      connectionTimeoutMillis: Number(process.env.PARTNER_DB_ACQUIRE_TIMEOUT_MS ?? 2000),
+      query_timeout: Number(process.env.PARTNER_DB_QUERY_TIMEOUT_MS ?? 3000),
+    });
+    // Idle pooled clients emit errors on the POOL, not on any query promise. Without a listener
+    // Node treats that as an uncaught exception and exits. Matches adminPool and server/db.ts.
+    pool.on("error", (err) => console.error("[partner-runtime-pool] idle client error (evicted):", err.message));
+    // query_timeout is client-side: it frees the JS promise and the pool slot, but leaves the
+    // server-side query still waiting on the lock. lock_timeout is what actually stops the
+    // DB-side pile-up, so set it per connection as well. Applied via `connect` rather than a
+    // `SET LOCAL` because partnerRuntimeQuery is deliberately non-transactional. Session-scoped
+    // and idempotent, so it is safe to re-apply on a pooled endpoint.
+    const lockTimeoutMs = Number(process.env.PARTNER_DB_LOCK_TIMEOUT_MS ?? 2000);
+    pool.on("connect", (client) => {
+      client.query(`SET lock_timeout = ${Math.floor(lockTimeoutMs)}`).catch((err) => {
+        console.error("[partner-runtime-pool] failed to set lock_timeout:", (err as Error).message);
+      });
     });
   }
   return pool;
