@@ -459,6 +459,36 @@ const ROUND_TRIPS: RoundTrip[] = [
       return rows[0].n === 1 ? "purchase_seeded" : "purchase_absent";
     },
   },
+  {
+    number: 58,
+    standalone: true,
+    migration: "0058_partner_public_network.sql",
+    rollback: "rollback-0058-partner-public-network.sql",
+    hole: "without the public listing tables there is no shop finder, no public shop profile and nowhere to persist a quality rating",
+    whenApplied: "public_network_present",
+    whenRolledBack: "public_network_absent",
+    // Same reasoning as 0057 above: 0058 is now the newest migration, so the descending sequence
+    // starts here. Its rollback runs on an estate with no listings (the suite never seeds one), so
+    // the data-loss opt-in guard in rollback-0058 stays dormant and the file proceeds unprompted —
+    // which is what this round trip requires.
+    //
+    // The probe deliberately checks the TRIGGER FUNCTION as well as the table. DROP TABLE removes
+    // a trigger but leaves its function behind, and a stranded plpgsql function in `public` is
+    // exactly what the unpinned-function class sweep in this file goes red on. Probing the table
+    // alone would report a clean rollback while leaving that residue.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM pg_class
+             WHERE relnamespace='public'::regnamespace
+               AND relname IN ('partner_public_listings','partner_public_rating_snapshots','partner_public_rating_overrides'))
+           + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+               WHERE n.nspname='public' AND p.proname='partner_public_listing_transition_guard')
+         )::int n`
+      );
+      return rows[0].n === 0 ? "public_network_absent" : "public_network_present";
+    },
+  },
 ];
 
 // =============================================================================================

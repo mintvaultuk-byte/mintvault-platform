@@ -1043,6 +1043,11 @@ describe("Partner RLS isolation coverage is wired up", () => {
     "0054_cert_counter_monotonic_allocator",
     "0055_partner_ledger_preserve_search_path",
     "0056_partner_hq_control_tables_write_deny",
+    // 0058's three tables are tenant-keyed, so they MUST be applied here or the catalogue-driven
+    // sweep below never sees them and the RLS audit silently stops covering the public network.
+    // Omitting a tenant-keyed table from this list is not a red build — it is a coverage hole,
+    // which is the more dangerous failure.
+    "0058_partner_public_network",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */

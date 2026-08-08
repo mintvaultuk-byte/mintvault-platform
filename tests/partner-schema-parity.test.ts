@@ -218,6 +218,14 @@ describe("partner schema ↔ migration parity", () => {
       // as a new file rather than an edit to 0034 because 0034 is already applied on staging and
       // editing it would trip the runner's checksum refusal. Adds no table and no column.
       "0057_partner_credits_purchase_permission.sql",
+      // 0058 builds the PUBLIC partner network: partner_public_listings (the approved public
+      // identity of one partner location), partner_public_rating_snapshots and
+      // partner_public_rating_overrides. Additive — partner_locations is deliberately NOT
+      // restructured, because its `address` column is the OPERATIONAL address that 0035 snapshots
+      // onto certificates as immutable provenance. The public address is a separate, approvable,
+      // changeable fact, and keeping the two apart is what lets a shop move premises without
+      // rewriting what its historical certificates claim.
+      "0058_partner_public_network.sql",
     ]);
   });
 
