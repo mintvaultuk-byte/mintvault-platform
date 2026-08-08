@@ -3191,7 +3191,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!/^MV\d+$/.test(certNumber)) return res.status(404).end();
 
       const cert = (await storage.getCertificateByCertId(certNumber)) as any;
-      if (!cert || cert.status !== "active" || cert.gradeOverall == null) return res.status(404).end();
+      // gradeApprovedAt is the public-visibility gate every other public read applies via
+      // findCertByIdFlex. This proxy checked only status+grade, which is not the same thing: the
+      // connector inserts partner certificates as status='active', and the partner grader writes a
+      // grade while grade_approved_at is still NULL. Both of the old conditions were therefore true
+      // BEFORE HQ review, so an unauthenticated caller could stream the shop's customer's raw card
+      // scan straight from R2 — no signed URL, no expiry — for a certificate that /api/cert/:id
+      // correctly 404s. Same gate, same 404, no oracle.
+      if (!cert || cert.status !== "active" || cert.gradeOverall == null || cert.gradeApprovedAt == null) {
+        return res.status(404).end();
+      }
 
       let key: string | null = null;
       if (kind === "front-label") {
