@@ -242,6 +242,10 @@ END$$;
 --     Identical treatment to 0051's partner_feature_flags split.
 -- --------------------------------------------------------------------------------------------
 DROP POLICY IF EXISTS partner_service_tiers_tenant_isolation ON partner_service_tiers;
+-- Same re-appliability guard as 0051's flag split: drop the names this file is about to create,
+-- so a second apply cannot raise 42710.
+DROP POLICY IF EXISTS partner_service_tiers_global_read ON partner_service_tiers;
+DROP POLICY IF EXISTS partner_service_tiers_tenant_write ON partner_service_tiers;
 
 -- Read: the original USING clause, verbatim. A global tier row (tenant_id IS NULL) stays readable
 -- by every tenant and with no tenant context at all, which the pricing resolvers depend on.
@@ -327,9 +331,30 @@ BEGIN
     IF NOT enabled OR NOT forced THEN
       RAISE EXCEPTION '0052: % must be ENABLE + FORCE ROW LEVEL SECURITY (enabled=%, forced=%)', t, enabled, forced;
     END IF;
-    SELECT count(*) INTO npolicy FROM pg_policies WHERE schemaname = 'public' AND tablename = t;
-    IF npolicy <> 1 THEN
-      RAISE EXCEPTION '0052: expected exactly 1 policy on %, found %', t, npolicy;
+    -- No policy on these tables may be anything other than this file's tenant-isolation policy or
+    -- 0056's deny-all. Counting "exactly 1" was asserting something STRICTER than the security
+    -- property, and it made this file un-re-appliable: 0056 legitimately adds
+    -- %I_no_tenant_access (USING false / WITH CHECK false) to the same two tables, so on any
+    -- re-apply — the apply/rollback/reapply proof, a DR restore, a hand-run recovery — 0052 saw 2
+    -- and aborted. Because the runner applies files in one transaction and stops on the first
+    -- failure, that abort also took 0054 and 0055 down with it, which is why the cert_counter
+    -- allocator guards read as "not enforcing": they were never installed.
+    --
+    -- 0056's policy is strictly MORE restrictive than this one, so its presence cannot weaken the
+    -- guarantee. What must still be impossible is an UNEXPECTED policy, and that is what is
+    -- asserted here instead — by name, so a permissive third policy is still a hard failure.
+    SELECT count(*) INTO npolicy
+      FROM pg_policies
+     WHERE schemaname = 'public' AND tablename = t
+       AND policyname NOT IN (t || '_tenant_isolation', t || '_no_tenant_access');
+    IF npolicy <> 0 THEN
+      RAISE EXCEPTION '0052: unexpected policy on % — found % policy(ies) that are neither %_tenant_isolation nor %_no_tenant_access', t, npolicy, t, t;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = t AND policyname = t || '_tenant_isolation'
+    ) THEN
+      RAISE EXCEPTION '0052: the tenant-isolation policy on % is missing', t;
     END IF;
     IF NOT EXISTS (
       SELECT 1 FROM pg_policies

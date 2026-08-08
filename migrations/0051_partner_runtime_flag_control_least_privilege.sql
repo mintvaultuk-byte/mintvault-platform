@@ -137,6 +137,13 @@ REVOKE INSERT, UPDATE, DELETE ON partner_emergency_controls FROM partner_runtime
 -- 2) Structural containment: the permissive global-read branch must not govern writes.
 -- --------------------------------------------------------------------------------------------
 DROP POLICY IF EXISTS partner_feature_flags_tenant_isolation ON partner_feature_flags;
+-- The two names this file is about to CREATE are dropped too, so the file is re-appliable in
+-- place. Dropping only the OLD name left a bare CREATE POLICY that raises 42710 on any second
+-- apply — a DR restore, a hand-run recovery, or an apply/reapply proof. Every sibling in this
+-- series already guards its own names (0047:102, 0049:243, 0052:230, 0056:114-116); this file
+-- and 0052's service-tier split were the two that did not.
+DROP POLICY IF EXISTS partner_feature_flags_global_read ON partner_feature_flags;
+DROP POLICY IF EXISTS partner_feature_flags_tenant_write ON partner_feature_flags;
 
 -- Read: unchanged semantics — a global row (tenant_id IS NULL) stays readable by every tenant, and
 -- with no tenant context at all, which resolveGlobalFlag() depends on.
