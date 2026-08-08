@@ -99,6 +99,12 @@ const PUBLIC_LISTING_COLUMNS = `
 
 export interface PublicRatingDto {
   available: boolean;
+  /**
+   * True when a Super Admin override is what the visitor is seeing. Published because a rating a
+   * human typed and a rating the formula produced are different claims, and a consumer that cannot
+   * tell them apart is being misled — `version` is null in that case for the same reason.
+   */
+  isOverride: boolean;
   /** 0.0-5.0, or null while the rating is still building. */
   rating: number | null;
   label: string;
@@ -152,14 +158,18 @@ export interface PublicRecentCardDto {
 
 function ratingDto(r: Record<string, unknown>): PublicRatingDto {
   const available = r.current_rating_available === true;
+  const isOverride = r.current_rating_is_override === true;
   return {
     available,
+    isOverride,
     // Belt and braces over the DB CHECK: never emit a number when the rating is not available.
     rating: available && r.current_public_rating !== null ? Number(r.current_public_rating) : null,
     label: String(r.current_rating_label ?? "Rating building"),
     sampleSize: Number(r.current_sample_size ?? 0),
     minimumSample: Number(r.current_minimum_sample ?? MINIMUM_PUBLIC_SAMPLE),
-    version: available ? ((r.current_rating_version as string | null) ?? null) : null,
+    // A hand-set override must NOT be attributed to PARTNER_QUALITY_V1 — the formula did not
+    // produce it.
+    version: available && !isOverride ? ((r.current_rating_version as string | null) ?? null) : null,
     calculatedAt: iso(r.current_rating_calculated_at),
   };
 }
@@ -405,7 +415,15 @@ export async function getShopProfile(slug: string): Promise<PublicShopProfileDto
  * work as a credential. Using the stricter predicate means this feature can only ever NARROW
  * publication, never broaden it — which is the property required of it.
  */
-const PUBLIC_CARD_PREDICATE = `
+/**
+ * EXPORTED so a test can execute the exact shipped column list against a real PostgreSQL. An
+ * assertion that merely re-types these names in the test would prove nothing — the defect this
+ * guards against is a name that TypeScript cannot check because it lives inside a SQL string.
+ */
+export const RECENT_CARD_COLUMNS =
+  "certificate_number, card_name, set_name, year_text, card_number_display, grade, grade_approved_at";
+
+export const PUBLIC_CARD_PREDICATE = `
   deleted_at IS NULL
   AND status = 'active'
   AND grade IS NOT NULL
@@ -427,7 +445,12 @@ const PUBLIC_CARD_PREDICATE = `
  */
 export async function getRecentCards(locationId: string): Promise<PublicRecentCardDto[]> {
   const { rows } = await partnerAdminQuery<Record<string, unknown>>(
-    `SELECT certificate_number, card_name, card_set, card_year, card_number, grade, grade_approved_at
+    // COLUMN NAMES ARE NOT THE OBVIOUS ONES. On `certificates` the set is `set_name`, the year is
+    // `year_text` and the card number is `card_number_display` — `card_set`/`card_year` belong to
+    // partner_submission_cards and do not exist here at all. An earlier revision of this query used
+    // those names: it type-checked perfectly and 500'd every single shop profile at runtime, because
+    // nothing in TypeScript knows what a raw SQL string means. Verified against shared/schema.ts.
+    `SELECT ${RECENT_CARD_COLUMNS}
        FROM certificates
       WHERE origin_location_id = $1
         AND origin_type = 'PARTNER'
@@ -439,12 +462,16 @@ export async function getRecentCards(locationId: string): Promise<PublicRecentCa
   return rows.map((r) => ({
     certId: String(r.certificate_number),
     cardName: (r.card_name as string | null) ?? null,
-    cardSet: (r.card_set as string | null) ?? null,
-    cardYear: r.card_year === null || r.card_year === undefined ? null : String(r.card_year),
-    cardNumber: (r.card_number as string | null) ?? null,
+    cardSet: (r.set_name as string | null) ?? null,
+    cardYear: r.year_text === null || r.year_text === undefined ? null : String(r.year_text),
+    cardNumber: (r.card_number_display as string | null) ?? null,
     grade: r.grade === null || r.grade === undefined ? null : String(r.grade),
     gradedDate: iso(r.grade_approved_at),
-    frontImageUrl: `/api/public/slab-image/${encodeURIComponent(String(r.certificate_number))}/front`,
+    // `scan`, not `front`. server/routes.ts:3217-3232 accepts exactly front-label | back-label |
+    // scan and 404s anything else, so `/front` produced a dead image on every card — and, worse,
+    // meant the "the proxy re-checks the gate" second layer claimed above was never exercised.
+    // `scan` is what slab-showcase.ts:118 uses, and its gate matches PUBLIC_CARD_PREDICATE.
+    frontImageUrl: `/api/public/slab-image/${encodeURIComponent(String(r.certificate_number))}/scan`,
   }));
 }
 
@@ -566,13 +593,16 @@ export async function recalculateRating(listingId: string, actor: string): Promi
         : Number(override.override_public_rating)
       : computed.publicRating;
     const effectiveLabel = override?.override_rating_label ?? computed.ratingLabel;
-    // An override may publish a rating the sample gate would otherwise withhold — that is the
-    // entire point of an EXCEPTIONAL override, and it is a named Super Admin's recorded decision.
-    // The DB CHECK still requires sample_size >= minimum_sample when available is true, so the
-    // stored minimum is relaxed to the actual sample for an overridden row rather than the
-    // constraint being weakened for everyone.
+    // An override may publish a rating the sample gate would otherwise withhold — that is the point
+    // of an EXCEPTIONAL override, and it is a named Super Admin's recorded decision.
+    //
+    // An earlier revision achieved that by rewriting current_minimum_sample DOWN to the actual
+    // sample so the CHECK would pass. That made the API lie: a 0-card shop reported
+    // `minimumSample: 0`, i.e. "the gate was met", when it had been sidestepped. The real minimum
+    // is now always stored, and the CHECK itself exempts override rows — so the constraint states
+    // the actual rule ("a COMPUTED rating must meet the gate") instead of being worked around.
     const effectiveAvailable = isOverride ? effectiveRating !== null : computed.ratingAvailable;
-    const storedMinimum = isOverride && effectiveAvailable ? Math.min(computed.minimumSample, computed.sampleSize) : computed.minimumSample;
+    const storedMinimum = computed.minimumSample;
 
     await client.query(
       `UPDATE partner_public_listings

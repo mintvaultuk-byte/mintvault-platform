@@ -66,6 +66,7 @@ Repeating a parameter (`?town=a&town=b`) is a **400**, not a silent pick.
       "verified": true,
       "rating": {
         "available": true,
+        "isOverride": false,
         "rating": 4.6,
         "label": "Excellent",
         "sampleSize": 42,
@@ -124,7 +125,7 @@ Everything in the finder row, plus:
   "website": "https://example.com",
   "openingInfo": "Mon–Sat 9:00–17:30",
   "description": "Independent card shop and MintVault grading partner.",
-  "rating": { "available": true, "rating": 4.6, "label": "Excellent", "sampleSize": 42, "minimumSample": 10, "version": "PARTNER_QUALITY_V1", "calculatedAt": "2026-08-08T18:20:00.000Z" },
+  "rating": { "available": true, "isOverride": false, "rating": 4.6, "label": "Excellent", "sampleSize": 42, "minimumSample": 10, "version": "PARTNER_QUALITY_V1", "calculatedAt": "2026-08-08T18:20:00.000Z" },
   "stats": { "cardsGraded": 42 },
   "recentCards": [
     {
@@ -135,7 +136,7 @@ Everything in the finder row, plus:
       "cardNumber": "4/102",
       "grade": "9.0",
       "gradedDate": "2026-08-01T10:12:00.000Z",
-      "frontImageUrl": "/api/public/slab-image/MV-0000000205/front"
+      "frontImageUrl": "/api/public/slab-image/MV-0000000205/scan"
     }
   ]
 }
@@ -162,6 +163,11 @@ internal rating components, override rationale, listing internal ids.
 | `true` | `rating` out of 5 (one decimal) + `label` + "based on N graded cards" (`sampleSize`) |
 | `false` | `label` ("Rating building") + "N of M cards graded" (`sampleSize` / `minimumSample`). **No stars.** |
 
+`isOverride: true` means a Super Admin set this figure by hand, not the formula. `version` is
+`null` in that case. Such a rating may sit below `minimumSample` — that is a deliberate, audited
+exception, and `minimumSample` still reports the real gate rather than being rewritten to match.
+Render it as a rating; do not claim it was computed.
+
 Call it **"MintVault Quality Rating"**. It is an operational rating derived from MintVault's own
 review outcomes — **not** customer reviews. Do not label it "reviews", "customer rating" or
 "satisfaction".
@@ -174,10 +180,15 @@ thresholds on the internal 0–100 score, which is **not** exposed publicly.
 ## 5. Partner self-service
 
 ```
-GET /api/partner/public-listing
-PUT /api/partner/public-listing
+GET /api/partner/public-listings
+PUT /api/partner/public-listings/:id
 ```
-Auth: partner session, `partner.location.view`. `PUT` also requires not-view-only.
+Auth: partner session. `GET` needs `partner.location.view`; `PUT` needs **`partner.users.manage`**
+(Owner/Manager only — these fields are published to the public, so editing them is a write of the
+shop's public identity, not a read) and not-view-only.
+
+`GET` returns `{ "rows": [...] }` — a tenant may run several shops, one listing per location. `PUT`
+addresses a single listing by id; it does not fan out across the tenant's other shops.
 
 `PUT` body — **these five keys only**:
 

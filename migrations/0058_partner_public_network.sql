@@ -324,12 +324,22 @@ CREATE TABLE IF NOT EXISTS partner_public_listings (
   -- a version and enough sample; an unavailable one must carry no number at all. RATING2
   -- (missing evidence scored as perfect) and RATING3 (minimum sample removed) therefore have to
   -- defeat a CHECK constraint here as well as in the snapshot history.
+  --
+  -- THE SAMPLE GATE BINDS COMPUTED RATINGS, NOT OVERRIDES. A Super Admin override is an
+  -- exceptional, named, audited decision that may deliberately publish a figure the formula would
+  -- withhold. The alternative -- making an override satisfy the gate -- was tried and was worse:
+  -- the service had to rewrite current_minimum_sample DOWN to the actual sample so the CHECK would
+  -- pass, which made the public API report "minimumSample: 0" for a zero-card shop, i.e. claim the
+  -- gate had been met when it had been sidestepped. A constraint that can only be satisfied by
+  -- falsifying its own inputs is worse than one that states the real rule, so it states the real
+  -- rule. current_rating_is_override is HQ-writable only (no partner grant), and it is published in
+  -- the public DTO, so an overridden rating is never mistaken for a computed one.
   CONSTRAINT chk_partner_public_listings_current_rating CHECK (
     (current_rating_available = true
        AND current_public_rating IS NOT NULL
        AND current_rating_label IS NOT NULL
        AND current_rating_version IS NOT NULL
-       AND current_sample_size >= current_minimum_sample)
+       AND (current_rating_is_override OR current_sample_size >= current_minimum_sample))
     OR
     (current_rating_available = false
        AND current_public_rating IS NULL)
@@ -429,9 +439,31 @@ CREATE INDEX IF NOT EXISTS idx_partner_public_listings_active_rating
 -- appear (partner-originated AND approved), so it stays small against a table that is
 -- overwhelmingly HQ-originated. Created here rather than in 0035 because 0035 predates the public
 -- profile and its checksum is frozen.
-CREATE INDEX IF NOT EXISTS idx_certificates_origin_location_recent
-  ON certificates (origin_location_id, grade_approved_at DESC)
-  WHERE origin_location_id IS NOT NULL AND grade_approved_at IS NOT NULL;
+--
+-- CONDITIONAL, because 0058 DOES NOT OWN `certificates`. Several partner suites apply the full
+-- migration chain against a MINIMAL certificates stub that carries the origin_* columns (0035 adds
+-- those) but not base columns like grade_approved_at. An unconditional CREATE INDEX there fails
+-- with 42703 and takes the whole chain down — which is exactly how this first landed, breaking
+-- tests/partner-rls-isolation.test.ts in CI while every local suite passed.
+--
+-- A migration that reaches into a table it does not own must tolerate that table being narrower
+-- than it expects. Where the columns are absent the index is simply not created: it is a
+-- performance optimisation for the real estate, not a correctness requirement, and the query it
+-- serves is correct either way. The completeness assertion below is scoped the same way, so this
+-- cannot silently degrade into "asserted nothing" on a real database.
+DO $$
+BEGIN
+  IF to_regclass('public.certificates') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='certificates' AND column_name='origin_location_id')
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='certificates' AND column_name='grade_approved_at')
+  THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_certificates_origin_location_recent '
+         || 'ON certificates (origin_location_id, grade_approved_at DESC) '
+         || 'WHERE origin_location_id IS NOT NULL AND grade_approved_at IS NOT NULL';
+  END IF;
+END$$;
 
 COMMENT ON TABLE partner_public_listings IS
   'Approved PUBLIC identity of one partner location. Snapshot, not a view over partner_locations. Only listing_status=ACTIVE is publicly readable.';
@@ -909,7 +941,6 @@ DECLARE
     'idx_partner_public_listings_active_name',
     'idx_partner_public_listings_active_coords',
     'idx_partner_public_listings_active_rating',
-    'idx_certificates_origin_location_recent',
     'idx_partner_public_rating_snapshots_tenant',
     'idx_partner_public_rating_snapshots_latest',
     'idx_partner_public_rating_snapshots_location',
@@ -969,6 +1000,18 @@ BEGIN
     FROM unnest(expected_indexes) AS i WHERE to_regclass('public.' || i) IS NULL;
   IF missing IS NOT NULL THEN
     RAISE EXCEPTION '0058 completeness assertion failed: missing index(es): %', missing;
+  END IF;
+
+  -- Scoped exactly like its creation above: assert the recent-cards index EXISTS wherever it
+  -- COULD have been created, so a real estate still fails closed if it is missing.
+  IF to_regclass('public.certificates') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='certificates' AND column_name='origin_location_id')
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='certificates' AND column_name='grade_approved_at')
+     AND to_regclass('public.idx_certificates_origin_location_recent') IS NULL
+  THEN
+    RAISE EXCEPTION '0058 completeness assertion failed: idx_certificates_origin_location_recent was not created on a certificates table that supports it.';
   END IF;
 
   SELECT string_agg(p, ', ' ORDER BY p) INTO missing

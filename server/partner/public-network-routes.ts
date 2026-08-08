@@ -25,6 +25,7 @@ import rateLimit from "express-rate-limit";
 import { partnerRateLimitClientKey } from "./rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly } from "./session";
+import { getPartnerAdminCapability } from "./admin-capability";
 import { withTenant, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { writePartnerAudit } from "./audit";
 import { storage } from "../storage";
@@ -210,10 +211,36 @@ async function auditAdmin(
   }
 }
 
+/**
+ * Every partner admin router carries this, and omitting it here was a real defect rather than a
+ * style inconsistency. 0058 puts FORCE ROW LEVEL SECURITY on all three tables, which removes the
+ * table-owner exemption — so ONLY a BYPASSRLS admin role can see a DRAFT or PENDING_REVIEW listing.
+ * Without the preflight, an admin pool lacking BYPASSRLS makes the review queue return HTTP 200
+ * carrying only ACTIVE rows: the operator sees an empty approval queue and concludes there is
+ * nothing to approve. That is the worst possible failure shape, and it is why this is a hard 503
+ * rather than a warning.
+ */
+async function requirePartnerAdminCapability(_req: Request, res: Response, next: () => void): Promise<void> {
+  const capability = await getPartnerAdminCapability();
+  if (!capability.ok) {
+    res.status(503).json({
+      error: {
+        code: "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
+        message: "Partner Super Admin management is not ready.",
+      },
+    });
+    return;
+  }
+  next();
+}
+
 export function partnerNetworkAdminRouter(): Router {
   const r = Router();
+  // Rate gate first so an unauthenticated flood never drives a DB round trip; capability last
+  // because it costs a memoised catalogue query.
   r.use(adminLimit);
   r.use(requireSuperAdmin);
+  r.use(requirePartnerAdminCapability);
 
   /** List every listing in any state — the review queue. */
   r.get("/", async (req: Request, res: Response) => {
@@ -606,37 +633,39 @@ export function partnerNetworkSelfServeRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
 
-  r.get("/public-listing", requirePartnerCapability("partner.location.view"), async (req: Request, res: Response) => {
+  r.get("/public-listings", requirePartnerCapability("partner.location.view"), async (req: Request, res: Response) => {
     try {
       const principal = req.partner!;
-      const row = await withTenant({ tenantId: principal.tenantId }, async (c) => {
+      const rows = await withTenant({ tenantId: principal.tenantId }, async (c) => {
         const { rows } = await c.query(
-          `SELECT slug, public_display_name, listing_status, town_city, county, postcode, country,
+          `SELECT id, slug, public_display_name, listing_status, town_city, county, postcode, country,
                   public_phone, public_email, public_website, public_opening_info, public_description,
                   verified_at, public_since,
                   current_public_rating, current_rating_label, current_rating_available,
                   current_sample_size, current_minimum_sample, current_rating_calculated_at
              FROM partner_public_listings
             WHERE tenant_id = $1
-            ORDER BY created_at ASC
-            LIMIT 1`,
+            ORDER BY created_at ASC`,
           [principal.tenantId],
         );
-        return rows[0] ?? null;
+        return rows;
       });
-      if (!row) {
-        res.status(404).json({ error: { code: "NO_LISTING", message: "This partner has no public listing yet." } });
-        return;
-      }
-      res.json(row);
+      // A tenant may run several shops: 0058 enforces one listing per LOCATION, not per tenant.
+      // Returning them all (rather than the oldest) is what lets the caller address the right one.
+      res.json({ rows });
     } catch (err) {
       sendError(res, err);
     }
   });
 
   r.put(
-    "/public-listing",
-    requirePartnerCapability("partner.location.view"),
+    "/public-listings/:id",
+    // partner.users.manage, NOT partner.location.view. These fields are PUBLISHED to consumers, so
+    // editing them is a write of the shop's public identity. partner.location.view is a READ
+    // capability held by PARTNER_TRAINEE, PARTNER_RECEPTION and MVGS_ASSESSMENT_TECHNICIAN — gating
+    // this on it let the lowest-trust credential in a shop repoint the publicly advertised phone
+    // number and website. partner.users.manage is held only by OWNER and MANAGER.
+    requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     async (req: Request, res: Response) => {
       try {
@@ -654,8 +683,13 @@ export function partnerNetworkSelfServeRouter(): Router {
           );
         }
 
+        const listingId = String(req.params.id);
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(listingId)) {
+          throw new PublicNetworkError("INVALID_INPUT", "Invalid listing id.");
+        }
+
         const sets: string[] = [];
-        const params: unknown[] = [principal.tenantId];
+        const params: unknown[] = [principal.tenantId, listingId];
         for (const [key, col] of Object.entries(SELF_SERVICE_FIELDS)) {
           if (!(key in body)) continue;
           const v = body[key];
@@ -670,13 +704,19 @@ export function partnerNetworkSelfServeRouter(): Router {
         if (sets.length === 0) throw new PublicNetworkError("INVALID_INPUT", "No editable fields were supplied.");
 
         const updated = await withTenant({ tenantId: principal.tenantId }, async (c) => {
+          // SCOPED TO ONE LISTING. Without the id predicate this updated EVERY listing the tenant
+          // owned, so a multi-shop partner editing one branch's phone number silently republished
+          // it on all of them — invisibly, because the portal only ever showed one. tenant_id stays
+          // in the predicate alongside the id: RLS already confines the row set, but an explicit
+          // tenant filter means a bug in the policy cannot become a cross-tenant write.
           const upd = await c.query(
-            `UPDATE partner_public_listings SET ${sets.join(", ")}, updated_at = now() WHERE tenant_id = $1`,
+            `UPDATE partner_public_listings SET ${sets.join(", ")}, updated_at = now()
+              WHERE tenant_id = $1 AND id = $2`,
             params,
           );
           if ((upd.rowCount ?? 0) === 0) {
             // RLS makes a cross-tenant write a silent no-op, so zero rows must be a failure here.
-            throw new PublicNetworkError("NO_LISTING", "This partner has no public listing yet.", 404);
+            throw new PublicNetworkError("NO_LISTING", "No such public listing for this partner.", 404);
           }
           await writePartnerAudit(c, {
             tenantId: principal.tenantId,
@@ -684,7 +724,7 @@ export function partnerNetworkSelfServeRouter(): Router {
             sessionId: principal.sessionId,
             action: "partner_public_listing_contact_updated",
             recordType: "partner_public_listing",
-            recordId: principal.tenantId,
+            recordId: listingId,
             after: Object.fromEntries(Object.keys(body).map((k) => [k, body[k]])),
           });
           return upd.rowCount;

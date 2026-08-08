@@ -26,6 +26,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { RECENT_CARD_COLUMNS, PUBLIC_CARD_PREDICATE } from "../server/partner/public-network-service";
 import {
   provisionRealisticRoles,
   createMintvaultCertificatesTable,
@@ -206,6 +207,79 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
   });
 
   // -------------------------------------------------------------------------------------------
+  describe("the shipped card SQL actually runs against the real certificates schema", () => {
+    /**
+     * THE TEST CLASS THAT WAS MISSING, and the reason a blocker shipped past tsc and CI.
+     *
+     * getRecentCards originally selected `card_set`, `card_year` and `card_number`. Those are
+     * columns of partner_submission_cards; on `certificates` the same facts are `set_name`,
+     * `year_text` and `card_number_display`. TypeScript cannot check a name inside a SQL string, so
+     * the code type-checked, linted, passed 4385 unit tests, and 500'd EVERY public shop profile at
+     * runtime with a generic "internal_error" that hid the cause.
+     *
+     * These tests import the shipped fragments and execute them, so a rename in the query is
+     * caught here rather than by a customer. Asserting the names in the test instead would prove
+     * nothing — it would just restate the same guess.
+     */
+    beforeAll(async () => {
+      // The shared stub omits `grade` and `redo_count`; both exist on the real table. Added here,
+      // in this suite's own disposable cluster, so the stub stays untouched for other suites.
+      await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade numeric(4,1)");
+      await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS redo_count integer NOT NULL DEFAULT 0");
+    });
+
+    it("runs the recent-cards query", async () => {
+      await expect(
+        admin.query(
+          `SELECT ${RECENT_CARD_COLUMNS} FROM certificates
+            WHERE origin_location_id = $1 AND origin_type = 'PARTNER' AND ${PUBLIC_CARD_PREDICATE}
+            ORDER BY grade_approved_at DESC LIMIT 12`,
+          ["11111111-1111-1111-1111-111111111111"],
+        ),
+      ).resolves.toBeTruthy();
+    });
+
+    it("runs the public card count", async () => {
+      await expect(
+        admin.query(
+          `SELECT count(*)::text n FROM certificates
+            WHERE origin_location_id = $1 AND origin_type = 'PARTNER' AND ${PUBLIC_CARD_PREDICATE}`,
+          ["11111111-1111-1111-1111-111111111111"],
+        ),
+      ).resolves.toBeTruthy();
+    });
+
+    it("runs the rating evidence aggregate", async () => {
+      const { rows } = await admin.query<{ approved: string; first_pass: string; redos: string }>(
+        `SELECT count(*)::text AS approved,
+                count(*) FILTER (WHERE redo_count = 0)::text AS first_pass,
+                coalesce(sum(redo_count), 0)::text AS redos
+           FROM certificates
+          WHERE origin_location_id = $1 AND origin_type = 'PARTNER' AND ${PUBLIC_CARD_PREDICATE}`,
+        ["11111111-1111-1111-1111-111111111111"],
+      );
+      expect(rows[0].approved).toBe("0");
+      expect(rows[0].redos).toBe("0");
+    });
+
+    it("uses the recent-cards index for a location lookup", async () => {
+      const { rows } = await admin.query<{ "QUERY PLAN": string }>(
+        `EXPLAIN SELECT ${RECENT_CARD_COLUMNS} FROM certificates
+           WHERE origin_location_id = $1 AND origin_type = 'PARTNER' AND ${PUBLIC_CARD_PREDICATE}
+           ORDER BY grade_approved_at DESC LIMIT 12`,
+        ["11111111-1111-1111-1111-111111111111"],
+      );
+      // An empty table can legitimately seq-scan, so this asserts the plan is PRODUCIBLE and the
+      // index is present rather than pinning a plan shape that row counts would flip anyway.
+      expect(rows.length).toBeGreaterThan(0);
+      expect(
+        (await admin.query("SELECT to_regclass('public.idx_certificates_origin_location_recent') IS NOT NULL ok"))
+          .rows[0].ok,
+      ).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------------------------
   describe("postcode normalisation is done by the database, not the application", () => {
     // A normaliser that lives only in TypeScript is one missed call site away from an unsearchable
     // listing, and the finder fails SILENTLY (empty result, HTTP 200).
@@ -306,6 +380,29 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
           [listingId],
         ),
       ).rejects.toThrow(/chk_partner_public_listings_current_rating/);
+    });
+
+    it("permits an OVERRIDE below the sample gate, and only an override", async () => {
+      const { listingId } = await seedListing(T_A, "OverrideSample", "rating-override-sample", "ACTIVE");
+      // The gate binds COMPUTED ratings. A Super Admin override is a named, audited, exceptional
+      // decision that may publish anyway — and current_minimum_sample keeps telling the truth
+      // about what the gate was, rather than being rewritten down to make the CHECK pass.
+      await expect(
+        admin.query(
+          `UPDATE partner_public_listings
+              SET current_rating_version='V1', current_public_rating=4.9, current_rating_label='Exceptional',
+                  current_rating_available=true, current_sample_size=2, current_minimum_sample=10,
+                  current_rating_is_override=true
+            WHERE id=$1`,
+          [listingId],
+        ),
+      ).resolves.toBeTruthy();
+      const { rows } = await admin.query(
+        "SELECT current_minimum_sample, current_sample_size FROM partner_public_listings WHERE id=$1",
+        [listingId],
+      );
+      expect(rows[0].current_minimum_sample).toBe(10);
+      expect(rows[0].current_sample_size).toBe(2);
     });
 
     it("refuses an unavailable rating that still carries a number (RATING2)", async () => {
