@@ -124,6 +124,98 @@ async function seedListing(tenantId: string, name: string, slug: string): Promis
   return { listingId, locationId };
 }
 
+/**
+ * Build the minimum real FK chain a `partner_grading_work_items` row requires, and return the
+ * partner submission id plus a setter for the work item's status.
+ *
+ * Direct inserts rather than the real submit route: the guard under test reads exactly one table,
+ * and driving submit would drag in MinIO and the wallet without making the proof stronger. Every
+ * NOT NULL FK in 0049's chain is still satisfied by a genuine row, so the query is exercised
+ * against the real schema — which is the part that catches a wrong column name.
+ */
+async function seedWorkItem(
+  locationId: string,
+  status: string,
+  tag: string,
+): Promise<{ partnerSubmissionId: string }> {
+  const u = await admin.query<{ id: string }>(
+    `INSERT INTO partner_users (tenant_id, partner_id, email, status, password_hash)
+     VALUES ($1,$1,$2,'ACTIVE','x') RETURNING id`,
+    [T_A, `cancel-${tag}@test.local`],
+  );
+  const userId = u.rows[0].id;
+  const ps = await admin.query<{ id: string }>(
+    `INSERT INTO partner_submissions (tenant_id, location_id, created_by, status)
+     VALUES ($1,$2,$3,'submitted_to_mintvault') RETURNING id`,
+    [T_A, locationId, userId],
+  );
+  const partnerSubmissionId = ps.rows[0].id;
+  const card = await admin.query<{ id: string }>(
+    `INSERT INTO partner_submission_cards
+       (tenant_id, submission_id, sequence_number, card_name, quantity, front_image_key, back_image_key)
+     VALUES ($1,$2,1,'Cancel Card',1,$3,$4) RETURNING id`,
+    [T_A, partnerSubmissionId, `f/${tag}.jpg`, `b/${tag}.jpg`],
+  );
+  const ho = await admin.query<{ id: string }>(
+    `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot)
+     VALUES ($1,$2,'applied','{}'::jsonb) RETURNING id`,
+    [T_A, partnerSubmissionId],
+  );
+  const cr = await admin.query<{ id: string }>(
+    `INSERT INTO partner_connector_records (tenant_id, partner_submission_id, handoff_id, state, attempt_count)
+     VALUES ($1,$2,$3,'imported',1) RETURNING id`,
+    [T_A, partnerSubmissionId, ho.rows[0].id],
+  );
+  const vr = await admin.query<{ id: string }>(
+    `INSERT INTO partner_connector_validation_runs
+       (connector_record_id, validation_attempt, source_submission_version, source_handoff_status,
+        source_fingerprint, source_fingerprint_version, outcome, blocking_error_count, warning_count, completed_at)
+     VALUES ($1,1,1,'pending',$2,1,'valid',0,0,now()) RETURNING id`,
+    [cr.rows[0].id, "a".repeat(64)],
+  );
+  const dest = await admin.query<{ id: number }>(
+    `INSERT INTO submissions (user_id, tracking_number, status) VALUES ('cancel-owner',$1,'draft') RETURNING id`,
+    [`MV-CANCEL-${tag}`],
+  );
+  const imp = await admin.query<{ id: string }>(
+    `INSERT INTO partner_connector_imports
+       (connector_record_id, partner_organisation_id, partner_location_id, partner_submission_id,
+        partner_handoff_id, validation_run_id, source_fingerprint, source_fingerprint_version,
+        mapping_version, import_attempt, state, destination_submission_id, completed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,1,1,1,'completed',$8, now()) RETURNING id`,
+    [cr.rows[0].id, T_A, locationId, partnerSubmissionId, ho.rows[0].id, vr.rows[0].id, "a".repeat(64), dest.rows[0].id],
+  );
+  const item = await admin.query<{ id: number }>(
+    "INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id",
+    [dest.rows[0].id],
+  );
+  await admin.query(
+    `INSERT INTO partner_grading_work_items
+       (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id, partner_submission_card_id,
+        partner_handoff_id, connector_import_id, connector_record_id, validation_run_id,
+        destination_submission_id, submission_item_id, card_ordinal, status, front_image_key, back_image_key)
+     VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13)`,
+    [
+      T_A,
+      locationId,
+      partnerSubmissionId,
+      card.rows[0].id,
+      ho.rows[0].id,
+      imp.rows[0].id,
+      cr.rows[0].id,
+      vr.rows[0].id,
+      dest.rows[0].id,
+      item.rows[0].id,
+      status,
+      // 0049 constrains both keys to encode tenant/submission/card, so a work item can never point
+      // at another tenant's object. Built from the real ids rather than a placeholder.
+      `partner-submissions/${T_A}/${partnerSubmissionId}/${card.rows[0].id}/front-${tag}.jpg`,
+      `partner-submissions/${T_A}/${partnerSubmissionId}/${card.rows[0].id}/back-${tag}.jpg`,
+    ],
+  );
+  return { partnerSubmissionId };
+}
+
 describe("Partner public network — behavioural rating evidence (disposable PostgreSQL 17)", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-public-network-behavioural");
@@ -290,6 +382,82 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
         [locationId],
       );
       expect(Number(durable.rows[0].n)).toBe(10);
+    });
+  });
+
+  /**
+   * The cancellation state machine — the anti-laundering control.
+   *
+   * Closing the rating denominator alone would NOT have closed the gaming vector: a shop could see
+   * a card come back at `returned_for_change`, cancel the submission, and re-submit the same
+   * physical card with a fresh `redo_count` of 0. Every surrogate key in the chain is minted at
+   * intake, so the second attempt is a different card to every table in the system. Governance of
+   * the lifecycle is what makes the evidence unerasable.
+   */
+  describe("cancellation state machine — grading evidence lock", () => {
+    let guard: typeof import("../server/partner/grading-assignment");
+
+    beforeAll(async () => {
+      guard = await import("../server/partner/grading-assignment");
+    });
+
+    it("A — ALLOWS cancellation before grading starts (ready_for_assignment)", async () => {
+      const { locationId } = await seedListing(T_A, "Cancel Pre", "cancel-pre");
+      const { partnerSubmissionId } = await seedWorkItem(locationId, "ready_for_assignment", "pre");
+
+      await expect(
+        guard.assertCancellationLeavesNoGradingEvidence(admin, partnerSubmissionId),
+      ).resolves.toBeUndefined();
+    });
+
+    it("B — REFUSES cancellation once a card is assigned to a grader", async () => {
+      const { locationId } = await seedListing(T_A, "Cancel Assigned", "cancel-assigned");
+      const { partnerSubmissionId } = await seedWorkItem(locationId, "assigned", "assigned");
+
+      await expect(
+        guard.assertCancellationLeavesNoGradingEvidence(admin, partnerSubmissionId),
+      ).rejects.toThrow(/Grading has already started/);
+    });
+
+    it("B — REFUSES cancellation at pending_review, and carries a named domain code", async () => {
+      const { locationId } = await seedListing(T_A, "Cancel Review", "cancel-review");
+      const { partnerSubmissionId } = await seedWorkItem(locationId, "pending_review", "review");
+
+      const err = await guard
+        .assertCancellationLeavesNoGradingEvidence(admin, partnerSubmissionId)
+        .then(() => null)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(guard.PartnerGradingEvidenceLockError);
+      expect((err as { code: string }).code).toBe("grading_already_started");
+    });
+
+    it("B — REFUSES cancellation at returned_for_change, which is the laundering entry point", async () => {
+      const { locationId } = await seedListing(T_A, "Cancel Returned", "cancel-returned");
+      const { partnerSubmissionId } = await seedWorkItem(locationId, "returned_for_change", "returned");
+
+      await expect(
+        guard.assertCancellationLeavesNoGradingEvidence(admin, partnerSubmissionId),
+      ).rejects.toThrow(/Grading has already started/);
+    });
+
+    it("B — REFUSES cancellation after approval", async () => {
+      const { locationId } = await seedListing(T_A, "Cancel Approved", "cancel-approved");
+      const { partnerSubmissionId } = await seedWorkItem(locationId, "approved", "approved");
+
+      await expect(
+        guard.assertCancellationLeavesNoGradingEvidence(admin, partnerSubmissionId),
+      ).rejects.toThrow(/Grading has already started/);
+    });
+
+    it("scopes the refusal to the submission being cancelled, not the whole tenant", async () => {
+      const { locationId } = await seedListing(T_A, "Cancel Scope", "cancel-scope");
+      await seedWorkItem(locationId, "pending_review", "scope-busy");
+      const quiet = await seedWorkItem(locationId, "ready_for_assignment", "scope-quiet");
+
+      // A different submission mid-review must not block this one.
+      await expect(
+        guard.assertCancellationLeavesNoGradingEvidence(admin, quiet.partnerSubmissionId),
+      ).resolves.toBeUndefined();
     });
   });
 

@@ -26,6 +26,10 @@ import type { PartnerPrincipal } from "./session";
 import { uploadToR2, getR2SignedUrl, headR2 } from "../r2";
 import { CreditReservationError, reserveCreditInTransaction } from "./partner-credit-reservation-service";
 import {
+  assertCancellationLeavesNoGradingEvidence,
+  PartnerGradingEvidenceLockError,
+} from "./grading-assignment";
+import {
   PartnerSubmissionCreditLifecycleError,
   releasePartnerReservationForPartnerCancellation,
 } from "./partner-submission-credit-lifecycle";
@@ -476,6 +480,13 @@ export async function cancelSubmission(
       if (!row) throw NOT_FOUND();
       if (row.status === "cancelled") throw NOT_DRAFT();
 
+      // Ordinary cancellation is a PRE-GRADING action. Once any card has left the intake queue it
+      // carries durable grading/review history, and cancelling would both erase that quality
+      // evidence and — via 0041's credit-hold trigger — leave the certificate unapprovable. Held
+      // inside this transaction, under FOR UPDATE, so a concurrent submit-for-review cannot slip
+      // between the check and the write. See assertCancellationLeavesNoGradingEvidence.
+      await assertCancellationLeavesNoGradingEvidence(c, submissionId);
+
       const actor = await c.query<{ email: string; status: string }>(
         `SELECT email, status FROM partner_users WHERE id=$1 AND tenant_id=$2 FOR KEY SHARE`,
         [principal.userId, principal.tenantId]
@@ -512,6 +523,11 @@ export async function cancelSubmission(
       return toSummary(rows[0]);
     });
   } catch (err) {
+    if (err instanceof PartnerGradingEvidenceLockError) {
+      // A named domain refusal, not an internal error: the partner needs to understand that the
+      // card is mid-grading and that withdrawal is now an HQ exception, not a self-service action.
+      throw new SubmissionError(err.code, err.message);
+    }
     if (err instanceof PartnerSubmissionCreditLifecycleError) {
       throw new SubmissionError("credit_settlement_required", err.message);
     }

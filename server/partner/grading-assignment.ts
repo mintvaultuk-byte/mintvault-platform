@@ -47,6 +47,89 @@ export async function partnerReviewLockGuard() {
 }
 
 /**
+ * Work-item statuses meaning a physical grading unit has left the intake queue and acquired
+ * durable grading/review history.
+ *
+ * `ready_for_assignment` is the only pre-grading state: the unit exists and is imported, but no
+ * grader has touched it and it carries no quality signal. Everything else means a partner grader
+ * was handed the card, or HQ has seen a submitted grade. `void` is excluded because nothing in the
+ * codebase writes it (server/print-workflow.ts:1100-1102 says so, and grep confirms) — listing it
+ * here would imply a state machine that does not exist.
+ */
+export const GRADING_EVIDENCE_WORK_ITEM_STATUSES = [
+  "assigned",
+  "pending_review",
+  "returned_for_change",
+  "approved",
+  "completed",
+] as const;
+
+/** Raised when an ordinary partner cancellation would erase durable grading/review evidence. */
+export class PartnerGradingEvidenceLockError extends Error {
+  public readonly code = "grading_already_started";
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Refuse an ORDINARY partner cancellation once grading has begun on any card in the submission.
+ *
+ * WHY THIS EXISTS. `cancelSubmission` previously guarded only on the submission not already being
+ * cancelled. The destination MintVault submission is created in status `draft`
+ * (connector-import-service.ts) and nothing in the partner grading path advances it — only a
+ * manual HQ action does. `PRE_GRADING_DESTINATION_STATUSES` includes `draft`, so the cancellation
+ * window stayed open across import, assignment, grading and submit-for-review. Two consequences,
+ * both real:
+ *
+ *   1. QUALITY LAUNDERING. A shop could see how grading went — a card sitting at
+ *      `returned_for_change` after HQ bounced it — then cancel and re-submit the same physical
+ *      card as a brand-new submission with a fresh `redo_count` of 0. Every surrogate key in the
+ *      chain is minted at intake, so the second attempt is a different card to every table in the
+ *      system. Closing the rating denominator alone would not have stopped this.
+ *   2. THE APPROVAL FREEZE. Cancelling creates unreleased rows in
+ *      `partner_submission_credit_holds`, and migration 0041's `certificates` trigger raises
+ *      `check_violation` on ANY write to a certificate whose destination carries an unreleased
+ *      hold. `approveCertGrade` is a plain UPDATE on that table, so HQ approval became impossible
+ *      — the partner could strand its own reviewed work with no in-app repair path.
+ *
+ * The fix is lifecycle governance rather than a new identity mechanism: once a unit has left
+ * `ready_for_assignment`, the ordinary cancel route is closed and the evidence cannot be erased.
+ * Genuinely exceptional cancellation stays available to HQ through its own audited path, which
+ * preserves the evidence rather than discarding it.
+ *
+ * Runs on the CALLER'S transaction client and takes `FOR UPDATE` on the work-item rows, so the
+ * check cannot be separated from the cancellation write by a concurrent submit-for-review. Rows
+ * are locked in `id` order, matching grading-review-mirror.ts's ordering on the same table, so the
+ * two writers serialise instead of forming a cycle.
+ *
+ * Degrades to a no-op when 0049 has not been applied, matching partnerReviewLockGuard above.
+ */
+export async function assertCancellationLeavesNoGradingEvidence(
+  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }> },
+  partnerSubmissionId: string
+): Promise<void> {
+  const present = await client.query("SELECT to_regclass('public.partner_grading_work_items')::text AS t");
+  if (!(present.rows[0] as { t?: string | null } | undefined)?.t) return;
+
+  const { rows } = await client.query(
+    `SELECT status
+       FROM partner_grading_work_items
+      WHERE partner_submission_id = $1
+        AND status = ANY($2::text[])
+      ORDER BY id
+        FOR UPDATE`,
+    [partnerSubmissionId, [...GRADING_EVIDENCE_WORK_ITEM_STATUSES]]
+  );
+  if (rows.length === 0) return;
+
+  throw new PartnerGradingEvidenceLockError(
+    "Grading has already started on this submission, so it can no longer be cancelled here. " +
+      "Contact MintVault support if it genuinely needs to be withdrawn."
+  );
+}
+
+/**
  * Bind an int[] as ONE parameter.
  *
  * Local copy of the same helper server/grader.ts uses privately. Duplicated rather than exported
