@@ -58,9 +58,11 @@ byte-identically. Guard suite 40/40 green with the legitimate change alone.
 rejection CAS only. Submit-for-review does not write it. That is sufficient for the proven exploit
 (the population is `grade_approved_at IS NOT NULL OR redo_count > 0`, and every member of it has
 either an approval date or a rejection), but a unit that entered review and was never acted on has
-no clock — it is also not in the population. **No dedicated `tests/partner-review-clock.test.ts`
-has been written**, and two code comments reference it. Those comments are currently aspirational
-and must be corrected or the test written before this is called proven.
+no clock — it is also not in the population.
+
+**Behavioural proof: `tests/partner-review-clock.test.ts`, 8 cases, added in session 2.** See the
+session-2 addendum at the foot of this file. The code comment that used to name a non-existent test
+now describes what the suite actually contains.
 
 ### B2 · Anonymous slab-image proxy ran on the privileged main pool
 `GET /api/public/slab-image/:certNumber/:kind` (unauthenticated) called
