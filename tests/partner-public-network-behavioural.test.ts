@@ -473,7 +473,7 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
 
     beforeAll(async () => {
       life = await import("../server/partner/public-network-rating-lifecycle");
-    });
+    }, 60_000);
 
     async function dirtyState(listingId: string) {
       const r = await admin.query<{
@@ -658,7 +658,23 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
     beforeAll(async () => {
       db = await import("../server/partner/db");
       routes = await import("../server/partner/public-network-routes");
-    });
+      // 60s, not the default 10s. This hook does nothing but load a large module graph, and it
+      // was observed exceeding the default and skipping the whole describe (reported as "24
+      // skipped", which reads as coverage being gated off rather than as a starved hook).
+      //
+      // ⚠️ THIS IS NOT THE FIX FOR THE WIDER "PARALLEL-ONLY FAILURE" CLASS, and it should not be
+      // cited as one. Root-caused 2026-08-09: those failures are HOST RESOURCE STARVATION, not a
+      // repository defect. The machine was at 93 MB free RAM with 17.25 GB of 18.4 GB swap in use
+      // and a load average of 92 on 10 cores, with three vitest roots across two worktrees running
+      // concurrently. `printable-grade-safety` blew a 5 s budget running ENTIRELY ALONE, one fork,
+      // which no amount of in-suite isolation can explain.
+      //
+      // CI does not run this topology at all: vitest.config.ts sets
+      // `fileParallelism: !process.env.TEST_DATABASE_URL`, and CI sets that variable, so CI runs
+      // test FILES SEQUENTIALLY. Raising budgets to "fix" a local-only symptom is how a real
+      // performance guard gets quietly defanged — see project-control-hardening's bounded-redaction
+      // test, which asserts a duration and must NOT be treated this way.
+    }, 60_000);
 
     it("executes public SQL AS partner_public_reader, not as the connecting login role", async () => {
       // The pool authenticates as the cluster superuser in this suite and drops to the group role
@@ -1220,7 +1236,7 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
 
     beforeAll(async () => {
       guard = await import("../server/partner/grading-assignment");
-    });
+    }, 60_000);
 
     it("A — ALLOWS cancellation before grading starts (ready_for_assignment)", async () => {
       const { locationId } = await seedListing(T_A, "Cancel Pre", "cancel-pre");
@@ -1729,7 +1745,7 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
     beforeAll(async () => {
       db = await import("../server/partner/db");
       slab = await import("../server/partner/public-slab-image");
-    });
+    }, 60_000);
 
     async function seedEligibleCert(locationId: string, certNumber: string): Promise<void> {
       const id = await insertCert(locationId, { certNumber });

@@ -1,6 +1,6 @@
 # Issue register — partner-final-blocker-repair
 
-**Baseline** `ad6a68f1` · **current** `878e4b79` · branch `opus/partner-final-integration`
+**Baseline** `ad6a68f1` · **current** `see git log` · branch `opus/partner-final-integration`
 **Staging** unchanged (max migration 0046) · **Production** unchanged (`6f182624`, verified live via
 `/api/version` 2026-08-09) · **No push, no deploy, no migration applied to any Neon host.**
 
@@ -458,3 +458,71 @@ must not be mis-stated. On that base, all 53 numbered files apply cleanly first 
 | Ten-agent hostile panel | not launched |
 | AMD64, push, CI, staging package, Codex handoff | not started |
 | gitleaks 91 historical findings | not attributed new-vs-pre-existing |
+
+---
+
+# CORRECTION — the "parallel-only failures" were misdiagnosed TWICE. Root cause found.
+
+I asserted two wrong causes before the evidence was in. Both are retracted here, because a register
+that quietly replaces a wrong finding with a right one teaches nobody anything.
+
+**Wrong #1 — "flakes."** Correctly rejected by the owner.
+
+**Wrong #2 — "afterAll teardown budgets."** I raised 39 files' cluster teardowns from the default
+10 s to 120 s and reported it as the fix on the strength of ONE clean run. The next run failed with
+`Hook timed out in 120000ms` and `Hook timed out in 180000ms` — the budgets I had just raised were
+themselves blown. That is a disproof, not a flake. **The change was reverted in full**, including a
+revert script that over-matched and stripped pre-existing `120_000` timeouts from unrelated blocks;
+`git checkout -- tests/` restored everything and only the one separately-reproduced fix was
+re-applied.
+
+## THE ACTUAL ROOT CAUSE: host resource starvation, not a repository defect
+
+Measured on this machine during the runs:
+
+```
+PhysMem: 15G used, 93M unused          vm.swapusage: 17250M of 18432M used
+Load Avg: 92.02 on 10 cores            CPU: 55.8% user, 44.2% sys, 0.0% idle
+```
+
+44 % SYSTEM time and 6.9 M cumulative swapins is page-fault thrashing. Three independent vitest
+roots across two git worktrees were running concurrently, plus two `tsc --noEmit` processes and
+several Electron apps. Each vitest root is entitled to 9 forks (`maxWorkers = max(cpus-1,1) = 9`).
+
+**The clinching evidence:** `tests/printable-grade-safety.test.ts` failed a 5 s budget running
+ENTIRELY ALONE — one file, one fork, no in-suite contention. No amount of test isolation can
+explain that.
+
+All 15 failures are wall-clock. **Zero are logic or value mismatches.** A pure-CPU regex over
+200 000 characters was measured at 3 399 / 5 906 / 6 689 / 12 857 ms against a <3 000 ms bar that
+passes trivially in isolation.
+
+## AND CI NEVER RUNS THIS TOPOLOGY
+
+`vitest.config.ts:15` — `fileParallelism: !process.env.TEST_DATABASE_URL`. CI sets
+`TEST_DATABASE_URL` (`ci.yml:14`), so **CI runs test files strictly sequentially, one at a time**,
+on a dedicated runner. `ci.yml:143-146` already documents this. Locally, with the variable unset,
+up to 9 files run at once.
+
+So the brief's requirement — "zero genuine failures under the same execution topology CI uses" — is
+a run with `TEST_DATABASE_URL` set. **That run has NOT been performed** and is the outstanding
+proof. The parallel local run is a harsher topology than the release gate, executed on a machine
+that was thrashing.
+
+### What was legitimately fixed, and what was not
+
+| Change | Status |
+|---|---|
+| Hoisted `await import()` out of test bodies (validation suite) | Kept — separately reproduced at 7825 ms / 5010 ms |
+| 60 s budget on four import-only `beforeAll` hooks | Kept — separately reproduced; explicitly NOT the class fix |
+| 60 s on the protected-engine guard (shells out to `git diff`) | Kept — property assertion, no guarantee weakened |
+| 120 s on 39 cluster teardowns | **REVERTED** — disproved by the next run |
+| `project-control-hardening` bounded-redaction | **Untouched by design** — asserts a DURATION; raising it deletes the guard |
+
+### Latent hazards found, not fixed
+- `tests/helpers/postgres17-cluster.ts:42` — port allocated by bind-to-0 / close / hand to
+  `initdb`, leaving a multi-second TOCTOU window on the ephemeral port space.
+- sharp's libvips and node-canvas each load their own glib/gio into the same worker; macOS reports
+  a duplicate-class warning that "may cause spurious casting failures and mysterious crashes".
+- The affected population is larger than five files — at least eight more timed out during
+  reproduction.
