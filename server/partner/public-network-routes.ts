@@ -692,9 +692,14 @@ export function partnerNetworkAdminRouter(): Router {
           throw new PublicNetworkError("INVALID_INPUT", "An override rating must be between 0 and 5.");
         }
       }
-      // ADVISORY ONLY. Nothing recalculates on a schedule, so an expiry cannot fire by itself:
-      // the value is a review-by reminder for Super Admin, not an enforcement. Stored and shown
-      // rather than silently pretending to expire. See docs/partner-public-network-0058.md L2.
+      // AN EXPIRY NOW GENUINELY FIRES. This comment used to say the opposite — "advisory only,
+      // nothing recalculates on a schedule, a review-by reminder rather than an enforcement" —
+      // and it cited limitation L2, which two later migrations closed:
+      //   * 0060 made the effective rating fall back to the computed one AT READ TIME, so an
+      //     expired override stops applying the moment it lapses, with no job and no write;
+      //   * 0066 added rating_next_recalc_at, so the reconciler also refreshes by clock alone.
+      // Left as a false comment it would have told the next engineer that the expiry path is
+      // decorative, which is precisely the sort of thing that gets deleted as dead code.
       let expiresAt: string | null = null;
       if (typeof body.expiresAt === "string" && body.expiresAt.trim() !== "") {
         const d = new Date(body.expiresAt);
