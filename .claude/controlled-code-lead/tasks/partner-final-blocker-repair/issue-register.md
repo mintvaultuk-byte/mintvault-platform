@@ -526,3 +526,61 @@ that was thrashing.
   a duplicate-class warning that "may cause spurious casting failures and mysterious crashes".
 - The affected population is larger than five files — at least eight more timed out during
   reproduction.
+
+---
+
+# SESSION 5 — `c758a7dd` → (see git log)
+
+## OVERRIDE-ATOMIC1 — CLOSED, mutation RED
+B5 made override create/remove atomic; nothing proved it, because the atomicity lived inside a
+super-admin-gated HTTP handler. `createRatingOverride` / `removeRatingOverride` moved into
+`public-network-service.ts`; the routes delegate and the SQL, lock, audit and dirty mark are
+unchanged, so the tested code is the shipped code. The two dead in-route helpers were removed
+rather than left as a second copy.
+
+Injection point is after the override row, dirty mark AND audit are written, before commit — the
+only window that produces B5's partial states. The detector asserts all four durable facts move
+together on success and that NONE moved on failure: no orphan override, no phantom audit, no stale
+dirty generation, and the listing still usable (so the rollback released its `FOR UPDATE`).
+Remove is covered too, where the partial state is worse — a half-removed override keeps the public
+profile publishing a value the audit trail says was retired.
+
+**Mutation OVERRIDE-ATOMIC1** (split the transaction, audit + dirty mark back outside as pre-B5) →
+**RED**, type-clean, restored byte-identically. Floor raised 80 → 84.
+
+## gitleaks — PR scope, CLOSED
+`gitleaks detect --log-opts="origin/main..HEAD"` over this branch's **156 commits**: *no leaks
+found*. **Zero new secret findings introduced by this work.** The 91 findings from the earlier scan
+are pre-existing repository history (2089 commits) and are not this release's gate.
+
+## Mutation matrix — cumulative
+| Mutation | Result |
+|---|---|
+| Protected-engine scoping | RED ×2 |
+| `RECENCY-REVIEWDATE1` | RED ×4 |
+| `RATING-CAS1` | RED |
+| `RATING-HOL1` | RED |
+| `RECENCY-CLOCK1` | RED |
+| `PUBLIC-5031` | RED |
+| `PUBLIC-IMAGE-ADMIN1` | RED ×2 |
+| `DEPLOY-ORDER1` | RED ×2 (structural + behavioural) |
+| `OVERRIDE-ATOMIC1` | RED |
+| `RATING-AWAIT1` | **no detector — not built** |
+| `RATING-DIRTY-WIRE1` | **no detector — not built** |
+| `PUBLIC-SETROLE1` | does not fire (redundant assertion) |
+| 16 retained | not re-run |
+
+Every mutation run was type-clean while applied and restored byte-identically.
+
+## RATING-AWAIT1 / RATING-DIRTY-WIRE1 — still open, and why
+Both must drive `mirrorPartnerRejection` / `mirrorPartnerApproval`, the real production callers.
+That needs a certificate-LINKED work item. Neither existing harness provides one:
+`partner-public-network-behavioural`'s `seedWorkItem` inserts a work item with **no
+`certificate_id`**, and `partner-full-pilot-workflow` — which does drive the real mirror — applies
+migrations only to **0050**, so it has no `partner_public_listings` at all.
+
+Closing them means extending one harness: linking a certificate through the 0049 composite FK
+`(certificate_id, submission_item_id) → certificates(id, submission_item_id)`, and for
+RATING-AWAIT1 additionally adding a rating-pool reset helper so the pool can be re-pointed and
+exhausted to make an explicit latency contract measurable. Neither is conceptually hard; both are
+real fixture work and were **not** attempted rather than half-done.
