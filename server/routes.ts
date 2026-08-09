@@ -77,7 +77,7 @@ import {
 } from "./partner/public-network-routes";
 // The anonymous slab-image proxy reads the 0064 projection as the least-privileged public reader.
 // It must NEVER fall back to `db` / `storage` for that lookup — see the note at the route.
-import { partnerPublicQuery } from "./partner/db";
+import { lookupPublicSlabImage } from "./partner/public-slab-image";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
@@ -3231,16 +3231,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // connection is not recoverable by noticing later. ⚠️ DEPLOY PREREQUISITE: that variable must
       // be set, and its login role must be a member of partner_public_reader, BEFORE this ships.
       // The public slab showcase is a LIVE production surface today and it will 503 without them.
-      let eligible: { scan_object_key: string | null; has_scan: boolean } | undefined;
+      // The lookup itself lives in server/partner/public-slab-image.ts. It is twelve lines, and it
+      // is a separate module for one reason: while it was inline here, the only testable claim
+      // about it was a source-text pin. Mutation PUBLIC-IMAGE-ADMIN1 — "route this back through the
+      // privileged pool" — now has a behavioural detector.
+      let eligible: import("./partner/public-slab-image").PublicSlabImageRow | null;
       try {
-        const { rows } = await partnerPublicQuery<{ scan_object_key: string | null; has_scan: boolean }>(
-          `SELECT scan_object_key, has_scan
-             FROM public_slab_image_projection
-            WHERE certificate_number = $1
-            LIMIT 1`,
-          [certNumber]
-        );
-        eligible = rows[0];
+        eligible = await lookupPublicSlabImage(certNumber);
       } catch (dbErr: any) {
         // Same classification the shop finder uses, so a Neon restart is a 503 and a query bug is
         // a 500 that shows up in alerting rather than hiding behind a soothing "try again".
@@ -3260,7 +3257,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       } else {
         // `scan`. The display/cropped/original precedence is resolved IN the projection, so the
         // ordering has exactly one definition instead of one here and one in slab-showcase.ts.
-        key = eligible.has_scan ? eligible.scan_object_key : null;
+        key = eligible.hasScan ? eligible.scanObjectKey : null;
       }
       if (!key) return res.status(404).end();
 

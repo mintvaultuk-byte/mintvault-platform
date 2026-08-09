@@ -108,7 +108,7 @@ const SUITES = [
   // suite had 19 tests, and never raised as it grew — 44 tests of SLACK, i.e. the rating-lifecycle
   // block (8), the public-reader least-privilege block (23), override expiry (4), eligibility
   // suspension (5) and the V2 recency window (3) were all silently deletable with CI green.
-  { file: "tests/partner-public-network-behavioural.test.ts", min: 69 },
+  { file: "tests/partner-public-network-behavioural.test.ts", min: 80 }, // RE-MEASURED 2026-08-09 after the mutation detectors and the slab-image block
 
   // ── PREVIOUSLY UNFLOORED (HIGH H11) ───────────────────────────────────────────────────────
   // All four were deletable in their entirety with every CI step green: nothing in scripts/ci/
@@ -122,6 +122,9 @@ const SUITES = [
   // exploit, and server/partner/public-network-service.ts names it in a comment as exactly that —
   // so it must not be deletable behind a green build.
   { file: "tests/partner-review-clock.test.ts", min: 8 },
+  // The H8 deploy-order gate. Its whole value is that it REFUSES, so a deleted test here is a
+  // gate nobody has proven refuses anything — which is the state it replaced.
+  { file: "tests/partner-deploy-preflight.test.ts", min: 13 },
   { file: "tests/partner-public-network-rating.test.ts", min: 48 },
   { file: "tests/partner-public-network-migration.test.ts", min: 42 },
   { file: "tests/partner-public-network-validation.test.ts", min: 31 },

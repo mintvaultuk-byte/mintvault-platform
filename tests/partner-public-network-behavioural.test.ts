@@ -1719,4 +1719,125 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(Number(stillDirty.rows[0].n), "the estate must actually be reconciled").toBe(0);
     }, 120_000);
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // PUBLIC-IMAGE-ADMIN1 — anonymous slab-image traffic must never reach the privileged pool
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  describe("anonymous slab-image lookup is isolated from the privileged pool", () => {
+    let db: typeof import("../server/partner/db");
+    let slab: typeof import("../server/partner/public-slab-image");
+    beforeAll(async () => {
+      db = await import("../server/partner/db");
+      slab = await import("../server/partner/public-slab-image");
+    });
+
+    async function seedEligibleCert(locationId: string, certNumber: string): Promise<void> {
+      const id = await insertCert(locationId, { certNumber });
+      // The projection resolves display -> cropped -> original; give it the middle one so the
+      // precedence is exercised rather than assumed.
+      await admin.query("UPDATE certificates SET grading_front_cropped = $2 WHERE id = $1", [
+        id,
+        `images/${certNumber}/front_crop.jpg`,
+      ]);
+    }
+
+    it("resolves an eligible certificate through the 0064 projection, as the restricted reader", async () => {
+      const { locationId } = await seedListing(T_A, "Image Shop", "image-shop");
+      await seedEligibleCert(locationId, "MV-IMG-0001");
+
+      const row = await slab.lookupPublicSlabImage("MV-IMG-0001");
+      expect(row, "an eligible certificate must resolve").not.toBeNull();
+      expect(row?.hasScan).toBe(true);
+      expect(row?.scanObjectKey).toBe("images/MV-IMG-0001/front_crop.jpg");
+    }, 60_000);
+
+    it("returns null — not an error — for a certificate awaiting HQ approval", async () => {
+      const { locationId } = await seedListing(T_A, "Image Pending", "image-pending");
+      // Graded by the partner, NOT yet approved by HQ. Before B2's repair this was the leak: the
+      // proxy checked status+grade but not grade_approved_at, so a shop's customer's raw scan was
+      // streamable from R2 for a certificate /api/cert/:id correctly 404s.
+      const id = await insertCert(locationId, { certNumber: "MV-IMG-0002", approved: false });
+      await admin.query("UPDATE certificates SET grading_front_cropped = 'images/x/front.jpg' WHERE id = $1", [id]);
+      expect(await slab.lookupPublicSlabImage("MV-IMG-0002")).toBeNull();
+    }, 60_000);
+
+    it("returns null for a voided certificate, and for one that does not exist", async () => {
+      const { locationId } = await seedListing(T_A, "Image Void", "image-void");
+      const id = await insertCert(locationId, { certNumber: "MV-IMG-0003", status: "void" });
+      await admin.query("UPDATE certificates SET grading_front_cropped = 'images/x/front.jpg' WHERE id = $1", [id]);
+      expect(await slab.lookupPublicSlabImage("MV-IMG-0003")).toBeNull();
+      expect(await slab.lookupPublicSlabImage("MV-NOPE-9999")).toBeNull();
+    }, 60_000);
+
+    /**
+     * PUBLIC-IMAGE-ADMIN1, the decisive case.
+     *
+     * With the public reader unavailable, the CORRECT implementation cannot serve at all — it
+     * throws, and the route turns that into a 503. A mutation that routes the lookup back through
+     * `storage` / `db.execute` on the main pool would SUCCEED here, because the main pool is
+     * perfectly healthy in this suite. So the mutation is caught by a test that asserts failure,
+     * which is the only shape that can distinguish "isolated" from "works".
+     */
+    it("PUBLIC-IMAGE-ADMIN1: with no public DB configured it FAILS CLOSED — it does not fall back", async () => {
+      const { locationId } = await seedListing(T_A, "Image Fallback", "image-fallback");
+      await seedEligibleCert(locationId, "MV-IMG-0004");
+      // Precondition: it genuinely resolves while the reader is available, so the rejection below
+      // is about the pool and not about the fixture.
+      await expect(slab.lookupPublicSlabImage("MV-IMG-0004")).resolves.not.toBeNull();
+
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      await db.__resetPartnerPublicPoolForTests();
+      delete process.env.PARTNER_PUBLIC_DATABASE_URL;
+      try {
+        await expect(
+          slab.lookupPublicSlabImage("MV-IMG-0004"),
+          "the lookup resolved with NO public database configured — it reached a privileged pool",
+        ).rejects.toThrow(db.PartnerPublicDbUnavailable);
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+      }
+      // And it recovers, so the assertion above was about configuration rather than a pool this
+      // test permanently broke.
+      await expect(slab.lookupPublicSlabImage("MV-IMG-0004")).resolves.not.toBeNull();
+    }, 90_000);
+
+    it("PUBLIC-IMAGE-ADMIN1: a login role without reader membership cannot serve images either", async () => {
+      const { locationId } = await seedListing(T_A, "Image NoMember", "image-nomember");
+      await seedEligibleCert(locationId, "MV-IMG-0005");
+
+      await admin.query("DROP ROLE IF EXISTS pn_img_nomember");
+      await admin.query("CREATE ROLE pn_img_nomember LOGIN PASSWORD 'nm' NOSUPERUSER NOBYPASSRLS");
+      const u = new URL(cluster.url);
+      u.username = "pn_img_nomember";
+      u.password = "nm";
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      try {
+        await db.__resetPartnerPublicPoolForTests();
+        process.env.PARTNER_PUBLIC_DATABASE_URL = u.toString();
+        // Fails at SET LOCAL ROLE, inside the transaction, before the SELECT ever runs. The
+        // privilege boundary is enforced by PostgreSQL, not by this codebase remembering to check.
+        await expect(slab.lookupPublicSlabImage("MV-IMG-0005")).rejects.toThrow();
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+        await admin.query("DROP ROLE IF EXISTS pn_img_nomember").catch(() => {});
+      }
+    }, 90_000);
+
+    it("the projection exposes a key and a boolean — and nothing private", async () => {
+      const cols = await admin.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_schema='public' AND table_name='public_slab_image_projection'
+          ORDER BY column_name`,
+      );
+      expect(cols.rows.map((c) => c.column_name)).toEqual(["certificate_number", "has_scan", "scan_object_key"]);
+      // The reader must reach the projection and NOTHING else. If this ever flips, the projection
+      // is decorative and the privilege boundary is back in application code.
+      const base = await admin.query<{ can: boolean }>(
+        "SELECT has_table_privilege('partner_public_reader','public.certificates','SELECT') AS can",
+      );
+      expect(base.rows[0].can, "the public reader has direct SELECT on certificates").toBe(false);
+    }, 60_000);
+  });
 });
