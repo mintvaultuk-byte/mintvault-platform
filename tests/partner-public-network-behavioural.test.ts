@@ -1498,4 +1498,225 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       await expect(gate.checkPartnerPublicNetworkReadiness({ force: true })).resolves.toMatchObject({ ready: true });
     }, 60_000);
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // MUTATION DETECTORS — every claim below was previously asserted only by a code comment
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  describe("rating lifecycle — the properties the mutation matrix targets", () => {
+    let life: typeof import("../server/partner/public-network-rating-lifecycle");
+    beforeAll(async () => {
+      life = await import("../server/partner/public-network-rating-lifecycle");
+    });
+    afterEach(() => {
+      life.__setRatingRefreshBarrierForTests(null);
+    });
+
+    /**
+     * RATING-CAS1 — the lost update, made deterministic.
+     *
+     * The window is between the generation READ and the CAS write, and it spans a real aggregate
+     * plus a snapshot transaction. Timing it with a sleep would produce a test that passes on a
+     * fast machine with or without the CAS, which is the same as no test — so the competing event
+     * is landed on a barrier at exactly the instant that matters.
+     */
+    it("RATING-CAS1: a quality event landing DURING a calculation is not erased by it", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "CAS Shop", "cas-shop");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, {});
+      await life.markRatingDirty(admin, locationId);
+
+      let barrierFired = false;
+      life.__setRatingRefreshBarrierForTests(async () => {
+        // The competing HQ approval, arriving mid-calculation.
+        barrierFired = true;
+        await life.markRatingDirty(admin, locationId);
+      });
+
+      const result = await life.refreshRatingAfterCommit(locationId, "test");
+      expect(barrierFired, "the barrier must actually have run, or this proves nothing").toBe(true);
+      // The calculation is NOT allowed to certify freshness it did not measure.
+      expect(result).toMatchObject({ refreshed: false, reason: "superseded" });
+
+      const after = await admin.query<{ dirty: boolean; dg: string; cg: string }>(
+        `SELECT rating_dirty AS dirty, rating_dirty_generation::text AS dg, rating_clean_generation::text AS cg
+           FROM partner_public_listings WHERE id = $1`, [listingId]);
+      expect(after.rows[0].dirty, "the listing must still be dirty for the reconciler").toBe(true);
+      expect(BigInt(after.rows[0].cg)).toBeLessThan(BigInt(after.rows[0].dg));
+
+      // NON-VACUITY: with no competing event the very same call DOES clean it. Without this, the
+      // assertion above would pass on a refresh that never cleans anything.
+      life.__setRatingRefreshBarrierForTests(null);
+      const clean = await life.refreshRatingAfterCommit(locationId, "test");
+      expect(clean).toMatchObject({ refreshed: true });
+      const settled = await admin.query<{ dirty: boolean }>(
+        "SELECT rating_dirty AS dirty FROM partner_public_listings WHERE id=$1", [listingId]);
+      expect(settled.rows[0].dirty).toBe(false);
+    }, 60_000);
+
+    /**
+     * RATING-HOL1 — head-of-line starvation.
+     *
+     * A permanently failing listing keeps the OLDEST rating_dirty_since forever (deliberately —
+     * that monotonicity is what stops a busy shop starving a quiet one), so without retry
+     * eligibility it is first in every bounded batch, on every tick, permanently.
+     */
+    it("RATING-HOL1: poisoned listings back off, and healthy listings behind them are processed", async () => {
+      // A REAL failure per listing, using the same technique as RATING-FAIL1: a CHECK constraint
+      // on the snapshot table that names these listings. The first poison attempt tried to corrupt
+      // location_id and was correctly refused by 0058's immutability trigger — which is the right
+      // outcome and is why the poison is applied one level out, at the write the recalculation
+      // actually performs.
+      const poisoned: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const { listingId, locationId } = await seedListing(T_A, `Poison ${i}`, `poison-${i}`);
+        for (let c = 0; c < 10; c++) await insertCert(locationId, {});
+        // Backdate so they are unambiguously FIRST in the oldest-first order — the whole defect is
+        // that the oldest dirty row is permanently at the head of every bounded batch.
+        await admin.query(
+          `UPDATE partner_public_listings
+              SET rating_dirty = true, rating_dirty_since = now() - interval '${100 + i} days',
+                  rating_dirty_generation = rating_dirty_generation + 1
+            WHERE id = $1`, [listingId]);
+        await admin.query(
+          `ALTER TABLE partner_public_rating_snapshots
+             ADD CONSTRAINT chk_hol_${i} CHECK (listing_id <> '${listingId}'::uuid)`);
+        poisoned.push(listingId);
+      }
+      const healthy = await seedListing(T_A, "Healthy Behind", "healthy-behind");
+      for (let i = 0; i < 10; i++) await insertCert(healthy.locationId, {});
+      // Dirty, but NEWER than the poisoned rows, so oldest-first puts it strictly behind them.
+      await admin.query(
+        `UPDATE partner_public_listings
+            SET rating_dirty = true, rating_dirty_since = now() - interval '1 day',
+                rating_dirty_generation = rating_dirty_generation + 1
+          WHERE id = $1`, [healthy.listingId]);
+
+      try {
+        // Batch of exactly 3: the poisoned rows fill it completely on the first tick, by design.
+        const first = await life.runRatingReconciler({ limit: 3, actor: "hol-a" });
+        expect(first.processed, "the first tick must be entirely the three oldest (poisoned) rows").toBe(3);
+        expect(first.failed, "all three must genuinely fail, not be skipped").toBe(3);
+
+        // Each must now be BACKED OFF — ineligible for the next tick. This is the property the
+        // mutation removes, and without it the next tick selects the same three forever.
+        const backoff = await admin.query<{ n: string }>(
+          `SELECT count(*)::text n FROM partner_public_listings
+            WHERE id = ANY($1::uuid[]) AND rating_next_attempt_at > now() AND rating_failure_count > 0`,
+          [poisoned]);
+        expect(Number(backoff.rows[0].n), "poisoned rows must not be immediately re-eligible").toBe(3);
+
+        // …so the SAME bounded batch size now reaches the healthy listing behind them.
+        const second = await life.runRatingReconciler({ limit: 3, actor: "hol-b" });
+        expect(second.refreshed, "a healthy listing behind poisoned ones must get processed").toBeGreaterThan(0);
+        const h = await admin.query<{ dirty: boolean }>(
+          "SELECT rating_dirty AS dirty FROM partner_public_listings WHERE id=$1", [healthy.listingId]);
+        expect(h.rows[0].dirty, "the healthy listing must be reconciled, not starved").toBe(false);
+
+        // And the poisoned rows are NOT abandoned — they are still owed, just not at the expense of
+        // everything else. Needs Attention surfaces them at the existing threshold.
+        const stillOwed = await admin.query<{ n: string }>(
+          "SELECT count(*)::text n FROM partner_public_listings WHERE id = ANY($1::uuid[]) AND rating_dirty = true",
+          [poisoned]);
+        expect(Number(stillOwed.rows[0].n), "a backed-off listing must stay owed, not be dropped").toBe(3);
+      } finally {
+        for (let i = 0; i < 3; i++) {
+          await admin.query(`ALTER TABLE partner_public_rating_snapshots DROP CONSTRAINT IF EXISTS chk_hol_${i}`);
+        }
+      }
+    }, 120_000);
+
+    /**
+     * RATING-NEW1 — a new shop must not be born asserting a freshness nothing established.
+     * The DEFAULT alone is not enough, which is why 0066 also carries a trigger: an INSERT that
+     * NAMES the column overrides a default, and that is what a regression actually looks like.
+     */
+    it("RATING-NEW1: a new listing is born dirty even when the INSERT explicitly says otherwise", async () => {
+      const loc = await admin.query<{ id: string }>(
+        "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'Newborn','ACTIVE') RETURNING id",
+        [T_A]);
+      const ins = await admin.query<{ id: string; dirty: boolean; dg: string; cg: string }>(
+        `INSERT INTO partner_public_listings
+           (tenant_id, location_id, slug, public_display_name, listing_status, rating_dirty, rating_dirty_since)
+         VALUES ($1,$2,'newborn','Newborn','DRAFT', false, NULL)
+         RETURNING id, rating_dirty AS dirty, rating_dirty_generation::text AS dg, rating_clean_generation::text AS cg`,
+        [T_A, loc.rows[0].id]);
+      const row = ins.rows[0];
+      expect(row.dirty, "an INSERT naming rating_dirty=false must still produce a dirty listing").toBe(true);
+      expect(BigInt(row.cg), "the generations must agree with the flag").toBeLessThan(BigInt(row.dg));
+      const since = await admin.query<{ s: Date | null }>(
+        "SELECT rating_dirty_since s FROM partner_public_listings WHERE id=$1", [row.id]);
+      expect(since.rows[0].s, "a dirty listing must carry the timestamp the queue orders by").not.toBeNull();
+    }, 60_000);
+
+    /**
+     * RECENCY-CLOCK1 — a 180-day rolling rating changes as time passes with NO write at all.
+     * Nothing else in the system notices that, which is why the reconciler's candidate set
+     * includes clean-but-due listings.
+     */
+    it("RECENCY-CLOCK1: a CLEAN listing whose window boundary has passed is picked up with no workflow write", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Clock Shop", "clock-shop");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, {});
+      await life.markRatingDirty(admin, locationId);
+      await life.refreshRatingAfterCommit(locationId, "test");
+
+      const cleaned = await admin.query<{ dirty: boolean; next: Date | null }>(
+        "SELECT rating_dirty AS dirty, rating_next_recalc_at AS next FROM partner_public_listings WHERE id=$1",
+        [listingId]);
+      expect(cleaned.rows[0].dirty, "precondition: the listing is clean").toBe(false);
+      expect(cleaned.rows[0].next, "a successful calculation must schedule its own next look").not.toBeNull();
+
+      // A clean listing whose boundary is still in the future must NOT be claimed — otherwise the
+      // assertion below would pass because the reconciler simply picks up everything.
+      //
+      // Scoped to THIS listing, deliberately. The cluster is shared with every earlier test in this
+      // suite, so an estate-wide `processed === 0` would be asserting something about other tests'
+      // fixtures rather than about the clock, and would break whenever one of them was edited.
+      await life.runRatingReconciler({ limit: 50, actor: "clock-idle" });
+      const untouched = await admin.query<{ claimed: Date | null; success: Date | null }>(
+        `SELECT rating_claimed_until AS claimed, rating_last_success_at AS success
+           FROM partner_public_listings WHERE id = $1`, [listingId]);
+      expect(untouched.rows[0].claimed, "a clean, not-yet-due listing must not be claimed").toBeNull();
+
+      // Advance the clock, changing NOTHING else. No approval, no rejection, no write to any card.
+      await admin.query("UPDATE partner_public_listings SET rating_next_recalc_at = now() - interval '1 minute' WHERE id=$1",
+        [listingId]);
+
+      await life.runRatingReconciler({ limit: 50, actor: "clock-due" });
+      const after = await admin.query<{ success: Date | null; next: Date | null }>(
+        `SELECT rating_last_success_at AS success, rating_next_recalc_at AS next
+           FROM partner_public_listings WHERE id = $1`, [listingId]);
+      // Recalculated: a fresh success timestamp, and a NEW boundary scheduled for next time.
+      expect(after.rows[0].success, "a clean listing past its boundary must be recalculated").not.toBeNull();
+      expect(
+        (after.rows[0].next as Date).getTime(),
+        "the refresh must schedule the next boundary, not leave it in the past",
+      ).toBeGreaterThan(Date.now());
+    }, 90_000);
+
+    /**
+     * The claim is DURABLE, which the previous FOR UPDATE SKIP LOCKED was not: that ran through a
+     * bare pool.query, so PostgreSQL's implicit transaction released every row lock before the
+     * first row was processed and two runners selected the SAME rows.
+     */
+    it("two concurrent reconcilers take DISJOINT work — no listing is processed twice", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const { listingId, locationId } = await seedListing(T_A, `Concur ${i}`, `concur-${i}`);
+        for (let c = 0; c < 10; c++) await insertCert(locationId, {});
+        await life.markRatingDirty(admin, locationId);
+        ids.push(listingId);
+      }
+      const [a, b] = await Promise.all([
+        life.runRatingReconciler({ limit: 6, actor: "worker-a" }),
+        life.runRatingReconciler({ limit: 6, actor: "worker-b" }),
+      ]);
+      // Disjoint: the two runs together must claim each listing AT MOST once.
+      expect(a.processed + b.processed, "a listing was claimed by both workers").toBeLessThanOrEqual(6);
+      // And between them they must actually do the work — a mutual exclusion that achieves
+      // exclusion by doing nothing is not the property under test.
+      const stillDirty = await admin.query<{ n: string }>(
+        "SELECT count(*)::text n FROM partner_public_listings WHERE id = ANY($1::uuid[]) AND rating_dirty = true",
+        [ids]);
+      expect(Number(stillDirty.rows[0].n), "the estate must actually be reconciled").toBe(0);
+    }, 120_000);
+  });
 });

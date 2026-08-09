@@ -152,6 +152,14 @@ export async function markRatingDirty(
  */
 const inFlight = new Set<Promise<unknown>>();
 
+/** See the call site in refreshRatingAfterCommit. Test-only; undefined in every real process. */
+let refreshBarrier: ((listingId: string) => Promise<void>) | null = null;
+
+/** Test-only: run `fn` at the exact instant between the generation capture and the CAS. */
+export function __setRatingRefreshBarrierForTests(fn: ((listingId: string) => Promise<void>) | null): void {
+  refreshBarrier = fn;
+}
+
 export function scheduleRatingRefresh(locationId: string | null | undefined, actor: string): void {
   if (!locationId) return;
   const p = refreshRatingAfterCommit(locationId, actor)
@@ -203,6 +211,18 @@ export async function refreshRatingAfterCommit(
     const listing = rows[0];
     if (!listing) return { refreshed: false, reason: "no_listing" };
     const generation = BigInt(listing.rating_dirty_generation);
+
+    // DETERMINISTIC OVERLAP POINT, for the lost-update proof and nothing else.
+    //
+    // H2 is a race: a quality event that lands BETWEEN the generation read above and the CAS
+    // below must survive. Proving that with sleeps and hope produces a flaky test that passes on
+    // a fast machine whether or not the CAS exists — which is the same as no test. This barrier
+    // lets the suite land the competing event at exactly the one instant that matters.
+    //
+    // Inert in production by construction: the hook is undefined unless a test sets it, so this
+    // is one truthiness check on a module-local. It is not reachable from any request, and it
+    // takes no input from one.
+    if (refreshBarrier) await refreshBarrier(listing.id);
 
     const result = await recalculateRating(listing.id, actor);
     const cleaned = await markRatingClean(listing.id, generation, result.evidence.oldestEvidenceInWindow);

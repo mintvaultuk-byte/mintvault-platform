@@ -538,47 +538,44 @@ export async function mirrorPartnerRejection(certId: number): Promise<PartnerMir
 
 
 /**
- * Record that this certificate's shop rating is owed a recalculation, and DO NOT WAIT for it.
+ * Schedule the shop's rating refresh. Never awaited by HQ review, and never load-bearing.
  *
- * ── WHAT WAS WRONG (BLOCKER B3) ────────────────────────────────────────────────────────────
- * This function used to `await refreshRatingAfterCommit(...)` on the HQ approve/reject path. The
- * contract said "NEVER THROWS" and it was implemented faithfully — but never throwing is not the
- * same as never blocking. `refreshRatingAfterCommit` measures evidence with an aggregate over
- * `certificates` and writes a snapshot in a transaction, and it did all of that on `adminPool`:
- * four connections, no acquire timeout, no query timeout, no lock timeout. A rating query that
- * hung returned no error to catch; the HQ approval simply never completed. A rating outage was a
- * grading outage, which is the one thing the whole design says it must not be.
+ * ── WHAT THIS IS *NOT* RESPONSIBLE FOR ANY MORE ────────────────────────────────────────────
+ * The DURABLE OBLIGATION is not here. It is `markRatingDirtyForCertInTx`, called as the last
+ * statement inside the mirror transaction in both mirrorPartnerApproval and
+ * mirrorPartnerRejection, so it commits or rolls back with the work-item transition that changed
+ * the evidence (H1).
  *
- * ── WHAT REPLACES IT, IN ORDER ─────────────────────────────────────────────────────────────
- *   1. THE DURABLE OBLIGATION, and nothing else, is what the caller waits on. One UPDATE of one
- *      row by an indexed lookup. If the process dies immediately after, the work is still owed and
- *      the reconciler will do it.
- *   2. THE EXPENSIVE HALF IS DETACHED. `scheduleRatingRefresh` returns synchronously; the refresh
- *      runs on its own bounded pool afterwards. It is not a floating promise — see its comment.
- *   3. NOTHING HERE CAN THROW. The try/catch remains, because step 1 touches a database too.
+ * This function used to ALSO mark dirty, post-commit, on its own connection. That was left in as
+ * belt-and-braces when the transactional mark landed, and it has been removed — for two reasons,
+ * the second of which matters more than the first:
  *
- * So the worst case is now: HQ approve returns 200 in its normal time, the rating stays dirty, and
- * the reconciler fixes it on a later tick.
+ *   1. It was pure duplication. Every caller now marks in-transaction, so the second mark only
+ *      ever bumped the generation again and cost the reconciler an extra pass.
+ *   2. IT MADE THE TRANSACTIONAL MARK UNTESTABLE. With a post-commit mark also running, deleting
+ *      the in-transaction one changed no observable behaviour — the listing still ended up dirty,
+ *      just non-durably. A redundant safety net that hides the failure of the real mechanism is
+ *      not a safety net; it is a reason the next regression ships green. Mutation
+ *      RATING-DIRTY-WIRE1 now goes RED because this duplicate is gone.
  *
- * ── WHY THE DIRTY MARK IS STILL AFTER THE COMMIT ───────────────────────────────────────────
- * Ideally it would be the last statement INSIDE the caller's transaction (that is what
- * `markRatingDirty(tx, locationId)` is for, and the approval path in this file will move to it
- * once the mirror transaction is reshaped to carry the location). Until then it runs immediately
- * after, on its own connection — never from inside the transaction, because a cross-pool
- * acquisition while holding locks is the indefinite hang described in
- * public-network-rating-lifecycle.ts. The reconciler is what covers the gap between the two.
+ * ── WHAT IT DOES DO ────────────────────────────────────────────────────────────────────────
+ * Resolves the certificate's immutable 0035 origin location and hands the expensive recalculation
+ * to `scheduleRatingRefresh`, which detaches it onto the isolated, bounded rating pool. Nothing
+ * here is awaited by the caller beyond one indexed SELECT, and nothing here can throw: an HQ
+ * approval must not fail — or wait — because a rating engine is unavailable (B3).
+ *
+ * If this never runs at all, the listing is still dirty and the reconciler owns the work. That is
+ * the property that makes a best-effort refresh safe to be best-effort.
  */
 async function refreshRatingForCert(certId: number, actor: string): Promise<void> {
   try {
     const locationId = await originLocationForCert(certId);
     if (!locationId) return;
-    // Awaited: tiny, indexed, and it is the durable part.
-    await markRatingDirtyForLocation(locationId);
     // NOT awaited: this is the part that can be slow, and HQ review must never wait on it.
     scheduleRatingRefresh(locationId, actor);
   } catch (err) {
     const e = err as { code?: string; message?: string };
-    console.error("[partner-rating] post-review dirty mark failed (card workflow unaffected):", e?.code, e?.message);
+    console.error("[partner-rating] post-review refresh could not be scheduled (card workflow unaffected):", e?.code, e?.message);
   }
 }
 
@@ -613,26 +610,3 @@ async function markRatingDirtyForCertInTx(
   `);
 }
 
-/**
- * Durable obligation, on its own connection — the POST-COMMIT belt-and-braces path.
- *
- * The transactional mark above is the primary mechanism now. This one still runs because it is
- * idempotent in effect and covers the paths that have no transaction of their own to join; a
- * second generation bump costs nothing but one extra reconciler pass.
- *
- * NO `AND rating_dirty = false` GUARD, and that omission is load-bearing (HIGH H2). It used to be
- * there as an optimisation, and it silently swallowed the generation bump on a listing that was
- * already dirty — which is exactly the case where an in-flight recalculation is about to mark the
- * listing clean and erase this event. `rating_dirty_since` is still monotonic via COALESCE, so the
- * reconciler's oldest-first ordering is unaffected and a busy shop still cannot push itself to the
- * back of the queue.
- */
-async function markRatingDirtyForLocation(locationId: string): Promise<void> {
-  await db.execute(sql`
-    UPDATE partner_public_listings
-       SET rating_dirty = true,
-           rating_dirty_since = COALESCE(rating_dirty_since, now()),
-           rating_dirty_generation = rating_dirty_generation + 1
-     WHERE location_id = ${locationId}::uuid
-  `);
-}
