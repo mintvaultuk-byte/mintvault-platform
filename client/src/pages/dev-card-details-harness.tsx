@@ -29,8 +29,7 @@
  * or secrets, and no real customer data.
  */
 import { useEffect, useState } from "react";
-import CertificateForm from "@/components/certificate-form";
-import GradingPanel from "@/components/grading/grading-panel";
+import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 import type { CertificateRecord } from "@shared/schema";
 
 /** Representative, fully-populated certificate — no real customer data. */
@@ -205,32 +204,20 @@ export default function DevCardDetailsHarness() {
   return (
     <div className="admin-root min-h-[100dvh] bg-[var(--admin-bg)]">
       <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]">
-        Card Details workspace — dev harness (real CertificateForm + real GradingPanel)
+        Card Details workspace — dev harness (real canonical GradingWorkstation)
       </div>
-      <CertificateForm
-        certificate={SAMPLE}
-        onSuccess={() => {}}
-        workstationSlot={
-          <GradingPanel
-            /* PR A · fail-closed initial lifecycle; CertificateForm injects the
-               real stage-derived value into this slot (see admin-dashboard). */
-            active={false}
-            approvalStageActive={false}
-            certId={1}
-            certIdStr="MV-0000000001"
-            cardName={SAMPLE.cardName || ""}
-            cardSet={SAMPLE.setName || ""}
-            cardNumber={SAMPLE.cardNumber || ""}
-            cardYear={SAMPLE.year || ""}
-            cardGame={SAMPLE.cardGame || ""}
-            existingGrade={SAMPLE.gradeOverall}
-            pendingAnalysis={null}
-            onPendingAnalysisConsumed={() => {}}
-            onManualIdentification={() => {}}
-            onGradeApproved={() => {}}
-            onCertUpdated={async () => {}}
-          />
-        }
+      <GradingWorkstation
+        mode="super-admin"
+        certId={1}
+        certIdStr="MV-0000000001"
+        cardName={SAMPLE.cardName || ""}
+        cardSet={SAMPLE.setName || ""}
+        cardNumber={SAMPLE.cardNumber || ""}
+        cardYear={SAMPLE.year || ""}
+        cardGame={SAMPLE.cardGame || ""}
+        existingGrade={SAMPLE.gradeOverall}
+        onGradeApproved={() => {}}
+        onCertUpdated={async () => {}}
       />
     </div>
   );

@@ -20,12 +20,13 @@ import NotFound from "@/pages/not-found";
 
 // Lazy-loaded pages
 const LegalPage = lazy(() => import("@/pages/legal-page"));
-// DEV-ONLY: canonical grading workstation preview harness (never in prod builds).
-const DevCanonicalWorkstationHarness = lazy(() => import("@/pages/dev-canonical-workstation-harness"));
-// The dynamic import sits INSIDE the `import.meta.env.DEV` ternary so a
+// The dynamic imports sit INSIDE the `import.meta.env.DEV` ternaries so a
 // production build constant-folds it away entirely and Vite emits no chunk for
-// it. Guarding only the <Route> (as above) leaves the route unreachable but
+// either harness. Guarding only the <Route> leaves the route unreachable but
 // still ships a dead lazy chunk. Never dereferenced outside the DEV guard below.
+const DevCanonicalWorkstationHarness = import.meta.env.DEV
+  ? lazy(() => import("@/pages/dev-canonical-workstation-harness"))
+  : (null as unknown as ReturnType<typeof lazy>);
 const DevCardDetailsHarness = import.meta.env.DEV
   ? lazy(() => import("@/pages/dev-card-details-harness"))
   : (null as unknown as ReturnType<typeof lazy>);

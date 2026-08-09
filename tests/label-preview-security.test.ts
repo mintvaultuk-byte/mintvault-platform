@@ -129,6 +129,10 @@ describe("server-authorised certificate label preview", () => {
 
   it("rejects suspended/unauthorised Partner sessions and missing preview permission", () => {
     expect(authorizePartnerLabelPreview(null, partnerCandidate())).toMatchObject({ ok: false, status: 401 });
+    expect(authorizePartnerLabelPreview(partnerPrincipal({ mfaPassed: false }), partnerCandidate())).toMatchObject({
+      ok: false,
+      status: 401,
+    });
     expect(
       authorizePartnerLabelPreview(partnerPrincipal({ permissions: new Set() }), partnerCandidate())
     ).toMatchObject({ ok: false, status: 403 });
@@ -171,7 +175,7 @@ describe("server-authorised certificate label preview", () => {
     const preview = read("client/src/components/grading-workflow/CertificatePreviewPanel.tsx");
     expect(panel).toContain("onPreviewSaved?.()");
     expect(workstation).toContain("revision={previewRevision}");
-    expect(preview).toContain("[endpoint, key, revision]");
+    expect(preview).toContain("[endpoint, key, revision, onRevisionComplete, requestTimeoutMs]");
   });
 
   it("provides Pending Review language and service tier from the authorised queue", () => {

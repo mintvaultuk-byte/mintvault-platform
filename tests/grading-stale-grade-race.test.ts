@@ -46,6 +46,7 @@ import { decideGradingPersistence } from "../shared/grading-persistence-lifecycl
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const PANEL = read("client/src/components/grading/grading-panel.tsx");
 const ROUTES = read("server/routes.ts");
 
@@ -61,10 +62,21 @@ describe("field-ownership contract", () => {
 
   it("every grading-owned field the race touched is covered", () => {
     for (const f of [
-      "gradeOverall", "gradeType", "labelType",
-      "gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface",
-      "centeringScore", "cornersScore", "edgesScore", "surfaceScore",
-      "defects", "eyeAppealModifier", "gradeApprovedAt", "graderStatus",
+      "gradeOverall",
+      "gradeType",
+      "labelType",
+      "gradeCentering",
+      "gradeCorners",
+      "gradeEdges",
+      "gradeSurface",
+      "centeringScore",
+      "cornersScore",
+      "edgesScore",
+      "surfaceScore",
+      "defects",
+      "eyeAppealModifier",
+      "gradeApprovedAt",
+      "graderStatus",
     ]) {
       expect(isGradingOwnedField(f), `${f} must be grading-owned`).toBe(true);
       expect(isMetadataOwnedField(f), `${f} must NOT be metadata-owned`).toBe(false);
@@ -163,7 +175,7 @@ describe("field-ownership contract", () => {
     for (const [alias, canonical] of Object.entries(GRADING_FIELD_ALIASES)) {
       expect(
         (GRADING_OWNED_FIELDS as readonly string[]).includes(canonical),
-        `${alias} -> ${canonical} is not a declared grading-owned field`,
+        `${alias} -> ${canonical} is not a declared grading-owned field`
       ).toBe(true);
     }
   });
@@ -184,17 +196,15 @@ describe("field-ownership contract", () => {
   it("M-4: it fails CLOSED — a changed value is rejected, an echo is not", () => {
     // A Drizzle-selected row has no property for an undeclared column.
     const stored = { gradeOverall: "9.5" };
-    expect(gradingFieldChanges({ gradeManualOverride: "true" }, stored).changing).toEqual([
-      "gradeManualOverride",
-    ]);
-    expect(gradingFieldChanges({ grade_manual_override: "true" }, stored).changing).toEqual([
-      "grade_manual_override",
-    ]);
+    expect(gradingFieldChanges({ gradeManualOverride: "true" }, stored).changing).toEqual(["gradeManualOverride"]);
+    expect(gradingFieldChanges({ grade_manual_override: "true" }, stored).changing).toEqual(["grade_manual_override"]);
     // an empty submission carries no decision and stays harmless
     expect(gradingFieldChanges({ gradeManualOverride: "" }, stored).changing).toEqual([]);
     // and when the column IS visible, a true echo is tolerated…
     expect(gradingFieldChanges({ gradeManualOverride: false }, { gradeManualOverride: false }).changing).toEqual([]);
-    expect(gradingFieldChanges({ grade_manual_override: "false" }, { gradeManualOverride: false }).changing).toEqual([]);
+    expect(gradingFieldChanges({ grade_manual_override: "false" }, { gradeManualOverride: false }).changing).toEqual(
+      []
+    );
     // …while a real flip is rejected. It is a BOOLEAN: numeric normalisation
     // must never be applied to it.
     expect(gradingFieldChanges({ gradeManualOverride: true }, { gradeManualOverride: false }).changing).toEqual([
@@ -279,7 +289,7 @@ describe("field-ownership contract", () => {
       expect(gradingFieldChanges({ gradeOverall: "9.5" }, { gradeOverall: "9.0" }).changing).toEqual(["gradeOverall"]);
     });
 
-    it("null and \"\" are equivalent (both mean absent)", () => {
+    it('null and "" are equivalent (both mean absent)', () => {
       expect(gradingFieldChanges({ gradeOverall: "" }, { gradeOverall: null }).changing).toEqual([]);
       expect(gradingFieldChanges({ gradeOverall: null }, { gradeOverall: "" }).changing).toEqual([]);
     });
@@ -294,9 +304,9 @@ describe("field-ownership contract", () => {
       // may be coerced. A different value is always a change.
       expect(gradingFieldChanges({ gradeType: "numeric" }, { gradeType: "NO" }).changing).toEqual(["gradeType"]);
       // approval provenance compares strictly
-      expect(
-        gradingFieldChanges({ gradeApprovedBy: "a@x" }, { gradeApprovedBy: "b@x" }).changing,
-      ).toEqual(["gradeApprovedBy"]);
+      expect(gradingFieldChanges({ gradeApprovedBy: "a@x" }, { gradeApprovedBy: "b@x" }).changing).toEqual([
+        "gradeApprovedBy",
+      ]);
       // booleans compare as strings, so an echo is tolerated and a flip is not
       expect(gradingFieldChanges({ darkBorder: "false" }, { darkBorder: false }).changing).toEqual([]);
       expect(gradingFieldChanges({ darkBorder: "true" }, { darkBorder: false }).changing).toEqual(["darkBorder"]);
@@ -309,9 +319,9 @@ describe("field-ownership contract", () => {
       // a JSON STRING equal to the stored object's serialisation is also an echo
       expect(gradingFieldChanges({ defects: JSON.stringify(defects) }, { defects }).changing).toEqual([]);
       // a materially different structure is a change
-      expect(
-        gradingFieldChanges({ defects: [{ zone: "corner", severity: 3 }] }, { defects }).changing,
-      ).toEqual(["defects"]);
+      expect(gradingFieldChanges({ defects: [{ zone: "corner", severity: 3 }] }, { defects }).changing).toEqual([
+        "defects",
+      ]);
     });
 
     it("only the declared numeric fields get semantic comparison", () => {
@@ -348,9 +358,20 @@ describe("field-ownership contract", () => {
 
   it("Card Details identity + catalogue fields remain metadata-owned", () => {
     for (const f of [
-      "cardGame", "setName", "cardName", "cardNumber", "year", "language",
-      "variant", "rarityCode", "finishVariant", "promoType", "subsetName",
-      "designations", "collectionCode", "notes",
+      "cardGame",
+      "setName",
+      "cardName",
+      "cardNumber",
+      "year",
+      "language",
+      "variant",
+      "rarityCode",
+      "finishVariant",
+      "promoType",
+      "subsetName",
+      "designations",
+      "collectionCode",
+      "notes",
     ]) {
       expect(isMetadataOwnedField(f), `${f} must stay metadata-owned`).toBe(true);
       expect(isGradingOwnedField(f)).toBe(false);
@@ -405,8 +426,7 @@ describe("5. Card Details payload contains no grading-owned fields", () => {
     otherText: "y",
   };
 
-  const keysFor = (isEdit: boolean) =>
-    certificateFormEntriesToSend(FORM_STATE, { isEdit }).map(([k]) => k);
+  const keysFor = (isEdit: boolean) => certificateFormEntriesToSend(FORM_STATE, { isEdit }).map(([k]) => k);
 
   it("the form builds its payload from the shared contract, not a local copy", () => {
     expect(FORM).toContain('from "@shared/certificate-field-ownership"');
@@ -459,7 +479,7 @@ describe("5. Card Details payload contains no grading-owned fields", () => {
   it("null/undefined values are dropped, exactly as FormData drops them", () => {
     const entries = certificateFormEntriesToSend(
       { cardName: "X", setName: null, cardNumber: undefined, year: "" },
-      { isEdit: true },
+      { isEdit: true }
     );
     expect(entries.map(([k]) => k).sort()).toEqual(["cardName", "year"]);
   });
@@ -524,10 +544,8 @@ describe("M-5: every key the metadata route commits is server-approved", () => {
     }
   });
 
-  it("a future putGuarded(\"gradeOverall\") fails LOUDLY", () => {
-    expect(() => assertServerMetadataCommitKeys({ ...LEGITIMATE_COMMIT, gradeOverall: "10" })).toThrow(
-      /gradeOverall/,
-    );
+  it('a future putGuarded("gradeOverall") fails LOUDLY', () => {
+    expect(() => assertServerMetadataCommitKeys({ ...LEGITIMATE_COMMIT, gradeOverall: "10" })).toThrow(/gradeOverall/);
     // and the message says where it belongs
     expect(() => assertServerMetadataCommitKeys({ gradeOverall: "10" })).toThrow(/\/grade/);
   });
@@ -577,7 +595,7 @@ describe("M-5: every key the metadata route commits is server-approved", () => {
   it("the route calls the guard BEFORE it writes anything", () => {
     const body = ROUTES.slice(
       ROUTES.indexOf("export async function handleCertificateMetadataUpdate"),
-      ROUTES.indexOf("export async function handleCertificateCreate"),
+      ROUTES.indexOf("export async function handleCertificateCreate")
     );
     const guard = body.indexOf("assertServerMetadataCommitKeys(");
     const write = body.indexOf("storage.updateCertificateAudited(");
@@ -611,7 +629,15 @@ describe("6-7. the metadata route cannot alter grading state", () => {
     const routeEnd = ROUTES.indexOf("export async function handleCertificateCreate");
     expect(routeEnd).toBeGreaterThan(routeStart);
     const body = ROUTES.slice(routeStart, routeEnd);
-    for (const f of ["gradeOverall", "gradeType", "labelType", "gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"]) {
+    for (const f of [
+      "gradeOverall",
+      "gradeType",
+      "labelType",
+      "gradeCentering",
+      "gradeCorners",
+      "gradeEdges",
+      "gradeSurface",
+    ]) {
       expect(body, `data.${f} must never be written by the metadata route`).not.toContain(`data.${f} =`);
     }
   });
@@ -623,7 +649,7 @@ describe("6-7. the metadata route cannot alter grading state", () => {
   it("a genuine no-op neither writes nor audits", () => {
     const body = ROUTES.slice(
       ROUTES.indexOf("export async function handleCertificateMetadataUpdate"),
-      ROUTES.indexOf("export async function handleCertificateCreate"),
+      ROUTES.indexOf("export async function handleCertificateCreate")
     );
     // the early return must come BEFORE the audited update, not after it
     const guard = body.indexOf("if (auditChanges.length === 0)");
@@ -721,45 +747,34 @@ describe("2/12/13. a hidden or inactive Grade stage never persists", () => {
     expect(eff).toContain("if (!decision.arm) return;");
     // the arming decision must precede the timer being set
     expect(eff.indexOf("if (!decision.arm) return;")).toBeLessThan(
-      eff.indexOf("autoSaveTimerRef.current = setTimeout"),
+      eff.indexOf("autoSaveTimerRef.current = setTimeout")
     );
     // and every non-arming decision drops pending work
     expect(eff).toContain("if (decision.cancelPending && autoSaveTimerRef.current)");
   });
 
   it("`active` is part of the effect dependencies so a stage switch re-evaluates", () => {
-    const deps = PANEL.slice(PANEL.indexOf("gradingWorkflowLocked,\n    active,"), PANEL.indexOf("gradingWorkflowLocked,\n    active,") + 60);
+    const deps = PANEL.slice(
+      PANEL.indexOf("gradingWorkflowLocked,\n    active,"),
+      PANEL.indexOf("gradingWorkflowLocked,\n    active,") + 60
+    );
     expect(deps).toContain("active");
   });
 
-  it("the form tells the workstation whether Grade is the active stage", () => {
-    expect(FORM).toContain("active: wfStage === GRADE_STAGE");
-    expect(FORM).toContain("cloneElement");
+  it("the canonical workstation alone derives Grade activity from its stage", () => {
+    expect(WORKSTATION).toContain("active={stage === GRADE_STAGE}");
+    expect(WORKSTATION).toContain("approvalStageActive={stage === REVIEW_STAGE}");
+    expect(FORM).not.toContain("<GradingPanel");
+    expect(FORM).not.toContain("cloneElement");
   });
 
-  it("the flag is injected OUTSIDE the JSX so the protected render site is untouched", () => {
-    // The Stage-3 render site must stay literally `{workstationSlot}` — several
-    // protected-surface suites assert the workstation is passed through with no
-    // wrapper, transform or scale. The `active` flag is therefore attached in a
-    // memo above the return, not at the render site.
-    expect(FORM).toContain("workstationSlot: rawWorkstationSlot");
-    expect(FORM).toContain("{workstationSlot}");
-    const memoStart = FORM.indexOf("const workstationSlot = useMemo(");
-    // Bounded to the memo's REAL end (its dependency array) rather than a magic
-    // character count: a fixed window silently loosens every time the memo grows,
-    // and would let an injection moved OUT of the memo keep passing.
-    const memoEnd = FORM.indexOf("[rawWorkstationSlot, wfStage, interactiveCardHost]", memoStart);
-    expect(memoEnd, "memo dependency array must be findable").toBeGreaterThan(memoStart);
-    const memo = FORM.slice(memoStart, memoEnd);
-    expect(memo).toContain("isValidElement(rawWorkstationSlot)");
-    expect(memo).toContain("active: wfStage === GRADE_STAGE");
-    // H-1: the approval flag is injected the SAME way, in the same memo, so the
-    // protected render site stays literally `{workstationSlot}`. On THIS surface
-    // the approving stage is GRADE — /admin shows the whole panel, Approve
-    // included, only on Grade (the role workstation is the one that approves on
-    // Review). Both directions are pinned in tests/grading-shortcut-lifecycle.
-    expect(memo).toContain("approvalStageActive: wfStage === GRADE_STAGE");
-    expect(memo).toContain(": rawWorkstationSlot"); // untouched fallback
+  it("the canonical render site wires lifecycle and exact Review invalidation directly", () => {
+    expect(FORM).not.toContain("workstationSlot");
+    expect((WORKSTATION.match(/<GradingPanel/g) ?? []).length).toBe(1);
+    expect(WORKSTATION).toContain("active={stage === GRADE_STAGE}");
+    expect(WORKSTATION).toContain("approvalStageActive={stage === REVIEW_STAGE}");
+    expect(WORKSTATION).toContain("onReviewValidityChange={handleReviewValidityChange}");
+    expect(WORKSTATION).toContain("ready.revision !== revision");
   });
 });
 
@@ -777,9 +792,13 @@ describe("3/4/11/17. absence of grading evidence is never a perfect card", () =>
     expect(PANEL).toContain("hydratedForCertId: gradingHydratedForRef.current,");
     expect(
       decideGradingPersistence({
-        active: true, certId: 7, hydratedForCertId: null,
-        workflowLocked: false, gradeApprovedAt: null, settledAfterHydration: true,
-      }).arm,
+        active: true,
+        certId: 7,
+        hydratedForCertId: null,
+        workflowLocked: false,
+        gradeApprovedAt: null,
+        settledAfterHydration: true,
+      }).arm
     ).toBe(false);
   });
 
@@ -791,16 +810,19 @@ describe("3/4/11/17. absence of grading evidence is never a perfect card", () =>
     // grading auto-save permanently dead for that mount.
     const reset = PANEL.slice(
       PANEL.indexOf("hydratedOnceRef.current = false;"),
-      PANEL.indexOf("hydratedOnceRef.current = false;") + 400,
+      PANEL.indexOf("hydratedOnceRef.current = false;") + 400
     );
     expect(reset, "the reset effect must NOT clear the hydration marker").not.toContain(
-      "gradingHydratedForRef.current = null",
+      "gradingHydratedForRef.current = null"
     );
     expect(reset).not.toContain("gradingHydratedForRef.current = false");
   });
 
   it("the marker is only set once the query resolved without error, for this certId", () => {
-    const setter = PANEL.slice(PANEL.indexOf("gradingData !== undefined"), PANEL.indexOf("gradingData !== undefined") + 220);
+    const setter = PANEL.slice(
+      PANEL.indexOf("gradingData !== undefined"),
+      PANEL.indexOf("gradingData !== undefined") + 220
+    );
     expect(setter).toContain("!gradingPending");
     expect(setter).toContain("!gradingError");
     expect(setter).toContain("gradingHydratedForRef.current = certId");
@@ -833,8 +855,11 @@ describe("18/19. MV900007 + MV900010 staging regressions are structurally imposs
 
   it("an inactive panel cannot manufacture the quad-10 that made Pristine reachable", () => {
     const base = {
-      certId: 7, hydratedForCertId: 7, workflowLocked: false,
-      gradeApprovedAt: null, settledAfterHydration: true,
+      certId: 7,
+      hydratedForCertId: 7,
+      workflowLocked: false,
+      gradeApprovedAt: null,
+      settledAfterHydration: true,
     };
     expect(decideGradingPersistence({ ...base, active: false }).arm).toBe(false);
     // …and an un-hydrated panel cannot either, active or not

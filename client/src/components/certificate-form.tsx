@@ -1,27 +1,10 @@
-import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, type ReactNode, type ReactElement } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { classifyLookupError } from "@/lib/lookup-errors";
 import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
-import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
-import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
-import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
-import { CertificatePreviewPanel, type CertificatePreviewFields } from "@/components/grading-workflow/CertificatePreviewPanel";
-import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { certificateFormEntriesToSend } from "@shared/certificate-field-ownership";
-import {
-  GRADING_STAGES,
-  deriveStageCompletion,
-  furthestReached,
-  clampStageIndex,
-  nextStageIndex,
-  prevStageIndex,
-  showsPreviewAside,
-  CARD_DETAILS_STAGE,
-  GRADE_STAGE,
-  REVIEW_STAGE,
-} from "@shared/grading-workflow";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import {
   decideRarityChange,
@@ -82,13 +65,6 @@ interface Props {
   /** External identification pushed from AI panel's "Change card" button */
   externalIdentification?: Record<string, unknown> | null;
   onExternalIdentificationConsumed?: () => void;
-  /** Owner directive (2026-07-01): the grading workstation renders INSIDE this
-      form's flow — after AI Identify, before Card Details — so the whole page
-      reads as one block: identify → grade with the card tool → fill details →
-      grade section. Passed as a slot so the workstation stays a separate
-      component (and outside the <form> element — its buttons must never
-      trigger a form submit). */
-  workstationSlot?: ReactNode;
   /** Optional grading-queue context (display + Next Card navigation only). When
       absent the form behaves exactly as before — no progress, no Next Card. */
   queue?: {
@@ -98,8 +74,6 @@ interface Props {
     onNext: () => void; // open the next queued draft (parent-owned navigation)
     onBackToQueue?: () => void;
   };
-  /** Optional read-only batch header (customer / submission / remaining). */
-  batch?: { customer?: string; submissionId?: string; remaining?: number };
   correctionMode?: boolean;
   onCorrectionMetadataReady?: (getFormData: () => FormData) => void;
 }
@@ -155,37 +129,6 @@ function slugifyCardGame(stored: string | null | undefined): string {
 
 const AUTOFILL_FIELDS = ["cardName", "rarity", "variant", "year"] as const;
 
-const PRESET_NOTES = [
-  "Minor edge softening",
-  "Slight off-centering",
-  "Light corner wear",
-  "Surface print line present",
-  "Minor whitening visible",
-  "Strong gloss retention",
-  "Clean surface presentation",
-  "No visible creasing",
-  "Minor holo scratching",
-  "Excellent overall eye appeal",
-];
-
-const NOTE_TEMPLATES: { label: string; text: string }[] = [
-  {
-    label: "Gem Mint",
-    text: "Strong gloss retention\nClean surface presentation\nNo visible creasing\nExcellent overall eye appeal",
-  },
-  {
-    label: "Mint",
-    text: "Strong gloss retention\nClean surface presentation\nNo visible creasing",
-  },
-  {
-    label: "Near Mint",
-    text: "Minor edge softening\nLight corner wear\nStrong gloss retention",
-  },
-  {
-    label: "Authentic",
-    text: "Card verified as genuine.\nNo physical alterations detected.\nAuthenticity confirmed by MintVault UK.",
-  },
-];
 type AutofillField = (typeof AUTOFILL_FIELDS)[number];
 type ProtectedField = AutofillField | "designations";
 
@@ -198,9 +141,7 @@ type ProtectedField = AutofillField | "designations";
  * previously edited certificate. Exported so the isolation contract is
  * unit-testable without a DOM (this repo has no jsdom/RTL).
  */
-export function buildFormStateFromCert(
-  certInput: (CertificateRecord & Record<string, any>) | null | undefined
-) {
+export function buildFormStateFromCert(certInput: (CertificateRecord & Record<string, any>) | null | undefined) {
   const cert = certInput as (CertificateRecord & Record<string, any>) | null | undefined;
   const initRarity = cert?.rarity || "";
   const initVariant = cert?.variant || "";
@@ -256,9 +197,7 @@ export default function CertificateForm({
   onIdentifyAndGrade,
   externalIdentification,
   onExternalIdentificationConsumed,
-  workstationSlot: rawWorkstationSlot,
   queue,
-  batch,
   correctionMode = false,
   onCorrectionMetadataReady,
 }: Props) {
@@ -274,11 +213,7 @@ export default function CertificateForm({
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
-  // Grader notes live in the Review stage, collapsed unless the cert already has notes.
-  const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
 
-  // Session HUD: count of cards completed (explicit save success) this session.
-  const [sessionCompleted, setSessionCompleted] = useState(0);
   // "✓ Saved" confirmation toast — fades ~2.5s after a successful explicit save.
   const [savedToast, setSavedToast] = useState(false);
   // Post-save panel (only when a queue is provided): Saved → Next Card / Back.
@@ -1371,7 +1306,6 @@ export default function CertificateForm({
       setBackImage(null);
       setRarityOverrideTransition(null);
       // Session/feedback UI (display only — save behaviour is unchanged above).
-      setSessionCompleted((c) => c + 1);
       setSavedToast(true);
       window.setTimeout(() => setSavedToast(false), 2500);
       // When a grading queue is provided, hold on a "Saved → Next Card" panel
@@ -1417,7 +1351,7 @@ export default function CertificateForm({
   // `form` and the next auto-save wrote them onto card B.
   //
   // A remount (`key={cert.id}`) would fix it too, but would destroy state the
-  // operator needs ACROSS cards — sessionCompleted, the saved panel/toast and
+  // operator needs ACROSS cards — the saved panel/toast and
   // the auto-save status HUD all live in this component. So we reset only the
   // per-certificate editable state and deliberately leave session/queue state
   // alone. The picker IS keyed (below), so its internal selection re-seeds.
@@ -1442,7 +1376,6 @@ export default function CertificateForm({
     setForm(buildFormStateFromCert(certificate));
     setRarityOverrideTransition(null);
     setDesignations((certificate?.designations as string[]) || []);
-    setNotesOpen(Boolean(certificate?.notes));
     setFrontImage(null);
     setBackImage(null);
 
@@ -1468,8 +1401,6 @@ export default function CertificateForm({
     setSetId("");
     setFlashFields(new Set());
     setError("");
-    setWfStage(0);
-    setWfMaxStage(0);
 
     // Per-certificate refs: the conflict snapshot and the consolidated-scheme
     // flag describe the OLD cert; re-derive them for the new one.
@@ -1893,138 +1824,6 @@ export default function CertificateForm({
 
   const canAutofill = (setId.trim() || form.setName.trim()) && form.cardNumber.trim();
 
-  // Grading workflow progress (advisory only — never gates saving/grading). The
-  // bar reflects which of the 4 stages have enough data; clicking a stage scrolls
-  // its section into view. No form value is changed here.
-  const stageCompletion = useMemo(
-    () =>
-      deriveStageCompletion({
-        cardName: form.cardName,
-        setName: form.setName,
-        rarityCode: form.rarityCode,
-        variant: form.variant,
-        finishVariant: form.finishVariant,
-        promoType: form.promoType,
-        subsetName: form.subsetName,
-        gradeOverall: form.gradeOverall,
-      }),
-    [
-      form.cardName,
-      form.setName,
-      form.rarityCode,
-      form.variant,
-      form.finishVariant,
-      form.promoType,
-      form.subsetName,
-      form.gradeOverall,
-    ]
-  );
-  // Stage gating is LOCAL UI STATE only: every stage's content stays mounted
-  // (hidden with CSS) so moving Back/Next can never clear a field, trigger a
-  // save, grade, or touch the DB. The protected workstation is geometry-safe
-  // under this: its card tool reads getBoundingClientRect LIVE per event
-  // (manual-card-tool.tsx), never caching mount-time sizes.
-  const [wfStage, setWfStage] = useState(0);
-  const [wfMaxStage, setWfMaxStage] = useState(0);
-  const [interactiveCardHost, setInteractiveCardHost] = useState<HTMLDivElement | null>(null);
-  const [gradingDraftPreview, setGradingDraftPreview] = useState<CertificatePreviewFields | null>(null);
-  const [gradingPreviewRevision, setGradingPreviewRevision] = useState(0);
-  const interactiveCardHostRef = useCallback((node: HTMLDivElement | null) => setInteractiveCardHost(node), []);
-
-  /**
-   * PR A · tell the grading workstation whether the Grade stage is ACTIVE.
-   *
-   * The slot is mounted hidden-not-unmounted so a grader's unsaved work survives
-   * a stage switch. Without this flag its debounced auto-save also ran while
-   * Card Details was on screen, and persisted all-zero UI defaults — which MVGS
-   * scores as a perfect card — as real grading data on records that had none.
-   *
-   * The flag is injected HERE rather than at the JSX render site, so the render
-   * site stays literally `{workstationSlot}`: the protected Stage-3 component is
-   * still passed through with no wrapper, no transform and no scale, exactly as
-   * the protected-surface guards in tests/grading-workstation-shell.test.ts,
-   * grading-density-pass.test.ts, grading-unified-admin-shell.test.ts,
-   * grading-workstation-ux-redesign.test.ts and grading-grade-stage-layout.test.ts
-   * require. A slot that does not accept `active` is passed through untouched by
-   * the fallback branch, so every existing call site is unaffected.
-   */
-  const workstationSlot = useMemo(
-    () =>
-      isValidElement(rawWorkstationSlot)
-        ? cloneElement(rawWorkstationSlot as ReactElement<{
-            active?: boolean;
-            approvalStageActive?: boolean;
-            previewHost?: HTMLElement | null;
-            onPreviewChange?: (fields: CertificatePreviewFields) => void;
-            onPreviewSaved?: () => void;
-          }>, {
-            active: wfStage === GRADE_STAGE,
-            previewHost: wfStage === GRADE_STAGE ? interactiveCardHost : null,
-            onPreviewChange: setGradingDraftPreview,
-            onPreviewSaved: () => setGradingPreviewRevision((value) => value + 1),
-            // ── H-1 · APPROVAL OWNERSHIP IS PER-SURFACE, AND THIS SURFACE IS
-            //         NOT THE WORKSTATION ────────────────────────────────────
-            // On the ROLE surfaces (GradingWorkstation) the panel's own
-            // section-level gate hides the footer actions on Grade and shows
-            // them on Review, so Approve lives on REVIEW there.
-            //
-            // /admin is the opposite, and deliberately so. This form does NOT
-            // use that role gate at all — it hides the WHOLE panel on any stage
-            // other than Grade (see the Stage-3 wrapper below), so every panel
-            // section, INCLUDING the footer actions / Approve & Publish, is on
-            // screen exactly when wfStage === GRADE_STAGE. /admin's Review stage
-            // carries no approve control at all — only "Back to Grade".
-            //
-            // So the approving stage here is GRADE. A previous revision copied
-            // the workstation's REVIEW condition onto this surface, which killed
-            // Ctrl+Enter where Approve actually is and opened an invisible
-            // confirmation on a stage where the panel is display:none.
-            //
-            // Do NOT generalise these two conditions into one shared rule: they
-            // are different because the two surfaces gate the panel differently.
-            approvalStageActive: wfStage === GRADE_STAGE,
-          })
-        : rawWorkstationSlot,
-    [rawWorkstationSlot, wfStage, interactiveCardHost],
-  );
-  const goToStage = (i: number) => {
-    // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
-    const next = clampStageIndex(i);
-    setWfStage(next);
-    setWfMaxStage((m) => Math.max(m, next));
-    if (typeof document !== "undefined") {
-      document
-        .querySelector('[data-testid="grading-workflow-bar"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-  /** Hidden-not-unmounted: stage content keeps all React state while inactive. */
-  const stageClass = (i: number) => (wfStage === i ? "" : "hidden");
-
-  // Auto-focus the first logical field when a stage opens, so a grader can start
-  // typing without reaching for the mouse. Card stage → Card Name. Guarded so it
-  // never steals focus mid-typing (only fires on stage change) and never on an
-  // already-focused field.
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const firstField: Record<number, string> = { 0: "input-card-name" };
-    const testId = firstField[wfStage];
-    if (!testId) return;
-    const active = document.activeElement;
-    // Don't steal focus if the grader already put the cursor in a field.
-    const alreadyTyping =
-      active &&
-      active !== document.body &&
-      (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT");
-    if (alreadyTyping) return;
-    const t = window.setTimeout(() => {
-      document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus();
-    }, 60);
-    return () => window.clearTimeout(t);
-  }, [wfStage]);
-  const workflowCurrent = wfStage;
-  const workflowMax = Math.max(wfMaxStage, furthestReached(stageCompletion));
-
   // AI-first Card stage derived state (presentation only — no save/grade/API).
   // hasCardMeta: the card already carries identification data (from AI, TCGdex
   // or a previous edit) so we can show the read-only "verify" chips above the
@@ -2056,122 +1855,8 @@ export default function CertificateForm({
   const catalogueAttributes = catalogue.attributes;
 
   return (
-    // Canonical grading workstation shell — the ONE shared outer geometry (fixed
-    // viewport height, full width, two-panel columns, internal scroll), extracted
-    // verbatim from this component's previously-inline geometry so /admin renders
-    // identically; Staff / Grader / Admin Review use the exact same shell. On
-    // Grade, the protected interactive card/defect surface is portalled into the
-    // persistent rail, avoiding a duplicate viewer while keeping its state.
-    // Bounded viewport-height wrapper for /admin (unchanged 4.5rem admin-header
-    // offset). The canonical shell fills this exactly (h-full) — no black band.
-    <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace-bound">
-    <CanonicalGradingWorkstationShell
-      previewAside={
-        showsPreviewAside(wfStage) ? (
-          <WorkstationPreviewAside
-            certificateId={certificate?.id ?? null}
-            frontFile={frontImage}
-            backFile={backImage}
-            interactiveCardHostRef={wfStage === GRADE_STAGE ? interactiveCardHostRef : undefined}
-            // Live front-certificate preview on every stage — the SAME component,
-            // canonical server renderer and left-column position.
-            //
-            // CONSOLIDATION NOTE: current main gated this on stages 0, 1 and 3 —
-            // Card, Rarity and Review under the old FOUR-stage numbering. Card and
-            // Rarity are now the single "Card Details" stage 0 and Review is 2, so
-            // `0 || 2` is the exact same coverage, not a narrowing. The founder spec
-            // additionally requires the preview to stay visible for the WHOLE of
-            // Card Details, which this satisfies.
-            //
-            // The panel is fed from CURRENT in-memory `form` state — never from the
-            // saved `certificate` prop — so it tracks typing immediately and never
-            // waits for autosave, an explicit save, a server round-trip or stage
-            // navigation. Rollback protection comes from the surrounding machinery,
-            // not from this mount: the auto-save replay posts the newest state, the
-            // cert→form resync only fills EMPTY fields, and the per-certificate
-            // isolation effect re-seeds everything on a card switch so cert A's values
-            // can never appear under cert B.
-            //
-            // KNOWN LIMIT (pre-existing, not introduced here): that resync treats ""
-            // as fillable, so a DELIBERATELY CLEARED cardName/setName/cardNumber/year
-            // can be re-filled from the refetched row if the `certificate` prop is
-            // refreshed mid-edit (e.g. AI Identify) before the clear is persisted —
-            // the same class PR #245 fixed for rarity/finish. Tracked separately; do
-            // not read the line above as a guarantee for cleared fields.
-            //
-            // Which Card-stage fields visibly move the preview is decided by the
-            // canonical renderer, NOT by this list: the front label prints card name,
-            // year + set name, the set suffix, the consolidated variant line, the
-            // grade panel and the card number. `language` and `collectionCode` are
-            // sent for cert-shape fidelity but are NOT printed on the front label
-            // today (buildCollectionLine is dead code), so they are deliberately not
-            // claimed as live-updating — and no dead label field is activated here.
-            below={
-              showsPreviewAside(wfStage) ? (
-                <CertificatePreviewPanel
-                  // Truthful caption: unsaved while editing, saved once the
-                  // auto-save lands, and explicitly NOT-authoritative after a
-                  // rejected concurrent edit.
-                  persistence={editConflict ? "conflict" : autoSaveStatus === "saved" ? "saved" : "unsaved"}
-                  // Keyed per certificate: the panel holds the rendered blob in
-                  // component state, so without a remount a "Next Card" switch left
-                  // card A's label visible under card B's image until the new render
-                  // arrived — on a surface captioned "exactly what will print".
-                  key={certificate?.id ?? "new"}
-                  revision={gradingPreviewRevision}
-                  fields={{
-                    // Editing an existing cert → the server starts from the SAVED
-                    // grade/subgrade columns so the black-label (Pristine) preview
-                    // matches print; absent (create flow) it renders from fields.
-                    certificateId: certificate?.id ?? null,
-                    // Send the real number for create-flow fidelity. Existing-cert
-                    // previews always preserve the authorised saved number server-side.
-                    certId: (certificate as { certId?: string } | null)?.certId ?? undefined,
-                    cardName: form.cardName,
-                    setName: form.setName,
-                    year: form.year,
-                    cardNumber: form.cardNumber,
-                    gradeType: form.gradeType,
-                    gradeOverall: form.gradeOverall,
-                    variant: form.variant,
-                    variantOther: form.variantOther,
-                    rarity: form.rarity,
-                    rarityOther: form.rarityOther,
-                    // Structured-variant codes → server derives the ONE consolidated
-                    // variant line (parity with print), same as the save routes.
-                    rarityCode: form.rarityCode,
-                    finishVariant: form.finishVariant,
-                    promoType: form.promoType,
-                    subsetName: form.subsetName,
-                    era: form.era,
-                    labelType: form.labelType,
-                    language: form.language,
-                    ...(gradingDraftPreview?.certificateId === certificate?.id ? gradingDraftPreview : {}),
-                  }}
-                />
-              ) : undefined
-            }
-          />
-        ) : null
-      }
-    >
+    <div className="contents" data-testid="certificate-editor-bound">
           <div className="shrink-0 space-y-1">
-            {/* Shared workstation header strip (WorkstationHeaderStrip) — 3-stage
-                workflow navigation + queue/session stats. ONE render site for
-                all three stages (outside the per-stage sections below), so
-                every stage sees byte-identical header geometry. Moved out of
-                the <form> into the fixed control-panel header so it stays put
-                while the form scrolls. Display-only: no queue-order or
-                session-calc change. */}
-            <WorkstationHeaderStrip
-              workflowCurrent={workflowCurrent}
-              workflowMax={workflowMax}
-              onStageClick={(i) => goToStage(i)}
-              batch={batch}
-              queue={queue}
-              sessionCompleted={sessionCompleted}
-            />
-
                   {/* One-time conversion warning — shown ONLY at the boundary where
                 this certificate first moves onto the consolidated scheme while
                 it still carries legacy free text the new line will not print.
@@ -2186,9 +1871,9 @@ export default function CertificateForm({
                 </p>
                 <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
                   This save converts the certificate to the structured classification. The typed wording{" "}
-                  <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
-                  will <span className="font-semibold">no longer appear on the printed label</span>, because a
-                  converted certificate prints only its explicit structured selections.
+              <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but will{" "}
+              <span className="font-semibold">no longer appear on the printed label</span>, because a converted
+              certificate prints only its explicit structured selections.
                 </p>
                 <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
                   If that wording is still required, cancel and select the matching structured values instead.
@@ -2355,30 +2040,7 @@ export default function CertificateForm({
               </details>
             )}
           </div>
-          <form
-            ref={formElRef}
-            onSubmit={handleSubmit}
-            onKeyDown={(e) => {
-              // Enter advances Card Details → Grade when the grader isn't in a
-              // textarea and the name/number validation already passes — and never
-              // lets Enter submit/save the form. Textareas keep newlines.
-              //
-              // Only Card Details (stage 0) is handled. Stage 1 is now the
-              // PROTECTED grading workstation: an Enter there must not navigate
-              // away mid-measurement, so it is deliberately left alone.
-              if (e.key !== "Enter") return;
-              const tag = (e.target as HTMLElement).tagName;
-              if (tag === "TEXTAREA") return;
-              if (wfStage === CARD_DETAILS_STAGE) {
-                e.preventDefault();
-                if (form.cardName.trim() && form.cardNumber.trim()) {
-                  captureLastCardContext();
-                  goToStage(nextStageIndex(CARD_DETAILS_STAGE));
-                }
-              }
-            }}
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
-          >
+      <form ref={formElRef} onSubmit={handleSubmit} className="space-y-2.5">
             {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
             {savedToast && (
               <div
@@ -2438,7 +2100,7 @@ export default function CertificateForm({
 
             {/* Existing auto-save status, kept visible on every stage (reuses the
             pre-existing autoSaveStatus state — no new save system). */}
-            {autoSaveEligible && wfStage !== 3 && (
+        {autoSaveEligible && (
               <div
                 className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]"
                 data-testid="text-autosave-status-mini"
@@ -2476,7 +2138,7 @@ export default function CertificateForm({
             )}
             {/* Identify controls (stages 0 + 1). The card preview now lives in the
             fixed workspace aside; this panel is just the stage controls. */}
-            <div data-workflow-stage="card-details" className={`space-y-2.5 ${stageClass(CARD_DETAILS_STAGE)}`}>
+        <div data-metadata-section="card-details" className="space-y-2.5">
               {/* ── STAGE 1 · CARD DETAILS — identity fields ── */}
               <div className="space-y-3">
                 {/* AI-first card identification — the primary Card-stage experience.
@@ -2550,9 +2212,7 @@ export default function CertificateForm({
                             ))}
                           <button
                             type="button"
-                            onClick={() =>
-                              manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-                            }
+                        onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                             data-testid="button-verify-edit"
                             title="The fields are always editable below — jump to them"
                             className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
@@ -2737,9 +2397,7 @@ export default function CertificateForm({
                     <Database size={11} />
                     Search TCG
                   </button>
-                  {!form.cardGame && (
-                    <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>
-                  )}
+              {!form.cardGame && <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>}
                   {manuallyVerified && (
                     <span className="flex items-center gap-1 text-[var(--admin-green)]">
                       <CheckCircle2 size={10} />
@@ -3037,9 +2695,7 @@ export default function CertificateForm({
                       <div className="flex items-start gap-2">
                         <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
                         <div className="flex-1">
-                          <p className="text-[var(--admin-amber)] text-sm font-medium">
-                            Overwrite manually edited fields?
-                          </p>
+                      <p className="text-[var(--admin-amber)] text-sm font-medium">Overwrite manually edited fields?</p>
                           <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
                             You edited: {overwriteConfirm.fields.join(", ")}
                           </p>
@@ -3327,8 +2983,7 @@ export default function CertificateForm({
                       // the new picker with card A's selection and, on the first
                       // interaction, emit A's values into card B. Same rule (and same
                       // reason) as grading-panel.tsx's picker.
-                      language:
-                        languageByValueOrLabel(certificate?.language ?? form.language)?.value ?? "en",
+                  language: languageByValueOrLabel(certificate?.language ?? form.language)?.value ?? "en",
                       era: ((certificate?.era ?? form.era) || null) as StructuredCardVariant["era"],
                       rarity: (certificate?.rarityCode ?? form.rarityCode) || null,
                       finish: (certificate?.finishVariant ?? form.finishVariant) || null,
@@ -3399,10 +3054,7 @@ export default function CertificateForm({
                     })}
                   </div>
                   {designations.length > 0 && (
-                    <p
-                      className="text-[var(--admin-ink-faint)] text-[10px] mt-1"
-                      data-testid="text-designations-summary"
-                    >
+                <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1" data-testid="text-designations-summary">
                       Selected: {designations.map((c) => getDesignationLabel(c, catalogueDesignations)).join(", ")}
                     </p>
                   )}
@@ -3441,75 +3093,12 @@ export default function CertificateForm({
                     </div>
                   </details>
                 )}
-
-              </div>
-
-              {/* ── Card Details nav — ONE continue, straight to Grade. The old
-              "Continue to Rarity" / "Back to Card" pair is gone: Variant now
-              lives on this same screen, so there is nothing to navigate to. The
-              card name + number precondition is preserved verbatim from the old
-              Card-stage button (Variant is NOT required — it is optional). ── */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      captureLastCardContext();
-                      goToStage(nextStageIndex(CARD_DETAILS_STAGE));
-                    }}
-                    disabled={!form.cardName.trim() || !form.cardNumber.trim()}
-                    title={
-                      !form.cardName.trim() || !form.cardNumber.trim()
-                        ? "Enter the card name and number first."
-                        : undefined
-                    }
-                    data-testid="button-continue-to-grade"
-                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Continue to Grade →
-                  </button>
-                </div>
-                {(!form.cardName.trim() || !form.cardNumber.trim()) && (
-                  <p className="text-[10px] text-[var(--admin-ink-faint)] text-right">
-                    Enter the card name and number first.
-                  </p>
-                )}
               </div>
             </div>
 
-            {/* Grading workstation — card tool front/back + defect marking. Placed
-            right after Card Details (owner directive, Option A 2026-07-02):
-            AI Identify → Card Details → grade the card → Grade section. Rendered
-            inside the <form> but every workstation button is type="button" and
-            handleSubmit no-ops pre-approval, so it can never submit the form. */}
-            {/* Stage 3 · GRADE — the protected workstation renders UNCHANGED inside
-            this wrapper. Hidden with CSS only (never unmounted, never scaled or
-            transformed): the card tool reads getBoundingClientRect live per
-            event, so visibility toggling cannot alter its coordinate system. */}
-            <div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>
-              {workstationSlot && (
-                // Plain in-flow wrapper — exists ONLY for the Enter-key guard below.
-                // It must not size or scroll: a height cap here becomes a second
-                // scrollport that clips the protected workstation. Full rationale +
-                // measurements in tests/grading-grade-stage-layout.test.ts.
-                <div
-                  onKeyDown={(e) => {
-                    // Workstation now lives inside the <form>. On an already-approved
-                    // cert the explicit "Save Changes to Published Certificate" submit
-                    // button exists, so Enter in a workstation text/number input would
-                    // otherwise submit the form (save + close the editor, discarding
-                    // the in-progress workstation edit). Swallow Enter's default for
-                    // INPUT elements only — textareas keep newlines, selects/buttons
-                    // are unaffected, and no grading input relies on Enter.
-                    if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
-                      e.preventDefault();
-                    }
-                  }}
-                >
-                  {workstationSlot}
-                </div>
-              )}
-
+        {/* Grade metadata remains part of the editor; the interactive
+                GradingPanel is owned and mounted once by GradingWorkstation. */}
+        <div data-metadata-section="creation-grade" className="space-y-2.5">
               <div className="space-y-4">
                 <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
 
@@ -3564,10 +3153,7 @@ export default function CertificateForm({
                         className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm cursor-default focus:outline-none focus:border-[var(--admin-gold)]"
                         data-testid="display-grade-type"
                       />
-                      <span
-                        id="cert-grade-type-hint"
-                        className="text-[var(--admin-ink-dim)] text-xs mt-1 block"
-                      >
+                  <span id="cert-grade-type-hint" className="text-[var(--admin-ink-dim)] text-xs mt-1 block">
                         Set in the Grade stage (Authentication)
                       </span>
                     </>
@@ -3674,28 +3260,21 @@ export default function CertificateForm({
                   </>
                 )}
               </div>
+        </div>
 
-              {/* Grade-stage nav — Back now returns to Card Details (the single
-              identity screen), per the consolidated 3-stage flow. */}
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => goToStage(prevStageIndex(GRADE_STAGE))}
-                  data-testid="button-back-to-card-details"
-                  className="px-3.5 py-1.5 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-[11px] font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+        {!correctionMode && (
+          <GradientButton
+            as="button"
+            type="submit"
+            disabled={mutation.isPending}
+            height="48px"
+            className="w-full"
+            data-testid="button-save-cert"
                 >
-                  ← Back to Card Details
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goToStage(nextStageIndex(GRADE_STAGE))}
-                  data-testid="button-review-card"
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all"
-                >
-                  Continue to Review →
-                </button>
-              </div>
-            </div>
+            <Save size={16} />
+            {mutation.isPending ? "Saving..." : isEdit ? "Save metadata" : "Create Certificate"}
+          </GradientButton>
+        )}
 
             {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
 
@@ -3708,8 +3287,8 @@ export default function CertificateForm({
                 </legend>
 
                 <p className="text-[var(--admin-ink-dim)] text-xs">
-                  Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and
-                  processed into analysis variants.
+              Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and processed
+              into analysis variants.
                 </p>
 
                 {/* 2×2 upload grid */}
@@ -3821,9 +3400,7 @@ export default function CertificateForm({
 
                 {/* Card database lookup */}
                 <div className="space-y-2 pt-2 border-t border-[var(--admin-line)]">
-                  <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
-                    Verify Card Identity
-                  </p>
+              <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">Verify Card Identity</p>
                   <div className="flex gap-2">
                     <select
                       value={cardLookupGame}
@@ -3869,11 +3446,7 @@ export default function CertificateForm({
                           className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0 flex items-start gap-3"
                         >
                           {r.imageUrl && (
-                            <img
-                              src={r.imageUrl}
-                              alt={r.name}
-                              className="w-8 h-10 object-contain rounded flex-shrink-0"
-                            />
+                        <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />
                           )}
                           <div>
                             <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
@@ -3944,9 +3517,7 @@ export default function CertificateForm({
                           key={cat}
                           className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-center"
                         >
-                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
-                            {cat}
-                          </p>
+                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">{cat}</p>
                           <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
                             {aiDraft[cat] || "—"}
                           </p>
@@ -4080,8 +3651,7 @@ export default function CertificateForm({
 
                 <p className="text-[var(--admin-ink-faint)] text-[10px] leading-relaxed">
                   Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
-                  lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface
-                  scratches.
+              lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
                 </p>
               </fieldset>
             )}
@@ -4091,262 +3661,7 @@ export default function CertificateForm({
                 {error}
               </p>
             )}
-
-            {/* Stage 3 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
-            explicit save action. Note content, templates and persistence are the
-            EXACT pre-existing implementation, only relocated. */}
-            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(REVIEW_STAGE)}`}>
-              {/* Compact approval header — frames Review as a final dashboard and keeps
-            Back to Grade as a quiet inline control instead of a chunky button row. */}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
-                  Final review &amp; approval
-                </span>
-                <button
-                  type="button"
-                  onClick={() => goToStage(prevStageIndex(REVIEW_STAGE))}
-                  data-testid="button-back-to-grade"
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
-                >
-                  ← Back to Grade
-                </button>
-              </div>
-              {/* Read-only confirmation summary — every value comes from existing form
-            state; Edit links only switch the local stage (no save/mutation). */}
-              <ReviewSummary
-                values={{
-                  certificateId: certificate?.id ?? null,
-                  frontFile: frontImage,
-                  backFile: backImage,
-                  cardGame: form.cardGame,
-                  cardName: form.cardName,
-                  setName: form.setName,
-                  cardNumber: form.cardNumber,
-                  year: form.year,
-                  language: form.language,
-                  rarityCode: form.rarityCode,
-                  finishVariant: form.finishVariant,
-                  promoType: form.promoType,
-                  subsetName: form.subsetName,
-                  era: form.era,
-                  variant: form.variant,
-                  rarity: form.rarity,
-                  variantOther: form.variantOther,
-                  rarityOther: form.rarityOther,
-                  storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
-                  designations,
-                  gradeOverall: form.gradeOverall,
-                  labelType: form.labelType,
-                  status: form.status,
-                }}
-                // Card and Variant are the SAME stage now — both Edit links land on
-                // Card Details; the Variant link additionally scrolls to its section.
-                onEditCard={() => goToStage(CARD_DETAILS_STAGE)}
-                onEditRarity={() => {
-                  goToStage(CARD_DETAILS_STAGE);
-                  if (typeof document !== "undefined") {
-                    window.setTimeout(() => {
-                      document
-                        .querySelector('[data-variant-section="variant"]')
-                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }, 60);
-                  }
-                }}
-                onEditGrade={() => goToStage(GRADE_STAGE)}
-              />
-              {/* Authentication summary — shown only for non-numeric (Authentic /
-            Authentic Altered) grade types, derived from the EXISTING form
-            gradeType. No value is invented; numeric grades render nothing here. */}
-              {isNonNum && (
-                <div
-                  className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/15 bg-[var(--admin-gold)]/[0.02] px-2.5 py-1.5"
-                  data-testid="review-authentication"
-                >
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
-                    Authentication
-                  </span>
-                  <span className="text-[12px] font-bold text-[var(--admin-ink)]">
-                    {NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ?? form.gradeType}
-                  </span>
-                </div>
-              )}
-              {/* The Review-stage live FRONT-label preview is now the single
-                  canonical CertificatePreviewPanel (mounted once, above, for the
-                  Rarity + Review stages via WorkstationPreviewAside `below`). The
-                  former second LabelPreview here was a duplicate of the same
-                  renderer and endpoint and has been consolidated away. */}
-              {/* Public Notes with preset helper — moved from Card Details, unchanged. */}
-              {notesOpen ? (
-                <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
-                  <div className="flex items-center gap-2">
-                    <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
-                    <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">
-                      Public Notes <span className="text-[var(--admin-ink-faint)] normal-case tracking-normal">· shown on the certificate</span>
-                    </label>
-                  </div>
-
-                  {/* Template buttons */}
-                  <div>
-                    <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
-                      Insert template
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {NOTE_TEMPLATES.map((t) => (
-                        <button
-                          key={t.label}
-                          type="button"
-                          onClick={() => updateField("notes", t.text)}
-                          className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
-                          data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
-                        >
-                          {t.label} Notes
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Notes textarea */}
-                  <textarea
-                    value={form.notes}
-                    onChange={(e) => updateField("notes", e.target.value)}
-                    rows={4}
-                    placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-                    className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
-                    data-testid="input-cert-notes"
-                  />
-
-                  {/* Preset chips */}
-                  <div>
-                    <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
-                      Quick add
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {PRESET_NOTES.map((preset) => {
-                        const lines = form.notes
-                          .split("\n")
-                          .map((l) => l.trim())
-                          .filter(Boolean);
-                        const alreadyAdded = lines.includes(preset);
-                        return (
-                          <button
-                            key={preset}
-                            type="button"
-                            disabled={alreadyAdded}
-                            onClick={() => {
-                              const current = form.notes.trimEnd();
-                              updateField("notes", current ? `${current}\n${preset}` : preset);
-                            }}
-                            className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
-                              alreadyAdded
-                                ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
-                                : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
-                            }`}
-                            data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
-                          >
-                            {!alreadyAdded && <Plus size={10} className="shrink-0" />}
-                            {preset}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setNotesOpen(true)}
-                  data-testid="button-add-grader-notes"
-                  className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
-                >
-                  + Add Public Notes
-                </button>
-              )}
-
-              {/* Owner directive (2026-07-01): an existing, not-yet-approved
-            certificate auto-saves silently (see autoSaveNow above) — no
-            manual button, matching the grading workstation below it. Create
-            flow (no certificate yet) and an already-approved/published
-            certificate (server has no approval lock of its own — see
-            autoSaveEligible) both keep an explicit save action. */}
-              {correctionMode ? (
-                <div
-                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
-                  data-testid="text-correction-save-owned-by-parent"
-                >
-                  Correction Mode uses the Save Correction button.
-                </div>
-              ) : autoSaveEligible ? (
-                /* Item 7 — a large explicit Save button on Review. Auto-save is
-                   preserved (owner directive 2026-07-01): this button FORCES an
-                   immediate save via the same autoSaveNow() path rather than the
-                   navigating mutation, so it never leaves the workstation. The
-                   status line below still reflects auto-save + this save. */
-                <div className="space-y-1.5">
-                  <GradientButton
-                    as="button"
-                    type="button"
-                    onClick={() => {
-                      // Cancel any pending debounced auto-save so this explicit
-                      // save doesn't get followed by a redundant second PUT.
-                      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-                      autoSaveNow();
-                    }}
-                    disabled={autoSaveStatus === "saving"}
-                    height="48px"
-                    className="w-full"
-                    data-testid="button-save-now"
-                  >
-                    <Save size={16} />
-                    {autoSaveStatus === "saving" ? "Saving…" : "Save Now"}
-                  </GradientButton>
-                  <div
-                    className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-5"
-                    data-testid="text-autosave-status"
-                  >
-                    {autoSaveStatus === "saving" && (
-                      <span className="flex items-center gap-1.5">
-                        <Loader2 size={10} className="animate-spin" /> Saving…
-                      </span>
-                    )}
-                    {autoSaveStatus === "saved" && (
-                      <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
-                        <CheckCircle2 size={10} /> Saved · auto-saves as you edit
-                      </span>
-                    )}
-                    {legacyLossWarning ? (
-                      <span className="text-amber-300" data-testid="text-save-paused">
-                        Save paused — confirm the conversion
-                      </span>
-                    ) : (
-                      autoSaveStatus === "idle" && (
-                        <span className="text-[var(--admin-ink-faint)]">Auto-saves as you edit</span>
-                      )
-                    )}
-                    {autoSaveStatus === "error" && (
-                      <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <GradientButton
-                  as="button"
-                  type="submit"
-                  disabled={mutation.isPending}
-                  height="48px"
-                  className="w-full"
-                  data-testid="button-save-cert"
-                >
-                  <Save size={16} />
-                  {mutation.isPending
-                    ? "Saving..."
-                    : isEdit
-                      ? "Save changes to this certificate only"
-                      : "Save Certificate"}
-                </GradientButton>
-              )}
-            </div>
           </form>
-        </CanonicalGradingWorkstationShell>
     </div>
   );
 }
@@ -4631,7 +3946,8 @@ export function PokemonSetPicker({
   const [editSaving, setEditSaving] = useState(false);
   const [canEditCatalogue, setCanEditCatalogue] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const setLibraryBase = editEndpoint || (createEndpoint.startsWith("/api/staff") ? "/api/staff/sets" : "/api/admin/sets");
+  const setLibraryBase =
+    editEndpoint || (createEndpoint.startsWith("/api/staff") ? "/api/staff/sets" : "/api/admin/sets");
 
   // Recently-used sets (last 8, per-device) so a grader working through a box of
   // the same set fills it in one click. Display-only convenience — never changes
@@ -4681,7 +3997,9 @@ export function PokemonSetPicker({
     fetch(sessionEndpoint, { credentials: "include" })
       .then(async (response) => {
         const session = await response.json();
-        return createEndpoint.startsWith("/api/staff") ? response.ok && session.caps?.editSets === true : response.ok && session.authenticated === true;
+        return createEndpoint.startsWith("/api/staff")
+          ? response.ok && session.caps?.editSets === true
+          : response.ok && session.authenticated === true;
       })
       .then(setCanEditCatalogue)
       .catch(() => setCanEditCatalogue(false));
@@ -4739,7 +4057,10 @@ export function PokemonSetPicker({
       });
       const data = await response.json();
       const row = Array.isArray(data?.sets)
-        ? data.sets.find((candidate: { source?: string; setId?: string }) => candidate.source === set.source && candidate.setId === set.id)
+        ? data.sets.find(
+            (candidate: { source?: string; setId?: string }) =>
+              candidate.source === set.source && candidate.setId === set.id
+          )
         : undefined;
       const authoritative: PokemonSet | undefined = row
         ? {
@@ -4902,7 +4223,9 @@ export function PokemonSetPicker({
       />
       {canEditSelectedSet && (
         <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
-          <span className="text-[var(--admin-ink-faint)]">Use this set for the certificate, or edit the catalogue record:</span>
+          <span className="text-[var(--admin-ink-faint)]">
+            Use this set for the certificate, or edit the catalogue record:
+          </span>
           <button
             type="button"
             onClick={() => openEditSet(selectedSet)}
@@ -5106,11 +4429,13 @@ export function PokemonSetPicker({
             <div>
               <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Edit catalogue set</p>
               <p className="mt-1 rounded border border-[color-mix(in_srgb,var(--admin-amber)_45%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--admin-amber)]">
-                This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed automatically.
+                This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed
+                automatically.
               </p>
               {(editingSet.linkedCertificates ?? 0) > 0 && (
                 <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
-                  {editingSet.linkedCertificates} certificate{editingSet.linkedCertificates === 1 ? "" : "s"} currently reference this set name.
+                  {editingSet.linkedCertificates} certificate{editingSet.linkedCertificates === 1 ? "" : "s"} currently
+                  reference this set name.
                 </p>
               )}
             </div>

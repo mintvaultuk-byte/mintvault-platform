@@ -13,6 +13,7 @@
  */
 import type { ReactNode, Ref } from "react";
 import { CardPreviewPanel } from "./CardPreviewPanel";
+import type { CardInspectionState } from "./card-inspection-state";
 
 /** Single source of truth for the preview column's width + breakpoint. */
 export const WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[40%] md:shrink-0";
@@ -24,6 +25,8 @@ export function WorkstationPreviewAside({
   apiBase = "/api/admin",
   below,
   interactiveCardHostRef,
+  inspectionState,
+  onInspectionStateChange,
 }: {
   certificateId: number | null;
   frontFile?: File | null;
@@ -38,6 +41,8 @@ export function WorkstationPreviewAside({
       This keeps one card surface in the canonical left rail rather than adding
       a read-only duplicate beside GradingPanel's editor. */
   interactiveCardHostRef?: Ref<HTMLDivElement>;
+  inspectionState?: CardInspectionState;
+  onInspectionStateChange?: (state: CardInspectionState) => void;
 }) {
   // ONE card-image render site (invariant enforced by the workstation-shell
   // tests). When a `below` panel is present the aside stacks; otherwise the
@@ -49,7 +54,15 @@ export function WorkstationPreviewAside({
       data-testid="grading-interactive-card-host"
     />
   ) : (
-    <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
+    <CardPreviewPanel
+      fill
+      certificateId={certificateId}
+      frontFile={frontFile}
+      backFile={backFile}
+      apiBase={apiBase}
+      inspectionState={inspectionState}
+      onInspectionStateChange={onInspectionStateChange}
+    />
   );
   if (!below) {
     return (

@@ -82,7 +82,7 @@ describe("stage model (pure)", () => {
 
 describe("bar component + form wiring (source assertions)", () => {
   const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
-  const FORM = read("client/src/components/certificate-form.tsx");
+  const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 
   it("bar uses the pure stage-status model + a gold tick for complete", () => {
     expect(BAR).toContain("stageStatuses");
@@ -91,31 +91,32 @@ describe("bar component + form wiring (source assertions)", () => {
     expect(BAR).toContain('aria-current={isCurrent ? "step" : undefined}'); // accessible current step
   });
 
-  it("the form renders the persistent bar + the three scroll anchors", () => {
-    // unified-shell pass: GradingWorkflowBar is rendered via the shared
-    // WorkstationHeaderStrip component (ONE render site for all three stages).
-    expect(FORM).toContain("<WorkstationHeaderStrip");
+  it("the canonical workstation renders one persistent bar and one stage gate", () => {
+    expect(WORKSTATION).toContain("<WorkstationHeaderStrip");
     const stripSrc = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
     expect(stripSrc).toContain("<GradingWorkflowBar");
-    for (const key of ["card-details", "grade", "review"]) {
-      expect(FORM).toContain(`data-workflow-stage="${key}"`);
-    }
-    // The retired Rarity stage must not leave a dangling anchor behind.
-    expect(FORM).not.toContain('data-workflow-stage="rarity"');
-    expect(FORM).not.toContain('data-workflow-stage="identify"');
+    expect(WORKSTATION.match(/<WorkstationHeaderStrip/g)).toHaveLength(1);
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(WORKSTATION).toContain("grading-stage-gate");
+    expect(WORKSTATION).not.toContain('data-workflow-stage="rarity"');
+    expect(WORKSTATION).not.toContain('data-workflow-stage="identify"');
   });
 
-  it("the bar is advisory only — it never mutates/saves/sets form state", () => {
-    // onStageClick only scrolls; the bar has no save/grade/mutation behaviour.
-    expect(FORM).toContain("scrollIntoView");
+  it("the bar is presentation-only; Review navigation is protected by the authoritative barrier", () => {
     expect(BAR).not.toMatch(/\bmutate\b|handleSubmit|setForm|onSubmit=/);
-    expect(FORM).toContain("advisory only — never gates saving/grading");
+    expect(WORKSTATION).toContain("index === REVIEW_STAGE");
+    expect(WORKSTATION).toContain("void establishReview()");
+    expect(WORKSTATION).toContain("runReviewTransitionBarrier");
+    expect(WORKSTATION).toMatch(/persist:\s*reviewTransitionHandler/);
+    expect(WORKSTATION).toMatch(/preview:\s*requestAuthoritativePreview/);
   });
 
   it("the new code imports NO protected grading/centering/cert-number/label module", () => {
     for (const src of [BAR, read("shared/grading-workflow.ts")]) {
       const imports = (src.match(/from\s+"[^"]+"/g) ?? []).join("\n");
-      expect(imports).not.toMatch(/components\/grading\/|mvgs|scoring|centering|pristine|grader|labels|certificate-document|cert-id/i);
+      expect(imports).not.toMatch(
+        /components\/grading\/|mvgs|scoring|centering|pristine|grader|labels|certificate-document|cert-id/i
+      );
     }
   });
 });

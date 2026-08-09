@@ -30,6 +30,10 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import type { CertificatePreviewFields } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { RoleReviewSummary } from "@/components/grading-workflow/RoleReviewSummary";
 import {
+  normaliseCardInspectionState,
+  type CardInspectionState,
+} from "@/components/grading-workflow/card-inspection-state";
+import {
   decideRarityChange,
   isLowerInformationRarityChange,
   languageByValueOrLabel,
@@ -42,6 +46,7 @@ import {
   decideExplicitGradingSave,
   decideGradingShortcut,
 } from "@shared/grading-persistence-lifecycle";
+import { reviewBarrierAllowsAction, type PersistedReviewRevision } from "@shared/grading-review-barrier";
 import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
@@ -176,6 +181,14 @@ interface Props {
   previewHost?: HTMLElement | null;
   onPreviewChange?: (fields: CertificatePreviewFields) => void;
   onPreviewSaved?: () => void;
+  onReviewTransitionReady?: (
+    handler: (() => Promise<PersistedReviewRevision<CertificatePreviewFields>>) | null
+  ) => void;
+  reviewBarrierReady?: PersistedReviewRevision<CertificatePreviewFields> | null;
+  /** Reports whether the live payload still matches the saved+previewed Review revision. */
+  onReviewValidityChange?: (valid: boolean, revision: number) => void;
+  inspectionState?: CardInspectionState;
+  onInspectionStateChange?: (state: CardInspectionState) => void;
   serviceTier?: string | null;
   workstationCapabilities?: {
     catalogueEndpoint?: string;
@@ -333,6 +346,11 @@ export default function GradingPanel({
   previewHost = null,
   onPreviewChange,
   onPreviewSaved,
+  onReviewTransitionReady,
+  reviewBarrierReady = null,
+  onReviewValidityChange,
+  inspectionState,
+  onInspectionStateChange,
   serviceTier,
   workstationCapabilities = {
     customSetMutations: true,
@@ -364,6 +382,13 @@ export default function GradingPanel({
 }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // Every workstation role renders the same Card Details and Review component
+  // tree. Staff/graders own identity edits through their scoped grade route;
+  // Super Admin and Pending Review see the same fields read-only and use their
+  // bounded, separately-authorised metadata controls for mutations.
+  const canonicalIdentityEditable = graderMode;
+  const canonicalIdentityVisible = canonicalIdentityEditable || adminReview || apiBase === "/api/admin";
+  const canonicalClassificationEditable = graderMode || adminReview;
 
   // Image URLs
   const { data: imageData } = useQuery<{ urls: Record<string, string | null>; quality: Record<string, any> }>({
@@ -450,6 +475,9 @@ export default function GradingPanel({
   // centering measurement path.
   // 8-dot manual card tool (crop + deskew + centering in one pass)
   const [manualCardToolSide, setManualCardToolSide] = useState<"front" | "back" | null>(null);
+  useEffect(() => {
+    if (!active) setManualCardToolSide(null);
+  }, [active]);
   // MVGS v2 — measurement tool overlay (fullscreen). Opens from the surface
   // sidebar's "Open Measurement Tool" button.
   // measurementToolOpen — REMOVED. Line drawing happens inside the existing
@@ -469,7 +497,16 @@ export default function GradingPanel({
   const [backLR, setBackLR] = useState("");
   const [backTB, setBackTB] = useState("");
   const [corners, setCorners] = useState<CornerValues>(DEFAULT_CORNERS);
-  const [viewerSide, setViewerSide] = useState("front");
+  const [viewerSide, setViewerSide] = useState<"front" | "back">(() => inspectionState?.side ?? "front");
+  const selectInspectionSide = (side: "front" | "back") => {
+    setViewerSide(side);
+    if (inspectionState && onInspectionStateChange) {
+      onInspectionStateChange(normaliseCardInspectionState({ ...inspectionState, side }));
+    }
+  };
+  useEffect(() => {
+    if (inspectionState) setViewerSide(inspectionState.side);
+  }, [inspectionState?.side]);
   const [viewerZoom, setViewerZoom] = useState(1);
   const [viewerMode, setViewerMode] = useState({ fullscreen: false, markMode: false });
   const [edges, setEdges] = useState<EdgeValues>(DEFAULT_EDGES);
@@ -567,7 +604,8 @@ export default function GradingPanel({
   // Editable card identity (grader mode only). Seeded once from props on mount;
   // the grader flow remounts the panel per card, so seed-once is correct. Edits
   // ride the existing debounced auto-save (buildPayload → /grade →
-  // applyCertGradeDraft). Admins edit identity via CertificateForm instead.
+  // applyCertGradeDraft). Admin metadata edits use the bounded admin metadata
+  // surface, while this shared stage renders the same identity component.
   const [idName, setIdName] = useState(cardName || "");
   const [idSet, setIdSet] = useState(cardSet || "");
   const [idNumber, setIdNumber] = useState(cardNumber || "");
@@ -600,7 +638,7 @@ export default function GradingPanel({
         typeof window !== "undefined" &&
         window.confirm(
           "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
-      );
+        );
       if (!confirmed) nextRarity = rarityCode;
       else setRarityOverrideTransition({ from: rarityCode, to: nextRarity });
     }
@@ -621,7 +659,7 @@ export default function GradingPanel({
   // exist otherwise. This is what makes a freshly-scanned card show its real name
   // (and stops the empty field from persisting "" back over it on auto-save).
   useEffect(() => {
-    if (!graderMode || !gradingData) return;
+    if (!canonicalIdentityVisible || !gradingData) return;
     const gd: any = gradingData;
     if (gd.cardName && !idName) setIdName(String(gd.cardName).toUpperCase());
     if (gd.setName && !idSet) setIdSet(String(gd.setName));
@@ -631,12 +669,12 @@ export default function GradingPanel({
     if (gd.variant && !idVariant) setIdVariant(String(gd.variant));
     // Intentionally fills only empty fields once on data arrival — id* values are
     // deliberately not deps (they'd re-fire and could re-fill after a grader edit).
-  }, [gradingData, graderMode]);
+  }, [gradingData, canonicalIdentityVisible]);
   // Structured rarity hydration — runs for BOTH graderMode and adminReview (the
   // Rarity stage renders on all role routes), so /admin/staff's picker loads the
   // stored rarity/finish/promo too. Fills only-when-empty, same pattern as above.
   useEffect(() => {
-    if (!(graderMode || adminReview) || !gradingData) return;
+    if (!canonicalIdentityVisible || !gradingData) return;
     const gd: any = gradingData;
     if (gd.rarityCode && !rarityCode) setRarityCode(String(gd.rarityCode));
     if (gd.finishVariant && !finishVariant) setFinishVariant(String(gd.finishVariant));
@@ -646,7 +684,7 @@ export default function GradingPanel({
     // depends on this effect winning any ordering race against the per-card reset.
     // Fills only-when-empty on data arrival; the rarity* values are deliberately
     // not deps (same pattern as the identity hydration effect above).
-  }, [gradingData, graderMode, adminReview]);
+  }, [gradingData, canonicalIdentityVisible]);
   // Card autofill — mirrors CertificateForm.handleAutofill: set(+number) → card
   // master → fill name/year/variant. Same /api/cards/autofill endpoint + pattern.
   async function graderAutofill() {
@@ -1134,16 +1172,51 @@ export default function GradingPanel({
   // further down (also hoisted).
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveSeqRef = useRef(0);
+  const autoSavePromiseRef = useRef<Promise<boolean> | null>(null);
   /** The certId GET /grading has actually returned for. While this does not
    *  equal the current certId the panel's state is UI defaults, not grading
    *  evidence, and nothing may be persisted (PR A). */
   const gradingHydratedForRef = useRef<number | null>(null);
   /** M-1: one explicit draft save in flight at a time (repeated Ctrl+S). */
   const saveDraftInFlightRef = useRef(false);
+  const saveDraftPromiseRef = useRef<Promise<void> | null>(null);
+  const reviewRevisionRef = useRef(0);
+  const reviewAbortRef = useRef<AbortController | null>(null);
+  const gradingPanelMountedRef = useRef(true);
+  const latestReviewDraftRef = useRef<{
+    certId: number;
+    payloadFingerprint: string;
+    preview: CertificatePreviewFields;
+  } | null>(null);
+  const reviewTransitionHandlerRef = useRef<() => Promise<PersistedReviewRevision<CertificatePreviewFields>>>(
+    async () => {
+      throw new Error("Grading payload is not ready");
+    }
+  );
   /** M-2: one approval in flight at a time (repeated Ctrl+Enter / fast clicks). */
   const approveInFlightRef = useRef(false);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
+
+  useEffect(() => {
+    gradingPanelMountedRef.current = true;
+    return () => {
+      gradingPanelMountedRef.current = false;
+      reviewAbortRef.current?.abort();
+      reviewAbortRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!onReviewTransitionReady) return;
+    if (gradingWorkflowLocked || gradingHydratedForRef.current !== certId) {
+      onReviewTransitionReady(null);
+      return;
+    }
+    const invoke = () => reviewTransitionHandlerRef.current();
+    onReviewTransitionReady(invoke);
+    return () => onReviewTransitionReady(null);
+  }, [certId, gradingWorkflowLocked, onReviewTransitionReady]);
 
   useEffect(() => {
     setGradeApprovedAt(null);
@@ -1311,34 +1384,42 @@ export default function GradingPanel({
   }
 
   async function autoSaveNow(): Promise<boolean> {
-    const seq = ++autoSaveSeqRef.current;
-    setAutoSaveStatus("saving");
-    try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      if (seq !== autoSaveSeqRef.current) return true;
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
+    const operation = (async (): Promise<boolean> => {
+      const seq = ++autoSaveSeqRef.current;
+      setAutoSaveStatus("saving");
+      try {
+        const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload()),
+        });
+        if (seq !== autoSaveSeqRef.current) return true;
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        setRarityOverrideTransition(null);
+        setAutoSaveStatus("saved");
+        onPreviewSaved?.();
+        if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
+        autoSavedClearTimerRef.current = setTimeout(() => {
+          if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
+        }, 2500);
+        return true;
+      } catch (e: any) {
+        if (seq !== autoSaveSeqRef.current) return false;
+        setRarityOverrideTransition(null);
+        setAutoSaveStatus("error");
+        toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+        return false;
       }
-      setRarityOverrideTransition(null);
-      setAutoSaveStatus("saved");
-      onPreviewSaved?.();
-      if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
-      autoSavedClearTimerRef.current = setTimeout(() => {
-        if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
-      }, 2500);
-      return true;
-    } catch (e: any) {
-      if (seq !== autoSaveSeqRef.current) return false;
-      setRarityOverrideTransition(null);
-      setAutoSaveStatus("error");
-      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
-      return false;
+    })();
+    autoSavePromiseRef.current = operation;
+    try {
+      return await operation;
+    } finally {
+      if (autoSavePromiseRef.current === operation) autoSavePromiseRef.current = null;
     }
   }
 
@@ -1520,9 +1601,7 @@ export default function GradingPanel({
           id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
           type: ad.type?.replace(/_/g, " ") || "Unknown",
           severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
-            | "minor"
-            | "moderate"
-            | "significant",
+            "minor" | "moderate" | "significant",
           description: ad.description || "",
           location: ad.location || (ad as any).detected_in || "front",
           image_side: imageSide,
@@ -1886,8 +1965,8 @@ export default function GradingPanel({
 
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
-  useEffect(() => {
-    onPreviewChange?.({
+  const currentPreviewFields = useMemo<CertificatePreviewFields>(
+    () => ({
       certificateId: certId,
       certId: certIdStr,
       cardName: idName,
@@ -1901,16 +1980,32 @@ export default function GradingPanel({
       promoType,
       gradeType: authStatus === "authentic_altered" ? "AA" : authStatus === "not_original" ? "NO" : "numeric",
       gradeOverall: finalGradeOverall,
-      gradeCentering: centering || null,
-      gradeCorners: cornersGrade || null,
-      gradeEdges: edgesGrade || null,
-      gradeSurface: surfaceGrade || null,
-    });
-  }, [
-    onPreviewChange, certId, certIdStr, idName, idSet, idYear, idNumber, idLanguage, idVariant,
-    rarityCode, finishVariant, promoType, authStatus, finalGradeOverall, centering, cornersGrade,
-    edgesGrade, surfaceGrade,
-  ]);
+      gradeCentering: sub.centering || null,
+      gradeCorners: sub.corners || null,
+      gradeEdges: sub.edges || null,
+      gradeSurface: sub.surface || null,
+    }),
+    [
+      certId,
+      certIdStr,
+      idName,
+      idSet,
+      idYear,
+      idNumber,
+      idLanguage,
+      idVariant,
+      rarityCode,
+      finishVariant,
+      promoType,
+      authStatus,
+      finalGradeOverall,
+      sub.centering,
+      sub.corners,
+      sub.edges,
+      sub.surface,
+    ]
+  );
+  useEffect(() => onPreviewChange?.(currentPreviewFields), [onPreviewChange, currentPreviewFields]);
   const correctedFields = useMemo(
     () => new Set((correctionFeedback?.changes || []).map((change) => change.field)),
     [correctionFeedback]
@@ -2068,6 +2163,93 @@ export default function GradingPanel({
     return out;
   }
 
+  const currentPayloadFingerprint = JSON.stringify(buildPayload());
+  // This ref is updated on EVERY committed render. An async save must compare
+  // its captured fingerprint against this value after the response arrives;
+  // calling buildPayload from the old async closure only re-read the old render
+  // and could incorrectly accept an eye-appeal/edit made while PUT was in flight.
+  latestReviewDraftRef.current = {
+    certId,
+    payloadFingerprint: currentPayloadFingerprint,
+    preview: currentPreviewFields,
+  };
+  const reviewActionReady = reviewBarrierAllowsAction({
+    certId,
+    currentPayloadFingerprint,
+    ready: reviewBarrierReady,
+  });
+  useEffect(() => {
+    if (reviewBarrierReady) onReviewValidityChange?.(reviewActionReady, reviewBarrierReady.revision);
+  }, [onReviewValidityChange, reviewActionReady, reviewBarrierReady]);
+
+  reviewTransitionHandlerRef.current = async () => {
+    const gate = decideExplicitGradingSave({
+      // Initial transition runs from Grade; a fingerprint-invalidated Review
+      // retries from the still-visible Review stage. Both are explicit user
+      // actions and must be able to persist, unlike background auto-save (which
+      // remains strictly gated by `active` alone).
+      active: active || approvalStageActive,
+      certId,
+      hydratedForCertId: gradingHydratedForRef.current,
+      workflowLocked: gradingWorkflowLocked,
+      gradeApprovedAt,
+      settledAfterHydration: true,
+    });
+    if (!gate.allow) throw new Error(`Grading cannot enter Review: ${gate.reason}`);
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    // Serialize behind every older write. Otherwise a slow auto-save carrying
+    // revision N-1 could arrive after this barrier's revision N and overwrite it.
+    await autoSavePromiseRef.current;
+    await saveDraftPromiseRef.current;
+
+    const draft = latestReviewDraftRef.current;
+    if (!draft || draft.certId !== certId) throw new Error("Grading payload changed before Review could save.");
+    const transitionCertId = draft.certId;
+    const payloadFingerprint = draft.payloadFingerprint;
+    const revision = ++reviewRevisionRef.current;
+    reviewAbortRef.current?.abort();
+    const controller = new AbortController();
+    reviewAbortRef.current = controller;
+    setSaving(true);
+    setAutoSaveStatus("saving");
+    try {
+      const res = await fetch(`${apiBase}/certificates/${transitionCertId}/grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: payloadFingerprint,
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Review save failed");
+      const latest = latestReviewDraftRef.current;
+      if (
+        !gradingPanelMountedRef.current ||
+        controller.signal.aborted ||
+        latest?.certId !== transitionCertId ||
+        latest.payloadFingerprint !== payloadFingerprint
+      ) {
+        throw new Error("Grading changed while Review was preparing. Try again.");
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${transitionCertId}/grading`] });
+      setAutoSaveStatus("saved");
+      return { revision, certId: transitionCertId, payloadFingerprint, preview: draft.preview };
+    } catch (error) {
+      if (gradingPanelMountedRef.current && reviewAbortRef.current === controller) setAutoSaveStatus("error");
+      throw error;
+    } finally {
+      if (reviewAbortRef.current === controller) {
+        reviewAbortRef.current = null;
+        if (gradingPanelMountedRef.current) setSaving(false);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!onCorrectionGradingReady) return;
     onCorrectionGradingReady(() => {
@@ -2160,24 +2342,32 @@ export default function GradingPanel({
     const savingCertId = certId;
     saveDraftInFlightRef.current = true;
     setSaving(true);
+    const operation = (async () => {
+      try {
+        const res = await fetch(`${apiBase}/certificates/${savingCertId}/grade`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload()),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Save failed");
+        toast({ title: "Draft saved" });
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+        queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${savingCertId}/grading`] });
+        onPreviewSaved?.();
+      } catch (e: any) {
+        toast({ title: "Save failed", description: e.message, variant: "destructive" });
+      } finally {
+        saveDraftInFlightRef.current = false;
+        setSaving(false);
+      }
+    })();
+    saveDraftPromiseRef.current = operation;
     try {
-      const res = await fetch(`${apiBase}/certificates/${savingCertId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Save failed");
-      toast({ title: "Draft saved" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${savingCertId}/grading`] });
-      onPreviewSaved?.();
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+      await operation;
     } finally {
-      saveDraftInFlightRef.current = false;
-      setSaving(false);
+      if (saveDraftPromiseRef.current === operation) saveDraftPromiseRef.current = null;
     }
   }
 
@@ -2314,6 +2504,14 @@ export default function GradingPanel({
       });
       return;
     }
+    if (!reviewActionReady) {
+      toast({
+        title: "Review is not current",
+        description: "Return to Grade, then enter Review again so the saved grade and certificate preview match.",
+        variant: "destructive",
+      });
+      return;
+    }
     // HARD GATE: a backgrounded crop that's still uploading or has failed must
     // never finalise a cert (defects would point at an unpersisted/old image).
     const block = cropGateBlockToast();
@@ -2347,16 +2545,8 @@ export default function GradingPanel({
       // ADMIN MODE: publish the grade live (PUT /approve).
       let res: Response;
       if (adminReview) {
-        const saveRes = await fetch(`${apiBase}/certificates/${certId}/grade`, {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
-        });
-        if (!saveRes.ok) {
-          const sd = await saveRes.json().catch(() => ({}));
-          throw new Error(sd.error || "Save failed");
-        }
+        // The Grade→Review barrier already persisted and previewed this exact
+        // payload fingerprint. Do not introduce a second unpreviewed save here.
         res = await fetch(`/api/admin/certificates/${certId}/approve-grader-grade`, {
           method: "POST",
           credentials: "include",
@@ -2610,11 +2800,11 @@ export default function GradingPanel({
           AI pre-grade errors before submitting). Edits ride the panel's debounced
           auto-save. graderMode-only: admins edit identity via the CertificateForm
           rendered above the panel. The cert number itself is not editable. */}
-      {graderMode || adminReview ? (
+      {canonicalIdentityVisible ? (
         <GradingIdentityVerification
           certId={certId}
           certIdStr={certIdStr}
-          mode={graderMode ? "edit" : "review"}
+          mode={canonicalIdentityEditable ? "edit" : "review"}
           locked={approvalInteractionLocked}
           game={cardGame}
           name={idName}
@@ -2658,41 +2848,43 @@ export default function GradingPanel({
       ) : (
         <div data-canonical-section="identity-fields" data-testid="section-card-identity" hidden />
       )}
-      {/* Rarity stage — the SAME canonical structured rarity/variant picker the
-          /admin CertificateForm uses (one component, one shared catalogue). Role
-          routes only (graderMode/adminReview); /admin renders its own via
-          CertificateForm. Persists via buildPayload → the role save (rarity_code /
-          finish_variant / promo_type). */}
-      {(graderMode || adminReview) && (
+      {/* The same structured classification appears for every role. It is
+          editable only where the scoped grade route owns those fields; Admin
+          uses the bounded metadata surface for mutations. */}
+      {canonicalIdentityVisible && (
         <div
           className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2.5 space-y-2"
           data-canonical-section="rarity"
           data-testid="section-rarity"
         >
-          <div className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Structured rarity &amp; variant</div>
+          <div className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+            Structured rarity &amp; variant
+          </div>
           {/* Mount only once gradingData is present so the picker (uncontrolled after
               mount) seeds from the STORED rarity, and key it by certId so switching
               certs remounts + re-seeds. Both derive straight from the query — no
               effect-ordering latch that a per-card reset could strand. */}
           {gradingData ? (
-            <RarityVariantPicker
-              key={certId ?? "none"}
-              legacyVariant={idVariant || null}
-              value={{
-                language: languageByValueOrLabel(idLanguage)?.value ?? "en",
-                era: null,
-                // Seed STRICTLY from the per-cert query (the picker only mounts once
-                // gradingData is present, so it is authoritative). No local-state
-                // fallback: a null-rarity cert returning rarityCode:null must seed
-                // null, never the previous cert's still-unreset local rarityCode.
-                rarity: (gradingData as any).rarityCode || null,
-                finish: (gradingData as any).finishVariant || null,
-                promo: (gradingData as any).promoType || null,
-                subset: null,
-              }}
-              onChange={handleRarityChange}
-              catalogueEndpoint={workstationCapabilities.catalogueEndpoint}
-            />
+            <fieldset disabled={!canonicalClassificationEditable} aria-label="Structured rarity and variant">
+              <RarityVariantPicker
+                key={certId ?? "none"}
+                legacyVariant={idVariant || null}
+                value={{
+                  language: languageByValueOrLabel(idLanguage)?.value ?? "en",
+                  era: null,
+                  // Seed STRICTLY from the per-cert query (the picker only mounts once
+                  // gradingData is present, so it is authoritative). No local-state
+                  // fallback: a null-rarity cert returning rarityCode:null must seed
+                  // null, never the previous cert's still-unreset local rarityCode.
+                  rarity: (gradingData as any).rarityCode || null,
+                  finish: (gradingData as any).finishVariant || null,
+                  promo: (gradingData as any).promoType || null,
+                  subset: null,
+                }}
+                onChange={handleRarityChange}
+                catalogueEndpoint={workstationCapabilities.catalogueEndpoint}
+              />
+            </fieldset>
           ) : (
             <div className="text-[11px] text-[var(--admin-ink-faint)]" data-testid="rarity-loading">
               Loading rarity…
@@ -2717,8 +2909,8 @@ export default function GradingPanel({
               approvalInteractionLocked
                 ? gradingWorkflowStatusCopy
                 : aiAnalysis
-                ? "Clear all overrides and re-populate sub-grades from the last AI run this session"
-                : "Run AI Identify & Grade first to enable this"
+                  ? "Clear all overrides and re-populate sub-grades from the last AI run this session"
+                  : "Run AI Identify & Grade first to enable this"
             }
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
               aiAnalysis && !approvalInteractionLocked
@@ -2799,11 +2991,31 @@ export default function GradingPanel({
         )}
       </div>
 
-      {(graderMode || adminReview) && (
+      {canonicalIdentityVisible && (
         <RoleReviewSummary
-          identity={{ certId: certIdStr, game: cardGame, name: idName, set: idSet, number: idNumber, year: idYear, language: idLanguage }}
-          classification={{ rarity: rarityCode, finish: finishVariant, promo: promoType, variant: idVariant, serviceTier }}
-          grade={{ overall: finalGradeOverall, centering: centering || null, corners: cornersGrade || null, edges: edgesGrade || null, surface: surfaceGrade || null }}
+          identity={{
+            certId: certIdStr,
+            game: cardGame,
+            name: idName,
+            set: idSet,
+            number: idNumber,
+            year: idYear,
+            language: idLanguage,
+          }}
+          classification={{
+            rarity: rarityCode,
+            finish: finishVariant,
+            promo: promoType,
+            variant: idVariant,
+            serviceTier,
+          }}
+          grade={{
+            overall: finalGradeOverall,
+            centering: centering || null,
+            corners: cornersGrade || null,
+            edges: edgesGrade || null,
+            surface: surfaceGrade || null,
+          }}
           authentication={{ status: authStatus, notes: authNotes }}
           defects={defects}
           publicNotes={gradeExplanation}
@@ -2812,238 +3024,254 @@ export default function GradingPanel({
       )}
 
       {/* Two-panel layout */}
-      <div className={previewHost ? "block" : "grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5"} data-testid="section-grading-workstation-grid">
+      <div
+        className={previewHost ? "block" : "grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5"}
+        data-testid="section-grading-workstation-grid"
+      >
         {/* LEFT — Image viewer + defect list */}
         <PreviewSurface host={previewHost}>
-        <div className="space-y-4" data-canonical-section="card-images" data-testid="section-card-images">
-          {/* FRONT/BACK chip row — own dedicated row above the absolute-anchor
+          <div className="space-y-4" data-canonical-section="card-images" data-testid="section-card-images">
+            {/* FRONT/BACK chip row — own dedicated row above the absolute-anchor
               wrapper for TL/T/TR labels. Pulled out of ImageViewer so the
               wrapper's `top: 0` (anchor for TL/T/TR at top:-28) is the variant
               tabs row, not the chip row — stops the dropdowns colliding with
               the chips. ImageViewer is told to omit its own chip row via
               `omitSideTabs` and to use `viewerSide` as controlled state. */}
-          <div className="px-[60px] mb-2">
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {(["front", "back"] as const).map((s) => {
-                const count = defects.filter((d) => d.image_side === s).length;
-                const hasImage = !!(
-                  urls[`${s}_cropped` as keyof typeof urls] || urls[`${s}_original` as keyof typeof urls]
-                );
-                const isActive = viewerSide === s;
-                return (
-                  <div key={s} className="flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setViewerSide(s)}
-                      disabled={!hasImage}
-                      data-testid={`btn-side-${s}`}
-                      className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
-                        isActive
-                          ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10"
-                          : hasImage
-                            ? "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"
-                            : "border-[var(--admin-line)] text-[var(--admin-ink-faint)] cursor-not-allowed"
-                      }`}
-                    >
-                      {s}
-                      {count > 0 ? ` (${count})` : ""}
-                    </button>
-                    {hasImage && certId && !adminReview && workstationCapabilities.imageMutations && (
+            <div className="px-[60px] mb-2">
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {(["front", "back"] as const).map((s) => {
+                  const count = defects.filter((d) => d.image_side === s).length;
+                  const hasImage = !!(
+                    urls[`${s}_cropped` as keyof typeof urls] || urls[`${s}_original` as keyof typeof urls]
+                  );
+                  const isActive = viewerSide === s;
+                  return (
+                    <div key={s} className="flex items-center gap-0.5">
                       <button
                         type="button"
-                        title={approvalInteractionLocked ? gradingWorkflowStatusCopy : `Delete ${s} image`}
-                        disabled={approvalInteractionLocked}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (approvalInteractionLocked) return;
-                          if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
-                          try {
-                            const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
-                              method: "DELETE",
-                              credentials: "include",
-                            });
-                            if (!r.ok) {
-                              const d = await r.json();
-                              throw new Error(d.error);
-                            }
-                            queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
-                          } catch {}
-                        }}
-                        className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={() => selectInspectionSide(s)}
+                        disabled={!hasImage}
+                        data-testid={`btn-side-${s}`}
+                        className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                          isActive
+                            ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10"
+                            : hasImage
+                              ? "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"
+                              : "border-[var(--admin-line)] text-[var(--admin-ink-faint)] cursor-not-allowed"
+                        }`}
                       >
-                        <Trash2 size={10} />
+                        {s}
+                        {count > 0 ? ` (${count})` : ""}
                       </button>
-                    )}
-                  </div>
-                );
-              })}
+                      {hasImage && certId && active && !adminReview && workstationCapabilities.imageMutations && (
+                        <button
+                          type="button"
+                          title={approvalInteractionLocked ? gradingWorkflowStatusCopy : `Delete ${s} image`}
+                          disabled={approvalInteractionLocked}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!active || approvalInteractionLocked) return;
+                            if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
+                            try {
+                              const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
+                                method: "DELETE",
+                                credentials: "include",
+                              });
+                              if (!r.ok) {
+                                const d = await r.json();
+                                throw new Error(d.error);
+                              }
+                              queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
+                            } catch {}
+                          }}
+                          className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
 
-          <div style={{ margin: "32px 60px 0" }}>
-            <div className="relative" style={{ overflow: "visible" }}>
-              <ImageViewer
-                apiBase={apiBase}
-                urls={urls}
+            <div style={{ margin: "32px 60px 0" }}>
+              <div className="relative" style={{ overflow: "visible" }}>
+                <ImageViewer
+                  apiBase={apiBase}
+                  urls={urls}
+                  defects={defects}
+                  onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
+                  onDefectsChange={(next) => active && setDefects(next)}
+                  inspectionState={inspectionState}
+                  onInspectionStateChange={onInspectionStateChange}
+                  mutationsEnabled={active && !approvalInteractionLocked}
+                  readOnly={approvalInteractionLocked}
+                  highlightId={highlightDefect}
+                  referenceImageUrl={aiIdentification?.referenceImageUrl}
+                  side={viewerSide as "front" | "back"}
+                  omitSideTabs
+                  onOpenCardTool={active && workstationCapabilities.imageMutations ? setManualCardToolSide : undefined}
+                  // MVGS v2.1 measurement state — flows back through the
+                  // callbacks below when the operator draws a whitening or
+                  // crease line inside mark mode (no separate tool overlay).
+                  whiteningLines={whiteningLines}
+                  creaseLines={creaseLines}
+                  onWhiteningLinesChange={(next) => {
+                    if (!active) return;
+                    setWhiteningLines(next);
+                    clearOverallOverrideIfSet();
+                  }}
+                  onCreaseLinesChange={(next) => {
+                    if (!active) return;
+                    setCreaseLines(next);
+                    clearOverallOverrideIfSet();
+                  }}
+                  centeringFront={
+                    frontLR
+                      ? {
+                          ratioLR: frontLR,
+                          ratioTB: frontTB,
+                          outerFrame:
+                            centeringMethod === "manual" && manualOuterFront
+                              ? manualOuterFront
+                              : aiAnalysis?.centering?.front_outer_frame || null,
+                          innerFrame:
+                            centeringMethod === "manual" && manualInnerFront
+                              ? manualInnerFront
+                              : aiAnalysis?.centering?.front_inner_frame || null,
+                        }
+                      : null
+                  }
+                  centeringBack={
+                    backLR
+                      ? {
+                          ratioLR: backLR,
+                          ratioTB: backTB,
+                          outerFrame:
+                            centeringMethod === "manual" && manualOuterBack
+                              ? manualOuterBack
+                              : aiAnalysis?.centering?.back_outer_frame || null,
+                          innerFrame:
+                            centeringMethod === "manual" && manualInnerBack
+                              ? manualInnerBack
+                              : aiAnalysis?.centering?.back_inner_frame || null,
+                        }
+                      : null
+                  }
+                  certId={certId}
+                  onImageDeleted={() => {
+                    if (!active) return;
+                    queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
+                  }}
+                  // Perspective crop tool plugs into the SAME per-side crop-sync
+                  // lifecycle as the 8-dot card tool (background upload, retries,
+                  // catch-all approval gate). front/back tracked independently.
+                  // STEP 4: a Manual-Crop re-straighten invalidates this side's
+                  // committed centering FIRST (it was measured on the old crop),
+                  // forcing a Redo so the grade never reads pre-straighten numbers.
+                  onStartCropUpload={
+                    active && workstationCapabilities.imageMutations
+                      ? (payload) => {
+                          invalidateCenteringForSide(payload.side);
+                          return runRecrop(payload.side, payload);
+                        }
+                      : undefined
+                  }
+                  onSideChange={(side) => setViewerSide(side as "front" | "back")}
+                  onZoomChange={setViewerZoom}
+                  onModeChange={setViewerMode}
+                />
+                {/* Corner/edge zone selectors removed — MVGS defect pins now
+                  drive corners/edges subgrades via computeMvgsScore. */}
+              </div>
+              {/* Bottom corner/edge selectors removed — MVGS-driven. */}
+            </div>
+            <div
+              className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2"
+              data-canonical-section="defect-marking"
+              data-testid="section-defect-marking"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+                <div className="flex items-center gap-2">
+                  {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
+                    <button
+                      type="button"
+                      disabled={!active || approvalInteractionLocked}
+                      onClick={() => {
+                        if (!active || approvalInteractionLocked) return;
+                        setDefects(
+                          defects.map((d) => ({
+                            ...d,
+                            mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
+                            tier: d.tier ?? "D2",
+                            zone:
+                              d.zone ??
+                              deriveZone({
+                                xPercent: d.x_percent,
+                                yPercent: d.y_percent,
+                                imageSide: d.image_side,
+                              }),
+                          }))
+                        );
+                      }}
+                      className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      data-testid="btn-recalc-zones"
+                      title={
+                        approvalInteractionLocked
+                          ? gradingWorkflowStatusCopy
+                          : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
+                      }
+                    >
+                      <Zap size={10} />
+                      Recalculate
+                    </button>
+                  )}
+                  {defects.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={!active || approvalInteractionLocked}
+                      onClick={() => {
+                        if (!active || approvalInteractionLocked) return;
+                        if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
+                        setDefects([]);
+                      }}
+                      className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      data-testid="btn-clear-defects"
+                      title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
+                    >
+                      <Trash2 size={10} />
+                      Clear Defects
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <DefectAnnotation
                 defects={defects}
-                onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
-                onDefectsChange={setDefects}
-                readOnly={approvalInteractionLocked}
+                onChange={(next) => active && setDefects(next)}
+                readOnly={!active || approvalInteractionLocked}
                 highlightId={highlightDefect}
-                referenceImageUrl={aiIdentification?.referenceImageUrl}
-                side={viewerSide as "front" | "back"}
-                omitSideTabs
-                onOpenCardTool={workstationCapabilities.imageMutations ? setManualCardToolSide : undefined}
-                // MVGS v2.1 measurement state — flows back through the
-                // callbacks below when the operator draws a whitening or
-                // crease line inside mark mode (no separate tool overlay).
+                onHighlight={setHighlightDefect}
+                candidates={defectCandidates}
+                onCandidatesChange={setDefectCandidates}
+                // MVGS v2.1 — line measurements merged into the same defect list.
                 whiteningLines={whiteningLines}
                 creaseLines={creaseLines}
                 onWhiteningLinesChange={(next) => {
+                  if (!active || approvalInteractionLocked) return;
                   setWhiteningLines(next);
                   clearOverallOverrideIfSet();
                 }}
                 onCreaseLinesChange={(next) => {
+                  if (!active || approvalInteractionLocked) return;
                   setCreaseLines(next);
                   clearOverallOverrideIfSet();
                 }}
-                centeringFront={
-                  frontLR
-                    ? {
-                        ratioLR: frontLR,
-                        ratioTB: frontTB,
-                        outerFrame:
-                          centeringMethod === "manual" && manualOuterFront
-                            ? manualOuterFront
-                            : aiAnalysis?.centering?.front_outer_frame || null,
-                        innerFrame:
-                          centeringMethod === "manual" && manualInnerFront
-                            ? manualInnerFront
-                            : aiAnalysis?.centering?.front_inner_frame || null,
-                      }
-                    : null
-                }
-                centeringBack={
-                  backLR
-                    ? {
-                        ratioLR: backLR,
-                        ratioTB: backTB,
-                        outerFrame:
-                          centeringMethod === "manual" && manualOuterBack
-                            ? manualOuterBack
-                            : aiAnalysis?.centering?.back_outer_frame || null,
-                        innerFrame:
-                          centeringMethod === "manual" && manualInnerBack
-                            ? manualInnerBack
-                            : aiAnalysis?.centering?.back_inner_frame || null,
-                      }
-                    : null
-                }
-                certId={certId}
-                onImageDeleted={() =>
-                  queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })
-                }
-                // Perspective crop tool plugs into the SAME per-side crop-sync
-                // lifecycle as the 8-dot card tool (background upload, retries,
-                // catch-all approval gate). front/back tracked independently.
-                // STEP 4: a Manual-Crop re-straighten invalidates this side's
-                // committed centering FIRST (it was measured on the old crop),
-                // forcing a Redo so the grade never reads pre-straighten numbers.
-                onStartCropUpload={workstationCapabilities.imageMutations ? (payload) => {
-                    invalidateCenteringForSide(payload.side);
-                    return runRecrop(payload.side, payload);
-                  } : undefined}
-                onSideChange={setViewerSide}
-                onZoomChange={setViewerZoom}
-                onModeChange={setViewerMode}
               />
-              {/* Corner/edge zone selectors removed — MVGS defect pins now
-                  drive corners/edges subgrades via computeMvgsScore. */}
             </div>
-            {/* Bottom corner/edge selectors removed — MVGS-driven. */}
           </div>
-          <div
-            className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2"
-            data-canonical-section="defect-marking"
-            data-testid="section-defect-marking"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
-              <div className="flex items-center gap-2">
-                {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
-	                  <button
-	                    type="button"
-	                    disabled={approvalInteractionLocked}
-	                    onClick={() => {
-	                      if (approvalInteractionLocked) return;
-	                      setDefects(
-                        defects.map((d) => ({
-                          ...d,
-                          mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
-                          tier: d.tier ?? "D2",
-                          zone:
-                            d.zone ??
-                            deriveZone({
-                              xPercent: d.x_percent,
-                              yPercent: d.y_percent,
-                              imageSide: d.image_side,
-                            }),
-                        }))
-                      );
-                    }}
-	                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-	                    data-testid="btn-recalc-zones"
-	                    title={
-	                      approvalInteractionLocked
-	                        ? gradingWorkflowStatusCopy
-	                        : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
-	                    }
-                  >
-                    <Zap size={10} />
-                    Recalculate
-                  </button>
-                )}
-                {defects.length > 0 && (
-	                  <button
-	                    type="button"
-	                    disabled={approvalInteractionLocked}
-	                    onClick={() => {
-	                      if (approvalInteractionLocked) return;
-	                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
-	                      setDefects([]);
-	                    }}
-	                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-	                    data-testid="btn-clear-defects"
-	                    title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
-                  >
-                    <Trash2 size={10} />
-                    Clear Defects
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <DefectAnnotation
-              defects={defects}
-              onChange={setDefects}
-              highlightId={highlightDefect}
-              onHighlight={setHighlightDefect}
-              candidates={defectCandidates}
-              onCandidatesChange={setDefectCandidates}
-              // MVGS v2.1 — line measurements merged into the same defect list.
-              whiteningLines={whiteningLines}
-              creaseLines={creaseLines}
-              onWhiteningLinesChange={(next) => {
-                setWhiteningLines(next);
-                clearOverallOverrideIfSet();
-              }}
-              onCreaseLinesChange={(next) => {
-                setCreaseLines(next);
-                clearOverallOverrideIfSet();
-              }}
-            />
-          </div>
-        </div>
         </PreviewSurface>
 
         {/* RIGHT — Grading inputs */}
@@ -3741,8 +3969,8 @@ export default function GradingPanel({
                     approvalInteractionLocked
                       ? gradingWorkflowStatusCopy
                       : subgradesIncomplete
-                      ? "Set all four subgrades first"
-                      : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
+                        ? "Set all four subgrades first"
+                        : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
                   }
                   className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   data-testid="btn-generate-description"
@@ -3835,6 +4063,7 @@ export default function GradingPanel({
                   onClick={() => {
                     if (gradingWorkflowLocked) return;
                     if (cropSyncBlocking) return; // belt-and-braces; button is disabled too
+                    if (!reviewActionReady) return;
                     setShowConfirm(true);
                   }}
                   disabled={
@@ -3843,26 +4072,29 @@ export default function GradingPanel({
                     overall <= 0 ||
                     subgradesIncomplete ||
                     !deionizationComplete ||
-                    cropSyncBlocking
+                    cropSyncBlocking ||
+                    !reviewActionReady
                   }
                   title={
                     gradingWorkflowLocked
                       ? gradingWorkflowStatusCopy
                       : overall <= 0 || subgradesIncomplete
-                      ? "Set all four subgrades first"
-                      : !deionizationComplete
-                        ? "Tick 'Deionization complete' before approving"
-                        : cropFailedSides.length > 0
-                          ? `${cropFailedSides.join(" + ")} crop failed to save — retry before approving`
-                          : cropPendingSides.length > 0
-                            ? `${cropPendingSides.join(" + ")} crop still saving to storage — wait for it to finish`
-                            : graderMode
-                              ? graderEdit
-                                ? "Save edits without publishing — this card stays pending review"
-                                : "Submit this grading for admin review"
-                              : adminReview
-                                ? "Approve the staff submission and publish the reviewed grade"
-                                : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                        ? "Set all four subgrades first"
+                        : !deionizationComplete
+                          ? "Tick 'Deionization complete' before approving"
+                          : cropFailedSides.length > 0
+                            ? `${cropFailedSides.join(" + ")} crop failed to save — retry before approving`
+                            : cropPendingSides.length > 0
+                              ? `${cropPendingSides.join(" + ")} crop still saving to storage — wait for it to finish`
+                              : !reviewActionReady
+                                ? "Waiting for the saved grade and exact certificate preview"
+                                : graderMode
+                                  ? graderEdit
+                                    ? "Save edits without publishing — this card stays pending review"
+                                    : "Submit this grading for admin review"
+                                  : adminReview
+                                    ? "Approve the staff submission and publish the reviewed grade"
+                                    : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
@@ -3876,7 +4108,9 @@ export default function GradingPanel({
                         ? "Crop failed — retry"
                         : cropPendingSides.length > 0
                           ? "Crop syncing…"
-                          : primaryActionCopy}
+                          : !reviewActionReady
+                            ? "Preparing saved review…"
+                            : primaryActionCopy}
                 </button>
               ) : (
                 <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">
@@ -3894,13 +4128,14 @@ export default function GradingPanel({
           freshly-cropped display image, using the same `onDefectAdded`
           handler that image-viewer mark mode uses (so the auto-save path
           is identical — no new server route, no divergent save semantics). */}
-      {manualCardToolSide && (manualCardToolSide === "front" ? urls.front_original : urls.back_original) && (
+      {active && manualCardToolSide && (manualCardToolSide === "front" ? urls.front_original : urls.back_original) && (
         <ManualCardTool
           apiBase={apiBase}
           certId={certId}
           side={manualCardToolSide}
           rawImageUrl={(manualCardToolSide === "front" ? urls.front_original : urls.back_original) as string}
           onCentering={(result) => {
+            if (!active) return;
             if (result.side === "front") {
               setFrontLR(result.leftRight);
               setFrontTB(result.topBottom);
@@ -3916,17 +4151,19 @@ export default function GradingPanel({
             setCenteringMethod("manual");
             clearOverallOverrideIfSet();
           }}
-          onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
+          onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
           existingDefects={defects}
           // MVGS v2.1 — line tools mirrored from image-viewer mark mode.
           // Same callbacks; the defects phase shares the panel's state.
           whiteningLines={whiteningLines}
           creaseLines={creaseLines}
           onWhiteningLinesChange={(next) => {
+            if (!active) return;
             setWhiteningLines(next);
             clearOverallOverrideIfSet();
           }}
           onCreaseLinesChange={(next) => {
+            if (!active) return;
             setCreaseLines(next);
             clearOverallOverrideIfSet();
           }}
@@ -3939,7 +4176,10 @@ export default function GradingPanel({
           // Background crop upload owned by the panel so it survives this tool
           // closing and gates the Approve button. Tracked PER SIDE so a back
           // upload can't clobber a still-pending front one.
-          onStartCropUpload={(payload) => runRecrop(payload.side, payload)}
+          onStartCropUpload={(payload) => {
+            if (!active) return Promise.resolve(undefined);
+            return runRecrop(payload.side, payload);
+          }}
           cropSyncStatus={cropSync[manualCardToolSide].status}
           onRetryCrop={() => retryCrop(manualCardToolSide)}
           // Skip centering when this side ALREADY has a crop image: open straight
@@ -4006,7 +4246,7 @@ export default function GradingPanel({
               <button
                 type="button"
                 onClick={() => approveGrade()}
-                disabled={approving || gradingWorkflowLocked}
+                disabled={approving || gradingWorkflowLocked || !reviewActionReady}
                 className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
                 {approving

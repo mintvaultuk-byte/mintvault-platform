@@ -27,6 +27,9 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+const PANEL = read("client/src/components/grading/grading-panel.tsx");
+const ROLE_SUMMARY = read("client/src/components/grading-workflow/RoleReviewSummary.tsx");
 
 /** Slice of FORM between two anchors (both must exist, in order). */
 function slice(start: string, end: string): string {
@@ -123,16 +126,16 @@ describe("intelligent set search wired to the existing catalogue (spec 3)", () =
 });
 
 describe("Review stage stays a compact dashboard (spec 5)", () => {
-  it("uses the ReviewSummary dashboard + an authentication summary", () => {
-    const review = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
-    expect(review).toContain("<ReviewSummary");
-    expect(review).toContain('data-testid="review-authentication"');
-    expect(review).toContain("button-save-cert"); // existing save action unchanged
+  it("uses the canonical RoleReviewSummary dashboard + authorised footer", () => {
+    expect(PANEL).toContain("<RoleReviewSummary");
+    expect(ROLE_SUMMARY).toContain('data-testid="role-review-summary"');
+    expect(ROLE_SUMMARY).toContain('label="Authentication"');
+    expect(PANEL).toContain('data-canonical-section="footer-actions"');
   });
   it("authentication is derived from the existing gradeType — no invented value", () => {
-    const review = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
-    expect(review).toContain("NON_NUMERIC_GRADES.find");
-    expect(review).toContain("form.gradeType");
+    expect(PANEL).toContain("authentication={{ status: authStatus, notes: authNotes }}");
+    expect(ROLE_SUMMARY).toContain("props.authentication.status");
+    expect(ROLE_SUMMARY).toContain("props.authentication.notes");
   });
 });
 
@@ -188,9 +191,12 @@ describe("protected surfaces untouched (hard rule)", () => {
     expect(clientEdits).toContain("client/src/components/certificate-form.tsx");
   });
 
-  it("workstationSlot render + the 4-stage contract are preserved", () => {
-    expect(FORM).toContain("{workstationSlot}");
-    expect(FORM).toContain('data-workflow-stage="grade"');
-    expect(FORM).toMatch(/stageClass = \(i: number\) => \(wfStage === i \? "" : "hidden"\)/);
+  it("the sole workstation-owned panel + three-stage contract are preserved", () => {
+    expect(FORM).not.toContain("workstationSlot");
+    expect((WORKSTATION.match(/<GradingPanel/g) ?? []).length).toBe(1);
+    expect(FORM).not.toContain("data-workflow-stage");
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(WORKSTATION).toContain("active={stage === GRADE_STAGE}");
+    expect(WORKSTATION).toContain("approvalStageActive={stage === REVIEW_STAGE}");
   });
 });

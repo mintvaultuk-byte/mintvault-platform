@@ -382,6 +382,27 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
       body: JSON.stringify(body),
     });
 
+  /**
+   * Give the MFA regression cases their own known active factor. Earlier MFA
+   * cases deliberately disable and cancel enrolments, so relying on file order
+   * made the later cases fail on an empty row instead of exercising the named
+   * security rule. This is fixture setup only; assertions still drive the real
+   * HTTP routes through the restricted runtime role.
+   */
+  async function seedActiveEnrolFactor(): Promise<string> {
+    const { generateTotpSecret, encryptSecret } = await import("../server/partner/mfa");
+    const secret = generateTotpSecret();
+    await admin.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'"
+    );
+    await admin.query(
+      "INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status, last_totp_counter) VALUES ($1,'11111111-0000-0000-0000-0000000000a4','totp',$2,'ACTIVE',NULL)",
+      [A, encryptSecret(secret)]
+    );
+    await admin.query("UPDATE partner_users SET mfa_required=true, mfa_enabled=true WHERE email='enrol@a.com'");
+    return secret;
+  }
+
   // ============ partner team management ============
   it("team management: OWNER lists, invites, resends, revokes invitation, changes roles, status and sessions", async () => {
     capturedInvites.length = 0;
@@ -803,7 +824,11 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect((await post("/api/partner/mfa/confirm", { code: "000000" }, cookie)).status).toBe(400);
     // correct code activates + returns recovery codes once
     const { currentTotp } = await import("../server/partner/mfa");
-    const confirm = await post("/api/partner/mfa/confirm", { enrolmentId, code: currentTotp(secret, Date.now()) }, cookie);
+    const confirm = await post(
+      "/api/partner/mfa/confirm",
+      { enrolmentId, code: currentTotp(secret, Date.now()) },
+      cookie
+    );
     expect(confirm.status).toBe(200);
     const { recoveryCodes } = await confirm.json();
     expect(Array.isArray(recoveryCodes) && recoveryCodes.length === 10).toBe(true);
@@ -825,11 +850,15 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect(session.mfaPassed).toBe(true);
     expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(403);
     const replaySession = await login("enrol@a.com");
-    expect((await post("/api/partner/auth/mfa", { code: currentTotp(secret, Date.now()) }, replaySession.cookie)).status).toBe(401);
+    expect(
+      (await post("/api/partner/auth/mfa", { code: currentTotp(secret, Date.now()) }, replaySession.cookie)).status
+    ).toBe(401);
   });
 
   it("MFA setup restart invalidates the old QR/code and accepts only the fresh enrolment", async () => {
-    await admin.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'");
+    await admin.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'"
+    );
     await admin.query("DELETE FROM partner_recovery_codes WHERE user_id='11111111-0000-0000-0000-0000000000a4'");
     await admin.query("UPDATE partner_users SET mfa_required=true, mfa_enabled=false WHERE email='enrol@a.com'");
     const { cookie } = await login("enrol@a.com");
@@ -844,10 +873,14 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     const { currentTotp } = await import("../server/partner/mfa");
 
     const oldCode = currentTotp(firstBody.secret, Date.now());
-    expect((await post("/api/partner/mfa/confirm", { enrolmentId: firstBody.enrolmentId, code: oldCode }, cookie)).status).toBe(400);
+    expect(
+      (await post("/api/partner/mfa/confirm", { enrolmentId: firstBody.enrolmentId, code: oldCode }, cookie)).status
+    ).toBe(400);
 
     const newCode = currentTotp(secondBody.secret, Date.now());
-    expect((await post("/api/partner/mfa/confirm", { enrolmentId: secondBody.enrolmentId, code: newCode }, cookie)).status).toBe(200);
+    expect(
+      (await post("/api/partner/mfa/confirm", { enrolmentId: secondBody.enrolmentId, code: newCode }, cookie)).status
+    ).toBe(200);
     const counts = await admin.query<{ status: string; n: number }>(
       "SELECT status, count(*)::int n FROM partner_mfa_methods WHERE user_id='11111111-0000-0000-0000-0000000000a4' GROUP BY status"
     );
@@ -856,7 +889,9 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("MFA setup confirmation is bound to the session that created the enrolment", async () => {
-    await admin.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'");
+    await admin.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'"
+    );
     await admin.query("UPDATE partner_users SET mfa_required=true, mfa_enabled=false WHERE email='enrol@a.com'");
     const s1 = await login("enrol@a.com");
     const enrol = await post("/api/partner/mfa/enrol", { password: "correct-horse-battery" }, s1.cookie);
@@ -872,7 +907,9 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("MFA setup cancel invalidates pending setup and signs out", async () => {
-    await admin.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'");
+    await admin.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id='11111111-0000-0000-0000-0000000000a4'"
+    );
     await admin.query("UPDATE partner_users SET mfa_required=true, mfa_enabled=false WHERE email='enrol@a.com'");
     const { cookie } = await login("enrol@a.com");
     expect((await post("/api/partner/mfa/enrol", { password: "correct-horse-battery" }, cookie)).status).toBe(200);
@@ -910,7 +947,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
 
   // ===== review-fix regression tests =====
   it("F1: a password-only (mfa-pending) session CANNOT re-enrol to replace an existing active factor", async () => {
-    // enrol@a already has an ACTIVE method from the enrolment test above
+    await seedActiveEnrolFactor();
     const active = await admin.query<{ n: number }>(
       "SELECT count(*)::int n FROM partner_mfa_methods WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE'"
     );
@@ -929,15 +966,9 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("F3: a TOTP code cannot be replayed within its window (second use rejected)", async () => {
-    await admin.query("UPDATE partner_users SET mfa_required=true WHERE email='enrol@a.com'");
-    await admin.query(
-      "UPDATE partner_mfa_methods SET last_totp_counter=NULL WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE'"
-    );
-    const m = await admin.query<{ secret_ref: string }>(
-      "SELECT secret_ref FROM partner_mfa_methods WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE' LIMIT 1"
-    );
-    const { currentTotp, decryptSecret } = await import("../server/partner/mfa");
-    const code = currentTotp(decryptSecret(m.rows[0].secret_ref), Date.now());
+    const secret = await seedActiveEnrolFactor();
+    const { currentTotp } = await import("../server/partner/mfa");
+    const code = currentTotp(secret, Date.now());
     const s1 = await login("enrol@a.com");
     expect((await post("/api/partner/auth/mfa", { code }, s1.cookie)).status).toBe(200); // first use ok
     const s2 = await login("enrol@a.com");
@@ -995,6 +1026,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
 
   it("MFA disable requires password + a valid second factor; then revokes sessions", async () => {
     // enrol@a has an ACTIVE totp method; login must challenge even if mfa_required drifted false.
+    const secret = await seedActiveEnrolFactor();
     const { cookie } = await login("enrol@a.com");
     const { recoveryHash } = await import("../server/partner/mfa");
     await admin.query(
@@ -1004,16 +1036,10 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect((await post("/api/partner/auth/mfa", { recoveryCode: "disable-login-code" }, cookie)).status).toBe(200);
     // disable without second factor fails
     expect((await post("/api/partner/mfa/disable", { password: "correct-horse-battery" }, cookie)).status).toBe(400);
-    // with a valid TOTP it succeeds (clear replay counter so a recent F3-test code doesn't collide)
-    await admin.query(
-      "UPDATE partner_mfa_methods SET last_totp_counter=NULL WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE'"
-    );
-    const m = await admin.query<{ secret_ref: string }>(
-      "SELECT secret_ref FROM partner_mfa_methods WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE' LIMIT 1"
-    );
-    const { currentTotp, decryptSecret } = await import("../server/partner/mfa");
+    // with a valid TOTP it succeeds
+    const { currentTotp } = await import("../server/partner/mfa");
     process.env.PARTNER_MFA_ENC_KEY = process.env.PARTNER_MFA_ENC_KEY || "0".repeat(64);
-    const code = currentTotp(decryptSecret(m.rows[0].secret_ref), Date.now());
+    const code = currentTotp(secret, Date.now());
     const disabled = await post("/api/partner/mfa/disable", { password: "correct-horse-battery", code }, cookie);
     expect(disabled.status).toBe(200);
     // sessions revoked

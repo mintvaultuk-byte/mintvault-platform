@@ -242,13 +242,16 @@ describe("correction route, audit, image, stats, and UI wiring", () => {
     expect(graderRoutes).toContain("action = 'cert_live_record_edit'");
   });
 
-  it("reuses the existing CertificateForm and GradingPanel surfaces for correction mode", () => {
+  it("uses the canonical workstation plus a bounded CertificateForm metadata surface for correction mode", () => {
     expect(adminDashboard).toContain('data-testid="button-correction-mode"');
     expect(adminDashboard).toContain('data-testid="button-save-correction"');
     expect(adminDashboard).toContain("correctionVersionFor");
     expect(adminDashboard).toContain("correctionMode={correctionMode}");
+    expect(adminDashboard).toContain("<GradingWorkstation");
+    expect(adminDashboard).toContain('mode="super-admin"');
+    expect(adminDashboard).toContain('data-testid="certificate-metadata-surface"');
     expect(certificateForm).toContain("onCorrectionMetadataReady");
-    expect(certificateForm).toContain("Correction Mode uses the Save Correction button.");
+    expect(certificateForm).not.toMatch(/CanonicalGradingWorkstationShell|<GradingPanel|data-workflow-stage/);
     expect(gradingPanel).toContain("onCorrectionGradingReady");
     expect(gradingPanel).toContain("delete (payload as any).private_notes");
   });

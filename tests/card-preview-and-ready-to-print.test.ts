@@ -31,6 +31,7 @@ import {
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const ASIDE = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
 const QUEUE = read("client/src/pages/admin-print-queue.tsx");
 const STAFF_ROUTES = read("server/routes/staff.ts");
@@ -52,19 +53,20 @@ describe("Card-stage live certificate preview (1-3, 13)", () => {
     // "Card Details" stage 0 and Review is 2, so this is the SAME coverage
     // expressed in the three-stage numbering, NOT a narrowing. Grade (now 1)
     // remains the one stage without the preview, exactly as before.
-    expect(FORM).toContain("showsPreviewAside(wfStage)");
+    expect(WORKSTATION).toContain("previewAside={");
     // The retired four-stage gate must not come back.
     expect(FORM).not.toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
     // exactly ONE mount of the panel — the same element serves both stages
-    expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
+    expect((WORKSTATION.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
+    expect(WORKSTATION).not.toMatch(/stage\s*===\s*(CARD_DETAILS_STAGE|REVIEW_STAGE).*CertificatePreviewPanel/);
   });
 
   it("1. it sits directly UNDER the card image in the same left column", () => {
     // The aside stacks the single card-image render site first, then `below`.
-    expect(ASIDE).toContain("<div className=\"min-h-0 flex-1\">{card}</div>");
-    expect(ASIDE).toContain("<div className=\"shrink-0\">{below}</div>");
-    // and the form passes the preview through that `below` slot
-    expect(FORM).toMatch(/below=\{[\s\S]{0,1200}<CertificatePreviewPanel/);
+    expect(ASIDE).toContain('<div className="min-h-0 flex-1">{card}</div>');
+    expect(ASIDE).toContain('<div className="shrink-0">{below}</div>');
+    // and the canonical workstation passes the preview through that `below` slot
+    expect(WORKSTATION).toMatch(/below=\{[\s\S]{0,1200}<CertificatePreviewPanel/);
   });
 
   it("3. no duplicate preview component, formatter or endpoint was introduced", () => {
@@ -94,8 +96,13 @@ describe("Card-stage live certificate preview (1-3, 13)", () => {
 
 describe("the preview tracks CURRENT form values for every field the label prints (4-8, 12)", () => {
   const base = {
-    cardName: "Rayquaza", setName: "Base Set", year: "2022", cardNumber: "014",
-    gradeType: "numeric", gradeOverall: 9, language: "English",
+    cardName: "Rayquaza",
+    setName: "Base Set",
+    year: "2022",
+    cardNumber: "014",
+    gradeType: "numeric",
+    gradeOverall: 9,
+    language: "English",
   };
 
   it("4-7. each printed Card-stage field flows through the canonical payload builder", () => {
@@ -119,19 +126,17 @@ describe("the preview tracks CURRENT form values for every field the label print
     const withVariant = { ...base, rarityCode: "rare_holo", structuredVariantVersion: 2 };
     expect(labelLineFor(withVariant)).toBe(consolidatedVariantForLabel(buildPreviewFields(withVariant) as never));
     // and the value itself is the canonical wording
-    expect(consolidatedVariantForLabel({ structuredVariantVersion: 2, rarityCode: "rare_holo" } as never)).toBe("HOLO RARE");
+    expect(consolidatedVariantForLabel({ structuredVariantVersion: 2, rarityCode: "rare_holo" } as never)).toBe(
+      "HOLO RARE"
+    );
   });
 
-  it("the preview is fed from `form`, never from the saved certificate prop", () => {
-    // Slice to the END of the mount rather than a fixed character budget — the
-    // mount grew when the truthful `persistence` caption prop was added, and a
-    // fixed window silently stops covering the later fields.
-    const mountStart = FORM.indexOf("<CertificatePreviewPanel");
-    const mount = FORM.slice(mountStart, FORM.indexOf("/>", FORM.indexOf("labelType: form.labelType", mountStart)));
-    for (const f of ["cardName", "setName", "year", "cardNumber"]) {
-      expect(mount).toContain(`${f}: form.${f}`);
-      expect(mount).not.toContain(`${f}: certificate?.${f}`);
-    }
+  it("the preview is fed from current panel state, with saved props only as initial fallback", () => {
+    expect(PANEL).toContain("const currentPreviewFields = useMemo<CertificatePreviewFields>");
+    expect(PANEL).toContain("onPreviewChange?.(currentPreviewFields)");
+    expect(WORKSTATION).toContain("draftPreview?.certificateId === certId");
+    expect(WORKSTATION).toContain("onPreviewChange={handleDraftPreviewChange}");
+    expect(WORKSTATION).toContain("const previewFields = authoritativePreview ?? panelPreviewFields");
   });
 });
 
@@ -141,7 +146,10 @@ describe("the preview cannot be rolled backwards (9-11)", () => {
     expect(FORM).toContain("void (autoSaveNowRef.current ?? autoSaveNow)();");
     expect(FORM).not.toMatch(/\n\s*void autoSaveNow\(\);/);
     // …and a save response only refreshes the conflict snapshot, never `form`
-    const refresh = FORM.slice(FORM.indexOf("function refreshSnapshotFromCert"), FORM.indexOf("function refreshSnapshotFromCert") + 900);
+    const refresh = FORM.slice(
+      FORM.indexOf("function refreshSnapshotFromCert"),
+      FORM.indexOf("function refreshSnapshotFromCert") + 900
+    );
     expect(refresh).not.toContain("setForm(");
   });
 
@@ -149,41 +157,37 @@ describe("the preview cannot be rolled backwards (9-11)", () => {
     // The preview is mounted ONCE, outside every stage container, and reads the single
     // `form` object — so stage navigation cannot substitute older server values and
     // there is no per-stage duplicate of the fields.
-    expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
-    const mountIdx = FORM.indexOf("<CertificatePreviewPanel");
-    const firstStageContainer = FORM.indexOf('data-workflow-stage=');
-    expect(mountIdx).toBeLessThan(firstStageContainer); // outside the stage containers
-    // goToStage only moves UI state — it must not write form values
-    const goTo = FORM.slice(FORM.indexOf("function goToStage"), FORM.indexOf("function goToStage") + 500);
-    expect(goTo).not.toContain("setForm(");
+    expect((WORKSTATION.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
+    expect((WORKSTATION.match(/<GradingPanel/g) ?? []).length).toBe(1);
+    expect(WORKSTATION).toContain("onPreviewChange={handleDraftPreviewChange}");
+    const goTo = WORKSTATION.slice(WORKSTATION.indexOf("const goToStage"), WORKSTATION.indexOf("const certId"));
+    expect(goTo).not.toContain("setDraftPreview(");
   });
 
   it("the preview remounts per certificate, so a stale rendered label cannot linger", () => {
-    const mount = FORM.slice(FORM.indexOf("<CertificatePreviewPanel"), FORM.indexOf("<CertificatePreviewPanel") + 900);
-    expect(mount).toContain('key={certificate?.id ?? "new"}');
+    const mount = WORKSTATION.slice(
+      WORKSTATION.indexOf("<CertificatePreviewPanel"),
+      WORKSTATION.indexOf("<CertificatePreviewPanel") + 900
+    );
+    expect(mount).toContain("key={certId}");
   });
 
   it("the preview carries the REAL certificate number, not the MV-PREVIEW placeholder", () => {
     expect(buildPreviewFields({ certId: "MV-0000012345", cardName: "X" }).certId).toBe("MV-0000012345");
     // create flow still falls back to the placeholder
     expect(buildPreviewFields({ cardName: "X" }).certId).toBe("MV-PREVIEW");
-    // Slice to the END of the mount rather than a fixed character budget — the
-    // mount grew when the truthful `persistence` caption prop was added, and a
-    // fixed window silently stops covering the later fields.
-    const mountStart = FORM.indexOf("<CertificatePreviewPanel");
-    const mount = FORM.slice(mountStart, FORM.indexOf("/>", FORM.indexOf("labelType: form.labelType", mountStart)));
-    expect(mount).toContain("certId:");
+    expect(WORKSTATION).toContain("certId: panelProps.certIdStr");
   });
 
   it("11. certificate A values never appear under certificate B", () => {
-    const start = FORM.indexOf("const currentCertIdRef");
-    const reset = FORM.slice(start, FORM.indexOf("}, [certificate?.id]);", start));
-    expect(reset).toContain("setForm(buildFormStateFromCert(certificate));");
-    expect(reset).toContain("autoSavePendingRef.current = false;");
-    expect(reset).toMatch(/autoSaveSeqRef\.current \+= 1;/);
-    // the picker remounts per cert, and the preview is keyed off the same cert id
-    expect(FORM).toContain('key={certificate?.id ?? "new"}');
-    expect(FORM).toContain("certificateId: certificate?.id ?? null,");
+    const start = WORKSTATION.indexOf("useEffect(() => {", WORKSTATION.indexOf("const resolvedPreviewCertificateId"));
+    const reset = WORKSTATION.slice(start, WORKSTATION.indexOf("}, [certId, mode]);", start));
+    expect(reset).toContain("setAuthoritativePreview(null)");
+    expect(reset).toContain("setReviewReady(null)");
+    // A retained live draft is displayed only when it belongs to this exact cert.
+    expect(WORKSTATION).toContain("draftPreview?.certificateId === certId");
+    expect(WORKSTATION).toContain("key={`${apiBase}:${certId}`}");
+    expect(WORKSTATION).toContain("certificateId: certId");
   });
 });
 
@@ -224,7 +228,9 @@ describe("approval gating, print history, reprint and numbering (14-18)", () => 
   });
 
   it("15. an approved-but-already-printed cert is not silently re-batched", () => {
-    expect(nextState("printed", "create_batch")).toEqual(expect.objectContaining({ ok: false, code: "already_printed" }));
+    expect(nextState("printed", "create_batch")).toEqual(
+      expect.objectContaining({ ok: false, code: "already_printed" })
+    );
     expect(nextState("printing", "create_batch")).toEqual(expect.objectContaining({ ok: false, code: "invalid_from" }));
   });
 
@@ -282,8 +288,16 @@ describe("printing-only capability boundary (19-20)", () => {
     // no wildcard re-dispatch (would be privilege escalation)
     expect(STAFF_ROUTES).not.toMatch(/app\.(get|post)\("\/api\/staff\/print\/\*/);
     // and no grading/approval/certificate-edit path is whitelisted for print staff
-    const printBlock = STAFF_ROUTES.slice(STAFF_ROUTES.indexOf("Printer (can_print)"), STAFF_ROUTES.indexOf("Printer (can_print)") + 4000);
-    for (const forbidden of ["/certificates/:id/grade", "/approve", "/grading/approve", "/certificates/:id/correction"]) {
+    const printBlock = STAFF_ROUTES.slice(
+      STAFF_ROUTES.indexOf("Printer (can_print)"),
+      STAFF_ROUTES.indexOf("Printer (can_print)") + 4000
+    );
+    for (const forbidden of [
+      "/certificates/:id/grade",
+      "/approve",
+      "/grading/approve",
+      "/certificates/:id/correction",
+    ]) {
       expect(printBlock).not.toContain(`"${forbidden}"`);
     }
   });

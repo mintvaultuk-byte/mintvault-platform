@@ -61,18 +61,24 @@ describe("1. the old grading tab was reachable before this change (audit finding
   });
 });
 
-describe("2. the final canonical grading entry point is CertificateForm", () => {
-  it("admin-dashboard's grading workstation view renders CertificateForm with the AI-identify-capable workstationSlot", () => {
-    expect(DASH).toContain("<CertificateForm");
-    expect(DASH).toContain("workstationSlot={");
+describe("2. the final canonical grading entry point is GradingWorkstation", () => {
+  it("admin-dashboard renders existing certificates through the shared workstation only", () => {
+    expect(DASH).toContain("<GradingWorkstation");
+    expect(DASH).toContain('mode="super-admin"');
+    expect(DASH).toMatch(/editingCert\s*\?\s*\(\s*<GradingWorkstation/);
+    expect(DASH).not.toMatch(/editor=\{/);
+    expect(DASH).not.toContain("<GradingPanel");
     expect(DASH).toContain("pendingAnalysis");
     expect(DASH).toContain("onManualIdentification");
     expect(DASH).toContain("onCertUpdated");
   });
-  it("CertificateForm itself still drives all three stages through the shared workstation primitives", () => {
-    expect(FORM).toContain("<WorkstationHeaderStrip");
-    expect(FORM).toContain("<WorkstationPreviewAside");
-    expect(FORM).toContain("<ReviewSummary");
+  it("CertificateForm is restricted to bounded create/metadata surfaces", () => {
+    expect(DASH).toContain('data-testid="certificate-create-surface"');
+    expect(DASH).toContain('data-testid="certificate-metadata-surface"');
+    expect(FORM).toContain('data-metadata-section="card-details"');
+    expect(FORM).not.toContain("data-workflow-stage");
+    expect(FORM).not.toContain("<CanonicalGradingWorkstationShell");
+    expect(FORM).not.toContain("<GradingPanel");
   });
 });
 
@@ -81,12 +87,15 @@ describe("3. no duplicate GradingQueue + bare-GradingPanel shell remains", () =>
     // Checked as CODE only — explanatory comments legitimately name the
     // retired component for context/history.
     const stripComments = (s: string) =>
-      s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      s
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
     const code = stripComments(DASH);
-    expect(code).not.toContain("GradingQueue");
     expect(code).not.toMatch(/from\s+"@\/components\/grading\/grading-queue"/);
+    expect(code).not.toMatch(/<GradingQueue\b/);
   });
-  it("the old activeTab === \"grading\" render branch (standalone shell) is gone", () => {
+  it('the old activeTab === "grading" render branch (standalone shell) is gone', () => {
     expect(DASH).not.toMatch(/lg:grid-cols-\[320px_1fr\]/); // the old tab's queue+panel grid
     expect(DASH).not.toContain("Select a certificate from the queue to begin grading");
   });
@@ -101,8 +110,8 @@ describe("3. no duplicate GradingQueue + bare-GradingPanel shell remains", () =>
   });
 });
 
-describe("4. stale activeTab=\"grading\" state safely redirects, never renders a blank page", () => {
-  it("a useEffect redirects activeTab===\"grading\" into startGradingSession(), then resets the tab", () => {
+describe('4. stale activeTab="grading" state safely redirects, never renders a blank page', () => {
+  it('a useEffect redirects activeTab==="grading" into startGradingSession(), then resets the tab', () => {
     const effectIdx = DASH.indexOf('if (activeTab === "grading")');
     expect(effectIdx).toBeGreaterThan(-1);
     const effectBlock = DASH.slice(effectIdx, effectIdx + 200);
@@ -162,8 +171,11 @@ describe("8. shared primitives + all three grading stages still canonical (regre
     const staff = read("client/src/pages/staff.tsx");
     expect(staff).toContain("<AdminHeaderRow");
   });
-  it("the preview aside gate still covers Card Details and Review (wfStage 0, 2) — Grade's protected exception is untouched", () => {
-    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
+  it("the shared workstation owns one persistent preview rail across all stages", () => {
+    const workstation = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+    expect(workstation).toContain("<WorkstationPreviewAside");
+    expect(workstation).not.toMatch(/wfStage\s*===\s*[02][\s\S]{0,120}<WorkstationPreviewAside/);
+    expect(workstation).toContain("interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}");
   });
 });
 
@@ -188,16 +200,18 @@ describe("9. Stage 3 protected component source remains untouched", () => {
   });
   it("no MVGS/centering/defect/grade-cap/rounding/cert-numbering/schema/migration/Partner-Network file changed", () => {
     if (changed.length === 0) return;
-    const PROTECTED = /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/i;
+    const PROTECTED =
+      /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/i;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
 });
 
 describe("10. save payload and rarity picker remain unchanged", () => {
-  it("ReviewSummary still receives every field; the save button is untouched", () => {
+  it("metadata create/save remains, while canonical Review belongs to GradingPanel", () => {
     expect(FORM).toContain('data-testid="button-save-cert"');
     expect(FORM).toContain('type="submit"');
-    expect(REVIEW_SUMMARY).toContain("v.gradeOverall");
+    expect(FORM).not.toContain("<ReviewSummary");
+    expect(FORM).not.toContain("legacy-review");
   });
   it("no rarity-picker source file appears in this pass's diff", () => {
     const changed = changedSinceScopeBase();

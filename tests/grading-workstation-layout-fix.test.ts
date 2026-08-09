@@ -2,7 +2,7 @@
  * Regression coverage for the two production grading-workstation layout defects:
  *
  *   1. Card Details read-only preview zoom must step by 75 percentage points —
- *      100 → 175 → 250 → 325 → 400 (max 400%, min 100%), button-only, wheel never
+ *      100 → 175 → … → 550 → 600 (max 600%, min 100%), button-only, wheel never
  *      zooms, reset returns to 100%.
  *   2. The desktop workstation must be a real two-column shell with correct scroll
  *      ownership: the right controls column scrolls internally where needed, the
@@ -22,6 +22,7 @@ import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const PREVIEW = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
 const SHELL = read("client/src/components/admin/admin-shell.tsx");
 // canonical-consolidation: the workstation outer geometry (grading-workspace +
@@ -63,16 +64,16 @@ function ladder(): number[] {
 }
 const pct = (z: number) => Math.round(z * 100);
 
-describe("1-4. button-only zoom steps 100 → 175 → 250 → 325 → 400", () => {
-  it("zoom levels are exactly 100, 175, 250, 325, 400 percent", () => {
-    expect(ladder().map(pct)).toEqual([100, 175, 250, 325, 400]);
+describe("1-4. button-only zoom steps preserve the Grade viewer's 600% ceiling", () => {
+  it("steps by 75 percentage points and clamps the final step at 600 percent", () => {
+    expect(ladder().map(pct)).toEqual([100, 175, 250, 325, 400, 475, 550, 600]);
     // 75 percentage points per click.
     expect(pct(MIN + STEP)).toBe(175);
   });
-  it("zoom never exceeds 400%", () => {
-    expect(pct(MAX)).toBe(400);
+  it("zoom never exceeds 600%", () => {
+    expect(pct(MAX)).toBe(600);
     // stepping up from the top clamps, never overshoots.
-    expect(pct(clamp(MAX + STEP))).toBe(400);
+    expect(pct(clamp(MAX + STEP))).toBe(600);
     // the Zoom-In control is disabled at the ceiling.
     expect(PREVIEW).toContain("zoom >= MAX_ZOOM");
   });
@@ -83,10 +84,9 @@ describe("1-4. button-only zoom steps 100 → 175 → 250 → 325 → 400", () =
   });
   it("Reset returns to 100% (and re-centres)", () => {
     const reset = slice(PREVIEW, "const resetView", "};");
-    expect(reset).toContain("setZoom(1)");
-    expect(reset).toContain("setPan({ x: 0, y: 0 })");
+    expect(reset).toContain("setView({ zoom: 1, focusX: 0.5, focusY: 0.5 })");
   });
-  it("the zoom read-out is Math.round(zoom * 100) — so it prints 100/175/250/325/400", () => {
+  it("the zoom read-out derives from the shared numeric zoom", () => {
     expect(PREVIEW).toContain("Math.round(zoom * 100)");
   });
 });
@@ -108,8 +108,9 @@ describe("5. the read-only preview has NO wheel-zoom handler", () => {
 
 describe("6. desktop shell is a real two-column layout at desktop breakpoints", () => {
   it("the panels row becomes a two-column flex-row at md+ (engages on real laptops)", () => {
-    // CertificateForm mounts the canonical shell; the two-column row lives there.
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    // GradingWorkstation is the sole shell owner; CertificateForm is an editor slot.
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
+    expect(FORM).not.toContain("<CanonicalGradingWorkstationShell");
     expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
     expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
@@ -117,19 +118,22 @@ describe("6. desktop shell is a real two-column layout at desktop breakpoints", 
     expect(CANON_SHELL).not.toContain("gap-3 lg:flex-row");
   });
   it("the workstation is viewport-bounded at desktop (not an unbounded h-full chain)", () => {
-    // The shell FILLS its parent; the one bounded viewport-height wrapper is CertForm's.
-    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]");
+    // The shell fills the bounded flex slot supplied by every route shell.
+    expect(DASH).toContain('className="min-h-0 flex-1"');
     expect(CANON_SHELL).toContain("flex min-h-0 flex-col h-full");
   });
 });
 
 describe("7. the right controls column has accessible vertical overflow where required", () => {
   it("the control-panel form scrolls internally (min-h-0 flex-1 + overflow-y-auto)", () => {
-    // The control-panel column is the shell's; its scroll body (the <form>) is
-    // still composed in certificate-form.tsx with the canonical scroll class.
-    const controlPanel = slice(FORM, "onSubmit={handleSubmit}", "</form>");
-    expect(controlPanel).toContain("overflow-y-auto");
-    expect(controlPanel).toContain("min-h-0 flex-1");
+    // GradingWorkstation owns the one right-hand scroll body; the embedded form
+    // deliberately has no competing overflow owner.
+    const controlPanel = slice(WORKSTATION, "className={`${WORKSTATION_BODY_SCROLL_CLASS}", "<GradingPanel");
+    expect(controlPanel).toContain("WORKSTATION_BODY_SCROLL_CLASS");
+    expect(CANON_SHELL).toContain(
+      'WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"'
+    );
+    expect(slice(FORM, "onSubmit={handleSubmit}", ">\n")).toContain('className="space-y-2.5"');
   });
 });
 
@@ -154,17 +158,17 @@ describe("8. no top-level workstation container traps page scrolling", () => {
 
 describe("9. the workflow strip is in the controls column, not beneath the preview", () => {
   it("WorkstationHeaderStrip (with the embedded workflow bar) lives inside the control panel header", () => {
-    const controlHeader = slice(FORM, "<WorkstationHeaderStrip", "onSubmit={handleSubmit}");
+    const controlHeader = slice(WORKSTATION, "<WorkstationHeaderStrip", "className={`${WORKSTATION_BODY_SCROLL_CLASS}");
     expect(controlHeader).toContain("<WorkstationHeaderStrip");
     const stripSrc = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
     expect(stripSrc).toContain('data-testid="workstation-strip"');
     expect(stripSrc).toContain("<GradingWorkflowBar embedded");
   });
   it("preview aside and control panel are siblings in the same md flex-row (strip not under a full-width preview)", () => {
-    // In certificate-form.tsx the shell receives the preview aside (previewAside
+    // In GradingWorkstation the shell receives the preview aside (previewAside
     // prop) BEFORE the header strip child, and the shell owns the control-panel
     // column — so the strip renders in the right column, never under the preview.
-    const row = slice(FORM, "<CanonicalGradingWorkstationShell", "onSubmit={handleSubmit}");
+    const row = slice(WORKSTATION, "<CanonicalGradingWorkstationShell", "className={`${WORKSTATION_BODY_SCROLL_CLASS}");
     expect(row).toContain("<WorkstationPreviewAside");
     expect(CANON_SHELL).toContain('data-testid="grading-control-panel"');
     const asideIdx = row.indexOf("<WorkstationPreviewAside");

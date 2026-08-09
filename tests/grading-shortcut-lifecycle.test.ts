@@ -525,17 +525,18 @@ describe("M-2 · the approval stage is wired from stage state, never from a page
     expect(src).toMatch(/"active"\s*\|\s*"approvalStageActive"/);
   });
 
-  it("CertificateForm injects it from its workflow stage into the slot", () => {
+  it("CertificateForm is metadata-only and cannot inject shortcut lifecycle flags", () => {
     const src = read("client/src/components/certificate-form.tsx");
-    // H-1: this surface's approving stage is GRADE — /admin shows the whole
-    // panel (Approve included) only on Grade. Pinned in both directions by the
-    // "each surface is wired to ITS OWN approving stage" block below.
-    expect(src).toMatch(/approvalStageActive:\s*wfStage === GRADE_STAGE/);
+    expect(src).not.toContain("<GradingPanel");
+    expect(src).not.toContain("approvalStageActive");
   });
 
-  it("standalone mount sites state the fail-CLOSED value explicitly", () => {
-    expect(read("client/src/pages/admin-dashboard.tsx")).toMatch(/approvalStageActive=\{false\}/);
-    expect(read("client/src/pages/dev-card-details-harness.tsx")).toMatch(/approvalStageActive=\{false\}/);
+  it("pages cannot override either lifecycle flag on the canonical adapter", () => {
+    const src = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+    expect(src).toMatch(/"active"\s*\|\s*"approvalStageActive"/);
+    for (const page of ["client/src/pages/admin-dashboard.tsx", "client/src/pages/dev-card-details-harness.tsx"]) {
+      expect(read(page)).not.toMatch(/<GradingWorkstation[\s\S]*?approvalStageActive=/);
+    }
   });
 
   it("the handler passes the live approval flag and contentEditable through", () => {
@@ -547,65 +548,8 @@ describe("M-2 · the approval stage is wired from stage state, never from a page
   });
 });
 
-/**
- * H-1 (final hostile recheck) · APPROVAL OWNERSHIP IS PER-SURFACE.
- *
- * WHAT WENT WRONG
- * The first M-2 fix established that Ctrl+Enter belongs to "the stage that owns
- * Approve", then wired BOTH surfaces to REVIEW. That is right for the role
- * workstation and wrong for /admin, because the two surfaces gate the panel
- * differently:
- *
- *   GradingWorkstation — applies `.grading-stage-gate`, which hides
- *     [data-canonical-section="footer-actions"] on Grade and shows it on Review.
- *     Approve lives on REVIEW.
- *   CertificateForm (/admin) — does NOT apply that gate at all. It wraps the
- *     WHOLE panel in `stageClass(GRADE_STAGE)`, so every section including
- *     footer-actions is on screen exactly when wfStage === GRADE_STAGE, and the
- *     Review stage carries only "Back to Grade". Approve lives on GRADE.
- *
- * So on /admin the shortcut was dead where Approve actually is, and on Review it
- * opened a confirmation inside a display:none subtree that then survived stage
- * navigation and reappeared later over a live publish action.
- */
-describe("H-1 · /admin (CertificateForm) owns approval on the GRADE stage", () => {
-  /** /admin, Grade stage: the panel is fully visible, Approve included. */
-  const ADMIN_GRADE: GradingShortcutState = { ...READY, active: true, approvalStageActive: true };
-  /** /admin, Review stage: the WHOLE panel is display:none, so both flags are false. */
-  const ADMIN_REVIEW: GradingShortcutState = { ...READY, active: false, approvalStageActive: false };
-
-  it("/admin Grade + Ctrl+Enter opens approval", () => {
-    expect(decideGradingShortcut(CTRL_ENTER, ADMIN_GRADE)).toEqual({ action: "open-approval" });
-  });
-
-  it("/admin Grade + Ctrl+S still saves", () => {
-    expect(decideGradingShortcut(CTRL_S, ADMIN_GRADE)).toEqual({ action: "save-draft" });
-  });
-
-  it("/admin Review + Ctrl+Enter does nothing at all", () => {
-    const out = decideGradingShortcut(CTRL_ENTER, ADMIN_REVIEW);
-    expect(out).toEqual({ action: "ignore", reason: "inactive" });
-    expect(out.action).not.toBe("open-approval");
-  });
-
-  it("/admin Review + Ctrl+S does nothing at all", () => {
-    expect(decideGradingShortcut(CTRL_S, ADMIN_REVIEW)).toEqual({ action: "ignore", reason: "inactive" });
-  });
-
-  it("the /admin approving stage still inherits every lifecycle guard", () => {
-    for (const denial of [
-      { certId: null },
-      { workflowLocked: true },
-      { gradeApprovedAt: "2026-07-01T00:00:00Z" },
-      { hydratedForCertId: null },
-      { hydratedForCertId: 41 },
-    ]) {
-      expect(decideGradingShortcut(CTRL_ENTER, { ...ADMIN_GRADE, ...denial }).action).not.toBe("open-approval");
-    }
-  });
-});
-
-describe("H-1 · the workstation keeps REVIEW ownership (the surfaces differ on purpose)", () => {
+/** H-1 · every role uses the same canonical stage ownership. */
+describe("H-1 · canonical workstation owns save on Grade and approval on Review", () => {
   it("workstation Grade + Ctrl+Enter does nothing — footer-actions is hidden there", () => {
     expect(decideGradingShortcut(CTRL_ENTER, READY)).toEqual({ action: "ignore", reason: "inactive" });
   });
@@ -613,40 +557,29 @@ describe("H-1 · the workstation keeps REVIEW ownership (the surfaces differ on 
   it("workstation Review + Ctrl+Enter opens approval", () => {
     expect(decideGradingShortcut(CTRL_ENTER, REVIEW_READY)).toEqual({ action: "open-approval" });
   });
-});
 
-describe("H-1 · each surface is wired to ITS OWN approving stage, and they must not converge", () => {
-  const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
-
-  it("CertificateForm injects the GRADE stage — not Review", () => {
-    const src = read("client/src/components/certificate-form.tsx");
-    expect(src).toMatch(/approvalStageActive:\s*wfStage === GRADE_STAGE/);
-    // The regression this pins: copying the workstation's condition onto /admin.
-    expect(src).not.toMatch(/approvalStageActive:\s*wfStage === REVIEW_STAGE/);
-  });
-
-  it("GradingWorkstation still injects the REVIEW stage", () => {
-    const src = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+  it("every role adapter derives the two flags from the same stage value", () => {
+    const src = readFileSync(
+      path.join(process.cwd(), "client/src/components/grading-workflow/GradingWorkstation.tsx"),
+      "utf8"
+    );
+    expect(src).toMatch(/active=\{stage === GRADE_STAGE\}/);
     expect(src).toMatch(/approvalStageActive=\{stage === REVIEW_STAGE\}/);
     expect(src).not.toMatch(/approvalStageActive=\{stage === GRADE_STAGE\}/);
+    expect(src).toContain("mode: GradingWorkstationMode");
+    expect(src).not.toMatch(/mode\s*===\s*["']super-admin["'][\s\S]{0,160}approvalStageActive/);
   });
 
-  it("the two surfaces genuinely disagree — that difference is the fix", () => {
-    const form = read("client/src/components/certificate-form.tsx");
-    const ws = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
-    expect(/approvalStageActive:\s*wfStage === GRADE_STAGE/.test(form)).toBe(true);
-    expect(/approvalStageActive=\{stage === REVIEW_STAGE\}/.test(ws)).toBe(true);
-  });
-
-  it("/admin gates the WHOLE panel by Grade, which is why Approve is reachable there", () => {
-    const form = read("client/src/components/certificate-form.tsx");
-    // The panel (and therefore footer-actions) is inside the Grade wrapper…
-    expect(form).toContain('data-workflow-stage="grade"');
-    expect(form).toMatch(/stageClass\(GRADE_STAGE\)/);
-    // …and this surface never APPLIES the section-level gate that would move
-    // Approve to Review. Asserted on className usage, not on the bare word:
-    // the comment above the injection legitimately names the class.
-    expect(form).not.toMatch(/className=[^\n]*grading-stage-gate/);
+  it("the approving stage still inherits every lifecycle guard", () => {
+    for (const denial of [
+      { certId: null },
+      { workflowLocked: true },
+      { gradeApprovedAt: "2026-07-01T00:00:00Z" },
+      { hydratedForCertId: null },
+      { hydratedForCertId: 41 },
+    ]) {
+      expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, ...denial }).action).not.toBe("open-approval");
+    }
   });
 });
 

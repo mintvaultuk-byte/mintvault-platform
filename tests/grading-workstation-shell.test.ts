@@ -13,6 +13,7 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION_SRC = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
 const SHELL = read("client/src/components/admin/admin-shell.tsx");
 // unified-shell pass: the preview aside and the header strip were extracted
@@ -39,42 +40,41 @@ function changedFiles(): string[] {
   return gradingReleaseChangedFiles();
 }
 
-// CertificateForm now mounts the canonical shell; slice from the mount to the
-// form close to bound the /admin workstation body it composes.
-const WORKSPACE = slice(FORM, "<CanonicalGradingWorkstationShell", "</form>");
-// Everything from the header strip to the form open = the fixed header of the
-// right panel (workflow strip + identification tools live here), still composed
-// inside certificate-form.tsx as the shell's control-panel children.
-const CONTROL_HEADER = slice(FORM, "<WorkstationHeaderStrip", "onSubmit={handleSubmit}");
+// GradingWorkstation is the sole shell/header/panel owner. CertificateForm is
+// the Super Admin metadata editor rendered inside its right-hand scroll body.
+const WORKSPACE = slice(WORKSTATION_SRC, "<CanonicalGradingWorkstationShell", "</CanonicalGradingWorkstationShell>");
+const CONTROL_HEADER = slice(
+  WORKSTATION_SRC,
+  "<WorkstationHeaderStrip",
+  "className={`${WORKSTATION_BODY_SCROLL_CLASS}"
+);
 
 describe("1-4. two-panel workspace: preview aside + control panel are grid siblings", () => {
   it("a viewport-bounded workspace wraps a two-column flex row (preview | controls)", () => {
-    // CertificateForm MOUNTS the one canonical shell — no inline geometry.
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    expect(WORKSTATION_SRC).toContain("<CanonicalGradingWorkstationShell");
+    expect(FORM).not.toContain("<CanonicalGradingWorkstationShell");
     // The canonical shell OWNS the grading-workspace testid + the bounded,
     // viewport-relative workstation height at desktop (auto below md so the page
     // flows) — extracted verbatim from the old inline /admin layout.
     expect(SHELL_SRC).toMatch(/data-testid="grading-workspace"[^>]*/);
     expect(SHELL_SRC).toContain("flex min-h-0 flex-col");
     expect(SHELL_SRC).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
-    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]"); // the one bounded viewport wrapper (CertForm)
+    expect(DASH).toContain('className="min-h-0 flex-1"');
     // The panels container is a flex row at md+ (column-stack below): 40% preview
     // aside on the left, flex-1 control panel on the right.
     expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     expect(ASIDE_SRC).toContain("md:w-[40%] md:shrink-0");
   });
   it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one flex row", () => {
-    // CertificateForm passes the preview aside to the canonical shell; the
-    // shell composes it beside the control panel. Slice the mount → form.
-    const row = slice(FORM, "<CanonicalGradingWorkstationShell", "onSubmit={handleSubmit}");
+    // GradingWorkstation passes the preview aside to the canonical shell.
+    const row = WORKSPACE;
     expect(row).toContain("<WorkstationPreviewAside");
     expect(ASIDE_SRC).toContain('data-testid="grading-preview-panel"');
     expect(ASIDE_SRC).toContain("<CardPreviewPanel");
     // The control-panel column + its testid are owned by the canonical shell.
     expect(SHELL_SRC).toContain('data-testid="grading-control-panel"');
-    // preview aside renders for Card, Rarity AND Review (Grade keeps its own
-    // dedicated protected card/defect tool and is intentionally excluded).
-    expect(row).toMatch(/showsPreviewAside\(wfStage\)[\s\S]*WorkstationPreviewAside/);
+    // The same aside persists; Grade's one interactive viewer is portalled into it.
+    expect(row).toContain("previewHost={gradingEnabled ? interactiveCardHost : null}");
   });
   it("preview is NOT rendered above the fields as a full-width block", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at
@@ -83,7 +83,7 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // full-width row above the form.
     expect(FORM).not.toContain("<CardPreviewPanel");
     expect((ASIDE_SRC.match(/<CardPreviewPanel/g) ?? []).length).toBe(1);
-    const aside = slice(FORM, "<WorkstationPreviewAside", ") : null");
+    const aside = slice(WORKSTATION_SRC, "<WorkstationPreviewAside", "below={");
     expect(aside).toContain("WorkstationPreviewAside");
   });
 });
@@ -94,8 +94,9 @@ describe("2-3. workflow strip + Identification Tools are INSIDE the right contro
     expect(STRIP_SRC).toContain('data-testid="workstation-strip"');
     expect(STRIP_SRC).toContain("<GradingWorkflowBar embedded");
   });
-  it("Identification Tools is in the control-panel header, collapsed, not full-width above both panels", () => {
-    expect(CONTROL_HEADER).toContain('data-testid="identification-tools"');
+  it("Identification Tools remains in the bounded admin metadata surface, not the canonical grading body", () => {
+    expect(CONTROL_HEADER).not.toContain('data-testid="identification-tools"');
+    expect(FORM).toContain('data-testid="identification-tools"');
     // it is a closed-by-default <details>
     const idt = slice(FORM, 'data-testid="identification-tools"', "runIdentify");
     expect(idt).not.toMatch(/<details[^>]*\sopen/);
@@ -104,9 +105,9 @@ describe("2-3. workflow strip + Identification Tools are INSIDE the right contro
 
 describe("5-6. fixed-height shell + internal scroll", () => {
   it("the right control panel form scrolls internally (page itself does not grow unbounded)", () => {
-    const controlPanel = slice(FORM, "onSubmit={handleSubmit}", "</form>");
-    expect(controlPanel).toContain("overflow-y-auto");
-    expect(controlPanel).toContain("min-h-0 flex-1");
+    const controlPanel = slice(WORKSTATION_SRC, "className={`${WORKSTATION_BODY_SCROLL_CLASS}", "<GradingPanel");
+    expect(controlPanel).toContain("WORKSTATION_BODY_SCROLL_CLASS");
+    expect(SHELL_SRC).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
   });
   it("admin-dashboard renders the grading view in a page-scrollable focus shell", () => {
     expect(DASH).toContain("focus"); // AdminShell focus prop passed
@@ -131,7 +132,8 @@ describe("5-6. fixed-height shell + internal scroll", () => {
 describe("7-9. old tall chrome is gone", () => {
   it("the large 1·CARD DETAILS fieldset is gone (now a plain div)", () => {
     expect(FORM).not.toMatch(/<fieldset data-workflow-stage="card-details"/);
-    expect(FORM).toContain('data-workflow-stage="card-details"'); // still a stage container, just a div
+    expect(FORM).toContain('data-metadata-section="card-details"');
+    expect(FORM).not.toContain("data-workflow-stage");
   });
   it("the large EDIT MV### title + 'Update certificate details' subtitle are removed", () => {
     expect(FORM).not.toContain('data-testid="text-form-title"');
@@ -140,14 +142,13 @@ describe("7-9. old tall chrome is gone", () => {
 });
 
 describe("10-11. navigation + stage reuse", () => {
-  it("Continue to Grade stays inside the control panel form", () => {
-    const controlPanel = slice(FORM, "onSubmit={handleSubmit}", "</form>");
-    expect(controlPanel).toContain('data-testid="button-continue-to-grade"');
+  it("CertificateForm has no competing stage navigation", () => {
+    expect(FORM).not.toContain('data-testid="button-continue-to-grade"');
+    expect(FORM).not.toContain('data-testid="button-review-card"');
   });
-  it("Card Details AND Review reuse the same side-by-side shell (aside shows for wfStage 0, 2)", () => {
-    // The preview aside gate covers Card Details (0) and Review (2); Grade (1)
-    // keeps its own dedicated protected card/defect tool instead.
-    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)[\s\S]*WorkstationPreviewAside/);
+  it("Card Details, Grade and Review reuse the same persistent side-by-side shell", () => {
+    expect(WORKSTATION_SRC).toContain("<WorkstationPreviewAside");
+    expect(WORKSTATION_SRC).toContain("interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}");
   });
 });
 
@@ -191,14 +192,15 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(
-        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts|vite\.ts)|^migrations\//,
+        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts|vite\.ts)|^migrations\//
       );
       if (!f.startsWith("tests/")) expect(allowedNonTest.has(f), `unexpected file: ${f}`).toBe(true);
     }
   });
-  it("workstationSlot render + Stage-3 wrapper unchanged (no transform/scale added)", () => {
-    const wrapper = slice(FORM, 'data-workflow-stage="grade"', "Grade-stage nav");
-    expect(wrapper).toContain("{workstationSlot}");
+  it("GradingWorkstation is the sole GradingPanel owner and adds no transform/scale", () => {
+    const wrapper = slice(FORM, 'data-metadata-section="creation-grade"', 'data-testid="button-save-cert"');
+    expect(FORM).not.toContain("workstationSlot");
+    expect((WORKSTATION_SRC.match(/<GradingPanel/g) ?? []).length).toBe(1);
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });
   it("save payload builder + endpoints not modified by this pass", () => {
@@ -207,9 +209,11 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       .split("\n")
       .filter((l) => /^[+-]/.test(l) && !/^[+-]{3}/.test(l))
       .filter((l) => /apiRequest\(|\/api\/admin\/certificates|method:\s*"(POST|PUT|PATCH)"|buildCertFormData/.test(l));
-      // The AI identify / grade / TCGdex-lookup endpoints are NOT the save path;
-      // this pass legitimately restructured the identify fetch. Guard the SAVE only.
-      const saveTouched = touched.filter((l) => !/\/identify|\/grade|\/analyze|\/approve-grade|\/upload-images|\/images|tcgdex|card-lookup/.test(l));
+    // The AI identify / grade / TCGdex-lookup endpoints are NOT the save path;
+    // this pass legitimately restructured the identify fetch. Guard the SAVE only.
+    const saveTouched = touched.filter(
+      (l) => !/\/identify|\/grade|\/analyze|\/approve-grade|\/upload-images|\/images|tcgdex|card-lookup/.test(l)
+    );
     expect(saveTouched).toEqual([]);
   });
   it("queue + Ownership/NFC logic untouched (admin-dashboard has no queue/drawer logic change)", () => {

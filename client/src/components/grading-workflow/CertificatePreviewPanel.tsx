@@ -10,7 +10,6 @@
  * This panel never writes anything; it only reflects the fields passed in.
  */
 import { useEffect, useRef, useState } from "react";
-import { apiRequest } from "@/lib/queryClient";
 
 export interface CertificatePreviewFields {
   // When set, the server starts the preview from this saved cert's real grade /
@@ -63,6 +62,8 @@ export function CertificatePreviewPanel({
    */
   persistence = "unsaved",
   revision = 0,
+  onRevisionComplete,
+  requestTimeoutMs = 12_000,
 }: {
   fields: CertificatePreviewFields;
   /** Server-authorised role endpoint. The endpoint, never UI visibility, owns
@@ -71,6 +72,10 @@ export function CertificatePreviewPanel({
   persistence?: "unsaved" | "saved" | "conflict";
   /** Increments after an authoritative grade save so saved grade/subgrades are re-read. */
   revision?: number;
+  /** Acknowledges only the request started for this exact revision. */
+  onRevisionComplete?: (revision: number, ok: boolean, fingerprint: string) => void;
+  /** Bounded independently of the workstation barrier so a hung fetch is aborted. */
+  requestTimeoutMs?: number;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,29 +84,62 @@ export function CertificatePreviewPanel({
   const key = JSON.stringify(fields);
 
   useEffect(() => {
-    let cancelled = false;
+    const requestFingerprint = key;
+    const controller = new AbortController();
+    let completed = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const complete = (ok: boolean) => {
+      if (completed) return;
+      completed = true;
+      onRevisionComplete?.(revision, ok, requestFingerprint);
+    };
     const timer = setTimeout(async () => {
       setLoading(true);
       setError(null);
+      timeout = setTimeout(() => {
+        controller.abort(new Error("Certificate preview timed out."));
+        setError("Certificate preview timed out.");
+        setLoading(false);
+        complete(false);
+      }, requestTimeoutMs);
       try {
-        const res = await apiRequest("POST", endpoint, fields);
+        const res = await fetch(endpoint, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: requestFingerprint,
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Certificate preview failed (${res.status})`);
+        }
         const blob = await res.blob();
-        if (cancelled) return;
+        if (completed) return;
         const next = URL.createObjectURL(blob);
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
         urlRef.current = next;
         setUrl(next);
+        complete(true);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Preview unavailable.");
+        if (!completed) {
+          setError(err instanceof Error ? err.message : "Preview unavailable.");
+          complete(false);
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (timeout) clearTimeout(timeout);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, 350);
     return () => {
-      cancelled = true;
       clearTimeout(timer);
+      if (timeout) clearTimeout(timeout);
+      controller.abort();
+      // Supersession/unmount is a terminal failure for THIS exact revision.
+      // Without this acknowledgement, the workstation waiter never settles.
+      complete(false);
     };
-  }, [endpoint, key, revision]);
+  }, [endpoint, key, revision, onRevisionComplete, requestTimeoutMs]);
 
   // Revoke the last object URL on unmount.
   useEffect(

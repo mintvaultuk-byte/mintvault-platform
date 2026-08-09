@@ -14,8 +14,14 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
 const HUD = read("client/src/components/grading-workflow/SessionHud.tsx");
 const VIEWER = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+const PANEL = read("client/src/components/grading/grading-panel.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
-const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const stripComments = (s: string) =>
+  s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
 describe("Next Card (spec 1) — user-confirmed, never skips, nav only", () => {
   it("form shows a post-save Saved panel with Next Card (primary) + Back to Queue", () => {
@@ -40,7 +46,7 @@ describe("queue progress + batch header (spec 2, 10) — read-only", () => {
   // component (one render site for all three stages).
   const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
   it("shows position / total", () => {
-    expect(FORM).toContain("<WorkstationHeaderStrip");
+    expect(WORKSTATION).toContain("<WorkstationHeaderStrip");
     expect(STRIP_SRC).toContain('data-testid="queue-progress"');
     expect(STRIP_SRC).toContain("{queue.position} / {queue.total}");
   });
@@ -63,24 +69,21 @@ describe("session HUD (spec 3,4,5) — client-only, no external tracking", () =>
     const code = stripComments(HUD);
     expect(code).not.toMatch(/fetch\(|apiRequest|POST/); // no network
   });
-  it("form bumps the completed count on successful save (display only)", () => {
-    expect(FORM).toContain("setSessionCompleted((c) => c + 1)");
+  it("the shared workstation is the sole owner of the client-only HUD value", () => {
+    expect(WORKSTATION).toContain("sessionCompleted={0}");
+    expect(FORM).not.toContain("<SessionHud");
   });
 });
 
 describe("keyboard shortcuts (spec 6,7,8)", () => {
-  it("Enter continues when not in a textarea and validation passes (never submits)", () => {
-    expect(FORM).toContain('if (e.key !== "Enter") return');
-    expect(FORM).toContain('if (tag === "TEXTAREA") return');
-    // M-4: the advance goes through the SHARED transition helper, and Enter is
-    // handled ONLY on Card Details — it must never navigate away from the
-    // protected grading workstation mid-measurement.
-    expect(FORM).toContain("goToStage(nextStageIndex(CARD_DETAILS_STAGE))");
-    expect(FORM).toContain("if (wfStage === CARD_DETAILS_STAGE) {");
+  it("grading shortcuts are stage-gated and never use ordinary Enter as form submission", () => {
+    expect(PANEL).toContain('if (!e.ctrlKey || (e.key !== "s" && e.key !== "Enter")) return');
+    expect(WORKSTATION).toContain("approvalStageActive={stage === REVIEW_STAGE}");
+    expect(FORM).not.toMatch(/goToStage|nextStageIndex|data-workflow-stage/);
   });
   it("Space toggles front/back only inside the preview", () => {
     expect(VIEWER).toMatch(/e\.key === " " \|\| e\.code === "Space"/);
-    expect(VIEWER).toContain('s === "front" ? "back" : "front"');
+    expect(VIEWER).toContain('setSide(side === "front" ? "back" : "front")');
   });
   it("Escape exits fullscreen (viewer)", () => {
     expect(VIEWER).toContain('e.key === "Escape" && setFullscreen(false)');

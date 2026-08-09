@@ -20,6 +20,14 @@ import { MVGS_DEFECT_TYPES, deriveZone, LINE_COLOUR_PALETTE } from "./defect-ann
 import type { Defect, MvgsCode } from "./defect-annotation";
 import DefectTypePicker from "./defect-type-picker";
 import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
+import {
+  CARD_INSPECTION_MAX_ZOOM,
+  inspectionViewToPercentFocus,
+  normaliseCardInspectionState,
+  percentFocusToInspectionView,
+  updateCardInspectionView,
+  type CardInspectionState,
+} from "../grading-workflow/card-inspection-state";
 
 type Side = "front" | "back" | "angled" | "closeup";
 type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted";
@@ -102,6 +110,13 @@ interface Props {
   onSideChange?: (side: string) => void;
   onZoomChange?: (zoom: number) => void;
   onModeChange?: (mode: { fullscreen: boolean; markMode: boolean }) => void;
+  /** Shared presentation-only state. It is ignored by mark/crop coordinate
+   * paths, which retain their transform-free image-relative geometry. */
+  inspectionState?: CardInspectionState;
+  onInspectionStateChange?: (state: CardInspectionState) => void;
+  /** False outside the active Grade stage. Inspection remains interactive,
+   * but defect, line, crop, upload and image-delete mutations are unavailable. */
+  mutationsEnabled?: boolean;
   /** When true, defect markers render but clicks are inert (tooltip explains
    *  why). Used by the post-approval read-only state in the parent's edit-mode
    *  gate so admins can still SEE the defects but can't edit until they click
@@ -246,6 +261,9 @@ export default function ImageViewer({
   onSideChange,
   onZoomChange,
   onModeChange,
+  inspectionState,
+  onInspectionStateChange,
+  mutationsEnabled = true,
   readOnly,
   side: controlledSide,
   omitSideTabs,
@@ -282,11 +300,11 @@ export default function ImageViewer({
   // clicks degrade to no-op (and we'd never have opened the popover anyway
   // because `clickable` falls through to false).
   function updateDefectField<K extends keyof Defect>(id: number, key: K, value: Defect[K]) {
-    if (!onDefectsChange) return;
+    if (!mutationsEnabled || !onDefectsChange) return;
     onDefectsChange(defects.map((d) => (d.id === id ? { ...d, [key]: value } : d)));
   }
   function deleteDefect(id: number) {
-    if (!onDefectsChange) return;
+    if (!mutationsEnabled || !onDefectsChange) return;
     onDefectsChange(defects.filter((d) => d.id !== id));
     setEditingDefectId(null);
     setEditingDefectAnchor(null);
@@ -314,9 +332,11 @@ export default function ImageViewer({
   // now matches.)
   const [showReference, setShowReference] = useState(false);
   const [zoom, setZoomRaw] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  /** Normal inspection mode stores the image-relative focal point as percent.
+   * Mark mode still uses its existing native-scroll geometry below. */
+  const [pan, setPanRaw] = useState({ x: 50, y: 50 });
   const [dragging, setDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({ pointerX: 0, pointerY: 0, focusX: 50, focusY: 50 });
   const [showDefects, setShowDefects] = useState(true);
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkModeRaw] = useState(false);
@@ -344,13 +364,44 @@ export default function ImageViewer({
   // mouse-up commits via onWhiteningLinesChange / onCreaseLinesChange.
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null);
   const [lineEnd, setLineEnd] = useState<{ x: number; y: number } | null>(null);
-  const canDrawWhitening = !!onWhiteningLinesChange;
-  const canDrawCrease = !!onCreaseLinesChange;
+  const canDrawWhitening = mutationsEnabled && !!onWhiteningLinesChange;
+  const canDrawCrease = mutationsEnabled && !!onCreaseLinesChange;
+
+  const publishInspection = (nextZoom: number, nextPan: { x: number; y: number }) => {
+    if (!inspectionState || !onInspectionStateChange || markMode) return;
+    onInspectionStateChange(
+      updateCardInspectionView(
+        inspectionState,
+        side as "front" | "back",
+        percentFocusToInspectionView(nextZoom, nextPan)
+      )
+    );
+  };
+
+  function commitViewport(nextZoom: number, nextPan: { x: number; y: number }) {
+    const boundedPan = {
+      x: Math.max(0, Math.min(100, nextPan.x)),
+      y: Math.max(0, Math.min(100, nextPan.y)),
+    };
+    const boundedZoom =
+      inspectionState && !markMode ? Math.min(CARD_INSPECTION_MAX_ZOOM, Math.max(1, nextZoom)) : nextZoom;
+    setZoomRaw(boundedZoom);
+    setPanRaw(boundedPan);
+    publishInspection(boundedZoom, boundedPan);
+    onZoomChange?.(boundedZoom);
+  }
+
+  function setPan(next: { x: number; y: number }) {
+    commitViewport(zoom, next);
+  }
 
   function setSide(s: Side) {
     // Only mutate internal state when uncontrolled. Controlled callers
     // own the state — they must call onSideChange's value back into props.
     if (controlledSide === undefined) setSideRaw(s);
+    if (inspectionState && onInspectionStateChange && (s === "front" || s === "back")) {
+      onInspectionStateChange(normaliseCardInspectionState({ ...inspectionState, side: s }));
+    }
     onSideChange?.(s);
   }
 
@@ -364,17 +415,23 @@ export default function ImageViewer({
     if (prevSideRef.current !== side) {
       prevSideRef.current = side;
       setShowReference(false);
-      setZoomRaw(1);
-      setPan({ x: 0, y: 0 });
-      onZoomChange?.(1);
+      const saved = inspectionState?.views[side as "front" | "back"];
+      const nextZoom = !markMode && saved ? saved.zoom : 1;
+      const nextPan = !markMode && saved ? inspectionViewToPercentFocus(saved) : { x: 50, y: 50 };
+      setZoomRaw(nextZoom);
+      setPanRaw(nextPan);
+      onZoomChange?.(nextZoom);
     }
-  }, [side, onZoomChange]);
+  }, [inspectionState, markMode, side, onZoomChange]);
+  useEffect(() => {
+    if (!inspectionState || markMode || (side !== "front" && side !== "back")) return;
+    const saved = inspectionState.views[side];
+    setZoomRaw(saved.zoom);
+    setPanRaw(inspectionViewToPercentFocus(saved));
+  }, [inspectionState, markMode, side]);
   function setZoom(z: number | ((prev: number) => number)) {
-    setZoomRaw((prev) => {
-      const next = typeof z === "function" ? z(prev) : z;
-      onZoomChange?.(next);
-      return next;
-    });
+    const requested = typeof z === "function" ? z(zoom) : z;
+    commitViewport(requested, pan);
   }
   function setMarkMode(v: boolean) {
     setMarkModeRaw(v);
@@ -386,9 +443,21 @@ export default function ImageViewer({
   }
 
   useEffect(() => {
-    onSideChange?.("front");
+    onSideChange?.(inspectionState?.side ?? "front");
   }, []);
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
+  useEffect(() => {
+    if (mutationsEnabled) return;
+    setManualCropSide(null);
+    setPickerOpen(false);
+    setPendingBatch([]);
+    setLineStart(null);
+    setLineEnd(null);
+    if (markMode) {
+      setMarkMode(false);
+      setFullscreen(false);
+    }
+  }, [mutationsEnabled]);
   // Batch defect placement: admin drops multiple pins (each click adds one),
   // then assigns a defect type once for the whole batch via the picker.
   // x/y are image-relative percents; pxX/pxY are viewport-absolute pixels
@@ -515,6 +584,7 @@ export default function ImageViewer({
   }, [fullscreen, pendingBatch, pickerOpen]);
 
   function enterMarkMode() {
+    if (!mutationsEnabled) return;
     setMarkMode(true);
     setFullscreen(true);
   }
@@ -528,7 +598,7 @@ export default function ImageViewer({
   // Record the press origin so handleContainerClick can tell a tap from a
   // scroll/pan drag (pin tool only; mirrors the card tool's screen-px threshold).
   function handleMarkPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if (markMode && markTool === "pin") tapStartRef.current = { x: e.clientX, y: e.clientY };
+    if (mutationsEnabled && markMode && markTool === "pin") tapStartRef.current = { x: e.clientX, y: e.clientY };
   }
 
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -537,7 +607,7 @@ export default function ImageViewer({
     // /handleMouseUp); on click here we just skip so the existing pin path
     // doesn't fire too. lineStart != null = a drag is in progress.
     if (markMode && markTool !== "pin") return;
-    if (markMode && imgElRef.current) {
+    if (mutationsEnabled && markMode && imgElRef.current) {
       // Tap vs scroll/pan: if the pointer moved more than 8px (screen) between
       // pointerdown and this click, it was a scroll/pan — not a pin tap. A touch
       // scroll-drag fires a synthetic click; without this it dropped a defect pin.
@@ -569,8 +639,10 @@ export default function ImageViewer({
       zoomReset();
     } else {
       const rect = e.currentTarget.getBoundingClientRect();
-      setPan({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
-      setZoom(nextZoomStep(zoom));
+      commitViewport(nextZoomStep(zoom), {
+        x: ((e.clientX - rect.left) / Math.max(1, rect.width)) * 100,
+        y: ((e.clientY - rect.top) / Math.max(1, rect.height)) * 100,
+      });
     }
   }
 
@@ -587,7 +659,7 @@ export default function ImageViewer({
   }
 
   function lineMouseDown(e: React.MouseEvent) {
-    if (!markMode) return;
+    if (!mutationsEnabled || !markMode) return;
     if (markTool === "pin") return;
     if (markTool === "whitening" && !canDrawWhitening) return;
     if (markTool === "crease" && !canDrawCrease) return;
@@ -605,6 +677,11 @@ export default function ImageViewer({
   }
 
   function lineMouseUp() {
+    if (!mutationsEnabled) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
     if (!lineStart || !lineEnd) {
       setLineStart(null);
       setLineEnd(null);
@@ -653,14 +730,13 @@ export default function ImageViewer({
   }
 
   function zoomIn() {
-    setZoom((z) => nextZoomStep(z));
+    setZoom((z) => Math.min(inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6, nextZoomStep(z)));
   }
   function zoomOut() {
     setZoom((z) => prevZoomStep(z));
   }
   function zoomReset() {
-    setZoom(1);
-    setPan({ x: 50, y: 50 });
+    commitViewport(1, { x: 50, y: 50 });
   }
 
   function handleMouseDown(e: React.MouseEvent) {
@@ -677,7 +753,7 @@ export default function ImageViewer({
     if (markMode) return;
     if (zoom <= 1) return;
     setDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    setDragStart({ pointerX: e.clientX, pointerY: e.clientY, focusX: pan.x, focusY: pan.y });
   }
 
   function handleMouseMove(e: React.MouseEvent) {
@@ -686,7 +762,12 @@ export default function ImageViewer({
       return;
     }
     if (!dragging) return;
-    setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPan({
+      x: dragStart.focusX - ((e.clientX - dragStart.pointerX) / Math.max(1, rect.width)) * 100,
+      y: dragStart.focusY - ((e.clientY - dragStart.pointerY) / Math.max(1, rect.height)) * 100,
+    });
   }
 
   function handleMouseUp() {
@@ -705,6 +786,7 @@ export default function ImageViewer({
   }
 
   function commitBatch(opts: { mvgsCode: MvgsCode; label: string; tier: "D1" | "D2" | "D3" }) {
+    if (!mutationsEnabled) return;
     let nextId = defects.length > 0 ? Math.max(...defects.map((d) => d.id)) + 1 : 1;
     for (const pin of pendingBatch) {
       // Auto-derive zone from coords + side per the MVGS spec. Admin can
@@ -766,7 +848,7 @@ export default function ImageViewer({
                     onClick={() => {
                       setSide(s);
                       setShowReference(false);
-                      zoomReset();
+                      if (!inspectionState) zoomReset();
                     }}
                     disabled={!hasImage}
                     className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
@@ -780,7 +862,7 @@ export default function ImageViewer({
                     {s}
                     {count > 0 ? ` (${count})` : ""}
                   </button>
-                  {hasImage && certId && !fullscreen && (
+                  {hasImage && certId && !fullscreen && mutationsEnabled && (
                     <button
                       type="button"
                       title={`Delete ${s} image`}
@@ -877,6 +959,12 @@ export default function ImageViewer({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        data-testid="grading-image-viewport"
+        data-coordinate-mode={markMode ? "measurement" : "inspection"}
+        data-inspection-side={side}
+        data-inspection-zoom={zoom}
+        data-inspection-focus-x={pan.x / 100}
+        data-inspection-focus-y={pan.y / 100}
       >
         {currentUrl ? (
           <div
@@ -1201,7 +1289,7 @@ export default function ImageViewer({
             {showDefects &&
               (() => {
                 let humanIdx = 0;
-                const clickable = !readOnly && !!onDefectsChange;
+                const clickable = mutationsEnabled && !readOnly && !!onDefectsChange;
                 return sideDefects.map((d) => {
                   const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
                   if (!isAi) humanIdx++;
@@ -1308,7 +1396,7 @@ export default function ImageViewer({
                           anchorRect={editingDefectAnchor}
                           onChangeField={(k, v) => updateDefectField(d.id, k, v)}
                           onBulkUpdate={(patch) => {
-                            if (!onDefectsChange) return;
+                            if (!mutationsEnabled || !onDefectsChange) return;
                             onDefectsChange(defects.map((dd) => (dd.id === d.id ? { ...dd, ...patch } : dd)));
                           }}
                           onDelete={() => deleteDefect(d.id)}
@@ -1348,7 +1436,7 @@ export default function ImageViewer({
                 </div>
               ))}
           </div>
-        ) : certId ? (
+        ) : certId && mutationsEnabled ? (
           /* Inline drop zone for missing side */
           <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
         ) : (
@@ -1388,6 +1476,7 @@ export default function ImageViewer({
           <div className="flex items-center gap-0.5 bg-[var(--admin-panel2)] border border-[var(--admin-line-hard)] rounded-full px-1 py-0.5">
             <button
               type="button"
+              aria-label="Zoom out"
               onClick={(e) => {
                 e.stopPropagation();
                 zoomOut();
@@ -1402,11 +1491,12 @@ export default function ImageViewer({
             </span>
             <button
               type="button"
+              aria-label="Zoom in"
               onClick={(e) => {
                 e.stopPropagation();
                 zoomIn();
               }}
-              disabled={zoom >= 6}
+              disabled={zoom >= (inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6)}
               className="w-7 h-7 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
             >
               <ZoomIn size={14} />
@@ -1414,6 +1504,7 @@ export default function ImageViewer({
             {zoom > 1 && (
               <button
                 type="button"
+                aria-label="Reset zoom"
                 onClick={(e) => {
                   e.stopPropagation();
                   zoomReset();
@@ -1618,7 +1709,7 @@ export default function ImageViewer({
       <div className="flex items-center gap-2 flex-wrap">
         {/* Gated on !readOnly to match the old sidebar behaviour: the card
             tool must not open on an approved (locked) cert outside edit mode. */}
-        {onOpenCardTool && !readOnly && (
+        {onOpenCardTool && mutationsEnabled && !readOnly && (
           <>
             <button
               type="button"
@@ -1639,21 +1730,26 @@ export default function ImageViewer({
         <button
           type="button"
           onClick={enterMarkMode}
+          disabled={!mutationsEnabled || !!readOnly}
           className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/40 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
         >
           <Maximize2 size={11} />
           Mark Defects
         </button>
-        {certId && (side === "front" || side === "back") && urls[`${side}_original` as keyof ImageUrls] && (
-          <button
-            type="button"
-            onClick={() => setManualCropSide(side as "front" | "back")}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/40 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
-          >
-            <Crop size={11} />
-            Manual Crop
-          </button>
-        )}
+        {certId &&
+          mutationsEnabled &&
+          !readOnly &&
+          (side === "front" || side === "back") &&
+          urls[`${side}_original` as keyof ImageUrls] && (
+            <button
+              type="button"
+              onClick={() => setManualCropSide(side as "front" | "back")}
+              className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/40 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
+            >
+              <Crop size={11} />
+              Manual Crop
+            </button>
+          )}
         <button
           type="button"
           onClick={() => setShowDefects(!showDefects)}
@@ -1674,7 +1770,7 @@ export default function ImageViewer({
       </div>
 
       {/* Manual Crop modal (lazy-loaded — won't crash if module fails) */}
-      {manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
+      {mutationsEnabled && manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
         <Suspense
           fallback={
             <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[var(--admin-gold)] text-sm">

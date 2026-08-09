@@ -15,6 +15,9 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+const DASH = read("client/src/pages/admin-dashboard.tsx");
+const PANEL = read("client/src/components/grading/grading-panel.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
 const PREVIEW = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
 
@@ -30,12 +33,15 @@ function between(start: string, end: string): string {
 /** The identity half of Card Details (game/set/name/number/year/language). */
 const CARD_IDENTITY = between("STAGE 1 · CARD DETAILS", "VARIANT (formerly the separate");
 /** The Variant half of Card Details — same screen, below the identity fields. */
-const VARIANT_BLOCK = between("VARIANT (formerly the separate", "Card Details nav");
+const VARIANT_BLOCK = between("VARIANT (formerly the separate", "Grade metadata remains");
 /** The whole consolidated Card Details stage. */
-const STAGE_CARD_DETAILS = between("STAGE 1 · CARD DETAILS", "Grading workstation — card tool");
-const STAGE_REVIEW = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
+const STAGE_CARD_DETAILS = between("STAGE 1 · CARD DETAILS", "Grade metadata remains");
 /** Code with comments stripped (comments deliberately describe what is NOT done). */
-const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const stripComments = (s: string) =>
+  s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
 describe("stage separation (spec 1-4)", () => {
   it("the identity half of Card Details holds identification fields, not the picker or notes", () => {
@@ -56,81 +62,81 @@ describe("stage separation (spec 1-4)", () => {
     expect(STAGE_CARD_DETAILS).toContain("RarityVariantPicker");
     expect(STAGE_CARD_DETAILS).toContain('data-testid="designations-details"');
     // ...and there is exactly ONE stage wrapper around them.
-    expect(FORM).toContain('data-workflow-stage="card-details"');
-    expect(FORM).not.toContain('data-workflow-stage="rarity"');
+    expect(FORM).toContain('data-metadata-section="card-details"');
+    expect(FORM).not.toContain("data-workflow-stage");
     // The old cross-stage navigation is gone entirely.
     expect(FORM).not.toContain("Continue to Rarity →");
     expect(FORM).not.toContain("← Back to Rarity");
   });
   it("Variant is presented as OPTIONAL and is not part of any gate", () => {
     expect(VARIANT_BLOCK).toContain("optional");
-    // The only Continue gate on Card Details is card name + number.
-    expect(FORM).toMatch(/disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\)\}/);
+    expect(FORM).not.toContain("button-continue-to-grade");
   });
   it("Card Details shows the permanent variant/classification summary below the picker (item 2)", () => {
     expect(VARIANT_BLOCK).toContain("<VariantSummary");
   });
-  it("Grade→Review advance button reads 'Continue to Review' (item 6)", () => {
-    expect(FORM).toContain("Continue to Review →");
+  it("CertificateForm contains no competing Grade→Review navigation", () => {
+    expect(FORM).not.toContain("Continue to Review");
+    expect(FORM).not.toContain("button-review-card");
   });
-  it("Grade stage renders the workstationSlot inside a plain visibility wrapper (no transform/scale)", () => {
-    // Assert on the wrapper region only (up to the stage-3 nav), with comments
-    // stripped — they deliberately describe what is NOT done.
-    const wrapper = stripComments(between('<div data-workflow-stage="grade"', "Grade-stage nav"));
-    expect(wrapper).toContain("{workstationSlot}");
-    expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
+  it("Grade stage metadata is editor-only; GradingPanel is owned by GradingWorkstation", () => {
+    expect(FORM).not.toContain("workstationSlot");
+    expect(FORM).not.toContain("<GradingPanel");
   });
-  it("Review stage holds the public notes (collapsed) + the save action", () => {
-    expect(STAGE_REVIEW).toContain("Public Notes");
-    expect(STAGE_REVIEW).toContain('data-testid="button-add-grader-notes"');
-    expect(STAGE_REVIEW).toContain("button-save-cert");
+  it("Review notes + approval remain in the canonical GradingPanel", () => {
+    expect(PANEL).toContain('data-canonical-section="notes"');
+    expect(PANEL).toContain('data-canonical-section="footer-actions"');
+    expect(FORM).not.toContain("legacy-review");
   });
   it("Review stage shows the live certificate preview via the SINGLE canonical panel", () => {
     // The Review-stage live preview is the SINGLE canonical
     // CertificatePreviewPanel, mounted once at the shell level (via
     // WorkstationPreviewAside `below`), never a second per-stage LabelPreview.
-    // Three-stage numbering: Card Details (0) + Review (2); Grade (1) excluded.
-    expect(FORM).toContain("<CertificatePreviewPanel");
-    expect(FORM).toContain("showsPreviewAside(wfStage)");
+    // The workstation owns one persistent panel for all three stages.
+    expect(WORKSTATION).toContain("<CertificatePreviewPanel");
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
     // PROVENANCE: the duplicate Review LabelPreview was removed by CURRENT MAIN,
     // not by this branch — this branch merely preserved main's negative guard
     // (it did NOT invert it) and re-expressed the gate in three-stage numbering.
     // LabelPreview.tsx no longer exists on main at all.
     expect(FORM).not.toContain("<LabelPreview");
-    expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
+    expect(FORM).not.toContain("<CertificatePreviewPanel");
+    expect((WORKSTATION.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
   });
-  it("Review stage exposes an explicit large Save button alongside auto-save (item 7)", () => {
-    expect(STAGE_REVIEW).toContain('data-testid="button-save-now"');
-    expect(STAGE_REVIEW).toContain("Save Now");
+  it("CertificateForm exposes only its metadata/create save", () => {
+    expect(FORM).toContain('data-testid="button-save-cert"');
+    expect(FORM).not.toContain("button-save-now");
   });
 });
 
 describe("stage navigation is UI-state only (spec: no save/grade/issue)", () => {
-  it("stages hide with CSS, never unmount — values survive Back/Next by construction", () => {
-    expect(FORM).toContain("Hidden-not-unmounted");
-    expect(FORM).toMatch(/stageClass = \(i: number\) => \(wfStage === i \? "" : "hidden"\)/);
+  it("canonical stages are owned and hidden-not-unmounted by GradingWorkstation", () => {
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(WORKSTATION).toContain("grading-stage-gate");
+    expect(WORKSTATION).not.toMatch(/\beditor\??\s*:/);
   });
-  it("goToStage only sets local state + scrolls — no save, submit, grade or mutation", () => {
-    const fn = FORM.slice(FORM.indexOf("const goToStage"), FORM.indexOf("const stageClass"));
-    expect(fn).toContain("setWfStage");
-    expect(fn).not.toMatch(/mutate|handleSubmit|autoSaveNow|fetch\(|setForm/);
+  it("CertificateForm cannot receive the canonical stage controller from /admin", () => {
+    expect(DASH).not.toMatch(/workflowStage=|onStageRequest=|editor=\{/);
+    expect(FORM).not.toMatch(/workflowStage|onStageRequest|onPresentationChange/);
   });
-  it("all nav buttons are type=button (cannot submit the form)", () => {
-    // 3-stage flow: Card Details → Grade → Review, and back again.
-    for (const id of ["button-continue-to-grade", "button-back-to-card-details", "button-review-card", "button-back-to-grade"]) {
-      const i = FORM.indexOf(id);
-      expect(i, id).toBeGreaterThan(-1);
-      expect(FORM.slice(i - 600, i)).toContain('type="button"');
-    }
+  it("all grading-stage navigation is absent from the metadata form", () => {
+    for (const id of [
+      "button-continue-to-grade",
+      "button-back-to-card-details",
+      "button-review-card",
+      "button-back-to-grade",
+    ])
+      expect(FORM).not.toContain(id);
+    expect(FORM).not.toContain("legacy-review");
   });
   it("the retired Rarity-stage nav testids are gone", () => {
     for (const id of ["button-continue-to-rarity", "button-back-to-rarity"]) {
       expect(FORM).not.toContain(id);
     }
   });
-  it("Continue to Grade gates only on genuinely mandatory fields with a plain reason", () => {
-    expect(FORM).toContain("Enter the card name and number first.");
-    expect(FORM).toMatch(/disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\)\}/);
+  it("CertificateForm contains no grading-stage gate", () => {
+    expect(FORM).not.toContain("Continue to Grade");
+    expect(FORM).not.toContain("button-continue-to-grade");
   });
 });
 
@@ -150,11 +156,11 @@ describe("card preview is read-only (spec 3)", () => {
     // Fixed-height workstation shell: preview lives in a dedicated aside beside
     // the control panel, not a sticky column inside the form. unified-shell
     // pass: the aside is now the shared WorkstationPreviewAside component.
-    // The two-column row now lives in the canonical shell CertificateForm mounts.
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    // The two-column row lives in the sole canonical GradingWorkstation shell.
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     const shellSrc = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
     expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(FORM).toContain("<WorkstationPreviewAside");
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
     expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');

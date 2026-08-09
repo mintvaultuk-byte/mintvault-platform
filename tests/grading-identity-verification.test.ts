@@ -103,7 +103,7 @@ describe("GradingIdentityVerification — guided AI-first identity (Staff / Grad
   });
 });
 
-describe("Route mounts — shared workstation shell, role-safe, /admin unchanged", () => {
+describe("Route mounts — one shared workstation shell, role-safe", () => {
   const read = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");
   const STAFF = read("client/src/pages/staff.tsx");
   const GRADER = read("client/src/pages/grader.tsx");
@@ -132,9 +132,12 @@ describe("Route mounts — shared workstation shell, role-safe, /admin unchanged
     expect(ADMIN_STAFF).toMatch(/reject-grade/);
   });
 
-  it("/admin is unchanged — mounts the bare GradingPanel via CertificateForm, no workstation wrapper", () => {
-    expect(ADMIN_DASH).toContain("<GradingPanel");
-    expect(ADMIN_DASH).not.toContain("GradingWorkstation");
+  it("/admin existing-certificate grading uses the shared workstation in Super Admin mode", () => {
+    expect(ADMIN_DASH).toContain("<GradingWorkstation");
+    expect(ADMIN_DASH).toContain('mode="super-admin"');
+    expect(ADMIN_DASH).toContain('apiBase="/api/admin"');
+    expect(ADMIN_DASH).not.toContain("<GradingPanel");
+    expect(ADMIN_DASH).toContain('data-testid="certificate-metadata-surface"');
   });
 
   it("no route mounts the retired CanonicalGradingPanelMount", () => {

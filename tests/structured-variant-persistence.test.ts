@@ -648,10 +648,10 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
   // ── F3: a held save must never be silently discarded ──────────────────────
   describe("deferred-save safety (F3)", () => {
     it("a deferred autosave shows a PAUSED state, not 'saves automatically'", () => {
-      // Both status renderers must report the pause; the held state (not the panel
-      // visibility) drives it, so Cancel cannot make the UI look resolved.
+      // The canonical compact status must report the hold (not the panel
+      // visibility), so Cancel cannot make the UI look resolved.
       expect(FORM).toContain('"Save paused — confirm the conversion"');
-      expect(FORM).toContain('data-testid="text-save-paused"');
+      expect(FORM).toContain('data-testid="text-autosave-status-mini"');
       // the mini status checks the hold FIRST, before the autoSaveStatus ladder
       const mini = FORM.slice(FORM.indexOf('data-testid="text-autosave-status-mini"'));
       expect(mini.slice(0, 700)).toMatch(/legacyLossWarning\s*\n?\s*\?\s*"Save paused/);
