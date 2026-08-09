@@ -1,6 +1,6 @@
 # Issue register — partner-final-blocker-repair
 
-**Baseline** `ad6a68f1` · **current** `97e9de5b` · branch `opus/partner-final-integration`
+**Baseline** `ad6a68f1` · **current** `9b12358a` · branch `opus/partner-final-integration`
 **Staging** unchanged (max migration 0046) · **Production** unchanged (`6f182624`, verified live via
 `/api/version` 2026-08-09) · **No push, no deploy, no migration applied to any Neon host.**
 
@@ -305,3 +305,93 @@ must exercise the assertion directly. **Not resolved.**
 | **Hostile panel** | Not launched. |
 | **Gates** | `lint`, `build`, full repository suite, `gitleaks`, AMD64 boot — none run this session. Only `tsc` and targeted suites. |
 | **Push / CI / staging package / Codex handoff** | Not started. Nothing pushed. |
+
+---
+
+# SESSION 3 ADDENDUM — `0c495df2` → `9b12358a`
+
+## Mutation matrix — now RUN, not asserted
+
+| Mutation | Detector | Result |
+|---|---|---|
+| Protected-engine scoping (scoring bundled with signature E) | `variant-line-consolidation` | **RED** ×2, reverted |
+| `RECENCY-REVIEWDATE1` | `partner-review-clock` | **RED** ×4, reverted |
+| `RATING-CAS1` | `partner-public-network-behavioural` | **RED**, reverted |
+| `RATING-HOL1` | `partner-public-network-behavioural` | **RED**, reverted |
+| `RECENCY-CLOCK1` | `partner-public-network-behavioural` | **RED**, reverted |
+| `PUBLIC-5031` | `partner-public-network-validation` | **RED**, reverted |
+| `RATING-NEW1` | born-dirty test (INSERT naming `rating_dirty=false`) | detector present; mutation **not run** |
+| `PUBLIC-SETROLE1` | — | **DOES NOT FIRE** (see session 2 addendum) |
+| `PUBLIC-IMAGE-ADMIN1`, `RATING-AWAIT1`, `RATING-DIRTY-WIRE1`, `OVERRIDE-ATOMIC1` | — | **no detector, not run** |
+| The 16 retained mutations | — | **not re-run** |
+
+Every mutation that ran was type-clean while applied and restored byte-identically.
+
+## A duplicate that was hiding a defect — removed
+`grading-review-mirror`'s post-commit `markRatingDirtyForLocation` was left as belt-and-braces
+when the transactional mark landed. It made the transactional mark **untestable**: deleting the
+in-transaction write changed no observable behaviour, because the duplicate still dirtied the
+listing — non-durably. Removed. `RATING-DIRTY-WIRE1` can now go RED; it has not yet been run.
+
+## Two defects a hostile agent found IN THIS REMEDIATION — both fixed
+
+**`rollback-0065` executed two statements outside its own guard and transaction.** Prose
+describing the manual CONCURRENTLY alternative had two lines that were not commented out. They
+ran at top level in autocommit: `SET LOCAL` became a no-op, the `DROP INDEX` took AccessExclusive
+on `certificates` unbounded, the order guard refused *after* the damage, and the journal still
+read `applied` — so the runner would never rebuild the index and H10 returned silently on an
+estate reporting fully migrated. Without `ON_ERROR_STOP`, psql continued past the refusal and
+de-journalled 0065 anyway. Rewritten; 0063/0064/0066 checked and clean.
+
+**`review_entered_at` / `status_updated_at` were absent from `shared/schema.ts`.** `certificates`
+is drizzle-managed and the drift guard is table-granular, so both were one `drizzle-kit push`
+from being proposed for DROP — including the review clock the rating engine reads. Both declared.
+
+## Fresh-estate proof (Phase 16)
+- All 53 numbered files apply cleanly, first time, in order — **on a base estate built from
+  `shared/schema.ts`**.
+- ⚠️ **The chain CANNOT build from zero.** A virgin cluster fails at
+  `0010_partner_connector_import.sql` — `relation "users" does not exist`. There is no
+  `0000_baseline`; the HQ schema is owned by `shared/schema.ts` + `drizzle-kit push`. Pre-existing
+  and not introduced here, but it means "fresh database from the migration chain" is not an
+  achievable state, and any claim phrased that way is really "schema.ts **plus** the chain".
+- 0065 applies through the runner's no-transaction path; index `indisvalid = t`; journal `applied`.
+- Round trip 0066→0063 then re-apply: `pg_dump -s` **identical** (only pg_dump's own random
+  session token differs). 127 tables / 5 views / 1681 columns / 361 indexes before and after.
+- **Boot-DDL audit: no missing column.** Every `certificates` column referenced in SQL by the five
+  public-network files exists on the fresh estate, verified twice — by set-difference and by
+  `EXPLAIN`-ing all seven queries, so no latent `42703` remains.
+
+## Measured lock modes — 0063–0066 (400k-row `certificates`, PG17)
+| Migration | `certificates` | `partner_public_listings` | duration |
+|---|---|---|---|
+| 0063 | **AccessExclusive** | none | 223 ms |
+| 0064 | **AccessExclusive** | none | 10 ms |
+| 0065 | **ShareUpdateExclusive only** | none | 179 ms |
+| 0066 | **none** | AccessExclusive | 19 ms |
+
+All three hypotheses CONFIRMED. 0063/0064 are the only files in the 0047+ series that block
+`certificates` **reads**, i.e. the only ones that can 404 the public verification page.
+
+## Docs — corrected
+Eleven divergences found; two were operational hazards an operator would have executed. The
+lock-safety runbook told them to expect "exactly 0047-0052, six files" (twenty are pending) and
+step 5's bare `--apply` would have run fourteen unplanned migrations including both
+AccessExclusive files. §12.8 of the 0058 doc — the list an operator applies from — stopped at
+0062. Both fixed, with the out-of-band `GRANT` written out. Superseded claims struck through and
+dated rather than deleted.
+
+## Gates
+`tsc` clean · `lint` 0 errors (2546 pre-existing warnings) · `build` green · `git diff --check`
+clean on source (trailing whitespace only in pre-existing evidence text files) · full suite
+**4501 passed / 16 failed / 1092 skipped**. One failure was mine (the no-transaction pin, fixed);
+the other 15 pass in isolation and fail only under parallel load — wall-clock and canvas/PDF
+assertions. **Not claimed as green.**
+
+`gitleaks`: 91 findings across 2089 commits of history — **not triaged**, and not introduced by
+this work. Needs a separate pass.
+
+## Still open
+H8 deploy-order **gate** (documented and runtime-fail-closed, but nothing prevents a bad order);
+4 mutations with no detector + 16 unre-run; the ten-agent hostile panel; AMD64; push + CI;
+staging package; Codex handoff.
