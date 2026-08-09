@@ -336,10 +336,11 @@ export async function requireCompletePartnerSubmissionSet(
       SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
         FROM selected s
         JOIN certificates c ON c.certificate_number = s.certificate_number
+        JOIN submission_items si ON si.id = c.submission_item_id
         JOIN partner_grading_work_items pgwi
           ON pgwi.certificate_id = c.id
          AND pgwi.submission_item_id = c.submission_item_id
-         AND pgwi.destination_submission_id = c.submission_id
+         AND pgwi.destination_submission_id = si.submission_id
     )
     SELECT pgwi.tenant_id::text AS tenant_id,
            pgwi.partner_submission_id::text AS partner_submission_id,
@@ -354,7 +355,9 @@ export async function requireCompletePartnerSubmissionSet(
       JOIN certificates c
         ON c.id = pgwi.certificate_id
        AND c.submission_item_id = pgwi.submission_item_id
-       AND c.submission_id = pgwi.destination_submission_id
+      JOIN submission_items si
+        ON si.id = c.submission_item_id
+       AND si.submission_id = pgwi.destination_submission_id
       JOIN submissions s ON s.id = pgwi.destination_submission_id
      WHERE pgwi.status <> 'void'
      ORDER BY pgwi.destination_submission_id, c.certificate_number
@@ -447,10 +450,11 @@ export async function partnerSettlementBlockForCert(certNumber: string): Promise
   const rows = await db.execute(sql`
     SELECT s.status::text AS destination_status
       FROM certificates c
+      JOIN submission_items si ON si.id = c.submission_item_id
       JOIN partner_grading_work_items pgwi
         ON pgwi.certificate_id = c.id
        AND pgwi.submission_item_id = c.submission_item_id
-       AND pgwi.destination_submission_id = c.submission_id
+       AND pgwi.destination_submission_id = si.submission_id
       JOIN submissions s ON s.id = pgwi.destination_submission_id
      WHERE c.certificate_number = ANY(${pgTextArray(certIdStorageVariants([certNumber]))}::text[])
        AND pgwi.status <> 'void'
@@ -1202,10 +1206,11 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
         UPDATE partner_grading_work_items pgwi
            SET status = 'completed', updated_at = NOW()
           FROM certificates c
+          JOIN submission_items si ON si.id = c.submission_item_id
          WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
            AND c.id = pgwi.certificate_id
            AND c.submission_item_id = pgwi.submission_item_id
-           AND c.submission_id = pgwi.destination_submission_id
+           AND si.submission_id = pgwi.destination_submission_id
            AND pgwi.status = 'approved'
       `);
       await tx.execute(sql`
@@ -1215,7 +1220,9 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
             JOIN certificates c
               ON c.id = pgwi.certificate_id
              AND c.submission_item_id = pgwi.submission_item_id
-             AND c.submission_id = pgwi.destination_submission_id
+            JOIN submission_items si
+              ON si.id = c.submission_item_id
+             AND si.submission_id = pgwi.destination_submission_id
            WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
         ),
         complete_partner_submissions AS (
@@ -1249,7 +1256,9 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
             JOIN certificates c
               ON c.id = pgwi.certificate_id
              AND c.submission_item_id = pgwi.submission_item_id
-             AND c.submission_id = pgwi.destination_submission_id
+            JOIN submission_items si
+              ON si.id = c.submission_item_id
+             AND si.submission_id = pgwi.destination_submission_id
            WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
         ),
         complete_destinations AS (
@@ -1280,7 +1289,9 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
             JOIN certificates c
               ON c.id = pgwi.certificate_id
              AND c.submission_item_id = pgwi.submission_item_id
-             AND c.submission_id = pgwi.destination_submission_id
+            JOIN submission_items si
+              ON si.id = c.submission_item_id
+             AND si.submission_id = pgwi.destination_submission_id
            WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
         ),
         complete_destinations AS (

@@ -118,7 +118,9 @@ async function partnerCertContext(certId: number): Promise<PartnerCertContext | 
       JOIN certificates cert
         ON cert.id = pgwi.certificate_id
        AND cert.submission_item_id = pgwi.submission_item_id
-       AND cert.submission_id = pgwi.destination_submission_id
+      JOIN submission_items si
+        ON si.id = cert.submission_item_id
+       AND si.submission_id = pgwi.destination_submission_id
       JOIN submissions dest
         ON dest.id = pgwi.destination_submission_id
      WHERE cert.id = ${certId}

@@ -218,7 +218,7 @@ export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
  * Create the MintVault `certificates` table a partner migration needs.
  *
  * WHY THIS EXISTS: migration 0049 both creates
- *   CREATE UNIQUE INDEX ... ON certificates(id, submission_id, submission_item_id)
+ *   CREATE UNIQUE INDEX ... ON certificates(id, submission_item_id)
  * and issues COLUMN-LEVEL grants naming 38 distinct certificates columns. `IF NOT EXISTS` on the
  * index guards its NAME, not its columns, and a column-level GRANT naming a missing column is a
  * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0049 fail and
@@ -241,7 +241,6 @@ export async function createMintvaultCertificatesTable(admin: pg.Client): Promis
     secret text,
     certificate_number text,
     reference_number text,
-    submission_id integer,
     submission_item_id integer,
     card_id integer,
     status text,

@@ -377,17 +377,16 @@ async function seedCompletionReadyPilot(opts?: {
         // The 0035 origin constraints are paired: a PARTNER certificate must carry the full
         // immutable origin snapshot AND its capture metadata, or the row is rejected outright.
         `INSERT INTO certificates
-           (certificate_number, submission_id, submission_item_id, status, grade_type, grader_status,
+           (certificate_number, submission_item_id, status, grade_type, grader_status,
             print_state, grade_approved_at, created_by, issued_at, updated_at,
             origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
             origin_location_id, origin_location_public_ref, origin_location_name,
             origin_captured_at, origin_snapshot_version)
-         VALUES ($1,$2,$3,'active','numeric','approved','printed', now(),'partner_connector', now(), now(),
-                 'PARTNER',$4,$5,$6,$7,$8,$9, now(), 1)
+         VALUES ($1,$2,'active','numeric','approved','printed', now(),'partner_connector', now(), now(),
+                 'PARTNER',$3,$4,$5,$6,$7,$8, now(), 1)
          RETURNING id`,
         [
           certNumber,
-          destinationSubmissionId,
           itemId,
           tenantId,
           `cc-org-${n}`,
@@ -601,7 +600,7 @@ describe("Partner completion cascade — real markCompleted with migration 0049 
       )
     ).toBe("2");
     expect(
-      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+      await scalar<string>("SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='printed'", [
         f.destinationSubmissionId,
       ])
     ).toBe("2");
@@ -624,7 +623,7 @@ describe("Partner completion cascade — real markCompleted with migration 0049 
     // Level 0 — certificates
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='completed'",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='completed'",
         [f.destinationSubmissionId]
       )
     ).toBe("2");
@@ -722,7 +721,7 @@ describe("Partner completion cascade — real markCompleted with migration 0049 
 
     // Nothing moved: not the selected certificate, not the work items, not the submission.
     expect(
-      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+      await scalar<string>("SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='printed'", [
         f.destinationSubmissionId,
       ])
     ).toBe("2");

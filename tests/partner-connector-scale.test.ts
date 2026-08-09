@@ -79,7 +79,7 @@ async function seedMintVaultTables(): Promise<void> {
   await admin.query(`CREATE TABLE IF NOT EXISTS cards (id serial PRIMARY KEY, submission_id integer, card_name text)`);
   // Forbidden-side-effect fixtures: representative MintVault tables the importer must NEVER touch.
   await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
-    id serial PRIMARY KEY, certificate_number text, cert_id text, card_id integer, submission_id integer, submission_item_id integer,
+    id serial PRIMARY KEY, certificate_number text, cert_id text, card_id integer, submission_item_id integer,
     status text, label_type text, grade_type text, language text, card_game text, set_name text,
     card_name text, card_number_display text, year_text text, variant text, front_image_path text,
     back_image_path text, grading_front_original text, grading_back_original text, created_by text,

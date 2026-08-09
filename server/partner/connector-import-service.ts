@@ -155,8 +155,12 @@ async function createPartnerCertificateForWorkItem(
     .digest("hex");
   const referenceNumber = generateReferenceNumber();
   const inserted = await client.query<{ id: number; certificate_number: string }>(
+    // NOTE: certificates has NO submission_id column — on staging, on production, or in
+    // shared/schema.ts; no migration ever created one. An earlier revision of this INSERT named it
+    // and would have raised 42703 on the very first partner certificate mint. The submission link
+    // is carried by submission_item_id; submissions are reached via submission_items.submission_id.
     `INSERT INTO certificates (
-       certificate_number, submission_id, submission_item_id,
+       certificate_number, submission_item_id,
        status, label_type, grade_type, language,
        card_game, set_name, card_name, card_number_display, year_text, variant,
        front_image_path, back_image_path, grading_front_original, grading_back_original,
@@ -167,20 +171,19 @@ async function createPartnerCertificateForWorkItem(
        origin_location_name, origin_location_address, origin_captured_at, origin_snapshot_version
      )
      VALUES (
-       $1, $2, $3,
-       'active', 'Standard', 'numeric', COALESCE($4, 'English'),
-       $5, $6, $7, $8, $9, $10,
-       $11, $12, $11, $12,
-       'partner_connector', NOW(), NOW(), $13, 1, NOW(),
-       $14, 'awaiting_approval', 'unassigned',
-       'PARTNER', $15, $16, $17,
-       $18, $19, $20,
-       $21, $22, NOW(), $23
+       $1, $2,
+       'active', 'Standard', 'numeric', COALESCE($3, 'English'),
+       $4, $5, $6, $7, $8, $9,
+       $10, $11, $10, $11,
+       'partner_connector', NOW(), NOW(), $12, 1, NOW(),
+       $13, 'awaiting_approval', 'unassigned',
+       'PARTNER', $14, $15, $16,
+       $17, $18, $19,
+       $20, $21, NOW(), $22
      )
      RETURNING id, certificate_number`,
     [
       certificateNumber,
-      params.submissionId,
       params.submissionItemId,
       params.card.language ?? null,
       params.card.game ?? null,

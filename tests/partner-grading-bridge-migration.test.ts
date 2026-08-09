@@ -213,18 +213,20 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
   );
   /**
    * 0049 links a work item to a certificate through a COMPOSITE foreign key —
-   * REFERENCES certificates(id, submission_id, submission_item_id) — backed by the unique index it
-   * creates on the protected certificates table. A certificate row whose submission_id/
-   * submission_item_id do not match this work item's destination is rejected, by design: it is what
-   * stops a work item pointing at a certificate belonging to a different submission. So the
-   * certificate has to be minted here, against THIS destination, rather than passed in.
+   * REFERENCES certificates(id, submission_item_id) — backed by the unique index it creates on the
+   * protected certificates table. certificates has NO submission_id column on any real deployment,
+   * so the destination half of the identity is enforced one hop out, by the sibling FK
+   * pgwi(destination_submission_id, submission_item_id) -> submission_items(submission_id, id).
+   * Together they still reject a certificate belonging to a different submission: it is what stops
+   * a work item pointing at someone else's certificate. So the certificate has to be minted here,
+   * against THIS destination's submission_item, rather than passed in.
    */
   let certificateId: number | null = null;
   if (opts.linkCertificate) {
     const { rows: cert } = await admin.query<{ id: number }>(
-      `INSERT INTO certificates (cert_id, secret, certificate_number, submission_id, submission_item_id)
-       VALUES ($1, 's', $2, $3, $4) RETURNING id`,
-      [`MV45-${suffix}`, `MV-45-${suffix}`, dest[0].id, item[0].id]
+      `INSERT INTO certificates (cert_id, secret, certificate_number, submission_item_id)
+       VALUES ($1, 's', $2, $3) RETURNING id`,
+      [`MV45-${suffix}`, `MV-45-${suffix}`, item[0].id]
     );
     certificateId = cert[0].id;
   }

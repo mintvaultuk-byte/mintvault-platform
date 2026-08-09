@@ -369,19 +369,18 @@ async function seedAtPendingReview(): Promise<Fixture> {
   ]);
   const certId = await scalar<number>(
     `INSERT INTO certificates
-       (certificate_number, submission_id, submission_item_id, status, grade_type, grader_status,
+       (certificate_number, submission_item_id, status, grade_type, grader_status,
         print_state, ownership_status, grade, centering_score, corners_score, edges_score, surface_score,
         assigned_grader_id, graded_by, review_required, graded_at, created_by, issued_at, updated_at,
         origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
         origin_location_id, origin_location_public_ref, origin_location_name,
         origin_captured_at, origin_snapshot_version)
-     VALUES ($1,$2,$3,'active','numeric','pending_review','awaiting_approval','unclaimed',
-             9,9,9,9,9,$4,$4,true, now(),'partner_connector', now(), now(),
-             'PARTNER',$5,$6,$7,$8,$9,$10, now(), 1)
+     VALUES ($1,$2,'active','numeric','pending_review','awaiting_approval','unclaimed',
+             9,9,9,9,9,$3,$3,true, now(),'partner_connector', now(), now(),
+             'PARTNER',$4,$5,$6,$7,$8,$9, now(), 1)
      RETURNING id`,
     [
       `MVH2${9000 + n * 10}`,
-      destinationSubmissionId,
       itemId,
       graderId,
       tenantId,

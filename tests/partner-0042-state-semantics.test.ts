@@ -75,7 +75,7 @@ async function seedMintVaultTables(): Promise<void> {
   // 0041 attaches a credit-hold guard trigger to certificates and label_prints as well as
   // submissions. Omitting them would silently reduce requirement 10 to a one-trigger assertion.
   await admin.query(
-    "CREATE TABLE certificates (id serial primary key, cert_id text, submission_id integer, secret text)"
+    "CREATE TABLE certificates (id serial primary key, cert_id text, secret text)"
   );
   await admin.query(
     "CREATE TABLE label_prints (id serial primary key, certificate_id integer, created_at timestamptz not null default now())"

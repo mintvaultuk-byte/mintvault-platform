@@ -413,19 +413,18 @@ async function seedPilotAtPendingReview(): Promise<Pilot> {
     // passes on its own merits rather than by being skipped.
     const certId = await scalar<number>(
       `INSERT INTO certificates
-         (certificate_number, submission_id, submission_item_id, status, grade_type, grader_status,
+         (certificate_number, submission_item_id, status, grade_type, grader_status,
           print_state, ownership_status, grade, centering_score, corners_score, edges_score, surface_score,
           assigned_grader_id, review_required, graded_at, created_by, issued_at, updated_at,
           origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
           origin_location_id, origin_location_public_ref, origin_location_name,
           origin_captured_at, origin_snapshot_version)
-       VALUES ($1,$2,$3,'active','numeric','pending_review','awaiting_approval','unclaimed',
-               9,9,9,9,9,$4,true, now(),'partner_connector', now(), now(),
-               'PARTNER',$5,$6,$7,$8,$9,$10, now(), 1)
+       VALUES ($1,$2,'active','numeric','pending_review','awaiting_approval','unclaimed',
+               9,9,9,9,9,$3,true, now(),'partner_connector', now(), now(),
+               'PARTNER',$4,$5,$6,$7,$8,$9, now(), 1)
        RETURNING id`,
       [
         certNumber,
-        destinationSubmissionId,
         itemId,
         graderId,
         tenantId,
@@ -583,7 +582,7 @@ async function expectSettledExactlyOnce(f: Pilot): Promise<void> {
   ).toBe("2");
   expect(
     await scalar<string>(
-      "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+      "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.grade_approved_at IS NOT NULL",
       [f.destinationSubmissionId]
     ),
     "both certificates must end published"
@@ -715,7 +714,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     ).toBe("2");
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NULL",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.grade_approved_at IS NULL",
         [f.destinationSubmissionId]
       ),
       "no certificate may be approved before the pilot begins"
@@ -739,7 +738,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     // One approved, one still pending.
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.grade_approved_at IS NOT NULL",
         [f.destinationSubmissionId]
       )
     ).toBe("1");
@@ -791,7 +790,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     ).toBe("2");
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.grade_approved_at IS NOT NULL",
         [f.destinationSubmissionId]
       )
     ).toBe("2");
@@ -982,7 +981,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(await triple(f.tenantId)).toEqual({ available: 8, reserved: 0, consumed: 2 });
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='needs_printing'",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='needs_printing'",
         [f.destinationSubmissionId]
       ),
       "approval moves both certificates awaiting_approval -> needs_printing"
@@ -996,7 +995,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(partial.rejected.map((r) => r.code)).toContain("partner_submission_incomplete");
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='needs_printing'",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='needs_printing'",
         [f.destinationSubmissionId]
       ),
       "the refused partial batch leaves both cards retryable"
@@ -1008,7 +1007,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(batch.batchId).toBeTruthy();
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printing'",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='printing'",
         [f.destinationSubmissionId]
       )
     ).toBe("2");
@@ -1020,7 +1019,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     const printed = await printWorkflow.markBatchPrinted(batch.batchId as string, actor);
     expect(printed.rejected).toEqual([]);
     expect(
-      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+      await scalar<string>("SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='printed'", [
         f.destinationSubmissionId,
       ])
     ).toBe("2");
@@ -1041,7 +1040,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     ).toBe("2");
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='completed'",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='completed'",
         [f.destinationSubmissionId]
       )
     ).toBe("2");
@@ -1081,7 +1080,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     await printWorkflow.markBatchPrinted(batch.batchId as string, actor);
 
     expect(
-      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+      await scalar<string>("SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='printed'", [
         f.destinationSubmissionId,
       ]),
       "precondition: both cards printed, so reprint has a legitimate source state"
@@ -1097,7 +1096,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     expect(tooShort.applied, "a sub-minimum reason must not reprint anything").toEqual([]);
     expect(tooShort.rejected.map((r) => r.code)).toEqual(["reason_required", "reason_required"]);
     expect(
-      await scalar<string>("SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='printed'", [
+      await scalar<string>("SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='printed'", [
         f.destinationSubmissionId,
       ]),
       "the refused reprint must leave print_state untouched"
@@ -1125,7 +1124,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
 
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND print_state='reprint_required'",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.print_state='reprint_required'",
         [f.destinationSubmissionId]
       )
     ).toBe("2");
@@ -1560,7 +1559,7 @@ describe("FULL-PILOT-LOCAL-01 — approval, automatic settlement and the correct
     ).toBe("2");
     expect(
       await scalar<string>(
-        "SELECT count(*)::text FROM certificates WHERE submission_id=$1 AND grade_approved_at IS NOT NULL",
+        "SELECT count(*)::text FROM certificates c JOIN submission_items si ON si.id = c.submission_item_id WHERE si.submission_id=$1 AND c.grade_approved_at IS NOT NULL",
         [f.destinationSubmissionId]
       ),
       "both certificates published"

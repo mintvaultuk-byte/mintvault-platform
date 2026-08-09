@@ -90,8 +90,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_grading_work_items_import_destinati
 CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_grading_work_items_submission_item_destination
   ON submission_items(submission_id, id);
 
+-- Keyed on (id, submission_item_id) — the REAL deployed certificates shape. There is no
+-- certificates.submission_id column on staging or production and no migration ever created one;
+-- an earlier revision of this index named it and raised 42703, which made this entire migration
+-- undeployable. The certificate→destination-submission identity is still fully enforced, one hop
+-- further out, via fk_partner_grading_work_items_submission_item_destination below:
+--   pgwi(destination_submission_id, submission_item_id) -> submission_items(submission_id, id)
+--   pgwi(certificate_id, submission_item_id)            -> certificates(id, submission_item_id)
+-- so a certificate can still only ever be attached to a work item whose submission_item genuinely
+-- belongs to that destination submission.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_grading_work_items_certificate_scope
-  ON certificates(id, submission_id, submission_item_id);
+  ON certificates(id, submission_item_id);
 
 DO $$
 BEGIN
@@ -213,8 +222,8 @@ BEGIN
   ) THEN
     ALTER TABLE partner_grading_work_items
       ADD CONSTRAINT fk_partner_grading_work_items_certificate_scope
-      FOREIGN KEY (certificate_id, destination_submission_id, submission_item_id)
-      REFERENCES certificates(id, submission_id, submission_item_id) ON DELETE RESTRICT
+      FOREIGN KEY (certificate_id, submission_item_id)
+      REFERENCES certificates(id, submission_item_id) ON DELETE RESTRICT
       DEFERRABLE INITIALLY DEFERRED;
   END IF;
 END$$;
@@ -276,7 +285,6 @@ GRANT SELECT ON partner_grading_work_items TO partner_runtime;
 REVOKE ALL PRIVILEGES ON certificates FROM partner_connector_runtime;
 GRANT INSERT (
   certificate_number,
-  submission_id,
   submission_item_id,
   status,
   label_type,
@@ -316,7 +324,6 @@ GRANT INSERT (
 GRANT SELECT (
   id,
   certificate_number,
-  submission_id,
   submission_item_id
 ) ON certificates TO partner_connector_runtime;
 DO $$

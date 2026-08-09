@@ -227,7 +227,12 @@ describe("migration 0049 ⇄ application parity", () => {
     expect(defs.some((d) => d.includes("(tenant_id, partner_location_id)"))).toBe(true);
     expect(defs.some((d) => d.includes("(tenant_id, partner_submission_id)"))).toBe(true);
     expect(defs.some((d) => d.includes("(partner_submission_id, partner_submission_card_id)"))).toBe(true);
-    expect(defs.some((d) => d.includes("(certificate_id, destination_submission_id, submission_item_id)"))).toBe(true);
+    // certificates has NO submission_id column on any real deployment, so the certificate FK is
+    // keyed on (id, submission_item_id). The destination half of the identity is carried by the
+    // sibling FK below — together they still stop a work item pointing at another submission's
+    // certificate. Asserting BOTH is what keeps that guarantee from being silently dropped.
+    expect(defs.some((d) => d.includes("(certificate_id, submission_item_id)"))).toBe(true);
+    expect(defs.some((d) => d.includes("(destination_submission_id, submission_item_id)"))).toBe(true);
     expect(rows.length, "0049 declares a large FK set").toBeGreaterThan(10);
   });
 

@@ -175,9 +175,11 @@ export async function assignPartnerCerts(partnerUserId: string, certIds: number[
              updated_at = NOW()
         FROM partner_grading_work_items pgwi
         JOIN partner_connector_imports pci ON pci.id = pgwi.connector_import_id
+        JOIN submission_items si
+          ON si.id = pgwi.submission_item_id
+         AND si.submission_id = pgwi.destination_submission_id
        WHERE cert.id = ANY(${intArray(clean)})
          AND cert.submission_item_id = pgwi.submission_item_id
-         AND cert.submission_id = pgwi.destination_submission_id
          AND pgwi.tenant_id = ${partner.tenant_id}
          AND (pgwi.certificate_id IS NULL OR pgwi.certificate_id = cert.id)
          AND pgwi.status IN ('ready_for_assignment','assigned','returned_for_change')

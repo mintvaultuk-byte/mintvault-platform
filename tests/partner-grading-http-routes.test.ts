@@ -367,17 +367,16 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
       // 0035's origin constraints are paired: a PARTNER certificate carries the full immutable
       // origin snapshot AND its capture metadata, or the row is rejected outright.
       `INSERT INTO certificates
-         (certificate_number, submission_id, submission_item_id, status, grade_type, grader_status,
+         (certificate_number, submission_item_id, status, grade_type, grader_status,
           print_state, created_by, issued_at, updated_at, private_notes,
           origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
           origin_location_id, origin_location_public_ref, origin_location_name,
           origin_captured_at, origin_snapshot_version)
-       VALUES ($1,$2,$3,'active','numeric','assigned','awaiting_approval','partner_connector', now(), now(), $10,
-               'PARTNER',$4,$5,$6,$7,$8,$9, now(), 1)
+       VALUES ($1,$2,'active','numeric','assigned','awaiting_approval','partner_connector', now(), now(), $9,
+               'PARTNER',$3,$4,$5,$6,$7,$8, now(), 1)
        RETURNING id`,
       [
         `MVGH${9000 + n * 1000 + i}`,
-        destinationSubmissionId,
         itemId,
         tenantId,
         `gh-org-ref-${n}`,

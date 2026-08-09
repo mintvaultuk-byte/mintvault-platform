@@ -70,7 +70,6 @@ async function seedMintVaultTables(): Promise<void> {
     certificate_number text UNIQUE,
     card_id integer,
     submission_item_id integer,
-    submission_id integer,
     status varchar(10) NOT NULL DEFAULT 'active',
     label_type text NOT NULL DEFAULT 'Standard',
     grade_type text NOT NULL DEFAULT 'numeric',

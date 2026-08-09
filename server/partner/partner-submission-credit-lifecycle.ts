@@ -881,7 +881,9 @@ async function assertPartnerGradingApprovedForSettlement(
        JOIN certificates cert
          ON cert.id = pgwi.certificate_id
         AND cert.submission_item_id = pgwi.submission_item_id
-        AND cert.submission_id = pgwi.destination_submission_id
+       JOIN submission_items si
+         ON si.id = cert.submission_item_id
+        AND si.submission_id = pgwi.destination_submission_id
       WHERE pgwi.tenant_id = $1
         AND pgwi.partner_submission_id = $2
         AND pgwi.destination_submission_id = $3

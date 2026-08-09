@@ -51,7 +51,7 @@ async function seedMintVaultTables(): Promise<void> {
   )`);
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
   await admin.query(
-    "CREATE TABLE certificates (id serial primary key, cert_id text, submission_id integer, secret text)"
+    "CREATE TABLE certificates (id serial primary key, cert_id text, secret text)"
   );
   await admin.query(
     "CREATE TABLE label_prints (id serial primary key, certificate_id integer, created_at timestamptz not null default now())"
