@@ -226,6 +226,7 @@ describe("partner schema ↔ migration parity", () => {
       // changeable fact, and keeping the two apart is what lets a shop move premises without
       // rewriting what its historical certificates claim.
       "0058_partner_public_network.sql",
+      "0059_partner_public_eligibility_propagation.sql",
     ]);
   });
 

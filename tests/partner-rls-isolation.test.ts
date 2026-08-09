@@ -1047,6 +1047,9 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // Omitting a tenant-keyed table from this list is not a red build — it is a coverage hole,
     // which is the more dangerous failure.
     "0058_partner_public_network",
+    // 0059 tightens partner_public_listings_public_read to gate on org/location eligibility as
+    // well as listing_status. Without it this audit would keep proving 0058's looser policy.
+    "0059_partner_public_eligibility_propagation",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */

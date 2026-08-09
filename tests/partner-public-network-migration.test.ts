@@ -70,7 +70,7 @@ async function seedListing(
   extra: Record<string, unknown> = {},
 ): Promise<{ listingId: string; locationId: string }> {
   const loc = await admin.query<{ id: string }>(
-    "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,$2) RETURNING id",
+    "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,$2,'ACTIVE') RETURNING id",
     [tenantId, locationName],
   );
   const locationId = loc.rows[0].id;
@@ -140,8 +140,8 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
       await migrator.end();
     }
 
-    await admin.query("INSERT INTO partner_organisations (id, legal_name) VALUES ($1,'Tenant A')", [T_A]);
-    await admin.query("INSERT INTO partner_organisations (id, legal_name) VALUES ($1,'Tenant B')", [T_B]);
+    await admin.query("INSERT INTO partner_organisations (id, legal_name, status) VALUES ($1,'Tenant A','ACTIVE')", [T_A]);
+    await admin.query("INSERT INTO partner_organisations (id, legal_name, status) VALUES ($1,'Tenant B','ACTIVE')", [T_B]);
   }, 300_000);
 
   afterAll(async () => {
@@ -297,7 +297,7 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
 
     it.each(CASES)("normalises %s -> %s / outward %s", async (raw, normalised, outward) => {
       const loc = await admin.query<{ id: string }>(
-        "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,'PC') RETURNING id",
+        "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'PC','ACTIVE') RETURNING id",
         [T_A],
       );
       const { rows } = await admin.query(
@@ -550,7 +550,7 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
 
     it("prevents a listing pointing at another tenant's location", async () => {
       const loc = await admin.query<{ id: string }>(
-        "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,'B only') RETURNING id",
+        "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'B only','ACTIVE') RETURNING id",
         [T_B],
       );
       await expect(
@@ -608,7 +608,7 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
 
     it("refuses ACTIVE without an approval record", async () => {
       const loc = await admin.query<{ id: string }>(
-        "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,'NoApproval') RETURNING id",
+        "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'NoApproval','ACTIVE') RETURNING id",
         [T_A],
       );
       await expect(
@@ -632,7 +632,7 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
     it("refuses to re-point a listing at a different location", async () => {
       const { listingId } = await seedListing(T_A, "Repoint", "state-repoint", "ACTIVE");
       const other = await admin.query<{ id: string }>(
-        "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,'Other') RETURNING id",
+        "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'Other','ACTIVE') RETURNING id",
         [T_A],
       );
       await expect(
@@ -642,7 +642,7 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
 
     it("refuses coordinates supplied as only one half of a pair", async () => {
       const loc = await admin.query<{ id: string }>(
-        "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,'HalfCoord') RETURNING id",
+        "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'HalfCoord','ACTIVE') RETURNING id",
         [T_A],
       );
       // Treating the missing half as 0 would drop the shop in the Gulf of Guinea.

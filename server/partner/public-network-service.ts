@@ -248,7 +248,12 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
     throw new PublicNetworkError("DISTANCE_REQUIRES_COORDINATES", "Sorting by distance requires lat and lng.", 400);
   }
 
-  const where: string[] = ["listing_status = 'ACTIVE'"];
+  // PUBLIC ELIGIBILITY (0059). All three conjuncts, not just listing_status: an organisation or
+  // location that has lost its standing must vanish from the finder with no second manual action.
+  // These are SNAPSHOT columns maintained by ENABLE ALWAYS triggers, not a join — the anonymous
+  // connection has no tenant GUC and both source tables are FORCE RLS, so a join would match zero
+  // rows and hide every shop. The RLS policy carries the identical predicate as the second layer.
+  const where: string[] = [PUBLIC_ELIGIBILITY_PREDICATE];
   const params: unknown[] = [];
   const add = (v: unknown) => `$${params.push(v)}`;
 
@@ -379,7 +384,7 @@ export async function getShopProfile(slug: string): Promise<PublicShopProfileDto
   const { rows } = await partnerRuntimeQuery<Record<string, unknown>>(
     `SELECT ${PUBLIC_LISTING_COLUMNS}, location_id
        FROM partner_public_listings
-      WHERE slug = $1 AND listing_status = 'ACTIVE'
+      WHERE slug = $1 AND ${PUBLIC_ELIGIBILITY_PREDICATE}
       LIMIT 1`,
     [slug],
   );
@@ -423,6 +428,20 @@ export async function getShopProfile(slug: string): Promise<PublicShopProfileDto
  */
 export const RECENT_CARD_COLUMNS =
   "certificate_number, card_name, set_name, year_text, card_number_display, grade, grade_approved_at";
+
+/**
+ * The complete public-visibility gate for a shop listing.
+ *
+ * org_status and location_status are 0059 snapshot columns kept in step with partner_organisations
+ * and partner_locations by ENABLE ALWAYS triggers. Eligibility is ACTIVE on both: PENDING is not
+ * eligible, because a shop whose organisation was never activated has no business on a public map.
+ *
+ * KEEP THIS IDENTICAL to the partner_public_listings_public_read RLS policy in 0059. They are two
+ * layers of the same rule, and a query that quietly disagreed with the policy would either serve
+ * suspended shops or serve none at all.
+ */
+export const PUBLIC_ELIGIBILITY_PREDICATE =
+  "listing_status = 'ACTIVE' AND org_status = 'ACTIVE' AND location_status = 'ACTIVE'";
 
 export const PUBLIC_CARD_PREDICATE = `
   deleted_at IS NULL

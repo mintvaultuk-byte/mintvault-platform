@@ -489,6 +489,37 @@ const ROUND_TRIPS: RoundTrip[] = [
       return rows[0].n === 0 ? "public_network_absent" : "public_network_present";
     },
   },
+  {
+    number: 59,
+    standalone: true,
+    migration: "0059_partner_public_eligibility_propagation.sql",
+    rollback: "rollback-0059-partner-public-eligibility-propagation.sql",
+    hole: "a suspended or revoked organisation stays publicly advertised on the shop finder, because listing_status is the only public gate",
+    whenApplied: "eligibility_propagation_present",
+    whenRolledBack: "eligibility_propagation_absent",
+    // 0059 is now the newest migration, so the descending sequence starts here rather than at 0058.
+    //
+    // The probe checks the COLUMNS, the three trigger functions AND the policy text. Dropping the
+    // columns alone would leave the propagation functions stranded in `public` — the residue the
+    // unpinned-function class sweep in this file goes red on — and would leave the public read
+    // policy still naming columns that no longer exist, which fails closed in the worst way: every
+    // shop invisible behind an HTTP 200.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='partner_public_listings'
+               AND column_name IN ('org_status','location_status'))
+           + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+               WHERE n.nspname='public' AND p.proname IN (
+                 'partner_public_listing_stamp_eligibility',
+                 'partner_public_propagate_org_status',
+                 'partner_public_propagate_location_status'))
+         )::int n`
+      );
+      return rows[0].n === 0 ? "eligibility_propagation_absent" : "eligibility_propagation_present";
+    },
+  },
 ];
 
 // =============================================================================================

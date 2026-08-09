@@ -103,7 +103,7 @@ async function insertCert(
 
 async function seedListing(tenantId: string, name: string, slug: string): Promise<{ listingId: string; locationId: string }> {
   const loc = await admin.query<{ id: string }>(
-    "INSERT INTO partner_locations (tenant_id, partner_id, name) VALUES ($1,$1,$2) RETURNING id",
+    "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,$2,'ACTIVE') RETURNING id",
     [tenantId, name],
   );
   const locationId = loc.rows[0].id;
@@ -259,7 +259,7 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
     await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS graded_at timestamptz");
     await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS status_updated_at timestamptz");
 
-    await admin.query("INSERT INTO partner_organisations (id, legal_name) VALUES ($1,'Tenant A')", [T_A]);
+    await admin.query("INSERT INTO partner_organisations (id, legal_name, status) VALUES ($1,'Tenant A','ACTIVE')", [T_A]);
 
     // Point every pool this service uses at the disposable cluster, THEN import it.
     process.env.PARTNER_ADMIN_DATABASE_URL = cluster.url;
@@ -436,6 +436,112 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(rework.rawValue).toBeCloseTo(2.0, 5);
       const firstPass = ev.metrics.find((m) => m.metric === "first_pass_approval_rate")!;
       expect(firstPass.rawValue).toBeCloseTo(0.0, 5);
+    });
+  });
+
+  /**
+   * PUBLIC ELIGIBILITY — suspension must propagate without a second manual action.
+   *
+   * A listing is a deliberate SNAPSHOT of a location, not a view over it (0058), so nothing carried
+   * the tenant's or the location's current standing onto it. `listing_status='ACTIVE'` was the only
+   * public gate, and a Super Admin suspending an organisation left its shop advertised, rated and
+   * "verified" on the public finder until somebody remembered to flip the listing too.
+   *
+   * Note WHY the eligibility is denormalised onto the listing rather than joined at read time: the
+   * public queries run on `partner_runtime` with NO tenant GUC, and both partner_organisations and
+   * partner_locations are ENABLE + FORCE RLS with a tenant-isolation policy and no public branch
+   * (0001). An EXISTS join against them from the anonymous connection matches zero rows, so it would
+   * not hide suspended shops — it would hide EVERY shop, behind an HTTP 200.
+   */
+  describe("public eligibility — organisation and location suspension", () => {
+    async function visible(slug: string): Promise<boolean> {
+      const profile = await svc.getShopProfile(slug);
+      const finder = await svc.findShops({ page: 1, pageSize: 50 });
+      const inFinder = finder.rows.some((s) => s.slug === slug);
+      // Visible means visible ANYWHERE public — a gate that closed the profile but left the shop
+      // on the finder would still be advertising a suspended partner.
+      return profile !== null || inFinder;
+    }
+
+    /** Always restore, even when an expectation throws, so one failure cannot cascade. */
+    async function withOrgStatus(status: string, body: () => Promise<void>): Promise<void> {
+      await admin.query("UPDATE partner_organisations SET status=$1 WHERE id=$2", [status, T_A]);
+      try {
+        await body();
+      } finally {
+        await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [T_A]);
+      }
+    }
+
+    it("hides the shop when the ORGANISATION is suspended, with the listing left ACTIVE", async () => {
+      const { locationId } = await seedListing(T_A, "Susp Org", "susp-org");
+      expect(await visible("susp-org")).toBe(true);
+
+      await withOrgStatus("SUSPENDED", async () => {
+        // PUBLIC-SUSPEND1: the listing is untouched and still ACTIVE. Only the org changed.
+        const still = await admin.query<{ s: string }>(
+          "SELECT listing_status AS s FROM partner_public_listings WHERE slug='susp-org'",
+        );
+        expect(still.rows[0].s).toBe("ACTIVE");
+        expect(await visible("susp-org")).toBe(false);
+      });
+      expect(await visible("susp-org")).toBe(true);
+      expect(locationId).toBeTruthy();
+    });
+
+    it("hides the shop when the ORGANISATION is revoked", async () => {
+      await seedListing(T_A, "Revoked Org", "revoked-org");
+      await withOrgStatus("REVOKED", async () => {
+        expect(await visible("revoked-org")).toBe(false);
+      });
+    });
+
+    it("hides the shop when the LOCATION is suspended", async () => {
+      const { locationId } = await seedListing(T_A, "Susp Loc", "susp-loc");
+      expect(await visible("susp-loc")).toBe(true);
+      await admin.query("UPDATE partner_locations SET status='SUSPENDED' WHERE id=$1", [locationId]);
+      expect(await visible("susp-loc")).toBe(false);
+    });
+
+    /**
+     * The SECOND layer, proven on its own.
+     *
+     * Every other test here goes through the application predicate, so they all stay green even if
+     * the RLS policy is gutted — defence in depth means either layer alone hides the shop, which is
+     * exactly why neither layer can be proven by a test that exercises both. This one takes the
+     * application out of the picture: it runs a bare SELECT as the RLS-bound runtime role with no
+     * predicate at all, so only the 0059 policy can refuse it.
+     */
+    it("RLS alone refuses a suspended shop, with no application predicate involved", async () => {
+      const { locationId } = await seedListing(T_A, "Rls Susp", "rls-susp");
+      const asRuntime = async () => {
+        await admin.query("SET ROLE partner_runtime");
+        try {
+          const r = await admin.query<{ slug: string }>(
+            "SELECT slug FROM partner_public_listings WHERE slug = 'rls-susp'",
+          );
+          return r.rows.length;
+        } finally {
+          await admin.query("RESET ROLE");
+        }
+      };
+
+      expect(await asRuntime()).toBe(1);
+      await admin.query("UPDATE partner_locations SET status='SUSPENDED' WHERE id=$1", [locationId]);
+      // No WHERE listing_status, no service call — if this is 1, the policy is not carrying the gate.
+      expect(await asRuntime()).toBe(0);
+    });
+
+    it("does not let the verified flag outlive eligibility", async () => {
+      const { locationId } = await seedListing(T_A, "Verified Susp", "verified-susp");
+      await admin.query("UPDATE partner_public_listings SET verified_at=now() WHERE slug='verified-susp'");
+      const before = await svc.getShopProfile("verified-susp");
+      expect(before?.verified).toBe(true);
+
+      await admin.query("UPDATE partner_locations SET status='SUSPENDED' WHERE id=$1", [locationId]);
+      // Gone entirely rather than returned with verified:true — a denormalised badge must never
+      // outlive the standing it attests to.
+      expect(await svc.getShopProfile("verified-susp")).toBeNull();
     });
   });
 

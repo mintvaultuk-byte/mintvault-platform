@@ -117,6 +117,7 @@ async function rollBackEverythingAbove0049(): Promise<void> {
       // rollback-0053 while anything >53), so omitting a newer file does not merely leave one
       // stray row — it makes the middle of this list refuse too, and 0049 then reports several
       // remaining rows rather than the one that was actually forgotten. Add new rollbacks here.
+      "rollback-0059-partner-public-eligibility-propagation.sql",
       "rollback-0058-partner-public-network.sql",
       "rollback-0057-partner-credits-purchase-permission.sql",
       "rollback-0056-partner-hq-control-tables-write-deny.sql",
