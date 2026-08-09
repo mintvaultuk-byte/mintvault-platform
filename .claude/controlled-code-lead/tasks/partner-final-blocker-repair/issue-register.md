@@ -584,3 +584,52 @@ Closing them means extending one harness: linking a certificate through the 0049
 RATING-AWAIT1 additionally adding a rating-pool reset helper so the pool can be re-pointed and
 exhausted to make an explicit latency contract measurable. Neither is conceptually hard; both are
 real fixture work and were **not** attempted rather than half-done.
+
+---
+
+# CI-EQUIVALENT FULL SUITE — GREEN, and what it cost to get an honest number
+
+**Final: 272 files passed, 28 skipped, 0 failed · 4850 tests passed, 828 skipped, 0 failed.**
+Topology: file-sequential (`TEST_DATABASE_URL` set, as `ci.yml` does), against the same
+`pgvector/pgvector:pg16` database and the same MinIO-on-9010 that `ci.yml` specifies. Zero
+all-skipped files.
+
+Getting there took three attempts, and each failure taught something:
+
+1. **Invented `TEST_DATABASE_URL`.** The repo guard refused it — *"REFUSED: TEST_DATABASE_URL must
+   be the local throwaway DB"*. 31 suites declined to START. Had I not read the error I would have
+   reported 31 defects.
+2. **Right database, no R2 proof env.** 1 real failure. I classified `partner-full-pilot-workflow`
+   refusing to start as "an environment prerequisite, not a defect". **That was half right and the
+   wrong half to act on** — the missing environment was HIDING a regression.
+3. **Full CI environment.** 1 → **15** failures, and 14 of them were mine.
+
+## The regression the missing environment was hiding
+`markRatingDirtyForCertInTx` (the H1 repair) runs INSIDE the mirror transaction — the placement is
+the point, because it makes the obligation commit with its evidence. It also means a failure there
+does not degrade the rating: **it rolls back the HQ approval with it.** On an estate without 0058,
+`partner_public_listings` does not exist, so every partner review 42P01s. That is the application-
+first rollout window, and it is exactly the failure "a rating is SECONDARY" exists to prevent,
+reintroduced by the repair meant to strengthen it. The reconciler already guarded against a
+pre-0062 database; the in-transaction path did not. Fixed with a per-call `to_regclass` probe.
+
+## A genuine sequential-topology test defect
+`partner-public-network-migration` keyed listing slugs on `Date.now()`, and `"ME2 2NG"` /
+`"ME2-2NG"` / `"me2 2ng"` all strip to the same stem — two cases in one millisecond collided on
+`uq_partner_public_listings_slug`. It surfaced in the SEQUENTIAL run because that is where the
+cases run fastest: the inverse of the starvation pattern. Replaced with a monotonic counter.
+
+## ⚠️ TWO EXECUTION FLOORS COULD NOT BE VALIDATED HERE
+Measured against the real run:
+
+| Suite | Executed on my run | Declared floor |
+|---|---|---|
+| `partner-management-migration` | **0** | 14 |
+| `partner-rls-isolation` | **33** | 85 |
+
+Both are env-gated and this machine does not hold every gate variable CI sets, so they ran
+partially or not at all. **In CI they should execute fully — but I have not proven that**, and the
+earlier floor audit separately flagged `partner-rls-isolation` as possibly stale-HIGH by one
+(static expansion = 84 vs a floor of 85), which would be a spurious red. Both need settling from a
+real CI run, not from me. Every other critical floor matched its measured count EXACTLY: 84, 8, 13,
+44, 48, 42, 37, 27, 21, 18.
