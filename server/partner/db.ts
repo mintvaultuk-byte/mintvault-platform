@@ -299,6 +299,11 @@ export async function partnerPublicQuery<T extends pg.QueryResultRow = pg.QueryR
   }
 }
 
+/** Test-only: the live public pool, so a harness can hold real connections against it. */
+export function __partnerPublicPoolForTests(): pg.Pool {
+  return getPublicPool();
+}
+
 /** Test-only: drop the memoised pool so a suite can re-point PARTNER_PUBLIC_DATABASE_URL. */
 export async function __resetPartnerPublicPoolForTests(): Promise<void> {
   const p = publicPool;

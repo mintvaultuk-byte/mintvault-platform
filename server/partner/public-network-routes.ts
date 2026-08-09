@@ -26,7 +26,7 @@ import { partnerRateLimitClientKey } from "./rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly } from "./session";
 import { getPartnerAdminCapability } from "./admin-capability";
-import { withTenant, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
+import { withTenant, partnerAdminQuery, withPartnerAdminTransaction, PartnerPublicDbUnavailable } from "./db";
 import { writePartnerAudit } from "./audit";
 import { SELF_SERVICE_VALIDATORS, SelfServiceValidationError } from "./public-network-validation";
 import { storage } from "../storage";
@@ -60,8 +60,55 @@ function sendError(res: Response, err: unknown): void {
   }
   // Log code+message only. A pg error object's `detail` can carry row values, i.e. PII.
   const e = err as { code?: string; message?: string };
+  if (isPublicDbUnavailable(err)) {
+    // 503, not 500: this is "come back shortly", not "this request was wrong". The distinction is
+    // load-bearing for the caller — a CDN or a client may retry a 503 and must not retry a 500 —
+    // and for us, because a public database outage that reports 500 looks like an application bug
+    // in every dashboard.
+    //
+    // The body is a FIXED domain shape. Nothing derived from the error reaches it: no SQLSTATE, no
+    // query text, no role, no host, no database name, no stack. A pg connection error's `message`
+    // routinely contains the host and port, so echoing it here would publish the database endpoint
+    // to anonymous callers.
+    console.error("[partner-network] public database unavailable:", e?.code, e?.message);
+    res.status(503).json({
+      error: { code: "public_service_unavailable", message: "Shop finder is temporarily unavailable. Please try again shortly." },
+    });
+    return;
+  }
   console.error("[partner-network] unexpected error:", e?.code, e?.message);
   res.status(500).json({ error: { code: "internal_error", message: "Something went wrong. Please try again." } });
+}
+
+/**
+ * Is this failure "the public database could not serve us right now"?
+ *
+ * Deliberately an ALLOWLIST of causes rather than a catch-all. A catch-all would quietly convert a
+ * genuine application bug into a soothing 503 and hide it from every alert, which is the opposite
+ * of what an outage signal is for.
+ *
+ * The SQLSTATEs are the bounds configured on the public pool actually firing:
+ *   57014  statement_timeout / query cancelled  — the statement bound
+ *   55P03  lock_not_available                   — the lock_timeout bound
+ *   53300  too_many_connections                 — the server refusing more backends
+ *   08xxx  connection exception class           — the endpoint gone or refusing
+ * plus node-postgres' own client-side acquire and query timeouts, which surface as messages rather
+ * than SQLSTATEs, and PartnerPublicDbUnavailable for a missing/refused public configuration.
+ */
+export function isPublicDbUnavailable(err: unknown): boolean {
+  if (err instanceof PartnerPublicDbUnavailable) return true;
+  const e = err as { code?: string; message?: string };
+  const code = typeof e?.code === "string" ? e.code : "";
+  if (code === "57014" || code === "55P03" || code === "53300" || code === "53200") return true;
+  if (code.startsWith("08")) return true;
+  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND") return true;
+  const msg = typeof e?.message === "string" ? e.message.toLowerCase() : "";
+  return (
+    msg.includes("timeout exceeded when trying to connect") ||
+    msg.includes("query read timeout") ||
+    msg.includes("connection terminated") ||
+    msg.includes("fail closed")
+  );
 }
 
 /**

@@ -453,9 +453,11 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
    */
   describe("public reader — least privilege", () => {
     let db: typeof import("../server/partner/db");
+    let routes: typeof import("../server/partner/public-network-routes");
 
     beforeAll(async () => {
       db = await import("../server/partner/db");
+      routes = await import("../server/partner/public-network-routes");
     });
 
     it("executes public SQL AS partner_public_reader, not as the connecting login role", async () => {
@@ -561,6 +563,151 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       );
       expect(Number(adminStillWorks.rows[0].n)).toBeGreaterThan(0);
     });
+
+    /**
+     * POOL EXHAUSTION, with real connections.
+     *
+     * Nothing here is mocked: six genuine clients are checked out of the real public pool and held,
+     * then a seventh request is made. The assertion is on the OBSERVED elapsed time against the
+     * configured acquire bound — not on vitest's own timeout, which would prove only that the test
+     * runner gave up.
+     */
+    it("bounds a request that arrives with every public connection held, and leaves Admin healthy", async () => {
+      const pool = db.__partnerPublicPoolForTests();
+      const held: Array<{ release: () => void }> = [];
+      try {
+        for (let i = 0; i < 6; i++) held.push(await pool.connect());
+
+        const started = Date.now();
+        let failure: unknown;
+        try {
+          await svc.findShops({ page: 1, pageSize: 5 });
+        } catch (e) {
+          failure = e;
+        }
+        const elapsed = Date.now() - started;
+
+        // It must FAIL — a seventh caller cannot be served — and fail QUICKLY. The 1s acquire bound
+        // plus generous slack; anything near "forever" means the bound is not being applied.
+        expect(failure, "a request with no free connection must fail, not queue indefinitely").toBeDefined();
+        expect(elapsed, `expected a bounded failure, took ${elapsed}ms`).toBeLessThan(4000);
+        // And it must be classified as unavailable, so the route answers 503 rather than 500.
+        expect(routes.isPublicDbUnavailable(failure)).toBe(true);
+
+        // THE ISOLATION CLAIM. While the public pool is fully saturated, Super Admin's own
+        // connection is unaffected — that is the entire operational point of a separate pool.
+        const adminOk = await admin.query<{ n: string }>(
+          "SELECT count(*)::text n FROM partner_public_listings",
+        );
+        expect(Number(adminOk.rows[0].n)).toBeGreaterThan(0);
+      } finally {
+        for (const c of held) c.release();
+      }
+
+      // The pool is reusable afterwards: exhaustion is a transient state, not a permanent wedge.
+      await expect(svc.findShops({ page: 1, pageSize: 5 })).resolves.toBeTruthy();
+    });
+
+    /**
+     * LOCK WAIT, with a real lock.
+     *
+     * A competing session takes ACCESS EXCLUSIVE on partner_public_listings — exactly what a
+     * migration or a stuck writer does — which blocks the public read through its view. The public
+     * request must give up on its own configured bound.
+     */
+    it("bounds a public read blocked by a real ACCESS EXCLUSIVE lock", async () => {
+      const blocker = new Client({ connectionString: cluster.url });
+      await blocker.connect();
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("LOCK TABLE partner_public_listings IN ACCESS EXCLUSIVE MODE");
+
+        // RACE, not a bare await. If the bounds are removed the call simply never returns, and a
+        // bare await would surface as vitest's own timeout — which proves nothing about the
+        // application's contract. Racing against an explicit deadline turns "it never came back"
+        // into a real assertion failure naming the missing bound. That is what makes
+        // PUBLIC-TIMEOUT1 a genuine RED rather than a runner artefact.
+        const DEADLINE_MS = 6000;
+        const started = Date.now();
+        const TIMED_OUT = Symbol("no-bound");
+        let failure: unknown;
+        const outcome = await Promise.race([
+          svc.getShopProfile("proj-gate").then(
+            () => "resolved" as const,
+            (e) => {
+              failure = e;
+              return "rejected" as const;
+            },
+          ),
+          new Promise<typeof TIMED_OUT>((r) => setTimeout(() => r(TIMED_OUT), DEADLINE_MS)),
+        ]);
+        const elapsed = Date.now() - started;
+
+        expect(
+          outcome,
+          `the public read was still waiting after ${DEADLINE_MS}ms — lock_timeout/statement_timeout is not being applied`,
+        ).not.toBe(TIMED_OUT);
+        expect(outcome, "a public read behind ACCESS EXCLUSIVE must fail, not succeed").toBe("rejected");
+        expect(failure, "a public read behind ACCESS EXCLUSIVE must not wait forever").toBeDefined();
+        // lock_timeout 1s / statement_timeout 2s / query_timeout 2s — whichever fires first, the
+        // request is bounded well inside this. PUBLIC-TIMEOUT1 removes those bounds and this
+        // becomes an unbounded wait, which is the RED.
+        expect(elapsed, `expected a bounded failure, took ${elapsed}ms`).toBeLessThan(6000);
+        expect(routes.isPublicDbUnavailable(failure)).toBe(true);
+
+        // Admin is not starved by the public path giving up.
+        await expect(admin.query("SELECT 1")).resolves.toBeTruthy();
+      } finally {
+        await blocker.query("ROLLBACK").catch(() => {});
+        await blocker.end().catch(() => {});
+      }
+
+      // Connection returned usable once the lock is gone.
+      await expect(svc.getShopProfile("proj-gate")).resolves.toBeTruthy();
+    }, 30_000);
+
+    /**
+     * THE 503 CONTRACT, over real HTTP.
+     *
+     * Asserted through an actual Express server rather than by calling the handler, because the
+     * status code and the serialised body ARE the contract Codex will build against. Also asserts
+     * what must NOT be in the body: a pg connection error's message routinely carries the host and
+     * port, so echoing it would publish the database endpoint to anonymous callers.
+     */
+    it("answers 503 with a safe body when the public database is unavailable", async () => {
+      const express = (await import("express")).default;
+      const app = express();
+      routes.registerPartnerNetworkPublicRoutes(app);
+      const server = app.listen(0);
+      await new Promise((r) => server.once("listening", r));
+      const port = (server.address() as { port: number }).port;
+
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      await db.__resetPartnerPublicPoolForTests();
+      delete process.env.PARTNER_PUBLIC_DATABASE_URL;
+      try {
+        for (const path of ["/api/shops?page=1&pageSize=5", "/api/shops/proj-gate"]) {
+          const res = await fetch(`http://127.0.0.1:${port}${path}`);
+          expect(res.status, `${path} must answer 503`).toBe(503);
+          const body = await res.json();
+          expect(body).toEqual({
+            error: {
+              code: "public_service_unavailable",
+              message: "Shop finder is temporarily unavailable. Please try again shortly.",
+            },
+          });
+          // Nothing about the database may reach an anonymous caller.
+          const raw = JSON.stringify(body).toLowerCase();
+          for (const leak of ["postgres", "postgresql", "5432", "partner_public_reader", "sqlstate", "select ", "127.0.0.1", "password"]) {
+            expect(raw, `503 body leaked ${leak}`).not.toContain(leak);
+          }
+        }
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+        await new Promise((r) => server.close(r));
+      }
+    }, 30_000);
 
     it("FAILS CLOSED when the public database URL is absent — it does not fall back", async () => {
       const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
