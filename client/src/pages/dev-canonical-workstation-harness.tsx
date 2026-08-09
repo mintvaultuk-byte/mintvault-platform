@@ -202,7 +202,7 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
   const savedRevisions: Partial<Record<CanonicalHarnessRoleKey, number>> = {};
   const roles = Object.values(ROLE_BY_CERTIFICATE_ID);
   const records = Object.fromEntries(
-    roles.map((role) => [role, { ...GRADING_PAYLOAD }])
+    roles.map((role) => [role, { ...GRADING_PAYLOAD, reviewRevision: 1 }])
   ) as unknown as CanonicalHarnessFixtureState["records"];
   const delays: Partial<Record<CanonicalHarnessOperation, number[]>> = {};
   const failures: Partial<Record<CanonicalHarnessOperation, number[]>> = {};
@@ -224,7 +224,7 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
     requests.splice(0);
     for (const key of Object.keys(savedPayloads) as CanonicalHarnessRoleKey[]) delete savedPayloads[key];
     for (const key of Object.keys(savedRevisions) as CanonicalHarnessRoleKey[]) delete savedRevisions[key];
-    for (const role of roles) records[role] = { ...GRADING_PAYLOAD };
+    for (const role of roles) records[role] = { ...GRADING_PAYLOAD, reviewRevision: 1 };
     for (const key of Object.keys(delays) as CanonicalHarnessOperation[]) delete delays[key];
     for (const key of Object.keys(failures) as CanonicalHarnessOperation[]) delete failures[key];
     stalePreviewDelay = null;
@@ -334,18 +334,19 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
     }
     if (method === "GET" && /^\d+\/grading$/.test(certificateSuffix)) {
       finish("fixture", role);
-      return json(records[role]);
+      return json({ ...records[role], reviewRevision: savedRevisions[role] ?? 1 });
     }
     if (method === "PUT" && /^\d+\/grade$/.test(certificateSuffix)) {
       savedPayloads[role] = body;
-      savedRevisions[role] = (savedRevisions[role] ?? 0) + 1;
+      savedRevisions[role] = (savedRevisions[role] ?? 1) + 1;
       const persisted = body as Record<string, unknown>;
       records[role] = {
         ...records[role],
         ...normalisePersistedGradingRecord(persisted),
+        reviewRevision: savedRevisions[role],
       };
       finish("fixture", role);
-      return json({ ok: true, revision: savedRevisions[role] });
+      return json({ ok: true, reviewRevision: savedRevisions[role] });
     }
     if (method === "POST" && certificateSuffix === "label/preview") {
       const certificateId = Number((body as { certificateId?: unknown } | null)?.certificateId);
@@ -356,6 +357,12 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
       if (ROLE_BY_CERTIFICATE_ID[certificateId] !== role) {
         finish("blocked", role);
         return json({ error: "The dev preview fixture rejects cross-role certificate IDs" }, 403);
+      }
+      const expectedRevision = (body as { expectedRevision?: unknown } | null)?.expectedRevision;
+      const authoritativeRevision = savedRevisions[role] ?? 1;
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== authoritativeRevision) {
+        finish("blocked", role);
+        return json({ code: "STALE_REVIEW", error: "The prepared review revision is stale" }, 409);
       }
       const grade = String(records[role].gradeOverall ?? records[role].grade ?? "").replace(/\.0$/, "");
       const fixtureBase64 = DEV_CANONICAL_LABEL_PNG_BASE64[grade];
@@ -369,7 +376,8 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
         headers: {
           "content-type": "image/png",
           "x-mv-harness-grade": grade,
-          "x-mv-harness-revision": String(savedRevisions[role] ?? 0),
+          "x-mv-harness-revision": String(authoritativeRevision),
+          "x-mintvault-review-revision": String(authoritativeRevision),
         },
       });
     }

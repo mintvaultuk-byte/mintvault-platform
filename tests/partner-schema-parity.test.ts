@@ -141,6 +141,8 @@ describe("partner schema ↔ migration parity", () => {
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
       "0046_partner_mfa_pending_lifecycle.sql",
       "0047_partner_label_preview_permission.sql",
+      // Server-authoritative CAS token for the canonical pending-review approval path.
+      "0048_grading_review_revision.sql",
     ]);
   });
 

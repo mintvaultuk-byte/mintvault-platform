@@ -76,13 +76,20 @@ describe("canonical workstation dev harness", () => {
         body: JSON.stringify({ overall_grade: grade, eye_appeal_modifier: index }),
       });
       expect(saved.status).toBe(200);
+      const { reviewRevision } = (await saved.json()) as { reviewRevision: number };
+      expect(reviewRevision).toBeGreaterThan(1);
       const preview = await fixture.fetch(`${testCase.base}/certificates/label/preview`, {
         method: "POST",
-        body: JSON.stringify({ certificateId: testCase.certId, gradeOverall: "hostile-stale-client-value" }),
+        body: JSON.stringify({
+          certificateId: testCase.certId,
+          gradeOverall: "hostile-stale-client-value",
+          expectedRevision: reviewRevision,
+        }),
       });
       const label = new DataView(await preview.arrayBuffer());
       expect(preview.headers.get("content-type")).toBe("image/png");
       expect(preview.headers.get("x-mv-harness-grade")).toBe(grade);
+      expect(preview.headers.get("x-mintvault-review-revision")).toBe(String(reviewRevision));
       expect(label.getUint32(16)).toBe(826);
       expect(label.getUint32(20)).toBe(236);
       expect(fixture.state.records[testCase.role].gradeOverall).toBe(grade);
@@ -97,18 +104,19 @@ describe("canonical workstation dev harness", () => {
         method: "PUT",
         body: JSON.stringify({ overall_grade: grade }),
       });
+    let reviewRevision = 1;
     const preview = () =>
       fixture.fetch("/api/grader/certificates/label/preview", {
         method: "POST",
-        body: JSON.stringify({ certificateId: 102, gradeOverall: "hostile-client-override" }),
+        body: JSON.stringify({ certificateId: 102, gradeOverall: "hostile-client-override", expectedRevision: reviewRevision }),
       });
 
-    expect((await save("8")).status).toBe(200);
+    reviewRevision = ((await (await save("8")).json()) as { reviewRevision: number }).reviewRevision;
     const label8 = await preview();
     expect(label8.headers.get("x-mv-harness-grade")).toBe("8");
     const png8 = new Uint8Array(await label8.arrayBuffer());
 
-    expect((await save("7")).status).toBe(200);
+    reviewRevision = ((await (await save("7")).json()) as { reviewRevision: number }).reviewRevision;
     const label7 = await preview();
     expect(label7.headers.get("x-mv-harness-grade")).toBe("7");
     const png7 = new Uint8Array(await label7.arrayBuffer());
@@ -130,11 +138,11 @@ describe("canonical workstation dev harness", () => {
     fixture.state.staleNextPreview(30);
     const first = fixture.fetch("/api/grader/certificates/label/preview", {
       method: "POST",
-      body: JSON.stringify({ certificateId: 103 }),
+      body: JSON.stringify({ certificateId: 103, expectedRevision: 1 }),
     });
     const second = fixture.fetch("/api/grader/certificates/label/preview", {
       method: "POST",
-      body: JSON.stringify({ certificateId: 103 }),
+      body: JSON.stringify({ certificateId: 103, expectedRevision: 1 }),
     });
     await Promise.all([first, second]);
     const previews = fixture.state.snapshot().filter((request) => request.operation === "preview");
@@ -143,7 +151,7 @@ describe("canonical workstation dev harness", () => {
 
     const crossRole = await fixture.fetch("/api/partner/grading/certificates/label/preview", {
       method: "POST",
-      body: JSON.stringify({ certificateId: 103 }),
+      body: JSON.stringify({ certificateId: 103, expectedRevision: 1 }),
     });
     expect(crossRole.status).toBe(403);
     const snapshot = fixture.state.snapshot();

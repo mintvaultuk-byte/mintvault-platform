@@ -26,6 +26,8 @@ async function renderPreview(props: {
   fields: CertificatePreviewFields;
   revision: number;
   onRevisionComplete: (revision: number, ok: boolean, fingerprint: string) => void;
+  expectedRevision?: number;
+  requireExpectedRevision?: boolean;
   requestTimeoutMs?: number;
 }) {
   await act(async () => {
@@ -150,6 +152,44 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     expect(host.querySelector('[data-testid="certificate-preview-image"]')).not.toBeNull();
   });
 
+  it("sends the saved server revision and becomes ready only when the label response acknowledges that exact revision", async () => {
+    const expectedRevision = 17;
+    const fetchMock = vi.fn(async () =>
+      new Response(new Blob(["png"]), {
+        status: 200,
+        headers: { "X-MintVault-Review-Revision": String(expectedRevision) },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const acknowledgements = vi.fn();
+    await renderPreview({
+      fields: fields("9"),
+      revision: 70,
+      expectedRevision,
+      requireExpectedRevision: true,
+      onRevisionComplete: acknowledgements,
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ expectedRevision });
+    expect(acknowledgements).toHaveBeenCalledWith(70, true, JSON.stringify(fields("9")), expectedRevision);
+  });
+
+  it("fails closed when a prepared preview omits or mismatches the authoritative revision header", async () => {
+    const acknowledgements = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"]), { status: 200 })));
+    await renderPreview({
+      fields: fields("9"),
+      revision: 71,
+      expectedRevision: 18,
+      requireExpectedRevision: true,
+      onRevisionComplete: acknowledgements,
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+    expect(acknowledgements).toHaveBeenCalledWith(71, false, JSON.stringify(fields("9")), null);
+    expect(host.textContent).toContain("did not acknowledge");
+  });
+
   it("settles the old revision false when an immediate sub-500ms edit supersedes it", async () => {
     vi.stubGlobal(
       "fetch",
@@ -259,6 +299,9 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     expect(puts.length).toBeGreaterThan(0);
     expect((puts.at(-1)?.body as { eye_appeal_modifier?: number }).eye_appeal_modifier).toBe(1);
     expect(previews.length).toBeGreaterThan(0);
+    const lastPreview = previews.at(-1)!;
+    expect((lastPreview.body as { expectedRevision?: unknown }).expectedRevision).toBe(state.savedRevisions.grader);
+    expect(typeof (lastPreview.body as { expectedRevision?: unknown }).expectedRevision).toBe("number");
     expect(workstationStage()).toBe("2");
     expect(host.querySelector('[data-testid="review-transition-status"]')).toBeNull();
   });
@@ -323,7 +366,7 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     expect((saved?.body as { eye_appeal_modifier?: number }).eye_appeal_modifier).not.toBe(2);
   });
 
-  it("discards an old delayed preview after navigation and accepts only the retry", async () => {
+  it("rejects an old delayed preview after navigation at the server revision boundary and accepts only the retry", async () => {
     const state = await mountProductionWorkstation();
     state.staleNextPreview(1_000);
     await requestReview();
@@ -338,7 +381,10 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     const previews = state.snapshot().filter((request) => request.operation === "preview");
     expect(previews).toHaveLength(2);
-    expect(previews[0].outcome).toBe("stale");
+    // The delayed R2 request reaches the fixture after the retry saved R3, so
+    // the server-side expectedRevision precondition rejects it rather than
+    // returning stale pixels for the client to discard.
+    expect(previews[0].outcome).toBe("blocked");
     expect(previews[0].completionSequence).toBeGreaterThan(previews[1].completionSequence!);
   });
 

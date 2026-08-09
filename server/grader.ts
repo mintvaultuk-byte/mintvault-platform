@@ -697,6 +697,9 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     // Cert-level workflow state — drives the grader panel's "rejected, redo"
     // banner and the queue chips.
     gradingStatus: (c as any).graderStatus || "unassigned",
+    // Hydrates the initial persistent preview with the same server-issued token
+    // used by save, preview acknowledgement and approval CAS.
+    reviewRevision: c.gradingRevision ?? 1,
     rejectionReason: (c as any).rejectionReason || null,
     redoCount: (c as any).redoCount ?? 0,
     gradeApprovedBy: c.gradeApprovedBy || null,
@@ -753,7 +756,13 @@ export class GradeDraftRejected extends Error {
   }
 }
 
-export async function applyCertGradeDraft(certId: number, body: any, extraWhere: SQL = sql``): Promise<boolean> {
+/**
+ * Persist one logical grading draft mutation and return the server-issued
+ * revision representing the saved certificate state.  The database trigger in
+ * migration 0048 advances it once only when certificate/review-authoritative
+ * fields actually changed; request sequence numbers are never authority.
+ */
+export async function applyCertGradeDraft(certId: number, body: any, extraWhere: SQL = sql``): Promise<number | null> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
   const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(
@@ -841,13 +850,18 @@ export async function applyCertGradeDraft(certId: number, body: any, extraWhere:
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
       updated_at = NOW()
     WHERE id = ${certId} AND grade_approved_at IS NULL ${extraWhere}
-    RETURNING id
+    RETURNING grading_revision
   `);
-  return r.rows.length > 0;
+  if (r.rows.length === 0) return null;
+  const revision = Number((r.rows[0] as { grading_revision?: unknown }).grading_revision);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error("Saved certificate has an invalid grading revision");
+  }
+  return revision;
 }
 
 /** Publish a certificate's grade (admin approval): set approved_at + live status. */
-export async function approveCertGrade(certId: number, adminUser: string): Promise<boolean> {
+export async function approveCertGrade(certId: number, adminUser: string, expectedRevision: number): Promise<boolean> {
   // Phase 2 — atomic CAS publish: only publishes while still pending_review (its
   // sole caller, approveGraderCert, requires that). 0 rows ⇒ state changed
   // concurrently (e.g. a racing reject) → caller returns 409 instead of double-publishing.
@@ -856,7 +870,9 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
         grader_status = 'approved', graded_at = NOW(), updated_at = NOW(),
         print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
-    WHERE id = ${certId} AND grader_status = 'pending_review'
+    WHERE id = ${certId}
+      AND grader_status = 'pending_review'
+      AND grading_revision = ${expectedRevision}
     RETURNING id
   `);
   return r.rows.length > 0;
@@ -1147,11 +1163,16 @@ export async function checkGradePublishGates(
  * status='active') and marks it 'approved' + graded_at — never touches sibling
  * certs of the same submission.
  */
-export async function approveGraderCert(certId: number, adminUser: string) {
+export async function approveGraderCert(certId: number, adminUser: string, expectedRevision: number) {
   const a = await getCertAssignment(certId);
   if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
   if (a.gradingStatus !== "pending_review") {
-    return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+    return {
+      ok: false as const,
+      status: 409,
+      code: "STALE_REVIEW",
+      error: "This card changed after your review was prepared. Refresh the saved review before approving.",
+    };
   }
   // Both pre-publish gates (B3 sub-grade completeness + printable-grade), shared
   // verbatim with the auto-approve path. Runs BEFORE any approval write.
@@ -1164,9 +1185,14 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   // rather than flip grader_status on an unpublished grade.
   // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
   // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
-  const published = await approveCertGrade(certId, adminUser);
+  const published = await approveCertGrade(certId, adminUser, expectedRevision);
   if (!published) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    return {
+      ok: false as const,
+      status: 409,
+      code: "STALE_REVIEW",
+      error: "This card changed after your review was prepared. Refresh the saved review before approving.",
+    };
   }
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
@@ -1221,7 +1247,7 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
-  let saved: boolean;
+  let saved: number | null;
   try {
     saved = await applyCertGradeDraft(certId, body);
   } catch (e) {
@@ -1237,7 +1263,7 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (!sameGradeSnapshot(before, after)) {
     await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
   }
-  return { ok: true as const };
+  return { ok: true as const, revision: saved };
 }
 
 // ── Earnings (display-only; NO deduction logic) ───────────────────────────────

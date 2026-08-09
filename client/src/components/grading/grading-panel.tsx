@@ -49,6 +49,13 @@ import {
 import { reviewBarrierAllowsAction, type PersistedReviewRevision } from "@shared/grading-review-barrier";
 import { autofillCard } from "@/lib/api";
 
+/** A grade write may trigger a non-review preview refresh. Only propagate a
+ * server-issued revision; callers must never substitute a local sequence. */
+function readReviewRevision(data: unknown): number | null {
+  const value = (data as { reviewRevision?: unknown } | null)?.reviewRevision;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
 import { computeMvgsScore, gradeFromMvgsScore, DEFAULT_MVGS_CALIBRATION } from "@shared/mvgs-scoring";
@@ -180,7 +187,9 @@ interface Props {
   approvalStageActive?: boolean;
   previewHost?: HTMLElement | null;
   onPreviewChange?: (fields: CertificatePreviewFields) => void;
-  onPreviewSaved?: () => void;
+  /** The server-issued revision of the persisted grading state, when this save
+   * has one. It is never a client-generated sequence. */
+  onPreviewSaved?: (reviewRevision: number | null) => void;
   onReviewTransitionReady?: (
     handler: (() => Promise<PersistedReviewRevision<CertificatePreviewFields>>) | null
   ) => void;
@@ -1117,6 +1126,14 @@ export default function GradingPanel({
     // now load empty — accepted trade-off per the Option B rework.
   }, [gradingData]);
 
+  // Existing certificates require a server-authoritative preview revision even
+  // before the operator makes their first edit. Hydration is the only source
+  // for that initial token; it is not inferred from client state.
+  useEffect(() => {
+    if (!gradingData) return;
+    onPreviewSaved?.(readReviewRevision(gradingData));
+  }, [gradingData, onPreviewSaved]);
+
   // AI analysis state
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisResult | null>(null);
   const [aiIdentification, setAiIdentification] = useState<AiIdentification | null>(null);
@@ -1180,7 +1197,6 @@ export default function GradingPanel({
   /** M-1: one explicit draft save in flight at a time (repeated Ctrl+S). */
   const saveDraftInFlightRef = useRef(false);
   const saveDraftPromiseRef = useRef<Promise<void> | null>(null);
-  const reviewRevisionRef = useRef(0);
   const reviewAbortRef = useRef<AbortController | null>(null);
   const gradingPanelMountedRef = useRef(true);
   const latestReviewDraftRef = useRef<{
@@ -1373,7 +1389,7 @@ export default function GradingPanel({
       editSnapshotRef.current = null;
       setRarityOverrideTransition(null);
       setEditMode(false);
-      onPreviewSaved?.();
+      onPreviewSaved?.(readReviewRevision(data));
     } catch (e: any) {
       setRarityOverrideTransition(null);
       // Keep edit mode open so the admin doesn't lose their changes.
@@ -1401,7 +1417,8 @@ export default function GradingPanel({
         }
         setRarityOverrideTransition(null);
         setAutoSaveStatus("saved");
-        onPreviewSaved?.();
+        const data = await res.json().catch(() => ({}));
+        onPreviewSaved?.(readReviewRevision(data));
         if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
         autoSavedClearTimerRef.current = setTimeout(() => {
           if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
@@ -2210,7 +2227,6 @@ export default function GradingPanel({
     if (!draft || draft.certId !== certId) throw new Error("Grading payload changed before Review could save.");
     const transitionCertId = draft.certId;
     const payloadFingerprint = draft.payloadFingerprint;
-    const revision = ++reviewRevisionRef.current;
     reviewAbortRef.current?.abort();
     const controller = new AbortController();
     reviewAbortRef.current = controller;
@@ -2226,6 +2242,10 @@ export default function GradingPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Review save failed");
+      const revision = readReviewRevision(data);
+      if (revision == null) {
+        throw new Error("Review save did not return an authoritative revision.");
+      }
       const latest = latestReviewDraftRef.current;
       if (
         !gradingPanelMountedRef.current ||
@@ -2355,7 +2375,7 @@ export default function GradingPanel({
         toast({ title: "Draft saved" });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
         queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${savingCertId}/grading`] });
-        onPreviewSaved?.();
+        onPreviewSaved?.(readReviewRevision(data));
       } catch (e: any) {
         toast({ title: "Save failed", description: e.message, variant: "destructive" });
       } finally {
@@ -2512,6 +2532,16 @@ export default function GradingPanel({
       });
       return;
     }
+    const preparedRevision = reviewBarrierReady?.revision;
+    if (typeof preparedRevision !== "number" || !Number.isSafeInteger(preparedRevision) || preparedRevision < 1) {
+      toast({
+        title: "Review is not current",
+        description: "The saved review revision is unavailable. Prepare Review again before approving.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const expectedRevision = preparedRevision;
     // HARD GATE: a backgrounded crop that's still uploading or has failed must
     // never finalise a cert (defects would point at an unpersisted/old image).
     const block = cropGateBlockToast();
@@ -2550,6 +2580,8 @@ export default function GradingPanel({
         res = await fetch(`/api/admin/certificates/${certId}/approve-grader-grade`, {
           method: "POST",
           credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expectedRevision }),
         });
       } else if (graderMode && graderEdit) {
         // GRADER EDIT: re-grading an already-submitted card. Route through the
@@ -2575,11 +2607,25 @@ export default function GradingPanel({
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
+          body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds, expectedRevision }),
         });
       }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || (graderMode ? "Submit failed" : "Approve failed"));
+      if (!res.ok) {
+        if (res.status === 409) {
+          // The server rejected the CAS. Never continue from the old preview:
+          // it may depict a different authoritative certificate revision.
+          onReviewValidityChange?.(false, expectedRevision);
+          setShowConfirm(false);
+          toast({
+            title: "Prepared Review is stale",
+            description: "This card changed after your review was prepared. Refresh the saved review before approving.",
+            variant: "destructive",
+          });
+          return;
+        }
+        throw new Error(data.error || (graderMode ? "Submit failed" : "Approve failed"));
+      }
       setApproved(true);
       setShowConfirm(false);
       if (!graderMode) {

@@ -549,6 +549,9 @@ export const certificates = pgTable("certificates", {
   gradedAt: timestamp("graded_at", { withTimezone: true }),
   rejectionReason: text("rejection_reason"),
   redoCount: integer("redo_count").notNull().default(0),
+  // Server-issued optimistic-concurrency token for the pending-review
+  // certificate preview → approval boundary. Never client-authored.
+  gradingRevision: integer("grading_revision").notNull().default(1),
   // ── Per-operator grading pipeline (migratePerOperatorSchema) — Phase 0 ─────
   // All nullable + UN-backfillable: captured at action-time (scan / submit) from
   // Phase 1/3 onward; existing inventory stays NULL (forward-only). Phase 0 adds

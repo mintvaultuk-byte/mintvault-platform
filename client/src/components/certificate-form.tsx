@@ -1135,8 +1135,6 @@ export default function CertificateForm({
     overall: string;
   }>({ centering: "", corners: "", edges: "", surface: "", overall: "" });
   const [aiDefects, setAiDefects] = useState<any[]>([]);
-  const [approveLoading, setApproveLoading] = useState(false);
-  const [approved, setApproved] = useState(false);
 
   async function runAiAnalysis() {
     if (!isEdit || !certificate?.id) return;
@@ -1164,31 +1162,6 @@ export default function CertificateForm({
       setAiError(e.message);
     } finally {
       setAiLoading(false);
-    }
-  }
-
-  async function approveGrade() {
-    if (!isEdit || !certificate?.id) return;
-    setApproveLoading(true);
-    try {
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/approve-grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...aiDraft, gradeType: form.gradeType }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Approve failed");
-      setApproved(true);
-      // Update the form's grade fields to reflect the approved grade
-      updateField("gradeOverall", aiDraft.overall);
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certificate?.id}/grading`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-    } catch (e: any) {
-      setAiError(e.message);
-    } finally {
-      setApproveLoading(false);
     }
   }
 
@@ -1397,7 +1370,6 @@ export default function CertificateForm({
     setAiAnalysis(null);
     setAiDraft({ centering: "", corners: "", edges: "", surface: "", overall: "" });
     setAiDefects([]);
-    setApproved(false);
     setSetId("");
     setFlashFields(new Set());
     setError("");
@@ -3628,24 +3600,12 @@ export default function CertificateForm({
                       )}
                     </div>
 
-                    {/* Approve button */}
-                    {!approved ? (
-                      <button
-                        type="button"
-                        onClick={approveGrade}
-                        disabled={approveLoading || !aiDraft.overall}
-                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
-                        data-testid="button-approve-grade"
-                      >
-                        {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                        {approveLoading ? "Approving…" : "Approve Grade"}
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2 text-[var(--admin-green)] text-sm font-semibold bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg p-3">
-                        <CheckCircle2 size={16} />
-                        Grade approved
-                      </div>
-                    )}
+                    <div
+                      className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] p-3 text-xs text-[var(--admin-ink-dim)]"
+                      data-testid="legacy-approval-retired"
+                    >
+                      Final approval is performed in the canonical grading workstation after the saved certificate preview is reviewed.
+                    </div>
                   </div>
                 )}
 

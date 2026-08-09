@@ -2553,8 +2553,9 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       const canonicalCertId = String((cert as { certId?: string }).certId ?? id);
       const gradingActor = (req.session as { adminEmail?: string })?.adminEmail || "admin";
 
+      let savedReviewRevision: number | null = null;
       await db.transaction(async (tx) => {
-      await tx.execute(sql`
+      const gradeWrite = await tx.execute(sql`
         UPDATE certificates SET
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
           centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
@@ -2665,7 +2666,14 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           },
           updated_at          = NOW()
         WHERE id = ${id}
+        RETURNING grading_revision
       `);
+      const rawRevision = (gradeWrite.rows[0] as { grading_revision?: unknown } | undefined)?.grading_revision;
+      const reviewRevision = Number(rawRevision);
+      if (!Number.isSafeInteger(reviewRevision) || reviewRevision < 1) {
+        throw new Error("Saved certificate has an invalid grading revision");
+      }
+      savedReviewRevision = reviewRevision;
 
       // Audit — distinguish draft saves from post-approve live-record edits.
       // Both fire the same SQL above, but the audit trail captures the
@@ -2709,11 +2717,17 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       }
       });
 
-      res.json({ ok: true, wasApproved });
+      res.json({ ok: true, wasApproved, reviewRevision: savedReviewRevision });
     } catch (error: any) {
       console.error("[grade] save error:", error.message);
       sendServerError(res, error);
     }
+}
+
+/** The canonical approval CAS token is server-issued and never coerced from a client string. */
+function expectedReviewRevision(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1) return null;
+  return raw;
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -3783,223 +3797,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.put("/api/admin/certificates/:id/approve-grade", requireAdmin, async (req, res) => {
-    try {
-      const id = parseInt(String(req.params.id), 10);
-      const cert = await storage.getCertificate(id);
-      if (!cert) return res.status(404).json({ error: "Certificate not found" });
-
-      // Restricted-grader lock (cert-level). While a card is in a grader's
-      // workflow the admin approves/rejects it via the grader-review endpoints,
-      // not by directly approving the certificate here.
-      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
-
-      const { centering, corners, edges, surface, overall, gradeType, grading_time_seconds } = req.body;
-
-      const finalGradeType = gradeType || "numeric";
-      const isNonNum = isNonNumericGrade(finalGradeType);
-      // Strict parse (see the matching helper on the sibling /approve route): parseFloat
-      // is a prefix parser, so "7.5abc" would publish 7.5 and [8] would publish 8.
-      const strictGrade = (v: unknown): number | null => {
-        if (typeof v === "number") return Number.isFinite(v) ? v : null;
-        if (typeof v !== "string") return null;
-        const t = v.trim();
-        // Plain decimal only. Number() also accepts hex ("0x0A" -> 10), binary and
-        // exponent forms, none of which any client sends for a card grade.
-        if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
-        const n = Number(t);
-        return Number.isFinite(n) ? n : null;
-      };
-      const finalOverall = isNonNum ? null : strictGrade(overall);
-      // Malformed-payload gate (same class as the MV205 grade-erasure on the sibling
-      // /approve route). `parseFloat(undefined)` is NaN, and Postgres `numeric` accepts
-      // NaN, so a payload without a readable `overall` would publish a corrupt grade
-      // over a valid one. Reject instead. NO/AA are exempt — their grade is NULL by
-      // design. Gate only: no scoring, weights, or formula logic is touched.
-      // LOCKED BUSINESS RULE (owner-approved 2026-07-25) — identical to the sibling
-      // /approve route: normal approval may NOT convert a certificate between numeric
-      // and authentication-only, and NEVER rewrites grade_type. Here the kind comes
-      // from the client's `gradeType` key rather than from `overall_grade`, but the
-      // hole is the same, so the same stored-vs-requested check applies. Comparison
-      // only — no scoring, weighting or formula logic is touched.
-      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
-      const requestedKind = kindOfGradeType(finalGradeType);
-      const kindRejection = rejectKindChange({
-        storedGradeType,
-        requestedKind,
-        isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
-        allowChangeWhenUnapproved: false,
-      });
-      if (kindRejection) {
-        try {
-          await storage.writeAuditLog(
-            "certificate",
-            String((cert as { certId?: string }).certId ?? id),
-            "approval_kind_change_rejected",
-            (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" }
-          );
-        } catch (auditErr) {
-          console.warn("[approve-grade] kind-rejection audit failed:", (auditErr as Error).message);
-        }
-        return res.status(400).json({ error: kindRejection });
-      }
-
-      if (!isNonNum && (finalOverall == null || !isValidNumericGrade(finalOverall))) {
-        return res.status(400).json({
-          error:
-            "Cannot approve without a valid numeric overall grade (1–10, half grades allowed). The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
-        });
-      }
-      // label_type (Pristine/black) is computed below, AFTER the MVGS run, so
-      // the shared isBlackLabel() gate can see the raw per-category deductions —
-      // a card that buckets to a 10 chip but carries real defect deduction must
-      // NOT be flagged Pristine.
-
-      // Cap at 1800s (30 min) so a grader leaving the tab open all day doesn't
-      // skew the dashboard average. Anything over 30 min gets clamped — keeps
-      // honest sessions intact while flattening coffee-break outliers.
-      const rawTime = Number(grading_time_seconds);
-      const clampedTime = Number.isFinite(rawTime) && rawTime > 0 ? Math.min(1800, Math.round(rawTime)) : null;
-
-      // P0 preservation helper — see /grade handler for rationale.
-      const num = (v: unknown): number | null => {
-        if (v == null || v === "") return null;
-        const n = typeof v === "number" ? v : parseFloat(String(v));
-        return isNaN(n) ? null : n;
-      };
-
-      // ── MVGS scoring on approve ──────────────────────────────────────────
-      // Cert state (defects, dark_border_front/back, eye_appeal_modifier,
-      // centering ratios) was already saved by the grading-panel /grade PUT
-      // before the operator hit Approve. Re-read the relevant columns and
-      // run the pure scoring helper. Result lands in grade_strength_score.
-      //
-      // verified_defects gets the MVGS-classified pins from the `defects`
-      // column when any are classified (any pin with mvgsCode+tier+zone);
-      // otherwise falls through to the legacy auto-promote-from-ai-defects
-      // behaviour so existing flows keep working.
-      // MVGS v2 — load calibration + thread persisted measurement inputs.
-      // scoreMvgsV2 routes everything through buildMvgsInput which enforces
-      // measurement-wins-over-checkbox precedence (shared/mvgs-input-builder.ts).
-      const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
-      const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
-      const savedDefects: any[] = Array.isArray((cert as any).defects) ? (cert as any).defects : [];
-      const mvgsPins = savedDefects
-        .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
-        .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
-      let mvgsScore: number | null = null;
-      let mvgsDeductions: Record<string, number> | undefined;
-      if (!isNonNum) {
-        const calibration = await loadMvgsCalibration();
-        const surfaceFlags = ((cert as any).surfaceValues as any) ?? {};
-        const r = scoreMvgsV2(
-          {
-            centeringFrontLr: (cert as any).centeringFrontLr ?? null,
-            centeringFrontTb: (cert as any).centeringFrontTb ?? null,
-            centeringBackLr: (cert as any).centeringBackLr ?? null,
-            centeringBackTb: (cert as any).centeringBackTb ?? null,
-            defects: mvgsPins,
-            // Per-side flags. Fall back to the legacy dark_border column for
-            // rows that pre-date the split (treated as both-sides dark).
-            darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
-            darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
-            eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
-            // v2 measurements (Phase 2 columns). Numeric column from Drizzle
-            // is `string | null` for decimal — coerce.
-            whiteningLines: Array.isArray((cert as any).whiteningLines) ? (cert as any).whiteningLines : null,
-            // v2.1 — multi-crease list. Engine input derives max(spanPct)
-            // at the mvgs-input-builder boundary. Legacy creaseSpanPct
-            // column kept as fallback when crease_lines is empty.
-            creaseLines: Array.isArray((cert as any).creaseLines) ? (cert as any).creaseLines : null,
-            creaseSpanPct: (cert as any).creaseSpanPct != null ? Number((cert as any).creaseSpanPct) : null,
-            wrinkleSeverity: (cert as any).wrinkleSeverity ?? null,
-            tearSeverity: (cert as any).tearSeverity ?? null,
-            // Legacy boolean fallback (only consulted by the builder when the
-            // matching measurement is null).
-            hasCrease: !!surfaceFlags.hasCrease,
-            hasTear: !!surfaceFlags.hasTear,
-          },
-          calibration
-        );
-        mvgsScore = r.score;
-        mvgsDeductions = r.deductions;
-      }
-      const useMvgsClassifiedVerified = mvgsPins.length > 0;
-      const mvgsVerifiedJson = useMvgsClassifiedVerified ? JSON.stringify(savedDefects) : null;
-
-      // Pristine 10P / black label — shared gate (one source of truth with the
-      // client panel and the other approve route). Subgrades from the approved
-      // payload; deductions from the MVGS run above. Requires overall 10 + all
-      // four subgrades 10 + zero raw defect deduction.
-      const computedLabel =
-        !isNonNum &&
-        isBlackLabel(
-          {
-            centering: num(centering) ?? -1,
-            corners: num(corners) ?? -1,
-            edges: num(edges) ?? -1,
-            surface: num(surface) ?? -1,
-          },
-          finalOverall ?? -1,
-          mvgsDeductions
-        )
-          ? "black"
-          : "Standard";
-
-      await db.execute(sql`
-        UPDATE certificates SET
-          -- Invariant: normal approval NEVER changes grade_type. The gate above proved
-          -- the requested kind matches the stored record, so persisting the stored
-          -- value verbatim is equivalent for accepted payloads and structurally
-          -- incapable of rewriting the column (incl. legacy long-form aliases).
-          grade_type        = ${storedGradeType},
-          -- Defence in depth behind the gate above: never let a null/NaN parameter
-          -- erase a stored grade. NO/AA still clear it, by design.
-          grade             = ${isNonNum ? sql`NULL` : sql`COALESCE(${finalOverall}::numeric, grade)`},
-          centering_score   = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(centering)}::numeric, centering_score)`},
-          corners_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(corners)}::numeric,   corners_score)`},
-          edges_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(edges)}::numeric,     edges_score)`},
-          surface_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(surface)}::numeric,   surface_score)`},
-          label_type        = ${computedLabel},
-          grade_approved_by = ${(req.session as any)?.adminEmail || "admin"},
-          grade_approved_at = NOW(),
-          status            = 'active',
-          -- Print workflow: approval atomically enters Needs Printing. CASE guard
-          -- promotes only from the default, never regressing an in-flight print state.
-          print_state       = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
-          grade_strength_score = ${isNonNum ? sql`grade_strength_score` : sql`${mvgsScore}::int`},
-          verified_defects  = ${
-            useMvgsClassifiedVerified
-              ? sql`${mvgsVerifiedJson}::jsonb`
-              : sql`CASE
-                  WHEN verified_defects IS NULL OR verified_defects = '[]'::jsonb
-                  THEN COALESCE(ai_defects, '[]'::jsonb)
-                  ELSE verified_defects
-                END`
-          },
-          grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
-          updated_at        = NOW()
-        WHERE id = ${id}
-      `);
-
-      await storage.writeAuditLog("certificate", cert.certId, "approve_grade", req.session.adminEmail || "admin", {
-        centering,
-        corners,
-        edges,
-        surface,
-        overall,
-        gradeType,
-        labelType: computedLabel,
-        grading_time_seconds: clampedTime,
-      });
-
-      const updated = await storage.getCertificate(id);
-      res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
-    } catch (error: any) {
-      console.error("Approve grade error:", error.message);
-      res.status(500).json({ error: "Failed to approve grade" });
-    }
+  // Legacy CertificateForm approval had no revision-bound preview.  Keep an
+  // explicit terminal response for stale clients; canonical review is the only
+  // final-approval authority.
+  app.put("/api/admin/certificates/:id/approve-grade", requireAdmin, async (_req, res) => {
+    return res.status(410).json({
+      error: "Legacy approval is retired. Open the canonical grading workstation and prepare Review before approving.",
+      code: "CANONICAL_REVIEW_REQUIRED",
+    });
   });
 
   // ── Public DGR endpoint ────────────────────────────────────────────────────
@@ -8092,6 +7897,10 @@ Defects (admin-confirmed): ${defectLines}`;
         authNotes: c.authNotes || "",
         gradeExplanation: c.gradeExplanation || "",
         privateNotes: c.privateNotes || "",
+        // Server-authoritative token used by the canonical preview → approval
+        // compare-and-swap. Hydration must expose it before any persisted-card
+        // preview is allowed to render.
+        reviewRevision: c.gradingRevision ?? 1,
         gradeApprovedBy: c.gradeApprovedBy || null,
         gradeApprovedAt: c.gradeApprovedAt || null,
         gradeStrengthScore: c.gradeStrengthScore ?? null,
@@ -8233,6 +8042,10 @@ Defects (admin-confirmed): ${defectLines}`;
   app.put("/api/admin/certificates/:id/approve", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
+      const expectedRevision = expectedReviewRevision((req.body ?? {}).expectedRevision);
+      if (expectedRevision == null) {
+        return res.status(400).json({ error: "A valid expectedRevision is required to approve this card" });
+      }
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
@@ -8453,83 +8266,33 @@ Defects (admin-confirmed): ${defectLines}`;
           ? "black"
           : "Standard";
 
-      await db.execute(sql`
+      // The final mutation is the CAS claim. All success-side effects below
+      // (grading session/audit/cache work) run only after this exact prepared
+      // revision is still current. This closes the Reviewer-A/Reviewer-B race
+      // for the unrestricted Super Admin path as well as pending review.
+      const approvalWrite = await db.execute(sql`
         UPDATE certificates SET
-          -- Defence in depth behind the overall-grade gate above: never let a null
-          -- parameter erase a stored grade. Matches the guard already used by the
-          -- draft-save route (PUT .../grade). NO/AA still clear it, by design.
-          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
-          -- Invariant: normal approval NEVER changes grade_type. The gate above proved
-          -- the requested kind and canonical token match the stored record, so writing
-          -- the stored value verbatim is equivalent for every accepted payload and is
-          -- structurally incapable of rewriting the column — including the legacy long
-          -- forms ('not_original'/'authentic_altered'), never normalised by an approval.
-          grade_type          = ${storedGradeType},
-          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCentering}::numeric, centering_score)`},
-          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCorners}::numeric,   corners_score)`},
-          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentEdges}::numeric,     edges_score)`},
-          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentSurface}::numeric,   surface_score)`},
-          grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
-          centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
-          centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
-          centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
-          centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
-          corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
-          edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
-          surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
-          defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
-          -- Preserve on omission rather than resetting to the most permissive value:
-          -- a payload without auth_status must not silently downgrade an
-          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
-          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
-          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
-          auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
-          grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
-          private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
-          label_type          = ${labelType},
-          whitening_lines     = ${
-            // MVGS v2 — persist on approve too so the cert row carries the
-            // final operator-marked measurements alongside the grade.
-            Array.isArray((b as any).whitening_lines)
-              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
-              : sql`whitening_lines`
-          },
-          crease_lines        = ${
-            // MVGS v2.1 multi-crease list.
-            Array.isArray((b as any).crease_lines)
-              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
-              : sql`crease_lines`
-          },
-          crease_span_pct     = ${
-            (b as any).crease_span_pct === null
-              ? sql`NULL`
-              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
-                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
-                : sql`crease_span_pct`
-          },
-          wrinkle_severity    = ${(() => {
-            const v = (b as any).wrinkle_severity;
-            if (v === null) return sql`NULL`;
-            if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
-              return sql`${v}`;
-            }
-            return sql`wrinkle_severity`;
-          })()},
-          tear_severity       = ${(() => {
-            const v = (b as any).tear_severity;
-            if (v === null) return sql`NULL`;
-            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
-            return sql`tear_severity`;
-          })()},
+          -- Approval is a state transition only. The canonical Grade → Review
+          -- barrier persisted and rendered this exact row already; allowing an
+          -- approval payload to rewrite certificate-facing fields here would
+          -- let it publish content the reviewer never inspected.
           grade_approved_by   = ${(req.session as any)?.adminEmail || "admin"},
           grade_approved_at   = NOW(),
           status              = 'active',
           -- Print workflow: approval atomically enters Needs Printing (no regression).
           print_state         = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
-          grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
           updated_at          = NOW()
         WHERE id = ${id}
+          AND grade_approved_at IS NULL
+          AND grading_revision = ${expectedRevision}
+        RETURNING id
       `);
+      if (approvalWrite.rows.length === 0) {
+        return res.status(409).json({
+          code: "STALE_REVIEW",
+          error: "This card changed after your review was prepared. Refresh the saved review before approving.",
+        });
+      }
 
       // Log to grading_sessions. grading_duration_seconds also feeds the
       // existing /api/admin/learning/overview avg_seconds metric — finally
@@ -8541,9 +8304,9 @@ Defects (admin-confirmed): ${defectLines}`;
             ${cert.certId},
             NOW(),
             ${(req.session as any)?.adminEmail || "admin"},
-            ${gradeNum},
-            ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
-            ${b.private_notes || null},
+            ${cert.gradeOverall ?? null},
+            ${cert.defects ? JSON.stringify(cert.defects) : null}::jsonb,
+            ${(cert as any).privateNotes || null},
             'claude-haiku-4-5-20251001',
             ${clampedTime}
           )
@@ -8562,14 +8325,14 @@ Defects (admin-confirmed): ${defectLines}`;
         "approve_and_publish",
         req.session.adminEmail || "admin",
         {
-          overall: overallGrade,
-          labelType,
+          overall: cert.gradeOverall ?? null,
+          labelType: cert.labelType ?? null,
           was_ai_drafted: wasAiDrafted,
         }
       );
 
       // Log AI vs human comparison if an AI draft grade exists for this certificate
-      if (cert.aiDraftGrade != null && gradeNum != null) {
+      if (cert.aiDraftGrade != null && cert.gradeOverall != null) {
         try {
           const aiAnalysis = (cert.aiAnalysis || {}) as Record<string, any>;
           await db.execute(sql`
@@ -8585,11 +8348,11 @@ Defects (admin-confirmed): ${defectLines}`;
               ${aiAnalysis.corners?.subgrade != null ? String(aiAnalysis.corners.subgrade) : null},
               ${aiAnalysis.edges?.subgrade != null ? String(aiAnalysis.edges.subgrade) : null},
               ${aiAnalysis.surface?.subgrade != null ? String(aiAnalysis.surface.subgrade) : null},
-              ${gradeNum},
-              ${finalCentering != null ? Math.round(finalCentering) : null},
-              ${finalCorners != null ? Math.round(finalCorners) : null},
-              ${finalEdges != null ? Math.round(finalEdges) : null},
-              ${finalSurface != null ? Math.round(finalSurface) : null},
+              ${Math.round(Number(cert.gradeOverall))},
+              ${cert.gradeCentering != null ? Math.round(Number(cert.gradeCentering)) : null},
+              ${cert.gradeCorners != null ? Math.round(Number(cert.gradeCorners)) : null},
+              ${cert.gradeEdges != null ? Math.round(Number(cert.gradeEdges)) : null},
+              ${cert.gradeSurface != null ? Math.round(Number(cert.gradeSurface)) : null},
               ${req.session.adminEmail || "admin"}
             )
           `);

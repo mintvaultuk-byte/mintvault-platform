@@ -31,13 +31,49 @@ const previewLimit = rateLimit({
   message: { error: "Too many preview requests. Please slow down." },
 });
 
-async function renderPreview(req: Request, res: Response, authorisedId: number | null): Promise<void> {
+function expectedReviewRevision(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1) return null;
+  return raw;
+}
+
+async function renderPreview(
+  req: Request,
+  res: Response,
+  authorisedId: number | null,
+  requireRevision = false
+): Promise<void> {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const saved = authorisedId == null ? null : await storage.getCertificate(authorisedId);
     if (authorisedId != null && !saved) {
       res.status(404).json({ error: "Certificate not found" });
       return;
+    }
+    // Existing certificate previews used to be an image-only endpoint.  The
+    // canonical review flow now binds that image to a server-issued revision.
+    // A preview of R17 can never be presented as a preview of R18.
+    if (authorisedId != null && requireRevision) {
+      const expected = expectedReviewRevision(body.expectedRevision);
+      if (expected == null) {
+        res.status(400).json({ error: "A valid expectedRevision is required for certificate preview" });
+        return;
+      }
+      const actual = Number((saved as CertificateRecord).gradingRevision);
+      if (!Number.isSafeInteger(actual) || actual < 1) {
+        res.status(500).json({ error: "Certificate has an invalid grading revision" });
+        return;
+      }
+      if (actual !== expected) {
+        res.status(409).json({
+          code: "STALE_REVIEW",
+          error: "This card changed after the saved review. Refresh the saved review before approving.",
+        });
+        return;
+      }
+      // Image responses cannot carry a JSON acknowledgement.  This explicit,
+      // no-store response header is the authoritative preview acknowledgement.
+      res.setHeader("X-MintVault-Review-Revision", String(actual));
+      res.setHeader("Access-Control-Expose-Headers", "X-MintVault-Review-Revision");
     }
     const cert = await buildLabelPreviewCertificate((saved as CertificateRecord | undefined) ?? null, body);
     // SAME rule as every print path, so the preview can never show something print
@@ -62,6 +98,21 @@ async function renderPreview(req: Request, res: Response, authorisedId: number |
       return;
     }
     const png = await generateLabelPreviewPNG(cert);
+    // A grading write may land while the renderer is producing pixels. Re-read
+    // before acknowledging readiness so R17 is never returned as a prepared
+    // preview after the database has advanced to R18. Approval CAS still covers
+    // changes after this check.
+    if (authorisedId != null && requireRevision) {
+      const current = await storage.getCertificate(authorisedId);
+      const currentRevision = Number((current as CertificateRecord | undefined)?.gradingRevision);
+      if (currentRevision !== expectedReviewRevision(body.expectedRevision)) {
+        res.status(409).json({
+          code: "STALE_REVIEW",
+          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+        });
+        return;
+      }
+    }
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "no-store");
     res.send(png);
@@ -81,7 +132,7 @@ export function registerLabelPreviewRoutes(app: Express): void {
     const hasId = body.certificateId != null || body.id != null;
     const id = previewCertificateId(body);
     if (hasId && !id) return res.status(400).json({ error: "Valid certificateId required" });
-    await renderPreview(req, res, id);
+    await renderPreview(req, res, id, id != null);
   });
 
   app.post("/api/admin/grade-review/certificates/label/preview", previewLimit, requireAdmin, async (req, res) => {
@@ -92,7 +143,7 @@ export function registerLabelPreviewRoutes(app: Express): void {
     if (assignment.gradingStatus !== "pending_review") {
       return res.status(409).json({ error: "Certificate is not pending review" });
     }
-    await renderPreview(req, res, id);
+    await renderPreview(req, res, id, true);
   });
 
   app.post("/api/grader/certificates/label/preview", previewLimit, requireCapability("grade"), async (req, res) => {
@@ -101,6 +152,6 @@ export function registerLabelPreviewRoutes(app: Express): void {
     const assignment = await getCertAssignment(id);
     const access = authorizeStaffLabelPreview(req.session, assignment);
     if (!access.ok) return res.status(access.status).json({ error: access.error });
-    await renderPreview(req, res, id);
+    await renderPreview(req, res, id, true);
   });
 }

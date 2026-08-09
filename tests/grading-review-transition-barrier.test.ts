@@ -160,6 +160,7 @@ describe("authoritative Grade → Review barrier", () => {
     expect(workstation).toContain("runReviewTransitionBarrier");
     expect(workstation).toContain("onRevisionComplete={handlePreviewRevisionComplete}");
     expect(preview).toContain("onRevisionComplete?.(revision, ok, requestFingerprint)");
+    expect(preview).toContain("authoritativeRevision !== expectedRevision");
     expect(preview).toContain("complete(false)");
     expect(panel).toContain("await autoSavePromiseRef.current");
     expect(panel).toContain("await saveDraftPromiseRef.current");

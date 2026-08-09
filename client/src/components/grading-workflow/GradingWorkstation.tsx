@@ -98,9 +98,12 @@ export function GradingWorkstation({
   const [authoritativePreview, setAuthoritativePreview] = useState<CertificatePreviewFields | null>(null);
   const [inspectionState, setInspectionState] = useState(createCardInspectionState);
   const [previewRevision, setPreviewRevision] = useState(0);
+  const [previewExpectedRevision, setPreviewExpectedRevision] = useState<number | null>(null);
   const previewRequestSeqRef = useRef(0);
   const transitionSeqRef = useRef(0);
-  const previewWaitersRef = useRef(new Map<number, { expectedFingerprint: string; resolve: (ok: boolean) => void }>());
+  const previewWaitersRef = useRef(
+    new Map<number, { expectedFingerprint: string; expectedRevision: number; resolve: (ok: boolean) => void }>()
+  );
   const [reviewTransitionHandler, setReviewTransitionHandler] = useState<
     (() => Promise<PersistedReviewRevision<CertificatePreviewFields>>) | null
   >(null);
@@ -123,14 +126,20 @@ export function GradingWorkstation({
     rootRef.current?.querySelector<HTMLElement>('[data-testid="grading-workstation-slot"]')?.scrollTo({ top: 0 });
   }, []);
 
-  const handlePreviewRevisionComplete = useCallback((revision: number, ok: boolean, fingerprint: string) => {
+  const handlePreviewRevisionComplete = useCallback(
+    (revision: number, ok: boolean, fingerprint: string, authoritativeRevision?: number | null) => {
     const waiter = previewWaitersRef.current.get(revision);
     if (!waiter) return;
     previewWaitersRef.current.delete(revision);
-    const exact = ok && fingerprint === waiter.expectedFingerprint;
+    const exact =
+      ok &&
+      fingerprint === waiter.expectedFingerprint &&
+      authoritativeRevision === waiter.expectedRevision;
     if (!exact) setAuthoritativePreview(null);
     waiter.resolve(exact);
-  }, []);
+    },
+    []
+  );
   const registerReviewTransitionHandler = useCallback(
     (handler: (() => Promise<PersistedReviewRevision<CertificatePreviewFields>>) | null) =>
       setReviewTransitionHandler(() => handler),
@@ -150,11 +159,16 @@ export function GradingWorkstation({
     (snapshot: PersistedReviewRevision<CertificatePreviewFields>): Promise<boolean> => {
       const requestRevision = ++previewRequestSeqRef.current;
       setAuthoritativePreview(snapshot.preview);
+      setPreviewExpectedRevision(snapshot.revision);
       setPreviewRevision(requestRevision);
       setReviewBarrierStatus("previewing");
       const expectedFingerprint = JSON.stringify(snapshot.preview);
       return new Promise<boolean>((resolve) =>
-        previewWaitersRef.current.set(requestRevision, { expectedFingerprint, resolve })
+        previewWaitersRef.current.set(requestRevision, {
+          expectedFingerprint,
+          expectedRevision: snapshot.revision,
+          resolve,
+        })
       );
     },
     []
@@ -176,6 +190,7 @@ export function GradingWorkstation({
     if (transitionSeqRef.current !== attempt) return;
     if (!result.ok) {
       setAuthoritativePreview(null);
+      setPreviewExpectedRevision(null);
       setReviewBarrierStatus("error");
       return;
     }
@@ -210,6 +225,7 @@ export function GradingWorkstation({
     for (const waiter of previewWaitersRef.current.values()) waiter.resolve(false);
     previewWaitersRef.current.clear();
     setAuthoritativePreview(null);
+    setPreviewExpectedRevision(null);
     setReviewReady(null);
     setReviewBarrierStatus("idle");
     setInspectionState(createCardInspectionState());
@@ -255,6 +271,18 @@ export function GradingWorkstation({
   const handleDraftPreviewChange = useCallback((preview: CertificatePreviewFields) => {
     if (previewWaitersRef.current.size === 0) setDraftPreview(preview);
   }, []);
+  const handlePreviewSaved = useCallback((revision: number | null) => {
+    // Existing certificate previews are server-authorised against the revision
+    // read from hydration or returned by a grade save. Create-mode previews
+    // intentionally have no persisted revision yet.
+    // A grading-query refetch can arrive while the Review barrier is rendering
+    // its exact saved revision. Do not let that secondary hydration effect
+    // supersede/cancel the prepared preview waiter; the waiter itself owns the
+    // only transition to Review-ready.
+    if (previewWaitersRef.current.size > 0) return;
+    setPreviewExpectedRevision(revision);
+    setPreviewRevision(++previewRequestSeqRef.current);
+  }, []);
   const previewEndpoint = `${apiBase}/certificates/label/preview`;
   const workstationCapabilities =
     mode === "partner"
@@ -291,6 +319,8 @@ export function GradingWorkstation({
                   endpoint={previewEndpoint}
                   persistence={reviewReady ? "saved" : "unsaved"}
                   revision={previewRevision}
+                  expectedRevision={previewExpectedRevision}
+                  requireExpectedRevision={resolvedPreviewCertificateId != null}
                   onRevisionComplete={handlePreviewRevisionComplete}
                 />
               }
@@ -355,7 +385,7 @@ export function GradingWorkstation({
               inspectionState={inspectionState}
               onInspectionStateChange={setInspectionState}
               onPreviewChange={handleDraftPreviewChange}
-              onPreviewSaved={() => setPreviewRevision(++previewRequestSeqRef.current)}
+              onPreviewSaved={handlePreviewSaved}
               onReviewTransitionReady={registerReviewTransitionHandler}
               reviewBarrierReady={reviewReady}
               onReviewValidityChange={handleReviewValidityChange}

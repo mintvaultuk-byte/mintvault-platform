@@ -62,6 +62,8 @@ export function CertificatePreviewPanel({
    */
   persistence = "unsaved",
   revision = 0,
+  expectedRevision,
+  requireExpectedRevision = false,
   onRevisionComplete,
   requestTimeoutMs = 12_000,
 }: {
@@ -72,8 +74,22 @@ export function CertificatePreviewPanel({
   persistence?: "unsaved" | "saved" | "conflict";
   /** Increments after an authoritative grade save so saved grade/subgrades are re-read. */
   revision?: number;
+  /**
+   * Server-authoritative grading revision the caller expects this label to
+   * represent. It is deliberately distinct from `revision`, which is only a
+   * local request sequence used to restart the effect.
+   */
+  expectedRevision?: number | null;
+  /** Existing-record canonical previews wait for hydration rather than sending
+   * an unbound request before the server-issued revision is known. */
+  requireExpectedRevision?: boolean;
   /** Acknowledges only the request started for this exact revision. */
-  onRevisionComplete?: (revision: number, ok: boolean, fingerprint: string) => void;
+  onRevisionComplete?: (
+    revision: number,
+    ok: boolean,
+    fingerprint: string,
+    authoritativeRevision?: number | null
+  ) => void;
   /** Bounded independently of the workstation barrier so a hung fetch is aborted. */
   requestTimeoutMs?: number;
 }) {
@@ -84,14 +100,29 @@ export function CertificatePreviewPanel({
   const key = JSON.stringify(fields);
 
   useEffect(() => {
+    if (requireExpectedRevision && expectedRevision == null) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    // Fingerprint certificate-facing fields only. `expectedRevision` is a
+    // concurrency precondition, not printable content, so the workstation can
+    // independently prove both the displayed payload and persisted revision.
     const requestFingerprint = key;
     const controller = new AbortController();
     let completed = false;
     let timeout: ReturnType<typeof setTimeout> | null = null;
-    const complete = (ok: boolean) => {
+    const complete = (ok: boolean, authoritativeRevision: number | null = null) => {
       if (completed) return;
       completed = true;
-      onRevisionComplete?.(revision, ok, requestFingerprint);
+      // Preserve the legacy three-argument acknowledgement for ordinary live
+      // previews. The fourth value is only meaningful for a prepared,
+      // revision-bound Review preview.
+      if (expectedRevision == null) {
+        onRevisionComplete?.(revision, ok, requestFingerprint);
+      } else {
+        onRevisionComplete?.(revision, ok, requestFingerprint, authoritativeRevision);
+      }
     };
     const timer = setTimeout(async () => {
       setLoading(true);
@@ -103,16 +134,26 @@ export function CertificatePreviewPanel({
         complete(false);
       }, requestTimeoutMs);
       try {
+        const body = expectedRevision == null ? fields : { ...fields, expectedRevision };
         const res = await fetch(endpoint, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: requestFingerprint,
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || `Certificate preview failed (${res.status})`);
+        }
+        const headerRevision = res.headers.get("X-MintVault-Review-Revision");
+        const authoritativeRevision =
+          headerRevision != null && /^\d+$/.test(headerRevision) ? Number(headerRevision) : null;
+        if (
+          expectedRevision != null &&
+          (!Number.isSafeInteger(authoritativeRevision) || authoritativeRevision !== expectedRevision)
+        ) {
+          throw new Error("Certificate preview did not acknowledge the saved review revision.");
         }
         const blob = await res.blob();
         if (completed) return;
@@ -120,7 +161,7 @@ export function CertificatePreviewPanel({
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
         urlRef.current = next;
         setUrl(next);
-        complete(true);
+        complete(true, authoritativeRevision);
       } catch (err) {
         if (!completed) {
           setError(err instanceof Error ? err.message : "Preview unavailable.");
@@ -139,7 +180,7 @@ export function CertificatePreviewPanel({
       // Without this acknowledgement, the workstation waiter never settles.
       complete(false);
     };
-  }, [endpoint, key, revision, onRevisionComplete, requestTimeoutMs]);
+  }, [endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]);
 
   // Revoke the last object URL on unmount.
   useEffect(

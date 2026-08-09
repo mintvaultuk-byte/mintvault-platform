@@ -267,7 +267,8 @@ describe("Canonical persistent preview rail", () => {
     expect(WORKSTATION).toContain("authoritativePreview ?? panelPreviewFields");
     expect(WORKSTATION).toContain("fields={previewFields}");
     expect(PREVIEW_PANEL).toContain("fetch(endpoint");
-    expect(PREVIEW_PANEL).toContain("body: requestFingerprint");
+    expect(PREVIEW_PANEL).toContain("const body = expectedRevision == null ? fields : { ...fields, expectedRevision }");
+    expect(PREVIEW_PANEL).toContain('res.headers.get("X-MintVault-Review-Revision")');
     expect(PREVIEW_PANEL).toContain('credentials: "include"');
   });
 
@@ -277,6 +278,7 @@ describe("Canonical persistent preview rail", () => {
     expect(WORKSTATION).toContain("fingerprint === waiter.expectedFingerprint");
     expect(WORKSTATION).toContain("if (previewWaitersRef.current.size === 0) setDraftPreview(preview)");
     expect(PREVIEW_PANEL).toContain("onRevisionComplete?.(revision, ok, requestFingerprint)");
+    expect(PREVIEW_PANEL).toContain("authoritativeRevision !== expectedRevision");
     expect(WORKSTATION).toContain("onReviewValidityChange={handleReviewValidityChange}");
     expect(WORKSTATION).toMatch(
       /if \(!ready \|\| ready\.revision !== revision\) return ready;[\s\S]*setAuthoritativePreview\(null\)[\s\S]*return null/

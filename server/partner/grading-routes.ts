@@ -63,6 +63,11 @@ type PartnerCertAuth = {
   provenanceValid: boolean;
 };
 
+function expectedReviewRevision(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1) return null;
+  return raw;
+}
+
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
 
 function numericId(raw: unknown): number | null {
@@ -371,6 +376,20 @@ export function partnerGradingRouter(): Router {
 
       const saved = await storage.getCertificate(certId);
       if (!saved) return res.status(404).json({ error: "Not found" });
+      const expected = expectedReviewRevision(body.expectedRevision);
+      if (expected == null) {
+        return res.status(400).json({ error: "A valid expectedRevision is required for certificate preview" });
+      }
+      const actual = Number((saved as CertificateRecord).gradingRevision);
+      if (!Number.isSafeInteger(actual) || actual < 1) {
+        return res.status(500).json({ error: "Certificate has an invalid grading revision" });
+      }
+      if (actual !== expected) {
+        return res.status(409).json({
+          code: "STALE_REVIEW",
+          error: "This card changed after the saved review. Refresh the saved review before approving.",
+        });
+      }
       const cert = await buildLabelPreviewCertificate(saved as CertificateRecord, body);
       const verdict = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
       if (!verdict.printable) {
@@ -385,8 +404,20 @@ export function partnerGradingRouter(): Router {
       }
 
       const png = await generateLabelPreviewPNG(cert);
+      // Detect a mutation that raced the render itself. A pre-render revision
+      // comparison alone would otherwise acknowledge stale pixels as ready.
+      const current = await storage.getCertificate(certId);
+      const currentRevision = Number((current as CertificateRecord | undefined)?.gradingRevision);
+      if (currentRevision !== expected) {
+        return res.status(409).json({
+          code: "STALE_REVIEW",
+          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+        });
+      }
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-MintVault-Review-Revision", String(actual));
+      res.setHeader("Access-Control-Expose-Headers", "X-MintVault-Review-Revision");
       return res.send(png);
     } catch (err) {
       if (err instanceof UnprintableGradeError) {
@@ -429,7 +460,7 @@ export function partnerGradingRouter(): Router {
           sessionId: req.partner!.sessionId,
           correlationId: auth.auth.partnerSubmissionId,
         });
-        res.json({ ok: true, gradingStatus: auth.auth.gradingStatus });
+        res.json({ ok: true, gradingStatus: auth.auth.gradingStatus, reviewRevision: saved });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }

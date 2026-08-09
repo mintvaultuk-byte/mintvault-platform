@@ -95,6 +95,12 @@ const GRADER_PROXY_ACTIONS = new Set([
   "generate-description",
 ]);
 
+/** Strictly parse the server CAS token; never coerce client input. */
+function expectedReviewRevision(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1) return null;
+  return raw;
+}
+
 /** Ownership gate (cert-level): the cert must be assigned to THIS grader and not
  *  yet approved. Returns the current grader_status for status-specific checks. */
 async function authorizeGraderCert(
@@ -420,7 +426,7 @@ export function registerGraderRoutes(app: Express): void {
       if (!saved) {
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
-      return res.json({ ok: true, gradingStatus: auth.gradingStatus });
+      return res.json({ ok: true, gradingStatus: auth.gradingStatus, reviewRevision: saved });
     } catch (e: any) {
       // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
       // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
@@ -1058,9 +1064,13 @@ export function registerGraderRoutes(app: Express): void {
   // ── Admin: approve / reject a grader-submitted (pending_review) cert ────────
   app.post("/api/admin/certificates/:id/approve-grader-grade", requireAdmin, async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
+    const revision = expectedReviewRevision((req.body ?? {}).expectedRevision);
+    if (revision == null) {
+      return res.status(400).json({ error: "A valid expectedRevision is required to approve this card" });
+    }
     const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await approveGraderCert(certId, adminUser);
-    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    const r = await approveGraderCert(certId, adminUser, revision);
+    if (!r.ok) return res.status(r.status).json({ error: r.error, ...(r.code ? { code: r.code } : {}) });
     return res.json({ ok: true, gradingStatus: "approved" });
   });
 
@@ -1111,7 +1121,7 @@ export function registerGraderRoutes(app: Express): void {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
       if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ ok: true });
+      return res.json({ ok: true, reviewRevision: r.revision });
     } catch (e: any) {
       if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[admin grade-review save] error:", e.message);
