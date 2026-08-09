@@ -28,6 +28,7 @@ import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly } from
 import { getPartnerAdminCapability } from "./admin-capability";
 import { withTenant, partnerAdminQuery, withPartnerAdminTransaction, PartnerPublicDbUnavailable } from "./db";
 import { writePartnerAudit } from "./audit";
+import { ratingsNeedingAttention } from "./public-network-rating-lifecycle";
 import { SELF_SERVICE_VALIDATORS, SelfServiceValidationError } from "./public-network-validation";
 import { storage } from "../storage";
 import {
@@ -540,6 +541,27 @@ export function partnerNetworkAdminRouter(): Router {
         [id],
       );
       res.json({ evidence, snapshots: snapshots.rows, overrides: overrides.rows });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /**
+   * The Super Admin exception queue — genuine failures only.
+   *
+   * Deliberately NOT a list of stale ratings. Staleness is normal and self-healing: a listing goes
+   * dirty on every HQ review and the reconciler clears it within minutes. What belongs here is the
+   * narrower set where automatic recovery has ALREADY been tried and has not worked, which is why
+   * the predicate is a consecutive-failure threshold rather than `rating_dirty = true`. A queue that
+   * fills up with healthy work is a queue nobody reads.
+   *
+   * Returned under a `ratings` key so further exception categories (settlement stuck, security hold,
+   * post-review cancellation, identity approval, print/completion inconsistency) can be added
+   * alongside it without changing the shape the UI already binds to.
+   */
+  r.get("/needs-attention", async (_req: Request, res: Response) => {
+    try {
+      res.json({ ratings: await ratingsNeedingAttention() });
     } catch (err) {
       sendError(res, err);
     }

@@ -175,6 +175,39 @@ review outcomes — **not** customer reviews. Do not label it "reviews", "custom
 Bands: `Exceptional` ≥90, `Excellent` ≥80, `Very Good` ≥70, `Good` ≥55, `Under Review` below —
 thresholds on the internal 0–100 score, which is **not** exposed publicly.
 
+### 4a. `PARTNER_QUALITY_V2` — what `version` means
+
+`version` is `"PARTNER_QUALITY_V2"` on every rating the formula produced, and `null` on an override.
+Older snapshots carry `"PARTNER_QUALITY_V1"`; if you ever surface history, do not relabel them — the
+two versions counted different populations and a V1 figure is only interpretable as V1.
+
+What V2 counts, so your copy is accurate: **reviewed units**, not approved cards. A card that
+reached HQ review stays in the population whether or not it was ever approved, and repeated
+resubmissions of the same physical card count **once**. `sampleSize` is a count of physical cards,
+so "based on N graded cards" is the correct phrasing.
+
+The population is a **rolling 180-day window** when it holds at least `minimumSample` units,
+otherwise the shop's all-time history. This is not surfaced as a separate field and you should not
+claim a period in the UI — say "based on N graded cards", never "in the last 6 months", because for
+a low-volume shop the figure is all-time.
+
+### 4b. Freshness — you do not need to render it
+
+Ratings refresh automatically: an HQ review marks the shop dirty and a refresh runs immediately
+after, with a reconciler as the safety net. There is **no** dirty/stale field on the public DTO and
+none is planned. A rating you receive is the last successfully computed one, which is always a real
+computed figure — never a partial or in-progress value. Do not build a "refreshing…" state; there is
+nothing to show.
+
+Staleness is an internal operations concern and appears only in the Super Admin Needs Attention
+projection (section 9).
+
+### 4c. Override expiry
+
+An override with a past `expiresAt` simply stops applying — the response reverts to the computed
+rating and `isOverride` becomes `false`, with no admin action and no delay. You never see an expired
+override, so there is no "expired" state to render. Render exactly what the response says.
+
 ---
 
 ## 5. Partner self-service
@@ -278,5 +311,96 @@ All errors: `{ "error": { "code": "...", "message": "..." } }`.
 | 409 | `ILLEGAL_TRANSITION` |
 | 429 | `RATE_LIMITED` |
 | 500 | `internal_error` |
+| 503 | `public_service_unavailable` |
 
 `message` is safe to display.
+
+### 8a. `503 public_service_unavailable` — the one you must handle
+
+The public database is unreachable, saturated or timing out. Exact body:
+
+```json
+{
+  "error": {
+    "code": "public_service_unavailable",
+    "message": "Shop finder is temporarily unavailable. Please try again shortly."
+  }
+}
+```
+
+Applies to **both** `GET /api/shops` and `GET /api/shops/:slug`. It is transient and **retryable** —
+unlike `500`, which is not. Suggested handling: show the message, offer a retry, do not clear cached
+results the user is already looking at, and do not report it as a client error.
+
+It is bounded by design: the public pool gives up within ~1–2 seconds rather than hanging, so a
+spinner will not sit indefinitely. Nothing about the database appears in the body — no SQLSTATE,
+role, host or query — so it is safe to display verbatim.
+
+### 8b. Suspended or ineligible shops return `404`, never `403`
+
+A shop whose listing is not ACTIVE, or whose organisation or location has been suspended or revoked,
+is absent from the finder and `404`s on its profile. This is deliberate: telling an anonymous caller
+"this shop exists but is suspended" is itself a disclosure. Render your normal not-found state. A
+shop can disappear between a finder result and a profile click — handle that as an ordinary 404.
+
+---
+
+## 9. Super Admin — Needs Attention
+
+One backend projection of genuine exceptions. **Healthy submissions and listings never appear** —
+the predicate is failure, not activity, so an empty list is the expected steady state and should be
+rendered as reassurance ("nothing needs attention"), not as an empty table.
+
+The rating slice is live today:
+
+```
+GET  /api/super-admin/partner-listings/needs-attention
+auth Super Admin session + partner admin capability
+```
+
+```json
+{
+  "ratings": [
+    {
+      "listingId": "0c2f…",
+      "slug": "strood-cards",
+      "failureCount": 4,
+      "lastErrorCode": "lock_timeout",
+      "dirtySince": "2026-08-09T09:14:22.118Z"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `failureCount` | Consecutive failed recalculations. Only listings at or above the threshold (default 3) appear |
+| `lastErrorCode` | Short classification: `statement_timeout`, `lock_timeout`, `deadlock`, `resource_exhausted`, `connection`, `schema`, `unknown`. Never driver text — safe to display, but it is an engineering hint, not user copy |
+| `dirtySince` | When the listing first became stale and stayed stale — the useful "how long has this been broken" figure |
+
+A rating that failed once and recovered never appears here: the reconciler retries automatically and
+almost every real failure clears without anyone looking. Presence in this list means automatic
+recovery has already been tried and has not worked.
+
+Other exception categories (settlement stuck, security hold, post-review cancellation request,
+identity/address approval, print/completion inconsistency, impossible workflow state) are defined in
+`docs/partner-public-network-0058.md` §12 and are **not yet exposed on this route**. Build the page so
+additional keys alongside `ratings` can be added without a redesign.
+
+---
+
+## 10. What updates itself, and what needs a human
+
+| Thing | Who |
+|---|---|
+| Effective public rating | **Automatic** — refreshed on every HQ review, reconciled as a safety net |
+| Rating override expiry | **Automatic** — lapses by clock at read time |
+| Shop disappears when suspended/revoked | **Automatic** — DB trigger propagation, no listing action needed |
+| Public card list and card count | **Automatic** — derived from published certificates |
+| Phone, email, website, opening info, description | **Partner** (Owner/Manager) — self-service, no HQ approval |
+| Display name, address, coordinates, verification, listing status | **Super Admin** — high-risk, controlled |
+| Rating override create/remove | **Super Admin** — exception only, audited, reason required |
+| Manual "Recalculate" | **Super Admin, exception only** — emergency tooling. Routine operation does not need it |
+
+If a screen you are building implies a Super Admin must press something for a healthy card to
+progress, that is a bug in the design — check this table before building the button.

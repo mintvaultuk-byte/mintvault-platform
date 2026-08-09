@@ -288,6 +288,26 @@ export async function createMintvaultCertificatesTable(admin: pg.Client): Promis
     origin_snapshot_version integer,
     updated_at timestamptz NOT NULL DEFAULT now()
   )`);
+  // CREATE TABLE IF NOT EXISTS is a NO-OP on a database that already has a narrower certificates
+  // table — which is exactly what a reused test database has after this helper is widened. The
+  // table then silently stays at yesterday's shape and the next migration that reads a new column
+  // dies with 42703, far away from the cause. These idempotent repairs make the helper mean "bring
+  // certificates up to the real shape", not "create it if absent".
+  //
+  // Every column below exists on staging and production. 0061's public card projection reads grade,
+  // grade_approved_at, deleted_at, status and origin_type; PARTNER_QUALITY_V2 reads redo_count,
+  // graded_at and status_updated_at.
+  for (const [col, type] of [
+    ["grade", "numeric(4,1)"],
+    ["redo_count", "integer NOT NULL DEFAULT 0"],
+    ["graded_at", "timestamptz"],
+    ["status_updated_at", "timestamptz"],
+    ["grade_approved_at", "timestamptz"],
+    ["deleted_at", "timestamptz"],
+    ["submission_item_id", "integer"],
+  ] as const) {
+    await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+  }
 }
 
 /**

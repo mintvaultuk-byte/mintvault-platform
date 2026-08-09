@@ -251,7 +251,13 @@ driving real HTTP through the finder and profile.
 
 ---
 
-## 11. Known limitations — hostile panel findings NOT fixed in this pass
+## 11. Known limitations recorded at 0058 — MOST ARE NOW CLOSED
+
+> **READ SECTION 12 FIRST.** This section is preserved as the historical record of what 0058
+> shipped with. L1, L2, L4 and L6 — every HIGH in this list — were closed by migrations 0059–0062
+> and the work described in section 12. Each is annotated inline below. The text of each finding is
+> left unedited on purpose: a limitations list that quietly rewrites itself teaches nobody anything,
+> and the reasoning that made these real is the reasoning that makes the fixes make sense.
 
 A ten-agent adversarial panel reviewed the shipped code. Every BLOCKER/HIGH it found was
 reproduced and fixed (see commit `0373ddac`). The findings below are **real and unfixed**. They are
@@ -259,6 +265,12 @@ recorded here rather than left implicit, because several of them limit what the 
 claim, and the public methodology text must not over-sell it.
 
 ### L1 — A shop partly controls its own denominator (fairness, HIGH)
+
+> **STATUS: CLOSED** by `PARTNER_QUALITY_V2` (commit `e8da6945`). The denominator counts REVIEWED
+> UNITS — `grade_approved_at IS NOT NULL OR redo_count > 0` — so an abandoned unit stays in the
+> population permanently. The behavioural fixture that scored 2.9 honest / 5.0 gamed now scores 2.9
+> either way. Mutation `REVIEW-DENOM1` proves it.
+
 
 Evidence counts cards with `grade_approved_at IS NOT NULL`. A rejected card only re-enters review
 when the **partner** resubmits it; nothing auto-resubmits and there is no timeout. So a card that is
@@ -276,6 +288,13 @@ schema does not have — `partner_grading_work_items.status` is current-state-on
 shop's work. It measures the work the shop carried through to approval.**
 
 ### L2 — Ratings are stale by default; override expiry is advisory only (HIGH)
+
+> **STATUS: CLOSED** in two halves. Override expiry is now evaluated at READ TIME (migration 0060,
+> commit `88b1e2fa`) — no cron, no human, no reconciler required for correctness. Staleness is
+> closed by migration 0062 (commit `42ccacd5`): lifecycle events mark the listing dirty durably, the
+> refresh runs post-commit, and a bounded reconciler is the safety net. Mutations `OVERRIDE-EXPIRY1`,
+> `RATING-AUTO1` and `RATING-FAIL1` prove it.
+
 
 `recalculateRating` has three call sites, all manual Super Admin routes. There is no cron, job,
 trigger or approval-time hook. Every published rating is frozen at whenever an admin last pressed
@@ -295,6 +314,10 @@ reassignment of partner cards happens in practice is an operational question, no
 
 ### L4 — No recency window (MEDIUM)
 
+> **STATUS: CLOSED** by the rolling 180-day window with low-sample fallback (commit `e8da6945`).
+> Mutations `RECENCY1` and `RECENCY2` prove it.
+
+
 Both scored components are means over unbounded history, so accumulated volume dilutes current
 performance without limit. Measured: 1000 clean historical cards plus 100 recent cards that each
 bounced twice scores **4.5 / "Exceptional"**, while those 100 recent cards alone score **0.0 /
@@ -310,6 +333,12 @@ unreachable as configured: the two components become unavailable together (zero 
 there is no state with exactly one live component.
 
 ### L6 — The anonymous profile route drives the privileged admin pool (HIGH, infrastructure)
+
+> **STATUS: CLOSED** by migration 0061 and the dedicated public pool (commits `2021922e`,
+> `25d343b7`). Anonymous traffic runs as `partner_public_reader` against two restricted projections,
+> on its own bounded pool with no privileged fallback. Mutations `PUBLIC-PRIV1`, `PUBLIC-POOL1` and
+> `PUBLIC-TIMEOUT1` prove it.
+
 
 `GET /api/shops/:slug` issues two `partnerAdminQuery` calls (recent cards, card count), because
 `certificates` is not readable by `partner_runtime`. The admin pool is `max: 4` with no acquire or
@@ -336,3 +365,224 @@ can be excluded while the API reports a confident, wrong `total`. Latent at pilo
   stored XSS on an unauthenticated page).
 - `0058` builds the `certificates` index non-concurrently, so applying it takes a brief write lock
   on the busiest table in the product. Worth a maintenance window on production.
+
+---
+
+## 12. What changed after 0058 — the hardening programme
+
+Everything below is implemented and behaviourally proven on real PostgreSQL 17. Each item names the
+migration and the mutation that keeps it honest.
+
+### 12.1 `certificates.submission_id` never existed (migration 0049 repair, `b5908b50`)
+
+Migration 0049, eleven runtime SQL sites and the connector's certificate INSERT all referenced
+`certificates.submission_id`. That column does not exist on staging or production, is not in
+`shared/schema.ts`, and no migration ever created it — only `submission_item_id` exists. 0049 was
+therefore **undeployable**: its unique index, composite FK and two column-level GRANT lists each
+raise 42703 against the real schema, so a staging pilot would have failed at "apply migrations",
+before card one. Fifteen test fixtures hand-created a `certificates` table WITH the column, so the
+entire estate was green against a table shape that exists nowhere.
+
+The repair routes through the canonical relation the same estate already used correctly:
+`certificate → submission_item_id → submission_items.submission_id`. No column was added to
+`shared/schema.ts` — that would widen 150+ Drizzle selects for a value reachable one hop out. The
+three-way identity guarantee is preserved transitively:
+
+```
+pgwi(destination_submission_id, submission_item_id) -> submission_items(submission_id, id)
+pgwi(certificate_id, submission_item_id)            -> certificates(id, submission_item_id)
+```
+
+Mutation `SUBMISSION-ID1` reintroduces the assumption; 0049 then fails and rolls back.
+
+### 12.2 `PARTNER_QUALITY_V2` (`e8da6945`)
+
+**Denominator — reviewed units.** V1 counted APPROVED cards, so a unit that reached review, was
+returned for change and then abandoned left the numerator and the denominator at once: abandoning
+your worst work raised your score. V2 counts units that entered the review lifecycle and keeps them
+there permanently.
+
+```
+REVIEWED_UNIT_PREDICATE:
+  deleted_at IS NULL
+  AND status = 'active'
+  AND (grade_approved_at IS NOT NULL OR redo_count > 0)
+```
+
+`redo_count` is incremented inside the rejection CAS and never reset anywhere, so a bounce is
+permanent evidence. `grade IS NOT NULL` is deliberately absent from the denominator — an abandoned
+unit may never have been graded, and requiring a grade would reopen the exact hole. It moved to the
+**first-pass numerator** instead: a unit approved with a NULL grade counts as reviewed but never as
+first-pass, because we cannot prove it was cleanly approved and "we don't know" must not score as
+"clean".
+
+**One certificate row is one physical unit.** Repeated return/resubmit raises `redo_count` on the
+same row, so `returned → resubmitted → returned → resubmitted → approved` is one sample carrying two
+redos, not three samples. Sample size cannot be inflated by churn.
+
+**180-day rolling window.** Used when it holds at least `MINIMUM_PUBLIC_SAMPLE` (10) reviewed units;
+otherwise widened to the all-time population; and if that is also short, no rating at all. A thin
+window never becomes a small rating — it becomes no rating. A unit with no usable timestamp counts
+as INSIDE the window: dropping an undateable unit is the flattering direction, and this module
+refuses flattering directions.
+
+**Formula and weights** are unchanged from V1 and documented in section 8. V1 snapshots stay
+interpretable: the version travels with the snapshot, `PARTNER_QUALITY_VERSION_V1` is retained as a
+named constant, and only new snapshots carry V2.
+
+Mutations: `REVIEW-DENOM1`, `REVIEW-DUP1`, `RECENCY1`, `RECENCY2`.
+
+### 12.3 Suspension propagation (migration 0059, `230a251e`)
+
+A listing was publicly visible on `listing_status = 'ACTIVE'` alone. Neither public query joined
+`partner_organisations` or `partner_locations`, so suspending an organisation left its shop
+advertised, rated and "verified" until somebody remembered to suspend the listing too.
+
+**Why denormalised rather than a read-time join:** the public queries run with no tenant GUC, and
+both source tables are ENABLE + FORCE RLS with tenant-isolation and no public branch. An `EXISTS`
+join from the anonymous connection matches ZERO rows — it would not hide suspended shops, it would
+hide EVERY shop, behind an HTTP 200.
+
+So 0059 puts `org_status` and `location_status` on the listing, backfilled and kept honest by
+**ENABLE ALWAYS** triggers plus a BEFORE INSERT stamp. ENABLE ALWAYS matters: propagation must fire
+for every writer including a Super Admin running manual SQL during an incident. Eligibility is
+`ACTIVE` on both; `PENDING` is deliberately not eligible.
+
+Both the application predicate and the RLS policy carry the identical three conjuncts, and each is
+mutation-proven **separately** — defence in depth means either layer alone hides the shop, which is
+exactly why a test exercising both proves neither.
+
+Mutation: `PUBLIC-SUSPEND1`.
+
+### 12.4 Override expiry at read time (migration 0060, `88b1e2fa`)
+
+`expires_at` was read only inside `recalculateRating`'s transaction while every public read consumed
+the denormalised `current_*` columns, so an expired override was published verbatim indefinitely.
+
+Correctness now happens at effective-rating SELECTION:
+
+```
+override in force := current_rating_is_override
+                     AND (current_override_expires_at IS NULL
+                          OR current_override_expires_at > now())
+```
+
+0060 denormalises the COMPUTED rating beside the effective one so an expiry has an honest fallback;
+existing rows backfill from `partner_public_rating_overrides`, which already copies the computed
+rating it displaced. Unresolvable rows fail closed to "Rating building".
+
+**Nothing retires, deletes or rewrites an override row.** Value, reason, actor, `created_at` and
+`expires_at` all survive — only the EFFECT lapses. The overrides table is not joined at read time
+because `partner_runtime` holds no privilege on it and its `reason` column is internal governance
+text.
+
+Mutation: `OVERRIDE-EXPIRY1`.
+
+### 12.5 Least-privileged public reader (migration 0061, `2021922e`)
+
+Two queries reachable from an unauthenticated `GET /api/shops/:slug` ran on `partnerAdminQuery` —
+BYPASSRLS, owner-privileged, and falling back to `MINTVAULT_DATABASE_URL` when its own URL is unset.
+
+0061 adds `partner_public_reader` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS) and two restricted views, with
+**no grant on any base table**:
+
+| Relation | Purpose |
+|---|---|
+| `partner_public_shop_projection` | eligible ACTIVE listings + effective rating, gates baked in |
+| `partner_public_card_projection` | publication-eligible partner-origin cards only |
+
+The views are **owner-checked, not `security_invoker`**: `security_invoker` would check the reader's
+privileges on base tables, requiring table-wide SELECT on `certificates` and
+`partner_public_listings` including every private column — the exact thing being removed. The view
+DEFINITION is therefore the boundary, and 0061 asserts the gates are present in
+`pg_get_viewdef` and that the card projection never names `private_notes`, `auth_status`,
+`stolen_status`, `ownership_status` or `submission_item_id`.
+
+Mutation: `PUBLIC-PRIV1`.
+
+### 12.6 Dedicated public pool and the 503 contract (`2021922e`, `25d343b7`)
+
+| Setting | Value | Why |
+|---|---|---|
+| `max` | 6 | Small and separate — a public spike exhausts this and nothing else |
+| acquire timeout | 1000 ms | A saturated pool must say so quickly; queueing turns a spike into a pile-up |
+| query timeout | 2000 ms | Client-side; frees the promise and the pool slot |
+| statement timeout | 2000 ms | Server-side bound |
+| lock timeout | 1000 ms | The one that matters — `query_timeout` leaves the backend still waiting |
+| idle timeout | 10000 ms | Bursty traffic should not hold connections between bursts |
+
+Each is env-overridable (`PARTNER_PUBLIC_DB_*`) but never unbounded. Every connection issues
+`SET ROLE partner_public_reader`, so the restricted identity executes public SQL in every
+environment. **There is no fallback** — a missing `PARTNER_PUBLIC_DATABASE_URL` fails closed.
+
+Public database failure answers **503** with a fixed body:
+
+```json
+{ "error": { "code": "public_service_unavailable",
+             "message": "Shop finder is temporarily unavailable. Please try again shortly." } }
+```
+
+503 rather than 500 is load-bearing: a client may retry a 503 and must not retry a 500, and an
+outage reporting 500 looks like an application bug in every dashboard. Classification is an explicit
+allowlist (`57014`, `55P03`, `53300`, the `08` class, node-postgres' client-side timeouts, missing
+config) — a catch-all would convert genuine bugs into a soothing 503 and hide them. Nothing derived
+from the error reaches the body: a pg connection error's message routinely carries the host and port.
+
+Proven with real held connections and a real `ACCESS EXCLUSIVE` lock, asserting observed elapsed
+time — not the test runner's timeout. Admin remains healthy throughout.
+
+Mutations: `PUBLIC-POOL1`, `PUBLIC-TIMEOUT1`.
+
+### 12.7 Rating automation (migration 0062, `42ccacd5`)
+
+`recalculateRating` had three callers, all Super Admin routes, so a published rating was only as
+fresh as the last time a human pressed Recalculate.
+
+**Dirty state** on `partner_public_listings`: `rating_dirty`, `rating_dirty_since`,
+`rating_last_attempted_at`, `rating_last_success_at`, `rating_failure_count`,
+`rating_last_error_code`. Existing listings backfill DIRTY — none is known-fresh, and starting them
+clean would assert a freshness nothing established.
+
+**Why durable state and not just a post-commit call:** the process can die between commit and
+refresh, a machine can restart, the refresh can fail. Each loses the work silently unless the
+obligation is recorded. Marking dirty commits with the evidence that created it.
+
+**The non-blocking contract.** A rating is secondary; nothing may fail a card's grading, approval,
+settlement, certificate issuance, printing or completion. The dirty mark is one tiny UPDATE on the
+caller's own client; everything expensive runs after the commit on its own connection behind a catch
+that never rethrows. Failure mode: the listing stays dirty.
+
+**Lock order:** `partner_public_listings` is acquired LAST, always. The approval hook sits after the
+mirror transaction closes so that transaction keeps its single-table lock set; the rejection hook
+fires only once its CAS confirms the unit moved. No cross-pool call from inside a transaction that
+could wait on its own locks — that has no cycle for PostgreSQL to detect and simply hangs two pooled
+connections.
+
+**Reconciler:** bounded batch (default 25, hard-capped 500), no estate-wide transaction, per-item
+catch, `FOR UPDATE SKIP LOCKED` for multi-machine safety, deterministic `rating_dirty_since ASC, id
+ASC` ordering. Registered on the existing advisory-locked scheduler at a 5-minute interval. Pre-0062
+databases are a clean no-op.
+
+**Retry/failure policy:** failures are retried automatically and only surface to Super Admin after
+`RATING_FAILURE_ATTENTION_THRESHOLD` (default 3) consecutive failures. A transient error must not
+become a human task on its first occurrence. `rating_last_error_code` holds a short
+application-chosen classification, never driver text.
+
+Mutations: `RATING-AUTO1`, `RATING-FAIL1`.
+
+### 12.8 Migration order for the pilot
+
+Apply in ascending order; each rollback carries a descending-order guard and de-journals itself:
+
+```
+0049_partner_grading_work_items
+0058_partner_public_network
+0059_partner_public_eligibility_propagation
+0060_partner_public_rating_override_expiry
+0061_partner_public_reader
+0062_partner_rating_dirty_state
+```
+
+`rollback-0061` deliberately REVOKES rather than DROPs `partner_public_reader`: a role is
+cluster-wide, not database-scoped, so dropping it reaches outside the migration's own database, and
+a NOSUPERUSER migrator may not hold ADMIN on a role another database's migrator created.

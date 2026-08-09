@@ -46,15 +46,30 @@ UPDATE partner_public_listings
        rating_dirty_since = COALESCE(rating_dirty_since, now())
  WHERE rating_dirty = false;
 
--- A dirty listing must always carry the timestamp the reconciler orders by.
-ALTER TABLE partner_public_listings
-  ADD CONSTRAINT chk_partner_public_listings_rating_dirty_since
-  CHECK (rating_dirty = false OR rating_dirty_since IS NOT NULL);
+-- PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so a bare ADD CONSTRAINT makes the whole
+-- migration non-idempotent: a re-apply after a rollback — or a retried deploy — fails with
+-- "constraint already exists" and takes every later statement down with it. The house pattern
+-- (0049) is a pg_constraint existence check, so re-application is a no-op.
+DO $$
+BEGIN
+  -- A dirty listing must always carry the timestamp the reconciler orders by.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_partner_public_listings_rating_dirty_since'
+  ) THEN
+    ALTER TABLE partner_public_listings
+      ADD CONSTRAINT chk_partner_public_listings_rating_dirty_since
+      CHECK (rating_dirty = false OR rating_dirty_since IS NOT NULL);
+  END IF;
 
--- Failure counts are counts.
-ALTER TABLE partner_public_listings
-  ADD CONSTRAINT chk_partner_public_listings_rating_failure_count
-  CHECK (rating_failure_count >= 0);
+  -- Failure counts are counts.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_partner_public_listings_rating_failure_count'
+  ) THEN
+    ALTER TABLE partner_public_listings
+      ADD CONSTRAINT chk_partner_public_listings_rating_failure_count
+      CHECK (rating_failure_count >= 0);
+  END IF;
+END$$;
 
 -- THE RECONCILER'S CANDIDATE INDEX. Partial on rating_dirty so it stays small no matter how large
 -- the estate grows: in a healthy system almost nothing is dirty, and the index holds only the work.
