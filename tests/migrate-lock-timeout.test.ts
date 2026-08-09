@@ -141,11 +141,40 @@ describe("migrate:no-transaction directive must be anchored", () => {
     expect(hasNoTransactionDirective(sql)).toBe(true);
   });
 
-  it("exactly one migration in the repo opts out of the transaction", () => {
+  it("every migration that opts out of the transaction is one we deliberately chose", () => {
     const optedOut = readdirSync(MIGRATIONS)
       .filter((f) => /^\d{4,}_.+\.sql$/.test(f))
       .filter((f) => hasNoTransactionDirective(readFileSync(join(MIGRATIONS, f), "utf8")));
-    expect(optedOut).toEqual(["0018_correction_audit_index.sql"]);
+    // An EXACT list, not a count and not a maximum. Opting out of the runner's transaction gives
+    // up atomicity — a failure part-way leaves statements applied with no journal row — so each
+    // one is a deliberate, individually-justified decision and a new arrival must be noticed here.
+    //
+    // 0018: CREATE INDEX CONCURRENTLY on audit_log.
+    // 0065: CREATE INDEX CONCURRENTLY on certificates. Added 2026-08-09 for H10 — the rating
+    //       measurement was seq-scanning certificates because 0058's partial index excludes the
+    //       abandoned units PARTNER_QUALITY_V2 added. Built concurrently because a plain
+    //       CREATE INDEX takes ShareLock and scripts/db/migrate.ts holds a file's locks until it
+    //       COMMITs, so an in-transaction build would block every certificate write for the
+    //       duration. Measured on PG17: CONCURRENTLY takes ShareUpdateExclusive only.
+    expect(optedOut).toEqual([
+      "0018_correction_audit_index.sql",
+      "0065_certificates_reviewed_unit_index.sql",
+    ]);
+  });
+
+  it("every no-transaction migration also declares its self-healing index target", () => {
+    // The pairing is what makes opting out RECOVERABLE rather than merely non-atomic: without
+    // `migrate:ensure-valid-concurrent-index` the runner cannot inspect indisvalid, so a failed
+    // build leaves an INVALID index that is maintained on every write, used for no read, and
+    // never repaired. scripts/db/migrate.ts:427 enforces the converse (the directive requires
+    // no-transaction); nothing enforced this direction until now.
+    const offenders = readdirSync(MIGRATIONS)
+      .filter((f) => /^\d{4,}_.+\.sql$/.test(f))
+      .filter((f) => {
+        const sql = readFileSync(join(MIGRATIONS, f), "utf8");
+        return hasNoTransactionDirective(sql) && !/migrate:ensure-valid-concurrent-index\s+\S+/i.test(sql);
+      });
+    expect(offenders, "a no-transaction migration with no self-healing target").toEqual([]);
   });
 });
 
