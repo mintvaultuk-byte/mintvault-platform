@@ -581,7 +581,30 @@ Apply in ascending order; each rollback carries a descending-order guard and de-
 0060_partner_public_rating_override_expiry
 0061_partner_public_reader
 0062_partner_rating_dirty_state
+0063_certificate_review_lifecycle_clock          # B1 review clock; ACCESS EXCLUSIVE, quiet window
+0064_public_slab_image_projection                # B2 anonymous image path; ACCESS EXCLUSIVE
+0065_certificates_reviewed_unit_index            # migrate:no-transaction — CONCURRENTLY, no window
+0066_partner_rating_lifecycle_hardening          # rating CAS / lease / backoff; partner tables only
 ```
+
+⚠️ **This list stopped at 0062 until 2026-08-09, and it is the list an operator applies from.**
+Applying it as it stood produced an estate where the rating engine's `review_entered_at` column did
+not exist and the live slab-image proxy's projection did not exist — i.e. a 500 on every rating
+measurement and a 503 on every public card image. Per-migration lock modes, measured rather than
+estimated, and the ordering constraint that 0065 must not share an `--apply` with a quiet-window
+file, are in `docs/partner-migration-lock-safety.md` §5.
+
+⚠️ **AND ONE STEP THAT IS NOT A MIGRATION.** After 0064 the anonymous slab-image proxy reads its
+projection as `partner_public_reader` and fails closed. Before deploying the application:
+
+```sql
+-- run as a role that holds ADMIN on the group role; no migration can do this (0008 convention)
+GRANT partner_public_reader TO <the login role in PARTNER_PUBLIC_DATABASE_URL>;
+```
+
+and set `PARTNER_PUBLIC_DATABASE_URL`. The public slab showcase is a LIVE production surface, and
+every image on it 503s without both. `reportPartnerPublicNetworkReadiness` logs
+`public_reader_role_unavailable` with the remedy at startup if the grant is missing.
 
 `rollback-0061` deliberately REVOKES rather than DROPs `partner_public_reader`: a role is
 cluster-wide, not database-scoped, so dropping it reaches outside the migration's own database, and

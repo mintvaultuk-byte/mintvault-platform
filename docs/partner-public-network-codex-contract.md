@@ -4,8 +4,19 @@ Backend contracts for the Shop Finder, public shop profiles, Super Admin listing
 Partner self-service. **Build presentation only** — every business rule below is already enforced
 server-side and must not be re-implemented or second-guessed in the UI.
 
-Branch `opus/partner-final-integration`. Migration `0058` is **not** applied to staging or
-production, so these endpoints will 500 until it is. Nothing here is live yet.
+Branch `opus/partner-final-integration`. Migrations `0058`-`0066` are **not** applied to staging or
+production. Nothing here is live yet.
+
+⚠️ Do NOT code against "these endpoints will 500 until it is", which is what this said until
+2026-08-09. It is wrong in both directions now:
+
+- With the rollout flag `partner_public_network_enabled` **OFF** — its default, and its state in
+  every environment today — every anonymous route returns **404** with the ordinary `NOT_FOUND`
+  body. A dark feature must be indistinguishable from an absent one.
+- With the flag ON but `PARTNER_PUBLIC_DATABASE_URL` unset, or its login role not a member of
+  `partner_public_reader`, they return **503** `public_service_unavailable`.
+
+Handle 404 and 503. Do not special-case 500.
 
 ---
 
@@ -27,7 +38,7 @@ production, so these endpoints will 500 until it is. Nothing here is live yet.
 ```
 GET /api/shops
 ```
-Auth: **none**. Rate limit 120/min per client.
+Auth: **none**. Rate limit 120/min per client. Gated by `partner_public_network_enabled` (default OFF) — see the 404 note on `/api/shops/:slug`.
 
 ### Query parameters
 
@@ -71,7 +82,7 @@ Repeating a parameter (`?town=a&town=b`) is a **400**, not a silent pick.
         "label": "Excellent",
         "sampleSize": 42,
         "minimumSample": 10,
-        "version": "PARTNER_QUALITY_V1",
+        "version": "PARTNER_QUALITY_V2",
         "calculatedAt": "2026-08-08T18:20:00.000Z"
       }
     }
@@ -98,7 +109,7 @@ slug. A "Rating building" shop can never outrank a rated one.
 ```
 GET /api/shops/:slug
 ```
-Auth: **none**. `404` for unknown, paused, suspended or removed.
+Auth: **none**. `404` for unknown, paused, suspended, removed — **or when the public network is not enabled in this environment** (`partner_public_network_enabled`, default OFF). All five are deliberately indistinguishable: telling an anonymous caller that a shop exists but is suspended, or that a feature exists but is dark, is itself a disclosure.
 
 ### Response `200`
 
@@ -125,7 +136,7 @@ Everything in the finder row, plus:
   "website": "https://example.com",
   "openingInfo": "Mon–Sat 9:00–17:30",
   "description": "Independent card shop and MintVault grading partner.",
-  "rating": { "available": true, "isOverride": false, "rating": 4.6, "label": "Excellent", "sampleSize": 42, "minimumSample": 10, "version": "PARTNER_QUALITY_V1", "calculatedAt": "2026-08-08T18:20:00.000Z" },
+  "rating": { "available": true, "isOverride": false, "rating": 4.6, "label": "Excellent", "sampleSize": 42, "minimumSample": 10, "version": "PARTNER_QUALITY_V2", "calculatedAt": "2026-08-08T18:20:00.000Z" },
   "stats": { "cardsGraded": 42 },
   "recentCards": [
     {
@@ -254,7 +265,7 @@ warning, it means the change committed but the audit write failed.
 | `POST` | `/:id/verify` | `{ verified, reason }` |
 | `GET` | `/:id/rating` | Evidence + last 20 snapshots + override history. **Read-only, persists nothing** |
 | `POST` | `/:id/rating/recalculate` | Recompute and persist |
-| `POST` | `/:id/rating/override` | `{ rating?, label?, reason, expiresAt? }`. `expiresAt` is an **advisory review-by date** — nothing recalculates on a schedule, so it does not auto-expire. Label it "review by", not "expires". |
+| `POST` | `/:id/rating/override` | `{ rating?, label?, reason, expiresAt? }`. `expiresAt` genuinely expires. 0060 makes the effective rating fall back to the computed one AT READ TIME the moment the override lapses, and 0066's clock-driven reconciler refreshes the stored row too. Label it "expires". ⚠️ This said "advisory review-by date — nothing recalculates on a schedule" until 2026-08-09, contradicting §4b and §4c of this same document; a UI built from the old wording will describe the behaviour wrongly. |
 | `DELETE` | `/:id/rating/override` | `{ reason }` — retire the active override |
 
 Legal transitions (the API returns **409 `ILLEGAL_TRANSITION`** otherwise; the database enforces
@@ -279,7 +290,7 @@ enters coordinates by hand. A listing without them is valid.
   "source": "audit_log entity_id has two incompatible conventions …", "sampleSize": 0 }
 ```
 
-Ratings are recalculated **only** when an admin presses recalculate — `calculatedAt` is the age of the figure, and it is worth surfacing.
+Ratings recalculate automatically — on every HQ review that changes the evidence, and by clock when the 180-day window moves. `calculatedAt` is still worth surfacing as the age of the figure. ⚠️ This said "only when an admin presses recalculate" until 2026-08-09; that stopped being true at 0062 and is doubly untrue since 0066.
 
 Render unavailable metrics as **"Not measurable"** with the `source` text as the explanation.
 Never render them as 0, 100% or a dash implying perfection.
