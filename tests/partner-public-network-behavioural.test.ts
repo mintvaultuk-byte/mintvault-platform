@@ -440,6 +440,111 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
   });
 
   /**
+   * OVERRIDE EXPIRY — a time-boxed exception must actually end.
+   *
+   * `expires_at` used to be read only inside recalculateRating's transaction, and every public read
+   * consumes the denormalised current_* columns that transaction wrote. Nothing recalculates on a
+   * schedule, so an expired override kept being published verbatim, indefinitely, until a Super
+   * Admin happened to press Recalculate.
+   *
+   * These tests move the CLOCK, not the data: after the recalculation that installs the override,
+   * nothing writes to the listing again. If the public rating changes, it changed by comparison at
+   * read time — which is the whole property.
+   */
+  describe("rating override expiry", () => {
+    async function installOverride(listingId: string, rating: string, expiresAt: string | null) {
+      await admin.query(
+        `INSERT INTO partner_public_rating_overrides
+           (tenant_id, listing_id, override_public_rating, override_rating_label, reason, created_by, expires_at,
+            computed_public_rating, computed_rating_label)
+         VALUES ($1,$2,$3,'Exceptional','pilot goodwill','hq@test',${expiresAt ?? "NULL"},
+                 (SELECT current_computed_public_rating FROM partner_public_listings WHERE id=$2),
+                 (SELECT current_computed_rating_label FROM partner_public_listings WHERE id=$2))`,
+        [T_A, listingId, rating],
+      );
+    }
+
+    it("serves the override while it is in force", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Live", "ovr-live");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1 });
+      await svc.recalculateRating(listingId, "test@hq");
+      await installOverride(listingId, "4.8", "now() + interval '30 days'");
+      await svc.recalculateRating(listingId, "test@hq");
+
+      const p = await svc.getShopProfile("ovr-live");
+      expect(p?.rating.isOverride).toBe(true);
+      expect(p?.rating.rating).toBeCloseTo(4.8, 5);
+      // A hand-set number must never be attributed to the formula.
+      expect(p?.rating.version).toBeNull();
+    });
+
+    it("OVERRIDE-EXPIRY1: stops serving the override the moment it expires, with NO recalculation", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Expiry", "ovr-expiry");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1 });
+      await svc.recalculateRating(listingId, "test@hq");
+      const computed = await svc.getShopProfile("ovr-expiry");
+      const computedRating = computed!.rating.rating;
+      expect(computedRating).not.toBeNull();
+
+      await installOverride(listingId, "5.0", "now() + interval '30 days'");
+      await svc.recalculateRating(listingId, "test@hq");
+      expect((await svc.getShopProfile("ovr-expiry"))!.rating.rating).toBeCloseTo(5.0, 5);
+
+      // Move the clock past the expiry. NOTHING else is written — no recalculation, no job, no human.
+      await admin.query(
+        "UPDATE partner_public_listings SET current_override_expires_at = now() - interval '1 second' WHERE id=$1",
+        [listingId],
+      );
+
+      const after = await svc.getShopProfile("ovr-expiry");
+      expect(after!.rating.isOverride).toBe(false);
+      expect(after!.rating.rating).toBeCloseTo(computedRating!, 5);
+      // The formula is answering again, so the version is attributable again.
+      expect(after!.rating.version).toBe("PARTNER_QUALITY_V2");
+    });
+
+    it("expiry reaches the finder's ranking too, not just the profile", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Finder", "ovr-finder");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1 });
+      await svc.recalculateRating(listingId, "test@hq");
+      await installOverride(listingId, "5.0", "now() + interval '30 days'");
+      await svc.recalculateRating(listingId, "test@hq");
+
+      const before = await svc.findShops({ page: 1, pageSize: 50 });
+      expect(before.rows.find((r) => r.slug === "ovr-finder")!.rating.rating).toBeCloseTo(5.0, 5);
+
+      await admin.query(
+        "UPDATE partner_public_listings SET current_override_expires_at = now() - interval '1 second' WHERE id=$1",
+        [listingId],
+      );
+      const after = await svc.findShops({ page: 1, pageSize: 50 });
+      const row = after.rows.find((r) => r.slug === "ovr-finder")!;
+      expect(row.rating.isOverride).toBe(false);
+      expect(row.rating.rating).toBeLessThan(5.0);
+    });
+
+    it("preserves the override RECORD after expiry — the effect lapses, the history does not", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Audit", "ovr-audit");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1 });
+      await svc.recalculateRating(listingId, "test@hq");
+      await installOverride(listingId, "5.0", "now() - interval '1 day'");
+      await svc.recalculateRating(listingId, "test@hq");
+
+      // Nothing retired, deleted or rewrote the row: reason, actor and expiry all survive.
+      const row = await admin.query<{ reason: string; created_by: string; removed_at: Date | null }>(
+        "SELECT reason, created_by, removed_at FROM partner_public_rating_overrides WHERE listing_id=$1",
+        [listingId],
+      );
+      expect(row.rows).toHaveLength(1);
+      expect(row.rows[0].reason).toBe("pilot goodwill");
+      expect(row.rows[0].created_by).toBe("hq@test");
+      expect(row.rows[0].removed_at).toBeNull();
+      // ...and it is not being served.
+      expect((await svc.getShopProfile("ovr-audit"))!.rating.isOverride).toBe(false);
+    });
+  });
+
+  /**
    * PUBLIC ELIGIBILITY — suspension must propagate without a second manual action.
    *
    * A listing is a deliberate SNAPSHOT of a location, not a view over it (0058), so nothing carried

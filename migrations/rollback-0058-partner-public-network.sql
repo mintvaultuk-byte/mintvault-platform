@@ -39,6 +39,26 @@
 
 BEGIN;
 
+-- ---- 0. DESCENDING-ORDER GUARD ----------------------------------------------------------------
+-- 0058 is no longer the newest migration: 0059 adds columns to partner_public_listings and 0060
+-- adds more. DROP TABLE below would take those columns with it while 0059/0060 remain journalled as
+-- applied, so the runner would never restore them — a silently half-rolled-back estate that reports
+-- green. Every rollback in this series carries the same guard for the same reason; descending order
+-- is the supported recovery path, and each file de-journals itself so that order is always reachable.
+DO $$
+DECLARE later_migrations integer;
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $q$SELECT count(*) FROM schema_migrations
+                WHERE filename ~ '^[0-9]{4}_' AND left(filename,4)::integer > 58$q$
+      INTO later_migrations;
+    IF later_migrations > 0 THEN
+      RAISE EXCEPTION 'rollback-0058 refused: % later migration journal row(s) exist. Resolve newer migrations first.',
+        later_migrations;
+    END IF;
+  END IF;
+END$$;
+
 -- MUST be the first statement inside this transaction: it must be in force before the first lock.
 -- partner_locations is read on the partner authentication and location-switch paths, and this file
 -- takes a lock on it to drop the composite-FK target index. An unbounded wait here would queue

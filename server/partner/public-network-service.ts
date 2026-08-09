@@ -68,6 +68,46 @@ export class PublicNetworkError extends Error {
  * `verified_by`, `approved_by` (staff identities), `current_rating_snapshot_id` (internal join
  * key). `public_ref` is excluded too — support quotes it, the website does not need it.
  */
+/**
+ * Is the override reflected in current_* still in force RIGHT NOW?
+ *
+ * An override lapses by comparison at read time, not by a job. `expires_at` used to be consulted
+ * only inside recalculateRating's transaction, and every public read consumes the denormalised
+ * current_* columns that transaction wrote — so an expired override kept being published verbatim
+ * until a Super Admin pressed Recalculate. A time-boxed exception that never ends is not one.
+ *
+ * NULL expiry means "does not lapse", which covers both no-override and an override with no
+ * expiry date.
+ */
+const OVERRIDE_IN_FORCE = `
+  current_rating_is_override = true
+  AND (current_override_expires_at IS NULL OR current_override_expires_at > now())
+`;
+
+/**
+ * The rating the public actually sees, chosen per row.
+ *
+ * Emitted under the ORIGINAL column aliases so ratingDto and every consumer stay unchanged — the
+ * selection moves into SQL, the shape does not. When the override is in force the stored effective
+ * values are served; the moment it lapses the row falls back to the COMPUTED rating that 0060
+ * denormalises alongside it, with no write, no job and no human.
+ *
+ * Used by the finder's ORDER BY as well as its SELECT: sorting by quality must sort by what is
+ * actually published, or a lapsed override would still be ranking a shop above its real peers.
+ */
+export const EFFECTIVE_RATING_COLUMNS = `
+  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_rating_version
+       ELSE current_computed_rating_version END           AS current_rating_version,
+  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_public_rating
+       WHEN current_computed_rating_available THEN current_computed_public_rating
+       ELSE NULL END                                      AS current_public_rating,
+  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_rating_label
+       ELSE COALESCE(current_computed_rating_label, 'Rating building') END AS current_rating_label,
+  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_rating_available
+       ELSE current_computed_rating_available END         AS current_rating_available,
+  (${OVERRIDE_IN_FORCE})                                  AS current_rating_is_override
+`;
+
 const PUBLIC_LISTING_COLUMNS = `
   slug,
   public_display_name,
@@ -88,13 +128,9 @@ const PUBLIC_LISTING_COLUMNS = `
   listing_status,
   verified_at,
   public_since,
-  current_rating_version,
-  current_public_rating,
-  current_rating_label,
-  current_rating_available,
+  ${EFFECTIVE_RATING_COLUMNS},
   current_sample_size,
   current_minimum_sample,
-  current_rating_is_override,
   current_rating_calculated_at
 `;
 
@@ -659,8 +695,12 @@ export async function recalculateRating(listingId: string, actor: string): Promi
 
     // An override expires by clock, not by a job: expires_at in the past means inactive. A trigger
     // that retired rows on a schedule would mutate history behind the operator's back.
-    const ov = await client.query<{ override_public_rating: string | null; override_rating_label: string | null }>(
-      `SELECT override_public_rating, override_rating_label
+    const ov = await client.query<{
+      override_public_rating: string | null;
+      override_rating_label: string | null;
+      expires_at: Date | null;
+    }>(
+      `SELECT override_public_rating, override_rating_label, expires_at
          FROM partner_public_rating_overrides
         WHERE listing_id = $1 AND removed_at IS NULL AND (expires_at IS NULL OR expires_at > now())
         LIMIT 1`,
@@ -696,7 +736,16 @@ export async function recalculateRating(listingId: string, actor: string): Promi
               current_minimum_sample = $7,
               current_rating_is_override = $8,
               current_rating_calculated_at = now(),
-              current_rating_snapshot_id = $9
+              current_rating_snapshot_id = $9,
+              -- The COMPUTED rating is denormalised beside the effective one so that when the
+              -- override lapses the public read has something honest to fall back to, with no
+              -- write and no job. These are always the formula's own output, never the override's.
+              current_computed_public_rating = $10,
+              current_computed_rating_label = $11,
+              current_computed_rating_available = $12,
+              current_computed_rating_version = $13,
+              -- NULL whenever no override is in force, so a stale expiry can never resurrect one.
+              current_override_expires_at = $14
         WHERE id = $1`,
       [
         l.id,
@@ -708,6 +757,11 @@ export async function recalculateRating(listingId: string, actor: string): Promi
         storedMinimum,
         isOverride,
         snapshotId,
+        computed.ratingAvailable ? computed.publicRating : null,
+        computed.ratingLabel,
+        computed.ratingAvailable,
+        computed.version,
+        isOverride ? (override?.expires_at ?? null) : null,
       ],
     );
 

@@ -18,6 +18,27 @@
 
 BEGIN;
 
+-- ---- 0. DESCENDING-ORDER GUARD ----------------------------------------------------------------
+-- 0059 is no longer the newest migration: 0060 denormalises the computed rating and the override
+-- expiry onto the same table, and its backfill reads rows this file's propagation keeps honest.
+-- Rolling 0059 back underneath 0060 would leave 0060 journalled as applied on an estate whose
+-- eligibility snapshot no longer exists. Every rollback in this series carries the same guard for
+-- the same reason; descending order is the supported recovery path, and each file de-journals
+-- itself so that order is always reachable.
+DO $$
+DECLARE later_migrations integer;
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $q$SELECT count(*) FROM schema_migrations
+                WHERE filename ~ '^[0-9]{4}_' AND left(filename,4)::integer > 59$q$
+      INTO later_migrations;
+    IF later_migrations > 0 THEN
+      RAISE EXCEPTION 'rollback-0059 refused: % later migration journal row(s) exist. Resolve newer migrations first.',
+        later_migrations;
+    END IF;
+  END IF;
+END$$;
+
 -- ---- 1. Restore 0058's public read policy ----------------------------------------------------
 DO $$
 BEGIN

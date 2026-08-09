@@ -1050,6 +1050,9 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // 0059 tightens partner_public_listings_public_read to gate on org/location eligibility as
     // well as listing_status. Without it this audit would keep proving 0058's looser policy.
     "0059_partner_public_eligibility_propagation",
+    // 0060 adds the denormalised computed-rating fallback and the override expiry instant. Both are
+    // read on the public path, so the grant/RLS audit must see them.
+    "0060_partner_public_rating_override_expiry",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */

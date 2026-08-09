@@ -461,7 +461,11 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 58,
-    standalone: true,
+    // Not standalone: 0059 and 0060 sit above it and add columns to partner_public_listings, so
+    // rollback-0058 now refuses while either is journalled. Its DROP TABLE would otherwise take
+    // their columns with it while they stayed journalled as applied — a half-rolled-back estate
+    // reporting green.
+    standalone: false,
     migration: "0058_partner_public_network.sql",
     rollback: "rollback-0058-partner-public-network.sql",
     hole: "without the public listing tables there is no shop finder, no public shop profile and nowhere to persist a quality rating",
@@ -491,7 +495,8 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 59,
-    standalone: true,
+    // Not standalone: 0060 sits above it and rollback-0059 refuses while it is journalled.
+    standalone: false,
     migration: "0059_partner_public_eligibility_propagation.sql",
     rollback: "rollback-0059-partner-public-eligibility-propagation.sql",
     hole: "a suspended or revoked organisation stays publicly advertised on the shop finder, because listing_status is the only public gate",
@@ -499,25 +504,48 @@ const ROUND_TRIPS: RoundTrip[] = [
     whenRolledBack: "eligibility_propagation_absent",
     // 0059 is now the newest migration, so the descending sequence starts here rather than at 0058.
     //
-    // The probe checks the COLUMNS, the three trigger functions AND the policy text. Dropping the
-    // columns alone would leave the propagation functions stranded in `public` — the residue the
-    // unpinned-function class sweep in this file goes red on — and would leave the public read
-    // policy still naming columns that no longer exist, which fails closed in the worst way: every
-    // shop invisible behind an HTTP 200.
+    // The probe counts COLUMNS ONLY, deliberately. An earlier revision also counted the three
+    // propagation functions — but a function survives DROP TABLE, so when rollback-0058 removed
+    // partner_public_listings underneath this migration the probe still reported "present" and the
+    // round trip passed with the columns gone. Counting anything that outlives the table it
+    // belongs to is how a probe lies.
     probe: async () => {
       const { rows } = await admin.query<{ n: number }>(
         `SELECT (
            (SELECT count(*) FROM information_schema.columns
              WHERE table_schema='public' AND table_name='partner_public_listings'
                AND column_name IN ('org_status','location_status'))
-           + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-               WHERE n.nspname='public' AND p.proname IN (
-                 'partner_public_listing_stamp_eligibility',
-                 'partner_public_propagate_org_status',
-                 'partner_public_propagate_location_status'))
          )::int n`
       );
       return rows[0].n === 0 ? "eligibility_propagation_absent" : "eligibility_propagation_present";
+    },
+  },
+  {
+    number: 60,
+    standalone: true,
+    migration: "0060_partner_public_rating_override_expiry.sql",
+    rollback: "rollback-0060-partner-public-rating-override-expiry.sql",
+    hole: "an expired rating override keeps being published indefinitely, because expires_at is only read during a manual recalculation",
+    whenApplied: "override_expiry_present",
+    whenRolledBack: "override_expiry_absent",
+    // 0060 is now the newest migration, so the descending sequence starts here.
+    //
+    // The probe checks the COLUMNS and the partial index. It deliberately also asserts the override
+    // TABLE survives: this rollback must never touch partner_public_rating_overrides, because the
+    // reason/actor/expiry history is the audit trail for every exception a Super Admin ever granted.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='partner_public_listings'
+               AND column_name IN ('current_override_expires_at','current_computed_public_rating',
+                                   'current_computed_rating_label','current_computed_rating_available',
+                                   'current_computed_rating_version'))
+           + (SELECT count(*) FROM pg_indexes
+               WHERE schemaname='public' AND indexname='idx_partner_public_listings_override_expiry')
+         )::int n`
+      );
+      return rows[0].n === 0 ? "override_expiry_absent" : "override_expiry_present";
     },
   },
 ];
