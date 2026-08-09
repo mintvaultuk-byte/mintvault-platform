@@ -551,7 +551,8 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 61,
-    standalone: true,
+    // Not standalone: 0062 sits above it.
+    standalone: false,
     migration: "0061_partner_public_reader.sql",
     rollback: "rollback-0061-partner-public-reader.sql",
     hole: "anonymous shop finder and public profile traffic runs on the BYPASSRLS admin pool, which also falls back to the full MintVault connection",
@@ -572,6 +573,32 @@ const ROUND_TRIPS: RoundTrip[] = [
          )::int n`
       );
       return rows[0].n === 0 ? "public_reader_absent" : "public_reader_present";
+    },
+  },
+  {
+    number: 62,
+    standalone: true,
+    migration: "0062_partner_rating_dirty_state.sql",
+    rollback: "rollback-0062-partner-rating-dirty-state.sql",
+    hole: "nothing marks a shop rating stale, so a published rating is only ever as fresh as the last time a human pressed Recalculate",
+    whenApplied: "rating_dirty_state_present",
+    whenRolledBack: "rating_dirty_state_absent",
+    // 0062 is now the newest migration, so the descending sequence starts here.
+    //
+    // The probe counts COLUMNS AND the partial candidate index. Dropping the columns while leaving
+    // the index behind would leave a stranded index on a table whose predicate no longer resolves.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='partner_public_listings'
+               AND column_name IN ('rating_dirty','rating_dirty_since','rating_last_attempted_at',
+                                   'rating_last_success_at','rating_failure_count','rating_last_error_code'))
+           + (SELECT count(*) FROM pg_indexes
+               WHERE schemaname='public' AND indexname='idx_partner_public_listings_rating_dirty')
+         )::int n`
+      );
+      return rows[0].n === 0 ? "rating_dirty_state_absent" : "rating_dirty_state_present";
     },
   },
 ];

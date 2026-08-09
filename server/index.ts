@@ -477,6 +477,23 @@ async function runTransferV2Sweep() {
   guardedPartnerCreditReservationExpiry();
   trackInterval(guardedPartnerCreditReservationExpiry, 60 * 60 * 1000);
 
+  // Partner shop ratings refresh themselves the moment an HQ review changes the evidence. This tick
+  // is the safety net for the cases that cannot cover — a process that died between the commit and
+  // the refresh, a machine restart, a transient DB error — so it runs often enough to keep a stale
+  // rating short-lived, and bounded so it can never become a long-running estate sweep.
+  const guardedPartnerRatingReconciler = guard("partner-rating-reconciler", async () => {
+    const { runPartnerRatingReconciler } = await import("./jobs/partner-rating-reconciler");
+    const result = await runPartnerRatingReconciler();
+    if (result.processed > 0) {
+      log(
+        `processed=${result.processed} refreshed=${result.refreshed} failed=${result.failed}`,
+        "partner-rating-reconciler"
+      );
+    }
+  });
+  guardedPartnerRatingReconciler();
+  trackInterval(guardedPartnerRatingReconciler, 5 * 60 * 1000);
+
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
   // hour. Job fail-softs if the migration hasn't run yet, so it's safe

@@ -1061,6 +1061,9 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // 0061 adds the public-reader role and its two restricted projections. The RLS/grant audit
     // must see them so a future blanket GRANT cannot widen the anonymous surface unnoticed.
     "0061_partner_public_reader",
+    // 0062 adds rating lifecycle state to partner_public_listings; the grant audit must see that
+    // partner_runtime cannot write it.
+    "0062_partner_rating_dirty_state",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */

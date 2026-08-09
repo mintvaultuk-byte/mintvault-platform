@@ -444,6 +444,169 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
   });
 
   /**
+   * RATING AUTOMATION (0062) — dirty marking, non-blocking refresh, bounded reconciliation.
+   */
+  describe("rating lifecycle automation", () => {
+    let life: typeof import("../server/partner/public-network-rating-lifecycle");
+
+    beforeAll(async () => {
+      life = await import("../server/partner/public-network-rating-lifecycle");
+    });
+
+    async function dirtyState(listingId: string) {
+      const r = await admin.query<{
+        rating_dirty: boolean; rating_failure_count: number;
+        rating_last_error_code: string | null; rating_last_success_at: Date | null;
+      }>(
+        `SELECT rating_dirty, rating_failure_count, rating_last_error_code, rating_last_success_at
+           FROM partner_public_listings WHERE id = $1`,
+        [listingId],
+      );
+      return r.rows[0];
+    }
+
+    it("RATING-AUTO1: marking dirty is idempotent and does not move the queue position", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Dirty Idem", "dirty-idem");
+      await admin.query("UPDATE partner_public_listings SET rating_dirty=false, rating_dirty_since=NULL WHERE id=$1", [listingId]);
+
+      await life.markRatingDirty(admin, locationId);
+      const first = await admin.query<{ since: Date }>(
+        "SELECT rating_dirty_since AS since FROM partner_public_listings WHERE id=$1", [listingId]);
+      expect((await dirtyState(listingId)).rating_dirty).toBe(true);
+
+      await life.markRatingDirty(admin, locationId);
+      const second = await admin.query<{ since: Date }>(
+        "SELECT rating_dirty_since AS since FROM partner_public_listings WHERE id=$1", [listingId]);
+      // Monotonic: a shop under constant activity cannot keep pushing itself to the back of the
+      // oldest-first queue and starve a quieter one.
+      expect(second.rows[0].since.getTime()).toBe(first.rows[0].since.getTime());
+    });
+
+    it("a reconciler tick refreshes a dirty listing and marks it clean", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Recon One", "recon-one");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1 });
+      await life.markRatingDirty(admin, locationId);
+
+      const result = await life.runRatingReconciler({ limit: 50 });
+      expect(result.processed).toBeGreaterThan(0);
+      expect(result.failed).toBe(0);
+
+      const after = await dirtyState(listingId);
+      expect(after.rating_dirty).toBe(false);
+      expect(after.rating_last_success_at).not.toBeNull();
+      // And the rating actually moved — the refresh did work, not just flip a flag.
+      const profile = await svc.getShopProfile("recon-one");
+      expect(profile?.rating.available).toBe(true);
+      expect(profile?.rating.sampleSize).toBe(10);
+    });
+
+    it("is bounded: a tick never processes more than its batch limit", async () => {
+      for (let i = 0; i < 4; i++) {
+        const { locationId } = await seedListing(T_A, `Batch ${i}`, `batch-${i}`);
+        await life.markRatingDirty(admin, locationId);
+      }
+      const result = await life.runRatingReconciler({ limit: 2 });
+      expect(result.processed).toBe(2);
+    });
+
+    it("one poisoned listing does not stop the rest of the batch", async () => {
+      const good = await seedListing(T_A, "Recon Good", "recon-good");
+      const bad = await seedListing(T_A, "Recon Bad", "recon-bad");
+      await life.markRatingDirty(admin, good.locationId);
+      await life.markRatingDirty(admin, bad.locationId);
+      // Break exactly ONE listing, genuinely and at the database level: a CHECK that rejects a
+      // snapshot insert for this listing id makes its recalculation fail for real. tenant_id and
+      // location_id are immutable by trigger (correctly), so the failure has to be induced somewhere
+      // the recalculation actually writes.
+      await admin.query(
+        `ALTER TABLE partner_public_rating_snapshots
+           ADD CONSTRAINT chk_poison_one_listing CHECK (listing_id <> '${bad.listingId}'::uuid)`,
+      );
+      let result: Awaited<ReturnType<typeof life.runRatingReconciler>>;
+      try {
+        result = await life.runRatingReconciler({ limit: 50 });
+      } finally {
+        await admin.query("ALTER TABLE partner_public_rating_snapshots DROP CONSTRAINT chk_poison_one_listing");
+      }
+      // The healthy one still got done — a single bad row must not freeze every rating in the estate.
+      expect(result.refreshed).toBeGreaterThan(0);
+      expect((await dirtyState(good.listingId)).rating_dirty).toBe(false);
+      // And the broken one is retained as dirty with a CLASSIFIED code, never driver text.
+      const b = await dirtyState(bad.listingId);
+      expect(b.rating_dirty).toBe(true);
+      expect(b.rating_failure_count).toBeGreaterThan(0);
+      if (b.rating_last_error_code !== null) {
+        expect(b.rating_last_error_code).toMatch(/^[a-z_]+$/);
+      }
+    });
+
+    it("two concurrent reconcilers take disjoint work and neither corrupts the other", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const { listingId, locationId } = await seedListing(T_A, `Conc ${i}`, `conc-${i}`);
+        await life.markRatingDirty(admin, locationId);
+        ids.push(listingId);
+      }
+      const [a, b] = await Promise.all([
+        life.runRatingReconciler({ limit: 10, actor: "recon-a" }),
+        life.runRatingReconciler({ limit: 10, actor: "recon-b" }),
+      ]);
+      expect(a.failed + b.failed).toBe(0);
+      // FOR UPDATE SKIP LOCKED means the two runners claim disjoint rows rather than both doing
+      // everything — and every listing still ends up clean, so no work is lost either.
+      for (const id of ids) {
+        expect((await dirtyState(id)).rating_dirty, `listing ${id} left dirty`).toBe(false);
+      }
+    });
+
+    it("RATING-FAIL1: a genuine recalculation failure resolves instead of throwing", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Fail Iso", "fail-iso");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1 });
+
+      // A REAL failure, at the database, for exactly this listing. Not an early return and not a
+      // mock: the snapshot insert genuinely raises. If refreshRatingAfterCommit ever propagated,
+      // this is the shape of error that would take an HQ approval down with it.
+      await admin.query(
+        `ALTER TABLE partner_public_rating_snapshots
+           ADD CONSTRAINT chk_fail_iso CHECK (listing_id <> '${listingId}'::uuid)`,
+      );
+      try {
+        await expect(life.refreshRatingAfterCommit(locationId, "test")).resolves.toEqual({
+          refreshed: false,
+          reason: "recalculation_failed",
+        });
+      } finally {
+        await admin.query("ALTER TABLE partner_public_rating_snapshots DROP CONSTRAINT chk_fail_iso");
+      }
+
+      // The obligation survived the failure: still dirty, so the reconciler will retry it.
+      expect((await dirtyState(listingId)).rating_dirty).toBe(true);
+
+      // And with the fault removed a real refresh succeeds — so the test is not passing merely
+      // because everything is broken.
+      await expect(life.refreshRatingAfterCommit(locationId, "test")).resolves.toMatchObject({
+        refreshed: true,
+      });
+      expect((await dirtyState(listingId)).rating_dirty).toBe(false);
+    });
+
+    it("only surfaces a rating in Needs Attention after the retry threshold", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Attn", "attn");
+      await life.markRatingDirty(admin, locationId);
+      // One failure is unlucky, not a human problem.
+      await admin.query("UPDATE partner_public_listings SET rating_failure_count=1 WHERE id=$1", [listingId]);
+      expect((await life.ratingsNeedingAttention()).some((r) => r.listingId === listingId)).toBe(false);
+
+      await admin.query("UPDATE partner_public_listings SET rating_failure_count=$2 WHERE id=$1",
+        [listingId, life.RATING_FAILURE_ATTENTION_THRESHOLD]);
+      const attention = await life.ratingsNeedingAttention();
+      const row = attention.find((r) => r.listingId === listingId);
+      expect(row, "a persistently failing rating must reach Needs Attention").toBeDefined();
+      expect(row!.slug).toBe("attn");
+    });
+  });
+
+  /**
    * PUBLIC READER ISOLATION (0061) — least privilege, proven by refusal.
    *
    * Every other test in this file would pass just as happily if the public path were still running

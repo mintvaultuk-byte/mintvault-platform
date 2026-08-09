@@ -28,6 +28,7 @@
  * can surface them rather than reporting a clean approval over a broken mirror.
  */
 import { db } from "../db";
+import { refreshRatingAfterCommit } from "./public-network-rating-lifecycle";
 import { sql } from "drizzle-orm";
 import { storage } from "../storage";
 
@@ -453,6 +454,13 @@ export async function mirrorPartnerApproval(certId: number, adminUser: string): 
      */
     await driveSettlement(outcome.destinationSubmissionId, certId, adminUser);
   }
+  // RATING REFRESH — after the commit, after settlement, and deliberately unable to fail this call.
+  // grade_approved_at is written by approveCertGrade BEFORE this mirror runs, so the evidence is
+  // already committed and visible; a refresh here cannot read a stale denominator. It is kept
+  // OUTSIDE the transaction above so that transaction keeps its single-table lock set, which is
+  // what makes it incapable of forming a deadlock cycle.
+  await refreshRatingForCert(certId, adminUser);
+
   return {
     kind: "mirrored",
     allApproved: outcome.allApproved,
@@ -466,6 +474,24 @@ export async function mirrorPartnerApproval(certId: number, adminUser: string): 
  * Guarded on `status = 'pending_review'` so a rejection cannot reopen a unit that has already been
  * approved or voided by someone else.
  */
+/**
+ * The location a certificate's quality evidence belongs to.
+ *
+ * certificates.origin_location_id is the IMMUTABLE 0035 snapshot taken at grading time, so a shop
+ * that later moves premises keeps exactly the cards it actually graded. Read on its own connection,
+ * outside any transaction, because both callers below run after their transaction has closed.
+ */
+async function originLocationForCert(certId: number): Promise<string | null> {
+  const r = await db.execute(sql`
+    SELECT origin_location_id::text AS loc
+      FROM certificates
+     WHERE id = ${certId} AND origin_type = 'PARTNER'
+     LIMIT 1
+  `);
+  const row = r.rows[0] as { loc?: string | null } | undefined;
+  return row?.loc ?? null;
+}
+
 export async function mirrorPartnerRejection(certId: number): Promise<PartnerMirrorResult> {
   if (!(await pendingPartnerWorkItem(certId))) return { kind: "not_partner" };
   const r = await db.execute(sql`
@@ -476,5 +502,40 @@ export async function mirrorPartnerRejection(certId: number): Promise<PartnerMir
      RETURNING id
   `);
   if (r.rows.length !== 1) return { kind: "conflict" };
+  // Only once the work item genuinely moved. rejectCertGrade has already incremented
+  // certificates.redo_count — the actual V2 evidence — in its own CAS before this runs.
+  await refreshRatingForCert(certId, "hq-review");
   return { kind: "mirrored", allApproved: false, destinationSubmissionId: null };
+}
+
+
+/**
+ * Refresh one certificate's shop rating, and NEVER let that failure reach the caller.
+ *
+ * This is the whole non-blocking contract in one place. An HQ approval or rejection must succeed
+ * even if the rating engine is unavailable: the listing was already marked dirty durably inside the
+ * evidence-changing work, so a failure here costs freshness, not correctness, and the reconciler
+ * picks it up. Anything that escaped this function would turn a rating outage into a grading outage.
+ */
+async function refreshRatingForCert(certId: number, actor: string): Promise<void> {
+  try {
+    const locationId = await originLocationForCert(certId);
+    if (!locationId) return;
+    await markRatingDirtyForLocation(locationId);
+    await refreshRatingAfterCommit(locationId, actor);
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    console.error("[partner-rating] post-review refresh failed (card workflow unaffected):", e?.code, e?.message);
+  }
+}
+
+/** Durable obligation first, on its own connection — this runs after every relevant transaction. */
+async function markRatingDirtyForLocation(locationId: string): Promise<void> {
+  await db.execute(sql`
+    UPDATE partner_public_listings
+       SET rating_dirty = true,
+           rating_dirty_since = COALESCE(rating_dirty_since, now())
+     WHERE location_id = ${locationId}::uuid
+       AND rating_dirty = false
+  `);
 }
