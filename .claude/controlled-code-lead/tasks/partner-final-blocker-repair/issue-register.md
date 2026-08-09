@@ -1,6 +1,6 @@
 # Issue register — partner-final-blocker-repair
 
-**Baseline** `ad6a68f1` · **current** `0aaf6386` · branch `opus/partner-final-integration`
+**Baseline** `ad6a68f1` · **current** `97e9de5b` · branch `opus/partner-final-integration`
 **Staging** unchanged (max migration 0046) · **Production** unchanged (`6f182624`, verified live via
 `/api/version` 2026-08-09) · **No push, no deploy, no migration applied to any Neon host.**
 
@@ -13,13 +13,18 @@ real disposable PostgreSQL 17 cluster. Everything else is marked OPEN with what 
 
 | | count |
 |---|---|
-| Closed and verified | 12 |
+| Closed and verified | 18 |
 | Partially closed (real repair landed, proof or scope incomplete) | 2 |
-| Open — not started | 7 |
+| Open — not started | 2 |
 
-**This remediation is INCOMPLETE against the brief's completion rule.** Phases 21 (full mutation
-matrix), 22 (fresh ten-agent hostile panel), 23 (full local gates), 24 (docs), 25 (push/CI),
-26 (staging preflight) and 27 (Codex handoff) have not been executed. Do not treat the closed items
+**Session 2 (from `e7703a66`) closed:** B1's missing proof, B5, H1, H12, H13, H14.
+**Still open:** H8 (deploy-order gate), and the bulk of the mutation matrix / hostile panel /
+full gates / push / staging package / Codex handoff.
+
+**This remediation is INCOMPLETE against the brief's completion rule.** The full mutation matrix,
+the fresh ten-agent hostile panel, the full local gates (lint/build/full suite/gitleaks/AMD64),
+the docs correction, the push + terminal CI, the staging package and the Codex handoff have not
+been executed. Do not treat the closed items
 below as release-approved: they are Local Proof, not Integration Proof.
 
 ---
@@ -215,3 +220,86 @@ statement moved out. No file in 0047–0062 sets its own timeout; all inherit th
 - Production SHA read from the live `/api/version`: `6f182624`, unchanged.
 
 **Not performed:** full repository suite, lint, build, AMD64, gitleaks, CodeQL, any push.
+
+---
+
+# SESSION 2 ADDENDUM — closures from `e7703a66` to `97e9de5b`
+
+## B1 · dedicated behavioural proof — CLOSED
+`tests/partner-review-clock.test.ts` now exists (8 cases) against a real disposable PostgreSQL 17
+estate with the full migration chain applied as the non-superuser migrator. It drives the real
+`measureEvidence` rather than restating its SQL, and deliberately does NOT create
+`review_entered_at` in the fixture — the column must arrive through 0063 or the suite fails.
+
+Cases: the exploit itself (imported 200d ago, reviewed 5d ago → 12/20 first-pass, not 12/12); the
+**non-vacuity control** (a genuinely dormant shop DOES fall out of the window and back to all-time);
+the delayed-submission gaming attempt (pushing every import date to 400 days changes nothing);
+approved vs abandoned comparability; GREATEST in **both** orders — bounced-then-approved and
+approved-then-reopened, the second being the one `COALESCE` gets wrong; the window-boundary
+reporting the reconciler needs; and the privilege assertions on the column.
+
+**Mutation RECENCY-REVIEWDATE1** — clock reverted to `COALESCE(grade_approved_at, graded_at,
+issued_at)`: type-clean, **4 tests RED**, restored byte-identically.
+The stale comment in `public-network-service.ts` now describes what the suite actually contains.
+
+## H1 · durable dirty mark inside the transaction — CLOSED (with a stated residual)
+The mark is now the **last statement inside** the mirror transaction, on the caller's client.
+`mirrorPartnerRejection` was a bare autocommit UPDATE and is now a transaction — the most important
+one, since rejection is what puts a unit into the V2 population.
+
+⚠️ **Residual window, stated rather than glossed.** `redo_count` and `grade_approved_at` are written
+by `server/grader.ts` in statements of their own, BEFORE the mirror runs. Making the dirty mark
+atomic with *those* would require wrapping the protected engine's CAS, which founder DECISION 1 does
+not authorise. So the window is now `grader CAS commit → mirror transaction`, instead of
+`mirror commit → post-commit mark`. It is bounded, not eliminated, and H6's clock-driven sweep
+(`rating_next_recalc_at`, max 7 days) is what guarantees the obligation is never permanently lost.
+
+## B5 · override atomicity — CLOSED
+Create and remove are each one transaction: lock the listing, write the override, mark dirty, audit.
+`auditAdminTx` deliberately does not catch — in a transaction there is something to undo.
+`maybeFailForTest` provides the forced-failure point. ⚠️ **The forced-failure test itself is not yet
+written**, so the rollback is proven by construction and by type, not behaviourally. Mutation
+`OVERRIDE-ATOMIC1` outstanding.
+
+## H12 / H13 · readiness and reader membership — CLOSED
+`server/partner/public-network-gate.ts`. One probe settles both: `partnerPublicQuery` already does
+`SET LOCAL ROLE` + a `current_user` assertion, so one successful query proves URL, role existence,
+**membership**, and the drop. Proven with a real membership-less login role — not ready, code
+`public_reader_role_unavailable`, and the query rejects rather than serving on the login role.
+Reports at startup; does not fail the process (rationale documented in the module).
+
+## H14 · default-OFF kill switch — CLOSED
+`partner_public_network_enabled`, router-level middleware, fail-closed via the existing
+`resolveGlobalFlag`. Proven: absent row is OFF; OFF answers 404 for finder and profile; ON exposes
+an eligible shop; a SUSPENDED shop stays hidden with the flag ON.
+
+---
+
+## Mutation matrix — honest state
+
+| Mutation | Result |
+|---|---|
+| Protected-engine scoping (bundled scoring alongside signature E) | **RED**, 2 guards, reverted |
+| `RECENCY-REVIEWDATE1` | **RED**, 4 tests, reverted |
+| `PUBLIC-SETROLE1` (as formulated) | **NOT DETECTED — see below** |
+| 24 others | **not run** |
+
+### ⚠️ Finding from my own mutation run, recorded because it is signal
+`PUBLIC-SETROLE1` was formulated as "swallow the `current_user` assertion" and the suite stayed
+GREEN. The reason is benign but worth stating precisely: when the login role lacks membership,
+`SET LOCAL ROLE` itself fails with 42501 and aborts the transaction, so the caller's query never
+runs regardless of the assertion. The assertion is therefore **redundant belt-and-braces with no
+independent detector**. It is not dead — it would catch a role that exists, is grantable and yet
+resolves to something unexpected — but nothing currently proves it. Either the mutation must be
+reformulated to remove the whole transaction-local role drop (which *would* be caught), or a test
+must exercise the assertion directly. **Not resolved.**
+
+## Still open after session 2
+
+| ID | Missing |
+|---|---|
+| **H8** | Deploy-order gate. The prerequisite is documented in code comments and enforced at runtime by fail-closed behaviour, but nothing *prevents* a deploy landing ahead of 0061/0064. |
+| **Mutations** | 24 of 27 unrun; most have no detector yet (`RATING-CAS1`, `RATING-HOL1`, `RATING-NEW1`, `RECENCY-CLOCK1`, `OVERRIDE-ATOMIC1`, `PUBLIC-IMAGE-ADMIN1`, `RATING-AWAIT1`, `RATING-DIRTY-WIRE1` all need tests written first). An unrun mutation is not a passed mutation. |
+| **Hostile panel** | Not launched. |
+| **Gates** | `lint`, `build`, full repository suite, `gitleaks`, AMD64 boot — none run this session. Only `tsc` and targeted suites. |
+| **Push / CI / staging package / Codex handoff** | Not started. Nothing pushed. |
