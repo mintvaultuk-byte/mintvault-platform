@@ -595,6 +595,31 @@ async function markRatingDirtyForCertInTx(
   tx: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> },
   certId: number,
 ): Promise<void> {
+  /**
+   * PRE-0058 ESTATES HAVE NO LISTINGS TABLE, AND A RATING MUST NEVER FAIL AN APPROVAL.
+   *
+   * This statement runs INSIDE the caller's transaction, so an error here does not degrade the
+   * rating — it rolls back the HQ approval or rejection with it. On any estate where 0058 has not
+   * been applied that is a 42P01 on every partner review, which is the exact failure mode the
+   * whole "a rating is SECONDARY" rule exists to prevent, reintroduced by the repair meant to
+   * strengthen it.
+   *
+   * Caught in the CI-topology suite run: partner-full-pilot-workflow and
+   * partner-grading-get-readonly both drive the real mirror against fixtures that stop at
+   * migration 0050, and both went red with "Failed query" the moment the mirror gained this write.
+   * That is not a fixture quirk — it is precisely the application-first rollout window, where the
+   * code ships before the migration lands. public-network-rating-lifecycle.ts already guards its
+   * reconciler this way for the same reason; the in-transaction path had no such guard.
+   *
+   * One cheap catalogue lookup on a connection the caller already holds, and a no-op when the
+   * table is absent. It is re-checked per call rather than memoised so that applying 0058 to a
+   * running estate takes effect without a restart.
+   */
+  const probe = (await tx.execute(sql`
+    SELECT to_regclass('public.partner_public_listings') IS NOT NULL AS present
+  `)) as { rows?: Array<{ present?: boolean }> };
+  if (probe?.rows?.[0]?.present !== true) return;
+
   await tx.execute(sql`
     UPDATE partner_public_listings
        SET rating_dirty = true,
