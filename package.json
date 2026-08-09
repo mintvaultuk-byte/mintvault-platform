@@ -18,7 +18,8 @@
     "db:lint-sql": "tsx scripts/db/lint-destructive-sql.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky"
+    "prepare": "husky",
+    "db:preflight-public": "tsx scripts/db/preflight-public-network.ts"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
