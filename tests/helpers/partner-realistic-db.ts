@@ -266,6 +266,14 @@ export async function createMintvaultCertificatesTable(admin: pg.Client): Promis
     issued_at timestamptz,
     deleted_at timestamptz,
     grade_approved_at timestamptz,
+    -- The rating evidence columns. All four exist on staging and production; suites that hand-added
+    -- them locally were compensating for this stub being narrower than the real table, which is the
+    -- same drift that let the certificates.submission_id defect hide. PARTNER_QUALITY_V2 reads
+    -- redo_count, grade_approved_at, graded_at and status_updated_at, so they belong here.
+    graded_at timestamptz,
+    status_updated_at timestamptz,
+    grade numeric(4,1),
+    redo_count integer NOT NULL DEFAULT 0,
     archived_to_b2_at timestamptz,
     origin_type text,
     origin_partner_id uuid,

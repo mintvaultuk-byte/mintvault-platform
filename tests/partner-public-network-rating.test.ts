@@ -22,19 +22,32 @@ import {
   RATING_BUILDING_LABEL,
   RATING_WEIGHTS,
   REWORK_CEILING,
+  RATING_WINDOW_DAYS,
   type RatingCounters,
 } from "../server/partner/public-network-rating";
 
 const LOC = "11111111-1111-1111-1111-111111111111";
 
-function evidenceFor(c: RatingCounters) {
-  return buildRatingEvidence(LOC, c);
+/**
+ * V2 counters with the two fields these maths tests do not vary defaulted.
+ * abandonedUnits: 0 keeps every pre-existing expectation numerically identical to V1 — under V2 a
+ * population with no abandonment is exactly the V1 population, which is the point: V2 changes WHICH
+ * units are counted, not how a counted unit scores. The abandonment cases are asserted explicitly
+ * below and behaviourally in partner-public-network-behavioural.test.ts.
+ */
+type PartialCounters = Omit<RatingCounters, "abandonedUnits" | "windowDays"> &
+  Partial<Pick<RatingCounters, "abandonedUnits" | "windowDays">>;
+function full(c: PartialCounters): RatingCounters {
+  return { abandonedUnits: 0, windowDays: RATING_WINDOW_DAYS, ...c };
 }
-function rate(c: RatingCounters) {
+function evidenceFor(c: PartialCounters) {
+  return buildRatingEvidence(LOC, full(c));
+}
+function rate(c: PartialCounters) {
   return computeRating(evidenceFor(c));
 }
 /** A perfect shop with plenty of sample — the control for every "worse than this" assertion. */
-const PERFECT: RatingCounters = { approvedCards: 40, firstPassCards: 40, totalRedos: 0 };
+const PERFECT: PartialCounters = { reviewedUnits: 40, firstPassUnits: 40, totalRedos: 0 };
 
 describe("evidence extraction", () => {
   it("reports completed volume but never gives it a score contribution", () => {
@@ -67,7 +80,7 @@ describe("evidence extraction", () => {
   });
 
   it("does not invent quality evidence for a shop with no approved cards", () => {
-    const ev = evidenceFor({ approvedCards: 0, firstPassCards: 0, totalRedos: 0 });
+    const ev = evidenceFor({ reviewedUnits: 0, firstPassUnits: 0, totalRedos: 0 });
     const firstPass = ev.metrics.find((m) => m.metric === "first_pass_approval_rate")!;
     // 0/0 must be "unknown", not 0% (a fabricated penalty) and not 100% (a fabricated reward).
     expect(firstPass.available).toBe(false);
@@ -75,7 +88,7 @@ describe("evidence extraction", () => {
   });
 
   it("derives first-pass and returned-for-change as exact complements", () => {
-    const ev = evidenceFor({ approvedCards: 10, firstPassCards: 7, totalRedos: 5 });
+    const ev = evidenceFor({ reviewedUnits: 10, firstPassUnits: 7, totalRedos: 5 });
     const fp = ev.metrics.find((m) => m.metric === "first_pass_approval_rate")!;
     const rc = ev.metrics.find((m) => m.metric === "returned_for_change_rate")!;
     expect(fp.rawValue).toBeCloseTo(0.7, 10);
@@ -85,7 +98,7 @@ describe("evidence extraction", () => {
   });
 
   it("computes rework intensity as redos per card", () => {
-    const ev = evidenceFor({ approvedCards: 10, firstPassCards: 7, totalRedos: 5 });
+    const ev = evidenceFor({ reviewedUnits: 10, firstPassUnits: 7, totalRedos: 5 });
     const rw = ev.metrics.find((m) => m.metric === "rework_intensity")!;
     expect(rw.rawValue).toBeCloseTo(0.5, 10);
     expect(rw.normalised).toBeCloseTo(1 - 0.5 / REWORK_CEILING, 10);
@@ -120,22 +133,22 @@ describe("scoring", () => {
   });
 
   it("penalises rework, and weights first-pass quality above it", () => {
-    const bouncy = rate({ approvedCards: 40, firstPassCards: 20, totalRedos: 20 });
+    const bouncy = rate({ reviewedUnits: 40, firstPassUnits: 20, totalRedos: 20 });
     expect(bouncy.internalScore!).toBeLessThan(100);
     // Halving first-pass must cost more than the same proportional change in rework intensity,
     // because quality outranks rework in the documented weights.
-    const onlyRework = rate({ approvedCards: 40, firstPassCards: 40, totalRedos: 20 });
+    const onlyRework = rate({ reviewedUnits: 40, firstPassUnits: 40, totalRedos: 20 });
     expect(bouncy.internalScore!).toBeLessThan(onlyRework.internalScore!);
   });
 
   it("never lets volume compensate for poor quality", () => {
-    const smallGood = rate({ approvedCards: 12, firstPassCards: 12, totalRedos: 0 });
-    const hugeBad = rate({ approvedCards: 5000, firstPassCards: 2500, totalRedos: 3000 });
+    const smallGood = rate({ reviewedUnits: 12, firstPassUnits: 12, totalRedos: 0 });
+    const hugeBad = rate({ reviewedUnits: 5000, firstPassUnits: 2500, totalRedos: 3000 });
     expect(hugeBad.internalScore!).toBeLessThan(smallGood.internalScore!);
   });
 
   it("clamps a catastrophic shop to zero rather than going negative", () => {
-    const r = rate({ approvedCards: 40, firstPassCards: 0, totalRedos: 400 });
+    const r = rate({ reviewedUnits: 40, firstPassUnits: 0, totalRedos: 400 });
     expect(r.internalScore).toBe(0);
     expect(r.publicRating).toBe(0);
     expect(r.ratingLabel).toBe("Under Review");
@@ -144,7 +157,7 @@ describe("scoring", () => {
 
 describe("low-sample protection (RATING3)", () => {
   it("withholds a rating below the minimum sample, however perfect the evidence", () => {
-    const r = rate({ approvedCards: 1, firstPassCards: 1, totalRedos: 0 });
+    const r = rate({ reviewedUnits: 1, firstPassUnits: 1, totalRedos: 0 });
     // The headline failure this prevents: 1 completed card -> 5.0 stars.
     expect(r.ratingAvailable).toBe(false);
     expect(r.publicRating).toBeNull();
@@ -154,7 +167,7 @@ describe("low-sample protection (RATING3)", () => {
   });
 
   it("still keeps the provisional internal score for HQ", () => {
-    const r = rate({ approvedCards: 3, firstPassCards: 3, totalRedos: 0 });
+    const r = rate({ reviewedUnits: 3, firstPassUnits: 3, totalRedos: 0 });
     expect(r.ratingAvailable).toBe(false);
     // HQ may look at it; the public may not. Both halves matter.
     expect(r.internalScore).toBe(100);
@@ -162,10 +175,10 @@ describe("low-sample protection (RATING3)", () => {
   });
 
   it("publishes at exactly the threshold and withholds one card below it", () => {
-    const at = rate({ approvedCards: MINIMUM_PUBLIC_SAMPLE, firstPassCards: MINIMUM_PUBLIC_SAMPLE, totalRedos: 0 });
+    const at = rate({ reviewedUnits: MINIMUM_PUBLIC_SAMPLE, firstPassUnits: MINIMUM_PUBLIC_SAMPLE, totalRedos: 0 });
     const below = rate({
-      approvedCards: MINIMUM_PUBLIC_SAMPLE - 1,
-      firstPassCards: MINIMUM_PUBLIC_SAMPLE - 1,
+      reviewedUnits: MINIMUM_PUBLIC_SAMPLE - 1,
+      firstPassUnits: MINIMUM_PUBLIC_SAMPLE - 1,
       totalRedos: 0,
     });
     expect(at.ratingAvailable).toBe(true);
@@ -173,7 +186,7 @@ describe("low-sample protection (RATING3)", () => {
   });
 
   it("withholds a rating entirely when there is no quality evidence at all", () => {
-    const r = rate({ approvedCards: 0, firstPassCards: 0, totalRedos: 0 });
+    const r = rate({ reviewedUnits: 0, firstPassUnits: 0, totalRedos: 0 });
     expect(r.ratingAvailable).toBe(false);
     expect(r.internalScore).toBeNull();
     expect(r.publicRating).toBeNull();

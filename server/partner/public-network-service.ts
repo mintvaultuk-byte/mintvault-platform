@@ -35,6 +35,7 @@ import {
   normalisePostcode,
   outwardCode,
   MINIMUM_PUBLIC_SAMPLE,
+  RATING_WINDOW_DAYS,
   type ComputedRating,
   type RatingEvidence,
 } from "./public-network-rating";
@@ -431,6 +432,31 @@ export const PUBLIC_CARD_PREDICATE = `
 `;
 
 /**
+ * THE V2 RATING DENOMINATOR — units that have entered the review lifecycle.
+ *
+ * Deliberately WIDER than PUBLIC_CARD_PREDICATE, and the difference is the entire anti-gaming fix.
+ * PUBLIC_CARD_PREDICATE answers "may this card be shown publicly"; this answers "did this shop's
+ * work reach HQ review", which is a question abandonment cannot un-answer.
+ *
+ *   grade_approved_at IS NOT NULL  -> reached approval
+ *   redo_count > 0                 -> was returned for change at least once
+ *
+ * The second arm is what keeps an abandoned unit in the population: it has no approval timestamp,
+ * but server/grader.ts increments redo_count inside the rejection CAS and NOTHING in the codebase
+ * ever resets it, so the bounce is permanent evidence. `grade IS NOT NULL` is intentionally absent —
+ * an abandoned unit may never have been graded, and requiring a grade would reopen the exact hole.
+ *
+ * This is a per-CERTIFICATE predicate, and a certificate is one physical unit. Repeated
+ * return/resubmit cycles raise redo_count on the same row, so the unit is counted once no matter
+ * how many attempts it took.
+ */
+export const REVIEWED_UNIT_PREDICATE = `
+  deleted_at IS NULL
+  AND status = 'active'
+  AND (grade_approved_at IS NOT NULL OR redo_count > 0)
+`;
+
+/**
  * Cards graded by this shop.
  *
  * ATTRIBUTION IS HISTORICAL, NOT CURRENT. origin_location_id is the immutable 0035 snapshot taken
@@ -495,22 +521,59 @@ export async function countPublicCards(locationId: string): Promise<number> {
  * query, no per-card work — a rating must never cost a scan per card.
  */
 export async function measureEvidence(locationId: string): Promise<RatingEvidence> {
-  const { rows } = await partnerAdminQuery<{ approved: string; first_pass: string; redos: string }>(
-    `SELECT
-       count(*)::text                                          AS approved,
-       count(*) FILTER (WHERE redo_count = 0)::text             AS first_pass,
-       coalesce(sum(redo_count), 0)::text                       AS redos
-     FROM certificates
-     WHERE origin_location_id = $1
-       AND origin_type = 'PARTNER'
-       AND ${PUBLIC_CARD_PREDICATE}`,
-    [locationId],
+  const { rows } = await partnerAdminQuery<{
+    w_units: string; w_first: string; w_redos: string; w_aband: string;
+    a_units: string; a_first: string; a_redos: string; a_aband: string;
+  }>(
+    `WITH units AS (
+       SELECT redo_count,
+              grade_approved_at,
+              grade,
+              -- The unit's position in time. grade_approved_at is the truth for an approved unit;
+              -- an ABANDONED unit has none, so we fall back through the timestamps that do survive
+              -- rework. issued_at is the last resort and always exists, so a unit can never fall
+              -- out of the all-time population for want of a date.
+              COALESCE(grade_approved_at, graded_at, status_updated_at, issued_at) AS ev
+         FROM certificates
+        WHERE origin_location_id = $1
+          AND origin_type = 'PARTNER'
+          AND ${REVIEWED_UNIT_PREDICATE}
+     )
+     SELECT
+       count(*) FILTER (WHERE (ev IS NULL OR ev >= now() - ($2 || ' days')::interval))::text AS w_units,
+       count(*) FILTER (WHERE (ev IS NULL OR ev >= now() - ($2 || ' days')::interval)
+                          AND grade_approved_at IS NOT NULL AND grade IS NOT NULL AND redo_count = 0)::text AS w_first,
+       coalesce(sum(redo_count) FILTER (WHERE (ev IS NULL OR ev >= now() - ($2 || ' days')::interval)), 0)::text AS w_redos,
+       count(*) FILTER (WHERE (ev IS NULL OR ev >= now() - ($2 || ' days')::interval)
+                          AND grade_approved_at IS NULL)::text AS w_aband,
+       count(*)::text AS a_units,
+       count(*) FILTER (WHERE grade_approved_at IS NOT NULL AND grade IS NOT NULL AND redo_count = 0)::text AS a_first,
+       coalesce(sum(redo_count), 0)::text AS a_redos,
+       count(*) FILTER (WHERE grade_approved_at IS NULL)::text AS a_aband
+     FROM units`,
+    [locationId, String(RATING_WINDOW_DAYS)],
   );
   const r = rows[0];
+  const windowed = {
+    reviewedUnits: Number(r?.w_units ?? 0),
+    firstPassUnits: Number(r?.w_first ?? 0),
+    totalRedos: Number(r?.w_redos ?? 0),
+    abandonedUnits: Number(r?.w_aband ?? 0),
+    windowDays: RATING_WINDOW_DAYS as number | null,
+  };
+
+  // THE FALLBACK. A rolling window is only honest while it holds enough units to mean something.
+  // Below the minimum we widen to the all-time population rather than publish a rating built on
+  // three cards — and if all-time is ALSO short, computeRating's sample gate returns
+  // "Rating building". A small window never becomes a small rating; it becomes no rating.
+  if (windowed.reviewedUnits >= MINIMUM_PUBLIC_SAMPLE) return buildRatingEvidence(locationId, windowed);
+
   return buildRatingEvidence(locationId, {
-    approvedCards: Number(r?.approved ?? 0),
-    firstPassCards: Number(r?.first_pass ?? 0),
-    totalRedos: Number(r?.redos ?? 0),
+    reviewedUnits: Number(r?.a_units ?? 0),
+    firstPassUnits: Number(r?.a_first ?? 0),
+    totalRedos: Number(r?.a_redos ?? 0),
+    abandonedUnits: Number(r?.a_aband ?? 0),
+    windowDays: null,
   });
 }
 

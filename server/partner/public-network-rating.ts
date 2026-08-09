@@ -48,8 +48,25 @@
  *  - image quality. imagesForPartnerCert() returns a hard-coded empty quality object.
  */
 
-/** Formula identity. Persisted on every snapshot so an old score stays explainable. */
-export const PARTNER_QUALITY_VERSION = "PARTNER_QUALITY_V1";
+/**
+ * Formula identity. Persisted on every snapshot so an old score stays explainable.
+ *
+ * V1 is retained as a NAMED constant, not deleted, because snapshots written under it are still in
+ * the history table and must stay interpretable as what they were. Nothing reinterprets a V1 row as
+ * V2: the version travels with the snapshot, and only new snapshots carry V2.
+ */
+export const PARTNER_QUALITY_VERSION_V1 = "PARTNER_QUALITY_V1";
+export const PARTNER_QUALITY_VERSION = "PARTNER_QUALITY_V2";
+
+/**
+ * Rolling rating window, in days. OWNER DECISION (locked): 180.
+ *
+ * A shop is rated on what it is doing NOW. Without a window, a long clean history dilutes a recent
+ * decline to invisibility — a shop that graded 500 clean cards last year can bounce half of this
+ * month's work and still show 4.8. The window is applied to the reviewed-unit population, and the
+ * fallback below is what stops it turning into a tiny-sample rating.
+ */
+export const RATING_WINDOW_DAYS = 180;
 
 /**
  * Minimum completed, approved cards before a rating is shown publicly.
@@ -79,6 +96,7 @@ export const REWORK_CEILING = 2.0;
 
 export type MetricKey =
   | "completed_volume"
+  | "abandoned_unit_rate"
   | "first_pass_approval_rate"
   | "returned_for_change_rate"
   | "rework_intensity"
@@ -107,19 +125,46 @@ export interface MetricEvidence {
 
 export interface RatingEvidence {
   locationId: string;
-  /** Cards approved and attributable to this location via the immutable origin snapshot. */
+  /** Reviewed UNITS attributable to this location via the immutable origin snapshot. The denominator. */
   sampleSize: number;
+  /** 180 when the rolling window supplied the population, null when it fell back to all-time. */
+  windowDays: number | null;
   metrics: MetricEvidence[];
 }
 
-/** Raw per-location counters, exactly as measured. The DB layer produces this; the maths lives here. */
+/**
+ * Raw per-location counters, exactly as measured. The DB layer produces this; the maths lives here.
+ *
+ * V2 DENOMINATOR — the anti-gaming change.
+ *
+ * V1 counted APPROVED cards. A unit that reached HQ review, was returned for change and was then
+ * abandoned had `grade_approved_at IS NULL`, so it left the numerator AND the denominator at once —
+ * abandoning your worst work raised your rating. That is limitation L1, and it was reproduced end
+ * to end on the real engine (20 units, 10 bounced = 2.9; abandon those 10 = 5.0).
+ *
+ * V2 counts REVIEWED UNITS: a physical card that has entered the review lifecycle stays in the
+ * population permanently, approved or not. The evidence was always durably present — the predicate
+ * simply declined to look at it. No new events table was needed to prove this, so none was added.
+ *
+ * One certificate row is one physical unit, so repeated return/resubmit cycles bump `redo_count` on
+ * the SAME row: the unit is counted ONCE however many times it goes round. Sample size cannot be
+ * inflated by resubmission; only the quality evidence worsens.
+ */
 export interface RatingCounters {
-  /** Approved, non-deleted, active, partner-originated cards for this location. */
-  approvedCards: number;
-  /** Of those, how many were never bounced (redo_count = 0). */
-  firstPassCards: number;
-  /** Sum of redo_count across those cards. */
+  /**
+   * Physical units that have entered the review lifecycle: approved, OR bounced at least once and
+   * never approved. Non-deleted, active, partner-originated, attributed by the immutable 0035
+   * origin snapshot. THIS is the denominator.
+   */
+  reviewedUnits: number;
+  /** Of those, units that were APPROVED having never been bounced. An abandoned unit is never first-pass. */
+  firstPassUnits: number;
+  /** Sum of redo_count across all reviewed units — abandoned units keep contributing their redos. */
   totalRedos: number;
+  /** Reviewed units that never reached approval. Reported to HQ as evidence; not separately scored. */
+  abandonedUnits: number;
+  /** 180 when the rolling window supplied the population, null when it fell back to all-time. */
+  windowDays: number | null;
 }
 
 /** A metric that cannot be produced. Kept as a helper so every unavailable case looks identical. */
@@ -135,26 +180,48 @@ function unavailable(metric: MetricKey, source: string): MetricEvidence {
  * about what the schema can and cannot prove.
  */
 export function buildRatingEvidence(locationId: string, counters: RatingCounters): RatingEvidence {
-  const { approvedCards, firstPassCards, totalRedos } = counters;
+  const { reviewedUnits, firstPassUnits, totalRedos, abandonedUnits, windowDays } = counters;
+  const approvedCards = reviewedUnits;
+  const firstPassCards = firstPassUnits;
   const metrics: MetricEvidence[] = [];
+  const windowNote =
+    windowDays === null
+      ? "all-time population (fewer than the minimum sample fell inside the rolling window)"
+      : `rolling ${windowDays}-day window`;
 
   metrics.push({
     metric: "completed_volume",
     available: true,
-    rawValue: approvedCards,
+    rawValue: reviewedUnits,
     // Volume is NEVER a score component. It sets confidence and the sample gate only, so a shop
     // cannot buy a better rating with throughput. normalised stays null to make that structural.
     normalised: null,
-    source: "certificates.origin_location_id + grade_approved_at (immutable 0035 origin snapshot)",
-    sampleSize: approvedCards,
+    source: `certificates.origin_location_id, units that entered review (approved OR bounced-and-abandoned), ${windowNote}`,
+    sampleSize: reviewedUnits,
+  });
+
+  // Abandonment is reported as evidence in its own right so HQ can SEE the behaviour the V2
+  // denominator neutralises. It is deliberately not a separate scored component: the abandoned unit
+  // already depresses first-pass rate and carries its redos into rework intensity, and scoring it
+  // again would penalise the same fact three times.
+  metrics.push({
+    metric: "abandoned_unit_rate",
+    available: reviewedUnits > 0,
+    rawValue: reviewedUnits > 0 ? abandonedUnits / reviewedUnits : null,
+    normalised: null,
+    source:
+      reviewedUnits > 0
+        ? `certificates that entered review and never reached approval, ${windowNote}`
+        : "no reviewed units attributed to this location yet",
+    sampleSize: reviewedUnits,
   });
 
   if (approvedCards === 0) {
     // With no approved cards there is no quality evidence at all. Reporting 0% first-pass would be
     // a fabricated penalty just as surely as 100% would be a fabricated reward.
-    metrics.push(unavailable("first_pass_approval_rate", "no approved cards attributed to this location yet"));
-    metrics.push(unavailable("returned_for_change_rate", "no approved cards attributed to this location yet"));
-    metrics.push(unavailable("rework_intensity", "no approved cards attributed to this location yet"));
+    metrics.push(unavailable("first_pass_approval_rate", "no reviewed units attributed to this location yet"));
+    metrics.push(unavailable("returned_for_change_rate", "no reviewed units attributed to this location yet"));
+    metrics.push(unavailable("rework_intensity", "no reviewed units attributed to this location yet"));
   } else {
     const firstPass = firstPassCards / approvedCards;
     metrics.push({
@@ -162,7 +229,7 @@ export function buildRatingEvidence(locationId: string, counters: RatingCounters
       available: true,
       rawValue: firstPass,
       normalised: clamp01(firstPass),
-      source: "certificates.redo_count = 0 over approved partner-originated cards",
+      source: "approved units with certificates.redo_count = 0, over ALL reviewed units (abandoned units count against this)",
       sampleSize: approvedCards,
     });
 
@@ -183,7 +250,7 @@ export function buildRatingEvidence(locationId: string, counters: RatingCounters
       available: true,
       rawValue: avgRedos,
       normalised: clamp01(1 - avgRedos / REWORK_CEILING),
-      source: "SUM(certificates.redo_count) / approved cards",
+      source: "SUM(certificates.redo_count) / reviewed units (abandoned units keep their redos)",
       sampleSize: approvedCards,
     });
   }
@@ -200,7 +267,7 @@ export function buildRatingEvidence(locationId: string, counters: RatingCounters
   metrics.push(unavailable("turnaround", "partner_grading_work_items has no completion timestamp"));
   metrics.push(unavailable("image_quality", "no image-quality measurement is captured"));
 
-  return { locationId, sampleSize: approvedCards, metrics };
+  return { locationId, sampleSize: reviewedUnits, windowDays, metrics };
 }
 
 /**

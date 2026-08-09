@@ -251,10 +251,13 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       await migrator.end();
     }
 
-    // The shared stub omits `grade` and `redo_count`; both exist on the real table, and the entire
-    // rating rests on redo_count. Added after the migrations so 0058's index build sees them.
+    // grade, redo_count, graded_at and status_updated_at now live in the shared stub (they exist on
+    // the real table and PARTNER_QUALITY_V2 reads all four). These ALTERs are kept as idempotent
+    // belt-and-braces so this suite still stands up if the shared stub is ever narrowed again.
     await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade numeric(4,1)");
     await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS redo_count integer NOT NULL DEFAULT 0");
+    await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS graded_at timestamptz");
+    await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS status_updated_at timestamptz");
 
     await admin.query("INSERT INTO partner_organisations (id, legal_name) VALUES ($1,'Tenant A')", [T_A]);
 
@@ -319,17 +322,26 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(ev.sampleSize).toBe(1);
     });
 
-    it("EXCLUDES a card with no grade — dropping `grade IS NOT NULL` from the predicate turns this red", async () => {
-      // PUBLIC_CARD_PREDICATE has four conjuncts and three of them had a dedicated killer test.
-      // `grade IS NOT NULL` had none: every insertCert call site took the 9.0 default, so the
-      // conjunct could be deleted from the shipped predicate with the whole suite still green.
-      // That is the exact vacuity this file exists to prevent, so the gap is closed here.
+    it("counts an ungraded approved card as a reviewed unit but NEVER as first-pass", async () => {
+      // Under V1 this asserted PUBLIC_CARD_PREDICATE's `grade IS NOT NULL` conjunct, which had no
+      // other killer test. V2 moves that conjunct from the DENOMINATOR to the FIRST-PASS NUMERATOR,
+      // and the distinction is the whole point:
+      //   - the unit DID go through review, so removing it from the denominator would be the same
+      //     flattering erasure that L1 exploited;
+      //   - but we cannot prove it was cleanly approved with no grade on it, and "we don't know"
+      //     must never be scored as "clean".
+      // So it stays in the population and costs the shop, exactly as an unknown should.
+      // PUBLIC_CARD_PREDICATE still enforces `grade IS NOT NULL` for public CARD DISPLAY; that is a
+      // different question ("may this be shown") and keeps its own tests above.
       const { locationId } = await seedListing(T_A, "Evidence No Grade", "evidence-no-grade");
       await insertCert(locationId, {});
       await insertCert(locationId, { grade: null });
 
       const ev = await svc.measureEvidence(locationId);
-      expect(ev.sampleSize).toBe(1);
+      expect(ev.sampleSize).toBe(2);
+      const firstPass = ev.metrics.find((m) => m.metric === "first_pass_approval_rate")!;
+      // 1 of 2 — deleting `grade IS NOT NULL` from the numerator makes this 1.0 and turns it red.
+      expect(firstPass.rawValue).toBeCloseTo(0.5, 5);
     });
 
     it("attributes only this location's cards", async () => {
@@ -377,17 +389,25 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(res.computed.ratingAvailable).toBe(true);
     });
 
-    it("scores the SAME body of work at 5.0 once the 10 bounced units are abandoned", async () => {
+    it("V2: abandoning the 10 bounced units changes NOTHING — same sample, same 2.9", async () => {
+      // THE FIX, stated as an equality rather than a threshold. Under V1 this same fixture scored
+      // 5.0 with sampleSize 10: the abandoned units left the numerator and the denominator at once.
+      // Under V2 the shop is graded on identical evidence whether it resubmits its bad work or
+      // walks away from it, so abandonment stops being a strategy at all.
       const { listingId, locationId } = await seedListing(T_A, "Gaming Abandoned", "gaming-abandoned");
       for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 0 });
-      // Reached review, bounced, never resubmitted: unapproved and invisible to today's denominator.
+      // Reached review, bounced, never resubmitted: unapproved, and STILL in the V2 population.
       for (let i = 0; i < 10; i++) await insertCert(locationId, { redoCount: 1, approved: false });
 
       const res = await svc.recalculateRating(listingId, "test@hq");
-      expect(res.computed.sampleSize).toBe(10);
-      expect(res.computed.publicRating).toBeCloseTo(5.0, 5);
-      // The abandoned units are durably present and identifiable — the evidence exists, the
-      // denominator simply declines to look at it. This is the predicate gap the V2 fix closes.
+      expect(res.computed.sampleSize).toBe(20);
+      expect(res.computed.publicRating).toBeCloseTo(2.9, 5);
+      expect(res.computed.version).toBe("PARTNER_QUALITY_V2");
+
+      // Abandonment is still visible to HQ as its own evidence line, not just absorbed into the score.
+      const aband = res.evidence.metrics.find((m) => m.metric === "abandoned_unit_rate")!;
+      expect(aband.rawValue).toBeCloseTo(0.5, 5);
+
       const durable = await admin.query<{ n: string }>(
         `SELECT count(*)::text AS n FROM certificates
           WHERE origin_location_id = $1 AND origin_type = 'PARTNER'
@@ -395,6 +415,79 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
         [locationId],
       );
       expect(Number(durable.rows[0].n)).toBe(10);
+    });
+
+    /**
+     * REVIEW-DUP1's target: a physical unit is counted ONCE however many times it goes round.
+     *
+     * One certificate row IS one physical unit, and server/grader.ts increments redo_count on that
+     * same row at each rejection. So return/resubmit/return/resubmit/approve is one unit carrying
+     * two redos, not three samples — the sample size cannot be inflated by churning a card, while
+     * the churn itself still costs the shop through rework intensity.
+     */
+    it("counts one physical unit ONCE across returned -> resubmitted -> returned -> resubmitted -> approved", async () => {
+      const { locationId } = await seedListing(T_A, "Resubmit Cycle", "resubmit-cycle");
+      await insertCert(locationId, { redoCount: 2, approved: true });
+
+      const ev = await svc.measureEvidence(locationId);
+      expect(ev.sampleSize).toBe(1);
+      const rework = ev.metrics.find((m) => m.metric === "rework_intensity")!;
+      // Two redos on ONE unit, not two units averaging one redo.
+      expect(rework.rawValue).toBeCloseTo(2.0, 5);
+      const firstPass = ev.metrics.find((m) => m.metric === "first_pass_approval_rate")!;
+      expect(firstPass.rawValue).toBeCloseTo(0.0, 5);
+    });
+  });
+
+  /**
+   * THE 180-DAY WINDOW AND ITS FALLBACK.
+   *
+   * These two tests are a matched pair and neither means much alone: the first proves the window
+   * bites, the second proves it cannot bite so hard that it manufactures a tiny-sample rating.
+   */
+  describe("PARTNER_QUALITY_V2 — 180-day recency window", () => {
+    const OLD = "now() - interval '400 days'";
+
+    it("lets recent poor work move the rating even against a large old clean history (RECENCY1/RECENCY2)", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Recency Decline", "recency-decline");
+      // 40 spotless units from over a year ago — the history a declining shop would hide behind.
+      for (let i = 0; i < 40; i++) await insertCert(locationId, { redoCount: 0, approvedAt: OLD });
+      // 12 recent units, every one bounced twice. This is what the shop is doing NOW.
+      for (let i = 0; i < 12; i++) await insertCert(locationId, { redoCount: 2 });
+
+      const res = await svc.recalculateRating(listingId, "test@hq");
+      // The window holds 12 units — at or above the minimum, so it is used and the old 40 are out.
+      expect(res.computed.sampleSize).toBe(12);
+      expect(res.evidence.windowDays).toBe(180);
+      expect(res.computed.ratingAvailable).toBe(true);
+      // Deleting the window (RECENCY1) pulls all 52 units in and lifts this to roughly 3.8;
+      // letting old volume outweigh recent work (RECENCY2) does the same. Both turn this red.
+      expect(res.computed.publicRating).toBeLessThan(1.5);
+    });
+
+    it("falls back to the all-time population when the window is too thin to judge", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Recency Fallback", "recency-fallback");
+      // Only 4 units inside the window — below MINIMUM_PUBLIC_SAMPLE, so the window alone cannot rate.
+      for (let i = 0; i < 4; i++) await insertCert(locationId, { redoCount: 0 });
+      for (let i = 0; i < 20; i++) await insertCert(locationId, { redoCount: 0, approvedAt: OLD });
+
+      const res = await svc.recalculateRating(listingId, "test@hq");
+      // Widened to all-time rather than publishing a rating built on 4 cards.
+      expect(res.computed.sampleSize).toBe(24);
+      expect(res.evidence.windowDays).toBeNull();
+      expect(res.computed.ratingAvailable).toBe(true);
+    });
+
+    it("still withholds a rating entirely when even the all-time population is too small", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Recency Tiny", "recency-tiny");
+      for (let i = 0; i < 5; i++) await insertCert(locationId, { redoCount: 0 });
+
+      const res = await svc.recalculateRating(listingId, "test@hq");
+      // A thin window must never become a small rating. It becomes NO rating.
+      expect(res.computed.sampleSize).toBe(5);
+      expect(res.computed.ratingAvailable).toBe(false);
+      expect(res.computed.publicRating).toBeNull();
+      expect(res.computed.ratingLabel).toBe("Rating building");
     });
   });
 
