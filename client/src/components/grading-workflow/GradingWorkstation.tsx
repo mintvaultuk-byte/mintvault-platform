@@ -1,7 +1,11 @@
-import React, { useCallback, useRef, useState, type ReactNode } from "react";
+import React, { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import GradingPanel from "@/components/grading/grading-panel";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import {
+  CertificatePreviewPanel,
+  type CertificatePreviewFields,
+} from "@/components/grading-workflow/CertificatePreviewPanel";
 import {
   CanonicalGradingWorkstationShell,
   WORKSTATION_BODY_SCROLL_CLASS,
@@ -28,7 +32,7 @@ import {
  * the top of the scroll body (right column), beside the card preview — never as
  * a detached full-width section above the shell.
  */
-export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader";
+export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader" | "partner";
 
 /** 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review. */
 const GRADE_STAGE = 1;
@@ -71,10 +75,14 @@ type Props = Omit<
 export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps }: Props) {
   const apiBase = panelProps.apiBase ?? "/api/admin";
   const rootRef = useRef<HTMLDivElement>(null);
-  // Grade is the working stage for these role surfaces; Card Details is already
-  // captured upstream. Start on Grade, keep every stage reachable.
-  // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
-  const [stage, setStage] = useState(GRADE_STAGE);
+  // Every grading role enters the same three-stage flow at Card Details. Pending
+  // Review is the one capability-driven exception: reviewers land directly on
+  // Review, with every stage still reachable from the shared strip.
+  const [stage, setStage] = useState(() => (mode === "admin-review" ? REVIEW_STAGE : 0));
+  const [interactiveCardHost, setInteractiveCardHost] = useState<HTMLDivElement | null>(null);
+  const [draftPreview, setDraftPreview] = useState<CertificatePreviewFields | null>(null);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const interactiveCardHostRef = useCallback((node: HTMLDivElement | null) => setInteractiveCardHost(node), []);
 
   // The stage bar GATES content (hidden-not-unmounted via the .grading-stage-gate
   // CSS on the body wrapper below): selecting a stage shows only that stage's
@@ -85,11 +93,43 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
     rootRef.current?.querySelector<HTMLElement>('[data-testid="grading-workstation-slot"]')?.scrollTo({ top: 0 });
   }, []);
 
-  // Grade is stage 1; showing the preview aside beside GradingPanel would
-  // duplicate its own image tool. Show it on Card Details, and ALWAYS when the
-  // Admin Review identity editor is open (so the card is left / editor right).
-  const showPreviewAside = stage === 0 || (mode === "admin-review" && !!identityEditor);
   const certId = panelProps.certId;
+  const previewFields = useMemo<CertificatePreviewFields>(
+    () =>
+      draftPreview?.certificateId === certId
+        ? draftPreview
+        : {
+            certificateId: certId,
+            certId: panelProps.certIdStr,
+            cardName: panelProps.cardName,
+            setName: panelProps.cardSet,
+            year: panelProps.cardYear ?? undefined,
+            cardNumber: panelProps.cardNumber ?? undefined,
+            language: panelProps.cardLanguage ?? undefined,
+            variant: panelProps.cardVariant ?? undefined,
+            gradeOverall: panelProps.existingGrade,
+          },
+    [
+      draftPreview,
+      certId,
+      panelProps.certIdStr,
+      panelProps.cardName,
+      panelProps.cardSet,
+      panelProps.cardYear,
+      panelProps.cardNumber,
+      panelProps.cardLanguage,
+      panelProps.cardVariant,
+      panelProps.existingGrade,
+    ]
+  );
+  const previewEndpoint = `${apiBase}/certificates/label/preview`;
+  const workstationCapabilities = mode === "partner" ? {
+    catalogueEndpoint: "/api/partner/catalogue/snapshot",
+    customSetMutations: false,
+    identify: false,
+    imageMutations: false,
+    generateDescription: false,
+  } : undefined;
 
   return (
     <div
@@ -101,8 +141,21 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
       <CanonicalGradingWorkstationShell
         rootRef={rootRef}
         previewAside={
-          showPreviewAside && certId != null ? (
-            <WorkstationPreviewAside certificateId={certId} apiBase={apiBase} />
+          certId != null ? (
+            <WorkstationPreviewAside
+              certificateId={certId}
+              apiBase={apiBase}
+              interactiveCardHostRef={stage === GRADE_STAGE ? interactiveCardHostRef : undefined}
+              below={
+                <CertificatePreviewPanel
+                  key={certId}
+                  fields={previewFields}
+                  endpoint={previewEndpoint}
+                  persistence="unsaved"
+                  revision={previewRevision}
+                />
+              }
+            />
           ) : null
         }
       >
@@ -145,6 +198,10 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
             {...panelProps}
             active={stage === GRADE_STAGE}
             approvalStageActive={stage === REVIEW_STAGE}
+            previewHost={stage === GRADE_STAGE ? interactiveCardHost : null}
+            onPreviewChange={setDraftPreview}
+            onPreviewSaved={() => setPreviewRevision((value) => value + 1)}
+            workstationCapabilities={workstationCapabilities}
           />
         </div>
       </CanonicalGradingWorkstationShell>

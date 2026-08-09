@@ -16,6 +16,10 @@ import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { getR2SignedUrl } from "../r2";
 import { storage } from "../storage";
+import type { CertificateRecord } from "@shared/schema";
+import { checkPrintableGrade, UnprintableGradeError } from "@shared/printable-grade";
+import { buildLabelPreviewCertificate, generateLabelPreviewPNG } from "../services/label-preview";
+import { authorizePartnerLabelPreview } from "../services/label-preview-access";
 import {
   applyCertGradeDraft,
   buildCertGradingPayload,
@@ -56,6 +60,7 @@ type PartnerCertAuth = {
   grade: string | null;
   rejectionReason: string | null;
   redoCount: number;
+  provenanceValid: boolean;
 };
 
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
@@ -105,13 +110,28 @@ async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Pro
               cert.variant,
               cert.grade::text,
               cert.rejection_reason AS "rejectionReason",
-              cert.redo_count::int AS "redoCount"
+              cert.redo_count::int AS "redoCount",
+              true AS "provenanceValid"
          FROM certificates cert
          LEFT JOIN cards c ON c.id = cert.card_id
          LEFT JOIN submission_items si ON si.id = cert.submission_item_id
          JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
          JOIN partner_connector_imports pci
            ON pci.destination_submission_id = s.id
+         JOIN partner_connector_records pcr
+           ON pcr.id = pci.connector_record_id
+          AND pcr.tenant_id = pci.partner_organisation_id
+          AND pcr.partner_submission_id = pci.partner_submission_id
+          AND pcr.handoff_id = pci.partner_handoff_id
+          AND pcr.state = 'imported'
+         JOIN partner_submissions ps
+           ON ps.id = pci.partner_submission_id
+          AND ps.tenant_id = pci.partner_organisation_id
+          AND ps.location_id = pci.partner_location_id
+         JOIN partner_submission_handoffs psh
+           ON psh.id = pci.partner_handoff_id
+          AND psh.tenant_id = pci.partner_organisation_id
+          AND psh.submission_id = pci.partner_submission_id
         WHERE cert.id = $1
           AND cert.deleted_at IS NULL
           AND pci.partner_organisation_id = $2
@@ -125,7 +145,7 @@ async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Pro
   return row;
 }
 
-function authorizeAssigned(principal: PartnerPrincipal, auth: PartnerCertAuth | null) {
+function authorizeAssignedPartnerCert(principal: PartnerPrincipal, auth: PartnerCertAuth | null) {
   if (!auth) return { ok: false as const, status: 404, error: "Not found" };
   if (auth.assignedGraderId !== principal.userId) {
     return { ok: false as const, status: 403, error: "This card is not assigned to you" };
@@ -147,6 +167,20 @@ function partnerDraftWriteGuard(principal: PartnerPrincipal) {
         LEFT JOIN submission_items si ON si.id = cert_check.submission_item_id
         JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
         JOIN partner_connector_imports pci ON pci.destination_submission_id = s.id
+        JOIN partner_connector_records pcr
+          ON pcr.id = pci.connector_record_id
+         AND pcr.tenant_id = pci.partner_organisation_id
+         AND pcr.partner_submission_id = pci.partner_submission_id
+         AND pcr.handoff_id = pci.partner_handoff_id
+         AND pcr.state = 'imported'
+        JOIN partner_submissions ps
+          ON ps.id = pci.partner_submission_id
+         AND ps.tenant_id = pci.partner_organisation_id
+         AND ps.location_id = pci.partner_location_id
+        JOIN partner_submission_handoffs psh
+          ON psh.id = pci.partner_handoff_id
+         AND psh.tenant_id = pci.partner_organisation_id
+         AND psh.submission_id = pci.partner_submission_id
        WHERE cert_check.id = certificates.id
          AND pci.partner_organisation_id = ${principal.tenantId}
          AND (${principal.orgWide} OR pci.partner_location_id = ${principal.locationId})
@@ -236,6 +270,20 @@ export function partnerGradingRouter(): Router {
              JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
              JOIN partner_connector_imports pci
                ON pci.destination_submission_id = s.id
+             JOIN partner_connector_records pcr
+               ON pcr.id = pci.connector_record_id
+              AND pcr.tenant_id = pci.partner_organisation_id
+              AND pcr.partner_submission_id = pci.partner_submission_id
+              AND pcr.handoff_id = pci.partner_handoff_id
+              AND pcr.state = 'imported'
+             JOIN partner_submissions ps
+               ON ps.id = pci.partner_submission_id
+              AND ps.tenant_id = pci.partner_organisation_id
+              AND ps.location_id = pci.partner_location_id
+             JOIN partner_submission_handoffs psh
+               ON psh.id = pci.partner_handoff_id
+              AND psh.tenant_id = pci.partner_organisation_id
+              AND psh.submission_id = pci.partner_submission_id
             WHERE pci.partner_organisation_id = $1
               AND pci.state IN ('completed','imported')
               AND cert.assigned_grader_id = $2
@@ -285,7 +333,7 @@ export function partnerGradingRouter(): Router {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-      const auth = authorizeAssigned(req.partner!, await loadPartnerCert(req.partner!, certId));
+      const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
       res.json(await imagesForPartnerCert(auth.auth));
     } catch (err) {
@@ -297,12 +345,53 @@ export function partnerGradingRouter(): Router {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-      const auth = authorizeAssigned(req.partner!, await loadPartnerCert(req.partner!, certId));
+      const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
       const payload = await buildCertGradingPayload(certId);
       if (!payload) return res.status(404).json({ error: "Not found" });
       res.json(stripGraderPii(payload));
     } catch (err) {
+      sendPartnerGradingError(res, err);
+    }
+  });
+
+  r.post("/grading/certificates/label/preview", requirePartnerCapability("partner.cards.preview"), async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const certId = numericId(body.certificateId ?? body.id);
+      if (!certId) return res.status(400).json({ error: "Valid certificateId required" });
+
+      // This is the same tenant/location/provenance lookup and per-user
+      // assignment check used by every other Partner grading read/write.
+      const candidate = await loadPartnerCert(req.partner!, certId);
+      const access = authorizePartnerLabelPreview(req.partner!, candidate);
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+      const auth = authorizeAssignedPartnerCert(req.partner!, candidate);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
+      const saved = await storage.getCertificate(certId);
+      if (!saved) return res.status(404).json({ error: "Not found" });
+      const cert = await buildLabelPreviewCertificate(saved as CertificateRecord, body);
+      const verdict = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
+      if (!verdict.printable) {
+        return res.status(422).json({
+          error:
+            verdict.reason === "missing_numeric_grade"
+              ? "Not graded yet — the preview appears once a grade is set."
+              : (verdict.message ?? "This certificate's grade cannot be previewed yet."),
+          code: "UNPRINTABLE_GRADE",
+          reason: verdict.reason,
+        });
+      }
+
+      const png = await generateLabelPreviewPNG(cert);
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(png);
+    } catch (err) {
+      if (err instanceof UnprintableGradeError) {
+        return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", reason: err.reason });
+      }
       sendPartnerGradingError(res, err);
     }
   });
@@ -316,7 +405,7 @@ export function partnerGradingRouter(): Router {
       try {
         const certId = numericId(req.params.id);
         if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-        const auth = authorizeAssigned(req.partner!, await loadPartnerCert(req.partner!, certId));
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
         if (!EDITABLE_STATUSES.has(auth.auth.gradingStatus)) {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not editable` });
@@ -356,7 +445,7 @@ export function partnerGradingRouter(): Router {
       try {
         const certId = numericId(req.params.id);
         if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-        const auth = authorizeAssigned(req.partner!, await loadPartnerCert(req.partner!, certId));
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
         if (auth.auth.gradingStatus !== "assigned") {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not submittable` });
@@ -394,6 +483,20 @@ export function partnerGradingRouter(): Router {
                 LEFT JOIN submission_items si ON si.id = cert_check.submission_item_id
                 JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
                 JOIN partner_connector_imports pci ON pci.destination_submission_id = s.id
+                JOIN partner_connector_records pcr
+                  ON pcr.id = pci.connector_record_id
+                 AND pcr.tenant_id = pci.partner_organisation_id
+                 AND pcr.partner_submission_id = pci.partner_submission_id
+                 AND pcr.handoff_id = pci.partner_handoff_id
+                 AND pcr.state = 'imported'
+                JOIN partner_submissions ps
+                  ON ps.id = pci.partner_submission_id
+                 AND ps.tenant_id = pci.partner_organisation_id
+                 AND ps.location_id = pci.partner_location_id
+                JOIN partner_submission_handoffs psh
+                  ON psh.id = pci.partner_handoff_id
+                 AND psh.tenant_id = pci.partner_organisation_id
+                 AND psh.submission_id = pci.partner_submission_id
                WHERE cert_check.id = certificates.id
                  AND pci.partner_organisation_id = ${req.partner!.tenantId}
                  AND (${req.partner!.orgWide} OR pci.partner_location_id = ${req.partner!.locationId})
@@ -436,7 +539,7 @@ export function partnerGradingRouter(): Router {
       try {
         const certId = numericId(req.params.id);
         if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-        const auth = authorizeAssigned(req.partner!, await loadPartnerCert(req.partner!, certId));
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
         if (auth.auth.gradingStatus !== "pending_review") {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not editable as submitted` });
@@ -474,6 +577,20 @@ export function partnerGradingRouter(): Router {
                 LEFT JOIN submission_items si ON si.id = cert_check.submission_item_id
                 JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
                 JOIN partner_connector_imports pci ON pci.destination_submission_id = s.id
+                JOIN partner_connector_records pcr
+                  ON pcr.id = pci.connector_record_id
+                 AND pcr.tenant_id = pci.partner_organisation_id
+                 AND pcr.partner_submission_id = pci.partner_submission_id
+                 AND pcr.handoff_id = pci.partner_handoff_id
+                 AND pcr.state = 'imported'
+                JOIN partner_submissions ps
+                  ON ps.id = pci.partner_submission_id
+                 AND ps.tenant_id = pci.partner_organisation_id
+                 AND ps.location_id = pci.partner_location_id
+                JOIN partner_submission_handoffs psh
+                  ON psh.id = pci.partner_handoff_id
+                 AND psh.tenant_id = pci.partner_organisation_id
+                 AND psh.submission_id = pci.partner_submission_id
                WHERE cert_check.id = certificates.id
                  AND pci.partner_organisation_id = ${req.partner!.tenantId}
                  AND (${req.partner!.orgWide} OR pci.partner_location_id = ${req.partner!.locationId})

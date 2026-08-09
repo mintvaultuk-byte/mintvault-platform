@@ -68,12 +68,16 @@ describe("Card-stage live certificate preview (1-3, 13)", () => {
   });
 
   it("3. no duplicate preview component, formatter or endpoint was introduced", () => {
-    // one panel component file, one payload builder, one endpoint, one renderer
+    // one panel component file, one payload builder, role-authorised endpoint
+    // adapters, and one renderer
     expect(FORM).not.toContain("CardStagePreview");
     expect(FORM).not.toContain("<LabelPreview");
     expect(read("server/routes.ts")).not.toContain('app.post("/api/admin/label-preview"');
     const preview = read("server/routes/admin/label-preview.ts");
-    expect((preview.match(/app\.post\(/g) ?? []).length).toBe(1);
+    expect((preview.match(/app\.post\(/g) ?? []).length).toBe(3);
+    expect(preview).toContain('"/api/admin/certificates/label/preview"');
+    expect(preview).toContain('"/api/grader/certificates/label/preview"');
+    expect(preview).toContain('"/api/admin/grade-review/certificates/label/preview"');
     expect(preview).toContain('generateLabelPNG(cert, "front")');
   });
 

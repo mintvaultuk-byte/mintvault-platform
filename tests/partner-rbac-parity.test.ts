@@ -30,6 +30,8 @@ import {
 
 const MIGRATION = "0034_partner_rbac_seed.sql";
 const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
+const ADDITIVE_MIGRATION = "0047_partner_label_preview_permission.sql";
+const additiveSql = readFileSync(join(process.cwd(), "migrations", ADDITIVE_MIGRATION), "utf8");
 
 /** Body of the `INSERT INTO _rbac_roles ... VALUES (...);` block. */
 function parseMigrationRoles(): Array<{ code: string; label: string }> {
@@ -78,8 +80,17 @@ function typescriptMappings(): Set<string> {
 
 describe("Partner RBAC parity — TypeScript ⇄ migration 0034", () => {
   const migRoles = parseMigrationRoles();
-  const migPerms = parseMigrationPermissions();
+  const migPerms = [...parseMigrationPermissions()];
+  for (const match of additiveSql.matchAll(/VALUES \('([^']+)',\s*'[^']+'\)/g)) {
+    if (!migPerms.includes(match[1])) migPerms.push(match[1]);
+  }
   const migMaps = parseMigrationMappings(migPerms);
+  const additivePermission = additiveSql.match(/p\.code = '([^']+)'/)?.[1];
+  const additiveRoles = additiveSql.match(/r\.code IN \(([^)]*)\)/)?.[1];
+  if (!additivePermission || !additiveRoles) throw new Error(`${ADDITIVE_MIGRATION}: could not parse grant`);
+  for (const match of additiveRoles.matchAll(/'([^']+)'/g)) {
+    migMaps.add(`${match[1]}|${additivePermission}`);
+  }
   const tsMaps = typescriptMappings();
 
   // Guard the parser itself: if a refactor of the SQL silently defeats these regexes, every

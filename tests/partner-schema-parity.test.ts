@@ -139,6 +139,8 @@ describe("partner schema ↔ migration parity", () => {
       // 0044 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+      "0046_partner_mfa_pending_lifecycle.sql",
+      "0047_partner_label_preview_permission.sql",
     ]);
   });
 

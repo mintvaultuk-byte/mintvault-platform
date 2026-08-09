@@ -19,9 +19,9 @@ interface SnapshotResponse {
 
 export const CATALOGUE_SNAPSHOT_KEY = "/api/catalogue/snapshot";
 
-export function useCatalogue(): CatalogueSnapshot {
+export function useCatalogue(endpoint = CATALOGUE_SNAPSHOT_KEY): CatalogueSnapshot {
   const { data } = useQuery<SnapshotResponse | null>({
-    queryKey: [CATALOGUE_SNAPSHOT_KEY],
+    queryKey: [endpoint],
     staleTime: 5 * 60 * 1000,
     placeholderData: { snapshot: SEED_CATALOGUE, categories: [] },
   });

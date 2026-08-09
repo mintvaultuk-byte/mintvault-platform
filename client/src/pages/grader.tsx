@@ -119,6 +119,7 @@ export default function GraderPage() {
           mode="grader"
           apiBase="/api/grader"
           graderMode
+          serviceTier={active.item.serviceTier}
           certId={c.certId}
           certIdStr={c.certIdStr}
           cardName={c.cardName || ""}

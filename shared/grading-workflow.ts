@@ -79,11 +79,7 @@ export function deriveStageCompletion(f: WorkflowProgressInput): boolean[] {
 export function hasAnyVariantData(f: WorkflowProgressInput): boolean {
   const filled = (v: unknown) => typeof v === "string" && v.trim() !== "";
   return (
-    filled(f.rarityCode) ||
-    filled(f.variant) ||
-    filled(f.finishVariant) ||
-    filled(f.promoType) ||
-    filled(f.subsetName)
+    filled(f.rarityCode) || filled(f.variant) || filled(f.finishVariant) || filled(f.promoType) || filled(f.subsetName)
   );
 }
 
@@ -122,10 +118,9 @@ export function stageIndexByKey(key: string): number {
   return GRADING_STAGES.findIndex((s) => s.key === key);
 }
 
-/** The preview aside is shown on Card Details and Review. Grade is the single
- *  documented exception: the protected grading workstation renders its own
- *  interactive card image there, and a second copy would duplicate it. */
+/** The canonical preview aside is persistent through all three stages. On Grade
+ *  it hosts the existing interactive grading image; the other stages host the
+ *  read-only card viewer. */
 export function showsPreviewAside(stage: number): boolean {
-  const s = clampStageIndex(stage);
-  return s === CARD_DETAILS_STAGE || s === REVIEW_STAGE;
+  return clampStageIndex(stage) >= CARD_DETAILS_STAGE;
 }

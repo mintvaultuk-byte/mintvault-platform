@@ -3,7 +3,7 @@ import React, { type ReactNode, type Ref } from "react";
 /**
  * CanonicalGradingWorkstationShell — the ONE grading-workstation outer shell for
  * the entire MintVault grading network (Super Admin /admin, Staff, Grader, Admin
- * Review, and future Partner grading).
+ * Review, and Partner grading).
  *
  * This is the EXACT proven outer geometry previously inlined only in
  * client/src/components/certificate-form.tsx (the founder-approved Super Admin
@@ -57,7 +57,7 @@ export const WORKSTATION_HEADER_REGION_CLASS = "shrink-0 space-y-1";
 export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1";
 
 export interface CanonicalGradingWorkstationShellProps {
-  /** Left preview aside (Card / Rarity / Review stages). Falsy → hidden. */
+  /** Persistent left card + live-certificate preview rail. */
   previewAside?: ReactNode;
   /** Ref to the outer root — used by routes for stage-scroll section queries. */
   rootRef?: Ref<HTMLDivElement>;
@@ -71,7 +71,11 @@ export interface CanonicalGradingWorkstationShellProps {
   children: ReactNode;
 }
 
-export function CanonicalGradingWorkstationShell({ previewAside, rootRef, children }: CanonicalGradingWorkstationShellProps) {
+export function CanonicalGradingWorkstationShell({
+  previewAside,
+  rootRef,
+  children,
+}: CanonicalGradingWorkstationShellProps) {
   return (
     <div ref={rootRef} className={WORKSTATION_FILL_CLASS} data-testid="grading-workspace" data-canonical-shell="true">
       <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">

@@ -23,7 +23,7 @@ export const PARTNER_MIGRATIONS = [
   "0003_partner_auth_hardening",
   "0004_partner_mfa_enrol",
   "0005_partner_mfa_replay_and_grants",
-  "0044_partner_mfa_pending_lifecycle",
+  "0046_partner_mfa_pending_lifecycle",
   "0006_partner_definer_role",
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
@@ -120,6 +120,7 @@ export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
 export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   ...PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION,
   "0034_partner_rbac_seed",
+  "0047_partner_label_preview_permission",
 ] as const;
 
 /** G6D — Partner submission credit reservation, consumption and release integration. */

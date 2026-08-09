@@ -6,7 +6,7 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
-import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
+import { CertificatePreviewPanel, type CertificatePreviewFields } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { certificateFormEntriesToSend } from "@shared/certificate-field-ownership";
@@ -1926,6 +1926,10 @@ export default function CertificateForm({
   // (manual-card-tool.tsx), never caching mount-time sizes.
   const [wfStage, setWfStage] = useState(0);
   const [wfMaxStage, setWfMaxStage] = useState(0);
+  const [interactiveCardHost, setInteractiveCardHost] = useState<HTMLDivElement | null>(null);
+  const [gradingDraftPreview, setGradingDraftPreview] = useState<CertificatePreviewFields | null>(null);
+  const [gradingPreviewRevision, setGradingPreviewRevision] = useState(0);
+  const interactiveCardHostRef = useCallback((node: HTMLDivElement | null) => setInteractiveCardHost(node), []);
 
   /**
    * PR A · tell the grading workstation whether the Grade stage is ACTIVE.
@@ -1947,8 +1951,17 @@ export default function CertificateForm({
   const workstationSlot = useMemo(
     () =>
       isValidElement(rawWorkstationSlot)
-        ? cloneElement(rawWorkstationSlot as ReactElement<{ active?: boolean; approvalStageActive?: boolean }>, {
+        ? cloneElement(rawWorkstationSlot as ReactElement<{
+            active?: boolean;
+            approvalStageActive?: boolean;
+            previewHost?: HTMLElement | null;
+            onPreviewChange?: (fields: CertificatePreviewFields) => void;
+            onPreviewSaved?: () => void;
+          }>, {
             active: wfStage === GRADE_STAGE,
+            previewHost: wfStage === GRADE_STAGE ? interactiveCardHost : null,
+            onPreviewChange: setGradingDraftPreview,
+            onPreviewSaved: () => setGradingPreviewRevision((value) => value + 1),
             // ── H-1 · APPROVAL OWNERSHIP IS PER-SURFACE, AND THIS SURFACE IS
             //         NOT THE WORKSTATION ────────────────────────────────────
             // On the ROLE surfaces (GradingWorkstation) the panel's own
@@ -1972,7 +1985,7 @@ export default function CertificateForm({
             approvalStageActive: wfStage === GRADE_STAGE,
           })
         : rawWorkstationSlot,
-    [rawWorkstationSlot, wfStage],
+    [rawWorkstationSlot, wfStage, interactiveCardHost],
   );
   const goToStage = (i: number) => {
     // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
@@ -2046,13 +2059,9 @@ export default function CertificateForm({
     // Canonical grading workstation shell — the ONE shared outer geometry (fixed
     // viewport height, full width, two-panel columns, internal scroll), extracted
     // verbatim from this component's previously-inline geometry so /admin renders
-    // identically; Staff / Grader / Admin Review use the exact same shell. Grade
-    // (GRADE_STAGE) deliberately hides the preview aside because the protected
-    // grading-panel.tsx workstation already renders its own interactive card
-    // image + defect-marking tool (its own internal two-column split); mounting
-    // the aside there would duplicate the image or narrow that protected grid — a
-    // real functional regression, not cosmetic. The shrink-0 header div + <form>
-    // body below are the shell's control-panel children, unchanged.
+    // identically; Staff / Grader / Admin Review use the exact same shell. On
+    // Grade, the protected interactive card/defect surface is portalled into the
+    // persistent rail, avoiding a duplicate viewer while keeping its state.
     // Bounded viewport-height wrapper for /admin (unchanged 4.5rem admin-header
     // offset). The canonical shell fills this exactly (h-full) — no black band.
     <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace-bound">
@@ -2063,11 +2072,9 @@ export default function CertificateForm({
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
-            // Live front-certificate preview on Card Details (0) and Review (2)
-            // — the SAME component, the SAME canonical server renderer, in the SAME
-            // left-column position directly under the card image. Grade (1) is the
-            // only stage without it, because that stage renders the grading
-            // workstationSlot in this column instead.
+            interactiveCardHostRef={wfStage === GRADE_STAGE ? interactiveCardHostRef : undefined}
+            // Live front-certificate preview on every stage — the SAME component,
+            // canonical server renderer and left-column position.
             //
             // CONSOLIDATION NOTE: current main gated this on stages 0, 1 and 3 —
             // Card, Rarity and Review under the old FOUR-stage numbering. Card and
@@ -2111,17 +2118,14 @@ export default function CertificateForm({
                   // card A's label visible under card B's image until the new render
                   // arrived — on a surface captioned "exactly what will print".
                   key={certificate?.id ?? "new"}
+                  revision={gradingPreviewRevision}
                   fields={{
                     // Editing an existing cert → the server starts from the SAVED
                     // grade/subgrade columns so the black-label (Pristine) preview
                     // matches print; absent (create flow) it renders from fields.
                     certificateId: certificate?.id ?? null,
-                    // Send the REAL certificate number. buildPreviewFields defaults
-                    // certId to "MV-PREVIEW" and the posted object wins over the saved
-                    // row, so omitting it made the preview's cert-number strip read
-                    // "-PREVIEW" while the printed label carries the real number —
-                    // contradicting this panel's own "exactly what will print" caption.
-                    // Absent (create flow) it still falls back to the placeholder.
+                    // Send the real number for create-flow fidelity. Existing-cert
+                    // previews always preserve the authorised saved number server-side.
                     certId: (certificate as { certId?: string } | null)?.certId ?? undefined,
                     cardName: form.cardName,
                     setName: form.setName,
@@ -2142,6 +2146,7 @@ export default function CertificateForm({
                     era: form.era,
                     labelType: form.labelType,
                     language: form.language,
+                    ...(gradingDraftPreview?.certificateId === certificate?.id ? gradingDraftPreview : {}),
                   }}
                 />
               ) : undefined

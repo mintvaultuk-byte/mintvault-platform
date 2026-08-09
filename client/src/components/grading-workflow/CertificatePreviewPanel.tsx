@@ -47,6 +47,7 @@ export interface CertificatePreviewFields {
 
 export function CertificatePreviewPanel({
   fields,
+  endpoint = "/api/admin/certificates/label/preview",
   /**
    * Truthfulness of the caption (hostile-review MEDIUM).
    *
@@ -61,9 +62,15 @@ export function CertificatePreviewPanel({
    *                   NOT authoritative and must not be presented as such.
    */
   persistence = "unsaved",
+  revision = 0,
 }: {
   fields: CertificatePreviewFields;
+  /** Server-authorised role endpoint. The endpoint, never UI visibility, owns
+   *  certificate/assignment/tenant access control. */
+  endpoint?: string;
   persistence?: "unsaved" | "saved" | "conflict";
+  /** Increments after an authoritative grade save so saved grade/subgrades are re-read. */
+  revision?: number;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -77,7 +84,7 @@ export function CertificatePreviewPanel({
       setLoading(true);
       setError(null);
       try {
-        const res = await apiRequest("POST", "/api/admin/certificates/label/preview", fields);
+        const res = await apiRequest("POST", endpoint, fields);
         const blob = await res.blob();
         if (cancelled) return;
         const next = URL.createObjectURL(blob);
@@ -94,24 +101,34 @@ export function CertificatePreviewPanel({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [key]);
+  }, [endpoint, key, revision]);
 
   // Revoke the last object URL on unmount.
-  useEffect(() => () => {
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    []
+  );
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-2" data-testid="certificate-preview-panel">
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Live certificate preview</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          Live certificate preview
+        </span>
         {loading && <span className="text-[10px] text-amber-400">rendering…</span>}
       </div>
       {error ? (
         <p className="py-4 text-center text-xs text-slate-500">{error}</p>
       ) : url ? (
         // The real front slab label (826×236 @300DPI) — read-only, matches print.
-        <img src={url} alt="Front certificate preview" className="w-full rounded border border-slate-800 bg-white" data-testid="certificate-preview-image" />
+        <img
+          src={url}
+          alt="Front certificate preview"
+          className="w-full rounded border border-slate-800 bg-white"
+          data-testid="certificate-preview-image"
+        />
       ) : (
         <p className="py-4 text-center text-xs text-slate-500">Preview will appear here.</p>
       )}

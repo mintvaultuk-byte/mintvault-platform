@@ -21,10 +21,15 @@ const ADMIN_DASH = read("client/src/pages/admin-dashboard.tsx");
 const STAFF = read("client/src/pages/staff.tsx");
 const GRADER = read("client/src/pages/grader.tsx");
 const ADMIN_STAFF = read("client/src/pages/admin-staff.tsx");
+const PARTNER = read("client/src/pages/partner/grading.tsx");
+const PANEL = read("client/src/components/grading/grading-panel.tsx");
+const PREVIEW_PANEL = read("client/src/components/grading-workflow/CertificatePreviewPanel.tsx");
+const IDENTITY = read("client/src/components/grading/GradingIdentityVerification.tsx");
+const ROLE_REVIEW = read("client/src/components/grading-workflow/RoleReviewSummary.tsx");
 
 // Every file that could own a grading workstation surface. Only the shell may
 // contain the canonical outer-geometry class strings.
-const ROUTE_MOUNTS = { STAFF, GRADER, ADMIN_STAFF, ADMIN_DASH, CERT_FORM, WORKSTATION };
+const ROUTE_MOUNTS = { STAFF, GRADER, ADMIN_STAFF, PARTNER, ADMIN_DASH, CERT_FORM, WORKSTATION };
 
 // HEIGHT CONTRACT: the shell FILLS its parent (h-full); it never sets a
 // viewport-relative height of its own. Exactly ONE bounded viewport-height
@@ -41,17 +46,19 @@ describe("Canonical grading workstation — one shell, capability-only role diff
   it("1. CertificateForm (Super Admin /admin) mounts CanonicalGradingWorkstationShell", () => {
     expect(CERT_FORM).toContain("<CanonicalGradingWorkstationShell");
     expect(CERT_FORM).toContain(
-      'import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell"',
+      'import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell"'
     );
   });
 
-  it("2-4. Staff, Grader and Admin Review all render through the SAME canonical shell (via GradingWorkstation)", () => {
+  it("2-4. Staff, Grader, Partner and Admin Review all render through the SAME canonical shell (via GradingWorkstation)", () => {
     expect(STAFF).toContain("<GradingWorkstation");
     expect(STAFF).toContain('mode="staff"');
     expect(GRADER).toContain("<GradingWorkstation");
     expect(GRADER).toContain('mode="grader"');
     expect(ADMIN_STAFF).toContain("<GradingWorkstation");
     expect(ADMIN_STAFF).toContain('mode="admin-review"');
+    expect(PARTNER).toContain("<GradingWorkstation");
+    expect(PARTNER).toContain('mode="partner"');
     // GradingWorkstation is a THIN adapter that mounts the canonical shell.
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
   });
@@ -87,12 +94,15 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(ADMIN_STAFF).toMatch(/fixed inset-0 z-50 flex flex-col/);
+    expect(PARTNER).toMatch(/fixed inset-0 z-50 flex flex-col/);
   });
 
   it("8. GradingPanel is mounted inside the shell's bounded canonical scroll body", () => {
     // The shell exposes the ONE canonical body scroll class; the adapter wraps
     // GradingPanel in exactly that, and admin's <form> uses it too.
-    expect(SHELL).toContain('export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
+    expect(SHELL).toContain(
+      'export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"'
+    );
     expect(WORKSTATION).toContain("WORKSTATION_BODY_SCROLL_CLASS");
     expect(WORKSTATION).toContain("<GradingPanel");
     expect(CERT_FORM).toContain("min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"); // the <form> body
@@ -102,6 +112,7 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(STAFF).toContain('apiBase="/api/grader"');
     expect(GRADER).toContain('apiBase="/api/grader"');
     expect(ADMIN_STAFF).toContain('apiBase="/api/admin/grade-review"');
+    expect(PARTNER).toContain('apiBase="/api/partner/grading"');
     // Super Admin GradingPanel talks to /api/admin via CertificateForm/admin-dashboard.
     expect(ADMIN_DASH).toContain("/api/admin/certificates");
   });
@@ -137,7 +148,10 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     // GradingWorkstation (role adapter) + CertificateForm (Super Admin) are the
     // only files allowed to mount CanonicalGradingWorkstationShell. If a new
     // competing shell/consumer appears, add it here deliberately — never silently.
-    const mounts = ["client/src/components/grading-workflow/GradingWorkstation.tsx", "client/src/components/certificate-form.tsx"];
+    const mounts = [
+      "client/src/components/grading-workflow/GradingWorkstation.tsx",
+      "client/src/components/certificate-form.tsx",
+    ];
     for (const p of mounts) expect(read(p)).toContain("<CanonicalGradingWorkstationShell");
     // Exactly ONE viewport-height wrapper is sanctioned across ALL grading
     // surfaces — CertForm's /admin wrapper. No other file may introduce a
@@ -169,7 +183,10 @@ describe("Hotfix: bottom black bar + Admin Review identity-editor placement", ()
     expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(ADMIN_STAFF).toMatch(/fixed inset-0 z-50 flex flex-col/);
     // admin-review overlay no longer caps the workstation with max-w-6xl.
-    const overlay = ADMIN_STAFF.slice(ADMIN_STAFF.indexOf("grade-review-overlay"), ADMIN_STAFF.indexOf("</GradingWorkstation"));
+    const overlay = ADMIN_STAFF.slice(
+      ADMIN_STAFF.indexOf("grade-review-overlay"),
+      ADMIN_STAFF.indexOf("</GradingWorkstation")
+    );
     expect(overlay).not.toContain("max-w-6xl");
     expect(overlay).not.toContain("min-h-screen");
   });
@@ -190,7 +207,7 @@ describe("Hotfix: bottom black bar + Admin Review identity-editor placement", ()
     // The old inline section (border-b bg-gold, between the header and the
     // workstation) is gone from admin-staff's overlay JSX.
     const overlay = ADMIN_STAFF.slice(ADMIN_STAFF.indexOf("grade-review-overlay"));
-    expect(overlay).not.toContain('bg-[var(--admin-gold)]/[0.03] px-4 py-2.5');
+    expect(overlay).not.toContain("bg-[var(--admin-gold)]/[0.03] px-4 py-2.5");
   });
 
   it("ID3. the identity save / cancel / search / re-run handlers stay connected in the moved editor", () => {
@@ -212,8 +229,56 @@ describe("Hotfix: bottom black bar + Admin Review identity-editor placement", ()
     }
   });
 
-  it("ID4. when the identity editor is open the preview aside is forced on (card left / editor right)", () => {
-    expect(WORKSTATION).toMatch(/mode === "admin-review" && !!identityEditor/);
+  it("ID4. the preview aside is persistent, including Admin Review identity editing", () => {
+    expect(WORKSTATION).toMatch(/previewAside=\{[\s\S]*certId != null/);
+    expect(WORKSTATION).toContain("identityEditor");
+  });
+});
+
+describe("Canonical persistent preview rail", () => {
+  it("keeps one card + live label rail mounted through Card Details, Grade and Review", () => {
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
+    expect(WORKSTATION).toContain("<CertificatePreviewPanel");
+    expect(WORKSTATION).toContain("interactiveCardHostRef={stage === GRADE_STAGE");
+    expect(WORKSTATION).toContain("previewHost={stage === GRADE_STAGE");
+    expect(CERT_FORM).toContain("interactiveCardHostRef={wfStage === GRADE_STAGE");
+    expect(CERT_FORM).toContain("previewHost: wfStage === GRADE_STAGE ? interactiveCardHost : null");
+    expect(PANEL).toContain("createPortal(children, host)");
+  });
+
+  it("uses each role's server-authorised preview endpoint and in-memory draft", () => {
+    expect(WORKSTATION).toContain("`${apiBase}/certificates/label/preview`");
+    expect(WORKSTATION).toContain("onPreviewChange={setDraftPreview}");
+    expect(WORKSTATION).toContain("fields={previewFields}");
+    expect(PREVIEW_PANEL).toContain('apiRequest("POST", endpoint, fields)');
+  });
+
+  it("starts operators at Card Details and Pending Review at Review", () => {
+    expect(WORKSTATION).toContain('mode === "admin-review" ? REVIEW_STAGE : 0');
+  });
+
+  it("keeps the canonical right body as the desktop scroll owner", () => {
+    expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
+    expect(PANEL).toContain('className={previewHost ? "block"');
+  });
+
+  it("keeps Partner in the shared shell with capability-configured controls", () => {
+    expect(WORKSTATION).toContain('mode === "partner"');
+    expect(WORKSTATION).toContain('catalogueEndpoint: "/api/partner/catalogue/snapshot"');
+    expect(WORKSTATION).toContain("customSetMutations: false");
+    expect(WORKSTATION).toContain("identify: false");
+    expect(WORKSTATION).toContain("imageMutations: false");
+    expect(PANEL).toContain("workstationCapabilities.imageMutations");
+    expect(IDENTITY).toContain("props.allowIdentify !== false");
+  });
+
+  it("provides language editing and a shared read-only role Review summary", () => {
+    expect(IDENTITY).toContain('data-testid="input-identity-language"');
+    expect(PANEL).toContain("onLanguage={setIdLanguage}");
+    expect(PANEL).toContain("<RoleReviewSummary");
+    for (const field of ["Authentication", "Defects", "Public grade explanation", "Private notes"]) {
+      expect(ROLE_REVIEW).toContain(field);
+    }
   });
 });
 
@@ -256,27 +321,60 @@ describe("Hotfix: stage bar gates content (Card Details / Grade / Review)", () =
     expect(stage(1)).toContain(sec("footer-actions"));
     expect(stage(1)).not.toContain(sec("grading-controls"));
     expect(stage(1)).not.toContain(sec("grade-result"));
-    // Stage 2 (Review): CRITICAL — never hide grading-controls, grade-result, or
-    // footer-actions, so the Approve/Submit button stays REACHABLE on Review.
+    // Stage 2 uses the shared read-only review summary, while the authorised
+    // footer remains reachable.
     expect(stage(2)).not.toContain(sec("grading-controls"));
-    expect(stage(2)).not.toContain(sec("grade-result"));
+    expect(stage(2)).toContain(sec("grade-result"));
     expect(stage(2)).not.toContain(sec("footer-actions"));
+    expect(stage(2)).not.toContain(sec("review-summary"));
     // Review hides the detailed sub-grade control siblings.
     expect(stage(2)).toContain(sec("mvgs-score"));
     expect(stage(2)).toContain(sec("notes"));
   });
 
+  it("SG4. role Review summary is visible only on Review", () => {
+    const block = (n: number) => {
+      const start = ADMIN_TOKENS.indexOf(`.grading-stage-gate[data-ws-stage="${n}"]`);
+      return ADMIN_TOKENS.slice(start, ADMIN_TOKENS.indexOf("display: none", start));
+    };
+    expect(block(0)).toContain('[data-canonical-section="review-summary"]');
+    expect(block(1)).toContain('[data-canonical-section="review-summary"]');
+    expect(block(2)).not.toContain('[data-canonical-section="review-summary"]');
+  });
+
   it("SG5. no grading section is hidden on ALL three stages (submit + every section reachable somewhere)", () => {
     const sections = [
-      "workflow-banners", "identification", "identity-fields", "rarity", "workstation-header", "preflight",
-      "ai-tools", "card-images", "defect-marking", "grading-controls", "mvgs-score", "grade-result",
-      "d1-d2-d3", "centering", "surface", "authentication", "notes", "footer-actions",
+      "workflow-banners",
+      "identification",
+      "identity-fields",
+      "rarity",
+      "workstation-header",
+      "preflight",
+      "ai-tools",
+      "card-images",
+      "defect-marking",
+      "grading-controls",
+      "mvgs-score",
+      "grade-result",
+      "d1-d2-d3",
+      "centering",
+      "surface",
+      "authentication",
+      "notes",
+      "footer-actions",
     ];
     // grade-result + footer-actions are children of grading-controls; a section is
     // "effectively hidden" on a stage if it OR grading-controls is in that stage's
     // hide-rule. Model that and assert every section is shown on ≥1 stage.
     const childrenOfGradingControls = new Set([
-      "mvgs-score", "grade-result", "d1-d2-d3", "centering", "surface", "authentication", "notes", "footer-actions",
+      "mvgs-score",
+      "grade-result",
+      "d1-d2-d3",
+      "centering",
+      "surface",
+      "authentication",
+      "notes",
+      "footer-actions",
     ]);
     // Each stage now has its OWN rule block (the old 0/1 shared-block hack is
     // gone with the Rarity stage). Slice each block through its display:none.
@@ -288,7 +386,8 @@ describe("Hotfix: stage bar gates content (Card Details / Grade / Review)", () =
     const hiddenOn = (section: string, n: number) => {
       const nBlock = stageRule(n);
       const direct = nBlock.includes(`[data-canonical-section="${section}"]`);
-      const viaParent = childrenOfGradingControls.has(section) && nBlock.includes('[data-canonical-section="grading-controls"]');
+      const viaParent =
+        childrenOfGradingControls.has(section) && nBlock.includes('[data-canonical-section="grading-controls"]');
       return direct || viaParent;
     };
     for (const s of sections) {
@@ -389,8 +488,9 @@ describe("Three-stage workflow: Variant lives in Card Details + one shared picke
   it("R10-R12. Grade has no submit; Review keeps submit reachable; Review shows the card+variant summary", () => {
     expect(stageHides(1, "footer-actions")).toBe(true); // no submit on Grade
     expect(stageHides(2, "footer-actions")).toBe(false); // submit reachable on Review
-    expect(stageHides(2, "identity-fields")).toBe(false); // card summary on Review
-    expect(stageHides(2, "rarity")).toBe(false); // variant summary on Review
+    expect(stageHides(2, "identity-fields")).toBe(true); // consolidated into shared Review summary
+    expect(stageHides(2, "rarity")).toBe(true); // consolidated into shared Review summary
+    expect(stageHides(2, "review-summary")).toBe(false);
   });
 
   it("R13-R15. one canonical picker only — no route-specific rarity component or role catalogue array", () => {
@@ -398,7 +498,9 @@ describe("Three-stage workflow: Variant lives in Card Details + one shared picke
     const roots = ["client/src/pages/staff.tsx", "client/src/pages/grader.tsx", "client/src/pages/admin-staff.tsx"];
     for (const p of roots) {
       const src = read(p);
-      expect(src, `${p} must not build its own rarity picker`).not.toMatch(/RarityVariantPicker|RARITY_CATALOG|rarityCatalogue/);
+      expect(src, `${p} must not build its own rarity picker`).not.toMatch(
+        /RarityVariantPicker|RARITY_CATALOG|rarityCatalogue/
+      );
     }
     // Density parity: role stages use the shared components; no role-specific
     // density override class introduced for the rarity/identity surfaces.
@@ -419,7 +521,9 @@ describe("Rarity clear: explicit 'No rarity' persists an empty selection (option
 
   it("C2. rarity is optional + single-select + toggle-off (clicking the selected rarity clears it)", () => {
     // pickRarity: selecting the same catalogue rarity toggles it off (null).
-    expect(PICKER).toMatch(/if \(nextCatalogueRarity\(rarity, v, !!selectedCustomId\) === null\) \{\s*setRarity\(null\)/);
+    expect(PICKER).toMatch(
+      /if \(nextCatalogueRarity\(rarity, v, !!selectedCustomId\) === null\) \{\s*setRarity\(null\)/
+    );
     // finish + promo are independent controls (separate setters), not tied to rarity.
     expect(PICKER).toContain("setFinish(");
     expect(PICKER).toContain("setPromoOrSubset(");

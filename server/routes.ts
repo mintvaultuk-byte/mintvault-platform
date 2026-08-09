@@ -8746,9 +8746,9 @@ Defects (admin-confirmed): ${defectLines}`;
                   : sql`cert.deleted_at IS NULL AND cert.grader_status IN ('unassigned','assigned','pending_review')`;
         const rows = await db.execute(sql`
           SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.card_name, cert.set_name,
-                 cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+                 cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
                  cert.grader_status, cert.assigned_grader_id, cert.redo_count, cert.rejection_reason,
-                 u.email AS grader_email, s.tracking_number AS submission_ref, s.id AS submission_id,
+                 u.email AS grader_email, s.tracking_number AS submission_ref, s.service_tier, s.id AS submission_id,
                  ${hasImages} AS has_images
           FROM certificates cert
           LEFT JOIN cards c ON cert.card_id = c.id
@@ -8767,6 +8767,8 @@ Defects (admin-confirmed): ${defectLines}`;
           setName: r.set_name ?? null,
           cardNumber: r.card_number ?? null,
           year: r.year ?? null,
+          language: r.language ?? null,
+          serviceTier: r.service_tier ?? null,
           variant: r.variant ?? null,
           graderStatus: r.grader_status ?? "unassigned",
           assignedGraderId: r.assigned_grader_id ?? null,

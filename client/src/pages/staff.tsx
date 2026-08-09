@@ -138,7 +138,7 @@ type GCard = {
   frontUrl: string | null;
   backUrl: string | null;
 };
-type GItem = { submissionRef: string; submissionCreatedAt: string | null; cards: GCard[] };
+type GItem = { submissionRef: string; submissionCreatedAt: string | null; serviceTier: string | null; cards: GCard[] };
 type CorrectionFeedback = {
   corrected: boolean;
   correctedAt?: string | null;
@@ -313,7 +313,7 @@ function GradeAnalytics({ a, loading }: { a: Analytics | null; loading: boolean 
 
 function GradeTab() {
   const [queue, setQueue] = useState<GItem[]>([]);
-  const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
+  const [active, setActive] = useState<{ ref: string; serviceTier: string | null; card: GCard } | null>(null);
   const [correctionFeedback, setCorrectionFeedback] = useState<CorrectionFeedback | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [aLoading, setALoading] = useState(true);
@@ -375,6 +375,7 @@ function GradeTab() {
         it.cards.map((card, cardIndex) => ({
           card,
           ref: it.submissionRef,
+          serviceTier: it.serviceTier,
           submissionCreatedAt: it.submissionCreatedAt,
           queueIndex: submissionIndex,
           cardIndex,
@@ -387,6 +388,7 @@ function GradeTab() {
       items: {
         card: GCard;
         ref: string;
+        serviceTier: string | null;
         submissionCreatedAt: string | null;
         queueIndex: number;
         cardIndex: number;
@@ -463,6 +465,7 @@ function GradeTab() {
           mode="staff"
           apiBase="/api/grader"
           graderMode
+          serviceTier={active.serviceTier}
           // Reopening an already-submitted card = EDIT mode: the full workstation,
           // but the primary action saves via the gated /edit-submission (stays
           // pending review, never publishes).
@@ -494,7 +497,7 @@ function GradeTab() {
     (x) => !["assigned", "unassigned", "pending_review", "approved"].includes(x.card.gradingStatus)
   );
 
-  const renderRow = ({ card, ref }: { card: GCard; ref: string }) => (
+  const renderRow = ({ card, ref, serviceTier }: { card: GCard; ref: string; serviceTier: string | null }) => (
     <li key={card.certId} className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4">
       <div className="flex items-center gap-3 min-w-0">
         {/* Front/back card thumbnails — reuses the grader image source (signed R2
@@ -549,7 +552,7 @@ function GradeTab() {
       </div>
       {card.gradingStatus === "assigned" && card.assignedToMe ? (
         <button
-          onClick={() => setActive({ ref, card })}
+          onClick={() => setActive({ ref, serviceTier, card })}
           className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] shrink-0"
         >
           Grade
@@ -560,7 +563,7 @@ function GradeTab() {
         <div className="flex flex-col items-end gap-1 shrink-0">
           <span className="text-[10px] uppercase tracking-wider text-amber-300">Submitted</span>
           <button
-            onClick={() => setActive({ ref, card })}
+            onClick={() => setActive({ ref, serviceTier, card })}
             data-testid={`btn-edit-submission-${card.certId}`}
             className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
           >
@@ -573,7 +576,7 @@ function GradeTab() {
           {card.grade && <span className="text-[#D4AF37] text-sm font-bold leading-none">{card.grade}</span>}
           {card.gradedByMe && (
             <button
-              onClick={() => setActive({ ref, card })}
+              onClick={() => setActive({ ref, serviceTier, card })}
               data-testid={`btn-view-approved-${card.certId}`}
               className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
             >

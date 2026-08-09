@@ -748,7 +748,7 @@ describe("2/12/13. a hidden or inactive Grade stage never persists", () => {
     // Bounded to the memo's REAL end (its dependency array) rather than a magic
     // character count: a fixed window silently loosens every time the memo grows,
     // and would let an injection moved OUT of the memo keep passing.
-    const memoEnd = FORM.indexOf("[rawWorkstationSlot, wfStage]", memoStart);
+    const memoEnd = FORM.indexOf("[rawWorkstationSlot, wfStage, interactiveCardHost]", memoStart);
     expect(memoEnd, "memo dependency array must be findable").toBeGreaterThan(memoStart);
     const memo = FORM.slice(memoStart, memoEnd);
     expect(memo).toContain("isValidElement(rawWorkstationSlot)");

@@ -188,10 +188,10 @@ describe("7. Continue and Back transitions (production functions)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("10-11. live preview appears only where intended, exactly once", () => {
-  it("the preview aside covers Card Details and Review, and excludes Grade", () => {
+  it("the preview aside persists across Card Details, Grade and Review", () => {
     expect(showsPreviewAside(CARD_DETAILS_STAGE)).toBe(true);
     expect(showsPreviewAside(REVIEW_STAGE)).toBe(true);
-    expect(showsPreviewAside(GRADE_STAGE)).toBe(false);
+    expect(showsPreviewAside(GRADE_STAGE)).toBe(true);
   });
 
   it("the duplicate Review LabelPreview component no longer exists in the tree", async () => {
@@ -447,9 +447,9 @@ describe("M-4: the wired transitions produce the approved production flow", () =
     expect(nextStageIndex(REVIEW_STAGE)).toBe(REVIEW_STAGE);
     expect(prevStageIndex(CARD_DETAILS_STAGE)).toBe(CARD_DETAILS_STAGE);
   });
-  it("preview is visible on Card Details and Review ONLY", () => {
+  it("preview is visible throughout Card Details, Grade and Review", () => {
     expect(showsPreviewAside(CARD_DETAILS_STAGE)).toBe(true);
-    expect(showsPreviewAside(GRADE_STAGE)).toBe(false);
+    expect(showsPreviewAside(GRADE_STAGE)).toBe(true);
     expect(showsPreviewAside(REVIEW_STAGE)).toBe(true);
   });
   it("there is no Rarity stage to navigate to at any point in the flow", () => {

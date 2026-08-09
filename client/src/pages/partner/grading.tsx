@@ -61,10 +61,11 @@ export default function PartnerGradingPage() {
           </button>
         </header>
         <GradingWorkstation
-          mode="grader"
+          mode="partner"
           apiBase="/api/partner/grading"
           graderMode
           graderEdit={card.gradingStatus === "pending_review"}
+          serviceTier={active.item.serviceTier}
           certId={card.certId}
           certIdStr={card.certIdStr}
           cardName={card.cardName || ""}

@@ -74,7 +74,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
   };
 
   /**
-   * Apply everything EXCEPT 0034, so each test starts from a real pre-seed estate — i.e. exactly the
+   * Apply everything EXCEPT 0034/0047, so each test starts from a real pre-seed estate — i.e. exactly the
    * state every deployed environment was in when the blocker was found. The stub tables are the ones
    * the partner migration set references from the main schema; they are created here rather than
    * pulled in wholesale so this suite stays scoped to RBAC.
@@ -92,16 +92,22 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
 
-    const upTo = PARTNER_MIGRATIONS_WITH_RBAC_SEED.filter((m) => m !== "0034_partner_rbac_seed");
+    const upTo = PARTNER_MIGRATIONS_WITH_RBAC_SEED.filter(
+      (m) => m !== "0034_partner_rbac_seed" && m !== "0047_partner_label_preview_permission"
+    );
     await applyMigrationsRealistic(admin, ADMIN_DB!, upTo);
   };
 
-  /** Apply ONLY 0034, through the real runner, with a real journal. */
+  /** Apply the immutable seed and its additive preview-permission upgrade through the real runner. */
   const runRealRunnerFor0034 = async () => {
     const files = listMigrationFiles(join(process.cwd(), "migrations")).filter(
-      (f) => f.filename === "0034_partner_rbac_seed.sql"
+      (f) =>
+        f.filename === "0034_partner_rbac_seed.sql" || f.filename === "0047_partner_label_preview_permission.sql"
     );
-    expect(files.length, "0034 must be visible to the real migration runner").toBe(1);
+    expect(files.map((f) => f.filename), "both cumulative RBAC migrations must be visible to the real runner").toEqual([
+      "0034_partner_rbac_seed.sql",
+      "0047_partner_label_preview_permission.sql",
+    ]);
     return applyMigrations(admin as never, files);
   };
 
@@ -237,7 +243,10 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
   // ---- 9-11: runner semantics ------------------------------------------------------------
   it("9. re-running through the repository migration system is safe (no-op)", async () => {
     const first = await runRealRunnerFor0034();
-    expect(first.applied).toEqual(["0034_partner_rbac_seed.sql"]);
+    expect(first.applied).toEqual([
+      "0034_partner_rbac_seed.sql",
+      "0047_partner_label_preview_permission.sql",
+    ]);
     const afterFirst = await counts();
 
     const second = await runRealRunnerFor0034();
@@ -253,6 +262,12 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     );
     expect(+rows[0].n).toBe(1);
     expect(rows[0].status).toBe("applied");
+
+    const { rows: previewRows } = await admin.query<{ n: string; status: string }>(
+      "SELECT count(*)::text AS n, min(status) AS status FROM schema_migrations WHERE filename='0047_partner_label_preview_permission.sql'"
+    );
+    expect(+previewRows[0].n).toBe(1);
+    expect(previewRows[0].status).toBe("applied");
   });
 
   it("11. the real runner produces NO nested-transaction warnings", async () => {

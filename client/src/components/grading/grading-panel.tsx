@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { classifyLookupError } from "@/lib/lookup-errors";
 import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2, Eye, AlertTriangle } from "lucide-react";
@@ -26,6 +27,8 @@ import ManualCardTool from "./manual-card-tool";
 import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
+import type { CertificatePreviewFields } from "@/components/grading-workflow/CertificatePreviewPanel";
+import { RoleReviewSummary } from "@/components/grading-workflow/RoleReviewSummary";
 import {
   decideRarityChange,
   isLowerInformationRarityChange,
@@ -170,6 +173,17 @@ interface Props {
    * shortcut rather than gaining one it never authorised.
    */
   approvalStageActive?: boolean;
+  previewHost?: HTMLElement | null;
+  onPreviewChange?: (fields: CertificatePreviewFields) => void;
+  onPreviewSaved?: () => void;
+  serviceTier?: string | null;
+  workstationCapabilities?: {
+    catalogueEndpoint?: string;
+    customSetMutations: boolean;
+    identify: boolean;
+    imageMutations: boolean;
+    generateDescription: boolean;
+  };
   certIdStr?: string;
   cardName: string;
   cardSet: string;
@@ -308,10 +322,24 @@ function surfaceGradeColor(g: number): string {
   return "#DC2626";
 }
 
+function PreviewSurface({ host, children }: { host: HTMLElement | null; children: ReactNode }) {
+  return host ? createPortal(children, host) : children;
+}
+
 export default function GradingPanel({
   certId,
   active,
   approvalStageActive = false,
+  previewHost = null,
+  onPreviewChange,
+  onPreviewSaved,
+  serviceTier,
+  workstationCapabilities = {
+    customSetMutations: true,
+    identify: true,
+    imageMutations: true,
+    generateDescription: true,
+  },
   certIdStr,
   cardName,
   cardSet,
@@ -1272,6 +1300,7 @@ export default function GradingPanel({
       editSnapshotRef.current = null;
       setRarityOverrideTransition(null);
       setEditMode(false);
+      onPreviewSaved?.();
     } catch (e: any) {
       setRarityOverrideTransition(null);
       // Keep edit mode open so the admin doesn't lose their changes.
@@ -1298,6 +1327,7 @@ export default function GradingPanel({
       }
       setRarityOverrideTransition(null);
       setAutoSaveStatus("saved");
+      onPreviewSaved?.();
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
       autoSavedClearTimerRef.current = setTimeout(() => {
         if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
@@ -1856,6 +1886,31 @@ export default function GradingPanel({
 
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
+  useEffect(() => {
+    onPreviewChange?.({
+      certificateId: certId,
+      certId: certIdStr,
+      cardName: idName,
+      setName: idSet,
+      year: idYear,
+      cardNumber: idNumber,
+      language: idLanguage,
+      variant: idVariant,
+      rarityCode,
+      finishVariant,
+      promoType,
+      gradeType: authStatus === "authentic_altered" ? "AA" : authStatus === "not_original" ? "NO" : "numeric",
+      gradeOverall: finalGradeOverall,
+      gradeCentering: centering || null,
+      gradeCorners: cornersGrade || null,
+      gradeEdges: edgesGrade || null,
+      gradeSurface: surfaceGrade || null,
+    });
+  }, [
+    onPreviewChange, certId, certIdStr, idName, idSet, idYear, idNumber, idLanguage, idVariant,
+    rarityCode, finishVariant, promoType, authStatus, finalGradeOverall, centering, cornersGrade,
+    edgesGrade, surfaceGrade,
+  ]);
   const correctedFields = useMemo(
     () => new Set((correctionFeedback?.changes || []).map((change) => change.field)),
     [correctionFeedback]
@@ -2117,6 +2172,7 @@ export default function GradingPanel({
       toast({ title: "Draft saved" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${savingCertId}/grading`] });
+      onPreviewSaved?.();
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -2566,6 +2622,7 @@ export default function GradingPanel({
           setCode={idSetCode}
           number={idNumber}
           year={idYear}
+          language={idLanguage}
           variant={idVariant}
           onName={setIdName}
           onSet={(name, id) => {
@@ -2574,6 +2631,7 @@ export default function GradingPanel({
           }}
           onNumber={setIdNumber}
           onYear={setIdYear}
+          onLanguage={setIdLanguage}
           onVariant={setIdVariant}
           onAutofill={graderAutofill}
           autofilling={idAutofilling}
@@ -2583,6 +2641,8 @@ export default function GradingPanel({
           onSearchAgain={rerunIdentify}
           searchBusy={idRerunBusy}
           onCardPick={applyCardPick}
+          allowCustomSetMutations={workstationCapabilities.customSetMutations}
+          allowIdentify={workstationCapabilities.identify}
           statusLabel={
             tcgState === "green"
               ? "TCGdex confirmed"
@@ -2631,6 +2691,7 @@ export default function GradingPanel({
                 subset: null,
               }}
               onChange={handleRarityChange}
+              catalogueEndpoint={workstationCapabilities.catalogueEndpoint}
             />
           ) : (
             <div className="text-[11px] text-[var(--admin-ink-faint)]" data-testid="rarity-loading">
@@ -2738,9 +2799,22 @@ export default function GradingPanel({
         )}
       </div>
 
+      {(graderMode || adminReview) && (
+        <RoleReviewSummary
+          identity={{ certId: certIdStr, game: cardGame, name: idName, set: idSet, number: idNumber, year: idYear, language: idLanguage }}
+          classification={{ rarity: rarityCode, finish: finishVariant, promo: promoType, variant: idVariant, serviceTier }}
+          grade={{ overall: finalGradeOverall, centering: centering || null, corners: cornersGrade || null, edges: edgesGrade || null, surface: surfaceGrade || null }}
+          authentication={{ status: authStatus, notes: authNotes }}
+          defects={defects}
+          publicNotes={gradeExplanation}
+          privateNotes={privateNotes}
+        />
+      )}
+
       {/* Two-panel layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5" data-testid="section-grading-workstation-grid">
+      <div className={previewHost ? "block" : "grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5"} data-testid="section-grading-workstation-grid">
         {/* LEFT — Image viewer + defect list */}
+        <PreviewSurface host={previewHost}>
         <div className="space-y-4" data-canonical-section="card-images" data-testid="section-card-images">
           {/* FRONT/BACK chip row — own dedicated row above the absolute-anchor
               wrapper for TL/T/TR labels. Pulled out of ImageViewer so the
@@ -2774,7 +2848,7 @@ export default function GradingPanel({
                       {s}
                       {count > 0 ? ` (${count})` : ""}
                     </button>
-                    {hasImage && certId && !adminReview && (
+                    {hasImage && certId && !adminReview && workstationCapabilities.imageMutations && (
                       <button
                         type="button"
                         title={approvalInteractionLocked ? gradingWorkflowStatusCopy : `Delete ${s} image`}
@@ -2819,7 +2893,7 @@ export default function GradingPanel({
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
                 omitSideTabs
-                onOpenCardTool={setManualCardToolSide}
+                onOpenCardTool={workstationCapabilities.imageMutations ? setManualCardToolSide : undefined}
                 // MVGS v2.1 measurement state — flows back through the
                 // callbacks below when the operator draws a whitening or
                 // crease line inside mark mode (no separate tool overlay).
@@ -2875,10 +2949,10 @@ export default function GradingPanel({
                 // STEP 4: a Manual-Crop re-straighten invalidates this side's
                 // committed centering FIRST (it was measured on the old crop),
                 // forcing a Redo so the grade never reads pre-straighten numbers.
-                onStartCropUpload={(payload) => {
-                  invalidateCenteringForSide(payload.side);
-                  return runRecrop(payload.side, payload);
-                }}
+                onStartCropUpload={workstationCapabilities.imageMutations ? (payload) => {
+                    invalidateCenteringForSide(payload.side);
+                    return runRecrop(payload.side, payload);
+                  } : undefined}
                 onSideChange={setViewerSide}
                 onZoomChange={setViewerZoom}
                 onModeChange={setViewerMode}
@@ -2970,6 +3044,7 @@ export default function GradingPanel({
             />
           </div>
         </div>
+        </PreviewSurface>
 
         {/* RIGHT — Grading inputs */}
         <div
@@ -3656,7 +3731,7 @@ export default function GradingPanel({
             {/* Generate Description (Option B — Haiku writes grade rationale
               from the admin's manual subgrades + confirmed defects).
               Hidden in admin-review — paid LLM call, charge-safe. */}
-            {!adminReview && (
+            {!adminReview && workstationCapabilities.generateDescription && (
               <div>
                 <button
                   type="button"

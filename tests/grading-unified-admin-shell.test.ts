@@ -115,24 +115,16 @@ describe("4. all three stages use the same desktop breakpoint (md) for the two-c
   });
 });
 
-describe("5. the preview zone exists in Card Details AND Review (Grade is a documented exception)", () => {
-  it("the aside gate covers wfStage 0 (Card Details) and 2 (Review)", () => {
+describe("5. the preview zone persists through Card Details, Grade and Review", () => {
+  it("the shared aside gate is used by the canonical shell", () => {
     expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
-  it("Grade (wfStage 1) is excluded from the shared aside — documented, not accidental", () => {
-    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
-    expect(gateIdx).toBeGreaterThan(-1);
-    const gateLine = FORM.slice(gateIdx, gateIdx + 40);
-    expect(gateLine).not.toContain("wfStage === 1");
-    // the architecture rationale is captured in source, not just tribal knowledge.
-    const context = FORM.slice(Math.max(0, gateIdx - 1400), gateIdx);
-    expect(context).toMatch(/protected.*grading-panel|grading-panel.*protected/is);
+  it("Grade portals the protected interactive surface into the persistent rail", () => {
+    expect(FORM).toContain("interactiveCardHostRef={wfStage === GRADE_STAGE ? interactiveCardHostRef : undefined}");
+    expect(FORM).toContain("previewHost: wfStage === GRADE_STAGE ? interactiveCardHost : null");
   });
-  it("GradingPanel (the protected Stage 3 component) already implements its OWN left-image/right-controls split", () => {
-    // Evidence for the exception: grading-panel.tsx has its own internal
-    // two-column grid — this is what makes forcing the generic aside on top
-    // both redundant (duplicate image) and harmful (squeezes this grid).
-    expect(GRADING_PANEL).toMatch(/grid-cols-1\s+lg:grid-cols-\[60%_40%\]/);
+  it("GradingPanel suppresses its internal split when a preview host is supplied", () => {
+    expect(GRADING_PANEL).toContain('previewHost ? "block" : "grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5"');
   });
 });
 
