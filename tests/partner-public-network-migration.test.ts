@@ -295,6 +295,7 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
       ["ME2", "ME2", null],
     ];
 
+    let postcodeCaseSeq = 0;
     it.each(CASES)("normalises %s -> %s / outward %s", async (raw, normalised, outward) => {
       const loc = await admin.query<{ id: string }>(
         "INSERT INTO partner_locations (tenant_id, partner_id, name, status) VALUES ($1,$1,'PC','ACTIVE') RETURNING id",
@@ -304,7 +305,13 @@ describe("0058 — public partner network schema, RLS and grants (disposable Pos
         `INSERT INTO partner_public_listings (tenant_id, location_id, slug, public_display_name, postcode)
          VALUES ($1,$2,$3,'PC Shop',$4)
          RETURNING postcode_normalised, postcode_outward`,
-        [T_A, loc.rows[0].id, `pc-${raw.toLowerCase().replace(/[^a-z0-9]/g, "")}-${Date.now()}`, raw],
+        // A MONOTONIC COUNTER, not Date.now(). Several CASES normalise to the SAME slug stem —
+        // "ME2 2NG", "ME2-2NG" and "me2 2ng" all strip to `me22ng` — so the timestamp was the only
+        // thing separating them, at millisecond resolution. `it.each` runs these back to back, and
+        // when two landed in the same millisecond the insert hit
+        // uq_partner_public_listings_slug. It surfaced in the file-sequential (CI) topology, where
+        // the cases run fastest. Date.now() is not a uniqueness primitive.
+        [T_A, loc.rows[0].id, `pc-${++postcodeCaseSeq}-${raw.toLowerCase().replace(/[^a-z0-9]/g, "")}`, raw],
       );
       expect(rows[0].postcode_normalised).toBe(normalised);
       expect(rows[0].postcode_outward).toBe(outward);
