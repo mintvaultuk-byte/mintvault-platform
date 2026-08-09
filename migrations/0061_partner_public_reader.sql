@@ -77,6 +77,11 @@ SELECT
   town_city,
   county,
   postcode,
+  -- The two GENERATED columns the finder's postcode search filters on. Derived solely from
+  -- `postcode`, which is already published, so exposing them widens nothing — and omitting them
+  -- silently broke every postcode search with a 42703 the moment the reads moved onto this view.
+  postcode_normalised,
+  postcode_outward,
   country,
   latitude,
   longitude,

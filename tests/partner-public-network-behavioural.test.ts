@@ -644,6 +644,26 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(r.rows[0].rolcanlogin).toBe(false);
     });
 
+    /**
+     * REGRESSION: postcode search must actually work through the projection.
+     *
+     * findShops filters on postcode_normalised / postcode_outward — GENERATED columns on the base
+     * table. When the public reads moved onto partner_public_shop_projection those columns were not
+     * carried across, so every postcode search raised 42703 and fell through to a 500. Nothing
+     * caught it because no test had ever exercised postcode search against a real database: the
+     * whole feature had zero behavioural callers.
+     */
+    it("postcode search works through the public projection (full and outward)", async () => {
+      const { listingId } = await seedListing(T_A, "Postcode Shop", "postcode-shop");
+      await admin.query("UPDATE partner_public_listings SET postcode='ME2 2NG' WHERE id=$1", [listingId]);
+
+      const full = await svc.findShops({ postcode: "ME2 2NG", page: 1, pageSize: 20 });
+      expect(full.rows.some((r) => r.slug === "postcode-shop"), "full postcode found nothing").toBe(true);
+
+      const outward = await svc.findShops({ postcode: "ME2", page: 1, pageSize: 20 });
+      expect(outward.rows.some((r) => r.slug === "postcode-shop"), "outward code found nothing").toBe(true);
+    });
+
     it("can read the two public projections and nothing else", async () => {
       await expect(
         db.partnerPublicQuery("SELECT count(*) FROM partner_public_shop_projection"),
