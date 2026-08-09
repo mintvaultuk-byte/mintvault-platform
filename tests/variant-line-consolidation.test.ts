@@ -407,7 +407,15 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
     }
-  });
+    // 60s, not the 5s default. This guard SHELLS OUT to `git diff` once per protected file via
+    // execFileSync — process spawn plus git object I/O. Alone that is well under a second; run
+    // alongside nine other suites it exceeded the default budget and failed at 5000ms, which reads
+    // as "the protected-engine guard is broken" when nothing about the guard changed.
+    //
+    // Raising the budget is the correct fix HERE because this test asserts a PROPERTY (no
+    // calculation engine file changed), not a duration — there is no guarantee being weakened. A
+    // test that asserted elapsed time would need the opposite treatment.
+  }, 60_000);
 
   it("if the grader workflow changed, it added NO scoring, weighting or formula logic", () => {
     // The narrow-scope half of the founder authorisation: server/grader.ts may gain GUARDS,
