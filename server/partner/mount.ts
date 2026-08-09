@@ -25,6 +25,8 @@ import { partnerSessionMiddleware } from "./session";
 import { partnerApiRouter } from "./routes";
 import { partnerSubmissionRouter } from "./submission-routes";
 import { partnerCustomerRouter } from "./customer-routes";
+import { partnerCatalogueRouter } from "./catalogue-routes";
+import { partnerGradingRouter } from "./grading-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { definerModelViolations } from "./definer-guard";
@@ -152,6 +154,8 @@ export function partnerPortalRouter(): Router {
 
   r.use(partnerSessionMiddleware);
   r.use(partnerApiRouter());
+  r.use(partnerCatalogueRouter()); // read-only HQ catalogue snapshot
+  r.use(partnerGradingRouter()); // partner-scoped MVGS grading adapter
   r.use(partnerSubmissionRouter()); // Phase 2 submission workflow
   r.use(partnerCustomerRouter()); // Phase 2 customer records
 

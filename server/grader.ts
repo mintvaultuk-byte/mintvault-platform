@@ -22,7 +22,7 @@ import {
 } from "./lib/grade-kind";
 import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
@@ -753,10 +753,13 @@ export class GradeDraftRejected extends Error {
   }
 }
 
-export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
+export async function applyCertGradeDraft(certId: number, body: any, extraWhere: SQL = sql``): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
-  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
+  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(
+    cert,
+    body
+  );
 
   const overall = body.overall_grade;
   // grade_type used to be written VERBATIM from the request body, and the column is plain
@@ -837,7 +840,7 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
       updated_at = NOW()
-    WHERE id = ${certId} AND grade_approved_at IS NULL
+    WHERE id = ${certId} AND grade_approved_at IS NULL ${extraWhere}
     RETURNING id
   `);
   return r.rows.length > 0;
@@ -1198,7 +1201,10 @@ async function gradeSnapshot(certId: number) {
   };
 }
 
-function sameGradeSnapshot(a: Awaited<ReturnType<typeof gradeSnapshot>>, b: Awaited<ReturnType<typeof gradeSnapshot>>): boolean {
+function sameGradeSnapshot(
+  a: Awaited<ReturnType<typeof gradeSnapshot>>,
+  b: Awaited<ReturnType<typeof gradeSnapshot>>
+): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -1215,7 +1221,7 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
-  let saved = false;
+  let saved: boolean;
   try {
     saved = await applyCertGradeDraft(certId, body);
   } catch (e) {

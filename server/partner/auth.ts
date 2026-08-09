@@ -46,6 +46,7 @@ interface AuthRow {
   failed_login_count: number;
   locked_until: string | null;
   mfa_required: boolean;
+  has_active_mfa: boolean;
 }
 
 /**
@@ -151,7 +152,7 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   if (emergencyBlocked) return { ok: false, reason: "suspended" };
 
   // success — reset lockout state, rotate a new session
-  const mfaPending = u.mfa_required;
+  const mfaPending = u.mfa_required || u.has_active_mfa;
   const token = crypto.randomBytes(32).toString("base64url");
   await withTenant({ tenantId: u.tenant_id }, async (c) => {
     await c.query(
@@ -202,8 +203,22 @@ async function recordFailure(
 }
 
 /** Mark the MFA challenge passed for the current session (after verifyTotp/recovery succeeds). */
-export async function markSessionMfaPassed(tenantId: string, sessionId: string): Promise<void> {
-  await withTenant({ tenantId }, (c) => c.query("UPDATE partner_sessions SET mfa_passed=true WHERE id=$1", [sessionId]));
+export async function markSessionMfaPassed(tenantId: string, sessionId: string, userId: string): Promise<boolean> {
+  return withTenant({ tenantId }, async (c) => {
+    const updated = await c.query(
+      `UPDATE partner_sessions s
+          SET mfa_passed=true
+         FROM partner_users u
+        WHERE s.id=$1
+          AND s.user_id=$2
+          AND s.tenant_id=$3
+          AND s.revoked_at IS NULL
+          AND u.id=s.user_id
+          AND u.credential_version=s.credential_version`,
+      [sessionId, userId, tenantId],
+    );
+    return updated.rowCount === 1;
+  });
 }
 
 export async function partnerLogout(tenantId: string, sessionId: string): Promise<void> {

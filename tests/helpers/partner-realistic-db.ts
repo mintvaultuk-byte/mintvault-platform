@@ -23,6 +23,7 @@ export const PARTNER_MIGRATIONS = [
   "0003_partner_auth_hardening",
   "0004_partner_mfa_enrol",
   "0005_partner_mfa_replay_and_grants",
+  "0044_partner_mfa_pending_lifecycle",
   "0006_partner_definer_role",
   "0007_partner_submissions",
   "0008_partner_connector_foundation",

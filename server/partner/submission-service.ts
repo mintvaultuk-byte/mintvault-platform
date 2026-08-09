@@ -18,9 +18,11 @@
  * No other transition is permitted. Every transition writes a partner_submission_events row.
  */
 import type { PoolClient } from "pg";
+import { fileTypeFromBuffer } from "file-type";
 import { withPartnerAdminTenantTransaction, withTenant } from "./db";
 import { writePartnerAudit } from "./audit";
 import type { PartnerPrincipal } from "./session";
+import { uploadToR2, getR2SignedUrl } from "../r2";
 import { CreditReservationError, reserveCreditInTransaction } from "./partner-credit-reservation-service";
 import {
   PartnerSubmissionCreditLifecycleError,
@@ -286,6 +288,33 @@ async function resolveServiceTier(
   return { pricePerCardPence: rows[0].price_per_card_pence };
 }
 
+async function activeCardQuantityTotal(c: PoolClient, submissionId: string, tenantId: string): Promise<number> {
+  const { rows } = await c.query<{ total: number }>(
+    `SELECT COALESCE(SUM(quantity), 0)::int AS total
+       FROM partner_submission_cards
+      WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL`,
+    [submissionId, tenantId]
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
+async function recomputeSubmissionTotals(c: PoolClient, tenantId: string, submissionId: string): Promise<void> {
+  const totalQuantity = await activeCardQuantityTotal(c, submissionId, tenantId);
+  const { rows } = await c.query<{ service_tier_code: string | null }>(
+    `SELECT service_tier_code FROM partner_submissions WHERE id=$1 AND tenant_id=$2`,
+    [submissionId, tenantId]
+  );
+  const tierCode = rows[0]?.service_tier_code ?? null;
+  const estimatedPrice =
+    tierCode === null ? null : (await resolveServiceTier(c, tenantId, tierCode)).pricePerCardPence * totalQuantity;
+  await c.query(
+    `UPDATE partner_submissions
+        SET card_count=$3, estimated_price_pence=$4, updated_at=now()
+      WHERE id=$1 AND tenant_id=$2`,
+    [submissionId, tenantId, totalQuantity, estimatedPrice]
+  );
+}
+
 async function writeEvent(
   c: PoolClient,
   principal: PartnerPrincipal,
@@ -293,12 +322,14 @@ async function writeEvent(
   eventType: string,
   fromStatus: string | null,
   toStatus: string | null,
-  reason: string | null
+  reason: string | null,
+  metadata?: Record<string, unknown> | null
 ): Promise<void> {
   await c.query(
-    `INSERT INTO partner_submission_events (tenant_id, submission_id, actor_user_id, event_type, from_status, to_status, reason)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [principal.tenantId, submissionId, principal.userId, eventType, fromStatus, toStatus, reason]
+    `INSERT INTO partner_submission_events
+       (tenant_id, submission_id, actor_user_id, event_type, from_status, to_status, reason, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [principal.tenantId, submissionId, principal.userId, eventType, fromStatus, toStatus, reason, metadata ?? null]
   );
 }
 
@@ -367,7 +398,9 @@ export async function editSubmissionDraft(
         newTierCode = null;
         newEstimatedPrice = null;
       } else {
-        newEstimatedPrice = (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence;
+        const totalQuantity = await activeCardQuantityTotal(c, submissionId, principal.tenantId);
+        newEstimatedPrice =
+          (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence * totalQuantity;
         newTierCode = input.serviceTierCode;
       }
     }
@@ -469,6 +502,80 @@ export interface CardInput {
   intakeNotes?: string | null;
 }
 
+export interface CardImage {
+  side: "front" | "back";
+  key: string | null;
+  url: string | null;
+}
+
+const ALLOWED_CARD_IMAGE_MIMES = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"],
+  ["image/tiff", "tiff"],
+]);
+
+function cardImageKey(tenantId: string, submissionId: string, cardId: string, side: "front" | "back", ext: string) {
+  return `partner-submissions/${tenantId}/${submissionId}/${cardId}/${side}-${Date.now()}.${ext}`;
+}
+
+export async function uploadCardImage(
+  principal: PartnerPrincipal,
+  submissionId: string,
+  cardId: string,
+  side: "front" | "back",
+  file: { buffer: Buffer; mimetype?: string | null; originalname?: string | null; size?: number | null }
+): Promise<CardImage> {
+  if (!file?.buffer?.length) throw VALIDATION("Choose an image to upload.");
+  const detected = await fileTypeFromBuffer(file.buffer);
+  if (!detected?.mime) throw VALIDATION("Upload a JPEG, PNG, WebP or TIFF image.");
+  const mime = detected.mime;
+  const ext = ALLOWED_CARD_IMAGE_MIMES.get(mime);
+  if (!ext) throw VALIDATION("Upload a JPEG, PNG, WebP or TIFF image.");
+  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+    const row = await loadSubmissionForUpdate(c, principal, submissionId);
+    if (!row) throw NOT_FOUND();
+    if (row.status === "cancelled") throw NOT_DRAFT();
+    const current = await c.query<{ id: string; front_image_key: string | null; back_image_key: string | null }>(
+      `SELECT id, front_image_key, back_image_key
+         FROM partner_submission_cards
+        WHERE id=$1 AND submission_id=$2 AND tenant_id=$3 AND removed_at IS NULL`,
+      [cardId, submissionId, principal.tenantId]
+    );
+    if (current.rows.length !== 1) throw NOT_FOUND();
+
+    const beforeKey = side === "front" ? current.rows[0].front_image_key : current.rows[0].back_image_key;
+    const key = cardImageKey(principal.tenantId, submissionId, cardId, side, ext);
+    await uploadToR2(key, file.buffer, mime);
+    await c.query(
+      `UPDATE partner_submission_cards
+          SET ${side === "front" ? "front_image_key" : "back_image_key"}=$4, updated_at=now()
+        WHERE id=$1 AND submission_id=$2 AND tenant_id=$3`,
+      [cardId, submissionId, principal.tenantId, key]
+    );
+    await writeEvent(c, principal, submissionId, "card_image_uploaded", null, null, null, {
+      cardId,
+      side,
+      replaced: !!beforeKey,
+      size: file.size ?? file.buffer.length,
+      mime,
+    });
+    await writePartnerAudit(c, {
+      tenantId: principal.tenantId,
+      locationId: row.location_id,
+      actorUserId: principal.userId,
+      action: "submission.card_image_uploaded",
+      recordType: "partner_submission_card",
+      recordId: cardId,
+      before: beforeKey ? { [side]: "present" } : null,
+      after: { side, key, mime, size: file.size ?? file.buffer.length },
+      sessionId: principal.sessionId,
+      correlationId: submissionId,
+    });
+    return { side, key, url: await getR2SignedUrl(key) };
+  });
+}
+
 export async function addCard(principal: PartnerPrincipal, submissionId: string, input: CardInput) {
   if (!input.cardName || !input.cardName.trim()) throw VALIDATION("Card name is required.");
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
@@ -487,7 +594,7 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
           variant, language, declared_value_pence, quantity, customer_notes, intake_notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-                 declared_value_pence, quantity, customer_notes, intake_notes, created_at`,
+                 declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at`,
       [
         principal.tenantId,
         submissionId,
@@ -505,11 +612,9 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
         input.intakeNotes ?? null,
       ]
     );
-    await c.query(`UPDATE partner_submissions SET card_count = card_count + 1, updated_at = now() WHERE id=$1`, [
-      submissionId,
-    ]);
+    await recomputeSubmissionTotals(c, principal.tenantId, submissionId);
     await writeEvent(c, principal, submissionId, "card_added", null, null, null);
-    return rows[0];
+    return withSignedCardImages(rows[0]);
   });
 }
 
@@ -556,7 +661,7 @@ export async function editCard(
          updated_at = now()
        WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL
        RETURNING id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-                 declared_value_pence, quantity, customer_notes, intake_notes, created_at`,
+                 declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at`,
       [
         cardId,
         submissionId,
@@ -574,8 +679,9 @@ export async function editCard(
       ]
     );
     if (rows.length !== 1) throw NOT_FOUND();
+    await recomputeSubmissionTotals(c, principal.tenantId, submissionId);
     await writeEvent(c, principal, submissionId, "card_updated", null, null, null);
-    return rows[0];
+    return withSignedCardImages(rows[0]);
   });
 }
 
@@ -590,10 +696,7 @@ export async function removeCard(principal: PartnerPrincipal, submissionId: stri
       [cardId, submissionId, reason ?? null]
     );
     if (res.rowCount !== 1) throw NOT_FOUND();
-    await c.query(
-      `UPDATE partner_submissions SET card_count = GREATEST(card_count - 1, 0), updated_at = now() WHERE id=$1`,
-      [submissionId]
-    );
+    await recomputeSubmissionTotals(c, principal.tenantId, submissionId);
     await writeEvent(c, principal, submissionId, "card_removed", null, null, reason ?? null);
   });
 }
@@ -610,11 +713,11 @@ export async function listCards(principal: PartnerPrincipal, submissionId: strin
     if (exists.rowCount !== 1) throw NOT_FOUND();
     const { rows } = await c.query(
       `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-              declared_value_pence, quantity, customer_notes, intake_notes, created_at
+              declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at
          FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL ORDER BY sequence_number`,
       [submissionId]
     );
-    return rows;
+    return Promise.all(rows.map(withSignedCardImages));
   });
 }
 
@@ -641,7 +744,7 @@ async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissio
   if (rows.length !== 1) throw NOT_FOUND();
   const cards = await c.query(
     `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
-            declared_value_pence, quantity, customer_notes, intake_notes, created_at
+            declared_value_pence, quantity, customer_notes, intake_notes, front_image_key, back_image_key, created_at
        FROM partner_submission_cards WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL ORDER BY sequence_number`,
     [submissionId, principal.tenantId]
   );
@@ -650,7 +753,17 @@ async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissio
        FROM partner_submission_events WHERE submission_id=$1 AND tenant_id=$2 ORDER BY created_at`,
     [submissionId, principal.tenantId]
   );
-  return { submission: toSummary(rows[0]), cards: cards.rows, events: events.rows };
+  return {
+    submission: toSummary(rows[0]),
+    cards: await Promise.all(cards.rows.map(withSignedCardImages)),
+    events: events.rows,
+  };
+}
+
+async function withSignedCardImages(row: any) {
+  const front = row.front_image_key ? await getR2SignedUrl(row.front_image_key) : null;
+  const back = row.back_image_key ? await getR2SignedUrl(row.back_image_key) : null;
+  return { ...row, front_image_url: front, back_image_url: back };
 }
 
 /**
@@ -755,6 +868,19 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
         );
         if (stillActive.rows[0].n < 1) throw SERVICE_TIER_UNAVAILABLE();
       }
+      await recomputeSubmissionTotals(c, principal.tenantId, submissionId);
+      const refreshed = await c.query(
+        `SELECT s.*, (SELECT json_agg(row_to_json(sc)) FROM (
+          SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+                 declared_value_pence, quantity, customer_notes, intake_notes
+            FROM partner_submission_cards
+           WHERE submission_id=s.id AND tenant_id=s.tenant_id AND removed_at IS NULL
+           ORDER BY sequence_number
+        ) sc) AS cards
+       FROM partner_submissions s WHERE s.id=$1 AND s.tenant_id=$2`,
+        [submissionId, principal.tenantId]
+      );
+      const handoffSnapshot = refreshed.rows[0];
 
       // Resolve the actor again from the trusted database inside this transaction. The HTTP middleware
       // has already authenticated the session, and this check makes the financial write fail closed if
@@ -809,7 +935,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       // longer 'draft' and throws NOT_DRAFT() instead of inserting a second handoff.
       await c.query(
         `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending',$3)`,
-        [principal.tenantId, submissionId, JSON.stringify(snapshot)]
+        [principal.tenantId, submissionId, JSON.stringify(handoffSnapshot)]
       );
       let updated;
       try {
