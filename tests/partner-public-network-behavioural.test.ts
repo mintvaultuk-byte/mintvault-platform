@@ -264,6 +264,10 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
     // Point every pool this service uses at the disposable cluster, THEN import it.
     process.env.PARTNER_ADMIN_DATABASE_URL = cluster.url;
     process.env.PARTNER_DATABASE_URL = cluster.url;
+    // The public pool (0061) connects on the SAME disposable cluster but drops to
+    // partner_public_reader via SET ROLE on every connection, so what actually executes the public
+    // SQL in this suite is the restricted identity — not the superuser the URL authenticates as.
+    process.env.PARTNER_PUBLIC_DATABASE_URL = cluster.url;
     pinAccountingTopologyTo(cluster.url);
     svc = await import("../server/partner/public-network-service");
   }, 300_000);
@@ -436,6 +440,139 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(rework.rawValue).toBeCloseTo(2.0, 5);
       const firstPass = ev.metrics.find((m) => m.metric === "first_pass_approval_rate")!;
       expect(firstPass.rawValue).toBeCloseTo(0.0, 5);
+    });
+  });
+
+  /**
+   * PUBLIC READER ISOLATION (0061) — least privilege, proven by refusal.
+   *
+   * Every other test in this file would pass just as happily if the public path were still running
+   * on the owner connection: they assert what comes BACK, and an over-privileged connection returns
+   * the same rows. These assert what the public identity CANNOT do, which is the only way to prove
+   * privilege was actually dropped rather than merely intended.
+   */
+  describe("public reader — least privilege", () => {
+    let db: typeof import("../server/partner/db");
+
+    beforeAll(async () => {
+      db = await import("../server/partner/db");
+    });
+
+    it("executes public SQL AS partner_public_reader, not as the connecting login role", async () => {
+      // The pool authenticates as the cluster superuser in this suite and drops to the group role
+      // via SET ROLE on connect. If that ever silently failed, every functional test would still
+      // pass while the public path held owner privileges — so assert the identity itself.
+      const r = await db.partnerPublicQuery<{ who: string; su: boolean }>(
+        "SELECT current_user AS who, (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS su",
+      );
+      expect(r.rows[0].who).toBe("partner_public_reader");
+      expect(r.rows[0].su).toBe(false);
+    });
+
+    it("the role is NOLOGIN, NOSUPERUSER and NOBYPASSRLS", async () => {
+      const r = await admin.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean }>(
+        "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname='partner_public_reader'",
+      );
+      expect(r.rows).toHaveLength(1);
+      expect(r.rows[0].rolsuper).toBe(false);
+      expect(r.rows[0].rolbypassrls).toBe(false);
+      expect(r.rows[0].rolcanlogin).toBe(false);
+    });
+
+    it("can read the two public projections and nothing else", async () => {
+      await expect(
+        db.partnerPublicQuery("SELECT count(*) FROM partner_public_shop_projection"),
+      ).resolves.toBeTruthy();
+      await expect(
+        db.partnerPublicQuery("SELECT count(*) FROM partner_public_card_projection"),
+      ).resolves.toBeTruthy();
+    });
+
+    /**
+     * PUBLIC-PRIV1's target. Granting the reader any one of these turns this red.
+     *
+     * `certificates` and `partner_public_listings` are in the list deliberately: the reader reaches
+     * both ONLY through a view whose WHERE clause is the publication gate. Direct table access would
+     * hand anonymous traffic every unapproved card and every suspended shop.
+     */
+    it.each([
+      "certificates",
+      "partner_public_listings",
+      "partner_public_rating_overrides",
+      "partner_public_rating_snapshots",
+      "partner_users",
+      "partner_customers",
+      "partner_submissions",
+      "partner_wallets",
+      "partner_credit_ledger",
+      "partner_organisations",
+      "partner_locations",
+      "partner_audit_events",
+      "partner_security_events",
+      "partner_grading_work_items",
+    ])("is REFUSED direct access to %s", async (table) => {
+      await expect(db.partnerPublicQuery(`SELECT * FROM ${table} LIMIT 1`)).rejects.toThrow(
+        /permission denied/i,
+      );
+    });
+
+    it("the card projection hides everything the publication gate excludes", async () => {
+      const { locationId } = await seedListing(T_A, "Proj Gate", "proj-gate");
+      await insertCert(locationId, {}); // publishable
+      await insertCert(locationId, { approved: false }); // never approved
+      await insertCert(locationId, { grade: null }); // approved but ungraded
+      await insertCert(locationId, { status: "void" }); // voided
+      await insertCert(locationId, { deletedAt: "now()" }); // soft-deleted
+      await insertCert(locationId, { originType: "HQ" });     // not partner-originated
+
+      const r = await db.partnerPublicQuery<{ n: string }>(
+        "SELECT count(*)::text n FROM partner_public_card_projection WHERE origin_location_id = $1",
+        [locationId],
+      );
+      // Six inserted, exactly one publishable. The gate is in the VIEW, so this holds no matter what
+      // the application query asks for.
+      expect(Number(r.rows[0].n)).toBe(1);
+    });
+
+    /**
+     * PUBLIC-POOL1's target, and the only test here that proves the SERVICE — not just the pool —
+     * is on the public identity.
+     *
+     * Removing PARTNER_PUBLIC_DATABASE_URL makes the public pool fail closed. If findShops or
+     * getShopProfile were routed through partnerAdminQuery they would keep working, because that
+     * helper falls back to MINTVAULT_DATABASE_URL. So "these two throw" IS the proof that anonymous
+     * reads no longer touch privileged infrastructure.
+     */
+    it("the public SERVICE endpoints depend on the public pool, not the admin pool", async () => {
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      await db.__resetPartnerPublicPoolForTests();
+      delete process.env.PARTNER_PUBLIC_DATABASE_URL;
+      try {
+        await expect(svc.findShops({ page: 1, pageSize: 10 })).rejects.toThrow(/fail closed/i);
+        await expect(svc.getShopProfile("proj-gate")).rejects.toThrow(/fail closed/i);
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+      }
+      // And the ADMIN path is unaffected by the public pool being down — isolation in the direction
+      // that matters operationally: a public outage must not take Super Admin with it.
+      const adminStillWorks = await admin.query<{ n: string }>(
+        "SELECT count(*)::text n FROM partner_public_listings",
+      );
+      expect(Number(adminStillWorks.rows[0].n)).toBeGreaterThan(0);
+    });
+
+    it("FAILS CLOSED when the public database URL is absent — it does not fall back", async () => {
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      await db.__resetPartnerPublicPoolForTests();
+      delete process.env.PARTNER_PUBLIC_DATABASE_URL;
+      try {
+        // partnerAdminQuery would happily fall back to MINTVAULT_DATABASE_URL here. This must not.
+        await expect(db.partnerPublicQuery("SELECT 1")).rejects.toThrow(/fail closed/i);
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+      }
     });
   });
 

@@ -129,6 +129,11 @@ async function seedMintVaultTables(): Promise<void> {
     submission_item_id integer,
     status text,
     label_type text,
+    -- 0061's public card projection reads grade; it exists on staging and production, and its
+    -- absence here was the stub being narrower than the real table again.
+    grade numeric(4,1),
+    grade_approved_at timestamptz,
+    deleted_at timestamptz,
     grade_type text,
     language text,
     card_game text,
@@ -1053,6 +1058,9 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // 0060 adds the denormalised computed-rating fallback and the override expiry instant. Both are
     // read on the public path, so the grant/RLS audit must see them.
     "0060_partner_public_rating_override_expiry",
+    // 0061 adds the public-reader role and its two restricted projections. The RLS/grant audit
+    // must see them so a future blanket GRANT cannot widen the anonymous surface unnoticed.
+    "0061_partner_public_reader",
   ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */
@@ -1220,6 +1228,10 @@ describe("Partner RLS isolation coverage is wired up", () => {
       submission_item_id integer,
       status text,
       label_type text,
+      -- 0061's public card projection reads grade; present on staging and production.
+      grade numeric(4,1),
+      grade_approved_at timestamptz,
+      deleted_at timestamptz,
       grade_type text,
       language text,
       card_game text,

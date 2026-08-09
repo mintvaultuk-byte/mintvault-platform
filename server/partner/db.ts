@@ -188,6 +188,124 @@ export async function partnerRuntimeQuery<T extends pg.QueryResultRow = pg.Query
   }
 }
 
+// =============================================================================================
+// PUBLIC READER — anonymous Shop Finder / public shop profile
+// =============================================================================================
+
+/** Error the public path raises when its own database identity is not configured or not reachable. */
+export class PartnerPublicDbUnavailable extends Error {
+  readonly code = "PUBLIC_DB_UNAVAILABLE";
+  constructor(message: string) {
+    super(message);
+    this.name = "PartnerPublicDbUnavailable";
+  }
+}
+
+let publicPool: pg.Pool | null = null;
+
+/** Whether the dedicated public-reader DB URL is configured. */
+export function partnerPublicDbConfigured(): boolean {
+  return !!process.env.PARTNER_PUBLIC_DATABASE_URL;
+}
+
+/**
+ * The dedicated pool for anonymous public traffic.
+ *
+ * THERE IS DELIBERATELY NO FALLBACK. Not to the admin pool, not to the runtime pool, and above all
+ * not to MINTVAULT_DATABASE_URL — `partnerAdminQuery` does fall back that way, and that is how two
+ * anonymous queries ended up executing on the broadest connection in the system. A missing public
+ * URL here produces a controlled 503, not a quiet privilege escalation. Failing the public site
+ * closed is recoverable in minutes; serving it from an owner connection is not.
+ *
+ * SIZED AND BOUNDED FOR SHORT READS. Every public query is a single indexed SELECT against one of
+ * the two 0061 projections, so these numbers are chosen for "fast or fail", not for throughput:
+ *
+ *   max                 6   Capacity is deliberately SMALL and separate. The point of isolation is
+ *                           that a public traffic spike exhausts THIS pool and nothing else — Super
+ *                           Admin keeps its own connections either way.
+ *   acquire timeout  1000ms Once the pool is saturated a caller must be told quickly. Queueing
+ *                           anonymous requests behind a full pool converts a spike into a pile-up.
+ *   query timeout    2000ms Client-side. Frees the JS promise and the pool slot.
+ *   lock timeout     1000ms Server-side, and the one that actually matters: query_timeout releases
+ *                           the slot but leaves the backend still waiting on the lock. Without this
+ *                           an ACCESS EXCLUSIVE lock (a migration, a stuck writer) parks every
+ *                           backend and the DB-side pile-up outlives the HTTP requests.
+ *   idle timeout    10000ms Public traffic is bursty; idle connections should not be held open
+ *                           against a shared Neon endpoint between bursts.
+ *
+ * Every one is overridable by env for staging tuning, but each has a working default so the pool is
+ * never accidentally unbounded.
+ */
+function getPublicPool(): pg.Pool {
+  const url = process.env.PARTNER_PUBLIC_DATABASE_URL;
+  if (!url) {
+    throw new PartnerPublicDbUnavailable(
+      "PARTNER_PUBLIC_DATABASE_URL is not configured — the public network refuses to serve from a privileged connection (fail closed)."
+    );
+  }
+  if (!publicPool) {
+    publicPool = new pg.Pool({
+      connectionString: url,
+      max: Number(process.env.PARTNER_PUBLIC_DB_POOL_MAX ?? 6),
+      connectionTimeoutMillis: Number(process.env.PARTNER_PUBLIC_DB_ACQUIRE_TIMEOUT_MS ?? 1000),
+      query_timeout: Number(process.env.PARTNER_PUBLIC_DB_QUERY_TIMEOUT_MS ?? 2000),
+      idleTimeoutMillis: Number(process.env.PARTNER_PUBLIC_DB_IDLE_TIMEOUT_MS ?? 10000),
+    });
+    publicPool.on("error", (err) =>
+      console.error("[partner-public-pool] idle client error (evicted):", err.message)
+    );
+    const lockTimeoutMs = Number(process.env.PARTNER_PUBLIC_DB_LOCK_TIMEOUT_MS ?? 1000);
+    const statementTimeoutMs = Number(process.env.PARTNER_PUBLIC_DB_STATEMENT_TIMEOUT_MS ?? 2000);
+    publicPool.on("connect", (client) => {
+      // SET ROLE is what makes the least privilege REAL rather than aspirational: the connection
+      // may authenticate as a login role that is merely a member of partner_public_reader (the
+      // house convention is NOLOGIN group roles, granted to a login role out of band), and in tests
+      // it may authenticate as the superuser that owns the cluster. Dropping to the group role on
+      // every new connection means the identity actually executing public SQL is the restricted one
+      // in every environment, so the negative-privilege proofs mean what they claim.
+      //
+      // Session-scoped and idempotent, so re-applying on a pooled endpoint is safe. A failure here
+      // is logged and NOT swallowed into silence — a connection that stayed on the login role would
+      // pass every functional test while holding privileges the whole design says it must not.
+      client
+        .query(
+          `SET ROLE partner_public_reader;
+           SET lock_timeout = ${Math.floor(lockTimeoutMs)};
+           SET statement_timeout = ${Math.floor(statementTimeoutMs)}`
+        )
+        .catch((err) => {
+          console.error("[partner-public-pool] failed to drop to partner_public_reader:", (err as Error).message);
+        });
+    });
+  }
+  return publicPool;
+}
+
+/**
+ * Run one anonymous public read.
+ *
+ * Non-transactional by design: every public query is a single SELECT, and a transaction would hold
+ * a pool slot across statements for no benefit.
+ */
+export async function partnerPublicQuery<T extends pg.QueryResultRow = pg.QueryResultRow>(
+  sql: string,
+  params: unknown[] = []
+): Promise<pg.QueryResult<T>> {
+  const client = await getPublicPool().connect();
+  try {
+    return await client.query<T>(sql, params);
+  } finally {
+    client.release();
+  }
+}
+
+/** Test-only: drop the memoised pool so a suite can re-point PARTNER_PUBLIC_DATABASE_URL. */
+export async function __resetPartnerPublicPoolForTests(): Promise<void> {
+  const p = publicPool;
+  publicPool = null;
+  if (p) await p.end().catch(() => {});
+}
+
 /**
  * A privileged partner-schema operation that is NOT tenant-scoped (super-admin control-shell reads
  * of partner data across tenants). Uses a SEPARATE privileged URL and must only be reachable behind

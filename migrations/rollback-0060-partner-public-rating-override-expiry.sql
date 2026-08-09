@@ -22,6 +22,24 @@
 
 BEGIN;
 
+-- ---- 0. DESCENDING-ORDER GUARD ----------------------------------------------------------------
+-- 0061 sits above this migration and its projections read the columns dropped below. Rolling 0060
+-- back underneath 0061 would leave those views referencing columns that no longer exist while 0061
+-- stayed journalled as applied. Descending order is the supported recovery path.
+DO $$
+DECLARE later_migrations integer;
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $q$SELECT count(*) FROM schema_migrations
+                WHERE filename ~ '^[0-9]{4}_' AND left(filename,4)::integer > 60$q$
+      INTO later_migrations;
+    IF later_migrations > 0 THEN
+      RAISE EXCEPTION 'rollback-0060 refused: % later migration journal row(s) exist. Resolve newer migrations first.',
+        later_migrations;
+    END IF;
+  END IF;
+END$$;
+
 -- ---- 1. Index, then the columns ---------------------------------------------------------------
 DROP INDEX IF EXISTS idx_partner_public_listings_override_expiry;
 

@@ -522,7 +522,8 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 60,
-    standalone: true,
+    // Not standalone: 0061 sits above it and rollback-0060 would otherwise run underneath it.
+    standalone: false,
     migration: "0060_partner_public_rating_override_expiry.sql",
     rollback: "rollback-0060-partner-public-rating-override-expiry.sql",
     hole: "an expired rating override keeps being published indefinitely, because expires_at is only read during a manual recalculation",
@@ -546,6 +547,31 @@ const ROUND_TRIPS: RoundTrip[] = [
          )::int n`
       );
       return rows[0].n === 0 ? "override_expiry_absent" : "override_expiry_present";
+    },
+  },
+  {
+    number: 61,
+    standalone: true,
+    migration: "0061_partner_public_reader.sql",
+    rollback: "rollback-0061-partner-public-reader.sql",
+    hole: "anonymous shop finder and public profile traffic runs on the BYPASSRLS admin pool, which also falls back to the full MintVault connection",
+    whenApplied: "public_reader_present",
+    whenRolledBack: "public_reader_absent",
+    // 0061 is now the newest migration, so the descending sequence starts here.
+    //
+    // The probe counts the VIEWS only. The ROLE deliberately survives a rollback — it is
+    // cluster-wide, so dropping it would reach outside this database — and rollback-0061 renders it
+    // inert by revoking instead. Counting the role here would therefore report "still applied"
+    // forever and the round trip could never go green.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM pg_class
+               WHERE relnamespace='public'::regnamespace AND relkind='v'
+                 AND relname IN ('partner_public_shop_projection','partner_public_card_projection'))
+         )::int n`
+      );
+      return rows[0].n === 0 ? "public_reader_absent" : "public_reader_present";
     },
   },
 ];

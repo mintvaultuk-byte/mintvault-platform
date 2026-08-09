@@ -4,7 +4,7 @@
  *
  * POOL CHOICE IS LOAD-BEARING, and gets its own note because getting it wrong fails silently:
  *
- *   FINDER / PROFILE (anonymous)  -> partnerRuntimeQuery. No tenant GUC. The rows come back only
+ *   FINDER / PROFILE (anonymous)  -> partnerPublicQuery. No tenant GUC. The rows come back only
  *                                    because 0058 gives partner_public_listings an explicit
  *                                    `FOR SELECT USING (listing_status='ACTIVE')` policy. If that
  *                                    policy were ever dropped, every query here would return an
@@ -26,7 +26,7 @@
  * partner_public_listings can never widen a public response by accident.
  */
 import type { PoolClient } from "pg";
-import { partnerRuntimeQuery, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
+import { partnerPublicQuery, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import {
   buildRatingEvidence,
   computeRating,
@@ -69,45 +69,13 @@ export class PublicNetworkError extends Error {
  * key). `public_ref` is excluded too — support quotes it, the website does not need it.
  */
 /**
- * Is the override reflected in current_* still in force RIGHT NOW?
+ * OVERRIDE EXPIRY AND ELIGIBILITY NOW LIVE IN THE DATABASE.
  *
- * An override lapses by comparison at read time, not by a job. `expires_at` used to be consulted
- * only inside recalculateRating's transaction, and every public read consumes the denormalised
- * current_* columns that transaction wrote — so an expired override kept being published verbatim
- * until a Super Admin pressed Recalculate. A time-boxed exception that never ends is not one.
- *
- * NULL expiry means "does not lapse", which covers both no-override and an override with no
- * expiry date.
+ * Both rules used to be re-stated here in TypeScript. They are now carried by
+ * partner_public_shop_projection (0061), which is the only relation the public reader can see, and
+ * 0061's completeness assertions fail the migration if either gate goes missing from the view
+ * definition. Restating them here as well would create two places to forget one.
  */
-const OVERRIDE_IN_FORCE = `
-  current_rating_is_override = true
-  AND (current_override_expires_at IS NULL OR current_override_expires_at > now())
-`;
-
-/**
- * The rating the public actually sees, chosen per row.
- *
- * Emitted under the ORIGINAL column aliases so ratingDto and every consumer stay unchanged — the
- * selection moves into SQL, the shape does not. When the override is in force the stored effective
- * values are served; the moment it lapses the row falls back to the COMPUTED rating that 0060
- * denormalises alongside it, with no write, no job and no human.
- *
- * Used by the finder's ORDER BY as well as its SELECT: sorting by quality must sort by what is
- * actually published, or a lapsed override would still be ranking a shop above its real peers.
- */
-export const EFFECTIVE_RATING_COLUMNS = `
-  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_rating_version
-       ELSE current_computed_rating_version END           AS current_rating_version,
-  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_public_rating
-       WHEN current_computed_rating_available THEN current_computed_public_rating
-       ELSE NULL END                                      AS current_public_rating,
-  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_rating_label
-       ELSE COALESCE(current_computed_rating_label, 'Rating building') END AS current_rating_label,
-  CASE WHEN ${OVERRIDE_IN_FORCE} THEN current_rating_available
-       ELSE current_computed_rating_available END         AS current_rating_available,
-  (${OVERRIDE_IN_FORCE})                                  AS current_rating_is_override
-`;
-
 const PUBLIC_LISTING_COLUMNS = `
   slug,
   public_display_name,
@@ -128,7 +96,11 @@ const PUBLIC_LISTING_COLUMNS = `
   listing_status,
   verified_at,
   public_since,
-  ${EFFECTIVE_RATING_COLUMNS},
+  current_rating_version,
+  current_public_rating,
+  current_rating_label,
+  current_rating_available,
+  current_rating_is_override,
   current_sample_size,
   current_minimum_sample,
   current_rating_calculated_at
@@ -289,7 +261,9 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
   // These are SNAPSHOT columns maintained by ENABLE ALWAYS triggers, not a join — the anonymous
   // connection has no tenant GUC and both source tables are FORCE RLS, so a join would match zero
   // rows and hide every shop. The RLS policy carries the identical predicate as the second layer.
-  const where: string[] = [PUBLIC_ELIGIBILITY_PREDICATE];
+  // Gates live in partner_public_shop_projection (0061): the view returns only ACTIVE listings
+  // whose organisation AND location are ACTIVE, so no row reaching this query is ineligible.
+  const where: string[] = ["true"];
   const params: unknown[] = [];
   const add = (v: unknown) => `$${params.push(v)}`;
 
@@ -330,8 +304,8 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
   if (geo) {
     // Bounded by the box + a hard LIMIT so a caller cannot pull the whole estate into memory by
     // asking for a 250km radius.
-    const { rows } = await partnerRuntimeQuery<Record<string, unknown>>(
-      `SELECT ${PUBLIC_LISTING_COLUMNS} FROM partner_public_listings
+    const { rows } = await partnerPublicQuery<Record<string, unknown>>(
+      `SELECT ${PUBLIC_LISTING_COLUMNS} FROM partner_public_shop_projection
         WHERE ${whereSql}
         ORDER BY slug
         LIMIT 500`,
@@ -374,15 +348,15 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
       ? "lower(public_display_name) ASC, slug ASC"
       : "current_rating_available DESC, current_public_rating DESC NULLS LAST, lower(public_display_name) ASC, slug ASC";
 
-  const countRes = await partnerRuntimeQuery<{ n: string }>(
-    `SELECT count(*)::text n FROM partner_public_listings WHERE ${whereSql}`,
+  const countRes = await partnerPublicQuery<{ n: string }>(
+    `SELECT count(*)::text n FROM partner_public_shop_projection WHERE ${whereSql}`,
     params,
   );
   const total = Number(countRes.rows[0]?.n ?? 0);
 
   const offset = (query.page - 1) * query.pageSize;
-  const { rows } = await partnerRuntimeQuery<Record<string, unknown>>(
-    `SELECT ${PUBLIC_LISTING_COLUMNS} FROM partner_public_listings
+  const { rows } = await partnerPublicQuery<Record<string, unknown>>(
+    `SELECT ${PUBLIC_LISTING_COLUMNS} FROM partner_public_shop_projection
       WHERE ${whereSql}
       ORDER BY ${orderSql}
       LIMIT ${add(query.pageSize)} OFFSET ${add(offset)}`,
@@ -417,10 +391,10 @@ function compareQuality(a: Record<string, unknown>, b: Record<string, unknown>):
  * telling an anonymous caller "this shop exists but is suspended" is itself a disclosure.
  */
 export async function getShopProfile(slug: string): Promise<PublicShopProfileDto | null> {
-  const { rows } = await partnerRuntimeQuery<Record<string, unknown>>(
+  const { rows } = await partnerPublicQuery<Record<string, unknown>>(
     `SELECT ${PUBLIC_LISTING_COLUMNS}, location_id
-       FROM partner_public_listings
-      WHERE slug = $1 AND ${PUBLIC_ELIGIBILITY_PREDICATE}
+       FROM partner_public_shop_projection
+      WHERE slug = $1
       LIMIT 1`,
     [slug],
   );
@@ -525,17 +499,15 @@ export const REVIEWED_UNIT_PREDICATE = `
  * image is fetched, so the visibility rule is enforced twice, independently.
  */
 export async function getRecentCards(locationId: string): Promise<PublicRecentCardDto[]> {
-  const { rows } = await partnerAdminQuery<Record<string, unknown>>(
+  const { rows } = await partnerPublicQuery<Record<string, unknown>>(
     // COLUMN NAMES ARE NOT THE OBVIOUS ONES. On `certificates` the set is `set_name`, the year is
     // `year_text` and the card number is `card_number_display` — `card_set`/`card_year` belong to
     // partner_submission_cards and do not exist here at all. An earlier revision of this query used
     // those names: it type-checked perfectly and 500'd every single shop profile at runtime, because
     // nothing in TypeScript knows what a raw SQL string means. Verified against shared/schema.ts.
     `SELECT ${RECENT_CARD_COLUMNS}
-       FROM certificates
+       FROM partner_public_card_projection
       WHERE origin_location_id = $1
-        AND origin_type = 'PARTNER'
-        AND ${PUBLIC_CARD_PREDICATE}
       ORDER BY grade_approved_at DESC
       LIMIT ${RECENT_CARDS_LIMIT}`,
     [locationId],
@@ -561,9 +533,9 @@ export async function getRecentCards(locationId: string): Promise<PublicRecentCa
  * this feature, and partner_runtime holds no UPDATE grant on any count column (COUNT1).
  */
 export async function countPublicCards(locationId: string): Promise<number> {
-  const { rows } = await partnerAdminQuery<{ n: string }>(
-    `SELECT count(*)::text n FROM certificates
-      WHERE origin_location_id = $1 AND origin_type = 'PARTNER' AND ${PUBLIC_CARD_PREDICATE}`,
+  const { rows } = await partnerPublicQuery<{ n: string }>(
+    `SELECT count(*)::text n FROM partner_public_card_projection
+      WHERE origin_location_id = $1`,
     [locationId],
   );
   return Number(rows[0]?.n ?? 0);

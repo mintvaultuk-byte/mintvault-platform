@@ -228,6 +228,7 @@ describe("partner schema ↔ migration parity", () => {
       "0058_partner_public_network.sql",
       "0059_partner_public_eligibility_propagation.sql",
       "0060_partner_public_rating_override_expiry.sql",
+      "0061_partner_public_reader.sql",
     ]);
   });
 
