@@ -58,6 +58,7 @@ import {
   type ComputedRating,
   type RatingEvidence,
 } from "./public-network-rating";
+import { markRatingDirtyByListing } from "./public-network-rating-lifecycle";
 
 /** Hard ceiling on finder page size. A public endpoint must not let a caller ask for the world. */
 export const MAX_PAGE_SIZE = 50;
@@ -804,5 +805,157 @@ export async function recalculateRating(listingId: string, actor: string): Promi
       evidence,
       snapshotId,
     };
+  });
+}
+
+
+// =================================================================================================
+// RATING OVERRIDES — the atomic half of B5
+// =================================================================================================
+
+/**
+ * Deterministic failure injection, for the atomicity proofs and nothing else.
+ *
+ * A rollback is only PROVABLE if a failure can be forced at a chosen instant — after the durable
+ * write, before the commit. Mocking the pg client would test the mock's idea of a transaction
+ * rather than PostgreSQL's, and the entire claim here is that the DATABASE rolls the work back.
+ *
+ * INERT IN PRODUCTION BY CONSTRUCTION: one string comparison against an env var no real process
+ * sets. There is no path from an HTTP request to this value.
+ */
+async function maybeFailForTest(point: string): Promise<void> {
+  if (process.env.PARTNER_TEST_FAIL_POINT === point) {
+    throw new Error(`forced test failure at ${point}`);
+  }
+}
+
+/**
+ * Audit INSIDE the caller's transaction, and DELIBERATELY NOT CATCHING.
+ *
+ * The post-commit `auditAdmin` variant exists for changes that have already landed, where reporting
+ * the gap is all that is possible. A Super Admin overriding a third party's published quality
+ * rating is not that case: in a transaction there is something to undo, and an override with no
+ * record of who set it is the one gap here that cannot be reconstructed afterwards.
+ *
+ * Raw SQL rather than the Drizzle helper because the helper binds to the global connection and
+ * would commit independently of this transaction — which is precisely the split being closed.
+ */
+async function auditOverrideTx(
+  client: PoolClient,
+  listingId: string,
+  action: string,
+  actor: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+     VALUES ('partner_public_listing', $1, $2, $3, $4::jsonb)`,
+    [listingId, action, actor, JSON.stringify(details)],
+  );
+}
+
+export interface OverrideInput {
+  rating: number | null;
+  label: string | null;
+  reason: string;
+  expiresAt: string | null;
+}
+
+/**
+ * Create an exceptional override — ONE TRANSACTION, OR NONE OF IT (B5).
+ *
+ * This used to be an INSERT in a transaction followed by `recalculateRating` and the audit write
+ * OUTSIDE it. Three states could survive a failure between them, and every one is silent:
+ *
+ *   * the override row exists but the listing's denormalised current_* columns do not reflect it —
+ *     so the override is in the audit trail and has no effect on what the public sees, which looks
+ *     exactly like the operator's action doing nothing;
+ *   * the override row exists and the listing was never marked dirty — so the RECONCILER never
+ *     picks it up either. Nothing in the system is owed the work; it stays wrong until a human
+ *     notices;
+ *   * the override applies and the audit row is missing — a rating a named human typed, with no
+ *     record that they typed it.
+ *
+ * Lock the listing, write the override, mark it dirty, write the audit: commit or roll back
+ * together. The DIRTY MARK is what makes the post-commit recalculation safe to be best-effort —
+ * if it fails, the obligation is durable and the reconciler owns it.
+ *
+ * LOCK ORDER is preserved: partner_public_listings is the only listing-side table involved and
+ * nothing here touches certificates, work items or wallets.
+ */
+export async function createRatingOverride(
+  listingId: string,
+  actor: string,
+  input: OverrideInput,
+): Promise<string> {
+  return withPartnerAdminTransaction(async (client: PoolClient) => {
+    const l = await client.query<{ tenant_id: string }>(
+      "SELECT tenant_id FROM partner_public_listings WHERE id = $1 FOR UPDATE",
+      [listingId],
+    );
+    if (!l.rows[0]) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
+    const latest = await client.query<Record<string, unknown>>(
+      `SELECT internal_score, public_rating, rating_label FROM partner_public_rating_snapshots
+        WHERE listing_id = $1 ORDER BY calculated_at DESC LIMIT 1`,
+      [listingId],
+    );
+    const c = latest.rows[0] ?? {};
+    const ins = await client.query<{ id: string }>(
+      `INSERT INTO partner_public_rating_overrides
+         (tenant_id, listing_id, computed_internal_score, computed_public_rating, computed_rating_label,
+          override_public_rating, override_rating_label, reason, created_by, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [
+        l.rows[0].tenant_id,
+        listingId,
+        c.internal_score ?? null,
+        c.public_rating ?? null,
+        c.rating_label ?? null,
+        input.rating,
+        input.label,
+        input.reason,
+        actor,
+        input.expiresAt,
+      ],
+    );
+    const overrideId = ins.rows[0].id;
+    await markRatingDirtyByListing(client, listingId);
+    await auditOverrideTx(client, listingId, "partner_listing_rating_override_created", actor, {
+      overrideId,
+      rating: input.rating,
+      label: input.label,
+      reason: input.reason,
+      expiresAt: input.expiresAt,
+    });
+    // The only window that can produce the partial states described above.
+    await maybeFailForTest("OVERRIDE_CREATE_AFTER_WRITE");
+    return overrideId;
+  });
+}
+
+/**
+ * Retire the active override — same atomicity argument, plus one specific to removal.
+ *
+ * The retirement used to run as a BARE AUTOCOMMIT UPDATE with no listing lock at all, so two Super
+ * Admins removing concurrently could both observe rowCount > 0 against different rows, and a
+ * failure before the recalculation left the override retired while the public profile kept
+ * publishing its value.
+ */
+export async function removeRatingOverride(listingId: string, actor: string, reason: string): Promise<void> {
+  await withPartnerAdminTransaction(async (client: PoolClient) => {
+    const l = await client.query("SELECT 1 FROM partner_public_listings WHERE id = $1 FOR UPDATE", [listingId]);
+    if (l.rowCount === 0) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
+    const upd = await client.query(
+      `UPDATE partner_public_rating_overrides
+          SET removed_at = now(), removed_by = $2, removal_reason = $3
+        WHERE listing_id = $1 AND removed_at IS NULL`,
+      [listingId, actor, reason],
+    );
+    if (upd.rowCount === 0) {
+      throw new PublicNetworkError("NO_ACTIVE_OVERRIDE", "There is no active override to remove.", 404);
+    }
+    await markRatingDirtyByListing(client, listingId);
+    await auditOverrideTx(client, listingId, "partner_listing_rating_override_removed", actor, { reason });
+    await maybeFailForTest("OVERRIDE_REMOVE_AFTER_WRITE");
   });
 }

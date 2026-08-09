@@ -1856,4 +1856,132 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       expect(base.rows[0].can, "the public reader has direct SELECT on certificates").toBe(false);
     }, 60_000);
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // OVERRIDE-ATOMIC1 — B5. A Super Admin override must land whole, or not at all.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  describe("rating override create/remove atomicity", () => {
+    let svc2: typeof import("../server/partner/public-network-service");
+    beforeAll(async () => {
+      svc2 = await import("../server/partner/public-network-service");
+    }, 60_000);
+
+    afterEach(() => {
+      delete process.env.PARTNER_TEST_FAIL_POINT;
+    });
+
+    /** The four durable facts an override touches. All must move together, or none. */
+    async function overrideState(listingId: string) {
+      const o = await admin.query<{ n: string }>(
+        "SELECT count(*)::text n FROM partner_public_rating_overrides WHERE listing_id=$1 AND removed_at IS NULL",
+        [listingId],
+      );
+      const a = await admin.query<{ n: string }>(
+        "SELECT count(*)::text n FROM audit_log WHERE entity_id=$1 AND action LIKE 'partner_listing_rating_override%'",
+        [listingId],
+      );
+      const l = await admin.query<{ dirty: boolean; gen: string }>(
+        "SELECT rating_dirty AS dirty, rating_dirty_generation::text AS gen FROM partner_public_listings WHERE id=$1",
+        [listingId],
+      );
+      return {
+        activeOverrides: Number(o.rows[0].n),
+        auditRows: Number(a.rows[0].n),
+        dirty: l.rows[0].dirty,
+        generation: BigInt(l.rows[0].gen),
+      };
+    }
+
+    it("create writes the override, the audit row and the dirty mark together", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Happy", "ovr-happy");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, {});
+      // Start clean so the dirty mark below is attributable to the override and nothing else.
+      await svc2.recalculateRating(listingId, "setup");
+      await admin.query(
+        `UPDATE partner_public_listings
+            SET rating_dirty=false, rating_dirty_since=NULL, rating_clean_generation=rating_dirty_generation
+          WHERE id=$1`, [listingId]);
+      const before = await overrideState(listingId);
+
+      const id = await svc2.createRatingOverride(listingId, "hq@test", {
+        rating: 4.5, label: "Exceptional", reason: "founder decision", expiresAt: null,
+      });
+      expect(id).toBeTruthy();
+
+      const after = await overrideState(listingId);
+      expect(after.activeOverrides).toBe(before.activeOverrides + 1);
+      expect(after.auditRows, "an override with no record of who set it is the one gap that cannot be reconstructed").toBe(before.auditRows + 1);
+      expect(after.dirty, "the reconciler must be told the published rating is now owed a recalculation").toBe(true);
+      expect(after.generation).toBeGreaterThan(before.generation);
+    }, 90_000);
+
+    /**
+     * OVERRIDE-ATOMIC1 — the forced-failure proof.
+     *
+     * The injection point is AFTER the override row, the dirty mark and the audit are all written
+     * and BEFORE the commit. That is the only window that can produce the partial states B5
+     * describes, and it is unreachable without a deterministic hook — which is why one exists.
+     */
+    it("OVERRIDE-ATOMIC1: a failure after the durable write rolls back EVERYTHING — create", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Rollback", "ovr-rollback");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, {});
+      const before = await overrideState(listingId);
+
+      process.env.PARTNER_TEST_FAIL_POINT = "OVERRIDE_CREATE_AFTER_WRITE";
+      await expect(
+        svc2.createRatingOverride(listingId, "hq@test", {
+          rating: 1.0, label: "Bogus", reason: "should never persist", expiresAt: null,
+        }),
+      ).rejects.toThrow(/forced test failure/);
+      delete process.env.PARTNER_TEST_FAIL_POINT;
+
+      const after = await overrideState(listingId);
+      // NO ORPHAN OVERRIDE — the rating a human typed must not be published by a failed request.
+      expect(after.activeOverrides, "an orphan override survived a failed create").toBe(before.activeOverrides);
+      // NO UNAUDITED CHANGE, and equally NO PHANTOM AUDIT of a change that did not happen.
+      expect(after.auditRows, "an audit row survived for an override that was rolled back").toBe(before.auditRows);
+      // NO STALE DIRTY MARK — a rollback must not leave the reconciler chasing work that never existed.
+      expect(after.generation, "the dirty generation advanced for a rolled-back override").toBe(before.generation);
+
+      // And the listing is still usable afterwards: the rollback released its FOR UPDATE lock.
+      await expect(
+        svc2.createRatingOverride(listingId, "hq@test", { rating: 4.0, label: null, reason: "real one", expiresAt: null }),
+      ).resolves.toBeTruthy();
+    }, 90_000);
+
+    it("OVERRIDE-ATOMIC1: a failure after the durable write rolls back EVERYTHING — remove", async () => {
+      const { listingId, locationId } = await seedListing(T_A, "Ovr Remove", "ovr-remove");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, {});
+      await svc2.createRatingOverride(listingId, "hq@test", {
+        rating: 3.0, label: null, reason: "to be removed", expiresAt: null,
+      });
+      const before = await overrideState(listingId);
+      expect(before.activeOverrides, "precondition: an override is in force").toBe(1);
+
+      process.env.PARTNER_TEST_FAIL_POINT = "OVERRIDE_REMOVE_AFTER_WRITE";
+      await expect(svc2.removeRatingOverride(listingId, "hq@test", "retiring")).rejects.toThrow(/forced test failure/);
+      delete process.env.PARTNER_TEST_FAIL_POINT;
+
+      const after = await overrideState(listingId);
+      // The override must still be IN FORCE. A half-removed override is the worst outcome: the
+      // public profile keeps publishing a value the audit trail says was retired.
+      expect(after.activeOverrides, "the override was retired by a request that failed").toBe(1);
+      expect(after.auditRows).toBe(before.auditRows);
+      expect(after.generation).toBe(before.generation);
+
+      // Removing it for real still works.
+      await expect(svc2.removeRatingOverride(listingId, "hq@test", "retiring properly")).resolves.toBeUndefined();
+      const done = await overrideState(listingId);
+      expect(done.activeOverrides).toBe(0);
+      expect(done.auditRows).toBe(before.auditRows + 1);
+      expect(done.generation).toBeGreaterThan(before.generation);
+    }, 90_000);
+
+    it("removing an override when none is active is refused, and changes nothing", async () => {
+      const { listingId } = await seedListing(T_A, "Ovr None", "ovr-none");
+      const before = await overrideState(listingId);
+      await expect(svc2.removeRatingOverride(listingId, "hq@test", "nothing to do")).rejects.toThrow();
+      expect(await overrideState(listingId)).toEqual(before);
+    }, 60_000);
+  });
 });
