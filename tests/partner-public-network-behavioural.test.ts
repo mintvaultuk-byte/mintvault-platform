@@ -25,7 +25,7 @@
  * database. Both are pinned to this cluster in beforeAll BEFORE the service module is imported, so
  * the import is dynamic rather than top-level.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { Client } from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import {
@@ -42,6 +42,8 @@ let admin: Client;
 
 /** The live service module, imported after the pool URLs are pinned. */
 let svc: typeof import("../server/partner/public-network-service");
+/** The rollout gate + readiness module (H12/H13/H14). Same late-import discipline. */
+let gate: typeof import("../server/partner/public-network-gate");
 
 const T_A = "aaaa0000-0000-0000-0000-0000000000b1";
 
@@ -270,7 +272,27 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
     process.env.PARTNER_PUBLIC_DATABASE_URL = cluster.url;
     pinAccountingTopologyTo(cluster.url);
     svc = await import("../server/partner/public-network-service");
+    gate = await import("../server/partner/public-network-gate");
+    // The public network is DEFAULT OFF (H14). Every pre-existing test in this suite predates the
+    // kill switch and asserts the behaviour of a LIVE network, so the flag is enabled once here for
+    // the suite as a whole. The gate's own OFF behaviour is proven in its dedicated block below,
+    // which toggles it deliberately — not by leaving the rest of the suite in the off state, which
+    // would silently turn 60 behavioural assertions into "everything 404s" and still pass.
+    await setPublicNetworkFlag(true);
   }, 300_000);
+
+  /** Global (tenant_id IS NULL) rollout flag, the shape resolveGlobalFlag reads. */
+  async function setPublicNetworkFlag(enabled: boolean): Promise<void> {
+    await admin.query("DELETE FROM partner_feature_flags WHERE flag=$1 AND tenant_id IS NULL AND location_id IS NULL", [
+      "partner_public_network_enabled",
+    ]);
+    await admin.query(
+      "INSERT INTO partner_feature_flags (tenant_id, location_id, flag, enabled) VALUES (NULL, NULL, $1, $2)",
+      ["partner_public_network_enabled", enabled],
+    );
+    // The gate caches a TRUE verdict for 5s; drop it so a toggle is observable immediately.
+    gate.__resetPartnerPublicNetworkFlagCache();
+  }
 
   afterAll(async () => {
     await admin?.end().catch(() => {});
@@ -1294,5 +1316,186 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
         expect(keys).not.toContain(forbidden);
       }
     });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ROLLOUT GATE AND READINESS — H14 (kill switch), H12 (readiness), H13 (reader membership)
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  describe("public network rollout gate and readiness", () => {
+    // Same late-import discipline as the least-privilege block: these modules memoise pool state
+    // from the environment at first import, so they must be loaded AFTER the URLs are pinned.
+    let db: typeof import("../server/partner/db");
+    let routes: typeof import("../server/partner/public-network-routes");
+    beforeAll(async () => {
+      db = await import("../server/partner/db");
+      routes = await import("../server/partner/public-network-routes");
+    });
+
+    /**
+     * Mount the anonymous router on a throwaway Express app and drive it over real HTTP.
+     *
+     * Over HTTP rather than by calling the handler, because the GATE IS MIDDLEWARE — a handler-level
+     * call would bypass the very thing under test, and would have passed even with no gate at all.
+     */
+    async function withPublicApp<T>(fn: (base: string) => Promise<T>): Promise<T> {
+      const express = (await import("express")).default;
+      const app = express();
+      routes.registerPartnerNetworkPublicRoutes(app);
+      const server = app.listen(0);
+      await new Promise((r) => server.once("listening", r));
+      const port = (server.address() as { port: number }).port;
+      try {
+        return await fn(`http://127.0.0.1:${port}`);
+      } finally {
+        await new Promise((r) => server.close(() => r(null)));
+      }
+    }
+
+    afterEach(async () => {
+      // Every test in this block toggles a global. Leaving it off would silently 404 the rest of
+      // the suite, which is exactly the failure mode the suite-level enable exists to avoid.
+      await setPublicNetworkFlag(true);
+    });
+
+    it("H14: with the flag OFF the whole public network is invisible — finder AND profile", async () => {
+      const { locationId } = await seedListing(T_A, "Gated Shop", "gated-shop");
+      for (let i = 0; i < 10; i++) await insertCert(locationId, {});
+      // Visible first, so the OFF assertion cannot pass because the shop was never listed.
+      await expect(svc.getShopProfile("gated-shop")).resolves.toBeTruthy();
+
+      await setPublicNetworkFlag(false);
+      await withPublicApp(async (base) => {
+        for (const path of ["/api/shops?page=1&pageSize=5", "/api/shops/gated-shop"]) {
+          const res = await fetch(`${base}${path}`);
+          // 404, NOT 503: an unlaunched surface must not advertise itself as "temporarily" down,
+          // and it must be indistinguishable from a shop that is simply not listed.
+          expect(res.status, `${path} must be 404 while the network is off`).toBe(404);
+          expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Shop not found." } });
+        }
+      });
+    }, 60_000);
+
+    it("H14: an ABSENT flag row is OFF — the network is not live merely because the code deployed", async () => {
+      await seedListing(T_A, "No Row Shop", "no-row-shop");
+      // The rollout state on a freshly migrated estate: no flag row at all.
+      await admin.query(
+        "DELETE FROM partner_feature_flags WHERE flag=$1 AND tenant_id IS NULL AND location_id IS NULL",
+        ["partner_public_network_enabled"],
+      );
+      gate.__resetPartnerPublicNetworkFlagCache();
+      expect(await gate.partnerPublicNetworkEnabled(), "absent must mean OFF (fail closed)").toBe(false);
+      await withPublicApp(async (base) => {
+        expect((await fetch(`${base}/api/shops`)).status).toBe(404);
+      });
+    }, 60_000);
+
+    it("H14: turning the flag ON exposes an eligible shop, and a SUSPENDED one stays hidden", async () => {
+      const good = await seedListing(T_A, "Flag On Good", "flag-on-good");
+      const bad = await seedListing(T_A, "Flag On Suspended", "flag-on-suspended");
+      for (let i = 0; i < 10; i++) {
+        await insertCert(good.locationId, {});
+        await insertCert(bad.locationId, {});
+      }
+      // Suspension is an ELIGIBILITY rule (0059), and it must survive the kill switch being on.
+      // A flag that resurrected suspended shops would be worse than no flag.
+      await admin.query("UPDATE partner_organisations SET status='SUSPENDED' WHERE id=$1", [T_A]);
+      await admin.query(
+        "UPDATE partner_public_listings SET org_status='SUSPENDED' WHERE id=$1",
+        [bad.listingId],
+      );
+
+      await setPublicNetworkFlag(true);
+      await withPublicApp(async (base) => {
+        const suspended = await fetch(`${base}/api/shops/flag-on-suspended`);
+        expect(suspended.status, "a suspended shop must stay hidden with the flag ON").toBe(404);
+      });
+      // Restore, then prove the eligible one really is reachable — otherwise the assertion above
+      // would pass on a network that is simply broken.
+      await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [T_A]);
+      await withPublicApp(async (base) => {
+        const res = await fetch(`${base}/api/shops/flag-on-good`);
+        expect(res.status, "an eligible shop must be reachable with the flag ON").toBe(200);
+        expect((await res.json()).slug).toBe("flag-on-good");
+      });
+    }, 60_000);
+
+    it("H12: readiness reports READY only when the reader can actually reach all three projections", async () => {
+      gate.__resetPartnerPublicReadinessCache();
+      const r = await gate.checkPartnerPublicNetworkReadiness({ force: true });
+      expect(r.configured).toBe(true);
+      expect(r.ready, `readiness said ${r.code}`).toBe(true);
+      expect(r.code).toBeNull();
+      // All three, named. 0061 without 0064 gives a working finder whose every image 503s — a
+      // partial estate is the failure this exists to catch, so a partial pass is not a pass.
+      expect(r.projectionsReachable.sort()).toEqual([
+        "partner_public_card_projection",
+        "partner_public_shop_projection",
+        "public_slab_image_projection",
+      ]);
+    }, 60_000);
+
+    it("H12: an unconfigured public DB is reported as not-ready, and is NOT cached", async () => {
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      gate.__resetPartnerPublicReadinessCache();
+      await db.__resetPartnerPublicPoolForTests();
+      delete process.env.PARTNER_PUBLIC_DATABASE_URL;
+      try {
+        const r = await gate.checkPartnerPublicNetworkReadiness();
+        expect(r.ready).toBe(false);
+        expect(r.configured).toBe(false);
+        expect(r.code).toBe("public_db_not_configured");
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+      }
+      // Re-probing must recover WITHOUT a restart: an unready verdict is never cached, because the
+      // most likely moment it is returned is mid-rollout with an operator actively fixing it.
+      const after = await gate.checkPartnerPublicNetworkReadiness({ force: true });
+      expect(after.ready, "readiness must recover once the URL is restored").toBe(true);
+    }, 60_000);
+
+    it("H13: a login role WITHOUT partner_public_reader membership cannot become ready, and cannot serve", async () => {
+      /**
+       * THE STEP NO MIGRATION CAN PERFORM.
+       *
+       * 0061 creates partner_public_reader as a NOLOGIN GROUP role, per the house convention that a
+       * real login role is granted membership out of band by infrastructure. Nothing in the
+       * migration chain grants that membership, so a fully-migrated estate can still be unable to
+       * serve — and before this test nothing anywhere proved what happens when it is missing.
+       *
+       * A dedicated login role with NO membership is the honest simulation. The suite's normal URL
+       * authenticates as the cluster superuser, which can SET ROLE to anything and therefore could
+       * never detect this.
+       */
+      await admin.query("DROP ROLE IF EXISTS pn_public_nomember");
+      await admin.query("CREATE ROLE pn_public_nomember LOGIN PASSWORD 'nomember' NOSUPERUSER NOBYPASSRLS");
+      await admin.query("GRANT CONNECT ON DATABASE " + JSON.stringify(new URL(cluster.url).pathname.slice(1)).replace(/"/g, '"') + " TO pn_public_nomember");
+      const saved = process.env.PARTNER_PUBLIC_DATABASE_URL;
+      const u = new URL(cluster.url);
+      u.username = "pn_public_nomember";
+      u.password = "nomember";
+      try {
+        gate.__resetPartnerPublicReadinessCache();
+        await db.__resetPartnerPublicPoolForTests();
+        process.env.PARTNER_PUBLIC_DATABASE_URL = u.toString();
+
+        const r = await gate.checkPartnerPublicNetworkReadiness({ force: true });
+        expect(r.ready, "a role with no membership must not be reported ready").toBe(false);
+        expect(r.configured, "the URL IS configured — this is a membership failure, not a missing var").toBe(true);
+        expect(r.code).toBe("public_reader_role_unavailable");
+
+        // And it must FAIL rather than silently serve on the login role. This is the fail-closed
+        // half: the request errors, it does not quietly execute with more privilege than intended.
+        await expect(db.partnerPublicQuery("SELECT 1")).rejects.toThrow();
+      } finally {
+        process.env.PARTNER_PUBLIC_DATABASE_URL = saved;
+        await db.__resetPartnerPublicPoolForTests();
+        gate.__resetPartnerPublicReadinessCache();
+        await admin.query("DROP ROLE IF EXISTS pn_public_nomember").catch(() => {});
+      }
+      // Membership restored (the superuser URL) — ready again, so the assertion above was about
+      // membership and not about a pool this test permanently broke.
+      await expect(gate.checkPartnerPublicNetworkReadiness({ force: true })).resolves.toMatchObject({ ready: true });
+    }, 60_000);
   });
 });

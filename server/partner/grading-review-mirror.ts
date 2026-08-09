@@ -434,6 +434,24 @@ export async function mirrorPartnerApproval(certId: number, adminUser: string): 
        GROUP BY pgwi.destination_submission_id
     `);
     const row = statusCheck.rows[0] as { destination_submission_id?: number; all_approved?: boolean } | undefined;
+
+    // ── H1: THE DURABLE OBLIGATION, INSIDE THE TRANSACTION, AS ITS LAST STATEMENT ───────────
+    // It used to run after the commit on its own connection, so a process death in that window
+    // lost the obligation entirely — nothing recorded that the rating was owed a recalculation.
+    // Now it commits or rolls back with the work-item transition that changed the evidence.
+    //
+    // LAST, and that position is load-bearing rather than tidy: partner_public_listings is the
+    // SINK in this codebase's lock order (see the header of public-network-rating-lifecycle.ts).
+    // Every other write path takes some subset of certificates -> partner_grading_work_items ->
+    // partner_submissions -> submissions -> wallets in a mutually consistent order, and adding the
+    // listing anywhere earlier would create a genuine ABBA against those paths.
+    //
+    // It uses `tx` — the caller's own client — and NOT a second pooled connection. Acquiring one
+    // from inside a held transaction is the cross-pool hang: PostgreSQL would see one session
+    // idle-in-transaction and one waiting, with no cycle to detect and therefore no deadlock
+    // error, just two connections parked indefinitely.
+    await markRatingDirtyForCertInTx(tx, certId);
+
     return {
       allApproved: Boolean(row?.all_approved),
       destinationSubmissionId: row?.destination_submission_id ?? null,
@@ -494,16 +512,26 @@ async function originLocationForCert(certId: number): Promise<string | null> {
 
 export async function mirrorPartnerRejection(certId: number): Promise<PartnerMirrorResult> {
   if (!(await pendingPartnerWorkItem(certId))) return { kind: "not_partner" };
-  const r = await db.execute(sql`
-    UPDATE partner_grading_work_items
-       SET status = 'returned_for_change', updated_at = NOW()
-     WHERE certificate_id = ${certId}
-       AND status = 'pending_review'
-     RETURNING id
-  `);
-  if (r.rows.length !== 1) return { kind: "conflict" };
-  // Only once the work item genuinely moved. rejectCertGrade has already incremented
-  // certificates.redo_count — the actual V2 evidence — in its own CAS before this runs.
+  // A TRANSACTION, where this used to be a bare autocommit UPDATE. The work-item transition and the
+  // rating obligation it creates must land together — see the H1 note in mirrorPartnerApproval.
+  // A rejection is the single most important event to get right here: it is the one that puts a
+  // unit into the V2 population in the first place.
+  const moved = await db.transaction(async (tx) => {
+    const r = await tx.execute(sql`
+      UPDATE partner_grading_work_items
+         SET status = 'returned_for_change', updated_at = NOW()
+       WHERE certificate_id = ${certId}
+         AND status = 'pending_review'
+       RETURNING id
+    `);
+    if (r.rows.length !== 1) return false;
+    // Last statement, caller's client. rejectCertGrade has already incremented
+    // certificates.redo_count — the actual V2 evidence — in its own CAS before this runs.
+    await markRatingDirtyForCertInTx(tx, certId);
+    return true;
+  });
+  if (!moved) return { kind: "conflict" };
+  // Heavy recalculation stays post-commit and detached. HQ never waits on it (B3).
   await refreshRatingForCert(certId, "hq-review");
   return { kind: "mirrored", allApproved: false, destinationSubmissionId: null };
 }
@@ -555,7 +583,42 @@ async function refreshRatingForCert(certId: number, actor: string): Promise<void
 }
 
 /**
- * Durable obligation, on its own connection — this runs immediately after the relevant transaction.
+ * Mark this certificate's shop listing dirty using the CALLER'S transaction client.
+ *
+ * Resolves the immutable 0035 origin snapshot and the listing in ONE statement, so the whole
+ * obligation is a single round trip on a connection the caller already holds. A certificate with no
+ * partner origin, or a location with no public listing, updates zero rows — the expected case for
+ * almost every card MintVault grades, and deliberately not an error.
+ *
+ * `markRatingDirty` in public-network-rating-lifecycle.ts is the location-addressed twin of this;
+ * this variant exists because the mirror knows a certificate id and resolving the location
+ * separately would cost a second round trip inside a held transaction for no benefit.
+ */
+async function markRatingDirtyForCertInTx(
+  tx: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> },
+  certId: number,
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE partner_public_listings
+       SET rating_dirty = true,
+           rating_dirty_since = COALESCE(rating_dirty_since, now()),
+           rating_dirty_generation = rating_dirty_generation + 1
+     WHERE location_id = (
+       SELECT origin_location_id
+         FROM certificates
+        WHERE id = ${certId}
+          AND origin_type = 'PARTNER'
+          AND origin_location_id IS NOT NULL
+     )
+  `);
+}
+
+/**
+ * Durable obligation, on its own connection — the POST-COMMIT belt-and-braces path.
+ *
+ * The transactional mark above is the primary mechanism now. This one still runs because it is
+ * idempotent in effect and covers the paths that have no transaction of their own to join; a
+ * second generation bump costs nothing but one extra reconciler pass.
  *
  * NO `AND rating_dirty = false` GUARD, and that omission is load-bearing (HIGH H2). It used to be
  * there as an optimisation, and it silently swallowed the generation bump on a listing that was

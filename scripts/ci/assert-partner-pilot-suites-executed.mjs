@@ -108,7 +108,7 @@ const SUITES = [
   // suite had 19 tests, and never raised as it grew — 44 tests of SLACK, i.e. the rating-lifecycle
   // block (8), the public-reader least-privilege block (23), override expiry (4), eligibility
   // suspension (5) and the V2 recency window (3) were all silently deletable with CI green.
-  { file: "tests/partner-public-network-behavioural.test.ts", min: 63 },
+  { file: "tests/partner-public-network-behavioural.test.ts", min: 69 },
 
   // ── PREVIOUSLY UNFLOORED (HIGH H11) ───────────────────────────────────────────────────────
   // All four were deletable in their entirety with every CI step green: nothing in scripts/ci/
@@ -118,6 +118,10 @@ const SUITES = [
   // the suite whose absence would be discovered during an incident.
   // MEASURED 2026-08-09 against a real disposable PostgreSQL 17 cluster.
   { file: "tests/partner-rollback-integrity.test.ts", min: 44 },
+  // B1's dedicated behavioural proof. It is the ONLY executable reproduction of the recency
+  // exploit, and server/partner/public-network-service.ts names it in a comment as exactly that —
+  // so it must not be deletable behind a green build.
+  { file: "tests/partner-review-clock.test.ts", min: 8 },
   { file: "tests/partner-public-network-rating.test.ts", min: 48 },
   { file: "tests/partner-public-network-migration.test.ts", min: 42 },
   { file: "tests/partner-public-network-validation.test.ts", min: 31 },

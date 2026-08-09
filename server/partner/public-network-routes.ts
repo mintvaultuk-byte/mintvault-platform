@@ -27,8 +27,10 @@ import { requireSuperAdmin } from "../auth";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly } from "./session";
 import { getPartnerAdminCapability } from "./admin-capability";
 import { withTenant, partnerAdminQuery, withPartnerAdminTransaction, PartnerPublicDbUnavailable } from "./db";
+import type { PoolClient } from "pg";
+import { partnerPublicNetworkGate } from "./public-network-gate";
 import { writePartnerAudit } from "./audit";
-import { ratingsNeedingAttention } from "./public-network-rating-lifecycle";
+import { ratingsNeedingAttention, markRatingDirtyByListing } from "./public-network-rating-lifecycle";
 import { SELF_SERVICE_VALIDATORS, SelfServiceValidationError } from "./public-network-validation";
 import { storage } from "../storage";
 import {
@@ -188,7 +190,13 @@ const publicFinderLimit = rateLimit({
 
 export function partnerNetworkPublicRouter(): Router {
   const r = Router();
+  // ORDER MATTERS. The rate limiter runs FIRST, so a flood aimed at a disabled network is still
+  // shed at the limiter rather than each request costing a flag read. The gate then runs before
+  // any handler, so no route below can be reached while the rollout flag is off — including any
+  // route a future edit adds, which is why this is router-level middleware and not a per-handler
+  // check somebody can forget.
   r.use(publicFinderLimit);
+  r.use(partnerPublicNetworkGate());
 
   r.get("/", async (req: Request, res: Response) => {
     try {
@@ -278,6 +286,55 @@ function requireReason(body: Record<string, unknown>): string {
   }
   if (reason.trim().length > 500) throw new PublicNetworkError("INVALID_INPUT", "The reason is too long.");
   return reason.trim();
+}
+
+/**
+ * Audit INSIDE the caller's transaction.
+ *
+ * `auditAdmin` below writes on its own connection AFTER the change has committed, and it exists for
+ * the cases where that is genuinely all that is possible (a read, or a mutation that has already
+ * landed). For a governance decision it is not good enough: a Super Admin overriding a third
+ * party's published quality rating, with no record that they did, is the one gap in this feature
+ * that cannot be reconstructed after the fact. `auditAdmin`'s own comment concedes this — it
+ * reports the gap rather than preventing it, because by the time it runs there is nothing to undo.
+ *
+ * In a transaction there IS something to undo, so this one does NOT catch. If the audit cannot be
+ * written, the override does not happen. Raw SQL rather than the Drizzle helper because the helper
+ * binds to the global connection and would commit independently of the caller's transaction —
+ * which is precisely the split being closed.
+ *
+ * Column list matches shared/schema.ts `auditLog` exactly; `created_at` takes its DEFAULT.
+ */
+async function auditAdminTx(
+  client: PoolClient,
+  entityId: string,
+  action: string,
+  actor: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+     VALUES ('partner_public_listing', $1, $2, $3, $4::jsonb)`,
+    [entityId, action, actor, JSON.stringify(details)],
+  );
+}
+
+/**
+ * Deterministic failure injection for the atomicity proofs, and ONLY for them.
+ *
+ * A rollback is only provable if a failure can be forced at a chosen instant. The alternative —
+ * mocking the pg client — would test the mock's idea of a transaction rather than PostgreSQL's,
+ * and the whole point of these proofs is that the DATABASE rolls the work back.
+ *
+ * INERT IN PRODUCTION BY CONSTRUCTION. It reads one env var that is never set outside a test
+ * process; with it unset this is a single string comparison and returns immediately. It cannot be
+ * triggered by any request field, header or user input — there is no path from an HTTP request to
+ * this variable.
+ */
+async function maybeFailForTest(point: string): Promise<void> {
+  if (process.env.PARTNER_TEST_FAIL_POINT === point) {
+    throw new Error(`forced test failure at ${point}`);
+  }
 }
 
 async function auditAdmin(
@@ -645,6 +702,33 @@ export function partnerNetworkAdminRouter(): Router {
         expiresAt = d.toISOString();
       }
 
+      /**
+       * ── B5: ONE TRANSACTION, OR NONE OF IT ────────────────────────────────────────────────
+       * This used to be an INSERT in a transaction, followed by `recalculateRating` and
+       * `auditAdmin` OUTSIDE it. Three states could survive a failure between them, and every one
+       * is silent:
+       *
+       *   * override row written, listing's denormalised current_* columns NOT updated — the
+       *     override exists in the audit trail and has no effect on what the public sees, which
+       *     is the exact opposite of the intended change and looks like the operator's action
+       *     simply did nothing;
+       *   * override row written, listing not marked dirty — so the RECONCILER never picks it up
+       *     either. Nothing in the system is owed the work, and it stays wrong until a human
+       *     notices and presses Recalculate;
+       *   * override applied, audit row missing — a rating a named human typed, with no record
+       *     that they typed it. For a value published on a third party's public profile that is
+       *     the one gap that cannot be reconstructed afterwards.
+       *
+       * The whole operation is now one transaction: lock the listing, write the override, mark it
+       * dirty, and write the audit — commit or roll back together. The DIRTY MARK is what makes
+       * this safe even if the refresh that follows fails, because the obligation is then durable
+       * and the reconciler owns it.
+       *
+       * LOCK ORDER is preserved: partner_public_listings is taken FIRST and LAST here because it
+       * is the only listing-side table involved, and nothing in this transaction touches
+       * certificates, work items or wallets. See the lock-order note in
+       * public-network-rating-lifecycle.ts.
+       */
       const created = await withPartnerAdminTransaction(async (client) => {
         const l = await client.query<{ tenant_id: string }>(
           "SELECT tenant_id FROM partner_public_listings WHERE id = $1 FOR UPDATE",
@@ -675,19 +759,29 @@ export function partnerNetworkAdminRouter(): Router {
             expiresAt,
           ],
         );
-        return ins.rows[0].id;
+        const overrideId = ins.rows[0].id;
+        // Durable obligation, in the SAME transaction as the evidence that created it.
+        await markRatingDirtyByListing(client, id);
+        // Audit inside the transaction too: an override without its audit row must not exist.
+        await auditAdminTx(client, id, "partner_listing_rating_override_created", actor, {
+          overrideId,
+          rating,
+          label,
+          reason,
+          expiresAt,
+        });
+        // Test hook. Lets the forced-failure proof throw AFTER the override row and the audit have
+        // been written but BEFORE commit, which is the only window that can produce the partial
+        // states described above. Compiled out of any environment that does not set it.
+        await maybeFailForTest("OVERRIDE_CREATE_AFTER_WRITE");
+        return overrideId;
       });
 
-      // Recalculate so the public row reflects the override immediately.
+      // AFTER the commit, and allowed to fail. The override is already durable, already audited and
+      // already marked dirty, so a failure here costs freshness for one reconciler tick — it can no
+      // longer strand the operator's decision.
       const result = await recalculateRating(id, actor);
-      const audited = await auditAdmin(id, "partner_listing_rating_override_created", actor, {
-        overrideId: created,
-        rating,
-        label,
-        reason,
-        expiresAt,
-      });
-      res.status(201).json({ overrideId: created, effective: result.effective, audited });
+      res.status(201).json({ overrideId: created, effective: result.effective, audited: true });
     } catch (err) {
       sendError(res, err);
     }
@@ -699,16 +793,29 @@ export function partnerNetworkAdminRouter(): Router {
       const actor = adminActor(req);
       const id = String(req.params.id);
       const reason = requireReason((req.body ?? {}) as Record<string, unknown>);
-      const upd = await partnerAdminQuery(
-        `UPDATE partner_public_rating_overrides
-            SET removed_at = now(), removed_by = $2, removal_reason = $3
-          WHERE listing_id = $1 AND removed_at IS NULL`,
-        [id, actor, reason],
-      );
-      if (upd.rowCount === 0) throw new PublicNetworkError("NO_ACTIVE_OVERRIDE", "There is no active override to remove.", 404);
+      // Same atomicity argument as create, and one more specific to removal: the retirement used to
+      // run as a BARE AUTOCOMMIT UPDATE with no listing lock at all, so two Super Admins removing
+      // concurrently could both see rowCount > 0 against different rows, and a failure before the
+      // recalculation left the override retired while the public profile kept showing its value.
+      await withPartnerAdminTransaction(async (client) => {
+        const l = await client.query("SELECT 1 FROM partner_public_listings WHERE id = $1 FOR UPDATE", [id]);
+        if (l.rowCount === 0) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
+        const upd = await client.query(
+          `UPDATE partner_public_rating_overrides
+              SET removed_at = now(), removed_by = $2, removal_reason = $3
+            WHERE listing_id = $1 AND removed_at IS NULL`,
+          [id, actor, reason],
+        );
+        if (upd.rowCount === 0) {
+          throw new PublicNetworkError("NO_ACTIVE_OVERRIDE", "There is no active override to remove.", 404);
+        }
+        await markRatingDirtyByListing(client, id);
+        await auditAdminTx(client, id, "partner_listing_rating_override_removed", actor, { reason });
+        await maybeFailForTest("OVERRIDE_REMOVE_AFTER_WRITE");
+      });
+
       const result = await recalculateRating(id, actor);
-      const audited = await auditAdmin(id, "partner_listing_rating_override_removed", actor, { reason });
-      res.json({ ok: true, effective: result.effective, audited });
+      res.json({ ok: true, effective: result.effective, audited: true });
     } catch (err) {
       sendError(res, err);
     }

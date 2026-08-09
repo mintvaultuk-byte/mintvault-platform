@@ -230,6 +230,11 @@ describe("partner schema ↔ migration parity", () => {
       "0060_partner_public_rating_override_expiry.sql",
       "0061_partner_public_reader.sql",
       "0062_partner_rating_dirty_state.sql",
+      // Hostile-review remediation, 2026-08-09. Each closes a named BLOCKER/HIGH:
+      "0063_certificate_review_lifecycle_clock.sql", // B1 review clock + H9 boot-DDL columns
+      "0064_public_slab_image_projection.sql", // B2 anonymous image off the privileged pool
+      "0065_certificates_reviewed_unit_index.sql", // H10, CONCURRENTLY (migrate:no-transaction)
+      "0066_partner_rating_lifecycle_hardening.sql", // H2/H3/H4/H5/H6 rating CAS, lease, backoff
     ]);
   });
 

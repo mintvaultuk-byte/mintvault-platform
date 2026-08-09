@@ -477,6 +477,22 @@ async function runTransferV2Sweep() {
   guardedPartnerCreditReservationExpiry();
   trackInterval(guardedPartnerCreditReservationExpiry, 60 * 60 * 1000);
 
+  // PUBLIC NETWORK READINESS (HIGH H12/H13). Probed once here, after migrations and pools are up,
+  // so a missing PARTNER_PUBLIC_DATABASE_URL or — far more likely — a missing
+  // `GRANT partner_public_reader TO <login role>` is discovered at DEPLOY TIME with an actionable
+  // log line, instead of by the first anonymous visitor getting a 503. It reports; it does not
+  // fail the process. See the long note on reportPartnerPublicNetworkReadiness for why taking
+  // Stripe and certificate verification down over an unlaunched consumer feature would be the
+  // worse outage, and why that is only safe because both gates fail closed independently.
+  trackTimeout(async () => {
+    try {
+      const { reportPartnerPublicNetworkReadiness } = await import("./partner/public-network-gate");
+      await reportPartnerPublicNetworkReadiness();
+    } catch (err: any) {
+      console.error("[partner-public-network] readiness probe threw:", err?.message || err);
+    }
+  }, 10_000);
+
   // Partner shop ratings refresh themselves the moment an HQ review changes the evidence. This tick
   // is the safety net for the cases that cannot cover — a process that died between the commit and
   // the refresh, a machine restart, a transient DB error — so it runs often enough to keep a stale

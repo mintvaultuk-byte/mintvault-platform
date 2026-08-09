@@ -588,7 +588,9 @@ export async function measureEvidence(locationId: string): Promise<RatingEvidenc
               -- That is an intake timestamp, and the gap between intake and review is entirely
               -- the partner's to choose. Import a batch, sit on it for six months, grade it
               -- badly, abandon the bounces — and the bad evidence is already outside the 180-day
-              -- window on the day it is created. Reproduced in tests/partner-review-clock.test.ts.
+              -- window on the day it is created. Reproduced end to end, against the real engine on a real
+              -- PostgreSQL 17 estate, in tests/partner-review-clock.test.ts (8 cases, including the
+              -- non-vacuity control and the delayed-submission gaming attempt).
               --
               -- GREATEST, not COALESCE, and that is the anti-gaming direction: the LATEST review
               -- event positions the unit. Continuing to rework a unit keeps its evidence INSIDE
