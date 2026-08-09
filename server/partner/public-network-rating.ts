@@ -129,6 +129,15 @@ export interface RatingEvidence {
   sampleSize: number;
   /** 180 when the rolling window supplied the population, null when it fell back to all-time. */
   windowDays: number | null;
+  /**
+   * ISO timestamp of the OLDEST unit inside the population, or null when there is none.
+   *
+   * Carried out of the measurement because it is the only thing that can answer "when could this
+   * rating change with no workflow write at all" — the oldest unit is the next one to leave the
+   * rolling window. The lifecycle turns it into `rating_next_recalc_at`. It is NOT a rating input
+   * and nothing in computeRating reads it.
+   */
+  oldestEvidenceInWindow: string | null;
   metrics: MetricEvidence[];
 }
 
@@ -165,6 +174,8 @@ export interface RatingCounters {
   abandonedUnits: number;
   /** 180 when the rolling window supplied the population, null when it fell back to all-time. */
   windowDays: number | null;
+  /** Oldest review-clock timestamp inside the counted population, ISO, or null when empty. */
+  oldestEvidenceInWindow?: string | null;
 }
 
 /** A metric that cannot be produced. Kept as a helper so every unavailable case looks identical. */
@@ -267,7 +278,13 @@ export function buildRatingEvidence(locationId: string, counters: RatingCounters
   metrics.push(unavailable("turnaround", "partner_grading_work_items has no completion timestamp"));
   metrics.push(unavailable("image_quality", "no image-quality measurement is captured"));
 
-  return { locationId, sampleSize: reviewedUnits, windowDays, metrics };
+  return {
+    locationId,
+    sampleSize: reviewedUnits,
+    windowDays,
+    oldestEvidenceInWindow: counters.oldestEvidenceInWindow ?? null,
+    metrics,
+  };
 }
 
 /**

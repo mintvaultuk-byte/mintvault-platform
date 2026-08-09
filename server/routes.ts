@@ -73,7 +73,11 @@ import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import {
   registerPartnerNetworkPublicRoutes,
   registerPartnerNetworkAdminRoutes,
+  isPublicDbUnavailable,
 } from "./partner/public-network-routes";
+// The anonymous slab-image proxy reads the 0064 projection as the least-privileged public reader.
+// It must NEVER fall back to `db` / `storage` for that lookup — see the note at the route.
+import { partnerPublicQuery } from "./partner/db";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
@@ -3201,35 +3205,62 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const kind = String(req.params.kind);
       if (!/^MV\d+$/.test(certNumber)) return res.status(404).end();
 
-      const cert = (await storage.getCertificateByCertId(certNumber)) as any;
-      // gradeApprovedAt is the public-visibility gate every other public read applies via
-      // findCertByIdFlex. This proxy checked only status+grade, which is not the same thing: the
-      // connector inserts partner certificates as status='active', and the partner grader writes a
-      // grade while grade_approved_at is still NULL. Both of the old conditions were therefore true
-      // BEFORE HQ review, so an unauthenticated caller could stream the shop's customer's raw card
-      // scan straight from R2 — no signed URL, no expiry — for a certificate that /api/cert/:id
-      // correctly 404s. Same gate, same 404, no oracle.
-      if (!cert || cert.status !== "active" || cert.gradeOverall == null || cert.gradeApprovedAt == null) {
+      // VALIDATE THE KIND BEFORE TOUCHING A DATABASE. An unknown kind is a 404 that costs nothing,
+      // and doing it first means an anonymous caller cannot make us open a connection by guessing.
+      if (kind !== "front-label" && kind !== "back-label" && kind !== "scan") {
         return res.status(404).end();
       }
+
+      // ── BLOCKER B2: this lookup used to run on the PRIVILEGED MAIN POOL ────────────────────
+      // It was `storage.getCertificateByCertId()` (a Drizzle `SELECT *`, i.e. every private note
+      // and authenticity verdict on the row) followed by a raw `db.execute` — both on the owner,
+      // BYPASSRLS, unbounded MintVault connection, from an UNAUTHENTICATED request. Three separate
+      // problems: anonymous traffic executing with owner privilege; anonymous traffic consuming
+      // the pool Super Admin depends on, so a crawler on the showcase is an operator outage; and
+      // no statement timeout, so one slow scan holds a privileged connection indefinitely.
+      //
+      // It now runs on the SAME least-privileged reader 0061 built for the shop profile, against
+      // the narrow `public_slab_image_projection` (0064) — one certificate number, one resolved
+      // storage key, one boolean, and no access to `certificates` at all. The publication gate
+      // (not deleted, active, graded, HQ-APPROVED) is carried by the view definition, so it is
+      // enforced by the database rather than by the `if` that used to live here and could be
+      // dropped by a future edit. A row that does not come back IS the 404.
+      //
+      // FAIL CLOSED, NO FALLBACK. If PARTNER_PUBLIC_DATABASE_URL is not configured this 503s; it
+      // does NOT quietly return to the privileged pool. Serving the public showcase from an owner
+      // connection is not recoverable by noticing later. ⚠️ DEPLOY PREREQUISITE: that variable must
+      // be set, and its login role must be a member of partner_public_reader, BEFORE this ships.
+      // The public slab showcase is a LIVE production surface today and it will 503 without them.
+      let eligible: { scan_object_key: string | null; has_scan: boolean } | undefined;
+      try {
+        const { rows } = await partnerPublicQuery<{ scan_object_key: string | null; has_scan: boolean }>(
+          `SELECT scan_object_key, has_scan
+             FROM public_slab_image_projection
+            WHERE certificate_number = $1
+            LIMIT 1`,
+          [certNumber]
+        );
+        eligible = rows[0];
+      } catch (dbErr: any) {
+        // Same classification the shop finder uses, so a Neon restart is a 503 and a query bug is
+        // a 500 that shows up in alerting rather than hiding behind a soothing "try again".
+        if (isPublicDbUnavailable(dbErr)) {
+          console.error("[slab-image] public database unavailable:", dbErr?.code, dbErr?.message);
+          return res.status(503).end();
+        }
+        throw dbErr;
+      }
+      if (!eligible) return res.status(404).end();
 
       let key: string | null = null;
       if (kind === "front-label") {
         key = `public/slab-showcase/${certNumber}/front_label.png`;
       } else if (kind === "back-label") {
         key = `public/slab-showcase/${certNumber}/back_label.png`;
-      } else if (kind === "scan") {
-        // Raw SQL: grading_front_display predates this branch's schema.ts
-        // (added on perf/grading-speed) but exists in the staging DB — a
-        // drizzle select() won't return it until the branches merge.
-        const scanRow = (
-          await db.execute(
-            sql`SELECT grading_front_display, grading_front_cropped, front_image_path FROM certificates WHERE id = ${cert.id}`
-          )
-        ).rows[0] as any;
-        key = scanRow?.grading_front_display || scanRow?.grading_front_cropped || scanRow?.front_image_path || null;
       } else {
-        return res.status(404).end();
+        // `scan`. The display/cropped/original precedence is resolved IN the projection, so the
+        // ordering has exactly one definition instead of one here and one in slab-showcase.ts.
+        key = eligible.has_scan ? eligible.scan_object_key : null;
       }
       if (!key) return res.status(404).end();
 

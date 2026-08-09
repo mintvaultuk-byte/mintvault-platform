@@ -1,0 +1,82 @@
+-- migrate:no-transaction
+-- migrate:ensure-valid-concurrent-index public.idx_certificates_origin_location_reviewed
+--
+-- 0065_certificates_reviewed_unit_index.sql
+-- The index the PARTNER_QUALITY_V2 rating measurement actually needs, built without blocking a
+-- single write to `certificates`.
+--
+-- ============================================================================================
+-- THE DEFECT THIS CLOSES (HIGH H10)
+-- ============================================================================================
+-- 0058:462-464 created
+--
+--   idx_certificates_origin_location_recent
+--     ON certificates (origin_location_id, grade_approved_at DESC)
+--     WHERE origin_location_id IS NOT NULL AND grade_approved_at IS NOT NULL
+--
+-- for the public "recent cards" list, and that index is correct for that query. But V2 then
+-- widened the rating POPULATION to include reviewed units that were never approved:
+--
+--   WHERE origin_location_id = $1 AND origin_type = 'PARTNER'
+--     AND deleted_at IS NULL AND status = 'active'
+--     AND (grade_approved_at IS NOT NULL OR redo_count > 0)
+--
+-- `grade_approved_at IS NOT NULL` is in 0058's PARTIAL PREDICATE, so the planner cannot use that
+-- index for a query whose whole point is to include rows where it is NULL. The rating
+-- measurement — run on every HQ approval, every HQ return, and every reconciler tick — therefore
+-- sequentially scanned `certificates`, the largest table in the product. On an estate of any size
+-- that is a rating refresh that gets slower with every HQ card ever graded, on the same pool
+-- Super Admin uses.
+--
+-- Dropping the `grade_approved_at IS NOT NULL` conjunct is the whole fix. The predicate stays
+-- partial on `origin_location_id IS NOT NULL`, which is what keeps it small: `certificates` is
+-- overwhelmingly HQ-originated and every one of those rows has a NULL origin, so the index holds
+-- only partner-originated cards.
+--
+-- 0058's narrower index is deliberately NOT dropped. Dropping an index takes ACCESS EXCLUSIVE on
+-- its table, which is the one thing this file exists to avoid, and the planner simply picks
+-- whichever of the two is cheaper for the query in front of it. Retiring it is a separate,
+-- scheduled operation.
+--
+-- ============================================================================================
+-- WHY THIS IS ITS OWN FILE, AND WHY IT IS CONCURRENT
+-- ============================================================================================
+-- Measured on a disposable PostgreSQL 17.10 cluster (2026-08-09), a plain `CREATE INDEX` on
+-- `certificates` takes **ShareLock**, and scripts/db/migrate.ts:190 holds every lock a
+-- transaction-safe file takes until that file COMMITs. So building this index inside 0063 or 0064
+-- would have blocked every INSERT and UPDATE on `certificates` — i.e. all certificate issuance,
+-- all grading saves, all approvals — for the duration of the build, not just for the statement.
+--
+-- `CREATE INDEX CONCURRENTLY` takes ShareUpdateExclusive instead, which conflicts with nothing
+-- that ordinary traffic takes. It cannot run inside a transaction block, hence the
+-- `migrate:no-transaction` marker on line 1 — the same shape as
+-- migrations/0018_correction_audit_index.sql, which is this repo's working precedent.
+--
+-- THE COST OF CONCURRENTLY, STATED HONESTLY: it is not atomic. If it fails part-way it leaves an
+-- INVALID index behind, which the planner ignores but which still costs write amplification. That
+-- is what the `migrate:ensure-valid-concurrent-index` directive on line 2 is for — the runner
+-- (scripts/db/migrate.ts:420-442) inspects `pg_index.indisvalid` before and after, DROPs an
+-- invalid predecessor CONCURRENTLY, and refuses to journal the migration as applied unless the
+-- index is valid afterwards. So a failed run is retryable and self-healing rather than something
+-- an operator has to notice.
+--
+-- ============================================================================================
+-- COLUMN DEPENDENCIES
+-- ============================================================================================
+-- CONCURRENTLY cannot be wrapped in a DO block, so unlike 0058 this statement cannot be made
+-- conditional on the columns existing. Both are guaranteed by the chain that precedes it:
+--   * `certificates` itself — 0049:102 creates a UNIQUE INDEX on it unconditionally, so any
+--     estate that reached 0065 has the table.
+--   * `origin_location_id` — 0035:121, `ALTER TABLE certificates ADD COLUMN IF NOT EXISTS
+--     origin_location_id uuid`, unconditional.
+--   * `grade_approved_at` — created by 0063's sibling boot-DDL reconciliation and present on
+--     every estate 0058's own index was built against.
+-- If any of those is somehow absent the migration fails LOUDLY with 42703 rather than silently
+-- skipping, which is the correct direction: a rating engine quietly seq-scanning production is
+-- worse than a migration that refuses to apply.
+--
+-- Additive only. Creates one index, drops nothing, rewrites no applied migration.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_certificates_origin_location_reviewed
+  ON certificates (origin_location_id, grade_approved_at DESC)
+  WHERE origin_location_id IS NOT NULL;

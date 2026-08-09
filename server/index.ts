@@ -491,7 +491,15 @@ async function runTransferV2Sweep() {
       );
     }
   });
-  guardedPartnerRatingReconciler();
+  // FIRST RUN IS DELAYED, NOT IMMEDIATE (HIGH H16). Calling it inline here fired a bounded but
+  // real estate sweep — an aggregate over `certificates` per candidate listing — in the same tick
+  // as process start, competing with migrations finishing, pools warming and readiness probes, on
+  // every machine in the fleet simultaneously after a rolling deploy. The neighbours already
+  // settled this: transfer-v2-sweep waits 30s "let migrations finish", embed-corpus waits 60s "so
+  // the server is fully serving". 45s puts the reconciler in the same band. Nothing is lost by
+  // waiting: the durable dirty state is what carries the obligation across the delay, and the
+  // immediate post-review refresh means a rating is normally fresh long before the first tick.
+  trackTimeout(guardedPartnerRatingReconciler, 45_000);
   trackInterval(guardedPartnerRatingReconciler, 5 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the

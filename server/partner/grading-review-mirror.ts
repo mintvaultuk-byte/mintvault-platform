@@ -28,7 +28,7 @@
  * can surface them rather than reporting a clean approval over a broken mirror.
  */
 import { db } from "../db";
-import { refreshRatingAfterCommit } from "./public-network-rating-lifecycle";
+import { scheduleRatingRefresh } from "./public-network-rating-lifecycle";
 import { sql } from "drizzle-orm";
 import { storage } from "../storage";
 
@@ -510,32 +510,66 @@ export async function mirrorPartnerRejection(certId: number): Promise<PartnerMir
 
 
 /**
- * Refresh one certificate's shop rating, and NEVER let that failure reach the caller.
+ * Record that this certificate's shop rating is owed a recalculation, and DO NOT WAIT for it.
  *
- * This is the whole non-blocking contract in one place. An HQ approval or rejection must succeed
- * even if the rating engine is unavailable: the listing was already marked dirty durably inside the
- * evidence-changing work, so a failure here costs freshness, not correctness, and the reconciler
- * picks it up. Anything that escaped this function would turn a rating outage into a grading outage.
+ * ── WHAT WAS WRONG (BLOCKER B3) ────────────────────────────────────────────────────────────
+ * This function used to `await refreshRatingAfterCommit(...)` on the HQ approve/reject path. The
+ * contract said "NEVER THROWS" and it was implemented faithfully — but never throwing is not the
+ * same as never blocking. `refreshRatingAfterCommit` measures evidence with an aggregate over
+ * `certificates` and writes a snapshot in a transaction, and it did all of that on `adminPool`:
+ * four connections, no acquire timeout, no query timeout, no lock timeout. A rating query that
+ * hung returned no error to catch; the HQ approval simply never completed. A rating outage was a
+ * grading outage, which is the one thing the whole design says it must not be.
+ *
+ * ── WHAT REPLACES IT, IN ORDER ─────────────────────────────────────────────────────────────
+ *   1. THE DURABLE OBLIGATION, and nothing else, is what the caller waits on. One UPDATE of one
+ *      row by an indexed lookup. If the process dies immediately after, the work is still owed and
+ *      the reconciler will do it.
+ *   2. THE EXPENSIVE HALF IS DETACHED. `scheduleRatingRefresh` returns synchronously; the refresh
+ *      runs on its own bounded pool afterwards. It is not a floating promise — see its comment.
+ *   3. NOTHING HERE CAN THROW. The try/catch remains, because step 1 touches a database too.
+ *
+ * So the worst case is now: HQ approve returns 200 in its normal time, the rating stays dirty, and
+ * the reconciler fixes it on a later tick.
+ *
+ * ── WHY THE DIRTY MARK IS STILL AFTER THE COMMIT ───────────────────────────────────────────
+ * Ideally it would be the last statement INSIDE the caller's transaction (that is what
+ * `markRatingDirty(tx, locationId)` is for, and the approval path in this file will move to it
+ * once the mirror transaction is reshaped to carry the location). Until then it runs immediately
+ * after, on its own connection — never from inside the transaction, because a cross-pool
+ * acquisition while holding locks is the indefinite hang described in
+ * public-network-rating-lifecycle.ts. The reconciler is what covers the gap between the two.
  */
 async function refreshRatingForCert(certId: number, actor: string): Promise<void> {
   try {
     const locationId = await originLocationForCert(certId);
     if (!locationId) return;
+    // Awaited: tiny, indexed, and it is the durable part.
     await markRatingDirtyForLocation(locationId);
-    await refreshRatingAfterCommit(locationId, actor);
+    // NOT awaited: this is the part that can be slow, and HQ review must never wait on it.
+    scheduleRatingRefresh(locationId, actor);
   } catch (err) {
     const e = err as { code?: string; message?: string };
-    console.error("[partner-rating] post-review refresh failed (card workflow unaffected):", e?.code, e?.message);
+    console.error("[partner-rating] post-review dirty mark failed (card workflow unaffected):", e?.code, e?.message);
   }
 }
 
-/** Durable obligation first, on its own connection — this runs after every relevant transaction. */
+/**
+ * Durable obligation, on its own connection — this runs immediately after the relevant transaction.
+ *
+ * NO `AND rating_dirty = false` GUARD, and that omission is load-bearing (HIGH H2). It used to be
+ * there as an optimisation, and it silently swallowed the generation bump on a listing that was
+ * already dirty — which is exactly the case where an in-flight recalculation is about to mark the
+ * listing clean and erase this event. `rating_dirty_since` is still monotonic via COALESCE, so the
+ * reconciler's oldest-first ordering is unaffected and a busy shop still cannot push itself to the
+ * back of the queue.
+ */
 async function markRatingDirtyForLocation(locationId: string): Promise<void> {
   await db.execute(sql`
     UPDATE partner_public_listings
        SET rating_dirty = true,
-           rating_dirty_since = COALESCE(rating_dirty_since, now())
+           rating_dirty_since = COALESCE(rating_dirty_since, now()),
+           rating_dirty_generation = rating_dirty_generation + 1
      WHERE location_id = ${locationId}::uuid
-       AND rating_dirty = false
   `);
 }

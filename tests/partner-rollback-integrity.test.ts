@@ -576,14 +576,104 @@ const ROUND_TRIPS: RoundTrip[] = [
     },
   },
   {
-    number: 62,
+    number: 63,
+    standalone: false,
+    migration: "0063_certificate_review_lifecycle_clock.sql",
+    rollback: "rollback-0063-certificate-review-lifecycle-clock.sql",
+    hole: "the 180-day rating window dates an abandoned unit from its CONNECTOR IMPORT, so a shop can import a batch, grade it badly months later and have the bad evidence already outside the window",
+    whenApplied: "review_clock_present",
+    whenRolledBack: "review_clock_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (SELECT count(*) FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='certificates'
+                    AND column_name IN ('review_entered_at','status_updated_at'))::int n`
+      );
+      return rows[0].n === 0 ? "review_clock_absent" : "review_clock_present";
+    },
+  },
+  {
+    number: 64,
+    standalone: false,
+    migration: "0064_public_slab_image_projection.sql",
+    rollback: "rollback-0064-public-slab-image-projection.sql",
+    hole: "the anonymous slab-image proxy resolves certificates on the owner, BYPASSRLS, unbounded main pool",
+    whenApplied: "slab_projection_present",
+    whenRolledBack: "slab_projection_absent",
+    // Counts the view AND the reader's grant on it: dropping the view while leaving a grant, or
+    // leaving the view while revoking the grant, are both half-states the route cannot survive.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM pg_class
+             WHERE relnamespace='public'::regnamespace AND relkind='v'
+               AND relname = 'public_slab_image_projection')
+           + (SELECT count(*) FROM information_schema.role_table_grants
+               WHERE table_schema='public' AND table_name='public_slab_image_projection'
+                 AND grantee='partner_public_reader' AND privilege_type='SELECT')
+         )::int n`
+      );
+      return rows[0].n === 0 ? "slab_projection_absent" : "slab_projection_present";
+    },
+  },
+  {
+    number: 65,
+    standalone: false,
+    migration: "0065_certificates_reviewed_unit_index.sql",
+    rollback: "rollback-0065-certificates-reviewed-unit-index.sql",
+    hole: "the rating measurement seq-scans certificates, because 0058's partial index excludes exactly the abandoned units V2 added",
+    whenApplied: "reviewed_index_present",
+    whenRolledBack: "reviewed_index_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (SELECT count(*) FROM pg_indexes
+                  WHERE schemaname='public' AND indexname='idx_certificates_origin_location_reviewed')::int n`
+      );
+      return rows[0].n === 0 ? "reviewed_index_absent" : "reviewed_index_present";
+    },
+  },
+  {
+    number: 66,
     standalone: true,
+    migration: "0066_partner_rating_lifecycle_hardening.sql",
+    rollback: "rollback-0066-partner-rating-lifecycle-hardening.sql",
+    hole: "mark-clean erases a quality event that lands mid-calculation, two reconcilers claim the same listing, a poisoned row starves every healthy one, a new shop is born clean, and a clock-only window change never refreshes",
+    whenApplied: "rating_lifecycle_hardening_present",
+    whenRolledBack: "rating_lifecycle_hardening_absent",
+    // Columns AND the born-dirty trigger AND the generations CHECK AND both indexes. Each is a
+    // separate defect: dropping the columns but leaving the trigger would break every INSERT.
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT (
+           (SELECT count(*) FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='partner_public_listings'
+               AND column_name IN ('rating_dirty_generation','rating_clean_generation',
+                                   'rating_next_attempt_at','rating_next_recalc_at',
+                                   'rating_claimed_until','rating_claimed_by'))
+           + (SELECT count(*) FROM pg_trigger
+               WHERE tgrelid='public.partner_public_listings'::regclass
+                 AND tgname='trg_partner_public_listings_born_dirty')
+           + (SELECT count(*) FROM pg_constraint
+               WHERE conname='chk_partner_public_listings_rating_generations')
+           + (SELECT count(*) FROM pg_indexes
+               WHERE schemaname='public'
+                 AND indexname IN ('idx_partner_public_listings_rating_due',
+                                   'idx_partner_public_listings_rating_retry'))
+         )::int n`
+      );
+      return rows[0].n === 0 ? "rating_lifecycle_hardening_absent" : "rating_lifecycle_hardening_present";
+    },
+  },
+  {
+    number: 62,
+    standalone: false,
     migration: "0062_partner_rating_dirty_state.sql",
     rollback: "rollback-0062-partner-rating-dirty-state.sql",
     hole: "nothing marks a shop rating stale, so a published rating is only ever as fresh as the last time a human pressed Recalculate",
     whenApplied: "rating_dirty_state_present",
     whenRolledBack: "rating_dirty_state_absent",
-    // 0062 is now the newest migration, so the descending sequence starts here.
+    // 0062 is no longer the newest — 0063-0066 sit above it and the descending sequence now
+    // starts at 0066. The refusal this used to be exempt from is exactly what the sequence proves.
     //
     // The probe counts COLUMNS AND the partial candidate index. Dropping the columns while leaving
     // the index behind would leave a stranded index on a table whose predicate no longer resolves.
@@ -880,7 +970,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
   // 3. THE FULL DESCENDING SEQUENCE — the one that was permanently bricked.
   // ===========================================================================================
 
-  it("the whole 0056 -> 0047 descending rollback completes, and the runner restores every one", async () => {
+  it("the whole 0066 -> 0047 descending rollback completes, and the runner restores every one", async () => {
     const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
 
     for (const entry of descending) {

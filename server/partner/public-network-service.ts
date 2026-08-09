@@ -17,16 +17,35 @@
  *                                    privileges, so routing a self-service write through it
  *                                    silently discards the entire protection.
  *
- *   RATING RECALC / ADMIN         -> partnerAdminQuery / withPartnerAdminTransaction. Recalculation
+ *   RATING RECALC                 -> partnerRatingQuery / withPartnerRatingTransaction. Recalculation
  *                                    reads `certificates` (which partner_runtime cannot see) and
- *                                    writes rating columns partner_runtime has no grant on.
+ *                                    writes rating columns partner_runtime has no grant on, so it
+ *                                    needs the privileged URL — but it is SECONDARY work and runs
+ *                                    on a separate, hard-bounded pool of its own. Same URL, same
+ *                                    role, same privileges; isolated capacity. It used to share
+ *                                    adminPool (max 4, no timeouts of any kind), which meant a few
+ *                                    hung rating refreshes could park every connection HQ approve
+ *                                    and reject need. "The rating never throws" was true and did
+ *                                    not help: the caller waited just the same.
+ *
+ *   SUPER ADMIN LISTING CRUD      -> partnerAdminQuery / withPartnerAdminTransaction. Interactive
+ *                                    operator work, and correctly on the operator pool.
  *
  * Every public read builds an EXPLICIT allowlist DTO. There is no `SELECT *` to JSON anywhere in
  * this file, and the SELECT column lists are written out in full so that adding a column to
  * partner_public_listings can never widen a public response by accident.
  */
 import type { PoolClient } from "pg";
-import { partnerPublicQuery, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
+import {
+  partnerPublicQuery,
+  partnerAdminQuery,
+  withPartnerAdminTransaction,
+  // Rating work runs on its own small, hard-bounded pool. See the comment on getRatingPool in
+  // ./db — the point is that a hung rating refresh cannot consume the four adminPool connections
+  // HQ approve/reject needs. Same URL, same role, same privileges; separate, bounded capacity.
+  partnerRatingQuery,
+  withPartnerRatingTransaction,
+} from "./db";
 import {
   buildRatingEvidence,
   computeRating,
@@ -544,23 +563,44 @@ export async function countPublicCards(locationId: string): Promise<number> {
 /**
  * Measure the rating evidence for one location.
  *
- * Runs on the ADMIN pool because `certificates` is not readable by partner_runtime. One aggregate
- * query, no per-card work — a rating must never cost a scan per card.
+ * Runs on the isolated RATING pool because `certificates` is not readable by partner_runtime and
+ * this is the single most expensive query in the feature — one aggregate, no per-card work, but
+ * still a real scan. Bounded there so it can never hold a connection HQ review needs.
  */
 export async function measureEvidence(locationId: string): Promise<RatingEvidence> {
-  const { rows } = await partnerAdminQuery<{
-    w_units: string; w_first: string; w_redos: string; w_aband: string;
-    a_units: string; a_first: string; a_redos: string; a_aband: string;
+  const { rows } = await partnerRatingQuery<{
+    w_units: string; w_first: string; w_redos: string; w_aband: string; w_oldest: Date | null;
+    a_units: string; a_first: string; a_redos: string; a_aband: string; a_oldest: Date | null;
   }>(
     `WITH units AS (
        SELECT redo_count,
               grade_approved_at,
               grade,
-              -- The unit's position in time. grade_approved_at is the truth for an approved unit;
-              -- an ABANDONED unit has none, so we fall back through the timestamps that do survive
-              -- rework. issued_at is the last resort and always exists, so a unit can never fall
-              -- out of the all-time population for want of a date.
-              COALESCE(grade_approved_at, graded_at, status_updated_at, issued_at) AS ev
+              -- ── THE REVIEW CLOCK (migration 0063, BLOCKER B1) ───────────────────────────
+              -- The unit's position in time, and the single most gameable value in this query.
+              --
+              -- It used to be COALESCE(grade_approved_at, graded_at, status_updated_at, issued_at),
+              -- and for the exact unit V2 exists to keep — reviewed, returned, ABANDONED — the
+              -- first three were all NULL: no approval by definition, graded_at DELETED by
+              -- server/grader.ts's rejection CAS, and status_updated_at written only by the
+              -- shipping-status route. So ev was issued_at: the CONNECTOR IMPORT DATE.
+              --
+              -- That is an intake timestamp, and the gap between intake and review is entirely
+              -- the partner's to choose. Import a batch, sit on it for six months, grade it
+              -- badly, abandon the bounces — and the bad evidence is already outside the 180-day
+              -- window on the day it is created. Reproduced in tests/partner-review-clock.test.ts.
+              --
+              -- GREATEST, not COALESCE, and that is the anti-gaming direction: the LATEST review
+              -- event positions the unit. Continuing to rework a unit keeps its evidence INSIDE
+              -- the window, which is the direction that costs the shop. Under "first review wins"
+              -- a unit could be bounced indefinitely and still age out on schedule.
+              -- GREATEST ignores NULLs in PostgreSQL, so an approved unit with no earlier bounce
+              -- resolves to grade_approved_at exactly as before.
+              --
+              -- issued_at survives ONLY as the outer COALESCE's last resort, for a pre-0063 row
+              -- the backfill could not reach. It can never make a unit look NEWER than the truth,
+              -- so it fails to rescue evidence rather than fabricating it.
+              COALESCE(GREATEST(grade_approved_at, review_entered_at), issued_at) AS ev
          FROM certificates
         WHERE origin_location_id = $1
           AND origin_type = 'PARTNER'
@@ -573,10 +613,15 @@ export async function measureEvidence(locationId: string): Promise<RatingEvidenc
        coalesce(sum(redo_count) FILTER (WHERE (ev IS NULL OR ev >= now() - ($2 || ' days')::interval)), 0)::text AS w_redos,
        count(*) FILTER (WHERE (ev IS NULL OR ev >= now() - ($2 || ' days')::interval)
                           AND grade_approved_at IS NULL)::text AS w_aband,
+       -- The oldest unit INSIDE the window is the next one to leave it, so this is the earliest
+       -- instant the rating can change with no workflow write at all. It drives
+       -- rating_next_recalc_at; it is not a rating input.
+       min(ev) FILTER (WHERE ev IS NOT NULL AND ev >= now() - ($2 || ' days')::interval) AS w_oldest,
        count(*)::text AS a_units,
        count(*) FILTER (WHERE grade_approved_at IS NOT NULL AND grade IS NOT NULL AND redo_count = 0)::text AS a_first,
        coalesce(sum(redo_count), 0)::text AS a_redos,
-       count(*) FILTER (WHERE grade_approved_at IS NULL)::text AS a_aband
+       count(*) FILTER (WHERE grade_approved_at IS NULL)::text AS a_aband,
+       min(ev) AS a_oldest
      FROM units`,
     [locationId, String(RATING_WINDOW_DAYS)],
   );
@@ -587,6 +632,7 @@ export async function measureEvidence(locationId: string): Promise<RatingEvidenc
     totalRedos: Number(r?.w_redos ?? 0),
     abandonedUnits: Number(r?.w_aband ?? 0),
     windowDays: RATING_WINDOW_DAYS as number | null,
+    oldestEvidenceInWindow: r?.w_oldest ? new Date(r.w_oldest).toISOString() : null,
   };
 
   // THE FALLBACK. A rolling window is only honest while it holds enough units to mean something.
@@ -601,6 +647,10 @@ export async function measureEvidence(locationId: string): Promise<RatingEvidenc
     totalRedos: Number(r?.a_redos ?? 0),
     abandonedUnits: Number(r?.a_aband ?? 0),
     windowDays: null,
+    // The all-time fallback has no window boundary to cross, so there is nothing here that can
+    // change by clock alone. Null makes the lifecycle fall back to its bounded staleness sweep,
+    // which is the right cadence for a shop that has not yet reached the minimum sample.
+    oldestEvidenceInWindow: null,
   });
 }
 
@@ -629,7 +679,9 @@ export interface RecalculationResult {
  * keeps an override auditable rather than a quiet rewrite of the record.
  */
 export async function recalculateRating(listingId: string, actor: string): Promise<RecalculationResult> {
-  const listing = await partnerAdminQuery<{ id: string; tenant_id: string; location_id: string }>(
+  // Rating pool, not adminPool. Recalculation is SECONDARY work and must not be able to consume
+  // the connections HQ approve/reject runs on — see getRatingPool in ./db.
+  const listing = await partnerRatingQuery<{ id: string; tenant_id: string; location_id: string }>(
     "SELECT id, tenant_id, location_id FROM partner_public_listings WHERE id = $1",
     [listingId],
   );
@@ -639,7 +691,7 @@ export async function recalculateRating(listingId: string, actor: string): Promi
   const evidence = await measureEvidence(l.location_id);
   const computed = computeRating(evidence);
 
-  return withPartnerAdminTransaction(async (client: PoolClient) => {
+  return withPartnerRatingTransaction(async (client: PoolClient) => {
     const snap = await client.query<{ id: string }>(
       `INSERT INTO partner_public_rating_snapshots
          (tenant_id, listing_id, location_id, rating_version, internal_score, public_rating,

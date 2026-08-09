@@ -467,19 +467,34 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
 
     it("RATING-AUTO1: marking dirty is idempotent and does not move the queue position", async () => {
       const { listingId, locationId } = await seedListing(T_A, "Dirty Idem", "dirty-idem");
-      await admin.query("UPDATE partner_public_listings SET rating_dirty=false, rating_dirty_since=NULL WHERE id=$1", [listingId]);
+      // Forcing the listing clean now has to move the GENERATIONS too, not just the flag: 0066's
+      // chk_partner_public_listings_rating_generations makes rating_dirty a derived fact
+      // (clean_generation < dirty_generation) rather than an independently-settable boolean. That
+      // constraint is the point — it is what stops the flag and the counters disagreeing — so the
+      // fixture is what changes, not the invariant.
+      await admin.query(
+        `UPDATE partner_public_listings
+            SET rating_dirty=false, rating_dirty_since=NULL,
+                rating_clean_generation = rating_dirty_generation
+          WHERE id=$1`, [listingId]);
 
       await life.markRatingDirty(admin, locationId);
-      const first = await admin.query<{ since: Date }>(
-        "SELECT rating_dirty_since AS since FROM partner_public_listings WHERE id=$1", [listingId]);
+      const first = await admin.query<{ since: Date; gen: string }>(
+        "SELECT rating_dirty_since AS since, rating_dirty_generation::text AS gen FROM partner_public_listings WHERE id=$1", [listingId]);
       expect((await dirtyState(listingId)).rating_dirty).toBe(true);
 
       await life.markRatingDirty(admin, locationId);
-      const second = await admin.query<{ since: Date }>(
-        "SELECT rating_dirty_since AS since FROM partner_public_listings WHERE id=$1", [listingId]);
+      const second = await admin.query<{ since: Date; gen: string }>(
+        "SELECT rating_dirty_since AS since, rating_dirty_generation::text AS gen FROM partner_public_listings WHERE id=$1", [listingId]);
       // Monotonic: a shop under constant activity cannot keep pushing itself to the back of the
       // oldest-first queue and starve a quieter one.
       expect(second.rows[0].since.getTime()).toBe(first.rows[0].since.getTime());
+      // BUT the generation MUST move on the second mark, even though the listing was already
+      // dirty. That is the H2 repair: the old implementation carried `AND rating_dirty = false`,
+      // so a second event on an already-dirty listing left no trace — and an in-flight
+      // recalculation would then CAS it clean and erase the event. Idempotent POSITION, not
+      // idempotent GENERATION.
+      expect(BigInt(second.rows[0].gen)).toBeGreaterThan(BigInt(first.rows[0].gen));
     });
 
     it("a reconciler tick refreshes a dirty listing and marks it clean", async () => {

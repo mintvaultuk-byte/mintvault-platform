@@ -1112,6 +1112,22 @@ export async function getCertsForSubmission(submissionId: number) {
   }));
 }
 
+/**
+ * The durable quality-review clock on `certificates` (migration 0063).
+ *
+ * ONE DEFINITION, because there are now three places that must agree on this column and a
+ * disagreement between them is silent: the writer below, the partner submit-for-review path
+ * (server/partner/grading-routes.ts), and the rating measurement
+ * (server/partner/public-network-service.ts). Raw SQL is invisible to the type checker, so a
+ * typo in any one of them type-checks perfectly and produces a rating computed from the wrong
+ * dates — which is precisely the class of failure this column exists to end.
+ *
+ * WHAT IT IS: the latest moment a physical unit entered or re-entered MintVault quality review.
+ * WHAT IT IS NOT: grading data. It feeds no score, weight, threshold, bracket or gate. It
+ * positions an already-computed piece of evidence on a calendar, nothing more.
+ */
+export const REVIEW_LIFECYCLE_COLUMN = "review_entered_at";
+
 // ── Reject / approve (admin sanctioned actions on a pending_review cert) ───────
 
 /** Reject a grader-submitted cert: pending_review → assigned, store reason, +redo. */
@@ -1123,10 +1139,27 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
   }
   // Phase 2 — atomic CAS: only reject while still pending_review; 0 rows ⇒ a
   // concurrent transition won, return 409 instead of clobbering the new state.
+  //
+  // review_entered_at is written HERE, in the same CAS, and that placement is the whole point.
+  // See REVIEW_LIFECYCLE_COLUMN above for what the column is and why the previous clock was
+  // gameable. What matters at this line is that `redo_count` — the predicate that puts a unit
+  // into the quality-rating population — and the timestamp that positions it in the rolling
+  // window MOVE IN ONE STATEMENT. Written anywhere else (the route, the partner mirror, a
+  // follow-up UPDATE) they could disagree: a crash between the two would leave a unit counted as
+  // reviewed but dated from its connector import, which is exactly the defect being closed.
+  //
+  // Note it survives `graded_at = NULL` on the same line. Nulling graded_at is what DESTROYED the
+  // only surviving review timestamp on a returned card and sent the window's clock all the way
+  // back to issued_at; that behaviour is deliberate and unchanged, and this column is what now
+  // records the review that happened regardless.
+  //
+  // NOT GRADING DATA. No grade, sub-grade, weight, threshold, deduction, centering value or
+  // Pristine decision is read or written by this change. It records WHEN a review outcome was
+  // recorded, not WHAT it was.
   const r = await db.execute(sql`
     UPDATE certificates
     SET grader_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
-        graded_at = NULL, updated_at = NOW()
+        graded_at = NULL, review_entered_at = NOW(), updated_at = NOW()
     WHERE id = ${certId} AND grader_status = 'pending_review'
     RETURNING id
   `);

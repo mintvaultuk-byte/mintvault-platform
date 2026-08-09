@@ -88,27 +88,57 @@ function sendError(res: Response, err: unknown): void {
  * genuine application bug into a soothing 503 and hide it from every alert, which is the opposite
  * of what an outage signal is for.
  *
- * The SQLSTATEs are the bounds configured on the public pool actually firing:
- *   57014  statement_timeout / query cancelled  — the statement bound
- *   55P03  lock_not_available                   — the lock_timeout bound
- *   53300  too_many_connections                 — the server refusing more backends
- *   08xxx  connection exception class           — the endpoint gone or refusing
- * plus node-postgres' own client-side acquire and query timeouts, which surface as messages rather
+ * The SQLSTATEs fall into two groups.
+ *
+ * OUR OWN BOUNDS FIRING — the public pool doing what it was configured to do:
+ *   57014  query_canceled / statement_timeout  — the statement bound
+ *   55P03  lock_not_available                  — the lock_timeout bound
+ *   53300  too_many_connections                — the server refusing more backends
+ *   53200  out_of_memory                       — the server refusing to allocate
+ *
+ * THE PROVIDER TAKING THE ENDPOINT AWAY — added after hostile review, because Neon does all three
+ * of these ROUTINELY (autosuspend, scale-to-zero, compute restart, maintenance) and every one of
+ * them was previously classified "unknown" and served as a 500. An ordinary Neon idle-resume
+ * looked identical to an application bug in every dashboard:
+ *   57P01  admin_shutdown        — the backend was terminated by an administrator
+ *   57P02  crash_shutdown        — the server is shutting down after a crash
+ *   57P03  cannot_connect_now    — the server is starting up and not yet accepting connections
+ *   08xxx  connection exception  — the endpoint gone, refusing, or lost mid-query
+ *
+ * plus node-postgres' own client-side acquire and query timeouts, which surface as MESSAGES rather
  * than SQLSTATEs, and PartnerPublicDbUnavailable for a missing/refused public configuration.
+ *
+ * ── WHAT WAS REMOVED, AND WHY IT MATTERED (HIGH H7) ─────────────────────────────────────────
+ * `msg.includes("fail closed")` used to be in this list, and it is the reason this function needed
+ * revisiting. "fail closed" is not a database condition — it is a PHRASE THIS CODEBASE WRITES INTO
+ * ITS OWN ERROR MESSAGES, in at least four places (server/partner/db.ts's missing-URL guard, its
+ * tenant-context assertion, the partner runtime pool's refusal to start, and now the public
+ * reader's role assertion). Several of those are raised by APPLICATION BUGS: a malformed tenant id
+ * reaching withTenant is a programming error, and it was being reported to the caller as "the shop
+ * finder is temporarily unavailable, please try again shortly" and to us as a 503 that no alert
+ * treats as a defect. A substring match on our own prose is the widest possible net, and it caught
+ * exactly the class of error that must stay loud.
+ *
+ * The genuine missing-configuration case that clause was there for is already covered, properly and
+ * by TYPE, by the `instanceof PartnerPublicDbUnavailable` check on the first line.
+ *
+ * THE RULE: an unknown error is a 500. A 500 is visible, alertable and honest. Widening this
+ * allowlist by one guess turns a defect into a shrug.
  */
 export function isPublicDbUnavailable(err: unknown): boolean {
   if (err instanceof PartnerPublicDbUnavailable) return true;
   const e = err as { code?: string; message?: string };
   const code = typeof e?.code === "string" ? e.code : "";
   if (code === "57014" || code === "55P03" || code === "53300" || code === "53200") return true;
+  if (code === "57P01" || code === "57P02" || code === "57P03") return true;
   if (code.startsWith("08")) return true;
-  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND") return true;
+  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND" || code === "EPIPE") return true;
   const msg = typeof e?.message === "string" ? e.message.toLowerCase() : "";
   return (
+    // node-postgres, verbatim: pool acquire timeout, query timeout, and a dropped backend.
     msg.includes("timeout exceeded when trying to connect") ||
     msg.includes("query read timeout") ||
-    msg.includes("connection terminated") ||
-    msg.includes("fail closed")
+    msg.includes("connection terminated")
   );
 }
 

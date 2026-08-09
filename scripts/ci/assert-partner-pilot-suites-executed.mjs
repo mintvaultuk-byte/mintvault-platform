@@ -47,13 +47,13 @@ const SUITES = [
    * (partner_submissions.completed_at, SQLSTATE 42703) reached a PR with every suite green.
    * If this floor is ever missing, that entire code path is unproven again.
    */
-  { file: "tests/partner-completion-cascade.test.ts", min: 15 },
+  { file: "tests/partner-completion-cascade.test.ts", min: 18 }, // RE-MEASURED 2026-08-09 (was 15)
   /**
    * FULL-PILOT-LOCAL-01. Pins the corrected approval/settlement lifecycle: approving card ONE of
    * two must NOT settle. The earlier acceptance wording asserted 8/2/0 after BOTH approvals, which
    * production does not do — mirrorPartnerApproval fires on the COMPLETE approved set.
    */
-  { file: "tests/partner-full-pilot-workflow.test.ts", min: 17 },
+  { file: "tests/partner-full-pilot-workflow.test.ts", min: 21 }, // RE-MEASURED 2026-08-09 (was 17)
   /**
    * The ONLY behavioural coverage of /api/partner/grading/*. Every other assertion about the
    * partner grading adapter in this repository is a source-string pin, and the PR #288 mutation
@@ -69,7 +69,9 @@ const SUITES = [
    * said a floor below the real count "permits silent test deletion ... which is exactly what must
    * not happen to the only end-to-end evidence"; it was true of the floor itself.
    */
-  { file: "tests/partner-grading-http-routes.test.ts", min: 16 },
+  // RE-MEASURED 2026-08-09: 27. Pinned at 16, i.e. 11 of slack — the SECOND time this exact suite
+  // has drifted (see the note above about the seven server-authority proofs).
+  { file: "tests/partner-grading-http-routes.test.ts", min: 27 },
   /**
    * H2-GET-READONLY — the sole behavioural evidence that a GET on the partner grading adapter does
    * not strand a `pending_review` work item. It appeared in NONE of the six manifests.
@@ -102,7 +104,23 @@ const SUITES = [
    * attribution and rework), 2 abandonment-gaming tests, 6 cancellation state-machine tests,
    * 3 sample-gate/public-exposure tests.
    */
-  { file: "tests/partner-public-network-behavioural.test.ts", min: 19 },
+  // RE-MEASURED 2026-08-09: 63 (49 declarations + a 14-row it.each). The pin was 19, set when the
+  // suite had 19 tests, and never raised as it grew — 44 tests of SLACK, i.e. the rating-lifecycle
+  // block (8), the public-reader least-privilege block (23), override expiry (4), eligibility
+  // suspension (5) and the V2 recency window (3) were all silently deletable with CI green.
+  { file: "tests/partner-public-network-behavioural.test.ts", min: 63 },
+
+  // ── PREVIOUSLY UNFLOORED (HIGH H11) ───────────────────────────────────────────────────────
+  // All four were deletable in their entirety with every CI step green: nothing in scripts/ci/
+  // and nothing in tests/ci-execution-floor.test.ts referenced them. partner-rollback-integrity
+  // is the worst of them — it is the ONLY forward+rollback+re-apply proof for the whole 0047-0066
+  // series and the only behavioural coverage of the descending recovery order, and it is exactly
+  // the suite whose absence would be discovered during an incident.
+  // MEASURED 2026-08-09 against a real disposable PostgreSQL 17 cluster.
+  { file: "tests/partner-rollback-integrity.test.ts", min: 44 },
+  { file: "tests/partner-public-network-rating.test.ts", min: 48 },
+  { file: "tests/partner-public-network-migration.test.ts", min: 42 },
+  { file: "tests/partner-public-network-validation.test.ts", min: 31 },
   /**
    * The Super Admin control shell: requireAdmin rejection, partner/location/user suspend, session
    * revoke, feature-flag writes, emergency stop, MFA reset, read-endpoint authorisation and the
@@ -129,7 +147,7 @@ const problems = [];
 const rows = [];
 
 for (const { file, min } of SUITES) {
-  const result = (report.testResults ?? []).find((r) => (r.name ?? "").replace(/\\/g, "/").endsWith(file));
+  const result = (report.testResults ?? []).find((r) => (r.name ?? "").replace(/\\/g, "/").replace(/^.*?(tests\/)/, "$1") === file);
   if (!result) {
     problems.push(`${file}: absent from the vitest report — the suite did not run at all`);
     rows.push({ suite: file, executed: "ABSENT", passed: 0, failed: 0, skipped: 0, floor: min });

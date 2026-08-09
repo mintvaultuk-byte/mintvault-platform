@@ -326,8 +326,37 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /auth_status\s*=\s*COALESCE\(/.test(addedCode) &&
           /auth_notes\s*=\s*COALESCE\(/.test(addedCode) &&
           /private_notes\s*=\s*COALESCE\(/.test(addedCode);
+        // E) Durable review-lifecycle clock — founder-approved 2026-08-09, narrowly, for THAT
+        //    REPAIR ONLY (owner DECISION 1 of the partner-network final blocker repair).
+        //
+        //    What it admits: PARTNER_QUALITY_V2's rolling 180-day window positioned each unit with
+        //    COALESCE(grade_approved_at, graded_at, status_updated_at, issued_at). For the exact
+        //    unit V2 exists to keep — reviewed, returned, ABANDONED — all three of the first
+        //    options are NULL, and one of them is nulled by THIS FUNCTION (`graded_at = NULL` in
+        //    the rejection CAS). The clock therefore fell through to `issued_at`, the connector
+        //    IMPORT date, so a shop could import a batch, sit on it, grade it badly six months
+        //    later and abandon the bounces — evidence already outside the window on the day it was
+        //    created. The repair stamps `review_entered_at` in the SAME CAS that increments
+        //    `redo_count`, so the population predicate and the clock can never disagree.
+        //
+        //    TWO independent tokens are required and they are in DIFFERENT representations, so
+        //    neither can fake the other: the exported column constant is proven in JS mode (tagged
+        //    template text can never satisfy it — N5), and the SQL assignment is proven in guarded
+        //    mode. Both are mandatory.
+        //
+        //    What it does NOT authorise, and cannot: no scoring, no MVGS mathematics, no
+        //    centering, no Pristine / Black Label, no B1/B2/B3 rule change, no grading threshold,
+        //    deduction, weighting or calibration change, and no unrelated server/grader.ts change
+        //    of any kind. Neither token names any of those; the calculation-token assertion below
+        //    still applies unchanged; and the sibling per-line formula guard in this file still
+        //    scans every added AND removed line — so an unrelated protected-engine change bundled
+        //    alongside this signature still FAILS. `review_entered_at` is a timestamp column: it
+        //    contains no digit, no arithmetic and no grade-ish identifier.
+        const signatureE =
+          /\bexport const REVIEW_LIFECYCLE_COLUMN\b/.test(addedJs) &&
+          /review_entered_at\s*=\s*NOW\(\)/.test(addedCode);
         expect(
-          signatureA || signatureB || signatureC || signatureD,
+          signatureA || signatureB || signatureC || signatureD || signatureE,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from

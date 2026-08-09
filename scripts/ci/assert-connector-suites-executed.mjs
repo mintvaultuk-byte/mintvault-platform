@@ -123,6 +123,15 @@ for (const { file, min } of EXPECTED) {
     );
   } else if (r.executed < min) {
     problems.push(`${file}: only ${r.executed} tests executed, expected at least ${min} — coverage was lost`);
+  } else if (r.skipped !== 0) {
+    // BACKPORTED 2026-08-09. The other five assert scripts have carried this check for months, and
+    // assert-partner-pilot-suites-executed.mjs documents its absence here in writing: a suite in
+    // THIS manifest could add two tests, skip three, stay above its floor and stay green. A floor
+    // that only counts what ran cannot see what stopped running.
+    problems.push(
+      `${file}: ${r.skipped} test(s) SKIPPED. A skip is invisible in an exit code — either an ` +
+        `it.skip was committed or a runtime gate turned coverage off silently`
+    );
   }
 }
 

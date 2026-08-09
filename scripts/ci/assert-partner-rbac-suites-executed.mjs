@@ -45,7 +45,7 @@ const EXPECTED = [
   // set at the counts observed once their databases existed, minus nothing — these suites are
   // stable, and a floor below the real count is how coverage silently drains away.
   { file: "tests/partner-definer-ownership.test.ts", min: 16 },
-  { file: "tests/partner-management-migration.test.ts", min: 13 },
+  { file: "tests/partner-management-migration.test.ts", min: 14 },
   { file: "tests/super-admin-correction-mode-behaviour.test.ts", min: 12 },
 ];
 
