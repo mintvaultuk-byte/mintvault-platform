@@ -3,12 +3,16 @@
  * applies the FULL migration set.
  *
  * WHY THIS REPLACED INLINE psql IN ci.yml. The workflow used to create the stub inline as
- * `certificates (id serial, cert_id text, secret text)`. Migration 0049 then landed, and it
- * references certificates.submission_id and submission_item_id (a unique index, a composite FK, and
- * 38 column-level grants). Every one of the six full-set appliers died in beforeAll with
+ * `certificates (id serial, cert_id text, secret text)`. Migration 0049 then landed referencing
+ * further certificates columns (a unique index, a composite FK, and 38 column-level grants), and
+ * every one of the six full-set appliers died in beforeAll with a missing-column error.
  *
- *     Migration 0049_partner_grading_work_items.sql failed and was rolled back:
- *     column "submission_id" does not exist
+ * HISTORICAL NOTE, because the error message is now misleading: at the time, 0049 named
+ * `certificates.submission_id`, and the fix was to make the stub supply it. That was the wrong
+ * direction. No such column exists on staging, on production, or in shared/schema.ts, and no
+ * migration ever created one — 0049 itself was undeployable, and the whole estate was green only
+ * because fixtures invented the column. 0049 now keys on (id, submission_item_id) and the
+ * requirement was removed from this script. Do not add it back to make something pass.
  *
  * and because a failed beforeAll makes vitest report the file's tests as SKIPPED, the surface
  * reading was "14 skipped" — which looks like configuration, not breakage. The execution-floor
@@ -97,13 +101,22 @@ for (const varName of varNames) {
     }
 
     // Prove the columns 0049 actually needs are present, rather than trusting that the helper ran.
+    //
+    // `submission_id` is deliberately NOT in this list. certificates has no such column — not on
+    // staging, not on production, not in shared/schema.ts, and no migration ever created one. This
+    // check used to require it, which made it the last place in the repository still asserting the
+    // phantom shape that 0049, eleven runtime SQL sites, the connector's certificate INSERT and
+    // fifteen fixtures also assumed. The canonical relation is
+    // certificate -> submission_item_id -> submission_items.submission_id.
+    const REQUIRED_CERT_COLUMNS = ["submission_item_id", "certificate_number", "grade"] as const;
     const { rows } = await admin.query<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'certificates'
-          AND column_name IN ('submission_id','submission_item_id','certificate_number')`
+          AND column_name = ANY($1)`,
+      [REQUIRED_CERT_COLUMNS as unknown as string[]]
     );
     const present = new Set(rows.map((r) => r.column_name));
-    const missing = ["submission_id", "submission_item_id", "certificate_number"].filter((c) => !present.has(c));
+    const missing = REQUIRED_CERT_COLUMNS.filter((c) => !present.has(c));
     if (missing.length > 0) {
       // Almost always a STALE database: the helper uses CREATE TABLE IF NOT EXISTS, which silently
       // no-ops against a certificates table left over from before a migration added columns. CI
