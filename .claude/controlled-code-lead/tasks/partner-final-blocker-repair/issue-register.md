@@ -1,6 +1,6 @@
 # Issue register — partner-final-blocker-repair
 
-**Baseline** `ad6a68f1` · **current** `9b12358a` · branch `opus/partner-final-integration`
+**Baseline** `ad6a68f1` · **current** `878e4b79` · branch `opus/partner-final-integration`
 **Staging** unchanged (max migration 0046) · **Production** unchanged (`6f182624`, verified live via
 `/api/version` 2026-08-09) · **No push, no deploy, no migration applied to any Neon host.**
 
@@ -395,3 +395,66 @@ this work. Needs a separate pass.
 H8 deploy-order **gate** (documented and runtime-fail-closed, but nothing prevents a bad order);
 4 mutations with no detector + 16 unre-run; the ten-agent hostile panel; AMD64; push + CI;
 staging package; Codex handoff.
+
+---
+
+# SESSION 4 ADDENDUM — `3e42bb08` → `878e4b79`
+
+## H8 · deploy-order gate — CLOSED
+`scripts/db/preflight-public-network.ts` (`npm run db:preflight-public`). Refuses the rollout on:
+migration journal 0058–0066 `applied` (not `applying`); `certificates.review_entered_at` and the
+six 0066 rating columns; all three public projections; reader role attributes; the reviewed-unit
+index existing **and** `indisvalid`; the reader being able to read each projection and **not**
+`certificates`; 0054's `cert_counter` guard; and the rollout flag being OFF
+(`--expect-flag-off=false` for post-enable verification).
+
+**Membership is proven by doing it** — the gate connects as the login role in
+`PARTNER_PUBLIC_DATABASE_URL`, drops to the group role and reads `current_user` back. On 42501 it
+prints the exact `GRANT` remedy. Read-only throughout via `withReadOnlySession`, and a test asserts
+the session is left clean and that no URL/host/port/credential appears in the output.
+
+**DEPLOY-ORDER1 → RED on both halves** (structural list pin + behavioural refusal), type-clean,
+restored. 13/13 against a real disposable PG17 estate.
+
+## PUBLIC-IMAGE-ADMIN1 — detector built, mutation RED
+The lookup moved into `server/partner/public-slab-image.ts` (12 lines; SQL, projection and gate
+unchanged) purely so it could be driven without standing up the app. The decisive test asserts
+**failure**: with the public URL unset the correct code throws, while a mutation on the admin pool
+would succeed. Mutation `partnerPublicQuery → partnerAdminQuery` → **RED ×2**, restored
+byte-identically. Also covers the pre-repair leak (a partner-graded card awaiting HQ approval now
+returns null) and re-asserts the reader has no direct `certificates` access.
+
+## Parallel-only failures — mechanism identified, two fixed at source
+Not flakiness. The mechanism is **work with inherently variable cost sitting inside vitest's
+default 5s per-test budget**, competing with every other worker.
+
+- `partner-public-network-validation` — my own classifier tests did `await import(...)` inside each
+  `it()`; reproduced at 7825 ms and 5010 ms on module-graph cold start. Hoisted into `beforeAll`.
+- `variant-line-consolidation` — the protected-engine guard shells out to `git diff` per protected
+  file; given 60 s.
+
+⚠️ **The distinction that matters:** both assert a PROPERTY, so a larger budget weakens nothing.
+`project-control-hardening`'s "redaction is bounded, not quadratic" asserts a **duration** — it is
+a real performance guard and raising its bound would delete what it protects. It needs a different
+fix (measure scaling, or serialise that one test) and is **NOT** addressed.
+
+Ten-suite matrix: **349/349 green**, first of two consecutive runs confirmed.
+
+## Migration bootstrap contract — recorded
+The numbered chain is a **partner overlay**, not a from-zero installer. A virgin cluster fails at
+`0010` with `relation "users" does not exist`; the HQ base schema is owned by `shared/schema.ts`.
+The real contract is **`shared/schema.ts` base → migration chain**, and any claim of "fresh
+database from migrations" is wrong. Not a migration defect — it matches the architecture — but it
+must not be mis-stated. On that base, all 53 numbered files apply cleanly first time, and the
+0066→0063 round trip returns a byte-identical `pg_dump -s`.
+
+## Still open
+| Item | State |
+|---|---|
+| `RATING-AWAIT1`, `RATING-DIRTY-WIRE1`, `OVERRIDE-ATOMIC1` | no detector, not run |
+| 13 remaining full-suite parallel failures | mechanism identified, **not individually fixed** |
+| 16 retained mutations | not re-run |
+| `PUBLIC-SETROLE1` | still does not fire (redundant assertion, no independent detector) |
+| Ten-agent hostile panel | not launched |
+| AMD64, push, CI, staging package, Codex handoff | not started |
+| gitleaks 91 historical findings | not attributed new-vs-pre-existing |
