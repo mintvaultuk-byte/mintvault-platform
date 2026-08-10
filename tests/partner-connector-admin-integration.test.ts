@@ -219,6 +219,15 @@ const OPS = "/api/super-admin/connector-ops";
     // no secret material anywhere in the read payloads
     const blob = JSON.stringify(partners) + JSON.stringify(records) + JSON.stringify(health);
     expect(blob).not.toMatch(/password|pin_hash|secret|token|\$2[aby]\$/i);
+
+    // The per-record read composes several connector projections. It must remain an ordinary
+    // successful admin read even when every projection takes the bounded connector-pool path.
+    const detailResponse = await aget(`${OPS}/records/${recordId}`, ac);
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json();
+    expect(detail.record.id).toBe(recordId);
+    expect(detail.mapping).toBeNull();
+    expect(detail.destination).toBeNull();
   });
 
   it("mutation: reason required (400); unknown record (404)", async () => {

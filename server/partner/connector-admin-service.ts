@@ -451,14 +451,19 @@ export async function getRecordDetail(recordId: string) {
       throw err;
     }
   };
-  const [validation, mapping, destination, attempts, consistency, partnerCredit] = await Promise.all([
-    projection("latest_validation", () => getLatestValidationRun(rec.id)),
-    projection("mapping", () => getConnectorImport(rec.id)),
-    projection("destination", () => getImportedDestination(rec.id)),
-    projection("attempts", () => getImportAttempts(rec.id)),
-    projection("consistency", () => inspectConnectorConsistency(rec.id)).catch(() => null),
-    projection("partner_credit", () => getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id)),
-  ]);
+  // These helpers each acquire from the intentionally small connector pool.  A detail request
+  // used to fan out six independent reads at once, while some helpers perform a second dependent
+  // connector query.  That can exceed the pool's bounded capacity and turn an otherwise healthy
+  // imported record into a transient 500.  This is an operator detail screen, not a latency-
+  // critical worker path, so bounded sequential reads are the correct fail-safe behaviour.
+  const validation = await projection("latest_validation", () => getLatestValidationRun(rec.id));
+  const mapping = await projection("mapping", () => getConnectorImport(rec.id));
+  const destination = await projection("destination", () => getImportedDestination(rec.id));
+  const attempts = await projection("attempts", () => getImportAttempts(rec.id));
+  const consistency = await projection("consistency", () => inspectConnectorConsistency(rec.id)).catch(() => null);
+  const partnerCredit = await projection("partner_credit", () =>
+    getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id)
+  );
   const findings = validation?.findings ?? [];
   const adminActions = await getRecordAuditHistory(recordId, 0, 50);
   return {
