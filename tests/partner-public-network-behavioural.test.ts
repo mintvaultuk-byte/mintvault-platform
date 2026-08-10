@@ -64,6 +64,8 @@ async function insertCert(
     originType?: string;
     certNumber?: string;
     approvedAt?: string;
+    /** Required to link a certificate to a work item: 0049's FK is (certificate_id, submission_item_id). */
+    submissionItemId?: number | null;
   } = {},
 ): Promise<number> {
   const {
@@ -85,8 +87,8 @@ async function insertCert(
     `INSERT INTO certificates
        (certificate_number, status, grade, grade_approved_at, deleted_at,
         origin_type, origin_partner_id, origin_partner_legal_name, origin_location_id,
-        origin_captured_at, origin_snapshot_version, redo_count)
-     VALUES ($1, $2, $3, ${approved ? approvedAt : "NULL"}, $4, $5, $6, $7, $8, now(), 1, $9)
+        origin_captured_at, origin_snapshot_version, redo_count, submission_item_id)
+     VALUES ($1, $2, $3, ${approved ? approvedAt : "NULL"}, $4, $5, $6, $7, $8, now(), 1, $9, $10)
      RETURNING id`,
     [
       opts.certNumber ?? `MV-${Math.floor(Math.random() * 1e9)}`,
@@ -98,6 +100,7 @@ async function insertCert(
       isPartner ? "Tenant A" : null,
       isPartner ? locationId : null,
       redoCount,
+      opts.submissionItemId ?? null,
     ],
   );
   return r.rows[0].id;
@@ -139,7 +142,7 @@ async function seedWorkItem(
   locationId: string,
   status: string,
   tag: string,
-): Promise<{ partnerSubmissionId: string }> {
+): Promise<{ partnerSubmissionId: string; submissionItemId: number; workItemId: string }> {
   const u = await admin.query<{ id: string }>(
     `INSERT INTO partner_users (tenant_id, partner_id, email, status, password_hash)
      VALUES ($1,$1,$2,'ACTIVE','x') RETURNING id`,
@@ -191,12 +194,12 @@ async function seedWorkItem(
     "INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id",
     [dest.rows[0].id],
   );
-  await admin.query(
+  const wi = await admin.query<{ id: string }>(
     `INSERT INTO partner_grading_work_items
        (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id, partner_submission_card_id,
         partner_handoff_id, connector_import_id, connector_record_id, validation_run_id,
         destination_submission_id, submission_item_id, card_ordinal, status, front_image_key, back_image_key)
-     VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13)`,
+     VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13) RETURNING id`,
     [
       T_A,
       locationId,
@@ -215,7 +218,7 @@ async function seedWorkItem(
       `partner-submissions/${T_A}/${partnerSubmissionId}/${card.rows[0].id}/back-${tag}.jpg`,
     ],
   );
-  return { partnerSubmissionId };
+  return { partnerSubmissionId, submissionItemId: item.rows[0].id, workItemId: wi.rows[0].id };
 }
 
 describe("Partner public network — behavioural rating evidence (disposable PostgreSQL 17)", () => {
@@ -1983,5 +1986,190 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
       await expect(svc2.removeRatingOverride(listingId, "hq@test", "nothing to do")).rejects.toThrow();
       expect(await overrideState(listingId)).toEqual(before);
     }, 60_000);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // RATING-DIRTY-WIRE1 and RATING-AWAIT1 — driven through the REAL production mirror
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  describe("HQ review path — durable dirty mark and bounded latency", () => {
+    let mirror: typeof import("../server/partner/grading-review-mirror");
+    let dbmod: typeof import("../server/partner/db");
+    let life: typeof import("../server/partner/public-network-rating-lifecycle");
+    beforeAll(async () => {
+      mirror = await import("../server/partner/grading-review-mirror");
+      dbmod = await import("../server/partner/db");
+      life = await import("../server/partner/public-network-rating-lifecycle");
+    }, 60_000);
+
+    /**
+     * A certificate ATTACHED to a pending_review work item — the shape the mirror actually looks
+     * up. `seedWorkItem` alone is not enough: it leaves `certificate_id` NULL, and
+     * `pendingPartnerWorkItem(certId)` keys on exactly that, so a test built on it would exercise
+     * the `not_partner` early return and prove nothing. 0049's FK is composite
+     * (certificate_id, submission_item_id) -> certificates(id, submission_item_id), so the
+     * certificate must carry the same submission_item_id as the work item.
+     */
+    async function seedReviewableCard(tag: string): Promise<{ certId: number; listingId: string; locationId: string }> {
+      const { listingId, locationId } = await seedListing(T_A, `Mirror ${tag}`, `mirror-${tag}`);
+      const wi = await seedWorkItem(locationId, "pending_review", tag);
+      const certId = await insertCert(locationId, {
+        approved: false,
+        grade: null,
+        certNumber: `MV-MIR-${tag}`,
+        submissionItemId: wi.submissionItemId,
+      });
+      // certificate_linked_at is NOT optional: 0049's chk_..._certificate_pair requires
+      // certificate_id and certificate_linked_at to be set together or both NULL, so that a work
+      // item can never claim a certificate without recording when it was claimed.
+      await admin.query(
+        "UPDATE partner_grading_work_items SET certificate_id = $2, certificate_linked_at = now() WHERE id = $1",
+        [wi.workItemId, certId],
+      );
+      return { certId, listingId, locationId };
+    }
+
+    async function listingState(listingId: string) {
+      const r = await admin.query<{ dirty: boolean; gen: string }>(
+        "SELECT rating_dirty AS dirty, rating_dirty_generation::text AS gen FROM partner_public_listings WHERE id=$1",
+        [listingId],
+      );
+      return { dirty: r.rows[0].dirty, generation: BigInt(r.rows[0].gen) };
+    }
+
+    /**
+     * RATING-DIRTY-WIRE1.
+     *
+     * The point is that the production CALLER is wired, not that the helper works. An earlier
+     * version of this repair had a post-commit dirty mark sitting alongside the transactional one,
+     * which made exactly this untestable: deleting the in-transaction write changed no observable
+     * behaviour because the duplicate still dirtied the listing. The duplicate is gone, so removing
+     * the transactional write is now detectable here.
+     */
+    it("RATING-DIRTY-WIRE1: an HQ rejection advances the dirty generation, in the same transaction", async () => {
+      const { certId, listingId } = await seedReviewableCard("dirty1");
+      // Start from a clean listing so the advance is attributable to the rejection.
+      await admin.query(
+        `UPDATE partner_public_listings
+            SET rating_dirty=false, rating_dirty_since=NULL, rating_clean_generation=rating_dirty_generation
+          WHERE id=$1`, [listingId]);
+      const before = await listingState(listingId);
+      expect(before.dirty, "precondition: listing is clean").toBe(false);
+
+      const result = await mirror.mirrorPartnerRejection(certId);
+      expect(result.kind, `mirror returned ${result.kind} — the work item was not certificate-linked`).toBe("mirrored");
+
+      // PRIMARY EVENT COMMITTED …
+      const wi = await admin.query<{ status: string }>(
+        "SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [certId]);
+      expect(wi.rows[0].status).toBe("returned_for_change");
+
+      // … AND the durable obligation advanced with it.
+      const after = await listingState(listingId);
+      expect(after.dirty, "the rejection did not mark the shop's rating dirty").toBe(true);
+      expect(after.generation, "the dirty GENERATION did not advance").toBeGreaterThan(before.generation);
+
+      await life.drainRatingRefreshes();
+    }, 120_000);
+
+    /**
+     * The approval side, proven by its ROLLBACK rather than its commit.
+     *
+     * mirrorPartnerApproval drives real credit settlement, which this fixture deliberately does not
+     * fund — so it raises `credit_settlement_required`. That is not a defect and not something to
+     * paper over: it is the honest behaviour of an unfunded submission, and partner-full-pilot-
+     * workflow already proves the funded, settlement-complete path end to end.
+     *
+     * What it proves instead is the wiring, and the ORDERING that makes the wiring correct.
+     * mirrorPartnerApproval commits its work-item transaction FIRST and drives settlement AFTER —
+     * so the approval and its rating obligation land together, and a later settlement refusal
+     * cannot un-record the review that genuinely happened. Asserting that ordering is worth more
+     * than asserting the happy path a funded suite already covers: it is exactly the split that
+     * would strand a rating if someone moved the dirty mark out of that transaction.
+     */
+    it("RATING-DIRTY-WIRE1: an approval advances the dirty generation with its work item, before settlement runs", async () => {
+      const { certId, listingId } = await seedReviewableCard("dirty2");
+      await admin.query(
+        `UPDATE partner_public_listings
+            SET rating_dirty=false, rating_dirty_since=NULL, rating_clean_generation=rating_dirty_generation
+          WHERE id=$1`, [listingId]);
+      const before = await listingState(listingId);
+      expect(before.dirty).toBe(false);
+
+      await expect(
+        mirror.mirrorPartnerApproval(certId, "hq@test"),
+        "an unfunded submission must refuse settlement rather than complete it",
+      ).rejects.toThrow(/credit_settlement_required|reconciliation/i);
+
+      // The work-item transaction COMMITTED before settlement was attempted …
+      const wi = await admin.query<{ status: string }>(
+        "SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [certId]);
+      expect(wi.rows[0].status).toBe("approved");
+      // … and the rating obligation committed with it. This is the assertion RATING-DIRTY-WIRE1
+      // removes: delete the in-transaction mark and the approval still succeeds while the shop's
+      // rating is never told its evidence moved.
+      const after = await listingState(listingId);
+      expect(after.dirty, "an approval did not mark the shop's rating dirty").toBe(true);
+      expect(after.generation, "the dirty GENERATION did not advance on approval").toBeGreaterThan(before.generation);
+
+      await life.drainRatingRefreshes();
+    }, 120_000);
+
+    /**
+     * RATING-AWAIT1 — an EXPLICIT latency contract, not a vitest timeout.
+     *
+     * The rating pool is deliberately made unusable: size 1, that one connection held open by this
+     * test, and an acquire timeout long enough that awaiting it would be unmistakable. Under the
+     * correct implementation HQ review never touches that pool on the request path — the heavy
+     * refresh is detached — so the rejection returns in well under a second. Under RATING-AWAIT1
+     * (restore the synchronous await) the same call has to wait out the acquire timeout first.
+     *
+     * The assertion is on MEASURED ELAPSED TIME against a stated bound, so the mutation fails on
+     * the contract rather than on a test-runner default.
+     */
+    it("RATING-AWAIT1: HQ rejection returns inside its latency bound while the rating pool is unusable", async () => {
+      const { certId, listingId } = await seedReviewableCard("await1");
+
+      const savedMax = process.env.PARTNER_RATING_POOL_MAX;
+      const savedAcquire = process.env.PARTNER_RATING_ACQUIRE_TIMEOUT_MS;
+      // 8s acquire timeout: far above the 1000ms bound below, so an awaited refresh cannot pass.
+      process.env.PARTNER_RATING_POOL_MAX = "1";
+      process.env.PARTNER_RATING_ACQUIRE_TIMEOUT_MS = "8000";
+      await dbmod.__resetPartnerRatingPoolForTests();
+
+      // Occupy the pool's only connection for the duration of the HQ call.
+      const hog = dbmod.partnerRatingQuery("SELECT pg_sleep(6)").catch(() => {});
+      await new Promise((r) => setTimeout(r, 300)); // let the hog actually take the slot
+
+      const LATENCY_BOUND_MS = 1000;
+      const started = Date.now();
+      const result = await mirror.mirrorPartnerRejection(certId);
+      const elapsed = Date.now() - started;
+
+      expect(result.kind).toBe("mirrored");
+      expect(
+        elapsed,
+        `HQ rejection took ${elapsed}ms with the rating pool exhausted — it must not wait on rating infrastructure`,
+      ).toBeLessThan(LATENCY_BOUND_MS);
+
+      // 1. PRIMARY STATE COMMITTED.
+      const wi = await admin.query<{ status: string }>(
+        "SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [certId]);
+      expect(wi.rows[0].status).toBe("returned_for_change");
+      // 2. THE RATING IS STILL OWED — freshness was lost, correctness was not.
+      const after = await listingState(listingId);
+      expect(after.dirty, "the obligation must survive a rating outage").toBe(true);
+
+      await hog;
+      process.env.PARTNER_RATING_POOL_MAX = savedMax;
+      process.env.PARTNER_RATING_ACQUIRE_TIMEOUT_MS = savedAcquire;
+      await dbmod.__resetPartnerRatingPoolForTests();
+      await life.drainRatingRefreshes();
+
+      // 3. AND THE RECONCILER REPAIRS IT once the pool is healthy again.
+      await life.runRatingReconciler({ limit: 50, actor: "await1-recovery" });
+      const repaired = await admin.query<{ success: Date | null }>(
+        "SELECT rating_last_success_at AS success FROM partner_public_listings WHERE id=$1", [listingId]);
+      expect(repaired.rows[0].success, "the reconciler did not repair the deferred rating").not.toBeNull();
+    }, 180_000);
   });
 });

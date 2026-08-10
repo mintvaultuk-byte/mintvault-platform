@@ -527,6 +527,19 @@ function getRatingPool(): pg.Pool {
   return ratingPool;
 }
 
+/**
+ * Test-only: drop the memoised rating pool so a suite can re-point or re-size it.
+ *
+ * Needed to make RATING-AWAIT1 provable: the proof requires a rating pool that is deliberately
+ * exhausted or unreachable, which cannot be arranged if the pool was memoised at first use with
+ * the healthy defaults.
+ */
+export async function __resetPartnerRatingPoolForTests(): Promise<void> {
+  const p = ratingPool;
+  ratingPool = null;
+  if (p) await p.end().catch(() => {});
+}
+
 /** One rating query, on the isolated bounded pool. Never uses adminPool. */
 export async function partnerRatingQuery<T extends pg.QueryResultRow = pg.QueryResultRow>(
   sql: string,

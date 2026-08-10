@@ -108,7 +108,7 @@ const SUITES = [
   // suite had 19 tests, and never raised as it grew — 44 tests of SLACK, i.e. the rating-lifecycle
   // block (8), the public-reader least-privilege block (23), override expiry (4), eligibility
   // suspension (5) and the V2 recency window (3) were all silently deletable with CI green.
-  { file: "tests/partner-public-network-behavioural.test.ts", min: 84 }, // RE-MEASURED 2026-08-09 after the mutation detectors and the slab-image block
+  { file: "tests/partner-public-network-behavioural.test.ts", min: 87 }, // RE-MEASURED 2026-08-09 after the mutation detectors and the slab-image block
 
   // ── PREVIOUSLY UNFLOORED (HIGH H11) ───────────────────────────────────────────────────────
   // All four were deletable in their entirety with every CI step green: nothing in scripts/ci/
