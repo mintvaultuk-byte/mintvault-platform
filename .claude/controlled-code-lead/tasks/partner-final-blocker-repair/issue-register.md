@@ -750,3 +750,52 @@ Two concrete signals from the log:
 Twelve mutations RED (matrix above) · CI-equivalent local suite 4853/0 · AMD64 PASS · gitleaks PASS
 · dependency review PASS · CodeQL javascript-typescript PASS · lint 0 errors · build green ·
 staging untouched (max 0046) · production untouched (`6f182624`) · MVGS maths unchanged.
+
+---
+
+# FOLLOW_UP — PRE-EXISTING SECURITY DEBT (owner-baselined 2026-08-10)
+
+**30 HIGH/CRITICAL (rule, path) pairs are baselined in `security/codeql-baseline.json`**, pinned
+from `refs/heads/main`. 25 of them are still reported on this branch; **0 are new**, proven by set
+difference (PR ⧵ main = ∅). Do **not** reopen the Partner release for these.
+
+Nothing is dismissed or suppressed. CodeQL still runs, every finding stays open in the Security
+tab, and the only thing that changed is which findings fail a build.
+
+## Why the aggregate `CodeQL` check was red — and why it never blocked the merge
+Branch protection on `main` requires exactly five contexts:
+`Lint, Type Check, Test & Build` · `linux/amd64 image build & boot` ·
+`CodeQL (SAST) (javascript-typescript)` · `PR dependency review` · `Secret scan (gitleaks)`.
+
+The aggregate `CodeQL` check (GitHub Advanced Security) is **not among them**. It flags any alert in
+code a PR touches, so on a 125-file PR it reports long-standing repository debt as
+*"new alerts in code changed by this pull request"*. **I called it release-blocking in the previous
+pass; that was wrong** — it is advisory here.
+
+## The real gap this closed
+The required CodeQL context is the ANALYSIS JOB. It proves the analysis RAN and says nothing about
+what it FOUND. So before this change a branch introducing a genuinely new HIGH would have gone
+green on every required check. The aggregate check looks at findings but cannot tell inherited from
+introduced. **Neither enforced the policy, from opposite directions.**
+
+`scripts/ci/assert-codeql-delta.mjs` does, and it runs INSIDE `Lint, Type Check, Test & Build` —
+already a required context — so a new HIGH blocks a merge with **no branch-protection change at
+all**. `check` also gains an explicit minimal `permissions: {contents: read, security-events: read}`
+where it previously inherited an unstated default.
+
+Keyed on **(rule, path)**, not line numbers: the same finding sat at `server/storage.ts:1782` on main
+and `:1784` here purely from unrelated edits. Keying on lines would expire the baseline constantly
+and train people to re-baseline reflexively. Stated cost: a second instance of the same rule in an
+already-baselined file is not distinguished. A new rule, or a known rule in a new file, always is.
+
+## Governance proof — `tests/codeql-delta-gate.test.ts`, 9 tests
+inherited HIGH → **passes** · new HIGH in a new file → **RED** · **new rule in an
+already-baselined file → RED** (the likeliest real regression) · CRITICAL → RED · medium/low → not
+blocking · **analysis did not run → RED even with zero alerts** (a vacuous green is unreachable:
+`analysisRan` is a required input, never inferred from an empty list) · a fixed baselined finding
+is reported, not failed.
+
+Live dry-run against PR #288: `No new HIGH/CRITICAL. 25 inherited (baselined), 5 baselined
+finding(s) no longer reported.` Those five are debt **this branch fixed** —
+`js/missing-rate-limiting` on `routes/auth.ts`, `routes/grader.ts`, `routes/staff.ts`,
+`routes/submissions.ts`, and `js/polynomial-redos` on `partner/customer-service.ts`.

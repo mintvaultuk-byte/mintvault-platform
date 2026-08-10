@@ -10,6 +10,14 @@ jobs:
   check:
     name: Lint, Type Check, Test & Build
     runs-on: ubuntu-latest
+    # EXPLICIT and MINIMAL. This job previously declared no permissions block and inherited the
+    # workflow/repository default, which is not a stated contract. It needs exactly two things:
+    # `contents: read` to check the repo out, and `security-events: read` for the CodeQL delta gate
+    # to list code-scanning alerts. Naming them removes the inherited default in both directions —
+    # nothing here writes, and the delta gate no longer depends on a default someone may tighten.
+    permissions:
+      contents: read
+      security-events: read
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
       MINTVAULT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
@@ -683,6 +691,37 @@ jobs:
       - name: Assert partner auth P0 suites executed
         if: always()
         run: node scripts/ci/assert-partner-auth-suites-executed.mjs vitest-report.json
+
+      # CodeQL DELTA GATE — blocks what this branch INTRODUCES, grandfathers what it inherited.
+      #
+      # It lives in THIS job on purpose. `Lint, Type Check, Test & Build` is already a required
+      # context in main's branch protection, so putting the gate here makes a new HIGH/CRITICAL
+      # block a merge with NO branch-protection change at all — the narrowest possible mechanism.
+      #
+      # It closes a real gap rather than adding ceremony. The required CodeQL context is
+      # `CodeQL (SAST) (javascript-typescript)`, which proves the ANALYSIS RAN and says nothing
+      # about what it found; the separate aggregate `CodeQL` check looks at findings but flags any
+      # alert in touched code, so on a large PR it reports long-standing repository debt as new.
+      # Neither enforced the actual policy. This does.
+      #
+      # `if: always()` so a red test run cannot hide a newly introduced vulnerability, and the step
+      # is NOT continue-on-error: a new HIGH fails the build.
+      #
+      # Needs `security-events: read`, declared explicitly on this job (it previously had no
+      # permissions block and relied on an inherited default). On a fork PR the token cannot read
+      # code scanning; the script reports that distinctly as `analysis_did_not_run` and fails
+      # rather than passing on an empty list.
+      - name: Assert no NEW CodeQL HIGH/CRITICAL (delta vs baselined main debt)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            node scripts/ci/assert-codeql-delta.mjs --pr "${{ github.event.pull_request.number }}"
+          else
+            node scripts/ci/assert-codeql-delta.mjs --ref "refs/heads/${GITHUB_REF_NAME}"
+          fi
 
       - name: Build
         run: npm run build
