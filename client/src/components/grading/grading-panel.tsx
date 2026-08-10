@@ -572,7 +572,7 @@ export default function GradingPanel({
         typeof window !== "undefined" &&
         window.confirm(
           "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
-      );
+        );
       if (!confirmed) nextRarity = rarityCode;
       else setRarityOverrideTransition({ from: rarityCode, to: nextRarity });
     }
@@ -1490,9 +1490,7 @@ export default function GradingPanel({
           id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
           type: ad.type?.replace(/_/g, " ") || "Unknown",
           severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
-            | "minor"
-            | "moderate"
-            | "significant",
+            "minor" | "moderate" | "significant",
           description: ad.description || "",
           location: ad.location || (ad as any).detected_in || "front",
           image_side: imageSide,
@@ -2609,7 +2607,9 @@ export default function GradingPanel({
           data-canonical-section="rarity"
           data-testid="section-rarity"
         >
-          <div className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Structured rarity &amp; variant</div>
+          <div className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+            Structured rarity &amp; variant
+          </div>
           {/* Mount only once gradingData is present so the picker (uncontrolled after
               mount) seeds from the STORED rarity, and key it by certId so switching
               certs remounts + re-seeds. Both derive straight from the query — no
@@ -2656,8 +2656,8 @@ export default function GradingPanel({
               approvalInteractionLocked
                 ? gradingWorkflowStatusCopy
                 : aiAnalysis
-                ? "Clear all overrides and re-populate sub-grades from the last AI run this session"
-                : "Run AI Identify & Grade first to enable this"
+                  ? "Clear all overrides and re-populate sub-grades from the last AI run this session"
+                  : "Run AI Identify & Grade first to enable this"
             }
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
               aiAnalysis && !approvalInteractionLocked
@@ -2897,12 +2897,12 @@ export default function GradingPanel({
               <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
               <div className="flex items-center gap-2">
                 {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
-	                  <button
-	                    type="button"
-	                    disabled={approvalInteractionLocked}
-	                    onClick={() => {
-	                      if (approvalInteractionLocked) return;
-	                      setDefects(
+                  <button
+                    type="button"
+                    disabled={approvalInteractionLocked}
+                    onClick={() => {
+                      if (approvalInteractionLocked) return;
+                      setDefects(
                         defects.map((d) => ({
                           ...d,
                           mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
@@ -2917,30 +2917,30 @@ export default function GradingPanel({
                         }))
                       );
                     }}
-	                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-	                    data-testid="btn-recalc-zones"
-	                    title={
-	                      approvalInteractionLocked
-	                        ? gradingWorkflowStatusCopy
-	                        : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
-	                    }
+                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-testid="btn-recalc-zones"
+                    title={
+                      approvalInteractionLocked
+                        ? gradingWorkflowStatusCopy
+                        : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
+                    }
                   >
                     <Zap size={10} />
                     Recalculate
                   </button>
                 )}
                 {defects.length > 0 && (
-	                  <button
-	                    type="button"
-	                    disabled={approvalInteractionLocked}
-	                    onClick={() => {
-	                      if (approvalInteractionLocked) return;
-	                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
-	                      setDefects([]);
-	                    }}
-	                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-	                    data-testid="btn-clear-defects"
-	                    title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
+                  <button
+                    type="button"
+                    disabled={approvalInteractionLocked}
+                    onClick={() => {
+                      if (approvalInteractionLocked) return;
+                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
+                      setDefects([]);
+                    }}
+                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-testid="btn-clear-defects"
+                    title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
                   >
                     <Trash2 size={10} />
                     Clear Defects
@@ -3666,8 +3666,8 @@ export default function GradingPanel({
                     approvalInteractionLocked
                       ? gradingWorkflowStatusCopy
                       : subgradesIncomplete
-                      ? "Set all four subgrades first"
-                      : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
+                        ? "Set all four subgrades first"
+                        : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
                   }
                   className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   data-testid="btn-generate-description"
@@ -3774,20 +3774,20 @@ export default function GradingPanel({
                     gradingWorkflowLocked
                       ? gradingWorkflowStatusCopy
                       : overall <= 0 || subgradesIncomplete
-                      ? "Set all four subgrades first"
-                      : !deionizationComplete
-                        ? "Tick 'Deionization complete' before approving"
-                        : cropFailedSides.length > 0
-                          ? `${cropFailedSides.join(" + ")} crop failed to save — retry before approving`
-                          : cropPendingSides.length > 0
-                            ? `${cropPendingSides.join(" + ")} crop still saving to storage — wait for it to finish`
-                            : graderMode
-                              ? graderEdit
-                                ? "Save edits without publishing — this card stays pending review"
-                                : "Submit this grading for admin review"
-                              : adminReview
-                                ? "Approve the staff submission and publish the reviewed grade"
-                                : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                        ? "Set all four subgrades first"
+                        : !deionizationComplete
+                          ? "Tick 'Deionization complete' before approving"
+                          : cropFailedSides.length > 0
+                            ? `${cropFailedSides.join(" + ")} crop failed to save — retry before approving`
+                            : cropPendingSides.length > 0
+                              ? `${cropPendingSides.join(" + ")} crop still saving to storage — wait for it to finish`
+                              : graderMode
+                                ? graderEdit
+                                  ? "Save edits without publishing — this card stays pending review"
+                                  : "Submit this grading for admin review"
+                                : adminReview
+                                  ? "Approve the staff submission and publish the reviewed grade"
+                                  : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
@@ -3825,6 +3825,11 @@ export default function GradingPanel({
           certId={certId}
           side={manualCardToolSide}
           rawImageUrl={(manualCardToolSide === "front" ? urls.front_original : urls.back_original) as string}
+          workingImageUrl={
+            (manualCardToolSide === "front" ? urls.front_working : urls.back_working) ||
+            (manualCardToolSide === "front" ? urls.front_original : urls.back_original) ||
+            undefined
+          }
           onCentering={(result) => {
             if (result.side === "front") {
               setFrontLR(result.leftRight);
@@ -3884,6 +3889,9 @@ export default function GradingPanel({
             (manualCardToolSide === "front"
               ? urls.front_display || urls.front_cropped
               : urls.back_display || urls.back_cropped) || undefined
+          }
+          workingCroppedUrl={
+            (manualCardToolSide === "front" ? urls.front_working_cropped : urls.back_working_cropped) || undefined
           }
         />
       )}

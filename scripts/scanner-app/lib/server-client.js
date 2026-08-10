@@ -13,7 +13,6 @@ const os        = require("node:os");
 const path      = require("node:path");
 const { Transform } = require("node:stream");
 const FormData  = require("form-data");
-const sharp     = require("sharp");
 // node-fetch v3 is ESM-only. Lazy-load via dynamic import; cache the promise.
 let _fetchPromise = null;
 function getFetch() {
@@ -29,16 +28,46 @@ function getFetch() {
 // so the watcher's existing retry/backoff logic re-drives the upload.
 const STALL_TIMEOUT_MS = 60_000;
 
-// Convert a source scan (TIFF/PNG/etc.) to a full-resolution JPEG buffer
-// in memory. quality 92, NO resize — pixels are preserved 1:1. sharp
-// auto-detects the input format from the file's magic bytes. The original
-// file on disk is left untouched (it still gets archived to processed/).
-// limitInputPixels:false because high-DPI SilverFast TIFFs can exceed
-// sharp's default 268MP ceiling.
-async function toJpegBuffer(filePath) {
-  return sharp(filePath, { limitInputPixels: false })
-    .jpeg({ quality: 92 })
-    .toBuffer();
+// Phase 58A evidence invariant: the scanner-produced TIFF is the master.
+// Do not decode, colour-convert, resize, or re-encode it in this client.
+// A separate, explicitly non-authoritative preview can be introduced later,
+// but it must never replace this multipart part.
+function assertTiffMaster(filePath) {
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size < 4) {
+    throw new Error(`authoritative scan is not a readable TIFF file: ${filePath}`);
+  }
+
+  const header = Buffer.alloc(4);
+  const fd = fs.openSync(filePath, "r");
+  try {
+    fs.readSync(fd, header, 0, header.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  // Classic TIFF (42) and BigTIFF (43), in either byte order. Full decoder
+  // validation belongs to the server before it accepts an immutable master.
+  const isTiff =
+    (header[0] === 0x49 && header[1] === 0x49 && header[2] === 0x2a && header[3] === 0x00) ||
+    (header[0] === 0x4d && header[1] === 0x4d && header[2] === 0x00 && header[3] === 0x2a) ||
+    (header[0] === 0x49 && header[1] === 0x49 && header[2] === 0x2b && header[3] === 0x00) ||
+    (header[0] === 0x4d && header[1] === 0x4d && header[2] === 0x00 && header[3] === 0x2b);
+  if (!isTiff) {
+    throw new Error(`authoritative scan is not TIFF-signature data: ${filePath}`);
+  }
+  return stat.size;
+}
+
+function appendTiffMaster(form, field, filePath) {
+  const byteLength = assertTiffMaster(filePath);
+  // Streaming preserves the scanner's original byte sequence and avoids
+  // materialising a 16-bit V850 TIFF in memory before the upload.
+  form.append(field, fs.createReadStream(filePath), {
+    filename: path.basename(filePath),
+    contentType: "image/tiff",
+    knownLength: byteLength,
+  });
 }
 
 // POST a form-data body with a stall watchdog. Streams the form through a
@@ -224,9 +253,8 @@ async function softDeleteCert(certId, reason) {
  */
 async function uploadPair(frontPath, backPath, idempotencyKey) {
   const form = new FormData();
-  // Convert to full-resolution JPEG in memory; the raw TIFF/PNG stays on disk.
-  form.append("front", await toJpegBuffer(frontPath), { filename: "front.jpg", contentType: "image/jpeg" });
-  if (backPath) form.append("back", await toJpegBuffer(backPath), { filename: "back.jpg", contentType: "image/jpeg" });
+  appendTiffMaster(form, "front", frontPath);
+  if (backPath) appendTiffMaster(form, "back", backPath);
   // Content-derived idempotency key (front+back SHA, computed by the watcher and
   // stable across retries/restarts). The server's UNIQUE-index gate makes a
   // re-driven/raced ingest resolve to the SAME cert — never a duplicate.
@@ -244,13 +272,12 @@ async function getScanStatus(certId) {
 }
 
 /**
- * Manual single-side attach to an existing cert. The server sharp-encodes
- * the .tif → JPEG, so the watcher only needs to stream the raw file.
+ * Manual single-side attach to an existing cert. This sends the original
+ * scanner TIFF as the same authoritative-master type as pair ingestion.
  */
 async function attachImage(certId, side, filePath, replaceExisting) {
   const form = new FormData();
-  // Convert to full-resolution JPEG in memory; the raw TIFF/PNG stays on disk.
-  form.append("image", await toJpegBuffer(filePath), { filename: `${side}.jpg`, contentType: "image/jpeg" });
+  appendTiffMaster(form, "image", filePath);
   form.append("side", side);
   form.append("replace_existing", replaceExisting ? "true" : "false");
   return postForm(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, form);
@@ -269,4 +296,6 @@ module.exports = {
   uploadPair,
   attachImage,
   getScanStatus,
+  // Deliberately exposed for the scanner-app regression test only.
+  _private: { assertTiffMaster },
 };

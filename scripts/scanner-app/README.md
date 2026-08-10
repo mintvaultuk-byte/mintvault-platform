@@ -42,6 +42,13 @@ Both gated `requireScannerOrAdmin`, identical pattern to the existing per-cert e
 
 One Electron process. One LaunchAgent (`com.mintvault.scanner-app`). Renderer talks to main via `contextBridge` exposing a `scanner` global.
 
+### Evidence upload invariant
+
+The scanner app streams the exact scanner-produced TIFF bytes as `image/tiff`
+for both paired ingest and manual side attachment. It does not decode, resize,
+colour-convert, or JPEG-encode the authoritative upload. Any operator preview
+is local-only and is never substituted for the TIFF master.
+
 ## Files
 
 ```

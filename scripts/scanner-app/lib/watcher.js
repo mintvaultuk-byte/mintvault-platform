@@ -50,12 +50,10 @@ const HASH_LOG_MAX = 200;
 // sequentially so we don't fire a thundering herd of uploads.
 const STARTUP_DEBOUNCE_MS = 2_000;
 
-// Accept any image format SilverFast might output. The server-side
-// scan-ingest endpoint runs everything through Sharp, which auto-detects
-// the input format from buffer magic bytes — so all five are equivalent
-// downstream. .bmp/.gif stay ignored because SilverFast never produces
-// them and they could mask other artefacts.
-const ACCEPTED = new Set([".tif", ".tiff", ".png", ".jpg", ".jpeg"]);
+// Phase 58A production evidence baseline is SilverFast TIFF. Allowing JPEG
+// or PNG here would create a record that cannot satisfy the immutable
+// 16-bit TIFF-master invariant, so those files must not enter the queue.
+const ACCEPTED = new Set([".tif", ".tiff"]);
 const IGNORED  = new Set([".bmp", ".gif"]);
 
 const STABLE_MS  = 2_000;   // file size unchanged for this long → ready

@@ -80,9 +80,19 @@ export const PARTNER_MIN_PASSWORD_LEN = 10;
 // `recoveryCodes` are shown ONCE and never persisted client-side.
 export const partnerMfa = {
   enrol: (password: string) =>
-    req<{ ok: boolean; secret: string; otpauthUri: string }>("POST", "/api/partner/mfa/enrol", { password }),
-  confirm: (code: string) =>
-    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", { code }),
+    req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
+      "POST",
+      "/api/partner/mfa/enrol",
+      { password }
+    ),
+  restart: () =>
+    req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
+      "POST",
+      "/api/partner/mfa/restart"
+    ),
+  cancel: () => req<{ ok: boolean }>("POST", "/api/partner/mfa/cancel"),
+  confirm: (input: { enrolmentId: string; code: string }) =>
+    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", input),
 };
 
 // ---- password reset ----
@@ -109,6 +119,10 @@ export const partnerCustomers = {
     req<PartnerCustomer[]>("GET", `/api/partner/customers${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   create: (input: { fullName: string; email?: string | null; phone?: string | null; reference?: string | null }) =>
     req<PartnerCustomer>("POST", "/api/partner/customers", input),
+  edit: (
+    id: string,
+    input: { fullName: string; email?: string | null; phone?: string | null; reference?: string | null }
+  ) => req<PartnerCustomer>("PATCH", `/api/partner/customers/${id}`, input),
 };
 
 // ---- locations ----
@@ -272,6 +286,10 @@ export interface SubmissionCard {
   quantity: number;
   customer_notes: string | null;
   intake_notes: string | null;
+  front_image_key: string | null;
+  back_image_key: string | null;
+  front_image_url: string | null;
+  back_image_url: string | null;
   created_at: string;
 }
 
@@ -289,6 +307,11 @@ export interface SubmissionDetail {
   submission: SubmissionSummary;
   cards: SubmissionCard[];
   events: SubmissionEvent[];
+}
+
+export interface PartnerCatalogueSnapshotResponse {
+  snapshot: import("@shared/pokemon-rarity-catalogue").CatalogueSnapshot;
+  categories: string[];
 }
 
 export const partnerSubmissions = {
@@ -365,6 +388,29 @@ export const partnerCards = {
       `/api/partner/submissions/${submissionId}/cards/${cardId}`,
       reason ? { reason } : undefined
     ),
+  uploadImage: async (submissionId: string, cardId: string, side: "front" | "back", file: File) => {
+    const form = new FormData();
+    form.append("image", file);
+    const res = await fetch(`/api/partner/submissions/${submissionId}/cards/${cardId}/images/${side}`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!res.ok) {
+      let body: { error?: { code?: string; message?: string } } = {};
+      try {
+        body = await res.json();
+      } catch {
+        /* ignore */
+      }
+      throw new PartnerApiError(res.status, body.error?.code ?? "error", body.error?.message ?? "Upload failed.");
+    }
+    return (await res.json()) as { side: "front" | "back"; key: string; url: string | null };
+  },
+};
+
+export const partnerCatalogue = {
+  snapshot: () => req<PartnerCatalogueSnapshotResponse>("GET", "/api/partner/catalogue/snapshot"),
 };
 
 /** A stable idempotency key for one submit "session" — regenerated only when the user explicitly retries after a genuine error, never on every render. */

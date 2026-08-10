@@ -127,6 +127,7 @@ describe("partner schema ↔ migration parity", () => {
       // connector release function with an N-reservation one. 0041 itself is untouched.
       "0042_partner_per_card_credit_settlement.sql",
       "0043_partner_credit_hold_per_card.sql",
+      "0044_partner_mfa_pending_lifecycle.sql",
     ]);
   });
 

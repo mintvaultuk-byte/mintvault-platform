@@ -6,6 +6,7 @@
  *   - GET  /api/partner/locations           (location list + switcher)
  *   - GET  /api/partner/customers           (search)
  *   - POST /api/partner/customers           (create)
+ *   - PATCH /api/partner/customers/:id      (edit)
  *   - GET  /api/partner/service-tiers       (wizard's Service step)
  *   - PATCH /api/partner/submissions/:id/cards/:cardId (wizard's Cards step edit)
  *
@@ -247,6 +248,27 @@ let admin: Client;
         expect(list.body.some((c: any) => c.id === created.body.id)).toBe(true);
       });
 
+      it("edit round-trips for the authenticated tenant and normalises direct API input", async () => {
+        const cookie = await login("owner@apia.com");
+        const created = await j("POST", "/api/partner/customers", cookie, {
+          fullName: "Patch Me",
+          email: "patch-me@example.com",
+        });
+        expect(created.status).toBe(201);
+
+        const updated = await j("PATCH", `/api/partner/customers/${created.body.id}`, cookie, {
+          fullName: "  Patched Customer  ",
+          email: "PATCHED@EXAMPLE.COM",
+          phone: "  07700 111222  ",
+          reference: "  patch-ref-1  ",
+        });
+        expect(updated.status).toBe(200);
+        expect(updated.body.fullName).toBe("Patched Customer");
+        expect(updated.body.email).toBe("patched@example.com");
+        expect(updated.body.phone).toBe("07700 111222");
+        expect(updated.body.reference).toBe("patch-ref-1");
+      });
+
       it("cross-tenant customers are invisible via list", async () => {
         const cookieA = await login("owner@apia.com");
         const cookieB = await login("owner@apib.com");
@@ -268,11 +290,65 @@ let admin: Client;
         expect(row.rows[0].tenant_id).toBe(A); // never B, despite the client's attempt
       });
 
+      it("a client-supplied tenant/organisation field is ignored on edit too", async () => {
+        const cookie = await login("owner@apia.com");
+        const created = await j("POST", "/api/partner/customers", cookie, { fullName: "Patch Spoof Base" });
+        expect(created.status).toBe(201);
+        const updated = await j("PATCH", `/api/partner/customers/${created.body.id}`, cookie, {
+          fullName: "Patch Spoof Updated",
+          tenantId: B,
+          organisationId: B,
+        });
+        expect(updated.status).toBe(200);
+        const row = await admin.query("SELECT tenant_id, full_name FROM partner_customers WHERE id=$1", [
+          created.body.id,
+        ]);
+        expect(row.rows[0].tenant_id).toBe(A);
+        expect(row.rows[0].full_name).toBe("Patch Spoof Updated");
+      });
+
+      it("cross-tenant customers cannot be edited and fail closed as not found", async () => {
+        const cookieA = await login("owner@apia.com");
+        const cookieB = await login("owner@apib.com");
+        const createdB = await j("POST", "/api/partner/customers", cookieB, {
+          fullName: "B Patch Only",
+          email: "b-patch-only@example.com",
+        });
+        expect(createdB.status).toBe(201);
+
+        const denied = await j("PATCH", `/api/partner/customers/${createdB.body.id}`, cookieA, {
+          fullName: "A Should Not Patch B",
+        });
+        expect(denied.status).toBe(404);
+
+        const row = await admin.query("SELECT tenant_id, full_name FROM partner_customers WHERE id=$1", [
+          createdB.body.id,
+        ]);
+        expect(row.rows[0].tenant_id).toBe(B);
+        expect(row.rows[0].full_name).toBe("B Patch Only");
+      });
+
+      it("malformed customer ids on edit fail closed as not found", async () => {
+        const cookie = await login("owner@apia.com");
+        const r = await j("PATCH", "/api/partner/customers/not-a-uuid", cookie, { fullName: "Nope" });
+        expect(r.status).toBe(404);
+      });
+
       it("empty or whitespace-only name is rejected", async () => {
         const cookie = await login("owner@apia.com");
         const empty = await j("POST", "/api/partner/customers", cookie, { fullName: "" });
         expect(empty.status).toBe(400);
         const whitespace = await j("POST", "/api/partner/customers", cookie, { fullName: "   " });
+        expect(whitespace.status).toBe(400);
+      });
+
+      it("empty or whitespace-only name is rejected on edit", async () => {
+        const cookie = await login("owner@apia.com");
+        const created = await j("POST", "/api/partner/customers", cookie, { fullName: "Edit Validation Base" });
+        expect(created.status).toBe(201);
+        const whitespace = await j("PATCH", `/api/partner/customers/${created.body.id}`, cookie, {
+          fullName: "   ",
+        });
         expect(whitespace.status).toBe(400);
       });
 
@@ -289,6 +365,80 @@ let admin: Client;
         const blank = await j("POST", "/api/partner/customers", cookie, { fullName: "Blank Email", email: "" });
         expect(blank.status).toBe(201);
         expect(blank.body.email).toBeNull();
+      });
+
+      it("malformed email is rejected on edit", async () => {
+        const cookie = await login("owner@apia.com");
+        const created = await j("POST", "/api/partner/customers", cookie, { fullName: "Edit Email Base" });
+        expect(created.status).toBe(201);
+        const bad = await j("PATCH", `/api/partner/customers/${created.body.id}`, cookie, {
+          fullName: "Edit Email Base",
+          email: "not-an-email",
+        });
+        expect(bad.status).toBe(400);
+      });
+
+      it("duplicate customer email/reference is rejected inside one tenant but allowed across tenants", async () => {
+        const cookieA = await login("owner@apia.com");
+        const cookieB = await login("owner@apib.com");
+        const first = await j("POST", "/api/partner/customers", cookieA, {
+          fullName: "Unique A",
+          email: "unique-a@example.com",
+          reference: "shared-ref-a",
+        });
+        expect(first.status).toBe(201);
+
+        const duplicateEmail = await j("POST", "/api/partner/customers", cookieA, {
+          fullName: "Duplicate Email A",
+          email: "UNIQUE-A@example.com",
+        });
+        expect(duplicateEmail.status).toBe(409);
+        expect(duplicateEmail.body.error.code).toBe("duplicate");
+
+        const duplicateReference = await j("POST", "/api/partner/customers", cookieA, {
+          fullName: "Duplicate Reference A",
+          reference: "SHARED-REF-A",
+        });
+        expect(duplicateReference.status).toBe(409);
+        expect(duplicateReference.body.error.code).toBe("duplicate");
+
+        const crossTenantSameEmail = await j("POST", "/api/partner/customers", cookieB, {
+          fullName: "Unique B",
+          email: "unique-a@example.com",
+          reference: "shared-ref-a",
+        });
+        expect(crossTenantSameEmail.status).toBe(201);
+      });
+
+      it("edit cannot collide with another customer in the same tenant", async () => {
+        const cookie = await login("owner@apia.com");
+        const first = await j("POST", "/api/partner/customers", cookie, {
+          fullName: "Collision First",
+          email: "collision-first@example.com",
+          reference: "collision-first-ref",
+        });
+        const second = await j("POST", "/api/partner/customers", cookie, {
+          fullName: "Collision Second",
+          email: "collision-second@example.com",
+          reference: "collision-second-ref",
+        });
+        expect(first.status).toBe(201);
+        expect(second.status).toBe(201);
+
+        const duplicate = await j("PATCH", `/api/partner/customers/${second.body.id}`, cookie, {
+          fullName: "Collision Second",
+          email: "collision-first@example.com",
+        });
+        expect(duplicate.status).toBe(409);
+        expect(duplicate.body.error.code).toBe("duplicate");
+
+        const selfSave = await j("PATCH", `/api/partner/customers/${first.body.id}`, cookie, {
+          fullName: "Collision First Renamed",
+          email: "collision-first@example.com",
+          reference: "collision-first-ref",
+        });
+        expect(selfSave.status).toBe(200);
+        expect(selfSave.body.fullName).toBe("Collision First Renamed");
       });
 
       it("script-shaped and SQL-shaped values are stored as inert text, never executed", async () => {

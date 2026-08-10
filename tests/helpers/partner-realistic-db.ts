@@ -23,6 +23,7 @@ export const PARTNER_MIGRATIONS = [
   "0003_partner_auth_hardening",
   "0004_partner_mfa_enrol",
   "0005_partner_mfa_replay_and_grants",
+  "0044_partner_mfa_pending_lifecycle",
   "0006_partner_definer_role",
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
@@ -264,9 +265,7 @@ export async function applyMigrationsRealistic(
       if (name === "0042_partner_per_card_credit_settlement") {
         // SET FALSE is NOT optional. PostgreSQL 16+ defaults a role grant to SET TRUE, so
         // `WITH INHERIT TRUE` alone would silently also confer SET ROLE into the definer.
-        await migrator.query(
-          `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`
-        );
+        await migrator.query(`GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`);
       }
       // EVERY migration — including 0041 and 0042 — runs as the NON-SUPERUSER pn_migrator.
       // There is deliberately no executor swap here any more.

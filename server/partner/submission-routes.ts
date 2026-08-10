@@ -6,6 +6,7 @@
  * { error: { code, message } } shape — never a raw DB error or stack trace.
  */
 import { Router } from "express";
+import { attachImagesUpload } from "../lib/multer-configs";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly, requireNotSensitiveFrozen } from "./session";
 import { partnerSubmissionMutationLimiter } from "./rate-limit";
 import {
@@ -22,6 +23,7 @@ import {
   submitSubmission,
   dashboardSummary,
   listAvailableServiceTiers,
+  uploadCardImage,
 } from "./submission-service";
 
 function sendError(res: import("express").Response, err: unknown): void {
@@ -359,6 +361,31 @@ export function partnerSubmissionRouter(): Router {
         const reason = typeof reasonRaw === "string" ? reasonRaw : undefined;
         await removeCard(req.partner!, String(req.params.id), String(req.params.cardId), reason);
         res.json({ ok: true });
+      } catch (err) {
+        sendError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/submissions/:id/cards/:cardId/images/:side",
+    requirePartnerCapability("partner.orders.edit"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerSubmissionMutationLimiter,
+    attachImagesUpload.single("image"),
+    async (req, res) => {
+      try {
+        const side = String(req.params.side);
+        if (side !== "front" && side !== "back") {
+          res.status(400).json({ error: { code: "validation", message: "Upload a front or back image." } });
+          return;
+        }
+        if (!req.file) {
+          res.status(400).json({ error: { code: "validation", message: "Choose an image to upload." } });
+          return;
+        }
+        res.json(await uploadCardImage(req.partner!, String(req.params.id), String(req.params.cardId), side, req.file));
       } catch (err) {
         sendError(res, err);
       }

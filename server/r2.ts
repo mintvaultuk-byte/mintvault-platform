@@ -65,6 +65,56 @@ export async function uploadToR2(key: string, body: Buffer, contentType: string)
   return key;
 }
 
+/**
+ * Create an evidence object once. The caller supplies a content-addressed key;
+ * an existing object is accepted only when its recorded SHA-256 and byte count
+ * prove it is the exact same object. This prevents a retry or a second scanner
+ * from silently overwriting master evidence.
+ *
+ * Bucket credentials must additionally deny DeleteObject/PutObject overwrite for
+ * the `evidence/masters/` prefix in production. Application checks cannot stop
+ * a credential holder from using the R2 API directly.
+ */
+export async function uploadImmutableEvidenceToR2(
+  key: string,
+  body: Buffer,
+  metadata: Record<string, string>
+): Promise<string> {
+  const client = getClient();
+  const bucket = getBucket();
+  try {
+    const existing = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    if (
+      existing.ContentLength === body.length &&
+      existing.Metadata?.sha256 === metadata.sha256 &&
+      existing.Metadata?.evidenceclass === metadata.evidenceclass
+    ) {
+      return key; // idempotent re-drive of the identical evidence bytes
+    }
+    throw new Error(`Refusing to overwrite immutable evidence object ${key}`);
+  } catch (err: any) {
+    const status = err?.$metadata?.httpStatusCode;
+    const name = err?.name;
+    if (status !== 404 && name !== "NotFound" && name !== "NoSuchKey") throw err;
+  }
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: "image/tiff",
+      CacheControl: "private, no-store",
+      Metadata: metadata,
+      // Conditional creation closes the normal racing-PUT window. If the
+      // backend reports a precondition failure, a re-drive will HEAD and verify
+      // the existing content on its next attempt instead of overwriting it.
+      IfNoneMatch: "*",
+    })
+  );
+  return key;
+}
+
 export async function getR2SignedUrl(key: string, expiresInSeconds: number = 600): Promise<string> {
   const client = getClient();
   return getSignedUrl(
@@ -106,7 +156,7 @@ export async function getR2Buffer(key: string): Promise<Buffer | null> {
  *  streamed back same-origin (behind admin auth) from any machine — the bytes live
  *  in shared R2, not on the machine that rendered them. */
 export async function getR2ObjectStream(
-  key: string,
+  key: string
 ): Promise<{ body: NodeJS.ReadableStream; contentLength?: number; contentType?: string } | null> {
   try {
     const out = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: key }));
@@ -136,7 +186,7 @@ export async function listR2Keys(prefix: string): Promise<string[]> {
  *  Read-only; used by the VQ orphan reconciler, whose age filter needs
  *  LastModified (which listR2Keys drops). Returns [] on any error. */
 export async function listR2Objects(
-  prefix: string,
+  prefix: string
 ): Promise<{ key: string; sizeBytes: number | null; lastModified: Date | null }[]> {
   const out: { key: string; sizeBytes: number | null; lastModified: Date | null }[] = [];
   try {
@@ -145,7 +195,7 @@ export async function listR2Objects(
     let continuationToken: string | undefined;
     do {
       const page = await client.send(
-        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken })
       );
       for (const o of page.Contents ?? []) {
         if (o.Key) out.push({ key: o.Key, sizeBytes: o.Size ?? null, lastModified: o.LastModified ?? null });

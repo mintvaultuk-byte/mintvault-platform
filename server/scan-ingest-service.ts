@@ -6,10 +6,17 @@
  */
 
 import { db, pool } from "./db";
+import { createHash } from "node:crypto";
 import { hashLockKey } from "./lib/advisory-lock";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
-import { uploadToR2, getR2Buffer, listR2Keys } from "./r2";
+import { uploadToR2, uploadImmutableEvidenceToR2, getR2Buffer, listR2Keys } from "./r2";
+import {
+  assertCompatibleEvidencePair,
+  inspectScannerEvidence,
+  type ScannerEvidenceInspection,
+} from "./lib/image-evidence";
+export { assertCompatibleEvidencePair, inspectScannerEvidence } from "./lib/image-evidence";
 import {
   generateImageVariants,
   identifyCardFromBuffer,
@@ -79,6 +86,51 @@ export async function ensureCertDurabilitySchema(): Promise<void> {
     console.error("[cert-durability-migrate] audit insert failed:", auditErr?.message);
   }
   console.log("[cert-durability-migrate] certificates.raw_uploaded + ingest_idempotency_key + unique index ensured");
+}
+
+/**
+ * Phase 58A additive evidence ledger. This deliberately has no numbered
+ * migration: the active migration sequence is owned by the release lead and
+ * must be reconciled before a numbered file is allocated. It mirrors the
+ * project's existing idempotent boot-schema pattern and is safe on an empty or
+ * live database; it never mutates historical certificate rows.
+ */
+export async function ensureImageEvidenceSchema(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS certificate_image_evidence (
+      id SERIAL PRIMARY KEY,
+      certificate_id INTEGER NOT NULL REFERENCES certificates(id) ON DELETE RESTRICT,
+      side VARCHAR(5) NOT NULL CHECK (side IN ('front', 'back')),
+      evidence_class VARCHAR(32) NOT NULL CHECK (evidence_class IN ('NEW_IMMUTABLE_MASTER', 'LEGACY_DERIVED_ONLY')),
+      evidence_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+      object_key TEXT NOT NULL UNIQUE,
+      sha256 VARCHAR(64) NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+      byte_length BIGINT NOT NULL CHECK (byte_length > 0),
+      pixel_width INTEGER NOT NULL CHECK (pixel_width > 0),
+      pixel_height INTEGER NOT NULL CHECK (pixel_height > 0),
+      bit_depth INTEGER,
+      dpi INTEGER,
+      format VARCHAR(16) NOT NULL,
+      capture_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      working_object_key TEXT,
+      working_sha256 VARCHAR(64),
+      working_width INTEGER,
+      working_height INTEGER,
+      working_format VARCHAR(16),
+      working_settings JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT uq_certificate_image_evidence_side UNIQUE (certificate_id, side)
+    )
+  `);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_object_key TEXT`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_sha256 VARCHAR(64)`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_width INTEGER`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_height INTEGER`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_format VARCHAR(16)`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_settings JSONB`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_certificate_image_evidence_sha ON certificate_image_evidence (sha256)`
+  );
 }
 
 /**
@@ -301,8 +353,24 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
         console.log(`[reconciler] ${certNum}: pipeline actively running elsewhere — skipping re-drive`);
         continue;
       }
-      const frontKeys = await listR2Keys(`images/grading/${certId}/raw_front`);
-      const backKeys = await listR2Keys(`images/grading/${certId}/raw_back`);
+      // Phase 58A masters are content-addressed under evidence/masters rather
+      // than the legacy mutable raw_front.* path. Keep that path as a fallback
+      // only for certificates ingested before the evidence ledger existed.
+      let evidenceRows: any[] = [];
+      try {
+        evidenceRows = (
+          await db.execute(sql`
+          SELECT side, object_key FROM certificate_image_evidence
+          WHERE certificate_id = ${certId}`)
+        ).rows as any[];
+      } catch {
+        // A rolling deployment can encounter a node before the additive schema
+        // boot step. Legacy recovery below remains available in that case.
+      }
+      const frontEvidenceKey = evidenceRows.find((r) => r.side === "front")?.object_key as string | undefined;
+      const backEvidenceKey = evidenceRows.find((r) => r.side === "back")?.object_key as string | undefined;
+      const frontKeys = frontEvidenceKey ? [frontEvidenceKey] : await listR2Keys(`images/grading/${certId}/raw_front`);
+      const backKeys = backEvidenceKey ? [backEvidenceKey] : await listR2Keys(`images/grading/${certId}/raw_back`);
       const frontBuf = frontKeys.length ? await getR2Buffer(frontKeys[0]) : null;
       const backBuf = backKeys.length ? await getR2Buffer(backKeys[0]) : null;
       if (!frontBuf) {
@@ -355,15 +423,70 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
  */
 export async function uploadRawScansToR2(
   certId: number,
-  front: { buffer: Buffer; mimeType: string; ext: string },
-  back: { buffer: Buffer; mimeType: string; ext: string } | null
+  front: { buffer: Buffer; mimeType: string; ext: string; inspection?: ScannerEvidenceInspection },
+  back: { buffer: Buffer; mimeType: string; ext: string; inspection?: ScannerEvidenceInspection } | null
 ): Promise<{ frontKey: string; backKey: string | null }> {
-  const safeExt = (ext: string) => (ext.replace(/[^a-z0-9]/gi, "") || "bin").toLowerCase();
-  const frontKey = `images/grading/${certId}/raw_front.${safeExt(front.ext)}`;
-  const backKey = back ? `images/grading/${certId}/raw_back.${safeExt(back.ext)}` : null;
-  await Promise.all([
-    uploadToR2(frontKey, front.buffer, front.mimeType || "application/octet-stream"),
-    back && backKey ? uploadToR2(backKey, back.buffer, back.mimeType || "application/octet-stream") : Promise.resolve(),
+  const frontInspection = front.inspection ?? (await inspectScannerEvidence(front.buffer));
+  const backInspection = back ? (back.inspection ?? (await inspectScannerEvidence(back.buffer))) : null;
+  assertCompatibleEvidencePair(frontInspection, backInspection);
+
+  const persist = async (
+    side: "front" | "back",
+    input: { buffer: Buffer },
+    inspection: ScannerEvidenceInspection
+  ): Promise<string> => {
+    // TIFF is content-addressed and immutable. A JPEG is retained only to keep
+    // existing scanner clients operational, under an explicit legacy prefix.
+    const key =
+      inspection.evidenceClass === "NEW_IMMUTABLE_MASTER"
+        ? `evidence/masters/${certId}/${side}/${inspection.sha256}.tif`
+        : `evidence/legacy/${certId}/${side}/${inspection.sha256}.jpg`;
+    if (inspection.evidenceClass === "NEW_IMMUTABLE_MASTER") {
+      await uploadImmutableEvidenceToR2(key, input.buffer, {
+        sha256: inspection.sha256,
+        evidenceclass: inspection.evidenceClass,
+        evidenceversion: "v1",
+        side,
+        certificateid: String(certId),
+      });
+    } else {
+      await uploadToR2(key, input.buffer, inspection.mimeType);
+    }
+
+    const inserted = await db.execute(sql`
+      INSERT INTO certificate_image_evidence
+        (certificate_id, side, evidence_class, evidence_version, object_key, sha256, byte_length,
+         pixel_width, pixel_height, bit_depth, dpi, format, capture_metadata)
+      VALUES
+        (${certId}, ${side}, ${inspection.evidenceClass}, 'v1', ${key}, ${inspection.sha256},
+         ${inspection.byteLength}, ${inspection.width}, ${inspection.height}, ${inspection.bitDepth},
+         ${inspection.dpi}, ${inspection.format},
+         ${JSON.stringify({ channels: inspection.channels, colourSpace: inspection.colourSpace, hasIccProfile: inspection.hasIccProfile })}::jsonb)
+      ON CONFLICT (certificate_id, side) DO NOTHING
+      RETURNING object_key
+    `);
+    if (inserted.rows.length) return key;
+
+    // A replay can only bind the same source hash to the already-allocated
+    // certificate side. A different side/hash is a substitution attempt, not a
+    // replacement workflow, and is rejected without mutating the ledger.
+    const existing = await db.execute(sql`
+      SELECT object_key, sha256, byte_length, evidence_class
+      FROM certificate_image_evidence WHERE certificate_id = ${certId} AND side = ${side}`);
+    const row = existing.rows[0] as any;
+    if (
+      row?.sha256 === inspection.sha256 &&
+      Number(row?.byte_length) === inspection.byteLength &&
+      row?.evidence_class === inspection.evidenceClass
+    ) {
+      return String(row.object_key);
+    }
+    throw new Error(`Refusing to replace existing ${side} scanner evidence for certificate ${certId}`);
+  };
+
+  const [frontKey, backKey] = await Promise.all([
+    persist("front", front, frontInspection),
+    back && backInspection ? persist("back", back, backInspection) : Promise.resolve(null),
   ]);
   return { frontKey, backKey };
 }
@@ -402,9 +525,7 @@ export async function processScanInBackground(
     // Two-scanner safety: the other scanner may have deleted this cert between
     // ingest and this background job. Skip the whole pipeline — the UPDATE
     // guards downstream would no-op anyway, this just avoids the wasted work.
-    const live = await db.execute(
-      sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    const live = await db.execute(sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     if (live.rows.length === 0) {
       console.log(`[process-scan] cert=${certInfo.certId} soft-deleted mid-ingest — skipping pipeline`);
       return;
@@ -413,9 +534,7 @@ export async function processScanInBackground(
     // staleness marker. Bumping it when the job actually STARTS means
     // "stale processing" measures started-but-died pipelines, not certs
     // that merely sat in a busy queue behind 3-4 scanners' worth of cards.
-    await db.execute(
-      sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
@@ -535,7 +654,61 @@ async function uploadImagesToCertUnlocked(
     .rows[0] as any;
   const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
 
-  // WORKING resolution for the variant pipeline. The raw scanner output is a
+  // A NEW_IMMUTABLE_MASTER working derivative may only be built from the exact
+  // master bytes bound in the evidence ledger. This deliberately makes legacy
+  // bulk-reprocess paths fail for new evidence rather than laundering a q85
+  // derivative back into an authoritative working pointer.
+  let masterRows: Array<{ side: string; sha256: string }> = [];
+  try {
+    masterRows = (
+      await db.execute(sql`
+        SELECT side, sha256 FROM certificate_image_evidence
+        WHERE certificate_id = ${certId} AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+      `)
+    ).rows as Array<{ side: string; sha256: string }>;
+  } catch {
+    // Table is additive during a rolling deployment; legacy processing remains
+    // available until it exists. New ingestion creates the ledger before this
+    // function is queued, so it never takes this fallback.
+  }
+  if (masterRows.length) {
+    const verify = async (side: "front" | "back", input: Buffer | null) => {
+      const row = masterRows.find((r) => r.side === side);
+      if (!row) return;
+      if (!input) throw new Error(`Missing ${side} master bytes for evidence-bound working derivative`);
+      const inspected = await inspectScannerEvidence(input);
+      if (inspected.evidenceClass !== "NEW_IMMUTABLE_MASTER" || inspected.sha256 !== row.sha256) {
+        throw new Error(`Refusing ${side} working derivative: source does not match immutable TIFF master`);
+      }
+    };
+    await verify("front", frontBuffer);
+    await verify("back", backBuffer);
+  }
+
+  // Phase 58A authoritative working asset. It is a browser-safe JPEG derived
+  // once from the master with deterministic orientation only: no crop, resize,
+  // denoise, sharpening, or perspective correction. The old 2000px output
+  // remains a non-authoritative analysis/display branch below.
+  const makeNativeWorkingAsset = async (buf: Buffer) => {
+    const result = await sharp(buf, { limitInputPixels: 30_000_000, failOn: "error" })
+      .rotate()
+      .jpeg({ quality: 95, chromaSubsampling: "4:4:4", progressive: false })
+      .toBuffer({ resolveWithObject: true });
+    return {
+      buffer: result.data,
+      width: result.info.width,
+      height: result.info.height,
+      sha256: createHash("sha256").update(result.data).digest("hex"),
+    };
+  };
+  const [frontWorking, backWorking] = await Promise.all([
+    makeNativeWorkingAsset(frontBuffer),
+    backBuffer ? makeNativeWorkingAsset(backBuffer) : Promise.resolve(null),
+  ]);
+
+  // WORKING resolution for the legacy variant pipeline. This is deliberately
+  // downstream of the authoritative native working asset, never the TIFF
+  // master. It must not be used for new manual measurements.
   // 900dpi TIFF (a card ≈ 2250×3150 px, the whole bed far more); the client
   // uploads it full-res. We downscale to this working size ONCE here, then EVERY
   // downstream step (deskew, card-detect, re-centre, the 5 analysis variants, the
@@ -565,8 +738,8 @@ async function uploadImagesToCertUnlocked(
       .toBuffer();
 
   const [frontResized, backResized] = await Promise.all([
-    resizeBuf(frontBuffer),
-    backBuffer ? resizeBuf(backBuffer) : Promise.resolve(null),
+    resizeBuf(frontWorking.buffer),
+    backWorking ? resizeBuf(backWorking.buffer) : Promise.resolve(null),
   ]);
 
   // Generate variants via the unified pipeline (deskew + autoCrop + reCentre).
@@ -646,6 +819,21 @@ async function uploadImagesToCertUnlocked(
   const uploadKeys: Record<string, string> = {};
   const uploads: Promise<void>[] = [];
 
+  // Persist native working assets under content-addressed keys. The ledger
+  // ties each output to its source master hash and settings before the
+  // workstation is allowed to consume it.
+  const evidenceRows = (
+    await db.execute(sql`
+    SELECT side, sha256 FROM certificate_image_evidence WHERE certificate_id = ${certId}`)
+  ).rows as any[];
+  const frontSource = evidenceRows.find((r) => r.side === "front");
+  const backSource = evidenceRows.find((r) => r.side === "back");
+  const frontWorkingKey = `evidence/working/${certId}/front/${frontWorking.sha256}.v1.jpg`;
+  uploads.push(uploadToR2(frontWorkingKey, frontWorking.buffer, "image/jpeg").then(() => {}));
+  const backWorkingKey = backWorking ? `evidence/working/${certId}/back/${backWorking.sha256}.v1.jpg` : null;
+  if (backWorking && backWorkingKey)
+    uploads.push(uploadToR2(backWorkingKey, backWorking.buffer, "image/jpeg").then(() => {}));
+
   // Flat JPG variants. Phase 2 — "cropped" REMOVED from this loop: it wrote the
   // SAME R2 key (front_cropped.jpg / back_cropped.jpg) as the canonical display
   // JPEG below, racing it in Promise.all with a different buffer. The display JPEG
@@ -714,6 +902,31 @@ async function uploadImagesToCertUnlocked(
   await Promise.all(uploads);
   const r2Ms = elapsedMs(tR2);
   console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
+
+  const workingSettings = JSON.stringify({
+    version: "v1",
+    format: "jpeg",
+    quality: 95,
+    chromaSubsampling: "4:4:4",
+    orientation: "rotate",
+    resize: null,
+  });
+  if (frontSource) {
+    await db.execute(sql`
+      UPDATE certificate_image_evidence SET
+        working_object_key = ${frontWorkingKey}, working_sha256 = ${frontWorking.sha256},
+        working_width = ${frontWorking.width}, working_height = ${frontWorking.height},
+        working_format = 'jpeg', working_settings = ${workingSettings}::jsonb
+      WHERE certificate_id = ${certId} AND side = 'front' AND sha256 = ${frontSource.sha256}`);
+  }
+  if (backSource && backWorking && backWorkingKey) {
+    await db.execute(sql`
+      UPDATE certificate_image_evidence SET
+        working_object_key = ${backWorkingKey}, working_sha256 = ${backWorking.sha256},
+        working_width = ${backWorking.width}, working_height = ${backWorking.height},
+        working_format = 'jpeg', working_settings = ${workingSettings}::jsonb
+      WHERE certificate_id = ${certId} AND side = 'back' AND sha256 = ${backSource.sha256}`);
+  }
 
   // Persist R2 keys + crop_geometry forensics
   const cropGeometry = {
@@ -1132,9 +1345,8 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
  */
 export async function repairEmptyIdentityFromSnapshot(certId: number): Promise<boolean> {
   try {
-    const row = (
-      await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`)
-    ).rows[0] as any;
+    const row = (await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`))
+      .rows[0] as any;
     if (!row) return false;
     const nameEmpty = row.card_name == null || String(row.card_name).trim() === "";
     if (!nameEmpty) return false; // only repair a genuinely missing name

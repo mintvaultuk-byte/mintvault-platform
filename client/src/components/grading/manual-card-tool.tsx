@@ -24,6 +24,7 @@ import {
   routePlacement,
   nextPass,
   axisLockInner,
+  screenPointToSourcePct,
   type CardToolMode,
 } from "./card-tool-geometry";
 import { type CenteringResult } from "./manual-centering";
@@ -37,6 +38,10 @@ interface Props {
   /** RAW original image URL. Display the raw (not the cropped) so /recrop —
    *  which rotates the raw first then crops — never double-rotates. */
   rawImageUrl: string;
+  /** Browser-safe, deterministic derivative of the immutable master. New
+   * evidence records MUST provide this; rawImageUrl is retained only for
+   * legacy JPEG-only records and server-side recrop compatibility. */
+  workingImageUrl?: string;
   /** Called after a successful compute (recrop ± centering) so the panel can
    *  refresh the images + grading queries. */
   onDone: () => void;
@@ -96,6 +101,9 @@ interface Props {
   /** When opening directly in "defects", the already-cropped display image URL
    *  to load as the defects-phase <img> (no /recrop re-run needed). */
   existingCroppedUrl?: string;
+  /** Authoritative working crop, when the pipeline provides one. The legacy
+   * display/cropped URL remains an explicit fallback for historical cards. */
+  workingCroppedUrl?: string;
   /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
   apiBase?: string;
 }
@@ -287,6 +295,7 @@ export default function ManualCardTool({
   side,
   certId,
   rawImageUrl,
+  workingImageUrl,
   onDone,
   onCancel,
   onCentering,
@@ -301,8 +310,14 @@ export default function ManualCardTool({
   onRetryCrop,
   initialPhase = "capture",
   existingCroppedUrl,
+  workingCroppedUrl,
   apiBase = "/api/admin",
 }: Props) {
+  // TIFF masters are intentionally not browser measurement inputs. New records
+  // use the deterministic working derivative; old records retain their actual
+  // JPEG evidence rather than pretending a TIFF exists.
+  const measurementImageUrl = workingImageUrl ?? rawImageUrl;
+  const initialWorkingCropUrl = workingCroppedUrl ?? existingCroppedUrl;
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
   const [innerPts, setInnerPts] = useState<Point[]>([]);
@@ -335,7 +350,7 @@ export default function ManualCardTool({
   // defects phase so the operator marks pins on the new crop (not the raw).
   // When opening directly in defects, seeded from the existing crop URL.
   const [croppedDisplayUrl, setCroppedDisplayUrl] = useState<string | null>(
-    initialPhase === "defects" && existingCroppedUrl ? existingCroppedUrl : null
+    initialPhase === "defects" && initialWorkingCropUrl ? initialWorkingCropUrl : null
   );
   // Optimistic local crop preview shown the instant Compute fires, while the
   // real crop uploads to R2 in the background. Geometry mirrors the server's
@@ -527,7 +542,13 @@ export default function ManualCardTool({
     if (!el) return null;
     const r = el.getBoundingClientRect();
     if (rotation === 0 || phase !== "capture") {
-      return { x: ((clientX - r.left) / r.width) * 100, y: ((clientY - r.top) / r.height) * 100 };
+      return screenPointToSourcePct({
+        clientX,
+        clientY,
+        bounds: r,
+        sourceDisplayWidth: el.offsetWidth,
+        sourceDisplayHeight: el.offsetHeight,
+      });
     }
     // Rotated stage: getBoundingClientRect returns the AABB of the rotated box,
     // whose centre is the rotation-invariant stage centre (= the CSS
@@ -540,14 +561,14 @@ export default function ManualCardTool({
     // stored dot re-renders precisely under the cursor.
     const W = el.offsetWidth;
     const H = el.offsetHeight;
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const rad = (rotation * Math.PI) / 180;
-    const sx = clientX - cx;
-    const sy = clientY - cy;
-    const ux = sx * Math.cos(rad) + sy * Math.sin(rad); // R(-rotation) · (sx,sy)
-    const uy = -sx * Math.sin(rad) + sy * Math.cos(rad);
-    return { x: ((ux + W / 2) / W) * 100, y: ((uy + H / 2) / H) * 100 };
+    return screenPointToSourcePct({
+      clientX,
+      clientY,
+      bounds: r,
+      sourceDisplayWidth: W,
+      sourceDisplayHeight: H,
+      rotationDeg: rotation,
+    });
   }
 
   function toPct(e: MouseEvent | React.MouseEvent): Point | null {
@@ -1184,7 +1205,7 @@ export default function ManualCardTool({
   // Shared defect-commit for a single screen point. Used by the desktop mouse
   // click (onDefectAreaClick) AND the iPad single-finger tap (onContainerTouchEnd)
   // so both surfaces get identical double-tap-opens-picker / single-tap-pins
-  // behaviour. Coordinates are raw screen px (clientX/clientY).
+  // behaviour. screenToImagePct keeps saved pins source-relative.
   function commitDefectTap(clientX: number, clientY: number) {
     if (phase !== "defects") return;
     const now = Date.now();
@@ -1194,12 +1215,9 @@ export default function ManualCardTool({
       openDefectPicker();
       return;
     }
-    const el = containerRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const x = clamp(((clientX - r.left) / r.width) * 100);
-    const y = clamp(((clientY - r.top) / r.height) * 100);
-    setDefectBatch((prev) => [...prev, { x, y, pxX: clientX, pxY: clientY }]);
+    const point = screenToImagePct(clientX, clientY);
+    if (!point) return;
+    setDefectBatch((prev) => [...prev, { x: point.x, y: point.y, pxX: clientX, pxY: clientY }]);
   }
   function onDefectAreaClick(e: React.MouseEvent) {
     commitDefectTap(e.clientX, e.clientY);
@@ -1581,7 +1599,7 @@ export default function ManualCardTool({
                       }}
                     >
                       <img
-                        src={rawImageUrl}
+                        src={measurementImageUrl}
                         alt={`${side} cropped preview`}
                         draggable={false}
                         style={{
@@ -1605,7 +1623,7 @@ export default function ManualCardTool({
                     // returned by /recrop. imgDims re-measures via onLoad so
                     // coordinate capture stays accurate against the new image's
                     // natural pixels (same aspect as the preview → no pin shift).
-                    src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : rawImageUrl}
+                    src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : measurementImageUrl}
                     alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
                     className="block cursor-crosshair"
                     style={

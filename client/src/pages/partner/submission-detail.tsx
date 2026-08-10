@@ -25,6 +25,7 @@ const EVENT_LABELS: Record<string, string> = {
   card_added: "Card added",
   card_updated: "Card updated",
   card_removed: "Card removed",
+  card_image_uploaded: "Card image uploaded",
   submitted: "Submitted to MintVault",
   cancelled: "Submission cancelled",
 };
@@ -109,6 +110,27 @@ export default function PartnerSubmissionDetailPage() {
                     Intake observation — not a MintVault grade: {c.intake_notes}
                   </p>
                 )}
+                <div className="mt-2 flex gap-2">
+                  {(["front", "back"] as const).map((side) => {
+                    const url = side === "front" ? c.front_image_url : c.back_image_url;
+                    return url ? (
+                      <a
+                        key={side}
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-primary underline"
+                        data-testid={`link-detail-${side}-image-${c.id}`}
+                      >
+                        {side} image
+                      </a>
+                    ) : (
+                      <span key={side} className="text-xs text-muted-foreground">
+                        {side} image missing
+                      </span>
+                    );
+                  })}
+                </div>
               </li>
             ))}
           </ul>
