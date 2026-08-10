@@ -6,7 +6,7 @@
  * Its only mutation is the explicit audited credit-adjustment action in the wallet panel.
  *
  * HONESTY RULE: where the platform has no data source (partner quality rating, device
- * registry, scanner telemetry, per-partner certificate counts, credit purchases), the server
+ * registry, scanner telemetry and per-partner certificate counts), the server
  * returns a typed `MetricUnavailable` and this page renders the REASON. It never renders a
  * zero in place of "we cannot know" — a fake metric on an operations console is worse than a
  * blank one, because it gets acted on.
@@ -128,6 +128,11 @@ export function Empty({ label, testId }: { label: string; testId: string }) {
       {label}
     </div>
   );
+}
+
+function formatPurchasePence(pence: number | null, currency: string | null): string {
+  if (pence === null || !currency) return "—";
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(pence / 100);
 }
 
 /** Explains an entire section that has no backing data, rather than showing an empty table. */
@@ -967,9 +972,54 @@ export function PartnerDrilldown({ partnerId, tab }: { partnerId: string; tab: D
               <StatCard label="Lifetime consumed" value={formatCredits(wallet.data.consumedReservations)} mono />
             </div>
             <div style={{ fontSize: 12, opacity: 0.8 }}>{wallet.data.note}</div>
-            <div style={{ fontSize: 12 }}>
-              Credit purchases: <Unavailable metric={wallet.data.purchases} />
-            </div>
+            {wallet.data.purchases.available ? (
+              <section data-testid="pd-purchase-history" style={{ display: "grid", gap: 8 }}>
+                <strong>Credit purchase history</strong>
+                {wallet.data.purchases.value.length === 0 ? (
+                  <Empty label="No credit purchases recorded." testId="pd-purchase-history-empty" />
+                ) : (
+                  <div style={wrap}>
+                    <table className="min-w-full text-left text-sm" data-testid="pd-purchase-history-table">
+                      <thead>
+                        <tr>
+                          {["When", "Credits", "Package", "Paid", "Source", "Reference"].map((h) => (
+                            <th key={h} scope="col" style={th}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {wallet.data.purchases.value.map((purchase) => (
+                          <tr key={purchase.ledgerEntryId} style={{ borderTop: "1px solid rgba(255,255,255,.08)" }}>
+                            <td style={td}>{formatDateTime(purchase.purchasedAt)}</td>
+                            <td style={td}>+{purchase.credits}</td>
+                            <td style={td}>{purchase.packageId ?? "—"}</td>
+                            <td style={td}>{formatPurchasePence(purchase.amountPaidPence, purchase.currency)}</td>
+                            <td style={td}>{purchase.source}</td>
+                            <td
+                              style={td}
+                              title={
+                                purchase.checkoutSessionId ??
+                                purchase.paymentIntentId ??
+                                purchase.reference ??
+                                undefined
+                              }
+                            >
+                              {purchase.reference ?? "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            ) : (
+              <div style={{ fontSize: 12 }}>
+                Credit purchases: <Unavailable metric={wallet.data.purchases} />
+              </div>
+            )}
             {wallet.data.manualAdjustmentEnabled && <CreditAdjustmentControl partnerId={partnerId} />}
             {wallet.data.recentLedger.length === 0 ? (
               <Empty label="No ledger entries." testId="pd-ledger-empty" />
@@ -978,7 +1028,7 @@ export function PartnerDrilldown({ partnerId, tab }: { partnerId: string; tab: D
                 <table className="min-w-full text-left text-sm" data-testid="pd-ledger-table">
                   <thead>
                     <tr>
-                      {["When", "Amount", "Type", "Source", "Reason", "Actor"].map((h) => (
+                      {["When", "Amount", "Type", "Source", "Reference", "Reason", "Actor"].map((h) => (
                         <th key={h} scope="col" style={th}>
                           {h}
                         </th>
@@ -994,6 +1044,7 @@ export function PartnerDrilldown({ partnerId, tab }: { partnerId: string; tab: D
                         </td>
                         <td style={td}>{e.entryType}</td>
                         <td style={td}>{e.source}</td>
+                        <td style={td}>{e.reference ?? "—"}</td>
                         <td style={td}>{e.reason}</td>
                         <td style={td}>{e.actorEmail ?? e.actorType}</td>
                       </tr>

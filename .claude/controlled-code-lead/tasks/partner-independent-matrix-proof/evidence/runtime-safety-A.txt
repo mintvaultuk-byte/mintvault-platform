@@ -1,0 +1,8 @@
+[A] runtime-safety proof database: mxa_mintvault_partner_matrix_rlsproof
+[A] fresh tenants: 9c729619-ada6-4ddd-8a2b-41f6c026c191 / 3dc3e4e5-e7d1-4a64-8390-7701c3fef001
+[A] effective role: {"user_name":"partner_runtime","superuser":"off","row_security":"on","bypassrls":false}
+  PROVEN  partner_runtime: NOSUPERUSER, NOBYPASSRLS, row_security=on
+  PROVEN  absent tenant context fails CLOSED (0 rows visible)
+  PROVEN  tenant A context sees ONLY tenant A's row (tenant B invisible)
+  PROVEN  tenant GUC is transaction-local (does not leak past ROLLBACK)
+RUNTIME_SAFETY_JSON {"matrix":"A","proofDatabase":"mxa_mintvault_partner_matrix_rlsproof","tenantA":"9c729619-ada6-4ddd-8a2b-41f6c026c191","tenantB":"3dc3e4e5-e7d1-4a64-8390-7701c3fef001","effectiveRole":"partner_runtime","superuser":"off","bypassrls":false,"rowSecurity":"on"}

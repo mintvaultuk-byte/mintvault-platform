@@ -102,7 +102,8 @@ describe("static rendering of dashboard primitives", () => {
   });
 
   describe("visibility-unavailable panel (D1, client side)", () => {
-    const MESSAGE = "Partner data is unavailable: the configured admin database role cannot perform cross-tenant reads.";
+    const MESSAGE =
+      "Partner data is unavailable: the configured admin database role cannot perform cross-tenant reads.";
 
     it("states that data is unavailable and explains why zeros are not shown", () => {
       const html = render(createElement(VisibilityUnavailable, { message: MESSAGE }));
@@ -247,5 +248,56 @@ describe("drill-down lazy loading (real mount, real queries)", () => {
 
     expect(container.textContent).toContain(reason);
     expect(container.textContent).not.toMatch(/\b0%\b/);
+  });
+
+  it("renders ledger-backed purchase history with its immutable reference", async () => {
+    fetchMock.mockImplementation(() =>
+      ok({
+        configured: true,
+        walletId: "wallet-1",
+        status: "active",
+        availableCredits: 25,
+        reservedCredits: 0,
+        ledgerBalance: 25,
+        consumedReservations: 0,
+        note: "Balances are ledger-derived.",
+        manualAdjustmentEnabled: false,
+        recentLedger: [
+          {
+            id: "ledger-1",
+            amount: 25,
+            entryType: "purchase",
+            source: "stripe",
+            reason: "Synthetic purchase",
+            actorType: "service",
+            actorEmail: null,
+            reference: "pi_dashboard_history",
+            createdAt: "2026-08-10T12:00:00.000Z",
+          },
+        ],
+        purchases: metric([
+          {
+            ledgerEntryId: "ledger-1",
+            credits: 25,
+            packageId: "credits-25",
+            amountPaidPence: 25_000,
+            currency: "gbp",
+            checkoutSessionId: "cs_dashboard_history",
+            paymentIntentId: "pi_dashboard_history",
+            source: "stripe",
+            reference: "pi_dashboard_history",
+            purchasedAt: "2026-08-10T12:00:00.000Z",
+          },
+        ]),
+      })
+    );
+
+    await mount(createElement(PartnerDrilldown, { partnerId: PARTNER, tab: "wallet" }));
+
+    expect(container.querySelector('[data-testid="pd-purchase-history-table"]')).not.toBeNull();
+    expect(container.textContent).toContain("Credit purchase history");
+    expect(container.textContent).toContain("credits-25");
+    expect(container.textContent).toContain("£250.00");
+    expect(container.textContent).toContain("pi_dashboard_history");
   });
 });

@@ -145,7 +145,7 @@ describe("G4 ops page source assertions", () => {
   it("renders automatic Partner credit details without adding manual accounting controls", () => {
     expect(src).toContain("detail.data?.partnerCredit");
     expect(src).toContain("partnerCredit.error");
-    expect(src).toContain("Credit reservation:");
+    expect(src).toContain("Credit reservations:");
     expect(src).toContain("Wallet:");
     expect(src).not.toMatch(/manual credit|adjust credits|credit adjustment/i);
   });

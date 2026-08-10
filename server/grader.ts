@@ -25,6 +25,9 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
+// Partner-owned predicate. The SQL and the partner table name live in server/partner/, so this
+// protected engine file carries none of that knowledge — see grading-assignment.ts's header.
+import { partnerReviewLockGuard } from "./partner/grading-assignment";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
@@ -187,6 +190,12 @@ const GRADER_PII_KEYS = new Set<string>([
   "claimCodeHash",
   "claimCodeUsedAt",
   "privateNotes",
+  // authNotes is HQ-private commentary on the authentication verdict and may record forgery or
+  // alteration suspicions, and may name the customer. It sat one line below privateNotes in the
+  // grading payload but in neither this list nor the hard-blank beside it, so it reached partner
+  // shop operators verbatim. The write side was already refused (auth_notes is not on the partner
+  // evidence whitelist); this closes the read side to match.
+  "authNotes",
   "customerEmail",
   "customerFirstName",
   "customerLastName",
@@ -204,6 +213,7 @@ const GRADER_PII_KEYS = new Set<string>([
   "claim_code_hash",
   "claim_code_used_at",
   "private_notes",
+  "auth_notes", // snake_case twin of authNotes above — both spellings, as with private_notes.
   "customer_email",
   "customer_first_name",
   "customer_last_name",
@@ -336,6 +346,13 @@ export interface CertAssignment {
   rejectionReason: string | null;
 }
 
+interface CertReviewRevision {
+  gradingRevision: number;
+  evidenceRevision: number;
+  reviewGradingRevision: number | null;
+  reviewEvidenceRevision: number | null;
+}
+
 /** Cert-level assignment/workflow read (grader v2 — no submission join). */
 export async function getCertAssignment(certId: number): Promise<CertAssignment | null> {
   const r = await db.execute(sql`
@@ -351,6 +368,27 @@ export async function getCertAssignment(certId: number): Promise<CertAssignment 
     gradingStatus: (row.grader_status ?? "unassigned") as GradingStatus,
     redoCount: Number(row.redo_count ?? 0),
     rejectionReason: row.rejection_reason ?? null,
+  };
+}
+
+/**
+ * Read the revision pair ONLY at the review boundary.  Normal draft/metadata routes need merely
+ * the assignment state and must not couple their read path to this additive migration.
+ */
+async function getCertReviewRevision(certId: number): Promise<CertReviewRevision | null> {
+  const r = await db.execute(sql`
+    SELECT grading_revision, evidence_revision, review_grading_revision, review_evidence_revision
+      FROM certificates
+     WHERE id = ${certId} AND deleted_at IS NULL
+     LIMIT 1
+  `);
+  const row = r.rows[0] as any;
+  if (!row) return null;
+  return {
+    gradingRevision: Number(row.grading_revision),
+    evidenceRevision: Number(row.evidence_revision),
+    reviewGradingRevision: row.review_grading_revision == null ? null : Number(row.review_grading_revision),
+    reviewEvidenceRevision: row.review_evidence_revision == null ? null : Number(row.review_evidence_revision),
   };
 }
 
@@ -652,11 +690,37 @@ export async function buildCertImagesPayload(
   return { urls, quality: c.imageQualityChecks || {} };
 }
 
+/**
+ * Read the two operator-visible authenticity columns DIRECTLY.
+ *
+ * `auth_status` and `auth_notes` are real `certificates` columns that this module writes in raw
+ * SQL, but shared/schema.ts does not declare them, so Drizzle's `select()` never materialises
+ * them and `cert.authStatus` is structurally `undefined` — not null, absent. The same root cause
+ * is documented in the codebase's own words at server/routes.ts:2582-2597.
+ *
+ * The consequence on the read side was that buildCertGradingPayload's `c.authStatus || "genuine"`
+ * handed EVERY operator the fallback `"genuine"`, including a certificate an HQ operator had
+ * recorded as Authentic Altered, and the grading panel then wrote that fabricated verdict back.
+ * Reading the columns explicitly is the minimal repair; `"genuine"` survives only as the
+ * genuinely-null fallback at the call site.
+ *
+ * `private_notes` is deliberately NOT read here — a grader must never receive admin-internal
+ * notes, and `privateNotes: ""` below is correct and unchanged.
+ */
+async function readUndeclaredAuthColumns(
+  certId: number
+): Promise<{ authStatus: string | null; authNotes: string | null }> {
+  const r = await db.execute(sql`SELECT auth_status, auth_notes FROM certificates WHERE id = ${certId}`);
+  const row = (r.rows?.[0] ?? {}) as { auth_status?: string | null; auth_notes?: string | null };
+  return { authStatus: row.auth_status ?? null, authNotes: row.auth_notes ?? null };
+}
+
 /** The grading state for a certificate. NO customer PII — grade/measurement data only. */
 export async function buildCertGradingPayload(certId: number): Promise<any | null> {
   const cert = await storage.getCertificate(certId);
   if (!cert) return null;
   const c = cert as any;
+  const undeclared = await readUndeclaredAuthColumns(certId);
   return {
     // Resolved card identity — the grader panel re-syncs its editable idName/idSet
     // fields from these once the on-open identify has run (the panel mounts before
@@ -686,8 +750,8 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     edges: c.edgeValues || null,
     surface: c.surfaceValues || null,
     defects: c.defects || [],
-    authStatus: c.authStatus || "genuine",
-    authNotes: c.authNotes || "",
+    authStatus: undeclared.authStatus || "genuine",
+    authNotes: undeclared.authNotes || "",
     gradeExplanation: c.gradeExplanation || "",
     // private_notes are admin-internal and may reference the customer — NEVER
     // surface them to a grader. Returned empty; the grader never reads or
@@ -736,6 +800,26 @@ const keepStr = (a: any, b: any) =>
   a === undefined || a === null || (typeof a === "string" && a.trim() === "") ? (b ?? null) : a;
 
 /**
+ * SQL-side preservation for the three columns the schema model does NOT declare.
+ *
+ * `auth_status`, `auth_notes` and `private_notes` are written by the UPDATE below but are absent
+ * from the `certificates` Drizzle model, so `cert.authStatus` / `cert.authNotes` /
+ * `cert.privateNotes` are ALWAYS `undefined` and `pick()` collapsed to NULL on EVERY draft save —
+ * silently destroying an HQ operator's private notes and resetting an `authentic_altered` verdict
+ * to nothing. Preserve at the SQL layer instead, so no read shape anywhere has to change: this is
+ * the identical repair server/routes.ts:2677-2680 already ships for these exact three columns on
+ * the admin certificate-update route.
+ *
+ * Returns NULL when the caller sent nothing, so `COALESCE(<expr>, <column>)` keeps the stored
+ * value. `""` is mapped to NULL and therefore PRESERVES rather than blanks — byte-identical to
+ * the admin route's `txt()` helper. That is deliberate: the grading panel seeds these fields
+ * empty before its data arrives, so treating `""` as an instruction to blank is exactly how the
+ * data was being lost. Blanking remains available on the admin certificate-update route, which
+ * is the surface that owns admin-internal fields.
+ */
+const keepStoredText = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
+
+/**
  * Persist a grader's grade as a DRAFT on the certificate (grade_approved_at
  * stays NULL — only the admin approval publishes). Mirrors the column set the
  * admin draft-save writes for the fields the grading panel round-trips, merging
@@ -753,10 +837,17 @@ export class GradeDraftRejected extends Error {
   }
 }
 
-export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
+export async function applyCertGradeDraft(
+  certId: number,
+  body: any,
+  options: { expectedEvidenceRevision?: number; refreshReviewRevision?: boolean } = {}
+): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
-  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
+  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(
+    cert,
+    body
+  );
 
   const overall = body.overall_grade;
   // grade_type used to be written VERBATIM from the request body, and the column is plain
@@ -827,24 +918,39 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       defects        = ${jb(body.defects, cert.defects)}::jsonb,
       whitening_lines = ${jb(body.whitening_lines, cert.whiteningLines)}::jsonb,
       crease_lines    = ${jb(body.crease_lines, cert.creaseLines)}::jsonb,
-      auth_status = ${pick(body.auth_status, cert.authStatus)},
-      auth_notes  = ${pick(body.auth_notes, cert.authNotes)},
+      auth_status = COALESCE(${keepStoredText(body.auth_status)}, auth_status, 'genuine'),
+      auth_notes  = COALESCE(${keepStoredText(body.auth_notes)}, auth_notes),
       grade_explanation = ${pick(body.grade_explanation, cert.gradeExplanation)},
-      private_notes     = ${pick(body.private_notes, cert.privateNotes)},
+      private_notes     = COALESCE(${keepStoredText(body.private_notes)}, private_notes),
       dark_border_front = ${pick(body.dark_border_front, cert.darkBorderFront)},
       dark_border_back  = ${pick(body.dark_border_back, cert.darkBorderBack)},
       eye_appeal_modifier = ${num(body.eye_appeal_modifier, cert.eyeAppealModifier)},
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
+      grading_revision = grading_revision + 1,
+      review_grading_revision = CASE
+        WHEN ${options.refreshReviewRevision === true} THEN grading_revision + 1
+        ELSE review_grading_revision
+      END,
+      review_evidence_revision = CASE
+        WHEN ${options.refreshReviewRevision === true} THEN evidence_revision
+        ELSE review_evidence_revision
+      END,
       updated_at = NOW()
-    WHERE id = ${certId} AND grade_approved_at IS NULL
+    WHERE id = ${certId}
+      AND grade_approved_at IS NULL
+      AND (${options.expectedEvidenceRevision ?? null}::integer IS NULL OR evidence_revision = ${options.expectedEvidenceRevision ?? null})
     RETURNING id
   `);
   return r.rows.length > 0;
 }
 
 /** Publish a certificate's grade (admin approval): set approved_at + live status. */
-export async function approveCertGrade(certId: number, adminUser: string): Promise<boolean> {
+export async function approveCertGrade(
+  certId: number,
+  adminUser: string,
+  reviewed: CertReviewRevision
+): Promise<boolean> {
   // Phase 2 — atomic CAS publish: only publishes while still pending_review (its
   // sole caller, approveGraderCert, requires that). 0 rows ⇒ state changed
   // concurrently (e.g. a racing reject) → caller returns 409 instead of double-publishing.
@@ -852,8 +958,15 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
     UPDATE certificates
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
         grader_status = 'approved', graded_at = NOW(), updated_at = NOW(),
+        approved_grading_revision = grading_revision,
+        approved_evidence_revision = evidence_revision,
         print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
-    WHERE id = ${certId} AND grader_status = 'pending_review'
+    WHERE id = ${certId}
+      AND grader_status = 'pending_review'
+      AND grading_revision = ${reviewed.gradingRevision}
+      AND evidence_revision = ${reviewed.evidenceRevision}
+      AND review_grading_revision = ${reviewed.reviewGradingRevision}
+      AND review_evidence_revision = ${reviewed.reviewEvidenceRevision}
     RETURNING id
   `);
   return r.rows.length > 0;
@@ -969,6 +1082,7 @@ export async function assignCerts(graderId: string, certIds: number[], adminUser
     SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
     WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
+      ${await partnerReviewLockGuard()}
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_assign", adminUser, {
@@ -993,6 +1107,7 @@ export async function reassignCerts(graderId: string, certIds: number[], adminUs
     SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
     WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
+      ${await partnerReviewLockGuard()}
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_reassign", adminUser, {
@@ -1016,6 +1131,7 @@ export async function unassignCerts(certIds: number[], adminUser: string) {
     UPDATE certificates
     SET assigned_grader_id = NULL, grader_status = 'unassigned', assigned_at = NULL, updated_at = NOW()
     WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
+      ${await partnerReviewLockGuard()}
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_unassign", adminUser, {
@@ -1053,6 +1169,22 @@ export async function getCertsForSubmission(submissionId: number) {
   }));
 }
 
+/**
+ * The durable quality-review clock on `certificates` (migration 0063).
+ *
+ * ONE DEFINITION, because there are now three places that must agree on this column and a
+ * disagreement between them is silent: the writer below, the partner submit-for-review path
+ * (server/partner/grading-routes.ts), and the rating measurement
+ * (server/partner/public-network-service.ts). Raw SQL is invisible to the type checker, so a
+ * typo in any one of them type-checks perfectly and produces a rating computed from the wrong
+ * dates — which is precisely the class of failure this column exists to end.
+ *
+ * WHAT IT IS: the latest moment a physical unit entered or re-entered MintVault quality review.
+ * WHAT IT IS NOT: grading data. It feeds no score, weight, threshold, bracket or gate. It
+ * positions an already-computed piece of evidence on a calendar, nothing more.
+ */
+export const REVIEW_LIFECYCLE_COLUMN = "review_entered_at";
+
 // ── Reject / approve (admin sanctioned actions on a pending_review cert) ───────
 
 /** Reject a grader-submitted cert: pending_review → assigned, store reason, +redo. */
@@ -1064,10 +1196,27 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
   }
   // Phase 2 — atomic CAS: only reject while still pending_review; 0 rows ⇒ a
   // concurrent transition won, return 409 instead of clobbering the new state.
+  //
+  // review_entered_at is written HERE, in the same CAS, and that placement is the whole point.
+  // See REVIEW_LIFECYCLE_COLUMN above for what the column is and why the previous clock was
+  // gameable. What matters at this line is that `redo_count` — the predicate that puts a unit
+  // into the quality-rating population — and the timestamp that positions it in the rolling
+  // window MOVE IN ONE STATEMENT. Written anywhere else (the route, the partner mirror, a
+  // follow-up UPDATE) they could disagree: a crash between the two would leave a unit counted as
+  // reviewed but dated from its connector import, which is exactly the defect being closed.
+  //
+  // Note it survives `graded_at = NULL` on the same line. Nulling graded_at is what DESTROYED the
+  // only surviving review timestamp on a returned card and sent the window's clock all the way
+  // back to issued_at; that behaviour is deliberate and unchanged, and this column is what now
+  // records the review that happened regardless.
+  //
+  // NOT GRADING DATA. No grade, sub-grade, weight, threshold, deduction, centering value or
+  // Pristine decision is read or written by this change. It records WHEN a review outcome was
+  // recorded, not WHAT it was.
   const r = await db.execute(sql`
     UPDATE certificates
     SET grader_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
-        graded_at = NULL, updated_at = NOW()
+        graded_at = NULL, review_entered_at = NOW(), updated_at = NOW()
     WHERE id = ${certId} AND grader_status = 'pending_review'
     RETURNING id
   `);
@@ -1150,6 +1299,20 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   if (a.gradingStatus !== "pending_review") {
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   }
+  const reviewed = await getCertReviewRevision(certId);
+  if (!reviewed) return { ok: false as const, status: 404, error: "Certificate not found" };
+  if (
+    reviewed.reviewGradingRevision == null ||
+    reviewed.reviewEvidenceRevision == null ||
+    reviewed.reviewGradingRevision !== reviewed.gradingRevision ||
+    reviewed.reviewEvidenceRevision !== reviewed.evidenceRevision
+  ) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Grade or evidence changed after this review was prepared; refresh and re-review before approving.",
+    };
+  }
   // Both pre-publish gates (B3 sub-grade completeness + printable-grade), shared
   // verbatim with the auto-approve path. Runs BEFORE any approval write.
   const gates = await checkGradePublishGates(certId);
@@ -1161,9 +1324,13 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   // rather than flip grader_status on an unpublished grade.
   // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
   // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
-  const published = await approveCertGrade(certId, adminUser);
+  const published = await approveCertGrade(certId, adminUser, reviewed);
   if (!published) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Grade or evidence changed after this review was prepared; refresh and re-review before approving.",
+    };
   }
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
@@ -1176,6 +1343,8 @@ export async function approveGraderCert(certId: number, adminUser: string) {
       edges: c?.gradeEdges ?? null,
       surface: c?.gradeSurface ?? null,
     },
+    grading_revision: reviewed.gradingRevision,
+    evidence_revision: reviewed.evidenceRevision,
   });
   return { ok: true as const };
 }
@@ -1198,7 +1367,10 @@ async function gradeSnapshot(certId: number) {
   };
 }
 
-function sameGradeSnapshot(a: Awaited<ReturnType<typeof gradeSnapshot>>, b: Awaited<ReturnType<typeof gradeSnapshot>>): boolean {
+function sameGradeSnapshot(
+  a: Awaited<ReturnType<typeof gradeSnapshot>>,
+  b: Awaited<ReturnType<typeof gradeSnapshot>>
+): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -1214,10 +1386,15 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+  const reviewed = await getCertReviewRevision(certId);
+  if (!reviewed) return { ok: false as const, status: 404, error: "Certificate not found" };
   const before = await gradeSnapshot(certId);
   let saved = false;
   try {
-    saved = await applyCertGradeDraft(certId, body);
+    saved = await applyCertGradeDraft(certId, body, {
+      expectedEvidenceRevision: reviewed.evidenceRevision,
+      refreshReviewRevision: true,
+    });
   } catch (e) {
     if (e instanceof GradeDraftValidationError) {
       return { ok: false as const, status: e.status, error: e.message };
@@ -1225,7 +1402,11 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
     throw e;
   }
   if (!saved) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Evidence changed while this review was open; refresh and re-review before approving.",
+    };
   }
   const after = await gradeSnapshot(certId);
   if (!sameGradeSnapshot(before, after)) {

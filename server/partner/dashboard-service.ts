@@ -46,6 +46,7 @@ import {
   type PartnerStaffRow,
   type PartnerSubmissionsView,
   type PartnerTableRow,
+  type PartnerCreditPurchaseView,
   type PartnerWalletView,
   type RiskLevel,
   type SortDirection,
@@ -102,6 +103,46 @@ function iso(v: unknown): string | null {
   return v instanceof Date ? v.toISOString() : String(v);
 }
 
+/** A history projection is deliberately bounded, typed and database-snapshotted; it never calls Stripe. */
+function textOrNull(value: unknown, maxLength = 500): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text.length > 0 && text.length <= maxLength ? text : null;
+}
+
+function ledgerReference(row: Record<string, unknown>): string | null {
+  return (
+    textOrNull(row.external_ref, 500) ?? textOrNull(row.correlation_id, 500) ?? textOrNull(row.idempotency_key, 200)
+  );
+}
+
+function purchaseHistoryRow(row: Record<string, unknown>): PartnerCreditPurchaseView {
+  const metadata =
+    row.metadata !== null && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const rawPence = metadata.amount_paid_pence;
+  const paidPence =
+    typeof rawPence === "number"
+      ? rawPence
+      : typeof rawPence === "string" && rawPence.trim() !== ""
+        ? Number(rawPence)
+        : Number.NaN;
+  const currency = textOrNull(metadata.currency, 3);
+  return {
+    ledgerEntryId: String(row.id),
+    credits: num(row.amount),
+    packageId: textOrNull(metadata.package_id, 120),
+    amountPaidPence: Number.isSafeInteger(paidPence) && paidPence >= 0 ? paidPence : null,
+    currency: currency && /^[a-z]{3}$/i.test(currency) ? currency.toLowerCase() : null,
+    checkoutSessionId: textOrNull(metadata.stripe_session_id, 500),
+    paymentIntentId: textOrNull(metadata.stripe_payment_intent, 500),
+    source: String(row.source),
+    reference: ledgerReference(row),
+    purchasedAt: iso(row.created_at) ?? "",
+  };
+}
+
 /** Zero-filled bucket map so the UI shows every state, not only the non-zero ones. */
 function bucket(keys: readonly string[], rows: Array<{ k: string; n: unknown }>): Record<string, number> {
   const out: Record<string, number> = {};
@@ -137,11 +178,6 @@ export const GRADING_ORIGIN_UNAVAILABLE: MetricUnavailable = unavailable(
 export const CERTS_UNAVAILABLE: MetricUnavailable = unavailable(
   "NOT_LINKED",
   "Certificates have no tenant column, so per-partner certificate and graded counts cannot be derived."
-);
-
-export const PURCHASES_UNAVAILABLE: MetricUnavailable = unavailable(
-  "REQUIRES_BACKEND_WORK",
-  "No Stripe credit-purchase path exists for partners. The ledger permits a 'purchase'/'stripe' entry but nothing writes one."
 );
 
 /** Wallet schema absent in this environment (migrations 0016/0017 not applied here). */
@@ -700,7 +736,7 @@ export async function getPartnerWallet(partnerIdRaw: unknown, walletSchema = tru
       ledgerBalance: null,
       consumedReservations: null,
       recentLedger: [],
-      purchases: PURCHASES_UNAVAILABLE,
+      purchases: PURCHASES_UNAVAILABLE_WALLET,
       manualAdjustmentEnabled: false,
       note: "The partner wallet schema is not present in this environment (migrations 0016/0017 not applied here).",
     };
@@ -717,24 +753,39 @@ export async function getPartnerWallet(partnerIdRaw: unknown, walletSchema = tru
       ledgerBalance: null,
       consumedReservations: null,
       recentLedger: [],
-      purchases: PURCHASES_UNAVAILABLE,
+      purchases: PURCHASES_UNAVAILABLE_WALLET,
       manualAdjustmentEnabled: false,
       note: "No wallet has been opened for this partner yet.",
     };
   }
 
-  const ledger = await tolerateMissingTable(
-    () =>
-      partnerAdminQuery<Record<string, unknown>>(
-        `SELECT id, amount, entry_type, source, reason, actor_type, actor_email, created_at
-           FROM partner_credit_ledger
-          WHERE tenant_id = $1
-          ORDER BY created_at DESC, id DESC
-          LIMIT 50`,
-        [partnerId]
-      ),
-    null
-  );
+  const [ledger, purchaseLedger] = await Promise.all([
+    tolerateMissingTable(
+      () =>
+        partnerAdminQuery<Record<string, unknown>>(
+          `SELECT id, amount, entry_type, source, reason, actor_type, actor_email,
+                  idempotency_key, correlation_id, external_ref, created_at
+             FROM partner_credit_ledger
+            WHERE tenant_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT 50`,
+          [partnerId]
+        ),
+      null
+    ),
+    tolerateMissingTable(
+      () =>
+        partnerAdminQuery<Record<string, unknown>>(
+          `SELECT id, amount, source, idempotency_key, correlation_id, external_ref, metadata, created_at
+             FROM partner_credit_ledger
+            WHERE tenant_id = $1 AND entry_type = 'purchase'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 50`,
+          [partnerId]
+        ),
+      null
+    ),
+  ]);
 
   const recentLedger: LedgerEntryView[] = (ledger?.rows ?? []).map((r) => ({
     id: String(r.id),
@@ -744,8 +795,10 @@ export async function getPartnerWallet(partnerIdRaw: unknown, walletSchema = tru
     reason: String(r.reason ?? ""),
     actorType: String(r.actor_type),
     actorEmail: (r.actor_email as string) ?? null,
+    reference: ledgerReference(r),
     createdAt: iso(r.created_at) ?? "",
   }));
+  const purchases = (purchaseLedger?.rows ?? []).map(purchaseHistoryRow);
 
   return {
     configured: true,
@@ -756,7 +809,7 @@ export async function getPartnerWallet(partnerIdRaw: unknown, walletSchema = tru
     ledgerBalance: num(w.ledger_balance),
     consumedReservations: num(w.consumed_reservations),
     recentLedger,
-    purchases: PURCHASES_UNAVAILABLE,
+    purchases: metric(purchases),
     manualAdjustmentEnabled: true,
     note: "Balances are ledger-derived. Super Admin adjustments append immutable entries.",
   };
@@ -1057,7 +1110,7 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
   // partner count, on an endpoint that auto-refreshes. `limit` bounds each source, and the
   // severity sort still runs across the combined set, so prioritisation is unchanged for any
   // realistic alert volume.
-  const [orgs, security, escalations, lockedUsers, lowCredit] = await Promise.all([
+  const [orgs, security, escalations, lockedUsers, lowCredit, supplyExceptions] = await Promise.all([
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT id, legal_name, status, created_at FROM partner_organisations
         WHERE status IN ('SUSPENDED','PENDING')
@@ -1111,6 +1164,26 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
           null
         )
       : null,
+    // Supply orders arrive after the original dashboard estate. A post-dispatch cancellation or
+    // refund is deliberately NOT automatic, so its immutable exception event must be surfaced to
+    // an operator rather than becoming an audit-only dead end. Older estates degrade cleanly.
+    tolerateMissingTable(
+      async () =>
+        (
+          await partnerAdminQuery<Record<string, unknown>>(
+            `SELECT e.order_id, e.tenant_id, o.legal_name, max(e.created_at) AS created_at,
+                  string_agg(DISTINCT COALESCE(e.details->>'requested_action', 'review'), ', ' ORDER BY COALESCE(e.details->>'requested_action', 'review')) AS requested_actions
+             FROM partner_supply_order_events e
+             JOIN partner_organisations o ON o.id=e.tenant_id
+            WHERE e.action='manual_exception_required'
+            GROUP BY e.order_id, e.tenant_id, o.legal_name
+            ORDER BY max(e.created_at) DESC, e.order_id ASC
+            LIMIT $1`,
+            [limit]
+          )
+        ).rows,
+      [] as Record<string, unknown>[]
+    ),
   ]);
 
   const alerts: DashboardAlert[] = [];
@@ -1194,6 +1267,22 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
       // must not be presented as a detection timestamp.
       detectedAt: null,
       link: `/admin/partners/dashboard?partner=${u.tenant_id}&tab=staff`,
+    });
+  }
+
+  for (const exception of supplyExceptions) {
+    const actions = String(exception.requested_actions ?? "review");
+    alerts.push({
+      id: `supply-exception-${exception.order_id}`,
+      partnerId: String(exception.tenant_id),
+      partnerName: String(exception.legal_name),
+      severity: "medium",
+      kind: "supply_manual_exception",
+      reason: `A ${actions} request for a dispatched or completed supply order requires manual review.`,
+      recommendedAction:
+        "Open Supply Orders, inspect its audit trail, and resolve the exception through the original payment/fulfilment process.",
+      detectedAt: iso(exception.created_at),
+      link: "/admin/supplies",
     });
   }
 

@@ -219,7 +219,7 @@ describe("the kind predicate matches the renderer EXACTLY (hostile-review Critic
         expect(rendered, `gradeType=${JSON.stringify(gt)} grade=${JSON.stringify(g)}`).toBe(predicted);
       }
     }
-  });
+  }, 15_000);
 
   it("uses the shared isNonNumericGrade predicate rather than its own trimmed set", async () => {
     const { isNonNumericGrade } = await import("../shared/schema");

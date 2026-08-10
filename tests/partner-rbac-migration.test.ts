@@ -96,12 +96,25 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     await applyMigrationsRealistic(admin, ADMIN_DB!, upTo);
   };
 
-  /** Apply ONLY 0034, through the real runner, with a real journal. */
+  /**
+   * Apply the RBAC CATALOGUE through the real runner, with a real journal.
+   *
+   * 0034 seeded the catalogue; it is applied on staging and can therefore never be edited again, so
+   * every later permission arrives as an additive extension file. The assertions below compare the
+   * seeded rows against the canonical TypeScript map, which spans the whole catalogue — so applying
+   * 0034 alone would fail the moment an extension exists, not because anything is wrong but because
+   * only half the catalogue was applied. Keep this list in numeric order and add extension files as
+   * they land (the same list lives in tests/partner-rbac-parity.test.ts as EXTENSION_MIGRATIONS).
+   */
+  const CATALOGUE_MIGRATIONS = ["0034_partner_rbac_seed.sql", "0057_partner_credits_purchase_permission.sql"] as const;
+
   const runRealRunnerFor0034 = async () => {
-    const files = listMigrationFiles(join(process.cwd(), "migrations")).filter(
-      (f) => f.filename === "0034_partner_rbac_seed.sql"
-    );
-    expect(files.length, "0034 must be visible to the real migration runner").toBe(1);
+    const all = listMigrationFiles(join(process.cwd(), "migrations"));
+    const files = CATALOGUE_MIGRATIONS.map((name) => {
+      const found = all.filter((f) => f.filename === name);
+      expect(found.length, `${name} must be visible to the real migration runner`).toBe(1);
+      return found[0];
+    });
     return applyMigrations(admin as never, files);
   };
 
@@ -237,7 +250,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
   // ---- 9-11: runner semantics ------------------------------------------------------------
   it("9. re-running through the repository migration system is safe (no-op)", async () => {
     const first = await runRealRunnerFor0034();
-    expect(first.applied).toEqual(["0034_partner_rbac_seed.sql"]);
+    expect(first.applied).toEqual([...CATALOGUE_MIGRATIONS]);
     const afterFirst = await counts();
 
     const second = await runRealRunnerFor0034();

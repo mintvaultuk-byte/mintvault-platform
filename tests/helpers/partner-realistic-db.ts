@@ -81,10 +81,24 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT = [
   "0031_partner_user_management",
 ] as const;
 
-/** Partner user management plus the DB-level final-owner invariant. */
+/**
+ * Partner user management plus the DB-level final-owner invariant.
+ *
+ * 0053 (second-factor failure counters on partner_users) is appended here rather than in a leaf
+ * list of its own BECAUSE every suite that drives POST /auth/mfa reaches this list through one
+ * inheritance chain or another, and the route now writes failed_mfa_count on every failed
+ * verification. A fixture without those columns makes a wrong code raise 42703 instead of
+ * returning 401 — the challenge fails CLOSED, which is the correct production behaviour but would
+ * show up here as an unrelated-looking test failure.
+ *
+ * It sits OUT of numeric order (before 0033/0034 in the derived lists) and that is safe: 0053 is
+ * two ADD COLUMN IF NOT EXISTS statements against partner_users, which 0001 creates. It depends on
+ * nothing between 0002 and 0052 and nothing between 0002 and 0052 depends on it.
+ */
 export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
   "0032_partner_final_owner_invariant",
+  "0053_partner_mfa_failure_lockout",
 ] as const;
 
 /**
@@ -100,6 +114,10 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
   "0031_partner_user_management",
   "0032_partner_final_owner_invariant",
   "0041_partner_submission_credit_lifecycle",
+  // 0053 — see the note on PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT. This chain branches
+  // off G6B rather than inheriting that list, so it needs its own copy; suites on it
+  // (partner-portal-mount-integration) drive a real MFA challenge.
+  "0053_partner_mfa_failure_lockout",
 ] as const;
 
 /** 0033 — additive audit-action precision (partner_user_mfa_reset et al). */
@@ -163,6 +181,162 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0043_partner_credit_hold_per_card",
   "0044_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
+
+/**
+ * 0047/0048 — the two hostile-review security repairs, in the order they land on a real database.
+ *
+ * 0047 closes A8-F1: partner_owner_invariant_tenants (created by 0032, granted to partner_runtime
+ * by 0032:117) had no RLS and no policy, so it returned every tenant to every partner session.
+ * 0048 closes A8-F2: 0044's location-snapshot trigger function had no `SET search_path` and read
+ * partner_locations unqualified, so it was pg_temp-shadowable.
+ *
+ * 0045 is deliberately absent and must stay absent — 0046 is already journalled on staging, and
+ * every rollback in this series refuses while a higher-numbered row exists, so anything at 0045
+ * would be born un-rollbackable there. See docs/migration-ownership-partner-0049.md.
+ */
+export const PARTNER_MIGRATIONS_WITH_SECURITY_REPAIRS = [
+  ...PARTNER_MIGRATIONS_WITH_LIFECYCLE,
+  "0047_partner_owner_invariant_tenants_rls",
+  "0048_partner_location_snapshot_search_path",
+] as const;
+
+/**
+ * 0049 — per-card Partner grading bridge/provenance. Requires the MintVault certificates table.
+ *
+ * 0050 grants partner_connector_runtime the RLS-scoped, column-level SELECT on
+ * partner_profiles(tenant_id, trading_name) that the importer's origin-snapshot query needs to
+ * record the approved partner trading name. Included here rather than in a separate list because
+ * every suite that drives a real connector import already uses this list, and without 0050 that
+ * import fails 42501 — exactly the production condition this harness exists to reproduce.
+ */
+export const PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE = [
+  ...PARTNER_MIGRATIONS_WITH_SECURITY_REPAIRS,
+  "0049_partner_grading_work_items",
+  "0050_partner_connector_profile_read",
+] as const;
+/**
+ * Create the MintVault `certificates` table a partner migration needs.
+ *
+ * WHY THIS EXISTS: migration 0049 both creates
+ *   CREATE UNIQUE INDEX ... ON certificates(id, submission_item_id)
+ * and issues COLUMN-LEVEL grants naming 38 distinct certificates columns. `IF NOT EXISTS` on the
+ * index guards its NAME, not its columns, and a column-level GRANT naming a missing column is a
+ * hard 42703 — so a fixture whose certificates table is missing ANY of them makes 0049 fail and
+ * the whole suite abort inside beforeAll. vitest renders a beforeAll throw as "N skipped", which
+ * reads exactly like a benign env gate; that is how two critical suites sat red while looking
+ * merely unconfigured.
+ *
+ * Several suites previously hand-rolled their own certificates table, each with a different
+ * subset of columns, so every new migration broke a different arbitrary set of them. This is the
+ * single definition. Extend it here when a migration needs another column, and every suite that
+ * uses it stays correct.
+ *
+ * Types are deliberately loose (text/integer/timestamptz) — these fixtures exercise partner
+ * migrations against a stand-in for the HQ table, not the HQ schema itself.
+ */
+export async function createMintvaultCertificatesTable(admin: pg.Client): Promise<void> {
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY,
+    cert_id text,
+    secret text,
+    certificate_number text,
+    reference_number text,
+    submission_item_id integer,
+    card_id integer,
+    status text,
+    label_type text,
+    grade_type text,
+    language text,
+    card_game text,
+    set_name text,
+    card_name text,
+    card_number_display text,
+    year_text text,
+    variant text,
+    front_image_path text,
+    back_image_path text,
+    grading_front_original text,
+    grading_back_original text,
+    grader_status text,
+    print_state text,
+    created_by text,
+    integrity_hash text,
+    logbook_version integer,
+    logbook_last_issued_at timestamptz,
+    issued_at timestamptz,
+    deleted_at timestamptz,
+    grade_approved_at timestamptz,
+    -- The rating evidence columns. All four exist on staging and production; suites that hand-added
+    -- them locally were compensating for this stub being narrower than the real table, which is the
+    -- same drift that let the certificates.submission_id defect hide. PARTNER_QUALITY_V2 reads
+    -- redo_count, grade_approved_at, graded_at and status_updated_at, so they belong here.
+    graded_at timestamptz,
+    status_updated_at timestamptz,
+    grade numeric(4,1),
+    redo_count integer NOT NULL DEFAULT 0,
+    archived_to_b2_at timestamptz,
+    origin_type text,
+    origin_partner_id uuid,
+    origin_partner_public_ref text,
+    origin_partner_legal_name text,
+    origin_partner_trading_name text,
+    origin_location_id uuid,
+    origin_location_public_ref text,
+    origin_location_name text,
+    origin_location_address text,
+    origin_captured_at timestamptz,
+    origin_snapshot_version integer,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  // CREATE TABLE IF NOT EXISTS is a NO-OP on a database that already has a narrower certificates
+  // table — which is exactly what a reused test database has after this helper is widened. The
+  // table then silently stays at yesterday's shape and the next migration that reads a new column
+  // dies with 42703, far away from the cause. These idempotent repairs make the helper mean "bring
+  // certificates up to the real shape", not "create it if absent".
+  //
+  // Every column below exists on staging and production. 0061's public card projection reads grade,
+  // grade_approved_at, deleted_at, status and origin_type; PARTNER_QUALITY_V2 reads redo_count,
+  // graded_at and status_updated_at.
+  for (const [col, type] of [
+    ["grade", "numeric(4,1)"],
+    ["redo_count", "integer NOT NULL DEFAULT 0"],
+    ["graded_at", "timestamptz"],
+    ["status_updated_at", "timestamptz"],
+    ["grade_approved_at", "timestamptz"],
+    ["deleted_at", "timestamptz"],
+    ["submission_item_id", "integer"],
+    ["grading_revision", "integer NOT NULL DEFAULT 1"],
+    ["evidence_revision", "integer NOT NULL DEFAULT 0"],
+    ["review_grading_revision", "integer"],
+    ["review_evidence_revision", "integer"],
+    ["approved_grading_revision", "integer"],
+    ["approved_evidence_revision", "integer"],
+  ] as const) {
+    await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+  }
+}
+
+/**
+ * Create the MintVault `label_prints` table a partner/print migration needs.
+ *
+ * Migration 0022 backfills `print_state` with a subquery that reads `lp.cert_id` and
+ * `lp.printed_at`. Its DO block is guarded on the label_prints TABLE existing
+ * (information_schema.tables), not on its COLUMNS — so a stub table with only
+ * (id, certificate_id, created_at) satisfies the guard and then fails at
+ * `column lp.cert_id does not exist`. Same class as the certificates fixture above: the guard
+ * protects against the table being absent, not against it being the wrong shape.
+ */
+export async function createMintvaultLabelPrintsTable(admin: pg.Client): Promise<void> {
+  await admin.query(`CREATE TABLE IF NOT EXISTS label_prints (
+    id serial PRIMARY KEY,
+    cert_id text NOT NULL UNIQUE,
+    sheet_ref text,
+    queued_at timestamptz NOT NULL DEFAULT now(),
+    printed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+}
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
@@ -189,6 +363,47 @@ export async function provisionRealisticRoles(admin: pg.Client): Promise<void> {
        END$$;`
     );
     await admin.query("GRANT partner_definer TO " + MIGRATOR_ROLE);
+    /**
+     * G6D credit-lifecycle roles, provisioned HERE rather than left to whichever suite happens to
+     * run first.
+     *
+     * pg_roles and pg_auth_members are CLUSTER-GLOBAL. Every partner suite in CI shares one
+     * PostgreSQL 17 server, and only partner-management-migration created these roles inline. So
+     * the connector migration suites passed only when that suite had already run on the same
+     * server: under CI's flat `vitest run`, applyEveryMigrationRealistic()'s
+     * `GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE` had no role to
+     * grant, and migration 0042 then failed closed with "pn_migrator lacks INHERIT membership".
+     * Reproduced from clean databases: 2 of 5 connector suites failed that way with 21 tests
+     * skipped, and the outcome flipped purely on suite order.
+     *
+     * ADMIN TRUE gives applyEveryMigrationRealistic() the admin option its INHERIT grant needs.
+     *
+     * INHERIT stays FALSE, deliberately and load-bearingly: applyMigrationsRealistic() asserts this
+     * membership is ABSENT when a suite applies 0041 WITHOUT 0042, and applyEveryMigrationRealistic()
+     * grants INHERIT itself only around the full-set apply and revokes it in a finally. Granting
+     * INHERIT here would silently disarm that assertion — a weakened proof dressed up as a fix.
+     * SET is never granted.
+     *
+     * This models Neon's provider-granted membership row; the INHERIT step models the
+     * owner-approved staging repair 0042 documents as its prerequisite.
+     */
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_credit_lifecycle_definer
+           NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE pn_credit_schema_owner
+           NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    await admin.query(
+      `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`
+    );
     // pn_migrator owns the schema (as a managed-PG project owner would) so it can grant schema USAGE.
     await admin.query("ALTER SCHEMA public OWNER TO " + MIGRATOR_ROLE);
     const { rows } = await admin.query<{ db: string }>("SELECT current_database() AS db");
@@ -301,9 +516,7 @@ export async function applyMigrationsRealistic(
       if (name === "0042_partner_per_card_credit_settlement") {
         // SET FALSE is NOT optional. PostgreSQL 16+ defaults a role grant to SET TRUE, so
         // `WITH INHERIT TRUE` alone would silently also confer SET ROLE into the definer.
-        await migrator.query(
-          `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`
-        );
+        await migrator.query(`GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`);
       }
       // EVERY migration — including 0041 and 0042 — runs as the NON-SUPERUSER pn_migrator.
       // There is deliberately no executor swap here any more.
@@ -406,9 +619,7 @@ export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise
     // asserts exactly this membership is ABSENT when a suite applies 0041 without 0042. 0041's own
     // closing REVOKE happens to clear it today because pn_migrator is its own grantor, but relying
     // on that makes the outcome order-dependent. Revoke it explicitly instead.
-    await migrator
-      .query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator")
-      .catch(() => {}); // best-effort: never mask the real failure from applyMigrations
+    await migrator.query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator").catch(() => {}); // best-effort: never mask the real failure from applyMigrations
   }
 }
 
@@ -434,4 +645,158 @@ export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise
  */
 export function pinAccountingTopologyTo(url: string): void {
   process.env.MINTVAULT_DATABASE_URL = url;
+}
+
+/**
+ * Bring a test `certificates` table up to the FULL production column set, derived from the Drizzle
+ * schema itself rather than from a hand-maintained list.
+ *
+ * WHY THIS EXISTS. `createMintvaultCertificatesTable` declares ~55 columns. The production
+ * `certificates` table declares ~150. Anything that goes through `storage.listCertificates()` —
+ * which is every print path, because `createBatchAtomic` renders from it — issues a full
+ * `SELECT` of all of them and dies with 42703 on the first one the fixture omits (`nfc_uid`).
+ * That is why NO suite had ever executed createBatchAtomic, and why the approval columns
+ * (grade, the four sub-scores, graded_at, grade_approved_by) were missing too.
+ *
+ * Hand-extending the shared list would fix today and rot tomorrow: a column added to
+ * shared/schema.ts would silently break the next print test with the same opaque 42703. So this
+ * reads `getTableColumns(certificates)` and adds whatever the live schema declares and the table
+ * lacks, using each column's own `getSQLType()`. Every column is added NULLABLE with no default:
+ * the point is queryability, not re-implementing production's constraints.
+ *
+ * ADDITIVE AND OPT-IN. Existing suites keep the small fixture unless they call this, so nothing
+ * that relies on the narrow shape changes semantics.
+ */
+export async function alignCertificatesTableToSchema(
+  admin: pg.Client
+): Promise<{ added: string[]; unsupported: string[] }> {
+  const [{ getTableColumns }, schema] = await Promise.all([import("drizzle-orm"), import("../../shared/schema")]);
+  const columns = getTableColumns(schema.certificates as never) as Record<
+    string,
+    { name: string; getSQLType(): string }
+  >;
+  const existing = new Set(
+    (
+      await admin.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='certificates'"
+      )
+    ).rows.map((r) => r.column_name)
+  );
+  /**
+   * Columns the LIVE certificates table has but the Drizzle model does NOT declare, because some
+   * production code reads them through raw SQL rather than the model. Deriving from
+   * getTableColumns() alone therefore under-builds the table and the raw query 42703s.
+   *
+   * `claim_code` is the confirmed case: storage.getOrGenerateClaimCode() SELECTs it directly
+   * (server/storage.ts), createBatchAtomic's renderer calls that per certificate, and
+   * shared/schema.ts declares only claim_code_hash / _created_at / _used_at. Verified against the
+   * live staging schema, which has all four.
+   *
+   * `private_notes`, `auth_status` and `auth_notes` are the same story one level deeper:
+   * server/grader.ts's applyCertGradeDraft UPDATE writes all three in raw SQL and shared/schema.ts
+   * declares none of them. All three are present on the live certificates table (`text`, with
+   * auth_status defaulting to 'genuine'). Without them any suite that drives a real grading draft
+   * save dies with 42703 — which is exactly how the partner grading adapter went unproven.
+   */
+  const RAW_SQL_ONLY_COLUMNS: Array<[string, string]> = [
+    ["claim_code", "text"],
+    ["private_notes", "text"],
+    ["auth_status", "text"],
+    ["auth_notes", "text"],
+  ];
+
+  const added: string[] = [];
+  const unsupported: string[] = [];
+  for (const [name, type] of RAW_SQL_ONLY_COLUMNS) {
+    if (existing.has(name)) continue;
+    await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS "${name}" ${type}`);
+    added.push(name);
+  }
+  for (const col of Object.values(columns)) {
+    if (existing.has(col.name)) continue;
+    try {
+      await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS "${col.name}" ${col.getSQLType()}`);
+      added.push(col.name);
+    } catch {
+      // A type the disposable cluster cannot provide — in practice only pgvector's `vector`, which
+      // needs an extension the plain postgres:17 image lacks. The column must still EXIST, because
+      // storage.listCertificates() SELECTs it by name and would otherwise 42703 the whole print
+      // path. Fall back to a placeholder type: nothing under test reads its value, only its
+      // presence. Recorded so a caller can assert on what was degraded.
+      try {
+        await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS "${col.name}" text`);
+        added.push(col.name);
+        unsupported.push(`${col.name} (declared ${col.getSQLType()}, created as text)`);
+      } catch (inner) {
+        unsupported.push(`${col.name}: ${(inner as Error).message}`);
+      }
+    }
+  }
+  return { added, unsupported };
+}
+
+/**
+ * Schema-parity guard. Returns every column the Drizzle `certificates` model declares that the
+ * database does not have, so a test can assert it is empty. Without this, a production column added
+ * to shared/schema.ts reaches the print path as a 42703 at runtime instead of a red schema test.
+ */
+export async function certificatesSchemaDrift(admin: pg.Client): Promise<string[]> {
+  const [{ getTableColumns }, schema] = await Promise.all([import("drizzle-orm"), import("../../shared/schema")]);
+  const columns = getTableColumns(schema.certificates as never) as Record<string, { name: string }>;
+  const existing = new Set(
+    (
+      await admin.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='certificates'"
+      )
+    ).rows.map((r) => r.column_name)
+  );
+  return Object.values(columns)
+    .map((c) => c.name)
+    .filter((n) => !existing.has(n))
+    .sort();
+}
+
+/**
+ * Generic form of the certificates alignment: bring ANY test table up to the columns its Drizzle
+ * model declares. `createMintvaultLabelPrintsTable` is the second confirmed divergence — it
+ * declares (certificate_id, cert_id, printed_at, created_at) while both shared/schema.ts and the
+ * live staging schema declare (id, cert_id, sheet_ref, queued_at, printed_at). createBatchAtomic
+ * INSERTs sheet_ref, so the print path 42703s on the fixture rather than on anything real.
+ *
+ * Same contract as alignCertificatesTableToSchema: additive, opt-in, columns added NULLABLE with
+ * no default, per-column tolerance with a text fallback for types the disposable cluster lacks.
+ */
+export async function alignTableToDrizzleModel(
+  admin: pg.Client,
+  tableName: string,
+  model: unknown
+): Promise<{ added: string[]; unsupported: string[] }> {
+  const { getTableColumns } = await import("drizzle-orm");
+  const columns = getTableColumns(model as never) as Record<string, { name: string; getSQLType(): string }>;
+  const existing = new Set(
+    (
+      await admin.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",
+        [tableName]
+      )
+    ).rows.map((r) => r.column_name)
+  );
+  const added: string[] = [];
+  const unsupported: string[] = [];
+  for (const col of Object.values(columns)) {
+    if (existing.has(col.name)) continue;
+    try {
+      await admin.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${col.name}" ${col.getSQLType()}`);
+      added.push(col.name);
+    } catch {
+      try {
+        await admin.query(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${col.name}" text`);
+        added.push(col.name);
+        unsupported.push(`${col.name} (declared ${col.getSQLType()}, created as text)`);
+      } catch (inner) {
+        unsupported.push(`${col.name}: ${(inner as Error).message}`);
+      }
+    }
+  }
+  return { added, unsupported };
 }

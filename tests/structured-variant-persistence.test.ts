@@ -24,6 +24,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape } from "./helpers/strip-non-code";
+import { diffProtectedEngineReach } from "./helpers/protected-module-refs";
+import { visibilityOnlyExportChange } from "./helpers/visibility-only-change";
 import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
 import {
   validateStructuredVariant,
@@ -985,6 +987,13 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         // An escape the analyser cannot decode could hide an identifier, so it is refused
         // outright rather than guessed at (N4).
         expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
+        // A module SPECIFIER is a StringLiteral, so both analysis modes blank it and a dynamic
+        // reach into a protected CALCULATION engine leaves no token for the identifier scan below
+        // (hostile review, 2026-08-07). Specifiers are resolved in a SEPARATE pass that never
+        // feeds the signature regexes — see tests/helpers/protected-module-refs.ts. Kept
+        // identical to the sibling guard so neither can drift into being the weaker one.
+        const engineReach = diffProtectedEngineReach(diff, "+");
+        expect(engineReach, `server/grader.ts reaches the protected calculation engine: ${engineReach}`).toBe("");
         // Signature A: the JavaScript half is proven in JS mode; the SQL column assignments are
         // a tagged-DOMAIN fact and are proven in guarded mode. Neither half can stand in for
         // the other.
@@ -1006,9 +1015,22 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
+        // D) D-1 undeclared-column preservation — founder-approved 2026-08-07, narrowly, for
+        //    that repair ONLY. Same five required tokens as the sibling guard in
+        //    variant-line-consolidation, kept identical so neither guard can drift into being
+        //    the weaker one. Rationale and the exhaustive list of what it does NOT authorise
+        //    are written out there; the short form is that it admits preservation of three
+        //    columns shared/schema.ts does not declare, and nothing else.
+        const signatureD =
+          /\bkeepStoredText\s*\(/.test(addedJs) &&
+          /\breadUndeclaredAuthColumns\s*\(/.test(addedJs) &&
+          /auth_status\s*=\s*COALESCE\(/.test(addedCode) &&
+          /auth_notes\s*=\s*COALESCE\(/.test(addedCode) &&
+          /private_notes\s*=\s*COALESCE\(/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC || signatureD,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
         expect(addedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
@@ -1025,11 +1047,36 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         // unrelated rendering change to this file still fails.
         const diff = protectedDiffFor(f);
         const addedJs = addedJsOf(diff, "+");
+        // Same specifier blind spot as server/grader.ts above — a rendering file must not reach
+        // into the calculation engine by a route the token scan cannot see.
+        const docReach = diffProtectedEngineReach(diff, "+");
+        expect(docReach, `server/certificate-document.ts reaches the protected engine: ${docReach}`).toBe("");
         expect(
           /\bcertificateOrigin\s*\(/.test(addedJs),
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
         ).toBe(true);
         expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
+        continue;
+      }
+      if (f === "shared/mvgs-scoring.ts") {
+        // The ONE narrowly-authorised exemption (owner, 2026-08-07): `remainingToGrade` gains an
+        // `export` keyword so the server-authoritative partner adapter can reuse the ONE engine
+        // instead of forking the bracket table. Rationale, the three required conditions, and
+        // the scope limits are written out in the sibling guard
+        // (tests/variant-line-consolidation.test.ts) and in tests/helpers/visibility-only-change.ts.
+        // Kept identical here so neither guard can drift into being the weaker one.
+        //
+        // shared/mvgs-scoring.ts REMAINS inside `engine` above — a conditional exemption, not a
+        // removal — and this is CONJUNCTIVE with the checks that follow it.
+        const diff = protectedDiffFor(f);
+        const verdict = visibilityOnlyExportChange(diff);
+        expect(
+          verdict.ok,
+          `shared/mvgs-scoring.ts changed and is NOT a pure visibility-only export: ${verdict.reason}`
+        ).toBe(true);
+        expect(hasMalformedEscape(diff), "shared/mvgs-scoring.ts contains a malformed escape sequence").toBe(false);
+        const mvgsReach = diffProtectedEngineReach(diff, "both");
+        expect(mvgsReach, `shared/mvgs-scoring.ts gained a protected-engine module reach: ${mvgsReach}`).toBe("");
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

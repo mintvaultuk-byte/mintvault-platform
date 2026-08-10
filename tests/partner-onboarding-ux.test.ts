@@ -391,6 +391,24 @@ describe("Partner sign in — enrolment is reachable (real render)", () => {
     expect(q("button-start-mfa-enrolment"), "enrolment is reachable from the code step").toBeTruthy();
     expect(calls("POST", "/mfa/enrol"), "enrolment is never started behind the user's back").toHaveLength(0);
   });
+
+  it("takes a non-MFA sign-in straight to the dashboard after refreshing the session", async () => {
+    apiRequest.mockImplementation((method: string, url: string) => {
+      if (url.endsWith("/auth/login")) return ok({ ok: true, mfaRequired: false });
+      if (url.endsWith("/session")) return ok({ mfaPassed: true, permissions: [] });
+      return ok({ ok: true });
+    });
+    await mountLogin();
+    await waitForTestId("form-partner-login");
+    setValue(q("input-email")!, "user@partner.test");
+    setValue(q("input-password")!, "correct-horse-battery");
+    await submitForm("form-partner-login");
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(window.location.pathname).toBe("/partner/dashboard");
+  });
 });
 
 // ---------------------------------------------------------------- password reset

@@ -7,7 +7,7 @@
  * a double-click or network retry can never create two submissions.
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,11 +21,14 @@ import {
   partnerCards,
   partnerCustomers,
   partnerServiceTiers,
+  partnerCredits,
+  partnerCatalogue,
   partnerErrorMessage,
   PartnerApiError,
   newIdempotencyKey,
   formatPence,
   type SubmissionSummary,
+  type SubmissionDetail,
   type SubmissionCard,
   type PartnerCustomer,
   type AvailableServiceTier,
@@ -33,7 +36,7 @@ import {
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { PARTNER_CARD_CATEGORIES } from "@shared/partner-card-categories";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { Trash2, Pencil, Check, X } from "lucide-react";
+import { Trash2, Pencil, Check, X, Upload, Image as ImageIcon } from "lucide-react";
 
 const STEPS = ["Customer", "Service", "Cards", "Review", "Submit"] as const;
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
@@ -71,20 +74,58 @@ export default function PartnerSubmissionWizardPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitResult, setSubmitResult] = useState<SubmissionSummary | null>(null);
   const idempotencyKey = useMemo(() => (submission ? newIdempotencyKey(submission.id) : ""), [submission?.id]);
+  const draftId = useMemo(() => readQueryValue("draft"), []);
+  const billingReturnPath = submission
+    ? `/partner/billing?returnTo=${encodeURIComponent(`/partner/submissions/new?draft=${submission.id}`)}`
+    : "/partner/billing";
 
-  // Create the draft ONCE on entry, using the session's currently-selected location.
+  const invalidateSubmissionQueries = useCallback(
+    (id?: string) => {
+      qc.invalidateQueries({ queryKey: ["/api/partner/dashboard/submissions"] });
+      qc.invalidateQueries({ queryKey: ["/api/partner/submissions"] });
+      if (id) qc.invalidateQueries({ queryKey: ["/api/partner/submissions", id] });
+    },
+    [qc]
+  );
+
+  const syncDraftDetail = useCallback((detail: SubmissionDetail) => {
+    setSubmission(detail.submission);
+    setCards(detail.cards);
+    setCustomerId(detail.submission.customerId);
+    setCustomerDisplay(detail.customer?.fullName ?? "");
+    setInternalReference(detail.submission.internalReference ?? "");
+    setServiceTierCode(detail.submission.serviceTierCode);
+  }, []);
+
+  const refreshDraft = useCallback(
+    async (id = submission?.id) => {
+      if (!id) return null;
+      const detail = await partnerSubmissions.detail(id);
+      syncDraftDetail(detail);
+      return detail;
+    },
+    [submission?.id, syncDraftDetail]
+  );
+
+  // Create the draft once on entry, or resume the exact draft used to begin credit checkout.
   useEffect(() => {
     if (submission || initError) return;
+    if (draftId) {
+      void refreshDraft(draftId).catch((err) => setInitError(partnerErrorMessage(err)));
+      return;
+    }
     if (!session?.locationId) return; // waits for the "select a location" state below
     (async () => {
       try {
         const created = await partnerSubmissions.create({ locationId: session.locationId! });
-        setSubmission(created);
+        const detail = await partnerSubmissions.detail(created.id);
+        syncDraftDetail(detail);
+        invalidateSubmissionQueries(created.id);
       } catch (err) {
         setInitError(partnerErrorMessage(err));
       }
     })();
-  }, [session?.locationId, submission, initError]);
+  }, [draftId, session?.locationId, submission, initError, syncDraftDetail, invalidateSubmissionQueries, refreshDraft]);
 
   const { data: availableTiers } = useQuery({
     queryKey: ["/api/partner/service-tiers"],
@@ -96,6 +137,16 @@ export default function PartnerSubmissionWizardPage() {
     queryFn: () => partnerCustomers.list(customerSearch || undefined),
     enabled: !!submission && customerSearch.length > 0,
   });
+  const { data: credits } = useQuery({
+    queryKey: ["/api/partner/credits"],
+    queryFn: () => partnerCredits.view(),
+    enabled: !!submission,
+  });
+  const { data: catalogue } = useQuery({
+    queryKey: ["/api/partner/catalogue/snapshot"],
+    queryFn: () => partnerCatalogue.snapshot(),
+    enabled: !!submission,
+  });
 
   const saveField = useCallback(
     async (patch: {
@@ -103,21 +154,24 @@ export default function PartnerSubmissionWizardPage() {
       internalReference?: string | null;
       serviceTierCode?: string | null;
     }) => {
-      if (!submission) return;
+      if (!submission) return false;
       setSaveStatus("saving");
       try {
         const updated = await partnerSubmissions.edit(submission.id, { version: submission.version, ...patch });
-        setSubmission(updated);
+        await refreshDraft(updated.id);
+        invalidateSubmissionQueries(updated.id);
         setSaveStatus("saved");
+        return true;
       } catch (err) {
         if (err instanceof PartnerApiError && err.code === "stale_version") {
           setSaveStatus("conflict");
         } else {
           setSaveStatus("error");
         }
+        return false;
       }
     },
-    [submission]
+    [submission, refreshDraft, invalidateSubmissionQueries]
   );
 
   // Free-text fields (unlike selects/buttons) fire on every keystroke — saving each one individually
@@ -147,10 +201,13 @@ export default function PartnerSubmissionWizardPage() {
         email: newCustomerEmail.trim() || null,
         phone: newCustomerPhone.trim() || null,
       });
-      setCustomerId(created.id);
-      setCustomerDisplay(created.fullName);
+      const saved = await saveField({ customerId: created.id });
+      if (!saved) return;
       setCreatingCustomer(false);
-      await saveField({ customerId: created.id });
+      setCustomerSearch("");
+      setNewCustomerName("");
+      setNewCustomerEmail("");
+      setNewCustomerPhone("");
     } catch (err) {
       // The server's validation message (e.g. why an email was rejected) was previously swallowed
       // into a bare "error" status, leaving the user with a form that silently refused to save.
@@ -158,24 +215,34 @@ export default function PartnerSubmissionWizardPage() {
     }
   }
 
-  function selectExistingCustomer(c: PartnerCustomer) {
-    setCustomerId(c.id);
-    setCustomerDisplay(c.fullName);
+  async function selectExistingCustomer(c: PartnerCustomer) {
+    setCustomerError(null);
+    const saved = await saveField({ customerId: c.id });
+    if (!saved) return;
     setCustomerSearch("");
-    saveField({ customerId: c.id });
+    setCreatingCustomer(false);
+  }
+
+  async function clearCustomer() {
+    setCustomerError(null);
+    const saved = await saveField({ customerId: null });
+    if (!saved) return;
+    setCustomerSearch("");
+    setCreatingCustomer(false);
   }
 
   async function handleAddCard(input: Parameters<typeof partnerCards.add>[1]) {
     if (!submission) return;
-    const created = await partnerCards.add(submission.id, input);
-    setCards((c) => [...c, created]);
-    setSubmission((s) => (s ? { ...s, cardCount: s.cardCount + 1 } : s));
+    await partnerCards.add(submission.id, input);
+    await refreshDraft(submission.id);
+    invalidateSubmissionQueries(submission.id);
   }
 
   async function handleEditCard(cardId: string, input: Parameters<typeof partnerCards.edit>[2]) {
     if (!submission) return;
-    const updated = await partnerCards.edit(submission.id, cardId, input);
-    setCards((c) => c.map((card) => (card.id === cardId ? updated : card)));
+    await partnerCards.edit(submission.id, cardId, input);
+    await refreshDraft(submission.id);
+    invalidateSubmissionQueries(submission.id);
     setEditingCardId(null);
   }
 
@@ -184,11 +251,18 @@ export default function PartnerSubmissionWizardPage() {
     setRemoveCardError(null);
     try {
       await partnerCards.remove(submission.id, cardId, "Removed by partner");
-      setCards((c) => c.filter((card) => card.id !== cardId));
-      setSubmission((s) => (s ? { ...s, cardCount: Math.max(s.cardCount - 1, 0) } : s));
+      await refreshDraft(submission.id);
+      invalidateSubmissionQueries(submission.id);
     } catch (err) {
       setRemoveCardError(partnerErrorMessage(err));
     }
+  }
+
+  async function handleUploadCardImage(cardId: string, side: "front" | "back", file: File) {
+    if (!submission) return;
+    await partnerCards.uploadImage(submission.id, cardId, side, file);
+    await refreshDraft(submission.id);
+    invalidateSubmissionQueries(submission.id);
   }
 
   async function handleSubmit() {
@@ -198,8 +272,9 @@ export default function PartnerSubmissionWizardPage() {
     try {
       const result = await partnerSubmissions.submit(submission.id, idempotencyKey);
       setSubmitResult(result.submission);
-      qc.invalidateQueries({ queryKey: ["/api/partner/dashboard/submissions"] });
-      qc.invalidateQueries({ queryKey: ["/api/partner/submissions"] });
+      syncDraftDetail(result);
+      invalidateSubmissionQueries(submission.id);
+      qc.invalidateQueries({ queryKey: ["/api/partner/credits"] });
     } catch (err) {
       setSubmitError(partnerErrorMessage(err));
     } finally {
@@ -242,9 +317,20 @@ export default function PartnerSubmissionWizardPage() {
   // warning banner AND the Submit step's button-disabled state, so a partner can never reach an
   // enabled Submit button by skipping past Review with something still missing.
   const missing: string[] = [];
-  if (!customerDisplay) missing.push("Customer");
-  if (!serviceTierCode) missing.push("Service");
-  if (cards.length === 0) missing.push("At least one card");
+  const cardsMissingImages = cards.some((card) => !card.front_image_key || !card.back_image_key);
+  const savedCardCount = physicalCardCount(cards);
+  if (!submission.customerId) missing.push("Customer");
+  if (!submission.serviceTierCode) missing.push("Service");
+  if (savedCardCount === 0) missing.push("At least one card");
+  if (savedCardCount > 0 && cardsMissingImages) missing.push("Front and back images for every card");
+  const canContinue =
+    step === 0
+      ? !!submission.customerId
+      : step === 1
+        ? !!submission.serviceTierCode
+        : step === 2
+          ? savedCardCount > 0 && !cardsMissingImages
+          : true;
 
   return (
     <div className="space-y-6" data-testid="wizard-new-submission">
@@ -266,6 +352,7 @@ export default function PartnerSubmissionWizardPage() {
           onSelectCustomer={selectExistingCustomer}
           creatingCustomer={creatingCustomer}
           onToggleCreate={() => setCreatingCustomer((v) => !v)}
+          onClearCustomer={clearCustomer}
           newCustomerName={newCustomerName}
           setNewCustomerName={setNewCustomerName}
           newCustomerEmail={newCustomerEmail}
@@ -281,10 +368,7 @@ export default function PartnerSubmissionWizardPage() {
         <ServiceStep
           tiers={availableTiers ?? []}
           selected={serviceTierCode}
-          onSelect={(code) => {
-            setServiceTierCode(code);
-            saveField({ serviceTierCode: code });
-          }}
+          onSelect={(code) => saveField({ serviceTierCode: code })}
         />
       )}
 
@@ -298,6 +382,8 @@ export default function PartnerSubmissionWizardPage() {
           onAddCard={handleAddCard}
           onEditCard={handleEditCard}
           onRemoveCard={handleRemoveCard}
+          onUploadCardImage={handleUploadCardImage}
+          catalogue={catalogue?.snapshot ?? null}
         />
       )}
 
@@ -308,13 +394,25 @@ export default function PartnerSubmissionWizardPage() {
           serviceTierCode={serviceTierCode}
           tiers={availableTiers ?? []}
           cards={cards}
+          creditBalance={credits?.summary.availableCredits ?? null}
+          creditConfigured={credits?.summary.configured ?? false}
+          billingHref={billingReturnPath}
           missing={missing}
           onEditStep={setStep}
         />
       )}
 
       {step === 4 && (
-        <SubmitStep missing={missing} submitting={submitting} error={submitError} onSubmit={handleSubmit} />
+        <SubmitStep
+          missing={missing}
+          cards={cards}
+          creditBalance={credits?.summary.availableCredits ?? null}
+          creditConfigured={credits?.summary.configured ?? false}
+          billingHref={billingReturnPath}
+          submitting={submitting}
+          error={submitError}
+          onSubmit={handleSubmit}
+        />
       )}
 
       <div className="flex items-center justify-between pt-4 border-t">
@@ -327,7 +425,7 @@ export default function PartnerSubmissionWizardPage() {
           Back
         </Button>
         {step < STEPS.length - 1 && (
-          <Button onClick={() => setStep((s) => s + 1)} data-testid="button-wizard-next">
+          <Button disabled={!canContinue} onClick={() => setStep((s) => s + 1)} data-testid="button-wizard-next">
             Continue
           </Button>
         )}
@@ -401,6 +499,7 @@ function CustomerStep(props: {
   onSelectCustomer: (c: PartnerCustomer) => void;
   creatingCustomer: boolean;
   onToggleCreate: () => void;
+  onClearCustomer: () => void;
   newCustomerName: string;
   setNewCustomerName: (v: string) => void;
   newCustomerEmail: string;
@@ -423,7 +522,7 @@ function CustomerStep(props: {
         {props.customerId ? (
           <div className="flex items-center justify-between rounded-md border p-3">
             <span data-testid="text-selected-customer">{props.customerDisplay}</span>
-            <Button variant="ghost" size="sm" onClick={props.onToggleCreate} data-testid="button-change-customer">
+            <Button variant="ghost" size="sm" onClick={props.onClearCustomer} data-testid="button-change-customer">
               Change
             </Button>
           </div>
@@ -594,6 +693,8 @@ function CardsStep(props: {
   onAddCard: (input: any) => Promise<void>;
   onEditCard: (id: string, input: any) => Promise<void>;
   onRemoveCard: (id: string) => Promise<void>;
+  onUploadCardImage: (id: string, side: "front" | "back", file: File) => Promise<void>;
+  catalogue: import("@shared/pokemon-rarity-catalogue").CatalogueSnapshot | null;
 }) {
   const [form, setForm] = useState(emptyCardForm);
   const [adding, setAdding] = useState(false);
@@ -613,7 +714,7 @@ function CardsStep(props: {
         variant: form.variant || null,
         language: form.language || null,
         declaredValuePence: form.declaredValuePence ? Math.round(Number(form.declaredValuePence) * 100) : null,
-        quantity: Number(form.quantity) || 1,
+        quantity: Number(form.quantity),
         customerNotes: form.customerNotes || null,
         intakeNotes: form.intakeNotes || null,
       });
@@ -628,7 +729,7 @@ function CardsStep(props: {
   return (
     <Card data-testid="wizard-step-cards">
       <CardHeader>
-        <CardTitle>Step 3 — Cards ({props.cards.length})</CardTitle>
+        <CardTitle>Step 3 — Cards ({physicalCardCount(props.cards)} physical)</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {props.removeCardError && (
@@ -663,6 +764,10 @@ function CardsStep(props: {
                       Intake observation — not a MintVault grade: {c.intake_notes}
                     </p>
                   )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <CardImageUploadButton card={c} side="front" onUpload={props.onUploadCardImage} />
+                    <CardImageUploadButton card={c} side="back" onUpload={props.onUploadCardImage} />
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
@@ -748,21 +853,41 @@ function CardsStep(props: {
             </div>
             <div className="space-y-2">
               <Label htmlFor="card-variant">Variant</Label>
-              <Input
-                id="card-variant"
-                value={form.variant}
-                onChange={(e) => setForm({ ...form, variant: e.target.value })}
-                data-testid="input-card-variant"
-              />
+              <Select
+                value={form.variant || "__none__"}
+                onValueChange={(v) => setForm({ ...form, variant: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger id="card-variant" data-testid="select-card-variant">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Not selected</SelectItem>
+                  {(props.catalogue?.finishes ?? []).map((finish) => (
+                    <SelectItem key={finish.value} value={finish.label}>
+                      {finish.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="card-language">Language</Label>
-              <Input
-                id="card-language"
-                value={form.language}
-                onChange={(e) => setForm({ ...form, language: e.target.value })}
-                data-testid="input-card-language"
-              />
+              <Select
+                value={form.language || "__none__"}
+                onValueChange={(v) => setForm({ ...form, language: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger id="card-language" data-testid="select-card-language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Not selected</SelectItem>
+                  {(props.catalogue?.languages ?? []).map((language) => (
+                    <SelectItem key={language.value} value={language.label}>
+                      {language.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="card-quantity">Quantity</Label>
@@ -819,6 +944,55 @@ function CardsStep(props: {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CardImageUploadButton({
+  card,
+  side,
+  onUpload,
+}: {
+  card: SubmissionCard;
+  side: "front" | "back";
+  onUpload: (id: string, side: "front" | "back", file: File) => Promise<void>;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = side === "front" ? card.front_image_url : card.back_image_url;
+  return (
+    <label className="inline-flex items-center gap-1.5 text-xs rounded-md border px-2 py-1 cursor-pointer hover:bg-accent">
+      {url ? (
+        <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+      ) : (
+        <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+      )}
+      <span>{uploading ? "Uploading..." : `${url ? "Replace" : "Upload"} ${side}`}</span>
+      <input
+        className="sr-only"
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/tiff"
+        data-testid={`input-upload-${side}-${card.id}`}
+        onChange={async (e) => {
+          const file = e.currentTarget.files?.[0];
+          if (!file) return;
+          setUploading(true);
+          setError(null);
+          try {
+            await onUpload(card.id, side, file);
+          } catch (err) {
+            setError(partnerErrorMessage(err));
+          } finally {
+            setUploading(false);
+            e.currentTarget.value = "";
+          }
+        }}
+      />
+      {error && (
+        <span role="alert" className="text-destructive" data-testid={`text-upload-${side}-error-${card.id}`}>
+          {error}
+        </span>
+      )}
+    </label>
   );
 }
 
@@ -889,11 +1063,17 @@ function ReviewStep(props: {
   serviceTierCode: string | null;
   tiers: AvailableServiceTier[];
   cards: SubmissionCard[];
+  creditBalance: number | null;
+  creditConfigured: boolean;
+  billingHref: string;
   missing: string[];
   onEditStep: (step: number) => void;
 }) {
   const tier = props.tiers.find((t) => t.tierCode === props.serviceTierCode);
   const missing = props.missing;
+  const creditsRequired = physicalCardCount(props.cards);
+  const remaining = props.creditBalance == null ? null : props.creditBalance - creditsRequired;
+  const shortfall = remaining == null ? null : Math.max(0, -remaining);
 
   return (
     <Card data-testid="wizard-step-review">
@@ -919,9 +1099,21 @@ function ReviewStep(props: {
           value={tier ? `${tier.label} (${formatPence(tier.pricePerCardPence)})` : "Not set"}
           onEdit={() => props.onEditStep(1)}
         />
+        {shortfall != null && shortfall > 0 && (
+          <CreditShortfallPanel shortfall={shortfall} billingHref={props.billingHref} />
+        )}
         <ReviewRow
           label="Cards"
-          value={`${props.cards.length} card${props.cards.length === 1 ? "" : "s"}`}
+          value={`${creditsRequired} physical card${creditsRequired === 1 ? "" : "s"}`}
+          onEdit={() => props.onEditStep(2)}
+        />
+        <ReviewRow
+          label="Credits"
+          value={
+            props.creditConfigured && props.creditBalance != null
+              ? `${creditsRequired} required · ${props.creditBalance} available · ${remaining} remaining`
+              : `${creditsRequired} required · balance unavailable`
+          }
           onEdit={() => props.onEditStep(2)}
         />
 
@@ -958,15 +1150,26 @@ function ReviewRow({ label, value, onEdit }: { label: string; value: string; onE
 // ---------------- Step 5: Submit ----------------
 function SubmitStep({
   missing,
+  cards,
+  creditBalance,
+  creditConfigured,
+  billingHref,
   submitting,
   error,
   onSubmit,
 }: {
   missing: string[];
+  cards: SubmissionCard[];
+  creditBalance: number | null;
+  creditConfigured: boolean;
+  billingHref: string;
   submitting: boolean;
   error: string | null;
   onSubmit: () => void;
 }) {
+  const creditsRequired = physicalCardCount(cards);
+  const remaining = creditBalance == null ? null : creditBalance - creditsRequired;
+  const shortfall = remaining == null ? null : Math.max(0, -remaining);
   return (
     <Card data-testid="wizard-step-submit">
       <CardHeader>
@@ -978,8 +1181,18 @@ function SubmitStep({
           <li>Submitted data becomes locked.</li>
           <li>MintVault may request more information.</li>
           <li>Intake observations are not grades.</li>
+          <li>
+            {creditsRequired} grading credit{creditsRequired === 1 ? "" : "s"} will be reserved when you submit.
+          </li>
           <li>Price remains subject to your approved Partner agreement where applicable.</li>
         </ul>
+        <div className="rounded-md border p-3 text-sm" data-testid="credit-preview">
+          <p>Physical cards: {creditsRequired}</p>
+          <p>Credits required: {creditsRequired}</p>
+          <p>Wallet balance: {creditConfigured && creditBalance != null ? creditBalance : "Not available"}</p>
+          <p>Remaining balance: {remaining == null ? "Not available" : remaining}</p>
+        </div>
+        {shortfall != null && shortfall > 0 && <CreditShortfallPanel shortfall={shortfall} billingHref={billingHref} />}
         {missing.length > 0 && (
           <div
             className="rounded-md border border-destructive/30 bg-destructive/5 p-3"
@@ -1001,7 +1214,7 @@ function SubmitStep({
         <Button
           size="lg"
           className="w-full"
-          disabled={submitting || missing.length > 0}
+          disabled={submitting || missing.length > 0 || (shortfall != null && shortfall > 0)}
           onClick={onSubmit}
           data-testid="button-confirm-submit"
         >
@@ -1010,6 +1223,35 @@ function SubmitStep({
       </CardContent>
     </Card>
   );
+}
+
+function CreditShortfallPanel({ shortfall, billingHref }: { shortfall: number; billingHref: string }) {
+  return (
+    <div
+      className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+      data-testid="credit-shortfall"
+    >
+      <p className="font-medium">
+        {shortfall} more grading credit{shortfall === 1 ? "" : "s"} needed
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        Add credits before submitting. Payment confirmation, not this page, updates the wallet.
+      </p>
+      <Button asChild className="mt-3" size="sm">
+        <Link href={billingHref} data-testid="button-buy-credits-shortfall">
+          Buy credits
+        </Link>
+      </Button>
+    </div>
+  );
+}
+
+function physicalCardCount(cards: SubmissionCard[]): number {
+  return cards.reduce((sum, card) => sum + Math.max(1, Number(card.quantity) || 1), 0);
+}
+
+function readQueryValue(name: string): string | null {
+  return new URL(window.location.href).searchParams.get(name);
 }
 
 function SubmitSuccessPanel({
@@ -1041,8 +1283,8 @@ function SubmitSuccessPanel({
           >
             View Submission
           </Button>
-          <Button variant="outline" onClick={() => window.print()} data-testid="button-print-receipt">
-            Print Intake Receipt
+          <Button variant="outline" onClick={() => navigate("/partner/grading")} data-testid="button-open-grading">
+            Open Grading
           </Button>
           <Button variant="ghost" onClick={onStartAnother} data-testid="button-start-another">
             Start Another Submission

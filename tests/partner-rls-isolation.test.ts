@@ -82,16 +82,19 @@ import { join } from "node:path";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
-  PARTNER_MIGRATIONS_WITH_PER_CARD,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
   provisionRealisticRoles,
 } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 let cluster: DisposablePostgres17;
 let admin: Client; // superuser — provisioning ONLY, never used for an isolation claim
 let runtime: Client; // the restricted partner runtime login — every claim is made through this
+let connectorRuntime: Client; // restricted connector login for INSERT/WITH CHECK claims
 
 const RUNTIME_LOGIN = "partner_rls_runtime";
 const RUNTIME_PASSWORD = "synthetic"; // disposable cluster only
+const CONNECTOR_LOGIN = "partner_rls_connector";
+const CONNECTOR_PASSWORD = "synthetic"; // disposable cluster only
 
 interface Tenant {
   id: string;
@@ -99,6 +102,8 @@ interface Tenant {
   userId: string;
   walletId: string;
   submissionId: string;
+  gradingWorkItemId: string;
+  destinationSubmissionId: number;
   reservationId: string;
 }
 
@@ -117,10 +122,53 @@ async function seedMintVaultTables(): Promise<void> {
   )`);
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
   // The MintVault table the restricted role must never be able to read.
-  await admin.query(
-    "CREATE TABLE certificates (id serial primary key, cert_id text, submission_id integer, secret text)"
-  );
-  await admin.query("INSERT INTO certificates (cert_id, secret) VALUES ('MV1','MV-DATA')");
+  await admin.query(`CREATE TABLE certificates (
+    id serial primary key,
+    certificate_number text,
+    cert_id text,
+    submission_item_id integer,
+    status text,
+    label_type text,
+    -- 0061's public card projection reads grade; it exists on staging and production, and its
+    -- absence here was the stub being narrower than the real table again.
+    grade numeric(4,1),
+    grade_approved_at timestamptz,
+    deleted_at timestamptz,
+    grade_type text,
+    language text,
+    card_game text,
+    set_name text,
+    card_name text,
+    card_number_display text,
+    year_text text,
+    variant text,
+    front_image_path text,
+    back_image_path text,
+    grading_front_original text,
+    grading_back_original text,
+    created_by text,
+    issued_at timestamptz,
+    updated_at timestamptz,
+    reference_number text,
+    logbook_version integer,
+    logbook_last_issued_at timestamptz,
+    integrity_hash text,
+    print_state text,
+    grader_status text,
+    origin_type text,
+    origin_partner_id uuid,
+    origin_partner_public_ref text,
+    origin_partner_legal_name text,
+    origin_partner_trading_name text,
+    origin_location_id uuid,
+    origin_location_public_ref text,
+    origin_location_name text,
+    origin_location_address text,
+    origin_captured_at timestamptz,
+    origin_snapshot_version integer,
+    secret text
+  )`);
+  await admin.query("INSERT INTO certificates (certificate_number, cert_id, secret) VALUES ('MV1','MV1','MV-DATA')");
   await admin.query("CREATE TABLE label_prints (id serial primary key, certificate_id integer)");
   await admin.query(`CREATE TABLE audit_log (
     id serial primary key, entity_type text not null, entity_id text not null, action text not null,
@@ -181,7 +229,104 @@ async function seedTenant(label: string): Promise<Tenant> {
       [walletId, id, locationId, submissionId, key]
     )
   ).rows[0].id;
-  return { id, locationId, userId, walletId, submissionId, reservationId };
+  const cardId = (
+    await admin.query<{ id: string }>(
+      `INSERT INTO partner_submission_cards
+         (tenant_id, submission_id, sequence_number, card_name, quantity, front_image_key, back_image_key)
+       VALUES ($1,$2,1,$3,1,'pending','pending')
+       RETURNING id`,
+      [id, submissionId, `Bridge Card ${label}`]
+    )
+  ).rows[0].id;
+  await admin.query(
+    `UPDATE partner_submission_cards
+        SET front_image_key = $1,
+            back_image_key = $2
+      WHERE id = $3`,
+    [
+      `partner-submissions/${id}/${submissionId}/${cardId}/front-rls.jpg`,
+      `partner-submissions/${id}/${submissionId}/${cardId}/back-rls.jpg`,
+      cardId,
+    ]
+  );
+  const handoffId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
+      [id, submissionId]
+    )
+  ).rows[0].id;
+  const connectorId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_connector_records (tenant_id, partner_submission_id, handoff_id, state) VALUES ($1,$2,$3,'imported') RETURNING id",
+      [id, submissionId, handoffId]
+    )
+  ).rows[0].id;
+  const validationRunId = (
+    await admin.query<{ id: string }>(
+      `INSERT INTO partner_connector_validation_runs
+         (connector_record_id, validation_attempt, source_submission_version, source_handoff_status, outcome, source_fingerprint, source_fingerprint_version, completed_at)
+       VALUES ($1,1,1,'pending','valid',md5($2)||md5($2||':f'),1,now())
+       RETURNING id`,
+      [connectorId, `bridge-${label}`]
+    )
+  ).rows[0].id;
+  const destinationSubmissionId = (
+    await admin.query<{ id: number }>(
+      "INSERT INTO submissions (user_id, status, tracking_number) VALUES ($1,'grading',$2) RETURNING id",
+      [userId, `MV-RLS-${label}`]
+    )
+  ).rows[0].id;
+  const submissionItemId = (
+    await admin.query<{ id: number }>("INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id", [
+      destinationSubmissionId,
+    ])
+  ).rows[0].id;
+  const importId = (
+    await admin.query<{ id: string }>(
+      `INSERT INTO partner_connector_imports
+         (connector_record_id, partner_organisation_id, partner_location_id, partner_submission_id, partner_handoff_id,
+          validation_run_id, destination_submission_id, source_fingerprint, source_fingerprint_version, state, completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,md5($8)||md5($8||':f'),1,'completed',now())
+       RETURNING id`,
+      [
+        connectorId,
+        id,
+        locationId,
+        submissionId,
+        handoffId,
+        validationRunId,
+        destinationSubmissionId,
+        `import-${label}`,
+      ]
+    )
+  ).rows[0].id;
+  const gradingWorkItemId = (
+    await admin.query<{ id: string }>(
+      `INSERT INTO partner_grading_work_items
+         (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id, partner_submission_card_id,
+          partner_handoff_id, connector_import_id, connector_record_id, validation_run_id,
+          destination_submission_id, submission_item_id, card_ordinal, front_image_key, back_image_key,
+          source_fingerprint, source_fingerprint_version)
+       VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,md5($13)||md5($13||':f'),1)
+       RETURNING id`,
+      [
+        id,
+        locationId,
+        submissionId,
+        cardId,
+        handoffId,
+        importId,
+        connectorId,
+        validationRunId,
+        destinationSubmissionId,
+        submissionItemId,
+        `partner-submissions/${id}/${submissionId}/${cardId}/front-rls.jpg`,
+        `partner-submissions/${id}/${submissionId}/${cardId}/back-rls.jpg`,
+        `work-${label}`,
+      ]
+    )
+  ).rows[0].id;
+  return { id, locationId, userId, walletId, submissionId, gradingWorkItemId, destinationSubmissionId, reservationId };
 }
 
 /**
@@ -212,10 +357,9 @@ async function assertRlsHarness(client: Client, table: string, expectTenant: str
   expect(r.rowCount, `table ${table} must exist`).toBe(1);
   const h = r.rows[0];
   // RLS2: running this proof as a superuser must fail HERE, explicitly, not pass silently.
-  expect(
-    h.is_super,
-    `RLS proof is running as SUPERUSER '${h.rolname}' — every isolation claim would be vacuous`
-  ).toBe(false);
+  expect(h.is_super, `RLS proof is running as SUPERUSER '${h.rolname}' — every isolation claim would be vacuous`).toBe(
+    false
+  );
   expect(h.bypassrls, `RLS proof role '${h.rolname}' holds BYPASSRLS — every isolation claim would be vacuous`).toBe(
     false
   );
@@ -227,6 +371,39 @@ async function assertRlsHarness(client: Client, table: string, expectTenant: str
   expect(h.forced, `${table} must have FORCE ROW LEVEL SECURITY`).toBe(true);
   expect(h.policies, `${table} must carry at least one policy`).toBeGreaterThan(0);
   expect(h.tenant, "tenant context must be set for this claim").toBe(expectTenant);
+}
+
+async function assertConnectorRlsHarness(client: Client, table: string, expectTenant: string): Promise<void> {
+  const r = await client.query<{
+    rolname: string;
+    is_super: boolean;
+    bypassrls: boolean;
+    rls_enabled: boolean;
+    forced: boolean;
+    policies: number;
+    tenant: string | null;
+  }>(
+    `SELECT current_user AS rolname,
+            (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS is_super,
+            (SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) AS bypassrls,
+            c.relrowsecurity AS rls_enabled,
+            c.relforcerowsecurity AS forced,
+            (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid=c.oid) AS policies,
+            NULLIF(current_setting('app.tenant_id', true),'') AS tenant
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname='public' AND c.relname=$1`,
+    [table]
+  );
+  expect(r.rowCount, `table ${table} must exist`).toBe(1);
+  const h = r.rows[0];
+  expect(h.is_super, `connector RLS proof is running as SUPERUSER '${h.rolname}'`).toBe(false);
+  expect(h.bypassrls, `connector RLS proof role '${h.rolname}' holds BYPASSRLS`).toBe(false);
+  expect(h.rolname, "connector claims must be made as partner_connector_runtime").toBe("partner_connector_runtime");
+  expect(h.rls_enabled, `${table} must have ROW LEVEL SECURITY enabled`).toBe(true);
+  expect(h.forced, `${table} must have FORCE ROW LEVEL SECURITY`).toBe(true);
+  expect(h.policies, `${table} must carry at least one policy`).toBeGreaterThan(0);
+  expect(h.tenant, "tenant context must be set for this connector claim").toBe(expectTenant);
 }
 
 /**
@@ -267,6 +444,28 @@ async function attemptWrite(
   }
 }
 
+async function attemptConnectorWrite(
+  sql: string,
+  params: unknown[]
+): Promise<{ refusal: "denied" | "no_rows" | "APPLIED"; rowCount: number; sqlstate: string; message: string }> {
+  await connectorRuntime.query("SAVEPOINT attempt");
+  try {
+    const r = await connectorRuntime.query(sql, params);
+    await connectorRuntime.query("RELEASE SAVEPOINT attempt");
+    return {
+      refusal: (r.rowCount ?? 0) === 0 ? "no_rows" : "APPLIED",
+      rowCount: r.rowCount ?? 0,
+      sqlstate: "",
+      message: "",
+    };
+  } catch (err) {
+    await connectorRuntime.query("ROLLBACK TO SAVEPOINT attempt");
+    await connectorRuntime.query("RELEASE SAVEPOINT attempt");
+    const e = err as { code?: string; message?: string };
+    return { refusal: "denied", rowCount: 0, sqlstate: e.code ?? "", message: e.message ?? "" };
+  }
+}
+
 /**
  * Run `fn` as partner_runtime with a TRANSACTION-LOCAL tenant context, exactly as production does.
  * The transaction is always rolled back, so no test can leak state or a GUC into another.
@@ -285,6 +484,67 @@ async function asTenant(tenant: string | null, fn: () => Promise<void>): Promise
   }
 }
 
+async function asConnectorTenant(tenant: string | null, fn: () => Promise<void>): Promise<void> {
+  await connectorRuntime.query("BEGIN");
+  try {
+    await connectorRuntime.query("SET ROLE partner_connector_runtime");
+    if (tenant !== null) await connectorRuntime.query("SELECT set_config('app.tenant_id', $1, true)", [tenant]);
+    await fn();
+  } finally {
+    await connectorRuntime.query("ROLLBACK").catch(() => {});
+    await connectorRuntime.query("RESET ROLE").catch(() => {});
+  }
+}
+
+async function nextDestinationItem(tenant: Tenant): Promise<number> {
+  return (
+    await admin.query<{ id: number }>("INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id", [
+      tenant.destinationSubmissionId,
+    ])
+  ).rows[0].id;
+}
+
+async function workItemInsertParams(tenant: Tenant, submissionItemId: number, ordinal: number) {
+  const row = (
+    await admin.query<{
+      tenant_id: string;
+      partner_location_id: string;
+      partner_submission_id: string;
+      partner_submission_card_id: string;
+      partner_handoff_id: string;
+      connector_import_id: string;
+      connector_record_id: string;
+      validation_run_id: string;
+      destination_submission_id: number;
+      front_image_key: string;
+      back_image_key: string;
+    }>(
+      `SELECT tenant_id, partner_location_id, partner_submission_id, partner_submission_card_id,
+              partner_handoff_id, connector_import_id, connector_record_id, validation_run_id,
+              destination_submission_id, front_image_key, back_image_key
+         FROM partner_grading_work_items
+        WHERE id=$1`,
+      [tenant.gradingWorkItemId]
+    )
+  ).rows[0];
+  return [
+    row.tenant_id,
+    row.partner_location_id,
+    row.partner_submission_id,
+    row.partner_submission_card_id,
+    row.partner_handoff_id,
+    row.connector_import_id,
+    row.connector_record_id,
+    row.validation_run_id,
+    row.destination_submission_id,
+    submissionItemId,
+    ordinal,
+    row.front_image_key.replace(/front-[^/]+$/, `front-connector-${ordinal}.jpg`),
+    row.back_image_key.replace(/back-[^/]+$/, `back-connector-${ordinal}.jpg`),
+    `connector-insert-${row.tenant_id}-${ordinal}`,
+  ];
+}
+
 describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role)", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-rls-isolation");
@@ -292,12 +552,16 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
     await admin.connect();
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_PER_CARD);
+    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
 
     await admin.query(`DO $$ BEGIN
         CREATE ROLE ${RUNTIME_LOGIN} LOGIN PASSWORD '${RUNTIME_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
       EXCEPTION WHEN duplicate_object THEN NULL; END$$;`);
     await admin.query(`GRANT partner_runtime TO ${RUNTIME_LOGIN}`);
+    await admin.query(`DO $$ BEGIN
+        CREATE ROLE ${CONNECTOR_LOGIN} LOGIN PASSWORD '${CONNECTOR_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
+      EXCEPTION WHEN duplicate_object THEN NULL; END$$;`);
+    await admin.query(`GRANT partner_connector_runtime TO ${CONNECTOR_LOGIN}`);
 
     A = await seedTenant("A");
     B = await seedTenant("B");
@@ -307,9 +571,15 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
     url.password = RUNTIME_PASSWORD;
     runtime = new Client({ connectionString: url.toString() });
     await runtime.connect();
+    const connectorUrl = new URL(cluster.url);
+    connectorUrl.username = CONNECTOR_LOGIN;
+    connectorUrl.password = CONNECTOR_PASSWORD;
+    connectorRuntime = new Client({ connectionString: connectorUrl.toString() });
+    await connectorRuntime.connect();
   }, 120_000);
 
   afterAll(async () => {
+    await connectorRuntime?.end().catch(() => {});
     await runtime?.end().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
@@ -330,6 +600,19 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
         ).toBe(false);
         expect(r.rows[0].rolname).toBe("partner_runtime");
         expect(r.rows[0].b).toBe(false);
+      });
+    });
+
+    it("the connector acting role is partner_connector_runtime, NOSUPERUSER and NOBYPASSRLS", async () => {
+      await asConnectorTenant(A.id, async () => {
+        const r = await connectorRuntime.query<{ rolname: string; s: boolean; b: boolean }>(
+          `SELECT current_user AS rolname,
+                  (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS s,
+                  (SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) AS b`
+        );
+        expect(r.rows[0].rolname).toBe("partner_connector_runtime");
+        expect(r.rows[0].s, "connector proof must not run as a superuser").toBe(false);
+        expect(r.rows[0].b, "connector proof must not hold BYPASSRLS").toBe(false);
       });
     });
 
@@ -356,6 +639,7 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
           // 0041 created this table with NO row-level security at all, while enabling it on its
           // sibling partner_credit_accounting_exceptions in the same migration. 0043 closes that.
           "partner_submission_credit_holds",
+          "partner_grading_work_items",
           "partner_locations",
         ]) {
           await assertRlsHarness(runtime, t, A.id);
@@ -375,6 +659,7 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
       { table: "partner_wallets", bId: (t) => t.walletId },
       { table: "partner_submissions", bId: (t) => t.submissionId },
       { table: "partner_credit_reservations", bId: (t) => t.reservationId },
+      { table: "partner_grading_work_items", bId: (t) => t.gradingWorkItemId },
     ];
 
     for (const c of cases) {
@@ -417,6 +702,78 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
 
   // ------------------------------------------------------------------ write isolation
   describe("tenant A cannot WRITE tenant B", () => {
+    it("partner_runtime has SELECT only on partner_grading_work_items, never DML", async () => {
+      await asTenant(A.id, async () => {
+        await assertRlsHarness(runtime, "partner_grading_work_items", A.id);
+        for (const statement of [
+          {
+            sql: "UPDATE partner_grading_work_items SET status='void' WHERE id=$1",
+            params: [A.gradingWorkItemId],
+          },
+          {
+            sql: "DELETE FROM partner_grading_work_items WHERE id=$1",
+            params: [A.gradingWorkItemId],
+          },
+          {
+            sql: `INSERT INTO partner_grading_work_items
+                   (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id,
+                    partner_submission_card_id, partner_handoff_id, connector_import_id, connector_record_id,
+                    validation_run_id, destination_submission_id, submission_item_id, card_ordinal,
+                    front_image_key, back_image_key, source_fingerprint, source_fingerprint_version)
+                  SELECT tenant_id, tenant_id, partner_location_id, partner_submission_id,
+                         partner_submission_card_id, partner_handoff_id, connector_import_id, connector_record_id,
+                         validation_run_id, destination_submission_id, submission_item_id, 99,
+                         front_image_key, back_image_key, 'runtime-forbidden', 1
+                    FROM partner_grading_work_items WHERE id=$1`,
+            params: [A.gradingWorkItemId],
+          },
+        ]) {
+          const r = await attemptWrite(statement.sql, statement.params);
+          expect(r.refusal).toBe("denied");
+          expect(r.sqlstate).toBe("42501");
+          expect(r.message).toMatch(/permission denied/i);
+        }
+      });
+    });
+
+    it("partner_connector_runtime can insert only work items for its transaction tenant", async () => {
+      const aItem = await nextDestinationItem(A);
+      const bItem = await nextDestinationItem(B);
+      const insertSql = `INSERT INTO partner_grading_work_items
+         (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id,
+          partner_submission_card_id, partner_handoff_id, connector_import_id, connector_record_id,
+          validation_run_id, destination_submission_id, submission_item_id, card_ordinal,
+          front_image_key, back_image_key, source_fingerprint, source_fingerprint_version)
+       VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,md5($14)||md5($14||':f'),1)`;
+      await asConnectorTenant(A.id, async () => {
+        await assertConnectorRlsHarness(connectorRuntime, "partner_grading_work_items", A.id);
+        const own = await attemptConnectorWrite(insertSql, await workItemInsertParams(A, aItem, 41));
+        expect(own.refusal).toBe("APPLIED");
+        expect(own.rowCount).toBe(1);
+
+        const cross = await attemptConnectorWrite(insertSql, await workItemInsertParams(B, bItem, 41));
+        expect(cross.refusal).toBe("denied");
+        expect(cross.sqlstate).toBe("42501");
+        expect(cross.message).toMatch(/row-level security|violates row-level security/i);
+      });
+    });
+
+    it("partner_connector_runtime fails closed when tenant context is missing", async () => {
+      const aItem = await nextDestinationItem(A);
+      const insertSql = `INSERT INTO partner_grading_work_items
+         (tenant_id, partner_organisation_id, partner_location_id, partner_submission_id,
+          partner_submission_card_id, partner_handoff_id, connector_import_id, connector_record_id,
+          validation_run_id, destination_submission_id, submission_item_id, card_ordinal,
+          front_image_key, back_image_key, source_fingerprint, source_fingerprint_version)
+       VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,md5($14)||md5($14||':f'),1)`;
+      await asConnectorTenant(null, async () => {
+        const r = await attemptConnectorWrite(insertSql, await workItemInsertParams(A, aItem, 42));
+        expect(r.refusal).toBe("denied");
+        expect(r.sqlstate).toBe("42501");
+        expect(r.message).toMatch(/row-level security|violates row-level security/i);
+      });
+    });
+
     it("UPDATE against B's reservation is refused and leaves it untouched", async () => {
       await asTenant(A.id, async () => {
         const r = await attemptWrite("UPDATE partner_credit_reservations SET reason='hijacked' WHERE id=$1", [
@@ -459,9 +816,7 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
        */
       await asTenant(A.id, async () => {
         await assertRlsHarness(runtime, "partner_submissions", A.id);
-        const r = await attemptWrite("UPDATE partner_submissions SET status='cancelled' WHERE id=$1", [
-          B.submissionId,
-        ]);
+        const r = await attemptWrite("UPDATE partner_submissions SET status='cancelled' WHERE id=$1", [B.submissionId]);
         // Not "denied": the grant exists. RLS makes the row invisible, so zero rows match.
         expect(r.refusal).toBe("no_rows");
         // ...and A can still update its OWN row, proving the grant is real and the test is not
@@ -674,12 +1029,42 @@ describe("Partner RLS isolation coverage is wired up", () => {
    * table, so before this list existed the pilot's actual data surface had ZERO tenant-isolation
    * coverage. Verified to apply cleanly, in this order, onto an empty database.
    */
+  /**
+   * The chain this suite applies.
+   *
+   * 0051 and 0052 are appended HERE rather than added to
+   * PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE in tests/helpers/partner-realistic-db.ts, because that
+   * exported list is consumed by a dozen other suites whose fixtures assert exact grant sets; both
+   * files revoke privileges, so widening the shared list would turn unrelated suites red for
+   * reasons that have nothing to do with what they test. The security sweep needs the FULL chain —
+   * an RLS audit that stops two migrations short of head is auditing a database nobody runs — so it
+   * extends the list locally.
+   */
   const PARTNER_MIGRATIONS = [
-    "0001_partner_foundation.sql",
-    "0007_partner_submissions.sql",
-    "0016_partner_wallet_ledger.sql",
-    "0017_partner_credit_reservations.sql",
-  ];
+    ...PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
+    "0051_partner_runtime_flag_control_least_privilege",
+    "0052_partner_internal_evidence_rls",
+    "0054_cert_counter_monotonic_allocator",
+    "0055_partner_ledger_preserve_search_path",
+    "0056_partner_hq_control_tables_write_deny",
+    // 0058's three tables are tenant-keyed, so they MUST be applied here or the catalogue-driven
+    // sweep below never sees them and the RLS audit silently stops covering the public network.
+    // Omitting a tenant-keyed table from this list is not a red build — it is a coverage hole,
+    // which is the more dangerous failure.
+    "0058_partner_public_network",
+    // 0059 tightens partner_public_listings_public_read to gate on org/location eligibility as
+    // well as listing_status. Without it this audit would keep proving 0058's looser policy.
+    "0059_partner_public_eligibility_propagation",
+    // 0060 adds the denormalised computed-rating fallback and the override expiry instant. Both are
+    // read on the public path, so the grant/RLS audit must see them.
+    "0060_partner_public_rating_override_expiry",
+    // 0061 adds the public-reader role and its two restricted projections. The RLS/grant audit
+    // must see them so a future blanket GRANT cannot widen the anonymous surface unnoticed.
+    "0061_partner_public_reader",
+    // 0062 adds rating lifecycle state to partner_public_listings; the grant audit must see that
+    // partner_runtime cannot write it.
+    "0062_partner_rating_dirty_state",
+  ].map((name) => `${name}.sql`);
 
   /** Deterministic per-tenant fixture ids, so every assertion can target an exact cross-tenant row. */
   const ID = {
@@ -697,6 +1082,14 @@ describe("Partner RLS isolation coverage is wired up", () => {
     walletB: "bbbb0000-0000-0000-0000-0000000000b6",
     resA: "aaaa0000-0000-0000-0000-0000000000a7",
     resB: "bbbb0000-0000-0000-0000-0000000000b7",
+    handoffA: "aaaa0000-0000-0000-0000-0000000000a8",
+    handoffB: "bbbb0000-0000-0000-0000-0000000000b8",
+    connectorA: "aaaa0000-0000-0000-0000-0000000000a9",
+    connectorB: "bbbb0000-0000-0000-0000-0000000000b9",
+    validationA: "aaaa0000-0000-0000-0000-0000000000aa",
+    validationB: "bbbb0000-0000-0000-0000-0000000000ba",
+    importA: "aaaa0000-0000-0000-0000-0000000000ab",
+    importB: "bbbb0000-0000-0000-0000-0000000000bb",
     /** A uuid that exists in NO tenant — the control arm of the FK existence-oracle probe. */
     absent: "deadbeef-0000-0000-0000-000000000000",
   };
@@ -713,7 +1106,89 @@ describe("Partner RLS isolation coverage is wired up", () => {
     "partner_credit_ledger",
     "partner_credit_reservations",
     "partner_credit_reservation_events",
+    "partner_grading_work_items",
   ] as const;
+
+  /**
+   * RLS-LESS EXCEPTION REGISTER — the pinned counterpart to the catalogue-driven coverage sweep
+   * below.
+   *
+   * WHY THIS EXISTS (A8-F4): the sweep used to be scoped `AND c.relname = ANY(TENANT_TABLES)`, an
+   * 11-name INCLUSION allowlist, while its own comment claimed it "catches a NEW tenant-scoped
+   * table landing in a future migration with the RLS block forgotten". It could not: a table
+   * absent from the list was absent from the query, so it could never fail. The live catalogue in
+   * this fixture has 34 tenant-keyed `partner_%` tables, not 11. That gap is exactly how A8-F1
+   * survived every green run of this file.
+   *
+   * The sweep is now catalogue-driven — it asks the catalogue which tenant-keyed tables exist and
+   * checks ALL of them — and this register is an EXCLUSION list asserted in BOTH directions. A new
+   * unprotected table fails closed (not in the register). Protecting a table listed here ALSO
+   * fails, which forces the fix to delete its entry rather than leave a stale exception behind.
+   *
+   * THE GRANT SET IS PINNED FOR **BOTH** RUNTIME ROLES — THIS IS THE HALF THAT WAS WRONG.
+   * The previous version of this register pinned `partnerRuntimeGrants` only, and cleared three
+   * entries with the reasoning "no partner_runtime grant, so RLS is not the boundary". That
+   * checked the WRONG ROLE. All three were granted to `partner_connector_runtime`, which the
+   * catalogue confirms is rolsuper=f / rolbypassrls=f — a genuinely restricted role, so its grants
+   * are real reach, and with no RLS the reach was every tenant at once. An exception register that
+   * asks about one role while the exposure sits on another is worse than no register: it
+   * manufactures confidence. Every entry now pins BOTH roles and both are asserted below.
+   */
+  const RLS_EXEMPT_TENANT_TABLES: Record<
+    string,
+    { partnerRuntimeGrants: string[]; connectorRuntimeGrants: string[]; why: string }
+  > = {
+    partner_connector_records: {
+      // GENUINE, ARCHITECTURAL EXCEPTION — not an amnesty, and not a deferral for want of a
+      // migration number (0052 exists and deliberately does not touch this table).
+      //
+      // This table is a CROSS-TENANT WORK QUEUE by design. server/partner/connector-service.ts:332
+      // `claimNextConnectorRecord` is the connector's central claim loop; it runs on the connector
+      // pool inside withConnectorTx(fn) with NO tenant argument and selects across every tenant at
+      // once (state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1).
+      // `listRetryableConnectorRecords` (:755) is a second such sweep on connectorQuery, which
+      // opens no transaction and sets no GUC at all (connector-db.ts:93-103).
+      //
+      // A `tenant_id = partner_current_tenant()` policy would make both return zero rows FOREVER:
+      // the worker would claim nothing, imports would stop, and partner submissions would never
+      // become certificates — silently, behind a green migration status. Fail-closed is right for
+      // a data boundary and exactly wrong for a queue drain. Hardening here means moving queue
+      // DISCOVERY onto the privileged BYPASSRLS pool that connector-runtime.ts:44-52 already uses
+      // for handoff discovery, so the connector pool only ever touches one named tenant. That is
+      // real follow-up work needing its own FOR UPDATE SKIP LOCKED concurrency proof, not a
+      // migration.
+      //
+      // WHY THE EXPOSURE IS CONTAINED MEANWHILE, verified rather than asserted:
+      //   * partner_runtime — the role every partner-authenticated portal request uses — holds
+      //     NOTHING on this table. Pinned as [] below and asserted, so a future grant fails here.
+      //   * No partner-facing route reaches the connector pool at all: `getConnectorStatus`
+      //     (connector-service.ts:292), the only connector read taking a caller-supplied tenant id,
+      //     has ZERO callers anywhere in the repository, and server/partner/routes.ts and mount.ts
+      //     contain no connector surface.
+      //   * The whole connector plane beneath this table (_events, _imports, _import_attempts,
+      //     _validation_runs, _validation_findings, _customer_links, _admin_actions) carries no
+      //     tenant_id column at all and is keyed on connector_record_id, so RLS on the root alone
+      //     would buy partial containment at full breakage cost.
+      partnerRuntimeGrants: [],
+      connectorRuntimeGrants: ["INSERT", "SELECT", "UPDATE"],
+      why:
+        "cross-tenant work queue: claimNextConnectorRecord (connector-service.ts:332) claims across " +
+        "all tenants with no GUC, so a tenant policy would drain-lock the connector rather than " +
+        "harden it. Contained by the ROLE boundary — partner_runtime holds nothing on it and no " +
+        "partner-facing route reaches the connector pool. Fix = move queue discovery to the " +
+        "BYPASSRLS admin pool; needs its own concurrency proof.",
+    },
+    // partner_internal_notes and partner_management_audit were HERE and are deliberately GONE:
+    // migration 0052 revoked the dead partner_connector_runtime grant (every reference in the repo
+    // runs on the BYPASSRLS admin pool) AND added ENABLE + FORCE RLS with a tenant policy. Because
+    // this register is asserted in both directions, leaving the entries behind would now fail the
+    // sweep — which is the ratchet working: a fixed table must lose its amnesty, not keep it.
+    //
+    // partner_owner_invariant_tenants was HERE too, as OPEN HIGH A8-F1, and is deliberately GONE:
+    // migration 0047_partner_owner_invariant_tenants_rls.sql closed it. The behavioural
+    // counterpart — a test that REPRODUCED the leak on every run — has been replaced by the
+    // positive proof below, for the same reason.
+  };
 
   const FP_A = "a".repeat(64);
   const FP_B = "b".repeat(64);
@@ -723,12 +1198,96 @@ describe("Partner RLS isolation coverage is wired up", () => {
     client = new Client({ connectionString: RLS_DB_URL });
     await client.connect();
     // fresh state
+    await client.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await client.query("CREATE SCHEMA public");
+    await client.query("GRANT ALL ON SCHEMA public TO public");
     await client.query("DROP OWNED BY partner_runtime").catch(() => {});
     await client.query(`DO $$ BEGIN
       PERFORM 1; END$$;`);
     // an existing MintVault-style table the restricted role must never read
-    await client.query("CREATE TABLE IF NOT EXISTS certificates (id serial primary key, secret text)");
-    await client.query("INSERT INTO certificates (secret) VALUES ('MV-DATA') ON CONFLICT DO NOTHING");
+    await client.query(
+      "CREATE TABLE IF NOT EXISTS users (id varchar primary key default gen_random_uuid(), email varchar unique)"
+    );
+    await client.query(`CREATE TABLE IF NOT EXISTS submissions (
+      id serial primary key, user_id varchar, status varchar(30) not null default 'draft',
+      tracking_number text not null unique, deleted_at timestamptz, grading_status varchar(30),
+      assigned_grader_id varchar, scan_status varchar(30), scan_assigned_to varchar,
+      shipped_at timestamptz, delivered_at timestamptz, completed_at timestamptz,
+      return_tracking text, return_carrier text, return_service text,
+      status_history jsonb not null default '[]'::jsonb, updated_at timestamptz not null default now()
+    )`);
+    await client.query(
+      "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
+    );
+    await client.query(`CREATE TABLE IF NOT EXISTS audit_log (
+      id serial primary key, entity_type text not null, entity_id text not null, action text not null,
+      admin_user text, details jsonb, created_at timestamptz not null default now()
+    )`);
+    await client.query("DROP TABLE IF EXISTS certificates");
+    await client.query(`CREATE TABLE certificates (
+      id serial primary key,
+      certificate_number text,
+      cert_id text,
+      submission_item_id integer,
+      status text,
+      label_type text,
+      -- 0061's public card projection reads grade; present on staging and production.
+      grade numeric(4,1),
+      grade_approved_at timestamptz,
+      deleted_at timestamptz,
+      grade_type text,
+      language text,
+      card_game text,
+      set_name text,
+      card_name text,
+      card_number_display text,
+      year_text text,
+      variant text,
+      front_image_path text,
+      back_image_path text,
+      grading_front_original text,
+      grading_back_original text,
+      created_by text,
+      issued_at timestamptz,
+      updated_at timestamptz,
+      reference_number text,
+      logbook_version integer,
+      logbook_last_issued_at timestamptz,
+      integrity_hash text,
+      print_state text,
+      grader_status text,
+      origin_type text,
+      origin_partner_id uuid,
+      origin_partner_public_ref text,
+      origin_partner_legal_name text,
+      origin_partner_trading_name text,
+      origin_location_id uuid,
+      origin_location_public_ref text,
+      origin_location_name text,
+      origin_location_address text,
+      origin_captured_at timestamptz,
+      origin_snapshot_version integer,
+      secret text
+    )`);
+    await client.query(
+      "INSERT INTO certificates (certificate_number, cert_id, secret) VALUES ('MV1','MV1','MV-DATA') ON CONFLICT DO NOTHING"
+    );
+    await client.query("CREATE TABLE IF NOT EXISTS label_prints (id serial primary key, certificate_id integer)");
+    // The certificate-number allocator, created here BEFORE the chain runs.
+    //
+    // In production storage.ts:ensureCertCounterTable() creates it at application boot, so both
+    // 0049 (which grants on it) and 0052 (which tightens that grant to column level) guard
+    // themselves with to_regclass. If this fixture created it AFTER the chain, 0052's allocator
+    // clause would correctly skip, and the A8-F5 test below would have to re-issue the grants
+    // itself — which would make it a test of its own setup rather than of the migration. Creating
+    // it first means 0052 does the tightening, and deleting that clause from 0052 turns the test
+    // RED. Verified by mutation.
+    await client.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+      id integer PRIMARY KEY DEFAULT 1,
+      last_issued integer NOT NULL DEFAULT 0,
+      updated_at timestamptz NOT NULL DEFAULT NOW())`);
+    await client.query("INSERT INTO cert_counter (id,last_issued) VALUES (1,0) ON CONFLICT (id) DO NOTHING");
+
     // apply the authoritative migrations (idempotent), in dependency order
     for (const file of PARTNER_MIGRATIONS) {
       await client.query(readFileSync(join(process.cwd(), "migrations", file), "utf8"));
@@ -760,33 +1319,127 @@ describe("Partner RLS isolation coverage is wired up", () => {
     await client.query("SET session_replication_role = 'origin'");
     await client.query(
       "INSERT INTO partner_organisations (id,public_ref,legal_name) VALUES ($1,'refA','A Ltd'),($2,'refB','B Ltd')",
-      [A, B],
+      [A, B]
     );
     await client.query(
       "INSERT INTO partner_locations (id,public_ref,tenant_id,partner_id,name) VALUES ($1,'la',$3,$3,'Shop A'),($2,'lb',$4,$4,'Shop B')",
-      [ID.locA, ID.locB, A, B],
+      [ID.locA, ID.locB, A, B]
     );
     await client.query(
       "INSERT INTO partner_users (id,public_ref,tenant_id,partner_id,email,status) VALUES ($1,'ua',$3,$3,'a@x.test','active'),($2,'ub',$4,$4,'b@x.test','active')",
-      [ID.userA, ID.userB, A, B],
+      [ID.userA, ID.userB, A, B]
     );
     await client.query(
       "INSERT INTO partner_customers (id,tenant_id,full_name,email) VALUES ($1,$3,'Cust A','a-cust@x.test'),($2,$4,'Cust B','b-cust@x.test')",
-      [ID.custA, ID.custB, A, B],
+      [ID.custA, ID.custB, A, B]
     );
     await client.query(
       `INSERT INTO partner_submissions (id,tenant_id,location_id,created_by,public_ref,customer_id,status,card_count)
        VALUES ($1,$3,$5,$7,'sa',$9,'draft',1),($2,$4,$6,$8,'sb',$10,'draft',1)`,
-      [ID.subA, ID.subB, A, B, ID.locA, ID.locB, ID.userA, ID.userB, ID.custA, ID.custB],
+      [ID.subA, ID.subB, A, B, ID.locA, ID.locB, ID.userA, ID.userB, ID.custA, ID.custB]
     );
     await client.query(
       `INSERT INTO partner_submission_cards (id,tenant_id,submission_id,sequence_number,card_name,declared_value_pence)
        VALUES ($1,$3,$5,1,'Card A',100),($2,$4,$6,1,'Card B',999999)`,
-      [ID.cardA, ID.cardB, A, B, ID.subA, ID.subB],
+      [ID.cardA, ID.cardB, A, B, ID.subA, ID.subB]
+    );
+    await client.query(
+      `INSERT INTO partner_submission_handoffs (id,tenant_id,submission_id,status,snapshot)
+       VALUES ($1,$3,$5,'applied','{}'::jsonb),($2,$4,$6,'applied','{}'::jsonb)`,
+      [ID.handoffA, ID.handoffB, A, B, ID.subA, ID.subB]
+    );
+    await client.query(
+      "INSERT INTO partner_connector_records (id,tenant_id,partner_submission_id,handoff_id,state) VALUES ($1,$3,$5,$7,'imported'),($2,$4,$6,$8,'imported')",
+      [ID.connectorA, ID.connectorB, A, B, ID.subA, ID.subB, ID.handoffA, ID.handoffB]
+    );
+    await client.query(
+      `INSERT INTO partner_connector_validation_runs
+         (id,connector_record_id,validation_attempt,source_submission_version,source_handoff_status,outcome,source_fingerprint,source_fingerprint_version,completed_at)
+       VALUES ($1,$3,1,1,'applied','valid',$5,1,now()),
+              ($2,$4,1,1,'applied','valid',$6,1,now())`,
+      [ID.validationA, ID.validationB, ID.connectorA, ID.connectorB, FP_A, FP_B]
+    );
+    const destA = await client.query<{ id: number }>(
+      "INSERT INTO submissions (user_id,status,tracking_number) VALUES ($1,'grading','RLS-A') RETURNING id",
+      [ID.userA]
+    );
+    const destB = await client.query<{ id: number }>(
+      "INSERT INTO submissions (user_id,status,tracking_number) VALUES ($1,'grading','RLS-B') RETURNING id",
+      [ID.userB]
+    );
+    const itemA = await client.query<{ id: number }>(
+      "INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id",
+      [destA.rows[0].id]
+    );
+    const itemB = await client.query<{ id: number }>(
+      "INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id",
+      [destB.rows[0].id]
+    );
+    await client.query(
+      `INSERT INTO partner_connector_imports
+         (id,connector_record_id,partner_organisation_id,partner_location_id,partner_submission_id,partner_handoff_id,validation_run_id,destination_submission_id,source_fingerprint,source_fingerprint_version,state,completed_at)
+       VALUES ($1,$3,$5,$7,$9,$11,$13,$15,$17,1,'completed',now()),
+              ($2,$4,$6,$8,$10,$12,$14,$16,$18,1,'completed',now())`,
+      [
+        ID.importA,
+        ID.importB,
+        ID.connectorA,
+        ID.connectorB,
+        A,
+        B,
+        ID.locA,
+        ID.locB,
+        ID.subA,
+        ID.subB,
+        ID.handoffA,
+        ID.handoffB,
+        ID.validationA,
+        ID.validationB,
+        destA.rows[0].id,
+        destB.rows[0].id,
+        FP_A,
+        FP_B,
+      ]
+    );
+    await client.query(
+      `INSERT INTO partner_grading_work_items
+         (tenant_id,partner_organisation_id,partner_location_id,partner_submission_id,partner_submission_card_id,
+          partner_handoff_id,connector_import_id,connector_record_id,validation_run_id,destination_submission_id,
+          submission_item_id,card_ordinal,front_image_key,back_image_key,source_fingerprint,source_fingerprint_version)
+       VALUES ($1,$1,$3,$5,$7,$9,$11,$13,$15,$17,$19,1,$23,$24,$21,1),
+              ($2,$2,$4,$6,$8,$10,$12,$14,$16,$18,$20,1,$25,$26,$22,1)`,
+      [
+        A,
+        B,
+        ID.locA,
+        ID.locB,
+        ID.subA,
+        ID.subB,
+        ID.cardA,
+        ID.cardB,
+        ID.handoffA,
+        ID.handoffB,
+        ID.importA,
+        ID.importB,
+        ID.connectorA,
+        ID.connectorB,
+        ID.validationA,
+        ID.validationB,
+        destA.rows[0].id,
+        destB.rows[0].id,
+        itemA.rows[0].id,
+        itemB.rows[0].id,
+        FP_A,
+        FP_B,
+        `partner-submissions/${A}/${ID.subA}/${ID.cardA}/front-a.png`,
+        `partner-submissions/${A}/${ID.subA}/${ID.cardA}/back-a.png`,
+        `partner-submissions/${B}/${ID.subB}/${ID.cardB}/front-b.png`,
+        `partner-submissions/${B}/${ID.subB}/${ID.cardB}/back-b.png`,
+      ]
     );
     await client.query(
       `INSERT INTO partner_submission_events (tenant_id,submission_id,event_type) VALUES ($1,$3,'created'),($2,$4,'created')`,
-      [A, B, ID.subA, ID.subB],
+      [A, B, ID.subA, ID.subB]
     );
     await client.query("INSERT INTO partner_wallets (id,tenant_id) VALUES ($1,$3),($2,$4)", [
       ID.walletA,
@@ -797,21 +1450,21 @@ describe("Partner RLS isolation coverage is wired up", () => {
     await client.query(
       `INSERT INTO partner_credit_ledger (wallet_id,tenant_id,amount,entry_type,idempotency_key,source,reason,actor_type,request_fingerprint)
        VALUES ($1,$3,10,'purchase','seed-a','admin','seed','admin',$5),($2,$4,999,'purchase','seed-b','admin','seed','admin',$6)`,
-      [ID.walletA, ID.walletB, A, B, FP_A, FP_B],
+      [ID.walletA, ID.walletB, A, B, FP_A, FP_B]
     );
     await client.query(
       `INSERT INTO partner_credit_reservations
          (id,wallet_id,tenant_id,location_id,card_reference,idempotency_key,request_fingerprint,source,reason,actor_type,expires_at)
        VALUES ($1,$3,$5,$7,'card-a','res-a',$9,'portal','seed','partner_user',now()+interval '1 day'),
               ($2,$4,$6,$8,'card-b','res-b',$10,'portal','seed','partner_user',now()+interval '1 day')`,
-      [ID.resA, ID.resB, ID.walletA, ID.walletB, A, B, ID.locA, ID.locB, FP_A, FP_B],
+      [ID.resA, ID.resB, ID.walletA, ID.walletB, A, B, ID.locA, ID.locB, FP_A, FP_B]
     );
     await client.query(
       `INSERT INTO partner_credit_reservation_events
          (reservation_id,wallet_id,tenant_id,event_type,idempotency_key,request_fingerprint,source,reason,actor_type)
        VALUES ($1,$3,$5,'reserved','ev-a',$7,'portal','seed','partner_user'),
               ($2,$4,$6,'reserved','ev-b',$8,'portal','seed','partner_user')`,
-      [ID.resA, ID.resB, ID.walletA, ID.walletB, A, B, FP_A, FP_B],
+      [ID.resA, ID.resB, ID.walletA, ID.walletB, A, B, FP_A, FP_B]
     );
   });
 
@@ -856,7 +1509,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // B intact (checked as superuser)
     const { rows } = await client.query(
       "SELECT count(*)::int n FROM partner_locations WHERE tenant_id=$1 AND address IS NULL",
-      [B],
+      [B]
     );
     expect(rows[0].n).toBe(1);
   });
@@ -864,7 +1517,10 @@ describe("Partner RLS isolation coverage is wired up", () => {
   it("tenant A cannot insert a row owned by tenant B (WITH CHECK)", async () => {
     await asPartner(A, async () => {
       await expect(
-        client.query("INSERT INTO partner_locations (public_ref,tenant_id,partner_id,name) VALUES ('evil',$1,$1,'evil')", [B]),
+        client.query(
+          "INSERT INTO partner_locations (public_ref,tenant_id,partner_id,name) VALUES ('evil',$1,$1,'evil')",
+          [B]
+        )
       ).rejects.toThrow();
     });
   });
@@ -891,7 +1547,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
 
   it("restricted role has no privilege on existing MintVault sequences", async () => {
     const { rows } = await client.query(
-      "SELECT has_sequence_privilege('partner_runtime','certificates_id_seq','USAGE') AS g",
+      "SELECT has_sequence_privilege('partner_runtime','certificates_id_seq','USAGE') AS g"
     );
     expect(rows[0].g).toBe(false);
   });
@@ -906,10 +1562,14 @@ describe("Partner RLS isolation coverage is wired up", () => {
   it("F1: restricted role cannot INSERT/UPDATE/DELETE its own organisation (super-admin lifecycle)", async () => {
     await asPartner(A, async () => {
       // DELETE: no grant -> permission denied (so the audit trail can never be cascade-wiped)
-      await expect(client.query("DELETE FROM partner_organisations WHERE id=$1", [A])).rejects.toThrow(/permission denied/i);
-      await expect(client.query("UPDATE partner_organisations SET status='REVOKED' WHERE id=$1", [A])).rejects.toThrow(/permission denied/i);
+      await expect(client.query("DELETE FROM partner_organisations WHERE id=$1", [A])).rejects.toThrow(
+        /permission denied/i
+      );
+      await expect(client.query("UPDATE partner_organisations SET status='REVOKED' WHERE id=$1", [A])).rejects.toThrow(
+        /permission denied/i
+      );
       await expect(
-        client.query("INSERT INTO partner_organisations (public_ref,legal_name) VALUES ('x','X')"),
+        client.query("INSERT INTO partner_organisations (public_ref,legal_name) VALUES ('x','X')")
       ).rejects.toThrow(/permission denied/i);
     });
     // org + its audit trail intact
@@ -924,7 +1584,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
       const seen = await client.query("SELECT count(*)::int n FROM partner_feature_flags WHERE flag='global'");
       expect(seen.rows[0].n).toBe(1); // global visible
       await expect(
-        client.query("INSERT INTO partner_feature_flags (tenant_id, flag) VALUES (NULL, 'evil-global')"),
+        client.query("INSERT INTO partner_feature_flags (tenant_id, flag) VALUES (NULL, 'evil-global')")
       ).rejects.toThrow(); // cannot write a global flag
     });
   });
@@ -948,7 +1608,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
                 (SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) AS bypass,
                 (SELECT rolsuper     FROM pg_roles WHERE rolname = current_user) AS super,
                 current_setting('is_superuser')  AS is_superuser,
-                current_setting('row_security')  AS row_security`,
+                current_setting('row_security')  AS row_security`
       );
       // Mirrors staging exactly: the RUNTIME role partner_app_staging is rolbypassrls = FALSE,
       // while only the ADMIN role neondb_owner is TRUE. If this ever flips, every cross-tenant
@@ -961,29 +1621,444 @@ describe("Partner RLS isolation coverage is wired up", () => {
     });
   });
 
-  it("every partner table carrying tenant_id has RLS ENABLED, FORCED and an isolation policy", async () => {
-    // Coverage sweep, not shape-checking for its own sake: this is what catches a NEW tenant-scoped
-    // table landing in a future migration with the RLS block forgotten. FORCE matters because
-    // without it the table OWNER is exempt from its own policies.
+  /**
+   * The catalogue itself — asked once, reused by the sweep assertions below so they cannot drift
+   * apart.
+   *
+   * NO INCLUSION FILTER OF ANY KIND, and that is the whole point (A8-F4, finished here).
+   *
+   * The previous version still carried TWO. `c.relname LIKE 'partner\\_%'` meant a tenant-keyed
+   * table that did not happen to be named partner_* could never fail this sweep, and
+   * `c.relkind = 'r'` meant VIEWS were outside it entirely. An inclusion filter is precisely what
+   * let A8-F1 survive every green run of this file, and leaving two smaller ones in place while
+   * congratulating the register on being exclusion-driven was the same mistake at a smaller scale.
+   *
+   * Both are gone. relkind now covers ordinary tables, PARTITIONED tables ('p' — a partitioned
+   * parent carries its own RLS flags and policies, and a future partitioned partner table would
+   * otherwise be invisible), views and materialised views.
+   *
+   * `partner_wallet_balances` and `partner_credit_availability` are the live cases: both carry
+   * tenant_id, both are SELECT-granted to partner_runtime, and both were outside the sweep. They
+   * are safe TODAY because 0016/0017 declare them WITH (security_invoker = true), so they execute
+   * with the CALLER's privileges and the underlying tables' policies apply. Nothing asserted that,
+   * so a future view landing without it — the default is security_definer semantics, i.e. the
+   * VIEW OWNER's privileges, which would bypass every tenant policy underneath — would have gone
+   * unnoticed. It is asserted now.
+   */
+  async function tenantKeyedRelations() {
     const { rows } = await client.query<{
       relname: string;
+      relkind: string;
       relrowsecurity: boolean;
       relforcerowsecurity: boolean;
       policies: number;
+      security_invoker: boolean;
     }>(
-      `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
-              (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
-         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'partner\\_%'
+      `SELECT c.relname, c.relkind::text AS relkind, c.relrowsecurity, c.relforcerowsecurity,
+              (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies,
+              COALESCE(c.reloptions, '{}') @> '{security_invoker=true}' AS security_invoker
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'p')
           AND EXISTS (SELECT 1 FROM pg_attribute a
                        WHERE a.attrelid = c.oid AND a.attname = 'tenant_id'
                          AND a.attnum > 0 AND NOT a.attisdropped)
-        ORDER BY c.relname`,
+        ORDER BY c.relname`
     );
-    const unprotected = rows.filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1);
-    expect(unprotected.map((r) => r.relname)).toEqual([]);
-    // Floor, so deleting tables from the chain cannot quietly shrink the sweep to nothing.
-    expect(rows.length).toBeGreaterThanOrEqual(18);
+    return rows;
+  }
+
+  /** The RLS sweep applies to relations that CAN carry policies: tables and partitioned tables. */
+  async function tenantKeyedPartnerTables() {
+    return (await tenantKeyedRelations()).filter((r) => r.relkind === "r" || r.relkind === "p");
+  }
+
+  it("every partner table carrying tenant_id has RLS ENABLED, FORCED and an isolation policy", async () => {
+    // Coverage sweep, driven by the CATALOGUE rather than by an inclusion allowlist: this is what
+    // catches a NEW tenant-scoped table landing in a future migration with the RLS block
+    // forgotten. FORCE matters because without it the table OWNER is exempt from its own policies.
+    // See RLS_EXEMPT_TENANT_TABLES for why an exclusion register replaced the old TENANT_TABLES
+    // scoping, and for the one entry that is an open defect rather than a real exception.
+    const rows = await tenantKeyedPartnerTables();
+    const unprotected = rows
+      .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
+      .map((r) => r.relname);
+
+    // Both directions. Left-to-right: a new unprotected tenant table fails closed. Right-to-left:
+    // an exception that has since been fixed (or whose table was dropped) fails too, so the
+    // register cannot rot into a permanent blanket amnesty.
+    expect(unprotected.sort()).toEqual(Object.keys(RLS_EXEMPT_TENANT_TABLES).sort());
+
+    // Floors, so neither the chain shrinking nor a table being dropped can quietly reduce the
+    // sweep to a vacuous pass.
+    const names = rows.map((r) => r.relname);
+    expect(TENANT_TABLES.filter((t) => !names.includes(t))).toEqual([]);
+    expect(rows.length).toBeGreaterThanOrEqual(TENANT_TABLES.length);
+    // The sweep must be materially wider than the 11-name list it replaced — the whole point of
+    // A8-F4. If a future refactor reintroduces allowlist scoping, this is what notices.
+    expect(rows.length).toBeGreaterThan(TENANT_TABLES.length);
+  });
+
+  it("every RLS-less tenant table has its reach pinned for BOTH runtime roles, not just partner_runtime", async () => {
+    // The grant is what turns "no RLS" into "cross-tenant read". The previous version of this test
+    // asked only about partner_runtime, which is how three RLS-less tables sat exempt for being
+    // "unreachable" while partner_connector_runtime — equally restricted — held SELECT/INSERT/
+    // UPDATE on all three. Both roles are pinned now, so a grant appearing on EITHER of them
+    // against an RLS-less table fails here even though the RLS sweep above would still pass.
+    const rows = await tenantKeyedPartnerTables();
+    const exempt = rows
+      .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
+      .map((r) => r.relname);
+
+    for (const role of ["partner_runtime", "partner_connector_runtime"] as const) {
+      // Guard the guard: a probe against a role that ignores privileges proves nothing. This is
+      // the same class of mistake the register itself made — checking something that cannot fail.
+      const { rows: attrs } = await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = $1",
+        [role]
+      );
+      expect(attrs).toHaveLength(1);
+      expect(attrs[0].rolsuper).toBe(false);
+      expect(attrs[0].rolbypassrls).toBe(false);
+
+      const { rows: grants } = await client.query<{ table_name: string; privilege_type: string }>(
+        `SELECT table_name, privilege_type FROM information_schema.table_privileges
+          WHERE grantee = $1 AND table_name = ANY($2::text[])`,
+        [role, exempt]
+      );
+
+      const actual = Object.fromEntries(exempt.map((t) => [t, [] as string[]]));
+      for (const g of grants) actual[g.table_name].push(g.privilege_type);
+      for (const t of exempt) actual[t] = [...new Set(actual[t])].sort();
+
+      const key = role === "partner_runtime" ? "partnerRuntimeGrants" : "connectorRuntimeGrants";
+      const expected = Object.fromEntries(
+        exempt.map((t) => [t, [...(RLS_EXEMPT_TENANT_TABLES[t]?.[key] ?? [])].sort()])
+      );
+      expect(actual).toEqual(expected);
+    }
+  });
+
+  it("every register entry carries a written justification (an exception without a reason is an amnesty)", () => {
+    for (const [table, entry] of Object.entries(RLS_EXEMPT_TENANT_TABLES)) {
+      expect(entry.why.length, `${table} has no justification`).toBeGreaterThan(40);
+    }
+  });
+
+  it("every tenant-keyed VIEW is security_invoker, so the tables' policies still apply through it", async () => {
+    // A8-F4, the half the relkind='r' filter hid. A view is not policy-bearing, so it can never
+    // appear in the RLS sweep above — but it is absolutely a way to READ tenant rows. PostgreSQL's
+    // default is security_DEFINER semantics: the view executes with the VIEW OWNER's privileges,
+    // and the owner here is the migrator, so every tenant policy underneath would be evaluated
+    // against a role the fixture never intended. `security_invoker = true` is what makes the
+    // underlying policies bind the CALLER instead.
+    const views = (await tenantKeyedRelations()).filter((r) => r.relkind === "v");
+
+    // Floor: these two exist today and are the reason this test does. If the query stops finding
+    // them the assertion below becomes vacuous, which is exactly the failure mode being removed.
+    expect(views.map((v) => v.relname).sort()).toEqual(
+      expect.arrayContaining(["partner_credit_availability", "partner_wallet_balances"])
+    );
+
+    const leaky = views.filter((v) => !v.security_invoker).map((v) => v.relname);
+    expect(
+      leaky,
+      "a tenant-keyed view is NOT security_invoker: it reads with the view owner's privileges, so " +
+        "the tenant policies on its base tables do not bind the caller"
+    ).toEqual([]);
+  });
+
+  it("no tenant-keyed MATERIALISED view exists — it could carry neither RLS nor security_invoker", async () => {
+    // A matview is a stored copy: it has no security_invoker option and policies on its sources do
+    // not apply to reads of it. If one ever lands carrying tenant_id it is a cross-tenant snapshot
+    // by construction, and it needs a deliberate decision rather than a silent pass. Fail closed.
+    const matviews = (await tenantKeyedRelations()).filter((r) => r.relkind === "m").map((r) => r.relname);
+    expect(matviews).toEqual([]);
+  });
+
+  it("MUTATION: the view sweep goes RED on a tenant-keyed view without security_invoker", async () => {
+    // Prove the assertion can fail. Without this, "leaky === []" would also hold if the catalogue
+    // query silently matched nothing — the same vacuous-pass class as the original inclusion filter.
+    await client.query(
+      "CREATE VIEW planted_leaky_tenant_view AS SELECT tenant_id, id FROM partner_locations"
+    );
+    try {
+      const views = (await tenantKeyedRelations()).filter((r) => r.relkind === "v");
+      const leaky = views.filter((v) => !v.security_invoker).map((v) => v.relname);
+      expect(leaky).toContain("planted_leaky_tenant_view");
+    } finally {
+      await client.query("DROP VIEW IF EXISTS planted_leaky_tenant_view");
+    }
+    // …and clean again, so the mutation cannot leave the guard permanently red.
+    const after = (await tenantKeyedRelations()).filter((r) => r.relkind === "v" && !r.security_invoker);
+    expect(after).toEqual([]);
+  });
+
+  it("MUTATION: the table sweep no longer depends on the `partner_%` name filter", async () => {
+    // The dropped inclusion filter, proven dropped. A tenant-keyed table under any other name must
+    // now be swept — before this change it was structurally incapable of failing.
+    await client.query(
+      "CREATE TABLE planted_offboard_tenant_table (id serial primary key, tenant_id uuid not null)"
+    );
+    try {
+      const rows = await tenantKeyedPartnerTables();
+      expect(
+        rows.map((r) => r.relname),
+        "a tenant-keyed table outside the partner_ namespace was not swept"
+      ).toContain("planted_offboard_tenant_table");
+
+      const unprotected = rows
+        .filter((r) => !r.relrowsecurity || !r.relforcerowsecurity || r.policies < 1)
+        .map((r) => r.relname);
+      expect(unprotected).toContain("planted_offboard_tenant_table");
+    } finally {
+      await client.query("DROP TABLE IF EXISTS planted_offboard_tenant_table");
+    }
+  });
+
+  it("A8-F1 CLOSED by 0047: partner_owner_invariant_tenants is RLS-enabled, FORCED and policy-bearing", async () => {
+    // This REPLACES a test that deliberately reproduced the leak on every run. That test was
+    // correct while 0032's omission was live; migration 0047 closed it, so the ratchet designed
+    // into this file fired exactly as intended — the fix turned the defect-reproducing test red
+    // and forced the register entry's deletion rather than leaving a stale amnesty behind. The
+    // negative claim is replaced by the positive one rather than simply deleted, so the table
+    // stays covered.
+    const { rows } = await client.query<{ rls: boolean; forced: boolean; policies: number }>(
+      `SELECT c.relrowsecurity AS rls, c.relforcerowsecurity AS forced,
+              (SELECT count(*)::int FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'partner_owner_invariant_tenants'`
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].rls).toBe(true);
+    expect(rows[0].forced).toBe(true);
+    expect(rows[0].policies).toBeGreaterThanOrEqual(1);
+  });
+
+  it("A8-F1 CLOSED by 0047: tenant A cannot enumerate tenants it has no relationship to", async () => {
+    // The BEHAVIOURAL half — the same probe the old KNOWN-OPEN test made, with the expectation
+    // inverted. Fixture provenance is unchanged and still load-bearing: the two rows are NOT
+    // hand-inserted. They are produced by 0032's own trigger partner_enforce_final_owner_invariant()
+    // — the only writer that exists in production — fired by an ordinary partner_user_roles INSERT
+    // that makes an ACTIVE user a PARTNER_OWNER. Two throwaway tenants keep the shared A/B fixture
+    // untouched. (The PARTNER_OWNER role row is created here because 0034's seed uses ON COMMIT
+    // DROP temp tables and leaves partner_roles empty under this suite's file-at-a-time apply.)
+    //
+    // Without the precondition below, "0 rows" would be indistinguishable from "the trigger never
+    // wrote anything" — a vacuous pass, which is precisely the failure mode this suite exists to
+    // avoid.
+    const C = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    const D = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    const ownerRole = "eeeeeeee-0000-0000-0000-00000000000e";
+    await client.query(
+      `INSERT INTO partner_roles (id, code, label) VALUES ($1,'PARTNER_OWNER','Partner Owner')
+         ON CONFLICT (code) DO NOTHING`,
+      [ownerRole]
+    );
+    const roleId = (await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code='PARTNER_OWNER'"))
+      .rows[0].id;
+    for (const [tenant, tag] of [
+      [C, "c"],
+      [D, "d"],
+    ] as const) {
+      await client.query(
+        `INSERT INTO partner_organisations (id, public_ref, legal_name, status)
+           VALUES ($1, $2, $3, 'ACTIVE') ON CONFLICT (id) DO NOTHING`,
+        [tenant, `ref${tag.toUpperCase()}`, `${tag.toUpperCase()} Ltd`]
+      );
+      const userId = `ffff0000-0000-0000-0000-00000000000${tag === "c" ? "1" : "2"}`;
+      await client.query(
+        `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status)
+           VALUES ($1, $2, $3, $3, $4, 'ACTIVE') ON CONFLICT (id) DO NOTHING`,
+        [userId, `u${tag}`, tenant, `${tag}@owner.test`]
+      );
+      // THIS is the production write path. The trigger on partner_user_roles is what inserts into
+      // partner_owner_invariant_tenants; nothing in this test writes to that table directly.
+      await client.query(
+        `INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)
+           ON CONFLICT (user_id, role_id) DO NOTHING`,
+        [tenant, userId, roleId]
+      );
+    }
+    const seeded = await client.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_owner_invariant_tenants WHERE tenant_id = ANY($1::uuid[])",
+      [[C, D]]
+    );
+    expect(seeded.rows[0].n).toBe(2);
+
+    await asPartner(A, async () => {
+      // Contrast arm: an RLS-protected table on the same connection with the same GUC.
+      const isolated = await client.query<{ n: number }>(
+        "SELECT count(*)::int n FROM partner_organisations WHERE id = ANY($1::uuid[])",
+        [[C, D]]
+      );
+      expect(isolated.rows[0].n).toBe(0);
+
+      // The claim: tenant A holds no relationship to C or D and now reads NEITHER.
+      const leaked = await client.query<{ n: number }>(
+        "SELECT count(*)::int n FROM partner_owner_invariant_tenants WHERE tenant_id = ANY($1::uuid[])",
+        [[C, D]]
+      );
+      expect(leaked.rows[0].n).toBe(0);
+    });
+  });
+
+  // =========================================================================================
+  // 0052 — the repairs this branch landed, each proved as the RESTRICTED CONNECTOR role.
+  //
+  // Every claim below runs under SET ROLE partner_connector_runtime, and each one first asserts
+  // that the acting role is not a superuser and does not hold BYPASSRLS. Without that assertion a
+  // probe passes whether or not the fix exists, which is exactly how the original finding survived.
+  // =========================================================================================
+
+  async function asConnector(tenant: string | null, fn: () => Promise<void>) {
+    await client.query("SET ROLE partner_connector_runtime");
+    try {
+      const { rows } = await client.query<{ su: string; rs: string; bypass: boolean; sup: boolean }>(
+        `SELECT current_setting('is_superuser') AS su, current_setting('row_security') AS rs,
+                r.rolbypassrls AS bypass, r.rolsuper AS sup
+           FROM pg_roles r WHERE r.rolname = current_user`
+      );
+      expect(current_user_is(rows[0])).toBe(true);
+      if (tenant === null) await client.query("RESET app.tenant_id");
+      else await client.query("SELECT set_config('app.tenant_id', $1, false)", [tenant]);
+      await fn();
+    } finally {
+      await client.query("RESET ROLE");
+    }
+  }
+
+  /** Harness integrity in one place: the acting role must be genuinely bound by privileges + RLS. */
+  function current_user_is(r: { su: string; rs: string; bypass: boolean; sup: boolean }): boolean {
+    return r.su === "off" && r.rs === "on" && r.bypass === false && r.sup === false;
+  }
+
+  for (const table of ["partner_internal_notes", "partner_management_audit"] as const) {
+    it(`0052: ${table} is unreachable by partner_connector_runtime — the dead grant is gone`, async () => {
+      // PRIMARY repair: the 0015:159 grant was never used by any code path (every reference runs on
+      // the BYPASSRLS admin pool), so it was revoked outright. The expected outcome is therefore
+      // 42501 permission-denied, which is strictly stronger than "zero rows": a revoked privilege
+      // cannot be defeated by a policy mistake.
+      await asConnector(null, async () => {
+        await expect(client.query(`SELECT * FROM ${table}`)).rejects.toMatchObject({ code: "42501" });
+      });
+      // …and with a perfectly valid tenant context too, so this is not a missing-GUC artefact.
+      await asConnector(A, async () => {
+        await expect(client.query(`SELECT * FROM ${table}`)).rejects.toMatchObject({ code: "42501" });
+      });
+    });
+
+    it(`0052: ${table} is ALSO tenant-scoped by RLS, so a restored grant is still not a leak`, async () => {
+      // DEFENCE IN DEPTH: 0001's blanket GRANT loop is exactly how the kill-switch defect 0051 had
+      // to repair came about, so the repair must survive the grant coming back. Restoring it inside
+      // this test and re-attacking is the only way to prove the second layer exists at all — the
+      // catalogue flags alone would not show that the policy actually binds.
+      await client.query(`GRANT SELECT ON ${table} TO partner_connector_runtime`);
+      try {
+        await asConnector(null, async () => {
+          const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int n FROM ${table}`);
+          expect(rows[0].n).toBe(0); // missing context fails CLOSED — no rows, not all rows
+        });
+        await asConnector(B, async () => {
+          const { rows } = await client.query<{ a_rows: number; b_rows: number; total: number }>(
+            `SELECT count(*) FILTER (WHERE tenant_id = $1)::int AS a_rows,
+                    count(*) FILTER (WHERE tenant_id = $2)::int AS b_rows,
+                    count(*)::int AS total FROM ${table}`,
+            [A, B]
+          );
+          expect(rows[0].a_rows).toBe(0); // tenant B cannot enumerate tenant A
+          // Nothing outside B is visible at all — and the query carries NO tenant predicate, so a
+          // pass here means RLS did the filtering rather than the WHERE clause.
+          expect(rows[0].total).toBe(rows[0].b_rows);
+        });
+      } finally {
+        await client.query(`REVOKE ALL ON ${table} FROM partner_connector_runtime`);
+      }
+      // The finally block must have actually restored the pinned state, or every later test in this
+      // file is running against a database this one silently widened.
+      const { rows } = await client.query<{ n: number }>(
+        `SELECT count(*)::int n FROM information_schema.table_privileges
+          WHERE grantee = 'partner_connector_runtime' AND table_name = $1`,
+        [table]
+      );
+      expect(rows[0].n).toBe(0);
+    });
+  }
+
+  it("0052 / A8-F7: a global service tier is READABLE by a tenant but not DELETABLE, even with a DML grant", async () => {
+    // PostgreSQL governs DELETE by the USING clause ALONE — WITH CHECK is never consulted for a row
+    // being removed — so the pre-0052 combined policy's permissive `tenant_id IS NULL` read branch
+    // doubled as a permissive DELETE branch over the platform-wide pricing rows. The grant is
+    // deliberately restored here: the whole point of the policy split is that the repair holds even
+    // when the privilege does, so testing it without the grant would prove nothing.
+    await client.query(
+      `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days)
+         VALUES (NULL, 'global0052', 'Global Tier', 1234, 5) ON CONFLICT DO NOTHING`
+    );
+    await client.query("GRANT SELECT, INSERT, UPDATE, DELETE ON partner_service_tiers TO partner_runtime");
+    try {
+      await asPartner(A, async () => {
+        const read = await client.query<{ n: number }>(
+          "SELECT count(*)::int n FROM partner_service_tiers WHERE tenant_id IS NULL AND tier_code='global0052'"
+        );
+        expect(read.rows[0].n).toBe(1); // the global read branch must SURVIVE, or pricing breaks
+
+        const del = await client.query("DELETE FROM partner_service_tiers WHERE tenant_id IS NULL");
+        expect(del.rowCount).toBe(0); // …but it must not govern writes
+
+        const upd = await client.query(
+          "UPDATE partner_service_tiers SET price_per_card_pence = 1 WHERE tenant_id IS NULL"
+        );
+        expect(upd.rowCount).toBe(0);
+      });
+    } finally {
+      await client.query("REVOKE INSERT, UPDATE, DELETE ON partner_service_tiers FROM partner_runtime");
+      await client.query("REVOKE SELECT ON partner_service_tiers FROM partner_runtime");
+      await client.query("GRANT SELECT ON partner_service_tiers TO partner_runtime");
+    }
+    const survived = await client.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_service_tiers WHERE tenant_id IS NULL AND tier_code='global0052'"
+    );
+    expect(survived.rows[0].n).toBe(1);
+  });
+
+  it("0052 / A8-F5: the connector can drive the certificate allocator but cannot re-point it", async () => {
+    // cert_counter is the single-row, platform-global certificate-number allocator, created at
+    // application boot (storage.ts:1336) rather than by a migration. The fixture creates it before
+    // the chain runs so 0052's to_regclass-guarded allocator clause actually fires — see beforeAll.
+    // NOTHING is granted here on purpose. cert_counter exists before the chain runs (see
+    // beforeAll), so 0049 granted table-level and 0052 tightened it to column level. Re-issuing
+    // the grants here would test this test's own setup instead of the migration.
+
+    await asConnector(null, async () => {
+      // The ATTACK: re-point the allocator row, then re-seed id=1 at zero. Every certificate number
+      // issued afterwards would collide with already-printed slabs — platform-wide, HQ's included.
+      await expect(client.query("UPDATE cert_counter SET id = 2 WHERE id = 1")).rejects.toMatchObject({
+        code: "42501",
+      });
+
+      // The LEGITIMATE path must still work, or partner imports fail 42501 in production. This is
+      // the arm that stops the repair from being "secure because it is broken".
+      await client.query("INSERT INTO cert_counter (id,last_issued) VALUES (1,0) ON CONFLICT (id) DO NOTHING");
+      const inc = await client.query<{ last_issued: number }>(
+        "UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued"
+      );
+      expect(inc.rows[0].last_issued).toBeGreaterThan(0);
+    });
+
+    // No table-level privilege survives — a table-level grant would silently re-confer UPDATE(id).
+    const { rows } = await client.query<{ n: number }>(
+      `SELECT count(*)::int n FROM information_schema.table_privileges
+        WHERE grantee = 'partner_connector_runtime' AND table_name = 'cert_counter'`
+    );
+    expect(rows[0].n).toBe(0);
+    const { rows: colp } = await client.query<{ upd_id: boolean; upd_last: boolean; sel_id: boolean }>(
+      `SELECT has_column_privilege('partner_connector_runtime','public.cert_counter','id','UPDATE')          AS upd_id,
+              has_column_privilege('partner_connector_runtime','public.cert_counter','last_issued','UPDATE') AS upd_last,
+              has_column_privilege('partner_connector_runtime','public.cert_counter','id','SELECT')          AS sel_id`
+    );
+    expect(colp[0].upd_id).toBe(false); // the primary key — the re-point vector
+    expect(colp[0].upd_last).toBe(true); // …while the increment the importer needs survives
+    expect(colp[0].sel_id).toBe(true); // …and `WHERE id = 1` still resolves
   });
 
   // =========================================================================================
@@ -998,7 +2073,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
                   count(*) FILTER (WHERE tenant_id = $1)::int AS b_rows,
                   count(*) FILTER (WHERE tenant_id = $2)::int AS a_rows
              FROM ${table}`,
-          [B, A],
+          [B, A]
         );
         expect(rows[0].b_rows).toBe(0);
         expect(rows[0].a_rows).toBeGreaterThanOrEqual(1);
@@ -1029,7 +2104,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // availability. Assert the behaviour AND the option that produces it.
     const opts = await client.query<{ relname: string; reloptions: string[] | null }>(
       `SELECT relname, reloptions FROM pg_class
-        WHERE relkind = 'v' AND relname IN ('partner_wallet_balances','partner_credit_availability')`,
+        WHERE relkind = 'v' AND relname IN ('partner_wallet_balances','partner_credit_availability')`
     );
     expect(opts.rows.length).toBe(2);
     for (const v of opts.rows) {
@@ -1042,7 +2117,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
       for (const view of ["partner_wallet_balances", "partner_credit_availability"] as const) {
         const { rows } = await client.query(
           `SELECT count(*)::int AS total, count(*) FILTER (WHERE tenant_id = $1)::int AS b_rows FROM ${view}`,
-          [B],
+          [B]
         );
         expect({ view, ...rows[0] }).toEqual({ view, total: 1, b_rows: 0 });
       }
@@ -1057,7 +2132,10 @@ describe("Partner RLS isolation coverage is wired up", () => {
     await asPartner(A, async () => {
       const s = await client.query("UPDATE partner_submissions SET status='cancelled' WHERE tenant_id=$1", [B]);
       const c = await client.query("UPDATE partner_submission_cards SET card_name='hacked' WHERE tenant_id=$1", [B]);
-      const k = await client.query("UPDATE partner_customers SET full_name='hacked', email='attacker@evil.test' WHERE tenant_id=$1", [B]);
+      const k = await client.query(
+        "UPDATE partner_customers SET full_name='hacked', email='attacker@evil.test' WHERE tenant_id=$1",
+        [B]
+      );
       expect({ s: s.rowCount, c: c.rowCount, k: k.rowCount }).toEqual({ s: 0, c: 0, k: 0 });
       // Blind UPDATE with no WHERE at all must also spare B.
       const blind = await client.query("UPDATE partner_submissions SET intake_notes='blind'");
@@ -1069,7 +2147,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
               (SELECT card_name FROM partner_submission_cards WHERE id=$2) AS card_name,
               (SELECT full_name FROM partner_customers        WHERE id=$3) AS cust_name,
               (SELECT intake_notes FROM partner_submissions   WHERE id=$1) AS sub_notes`,
-      [ID.subB, ID.cardB, ID.custB],
+      [ID.subB, ID.cardB, ID.custB]
     );
     expect(rows[0]).toEqual({ sub_status: "draft", card_name: "Card B", cust_name: "Cust B", sub_notes: null });
   });
@@ -1080,7 +2158,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
       // the attack fails one layer EARLIER than RLS, at the privilege check.
       for (const table of ["partner_submissions", "partner_submission_cards", "partner_customers"] as const) {
         await expect(client.query(`DELETE FROM ${table} WHERE tenant_id=$1`, [B])).rejects.toThrow(
-          /permission denied/i,
+          /permission denied/i
         );
       }
       // partner_users DOES carry a DELETE grant, so here RLS itself is the only thing standing
@@ -1097,26 +2175,24 @@ describe("Partner RLS isolation coverage is wired up", () => {
   it("cross-tenant INSERT (a row stamped with tenant B) is refused by WITH CHECK", async () => {
     await asPartner(A, async () => {
       await expect(
-        client.query("INSERT INTO partner_customers (tenant_id, full_name) VALUES ($1,'planted')", [B]),
+        client.query("INSERT INTO partner_customers (tenant_id, full_name) VALUES ($1,'planted')", [B])
       ).rejects.toThrow(/row-level security/i);
       await expect(
         client.query(
           `INSERT INTO partner_submissions (tenant_id,location_id,created_by,public_ref,status)
            VALUES ($1,$2,$3,'planted','draft')`,
-          [B, ID.locB, ID.userB],
-        ),
-      ).rejects.toThrow(/row-level security/i);
+          [B, ID.locB, ID.userB]
+        )
+      ).rejects.toThrow();
       await expect(
         client.query(
           `INSERT INTO partner_submission_cards (tenant_id,submission_id,sequence_number,card_name)
            VALUES ($1,$2,99,'planted')`,
-          [B, ID.subB],
-        ),
+          [B, ID.subB]
+        )
       ).rejects.toThrow(/row-level security/i);
     });
-    const { rows } = await client.query(
-      "SELECT count(*)::int n FROM partner_submissions WHERE public_ref='planted'",
-    );
+    const { rows } = await client.query("SELECT count(*)::int n FROM partner_submissions WHERE public_ref='planted'");
     expect(rows[0].n).toBe(0);
   });
 
@@ -1125,10 +2201,10 @@ describe("Partner RLS isolation coverage is wired up", () => {
     // policy's WITH CHECK arm is what stops it — USING alone would let this through.
     await asPartner(A, async () => {
       await expect(
-        client.query("UPDATE partner_submissions SET tenant_id=$1 WHERE tenant_id=$2", [B, A]),
+        client.query("UPDATE partner_submissions SET tenant_id=$1 WHERE tenant_id=$2", [B, A])
       ).rejects.toThrow(/row-level security/i);
       await expect(
-        client.query("UPDATE partner_customers SET tenant_id=$1 WHERE tenant_id=$2", [B, A]),
+        client.query("UPDATE partner_customers SET tenant_id=$1 WHERE tenant_id=$2", [B, A])
       ).rejects.toThrow(/row-level security/i);
     });
     const { rows } = await client.query("SELECT count(*)::int n FROM partner_submissions WHERE tenant_id=$1", [B]);
@@ -1144,27 +2220,24 @@ describe("Partner RLS isolation coverage is wired up", () => {
           `INSERT INTO partner_credit_ledger
              (wallet_id,tenant_id,amount,entry_type,idempotency_key,source,reason,actor_type,request_fingerprint)
            VALUES ($1,$2,1000000,'purchase','self-topup','admin','free money','admin',$3)`,
-          [ID.walletA, A, FP_A],
-        ),
+          [ID.walletA, A, FP_A]
+        )
       ).rejects.toThrow(/permission denied/i);
       await expect(client.query("UPDATE partner_credit_ledger SET amount=amount+1000")).rejects.toThrow(
-        /permission denied/i,
+        /permission denied/i
       );
       await expect(client.query("DELETE FROM partner_credit_ledger")).rejects.toThrow(/permission denied/i);
-      await expect(client.query("UPDATE partner_wallets SET status='active'")).rejects.toThrow(
-        /permission denied/i,
-      );
+      await expect(client.query("UPDATE partner_wallets SET status='active'")).rejects.toThrow(/permission denied/i);
       // Reservations likewise: forging one would consume credit that was never bought, and
       // releasing tenant B's would free their reserved credit.
       await expect(
-        client.query("UPDATE partner_credit_reservations SET status='released', released_at=now() WHERE tenant_id=$1", [B]),
+        client.query("UPDATE partner_credit_reservations SET status='released', released_at=now() WHERE tenant_id=$1", [
+          B,
+        ])
       ).rejects.toThrow(/permission denied/i);
       await expect(client.query("DELETE FROM partner_credit_reservations")).rejects.toThrow(/permission denied/i);
     });
-    const { rows } = await client.query(
-      "SELECT balance::int FROM partner_wallet_balances WHERE tenant_id=$1",
-      [B],
-    );
+    const { rows } = await client.query("SELECT balance::int FROM partner_wallet_balances WHERE tenant_id=$1", [B]);
     expect(rows[0].balance).toBe(999); // tenant B's balance untouched
   });
 
@@ -1177,16 +2250,14 @@ describe("Partner RLS isolation coverage is wired up", () => {
       `SELECT tgname, tgenabled FROM pg_trigger
         WHERE NOT tgisinternal
           AND tgrelid IN ('partner_credit_ledger'::regclass, 'partner_credit_reservation_events'::regclass)
-        ORDER BY tgname`,
+        ORDER BY tgname`
     );
     const names = rows.map((r) => r.tgname);
     expect(names).toEqual(expect.arrayContaining(["trg_partner_credit_ledger_no_row_mutate"]));
     expect(names).toEqual(expect.arrayContaining(["trg_partner_credit_ledger_no_truncate"]));
     for (const r of rows) expect({ t: r.tgname, on: r.tgenabled }).toEqual({ t: r.tgname, on: "O" });
     // And behaviourally, as the superuser/owner — not merely present, actually enforcing.
-    await expect(client.query("UPDATE partner_credit_ledger SET amount = amount + 1")).rejects.toThrow(
-      /append-only/i,
-    );
+    await expect(client.query("UPDATE partner_credit_ledger SET amount = amount + 1")).rejects.toThrow(/append-only/i);
     await expect(client.query("DELETE FROM partner_credit_ledger")).rejects.toThrow(/append-only/i);
   });
 
@@ -1194,10 +2265,10 @@ describe("Partner RLS isolation coverage is wired up", () => {
     await asPartner(A, async () => {
       await client.query(
         "INSERT INTO partner_submission_events (tenant_id,submission_id,event_type) VALUES ($1,$2,'noted')",
-        [A, ID.subA],
+        [A, ID.subA]
       );
       await expect(client.query("UPDATE partner_submission_events SET event_type='forged'")).rejects.toThrow(
-        /permission denied/i,
+        /permission denied/i
       );
       await expect(client.query("DELETE FROM partner_submission_events")).rejects.toThrow(/permission denied/i);
     });
@@ -1255,59 +2326,58 @@ describe("Partner RLS isolation coverage is wired up", () => {
   // hardened, which is the intended signal to update them. See the report for the proposed fix.
   // =========================================================================================
 
-  it("KNOWN GAP: FK checks bypass RLS, so a cross-tenant FK pivot is currently possible", async () => {
+  it("KNOWN GAP: card FK pivot remains possible, but submission customer/location pivot is refused", async () => {
     await asPartner(A, async () => {
       // A card owned by A, hung off tenant B's submission.
       await client.query(
         `INSERT INTO partner_submission_cards (tenant_id,submission_id,sequence_number,card_name)
          VALUES ($1,$2,900,'pivot-card')`,
-        [A, ID.subB],
+        [A, ID.subB]
       );
       // A submission owned by A, referencing tenant B's customer and location.
-      await client.query(
-        `INSERT INTO partner_submissions (tenant_id,location_id,created_by,public_ref,customer_id,status)
+      await expect(
+        client.query(
+          `INSERT INTO partner_submissions (tenant_id,location_id,created_by,public_ref,customer_id,status)
          VALUES ($1,$2,$3,'pivot-sub',$4,'draft')`,
-        [A, ID.locB, ID.userA, ID.custB],
-      );
+          [A, ID.locB, ID.userA, ID.custB]
+        )
+      ).rejects.toThrow();
     });
     const { rows } = await client.query(
       `SELECT (SELECT count(*)::int FROM partner_submission_cards WHERE card_name='pivot-card') AS cards,
-              (SELECT count(*)::int FROM partner_submissions      WHERE public_ref='pivot-sub')  AS subs`,
+              (SELECT count(*)::int FROM partner_submissions      WHERE public_ref='pivot-sub')  AS subs`
     );
-    // Documenting the gap, NOT endorsing it. Flip both to 0 once 0007 uses composite FKs.
-    expect(rows[0]).toEqual({ cards: 1, subs: 1 });
+    expect(rows[0]).toEqual({ cards: 1, subs: 0 });
   });
 
-  it("CONTAINMENT HOLDS: the pivot yields no cross-tenant READ and is invisible to the victim", async () => {
-    // This is the assertion that actually matters for confidentiality, and it must never regress
-    // even while the gap above is open.
+  it("CONTAINMENT HOLDS: the card pivot yields no cross-tenant READ and failed submission pivot is absent", async () => {
     await asPartner(A, async () => {
       const joined = await client.query(
         `SELECT s.public_ref AS leaked
            FROM partner_submission_cards c
-           LEFT JOIN partner_submissions s ON s.id = c.submission_id
-          WHERE c.card_name = 'pivot-card'`,
+          LEFT JOIN partner_submissions s ON s.id = c.submission_id
+         WHERE c.card_name = 'pivot-card'`
       );
-      expect(joined.rows[0].leaked).toBeNull(); // B's submission still unreadable through the FK
+      expect(joined.rows[0].leaked).toBeNull();
       const cust = await client.query(
         `SELECT k.full_name AS leaked
            FROM partner_submissions s
-           LEFT JOIN partner_customers k ON k.id = s.customer_id
-          WHERE s.public_ref = 'pivot-sub'`,
+          LEFT JOIN partner_customers k ON k.id = s.customer_id
+         WHERE s.public_ref = 'pivot-sub'`
       );
-      expect(cust.rows[0].leaked).toBeNull(); // B's customer PII still unreadable
+      expect(cust.rowCount).toBe(0);
       const loc = await client.query(
         `SELECT l.name AS leaked
            FROM partner_submissions s
-           LEFT JOIN partner_locations l ON l.id = s.location_id
-          WHERE s.public_ref = 'pivot-sub'`,
+          LEFT JOIN partner_locations l ON l.id = s.location_id
+         WHERE s.public_ref = 'pivot-sub'`
       );
-      expect(loc.rows[0].leaked).toBeNull();
+      expect(loc.rowCount).toBe(0);
     });
     await asPartner(B, async () => {
       const { rows } = await client.query(
         `SELECT (SELECT count(*)::int FROM partner_submission_cards WHERE card_name='pivot-card') AS cards,
-                (SELECT count(*)::int FROM partner_submission_cards) AS all_cards`,
+                (SELECT count(*)::int FROM partner_submission_cards) AS all_cards`
       );
       expect(rows[0]).toEqual({ cards: 0, all_cards: 1 }); // B's own view is uncontaminated
     });
@@ -1323,14 +2393,14 @@ describe("Partner RLS isolation coverage is wired up", () => {
         client.query(
           `INSERT INTO partner_submissions (tenant_id,location_id,created_by,public_ref,customer_id,status)
            VALUES ($1,$2,$3,'oracle-miss',$4,'draft')`,
-          [A, ID.locA, ID.userA, ID.absent],
-        ),
+          [A, ID.locA, ID.userA, ID.absent]
+        )
       ).rejects.toThrow(/foreign key constraint/i);
       // ...while tenant B's real customer id is ACCEPTED. The difference is the oracle.
       await client.query(
         `INSERT INTO partner_submissions (tenant_id,location_id,created_by,public_ref,customer_id,status)
          VALUES ($1,$2,$3,'oracle-hit',$4,'draft')`,
-        [A, ID.locA, ID.userA, ID.custB],
+        [A, ID.locA, ID.userA, ID.custB]
       );
     });
     await client.query("DELETE FROM partner_submissions WHERE public_ref='oracle-hit'");
@@ -1346,7 +2416,7 @@ describe("Partner RLS isolation coverage is wired up", () => {
           AND conrelid IN ('partner_credit_ledger'::regclass,
                            'partner_credit_reservations'::regclass,
                            'partner_credit_reservation_events'::regclass)
-        ORDER BY conname`,
+        ORDER BY conname`
     );
     const walletFks = rows.filter((r) => r.def.includes("REFERENCES partner_wallets"));
     expect(walletFks.length).toBeGreaterThanOrEqual(2);

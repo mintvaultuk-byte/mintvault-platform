@@ -1,15 +1,13 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
-import { getDatabaseUrl } from "./config";
+import { databaseSslConfig, getDatabaseUrl } from "./config";
 
 const DATABASE_URL = getDatabaseUrl();
-const databaseHost = new URL(DATABASE_URL).hostname;
-const isLocalDatabase = databaseHost === "127.0.0.1" || databaseHost === "localhost" || databaseHost === "::1";
 
 export const pool = new pg.Pool({
   connectionString: DATABASE_URL,
-  ssl: isLocalDatabase ? false : { rejectUnauthorized: false },
+  ssl: databaseSslConfig(DATABASE_URL),
   max: 8,
   // 30s gives Neon's autosuspend cold-start (typically 1–5s, occasionally
   // longer under load) enough headroom that a warm-up doesn't surface as

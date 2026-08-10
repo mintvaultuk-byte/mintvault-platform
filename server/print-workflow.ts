@@ -45,6 +45,20 @@ export interface ActorIdentity {
 }
 
 /**
+ * Optional immutable-origin fence for a Partner-owned print operation.
+ *
+ * The generic workflow is used by trusted HQ routes too, so it cannot assume a
+ * tenant.  The Partner adapter passes this fence on every reserve/duplicate
+ * path.  That makes the state-changing SQL itself fail closed if a certificate
+ * is moved, mixed, or requested across tenants between its route-level read and
+ * this workflow's write.
+ */
+export interface PartnerPrintScope {
+  tenantId: string;
+  locationId?: string | null;
+}
+
+/**
  * Resolve WHO is acting and their print role. Admin session → admin. A staffer
  * reaching an admin handler via the can_print proxy (__graderProxy set) → their
  * staff email + staff_print. Falls back to the literal "admin" only if nothing
@@ -289,6 +303,16 @@ function pgTextArray(ids: string[]): string {
   return `{${ids.map((s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
 }
 
+function certIdStorageVariants(ids: string[]): string[] {
+  const out = new Set<string>();
+  for (const id of ids) {
+    out.add(id);
+    const match = /^MV(\d+)$/.exec(id);
+    if (match) out.add(`MV-${match[1].padStart(10, "0")}`);
+  }
+  return [...out];
+}
+
 async function loadEffectiveStates(certIds: string[]): Promise<Map<string, PrintState>> {
   if (certIds.length === 0) return new Map();
   const result = await db.execute(sql`
@@ -308,6 +332,157 @@ async function loadEffectiveStates(certIds: string[]): Promise<Map<string, Print
     );
   }
   return map;
+}
+
+export async function requireCompletePartnerSubmissionSet(
+  certIds: string[],
+  phase: "batch" | "complete"
+): Promise<WorkflowResult["rejected"]> {
+  if (certIds.length === 0) return [];
+  const selected = new Set(certIdStorageVariants(certIds));
+  const exists = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`);
+  if (!(exists.rows[0] as { rel?: string | null } | undefined)?.rel) return [];
+  const rows = await db.execute(sql`
+    WITH selected AS (
+      SELECT unnest(${pgTextArray(certIds)}::text[]) AS certificate_number
+    ),
+    touched AS (
+      SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+        FROM selected s
+        JOIN certificates c ON c.certificate_number = s.certificate_number
+        JOIN submission_items si ON si.id = c.submission_item_id
+        JOIN partner_grading_work_items pgwi
+          ON pgwi.certificate_id = c.id
+         AND pgwi.submission_item_id = c.submission_item_id
+         AND pgwi.destination_submission_id = si.submission_id
+    )
+    SELECT pgwi.tenant_id::text AS tenant_id,
+           pgwi.partner_submission_id::text AS partner_submission_id,
+           pgwi.destination_submission_id::int AS destination_submission_id,
+           c.certificate_number,
+           s.status AS destination_status
+      FROM touched t
+      JOIN partner_grading_work_items pgwi
+        ON pgwi.tenant_id = t.tenant_id
+       AND pgwi.partner_submission_id = t.partner_submission_id
+       AND pgwi.destination_submission_id = t.destination_submission_id
+      JOIN certificates c
+        ON c.id = pgwi.certificate_id
+       AND c.submission_item_id = pgwi.submission_item_id
+      JOIN submission_items si
+        ON si.id = c.submission_item_id
+       AND si.submission_id = pgwi.destination_submission_id
+      JOIN submissions s ON s.id = pgwi.destination_submission_id
+     WHERE pgwi.status <> 'void'
+     ORDER BY pgwi.destination_submission_id, c.certificate_number
+  `);
+  const rejected: WorkflowResult["rejected"] = [];
+  const byDestination = new Map<string, { certs: string[]; destinationStatus: string | null }>();
+  for (const row of rows.rows as unknown as {
+    destination_submission_id: number;
+    certificate_number: string;
+    destination_status: string | null;
+  }[]) {
+    const key = String(row.destination_submission_id);
+    const current = byDestination.get(key) ?? { certs: [], destinationStatus: row.destination_status };
+    current.certs.push(row.certificate_number);
+    current.destinationStatus = row.destination_status;
+    byDestination.set(key, current);
+  }
+  for (const group of byDestination.values()) {
+    const missing = group.certs.filter((certId) => !selected.has(certId));
+    if (missing.length > 0) {
+      rejected.push(
+        ...missing.map((certId) => ({
+          certId,
+          code: "partner_submission_incomplete",
+          message: "Select every certificate from this Partner submission together.",
+        }))
+      );
+    }
+    if (phase === "batch" && !["ready_to_return", "completed"].includes(String(group.destinationStatus ?? ""))) {
+      rejected.push(
+        ...group.certs.map((certId) => ({
+          certId,
+          code: "partner_settlement_required",
+          message: "Partner credits must be settled before labels are rendered.",
+        }))
+      );
+    }
+  }
+  const touchedSubmissions = new Set(
+    (rows.rows as unknown as { tenant_id: string; partner_submission_id: string }[]).map(
+      (row) => `${row.tenant_id}:${row.partner_submission_id}`
+    )
+  );
+  if (touchedSubmissions.size > 1) {
+    rejected.push(
+      ...certIds.map((certId) => ({
+        certId,
+        code: "cross_tenant_partner_batch",
+        message: "Print Partner submissions in separate batches.",
+      }))
+    );
+  }
+  return rejected;
+}
+
+/**
+ * F2. The SINGLE-CERTIFICATE settlement gate.
+ *
+ * `requireCompletePartnerSubmissionSet(..., "batch")` refuses to render labels for a Partner
+ * submission whose credits have not settled — but it only ever runs on the batch path. Two
+ * admin routes rendered labels directly, with no partner lookup at all:
+ *
+ *   GET /api/admin/certificates/:id/label/:side          (server/routes.ts)
+ *   GET /api/admin/certificates/label/:certId/:filename  (server/routes.ts)
+ *
+ * Both call generateLabelPNG/generateLabelPDF and return the bytes. The PNG they return is the
+ * SAME artefact the batch renders, so an admin could produce a print-ready label for a Partner card
+ * MintVault had not been paid for, entirely outside the gate. That is the hole this closes.
+ *
+ * WHY THE SETTLED SET IS WIDER HERE THAN ON THE BATCH PATH. The batch gate accepts
+ * `ready_to_return`/`completed`. This one also accepts `shipped`, because a destination can only
+ * reach `shipped` from `ready_to_return` (see the completion cascade in `markCompleted`), so it is
+ * unambiguously post-settlement — and refusing there would break reprint-label lookups for cards
+ * already out of the door. It is never LOOSER at the pre-settlement end: `in_grading`, `received`
+ * and `new` are refused exactly as the batch gate refuses them.
+ *
+ * Returns null for HQ cards, for unknown certificates, and on a deployment with no partner bridge
+ * table — i.e. it fails OPEN only where there is provably no partner money at stake.
+ */
+export interface PartnerSettlementBlock {
+  code: "partner_settlement_required";
+  message: string;
+  destinationStatus: string;
+}
+
+export async function partnerSettlementBlockForCert(certNumber: string): Promise<PartnerSettlementBlock | null> {
+  if (!certNumber) return null;
+  const exists = await db.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`);
+  if (!(exists.rows[0] as { rel?: string | null } | undefined)?.rel) return null;
+  const rows = await db.execute(sql`
+    SELECT s.status::text AS destination_status
+      FROM certificates c
+      JOIN submission_items si ON si.id = c.submission_item_id
+      JOIN partner_grading_work_items pgwi
+        ON pgwi.certificate_id = c.id
+       AND pgwi.submission_item_id = c.submission_item_id
+       AND pgwi.destination_submission_id = si.submission_id
+      JOIN submissions s ON s.id = pgwi.destination_submission_id
+     WHERE c.certificate_number = ANY(${pgTextArray(certIdStorageVariants([certNumber]))}::text[])
+       AND pgwi.status <> 'void'
+     LIMIT 1
+  `);
+  const row = rows.rows[0] as { destination_status?: string } | undefined;
+  if (!row) return null;
+  const destinationStatus = String(row.destination_status ?? "");
+  if (["ready_to_return", "shipped", "completed"].includes(destinationStatus)) return null;
+  return {
+    code: "partner_settlement_required",
+    message: "Partner credits must be settled before labels are rendered.",
+    destinationStatus,
+  };
 }
 
 // ── Transition results ───────────────────────────────────────────────────────
@@ -351,10 +526,19 @@ export async function createBatchAtomic(params: {
   reason?: string | null;
   reasonCategory?: string | null;
   notes?: string | null;
+  partnerScope?: PartnerPrintScope;
 }): Promise<CreateBatchResult> {
   const { identity } = params;
   const requested = [...new Set(params.certIds)];
   const states = await loadEffectiveStates(requested);
+
+  const partnerScopeWhere = params.partnerScope
+    ? sql`
+        AND origin_type = 'PARTNER'
+        AND origin_partner_id = ${params.partnerScope.tenantId}
+        ${params.partnerScope.locationId ? sql`AND origin_location_id = ${params.partnerScope.locationId}` : sql``}
+      `
+    : sql``;
 
   const { deriveBatchId, CERTS_PER_PAGE, SHEET_LAYOUT_VERSION } = await import("./print-batch");
 
@@ -370,6 +554,22 @@ export async function createBatchAtomic(params: {
         SELECT batch_id, status, cert_ids, kind FROM print_batches
         WHERE created_by = ${identity.actor} AND status IN ('rendering', 'printing', 'printed')
           AND cert_ids @> ${sortedReq}::jsonb AND ${sortedReq}::jsonb @> cert_ids
+          ${
+            params.partnerScope
+              ? sql`
+            AND NOT EXISTS (
+              SELECT 1
+                FROM jsonb_array_elements_text(print_batches.cert_ids) AS scoped_cert(certificate_number)
+                LEFT JOIN certificates scoped_certificate
+                  ON scoped_certificate.certificate_number = scoped_cert.certificate_number
+               WHERE scoped_certificate.id IS NULL
+                  OR scoped_certificate.origin_type <> 'PARTNER'
+                  OR scoped_certificate.origin_partner_id <> ${params.partnerScope.tenantId}
+                  ${params.partnerScope.locationId ? sql`OR scoped_certificate.origin_location_id IS DISTINCT FROM ${params.partnerScope.locationId}` : sql``}
+            )
+          `
+              : sql``
+          }
         ORDER BY created_at DESC LIMIT 1
       `)
     : { rows: [] as unknown[] };
@@ -384,7 +584,7 @@ export async function createBatchAtomic(params: {
          WHERE certificate_number IN (${sql.join(
            ids.map((c) => sql`${c}`),
            sql`, `
-         )})
+         )}) ${partnerScopeWhere}
       `);
       const dupById = new Map(
         (
@@ -463,7 +663,7 @@ export async function createBatchAtomic(params: {
     WHERE certificate_number IN (${sql.join(
       eligible.map((e) => sql`${e.certId}`),
       sql`, `
-    )})
+    )}) ${partnerScopeWhere}
   `);
   const gradeOf = new Map(
     (
@@ -494,6 +694,23 @@ export async function createBatchAtomic(params: {
     return {
       applied: [],
       rejected,
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
+  }
+
+  const partnerRejected = await requireCompletePartnerSubmissionSet(
+    printable.map((e) => e.certId),
+    "batch"
+  );
+  if (partnerRejected.length > 0) {
+    return {
+      applied: [],
+      rejected: [...partnerRejected, ...rejected],
       batchId: null,
       kind: null,
       pdfUrl: null,
@@ -548,6 +765,7 @@ export async function createBatchAtomic(params: {
       const claim = await tx.execute(sql`
         UPDATE certificates SET print_state = 'printing', updated_at = NOW()
         WHERE certificate_number = ${certId} AND print_state IN ('needs_printing', 'reprint_required')
+          ${partnerScopeWhere}
         RETURNING certificate_number
       `);
       if (claim.rows.length === 0) {
@@ -792,7 +1010,10 @@ export async function markBatchPrinted(batchId: string, identity: ActorIdentity)
         WHERE batch_id = ${batchId} AND status = 'printing'
       `);
       await tx.execute(sql`
-        UPDATE label_prints SET printed_at = NOW() WHERE sheet_ref = ${`print_batch_${batchId}`}
+        UPDATE label_prints
+           SET printed_at = NOW()
+         WHERE sheet_ref = ${`print_batch_${batchId}`}
+           AND cert_id = ANY(${pgTextArray(certIdStorageVariants(applied))}::text[])
       `);
     }
   });
@@ -866,10 +1087,125 @@ export async function requestReprint(params: {
 }
 
 /**
- * Mark certs completed (terminal). Admin-only enforcement happens in the route;
- * the state machine still guards the transition (must be printed/reprinted).
+ * PARTNER COMPLETION MONEY GATE — "every physical graded unit is paid for".
+ *
+ * WHAT WAS WRONG (finding H3). The three completion CTEs below used to refuse completion whenever
+ * ANY reservation for the Partner submission was `status <> 'consumed'`. Migration 0017 defines
+ * FOUR statuses (active, consumed, released, expired) and `released`/`expired` are TERMINAL SETTLED
+ * states, not outstanding ones. The authorised Super Admin recovery path
+ * (`recoverPartnerDestinationCreditHold`) deliberately leaves the RELEASED predecessor carrying the
+ * same `submission_reference` as its live replacement, so after ANY recovery that predicate was
+ * permanently true and the submission could never complete — the cards were stranded forever.
+ * `cancelSubmission` independently refuses the same mixed state, so there was no exit at all.
+ *
+ * WHY THE OBVIOUS FIX IS WRONG. Narrowing the predicate to `r.status = 'active'` would let an
+ * ORDINARY CANCELLATION complete: a submission whose reservations are ALL `released` has no active
+ * row, so the gate would open and N cards would be graded, printed and completed for ZERO consumed
+ * credits. That is free grading. Reservation STATUS alone cannot distinguish "settled by grading"
+ * (MintVault was paid) from "settled by cancellation" (the credit went back to the partner).
+ *
+ * THE PREDICATE. Completion is gated on POSITIVE, PER-UNIT FINANCIAL EVIDENCE instead: the number
+ * of physical graded units (non-void `partner_grading_work_items` for this exact
+ * tenant/partner-submission/destination triple) must equal the number of reservations for that
+ * submission that carry CANONICAL CONSUMED EVIDENCE. "Canonical" is the same definition settlement
+ * itself uses in `hasExactConsumedEvidence()` (server/partner/partner-submission-credit-lifecycle.ts):
+ *
+ *   - the reservation is `status = 'consumed'` and `source = 'portal'` (0017 lines 23-45), and
+ *   - it has EXACTLY ONE terminal row in the append-only `partner_credit_reservation_events`
+ *     (0017's `uq_partner_credit_reservation_events_terminal`), and
+ *   - that row is `event_type = 'consumed'` carrying a `ledger_entry_id` (0017's
+ *     `chk_partner_credit_reservation_events_ledger_link` makes the link mandatory for consumes and
+ *     forbidden otherwise), and
+ *   - the linked `partner_credit_ledger` row is the real DEBIT: same wallet + tenant,
+ *     `amount = -1`, `correlation_id = <reservation id>` and
+ *     `idempotency_key = 'reservation-consume:<reservation id>'`, exactly as written by
+ *     `transitionReservationInTransaction()`.
+ *
+ * That resolves the three cases:
+ *   A. consumed with evidence               -> counted -> counts match -> COMPLETE.
+ *   B. recovery: released predecessor + live replacement that was later consumed -> the predecessor
+ *      contributes nothing and the REPLACEMENT's debit is counted -> counts match -> COMPLETE.
+ *   C. released/expired without a replacement, never-paid, still-active, or a `consumed` row whose
+ *      debit evidence is missing or malformed -> not counted -> counts differ -> REFUSED.
+ *
+ * A released/expired row can never be mistaken for payment because a release NEVER writes a ledger
+ * debit (0017's accounting model note), and a stray extra reservation cannot mask a missing one
+ * because 0017's `uq_partner_credit_reserve_card_live` makes (tenant_id, card_reference) unique
+ * across live+consumed rows, so consumed rows are one-per-card by construction.
+ *
+ * This is DEFINED ONCE and interpolated into all three CTEs; the three copies of the old predicate
+ * were free to drift apart.
  */
-export async function markCompleted(params: { certIds: string[]; identity: ActorIdentity }): Promise<WorkflowResult> {
+const partnerGradedUnitsFullySettled = sql`
+           -- F3. THE PREDICATE IS NOT ALLOWED TO BE VACUOUSLY TRUE. The equality below compares
+           -- two counts. At ZERO non-void work items both sides are 0, 0 = 0 holds, and the gate
+           -- OPENS: the submission and its destination cascade to completed having consumed ZERO
+           -- credits. "Nothing was graded" would read as "fully settled" — the one direction a
+           -- money gate must never fail. Nothing writes 'void' today (it exists only in 0049's
+           -- CHECK constraint and in read-side status <> 'void' predicates), so the shape is
+           -- currently unreachable; it goes live the day a void/withdraw path is added, which is
+           -- exactly the change least likely to re-derive this gate's arithmetic. Requiring at
+           -- least one live graded unit makes the equality carry positive evidence on BOTH sides:
+           -- N units matched by N canonical debits, with N never 0.
+           AND (
+             SELECT count(*)
+               FROM partner_grading_work_items unit
+              WHERE unit.tenant_id = t.tenant_id
+                AND unit.partner_submission_id = t.partner_submission_id
+                AND unit.destination_submission_id = t.destination_submission_id
+                AND unit.status <> 'void'
+           ) > 0
+           AND (
+             SELECT count(*)
+               FROM partner_grading_work_items unit
+              WHERE unit.tenant_id = t.tenant_id
+                AND unit.partner_submission_id = t.partner_submission_id
+                AND unit.destination_submission_id = t.destination_submission_id
+                AND unit.status <> 'void'
+           ) = (
+             SELECT count(*)
+               FROM partner_credit_reservations r
+              WHERE r.tenant_id = t.tenant_id
+                AND r.source = 'portal'
+                AND r.submission_reference = t.partner_submission_id::text
+                AND r.status = 'consumed'
+                AND (
+                  SELECT count(*)
+                    FROM partner_credit_reservation_events te
+                   WHERE te.reservation_id = r.id
+                     AND te.tenant_id = r.tenant_id
+                     AND te.event_type IN ('consumed','released','expired')
+                ) = 1
+                AND EXISTS (
+                  SELECT 1
+                    FROM partner_credit_reservation_events e
+                    JOIN partner_credit_ledger l
+                      ON l.id = e.ledger_entry_id
+                     AND l.wallet_id = e.wallet_id
+                     AND l.tenant_id = e.tenant_id
+                     AND l.correlation_id = r.id::text
+                     AND l.amount = -1
+                     AND l.idempotency_key = 'reservation-consume:' || r.id::text
+                   WHERE e.reservation_id = r.id
+                     AND e.tenant_id = r.tenant_id
+                     AND e.wallet_id = r.wallet_id
+                     AND e.event_type = 'consumed'
+                )
+           )`;
+
+/**
+ * Mark certs completed (terminal). HQ routes and the constrained Partner
+ * adapter each enforce their own authority/prerequisites; the state machine
+ * still guards the transition (must be printed/reprinted).
+ */
+export async function markCompleted(params: {
+  certIds: string[];
+  identity: ActorIdentity;
+  /** Immutable Partner-origin write fence for the constrained shop workflow. */
+  partnerScope?: PartnerPrintScope;
+  /** Refuse rather than partially complete a Partner submission set. */
+  allOrNothing?: boolean;
+}): Promise<WorkflowResult> {
   const { certIds, identity } = params;
   const states = await loadEffectiveStates(certIds);
   const applied: string[] = [];
@@ -885,26 +1221,171 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
     if (!t.ok) rejected.push({ certId, code: t.code, message: t.message });
     else targets.push({ certId, from });
   }
+  if (params.allOrNothing && rejected.length > 0) return { applied: [], rejected };
   if (targets.length === 0) return { applied, rejected };
-  await db.transaction(async (tx) => {
-    for (const { certId, from } of targets) {
-      // CAS: complete only if still printed/reprinted; event on real change only.
-      const upd = await tx.execute(sql`
+  const partnerRejected = await requireCompletePartnerSubmissionSet(
+    targets.map((t) => t.certId),
+    "complete"
+  );
+  if (partnerRejected.length > 0) return { applied: [], rejected: [...partnerRejected, ...rejected] };
+  const partnerScopeWhere = params.partnerScope
+    ? sql`
+        AND origin_type = 'PARTNER'
+        AND origin_partner_id = ${params.partnerScope.tenantId}
+        ${params.partnerScope.locationId ? sql`AND origin_location_id = ${params.partnerScope.locationId}` : sql``}
+      `
+    : sql``;
+  let atomicRejection: WorkflowResult["rejected"][number] | null = null;
+  try {
+    await db.transaction(async (tx) => {
+      for (const { certId, from } of targets) {
+        // CAS: complete only if still printed/reprinted; event on real change only.
+        const upd = await tx.execute(sql`
         UPDATE certificates SET print_state = 'completed', updated_at = NOW()
-        WHERE certificate_number = ${certId} AND print_state = ${from}
+        WHERE certificate_number = ${certId} AND print_state = ${from} ${partnerScopeWhere}
         RETURNING certificate_number
       `);
-      if (upd.rows.length === 0) {
-        rejected.push({ certId, code: "state_changed", message: "Concurrently updated." });
-        continue;
-      }
-      applied.push(certId);
-      await tx.execute(sql`
+        if (upd.rows.length === 0) {
+          const conflict = { certId, code: "state_changed", message: "Concurrently updated or outside Partner scope." };
+          if (params.allOrNothing) {
+            atomicRejection = conflict;
+            throw new Error("partner_completion_atomic_abort");
+          }
+          rejected.push(conflict);
+          continue;
+        }
+        applied.push(certId);
+        await tx.execute(sql`
         INSERT INTO print_events (cert_id, actor, actor_role, action, from_state, to_state)
         VALUES (${certId}, ${identity.actor}, ${identity.role}, 'complete', ${from}, 'completed')
       `);
+      }
+      const partnerBridge =
+        applied.length > 0
+          ? await tx.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`)
+          : { rows: [] as unknown[] };
+      if (applied.length > 0 && (partnerBridge.rows[0] as { rel?: string | null } | undefined)?.rel) {
+        await tx.execute(sql`
+        UPDATE partner_grading_work_items pgwi
+           SET status = 'completed', updated_at = NOW()
+          FROM certificates c
+          JOIN submission_items si ON si.id = c.submission_item_id
+         WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+           AND c.id = pgwi.certificate_id
+           AND c.submission_item_id = pgwi.submission_item_id
+           AND si.submission_id = pgwi.destination_submission_id
+           AND pgwi.status = 'approved'
+      `);
+        await tx.execute(sql`
+        WITH touched AS (
+          SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+            FROM partner_grading_work_items pgwi
+            JOIN certificates c
+              ON c.id = pgwi.certificate_id
+             AND c.submission_item_id = pgwi.submission_item_id
+            JOIN submission_items si
+              ON si.id = c.submission_item_id
+             AND si.submission_id = pgwi.destination_submission_id
+           WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+        ),
+        complete_partner_submissions AS (
+          SELECT t.tenant_id, t.partner_submission_id, t.destination_submission_id
+            FROM touched t
+           WHERE NOT EXISTS (
+             SELECT 1
+               FROM partner_grading_work_items pending
+              WHERE pending.tenant_id = t.tenant_id
+                AND pending.partner_submission_id = t.partner_submission_id
+                AND pending.destination_submission_id = t.destination_submission_id
+                AND pending.status NOT IN ('completed','void')
+           )
+           ${partnerGradedUnitsFullySettled}
+        )
+        -- NOTE: partner_submissions has NO completed_at column (0007 creates the table, 0044 adds
+        -- only location_name_snapshot; verified against the live staging schema). An earlier
+        -- revision of this statement set completed_at here, which raised 42703 undefined_column
+        -- and rolled back the ENTIRE completion transaction — the certificate never completed.
+        -- status='completed' + updated_at is the full record of completion for this table.
+        UPDATE partner_submissions ps
+           SET status = 'completed', updated_at = NOW()
+          FROM complete_partner_submissions cps
+         WHERE ps.id = cps.partner_submission_id
+           AND ps.tenant_id = cps.tenant_id
+      `);
+        await tx.execute(sql`
+        WITH touched AS (
+          SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+            FROM partner_grading_work_items pgwi
+            JOIN certificates c
+              ON c.id = pgwi.certificate_id
+             AND c.submission_item_id = pgwi.submission_item_id
+            JOIN submission_items si
+              ON si.id = c.submission_item_id
+             AND si.submission_id = pgwi.destination_submission_id
+           WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+        ),
+        complete_destinations AS (
+          SELECT t.destination_submission_id
+            FROM touched t
+           WHERE NOT EXISTS (
+             SELECT 1
+               FROM partner_grading_work_items pending
+              WHERE pending.tenant_id = t.tenant_id
+                AND pending.partner_submission_id = t.partner_submission_id
+                AND pending.destination_submission_id = t.destination_submission_id
+                AND pending.status NOT IN ('completed','void')
+           )
+           ${partnerGradedUnitsFullySettled}
+        )
+        UPDATE submissions s
+           SET status = 'shipped',
+               shipped_at = COALESCE(shipped_at, NOW()),
+               updated_at = NOW()
+          FROM complete_destinations cd
+         WHERE s.id = cd.destination_submission_id
+           AND s.status = 'ready_to_return'
+      `);
+        await tx.execute(sql`
+        WITH touched AS (
+          SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
+            FROM partner_grading_work_items pgwi
+            JOIN certificates c
+              ON c.id = pgwi.certificate_id
+             AND c.submission_item_id = pgwi.submission_item_id
+            JOIN submission_items si
+              ON si.id = c.submission_item_id
+             AND si.submission_id = pgwi.destination_submission_id
+           WHERE c.certificate_number = ANY(${pgTextArray(applied)}::text[])
+        ),
+        complete_destinations AS (
+          SELECT t.destination_submission_id
+            FROM touched t
+           WHERE NOT EXISTS (
+             SELECT 1
+               FROM partner_grading_work_items pending
+              WHERE pending.tenant_id = t.tenant_id
+                AND pending.partner_submission_id = t.partner_submission_id
+                AND pending.destination_submission_id = t.destination_submission_id
+                AND pending.status NOT IN ('completed','void')
+           )
+           ${partnerGradedUnitsFullySettled}
+        )
+        UPDATE submissions s
+           SET status = 'completed',
+               completed_at = COALESCE(completed_at, NOW()),
+               updated_at = NOW()
+          FROM complete_destinations cd
+         WHERE s.id = cd.destination_submission_id
+           AND s.status IN ('shipped','completed')
+      `);
+      }
+    });
+  } catch (err) {
+    if (atomicRejection && err instanceof Error && err.message === "partner_completion_atomic_abort") {
+      return { applied: [], rejected: [...rejected, atomicRejection] };
     }
-  });
+    throw err;
+  }
   return { applied, rejected };
 }
 

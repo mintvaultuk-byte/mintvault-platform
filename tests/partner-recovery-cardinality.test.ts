@@ -23,7 +23,7 @@
  *
  * MUTATION TARGET: RECOVERY1 (collapse the N replacement reservations into one) must turn this red.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
@@ -31,6 +31,41 @@ import {
   provisionRealisticRoles,
 } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+/**
+ * DETERMINISTIC STORAGE SEAM — this suite is financial-only.
+ *
+ * submitSubmission now requires, per card, a front and back image key matching the tenant-scoped
+ * prefix AND a real headR2() existence check; and its return path signs every allowed key via
+ * getR2SignedUrl(). Both reach server/r2.ts, whose getClient() throws when R2 is unconfigured.
+ *
+ * What this suite exists to prove is credit CARDINALITY — one reservation per physical card unit,
+ * N releases, N replacements. That invariant has nothing to do with object storage, so storage is
+ * stubbed here rather than stood up. The production gate is NOT weakened: submitSubmission is
+ * unchanged, and the real behaviour is proven elsewhere —
+ *   - tests/partner-real-r2-storage.test.ts drives real headR2/getR2SignedUrl against MinIO;
+ *   - tests/partner-shop-workflow-source.test.ts pins the gate's presence in the service;
+ *   - the missing-object refusal is asserted behaviourally in
+ *     tests/partner-per-card-credit-lifecycle.test.ts, which makes headR2 return null and proves
+ *     submit refuses and reserves nothing.
+ *
+ * BOTH functions must be overridden. Stubbing only headR2 swaps "Select a customer" for an
+ * uncaught "R2 credentials not configured" from the signing path — headR2 swallows that throw,
+ * getR2SignedUrl does not.
+ */
+vi.mock("../server/r2", async () => {
+  const actual = await vi.importActual<typeof import("../server/r2")>("../server/r2");
+  return {
+    ...actual,
+    headR2: vi.fn(async () => ({
+      lastModified: new Date("2026-08-06T00:00:00Z"),
+      contentLength: 1024,
+      contentType: "image/jpeg",
+      eTag: '"fixture"',
+    })),
+    getR2SignedUrl: vi.fn(async (key: string) => `https://storage.invalid/${key}`),
+  };
+});
 
 let cluster: DisposablePostgres17;
 let admin: Client;
@@ -46,6 +81,8 @@ interface TenantFixture {
   tenantId: string;
   locationId: string;
   userId: string;
+  customerId: string;
+  serviceTierCode: string;
 }
 
 async function seedMintVaultTables(): Promise<void> {
@@ -60,7 +97,7 @@ async function seedMintVaultTables(): Promise<void> {
     status_history jsonb not null default '[]'::jsonb, updated_at timestamptz not null default now()
   )`);
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
-  await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text, submission_id integer)");
+  await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text)");
   await admin.query("CREATE TABLE label_prints (id serial primary key, certificate_id integer)");
   await admin.query(`CREATE TABLE audit_log (
     id serial primary key, entity_type text not null, entity_id text not null, action text not null,
@@ -92,6 +129,21 @@ async function createTenantFixture(label: string): Promise<TenantFixture> {
       [`recovery-${ordinal}`, tenantId, `recovery-${ordinal}@example.test`]
     )
   ).rows[0].id;
+  // submitSubmission requires a customer and an ACTIVE service tier. The tier is TENANT-scoped:
+  // partner_service_tiers has a partial unique index on (tier_code) WHERE tenant_id IS NULL, so a
+  // per-fixture global row would collide on the second tenant. UNIQUE (tenant_id, tier_code) makes
+  // a constant code safe per tenant.
+  const customerId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_customers (tenant_id,full_name) VALUES ($1,$2) RETURNING id",
+      [tenantId, `Recovery ${label} Customer ${ordinal}`]
+    )
+  ).rows[0].id;
+  await admin.query(
+    `INSERT INTO partner_service_tiers (tenant_id,tier_code,label,price_per_card_pence,turnaround_days,is_active)
+     VALUES ($1,'recovery-tier','Recovery Tier',1500,20,true)`,
+    [tenantId]
+  );
   await wallet.ensureWallet(adminActor, tenantId);
   await wallet.appendFoundationCredit(adminActor, {
     tenantId,
@@ -102,7 +154,7 @@ async function createTenantFixture(label: string): Promise<TenantFixture> {
     idempotencyKey: `recovery-fund-${ordinal}`,
     actorType: "admin",
   });
-  return { tenantId, locationId, userId };
+  return { tenantId, locationId, userId, customerId, serviceTierCode: "recovery-tier" };
 }
 
 function principalFor(f: TenantFixture) {
@@ -122,10 +174,25 @@ function principalFor(f: TenantFixture) {
 /** Create and SUBMIT an n-card submission through the real service, reserving n credits. */
 async function submitNCardSubmission(f: TenantFixture, n: number): Promise<string> {
   const principal = principalFor(f);
-  const draft = await submissions.createSubmissionDraft(principal, { locationId: f.locationId });
+  const draft = await submissions.createSubmissionDraft(principal, {
+    locationId: f.locationId,
+    customerId: f.customerId,
+    serviceTierCode: f.serviceTierCode,
+  });
   const submissionId = draft.id as string;
   for (let i = 1; i <= n; i++) {
-    await submissions.addCard(principal, submissionId, { cardName: `card-${i}`, quantity: 1 });
+    const card = await submissions.addCard(principal, submissionId, { cardName: `card-${i}`, quantity: 1 });
+    // Keys must satisfy cardImageKeyAllowed()'s tenant/submission/card/side prefix exactly; the
+    // production writer is uploadCardImage, which does a real upload and a magic-byte sniff and is
+    // therefore unusable here. Existence is answered by the stubbed headR2 above.
+    await admin.query(
+      "UPDATE partner_submission_cards SET front_image_key=$2, back_image_key=$3 WHERE id=$1",
+      [
+        (card as { id: string }).id,
+        `partner-submissions/${f.tenantId}/${submissionId}/${(card as { id: string }).id}/front-fixture.jpg`,
+        `partner-submissions/${f.tenantId}/${submissionId}/${(card as { id: string }).id}/back-fixture.jpg`,
+      ]
+    );
   }
   await submissions.submitSubmission(principal, submissionId, `submit-${submissionId}`);
   return submissionId;

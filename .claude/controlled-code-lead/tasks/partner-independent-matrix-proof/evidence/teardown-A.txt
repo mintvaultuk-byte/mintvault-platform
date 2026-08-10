@@ -1,0 +1,20 @@
+=== [A] STATE BEFORE TEARDOWN ===
+mvmx-a-minio quay.io/minio/minio:latest Up 9 minutes
+mvmx-a-pg17 postgres:17.10 Up 9 minutes
+mvmx-a-pg16 pgvector/pgvector:pg16 Up 9 minutes
+volumes attached:
+  /mvmx-a-pg16: 7f551adfaf92895750334d43f12529159c336c10c52fdb8dab9c88f05fd7192e 
+  /mvmx-a-pg17: 7da349e8b23acf56f122fa1d4ebd4fbf447b2b85a9cb5f4c2bd302e030923ef2 
+  /mvmx-a-minio: 813b3e40d029d082c1f07e8b9e6413e46bbbace6438f24c1490f3f8dc98ef630 
+
+=== [A] DESTROY (containers AND their volumes) ===
+  removed mvmx-a-pg16 (with volumes)
+  removed mvmx-a-pg17 (with volumes)
+  removed mvmx-a-minio (with volumes)
+
+=== [A] PROOF OF DESTRUCTION ===
+containers matching mvmx-a-*: 0 (must be 0)
+port 55432: closed
+port 55443: closed
+port 9020: closed
+matrix A state destroyed: no containers, no volumes, no listeners

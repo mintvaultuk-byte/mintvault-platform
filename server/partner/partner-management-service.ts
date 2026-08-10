@@ -27,7 +27,10 @@ export interface ActorContext {
 
 type CreatePartnerFailurePoint = "after_org_insert" | "after_default_location_insert";
 type InvitePartnerFailurePoint =
-  "after_user_insert" | "after_role_assignment" | "before_invitation_insert" | "before_invitation_audit";
+  | "after_user_insert"
+  | "after_role_assignment"
+  | "before_invitation_insert"
+  | "before_invitation_audit";
 
 interface InviteBarrier {
   point: "after_duplicate_check";
@@ -274,9 +277,7 @@ export async function provisionMissingActivePartnerWallets(
       );
       const walletId =
         inserted.rows[0]?.id ??
-        (
-          await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])
-        ).rows[0]?.id;
+        (await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])).rows[0]?.id;
       if (!walletId) throw new G5RequestError("INTERNAL_ERROR", "Wallet backfill could not verify wallet.");
 
       const created = inserted.rowCount === 1;
@@ -736,7 +737,6 @@ export async function changeStatus(
       const wallet = await ensureWallet({ actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, org.id);
       walletProvisioned = !!wallet;
     }
-
 
     // Bump the aggregate version under optimistic lock AND set the status in ONE data-modifying-CTE
     // statement, so the two writes are atomic (no "version bumped but status unchanged" window) without
@@ -1444,6 +1444,21 @@ function buildLoginReadiness(
   };
 }
 
+/**
+ * G5 remains runnable against deliberately partial historical migration fixtures.  The optional
+ * onboarding facts must not turn a valid invitation/login status read into a 500 when its later
+ * wallet or public-network migration has not been applied.  In a complete environment the reads
+ * below remain authoritative; an absent table is surfaced as an unavailable/not-configured fact.
+ */
+async function optionalOnboardingRead<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read();
+  } catch (err) {
+    if ((err as { code?: string })?.code === "42P01") return null;
+    throw err;
+  }
+}
+
 export async function getPartnerOnboardingReadiness(partnerId: string) {
   const org = await loadPartner(partnerId);
   let portalEnabled = false;
@@ -1453,9 +1468,19 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
   } catch {
     portalEnabled = false;
   }
-  const { rows } = await partnerAdminQuery(
-    `SELECT u.id, u.first_name, u.last_name, u.email, u.status AS user_status,
+  /*
+   * This is a deliberately small, secret-free onboarding projection.  The privileged admin pool
+   * has no tenant GUC, so every query below carries the already-validated organisation ID. The MFA
+   * EXISTS intentionally returns a factor state only; the UI never needs factor material.
+   */
+  const [usersResult, walletResult, listingResult] = await Promise.all([
+    partnerAdminQuery(
+      `SELECT u.id, u.first_name, u.last_name, u.email, u.status AS user_status,
             o.status AS org_status, u.last_login_at, (u.password_hash IS NOT NULL) AS password_configured,
+            EXISTS (
+              SELECT 1 FROM partner_mfa_methods m
+               WHERE m.tenant_id = u.tenant_id AND m.user_id = u.id AND m.status = 'ACTIVE'
+            ) AS mfa_configured,
             COALESCE(json_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS role_codes,
             (SELECT count(*)::int FROM partner_sessions s
               WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
@@ -1476,11 +1501,98 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       GROUP BY u.id, o.status, li.status, li.expires_at, li.delivered_at, li.consumed_at, li.created_at
       ORDER BY u.created_at DESC, u.email ASC
       LIMIT 500`,
-    [org.id]
-  );
+      [org.id]
+    ),
+    optionalOnboardingRead(() =>
+      partnerAdminQuery<{
+        status: string;
+        ledger_balance: string;
+        active_reserved: string;
+        available_balance: string;
+        credit_available: boolean;
+      }>(
+        `SELECT status, ledger_balance::text, active_reserved::text, available_balance::text,
+                (available_balance > 0) AS credit_available
+           FROM partner_credit_availability
+          WHERE tenant_id = $1
+          LIMIT 1`,
+        [org.id]
+      )
+    ),
+    optionalOnboardingRead(() =>
+      partnerAdminQuery<{
+        listing_count: number;
+        active_listing_count: number;
+        public_profile_configured_count: number;
+        coordinates_configured_count: number;
+        listing_statuses: string;
+      }>(
+        `SELECT count(*)::int AS listing_count,
+                count(*) FILTER (WHERE listing_status = 'ACTIVE')::int AS active_listing_count,
+                count(*) FILTER (WHERE
+                  NULLIF(btrim(public_phone), '') IS NOT NULL
+                  OR NULLIF(btrim(public_email), '') IS NOT NULL
+                  OR NULLIF(btrim(public_website), '') IS NOT NULL
+                  OR NULLIF(btrim(public_opening_info), '') IS NOT NULL
+                  OR NULLIF(btrim(public_description), '') IS NOT NULL
+                )::int AS public_profile_configured_count,
+                count(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)::int AS coordinates_configured_count,
+                COALESCE(string_agg(DISTINCT listing_status, ', ' ORDER BY listing_status), '') AS listing_statuses
+           FROM partner_public_listings
+          WHERE tenant_id = $1`,
+        [org.id]
+      )
+    ),
+  ]);
+  const rows = usersResult.rows;
+  const wallet = walletResult?.rows[0] ?? null;
+  const listing = listingResult?.rows[0] ?? null;
   return {
     organisation: { id: org.id, legalName: org.legal_name, status: org.status },
     portalEnabled,
+    wallet: wallet
+      ? {
+          configured: true,
+          status: wallet.status,
+          ledgerBalance: wallet.ledger_balance,
+          reservedCredits: wallet.active_reserved,
+          availableCredits: wallet.available_balance,
+          creditAvailable: wallet.credit_available === true,
+        }
+      : {
+          configured: false,
+          status: null,
+          ledgerBalance: null,
+          reservedCredits: null,
+          availableCredits: null,
+          creditAvailable: false,
+        },
+    publicListing:
+      listing && listing.listing_count > 0
+        ? {
+            configured: true,
+            statuses: listing.listing_statuses,
+            listingCount: listing.listing_count,
+            activeListingCount: listing.active_listing_count,
+            publicProfileConfigured: listing.public_profile_configured_count > 0,
+            publicProfileConfiguredCount: listing.public_profile_configured_count,
+            coordinatesConfigured: listing.coordinates_configured_count > 0,
+            coordinatesConfiguredCount: listing.coordinates_configured_count,
+          }
+        : {
+            configured: false,
+            statuses: null,
+            listingCount: 0,
+            activeListingCount: 0,
+            publicProfileConfigured: false,
+            publicProfileConfiguredCount: 0,
+            coordinatesConfigured: false,
+            coordinatesConfiguredCount: 0,
+          },
+    deviceAndScanner: {
+      configured: false,
+      reason: "No tenant-linked device/station registry or scanner telemetry source exists yet.",
+    },
     users: rows.map((u: any) => ({
       id: u.id,
       email: u.email,
@@ -1495,6 +1607,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       acceptedAt: u.invitation_consumed_at,
       lastLoginAt: u.last_login_at,
       activeSessions: u.active_sessions ?? 0,
+      mfaConfigured: u.mfa_configured === true,
       readiness: buildLoginReadiness(u, portalEnabled),
     })),
   };

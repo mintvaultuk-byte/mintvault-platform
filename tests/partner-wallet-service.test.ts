@@ -13,6 +13,7 @@ import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17
 let cluster: DisposablePostgres17;
 let admin: Client;
 let service: typeof import("../server/partner/partner-wallet-service");
+let creditPurchases: typeof import("../server/partner/credit-purchase-service");
 let tenantA: string;
 let tenantB: string;
 
@@ -57,6 +58,7 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     service = await import("../server/partner/partner-wallet-service");
+    creditPurchases = await import("../server/partner/credit-purchase-service");
   }, 90_000);
 
   afterAll(async () => {
@@ -265,6 +267,135 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
         )
       ).rows[0].n
     ).toBe(1);
+  });
+
+  it("fulfils a paid Stripe credit package from the catalogue, never metadata price or credits", async () => {
+    const tenant = (
+      await admin.query<{ id: string }>(
+        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Webhook package authority','ACTIVE') RETURNING id"
+      )
+    ).rows[0].id;
+    await service.ensureWallet(actor, tenant);
+    const result = await creditPurchases.fulfilPartnerCreditPurchase("evt-package-authority", {
+      id: "cs-package-authority",
+      payment_status: "paid",
+      payment_intent: "pi-package-authority",
+      metadata: {
+        type: "partner_credits",
+        tenant_id: tenant,
+        package_id: "credits-10",
+        credits: "1000000",
+        amount_paid_pence: "1",
+      },
+    } as any);
+
+    expect(result).toEqual({ granted: true, credits: 10 });
+    const ledger = await admin.query<{ amount: number; metadata: Record<string, unknown> }>(
+      "SELECT amount::int, metadata FROM partner_credit_ledger WHERE source='stripe' AND idempotency_key='stripe-evt:evt-package-authority'"
+    );
+    expect(ledger.rows).toEqual([
+      {
+        amount: 10,
+        metadata: expect.objectContaining({ package_id: "credits-10", credits: 10, amount_paid_pence: 10_000 }),
+      },
+    ]);
+  });
+
+  it("collapses duplicate and concurrent Stripe webhook delivery to one ledger grant", async () => {
+    const tenant = (
+      await admin.query<{ id: string }>(
+        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Webhook duplicate','ACTIVE') RETURNING id"
+      )
+    ).rows[0].id;
+    await service.ensureWallet(actor, tenant);
+    const session = {
+      id: "cs-webhook-duplicate",
+      payment_status: "paid",
+      payment_intent: "pi-webhook-duplicate",
+      metadata: { type: "partner_credits", tenant_id: tenant, package_id: "credits-25" },
+    } as any;
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => creditPurchases.fulfilPartnerCreditPurchase("evt-webhook-duplicate", session))
+    );
+    expect(results.filter((result) => result.granted)).toHaveLength(1);
+    expect(results.filter((result) => result.reason === "duplicate_event")).toHaveLength(7);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS n FROM partner_credit_ledger WHERE source='stripe' AND idempotency_key='stripe-evt:evt-webhook-duplicate'"
+        )
+      ).rows[0].n
+    ).toBe(1);
+    expect((await service.getBalance(tenant)).balance).toBe(25);
+  });
+
+  it("fails closed when a replayed payment is redirected to another tenant", async () => {
+    const [tenantA, tenantB] = await Promise.all(
+      ["Webhook original tenant", "Webhook forged tenant"].map(async (name) => {
+        const id = (
+          await admin.query<{ id: string }>(
+            "INSERT INTO partner_organisations (legal_name,status) VALUES ($1,'ACTIVE') RETURNING id",
+            [name]
+          )
+        ).rows[0].id;
+        await service.ensureWallet(actor, id);
+        return id;
+      })
+    );
+    const session = (tenantId: string) =>
+      ({
+        id: "cs-cross-tenant",
+        payment_status: "paid",
+        payment_intent: "pi-cross-tenant",
+        metadata: { type: "partner_credits", tenant_id: tenantId, package_id: "credits-10" },
+      }) as any;
+
+    await expect(
+      creditPurchases.fulfilPartnerCreditPurchase("evt-cross-tenant", session(tenantA))
+    ).resolves.toMatchObject({
+      granted: true,
+      credits: 10,
+    });
+    await expect(
+      creditPurchases.fulfilPartnerCreditPurchase("evt-cross-tenant", session(tenantB))
+    ).rejects.toMatchObject({
+      code: "IDEMPOTENCY_CONFLICT",
+    });
+    expect((await service.getBalance(tenantA)).balance).toBe(10);
+    expect((await service.getBalance(tenantB)).balance).toBe(0);
+  });
+
+  it("leaves a failed pre-grant webhook retryable, then fulfils once its wallet is available", async () => {
+    const tenant = (
+      await admin.query<{ id: string }>(
+        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Webhook retry','ACTIVE') RETURNING id"
+      )
+    ).rows[0].id;
+    const session = {
+      id: "cs-webhook-retry",
+      payment_status: "paid",
+      payment_intent: "pi-webhook-retry",
+      metadata: { type: "partner_credits", tenant_id: tenant, package_id: "credits-10" },
+    } as any;
+
+    await expect(creditPurchases.fulfilPartnerCreditPurchase("evt-webhook-retry", session)).rejects.toMatchObject({
+      code: "WALLET_NOT_FOUND",
+    });
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int AS n FROM partner_credit_ledger WHERE source='stripe' AND idempotency_key='stripe-evt:evt-webhook-retry'"
+        )
+      ).rows[0].n
+    ).toBe(0);
+
+    await service.ensureWallet(actor, tenant);
+    await expect(creditPurchases.fulfilPartnerCreditPurchase("evt-webhook-retry", session)).resolves.toEqual({
+      granted: true,
+      credits: 10,
+    });
+    expect((await service.getBalance(tenant)).balance).toBe(10);
   });
 
   it("returns bounded newest-first ledger history", async () => {

@@ -21,6 +21,7 @@ import {
   envForSuite,
   findSuite,
   urlFor,
+  databaseName,
   assertDisposable,
 } from "./partner-suite-env-matrix.mjs";
 
@@ -90,12 +91,15 @@ function recreateDatabase(suite) {
   if (!suite.cluster || !suite.database) return;
   const maintenance = urlFor(suite.cluster, "postgres");
   assertDisposable(maintenance, `${suite.file} maintenance connection`);
+  // Must go through databaseName(): envForSuite() hands the suite the PREFIXED database, so
+  // dropping the unprefixed name would recreate nothing and leave the suite on stale state.
+  const database = databaseName(suite.database);
   const psql = (sql) =>
     spawnSync("psql", [maintenance, "-v", "ON_ERROR_STOP=1", "-Atc", sql], { encoding: "utf8" });
-  const drop = psql(`DROP DATABASE IF EXISTS "${suite.database}" WITH (FORCE)`);
-  if (drop.status !== 0) throw new Error(`drop ${suite.database} failed: ${drop.stderr || drop.stdout}`);
-  const create = psql(`CREATE DATABASE "${suite.database}"`);
-  if (create.status !== 0) throw new Error(`create ${suite.database} failed: ${create.stderr || create.stdout}`);
+  const drop = psql(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+  if (drop.status !== 0) throw new Error(`drop ${database} failed: ${drop.stderr || drop.stdout}`);
+  const create = psql(`CREATE DATABASE "${database}"`);
+  if (create.status !== 0) throw new Error(`create ${database} failed: ${create.stderr || create.stdout}`);
 }
 
 const results = [];

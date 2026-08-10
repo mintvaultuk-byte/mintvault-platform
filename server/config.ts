@@ -1,5 +1,20 @@
 let logged = false;
 
+const LOOPBACK_DATABASE_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+/**
+ * Local PostgreSQL containers normally do not enable TLS. Keep that exception
+ * exact so remote database connections retain certificate-tolerant TLS.
+ */
+export function databaseSslConfig(databaseUrl: string): false | { rejectUnauthorized: false } {
+  try {
+    const hostname = new URL(databaseUrl).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return LOOPBACK_DATABASE_HOSTS.has(hostname) ? false : { rejectUnauthorized: false };
+  } catch {
+    return { rejectUnauthorized: false };
+  }
+}
+
 export function getDatabaseUrl(): string {
   const dbUrl = process.env.MINTVAULT_DATABASE_URL;
 
@@ -10,9 +25,13 @@ export function getDatabaseUrl(): string {
   if (!logged) {
     try {
       const parsed = new URL(dbUrl);
-      console.log(`[config] ENV=${process.env.NODE_ENV || "development"} DB_HOST=${parsed.hostname} DB_NAME=${parsed.pathname.slice(1)} (Using MINTVAULT_DATABASE_URL)`);
+      console.log(
+        `[config] ENV=${process.env.NODE_ENV || "development"} DB_HOST=${parsed.hostname} DB_NAME=${parsed.pathname.slice(1)} (Using MINTVAULT_DATABASE_URL)`
+      );
     } catch {
-      console.log(`[config] ENV=${process.env.NODE_ENV || "development"} (Using MINTVAULT_DATABASE_URL, unable to parse host)`);
+      console.log(
+        `[config] ENV=${process.env.NODE_ENV || "development"} (Using MINTVAULT_DATABASE_URL, unable to parse host)`
+      );
     }
     logged = true;
   }

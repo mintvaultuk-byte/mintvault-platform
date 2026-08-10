@@ -16,7 +16,7 @@ import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email
 import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
-import { getDatabaseUrl } from "./config";
+import { databaseSslConfig, getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import { validatePartnerRbacAtBoot } from "./partner/permissions";
@@ -220,9 +220,10 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 const PgStore = connectPgSimple(session);
+const sessionDatabaseUrl = getDatabaseUrl();
 const sessionPool = new pg.Pool({
-  connectionString: getDatabaseUrl(),
-  ssl: { rejectUnauthorized: false },
+  connectionString: sessionDatabaseUrl,
+  ssl: databaseSslConfig(sessionDatabaseUrl),
   max: 8,
   // 30s tolerates Neon autosuspend cold-start (see server/db.ts for the
   // same rationale). Session reads/writes happen on nearly every request,
@@ -476,6 +477,47 @@ async function runTransferV2Sweep() {
   });
   guardedPartnerCreditReservationExpiry();
   trackInterval(guardedPartnerCreditReservationExpiry, 60 * 60 * 1000);
+
+  // PUBLIC NETWORK READINESS (HIGH H12/H13). Probed once here, after migrations and pools are up,
+  // so a missing PARTNER_PUBLIC_DATABASE_URL or — far more likely — a missing
+  // `GRANT partner_public_reader TO <login role>` is discovered at DEPLOY TIME with an actionable
+  // log line, instead of by the first anonymous visitor getting a 503. It reports; it does not
+  // fail the process. See the long note on reportPartnerPublicNetworkReadiness for why taking
+  // Stripe and certificate verification down over an unlaunched consumer feature would be the
+  // worse outage, and why that is only safe because both gates fail closed independently.
+  trackTimeout(async () => {
+    try {
+      const { reportPartnerPublicNetworkReadiness } = await import("./partner/public-network-gate");
+      await reportPartnerPublicNetworkReadiness();
+    } catch (err: any) {
+      console.error("[partner-public-network] readiness probe threw:", err?.message || err);
+    }
+  }, 10_000);
+
+  // Partner shop ratings refresh themselves the moment an HQ review changes the evidence. This tick
+  // is the safety net for the cases that cannot cover — a process that died between the commit and
+  // the refresh, a machine restart, a transient DB error — so it runs often enough to keep a stale
+  // rating short-lived, and bounded so it can never become a long-running estate sweep.
+  const guardedPartnerRatingReconciler = guard("partner-rating-reconciler", async () => {
+    const { runPartnerRatingReconciler } = await import("./jobs/partner-rating-reconciler");
+    const result = await runPartnerRatingReconciler();
+    if (result.processed > 0) {
+      log(
+        `processed=${result.processed} refreshed=${result.refreshed} failed=${result.failed}`,
+        "partner-rating-reconciler"
+      );
+    }
+  });
+  // FIRST RUN IS DELAYED, NOT IMMEDIATE (HIGH H16). Calling it inline here fired a bounded but
+  // real estate sweep — an aggregate over `certificates` per candidate listing — in the same tick
+  // as process start, competing with migrations finishing, pools warming and readiness probes, on
+  // every machine in the fleet simultaneously after a rolling deploy. The neighbours already
+  // settled this: transfer-v2-sweep waits 30s "let migrations finish", embed-corpus waits 60s "so
+  // the server is fully serving". 45s puts the reconciler in the same band. Nothing is lost by
+  // waiting: the durable dirty state is what carries the obligation across the delay, and the
+  // immediate post-review refresh means a rating is normally fresh long before the first tick.
+  trackTimeout(guardedPartnerRatingReconciler, 45_000);
+  trackInterval(guardedPartnerRatingReconciler, 5 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every

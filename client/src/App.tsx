@@ -135,6 +135,8 @@ const AdminProjectControlPackagePage = lazy(() => import("@/pages/admin/project-
 const AdminProjectControlShopLaunchPage = lazy(() => import("@/pages/admin/project-control-shop-launch"));
 const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-control-scanner"));
 const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
+const AdminPartnerPublicListingsPage = lazy(() => import("@/pages/admin/partner-public-listings"));
+const AdminSupplyOrdersPage = lazy(() => import("@/pages/admin/supply-orders"));
 
 // Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
@@ -147,11 +149,18 @@ const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
 const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
+const PartnerGradingPage = lazy(() => import("@/pages/partner/grading"));
+const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
+const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
+const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
+const PartnerPublicProfilePage = lazy(() => import("@/pages/partner/public-profile"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
+const ShopFinderPage = lazy(() => import("@/pages/shop-finder"));
+const ShopProfilePage = lazy(() => import("@/pages/shop-profile"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -288,6 +297,16 @@ function PartnerPortalRoutes() {
             <PartnerSubmissionsPage />
           </PartnerRouteGuard>
         </Route>
+        <Route path="/partner/customers">
+          <PartnerRouteGuard>
+            <PartnerCustomersPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/grading">
+          <PartnerRouteGuard requiredPermission="partner.cards.assess">
+            <PartnerGradingPage />
+          </PartnerRouteGuard>
+        </Route>
         <Route path="/partner/users">
           <PartnerRouteGuard>
             <PartnerUsersPage />
@@ -301,6 +320,21 @@ function PartnerPortalRoutes() {
         <Route path="/partner/billing">
           <PartnerRouteGuard>
             <PartnerBillingPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/certificates">
+          <PartnerRouteGuard requiredPermission="partner.cards.view">
+            <PartnerCertificatesPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/supplies">
+          <PartnerRouteGuard requiredPermission="partner.orders.view">
+            <PartnerSuppliesPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/public-profile">
+          <PartnerRouteGuard requiredPermission="partner.location.view">
+            <PartnerPublicProfilePage />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/help">
@@ -383,6 +417,8 @@ function Router() {
           {/* Most-specific first. /admin/partners/dashboard MUST stay above any future
               /admin/partners/:partnerId route, or wouter captures the literal "dashboard". */}
           <Route path="/admin/partners/dashboard" component={AdminPartnerDashboardPage} />
+          <Route path="/admin/partner-listings" component={AdminPartnerPublicListingsPage} />
+          <Route path="/admin/supplies" component={AdminSupplyOrdersPage} />
           {/* The two blocks above are disjoint prefixes (/admin/project-control* vs
               /admin/partners/dashboard) and do not shadow one another. */}
           <Route path="/admin/partner-network/partners/:partnerId" component={AdminPartnerManagementDetailPage} />
@@ -400,6 +436,8 @@ function Router() {
           <Route path="/cert/:id/report" component={GradingReportPage} />
           <Route path="/cert/:id" component={LogbookPage} />
           <Route path="/vault/:certId" component={LogbookPage} />
+          <Route path="/shops/:slug" component={ShopProfilePage} />
+          <Route path="/shops" component={ShopFinderPage} />
           <Route path="/" component={Home} />
           <Route path="/pricing" component={Pricing} />
           <Route path="/vault-club" component={VaultClub} />

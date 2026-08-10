@@ -1,0 +1,175 @@
+{
+  "_comment": [
+    "INHERITED CodeQL HIGH/CRITICAL debt, baselined by owner decision 2026-08-10.",
+    "This file does NOT dismiss or suppress anything. CodeQL still runs, still reports, and every",
+    "entry here remains an open alert in the Security tab. It records which (rule, path) pairs were",
+    "ALREADY PRESENT ON main at the moment of baselining, so scripts/ci/assert-codeql-delta.mjs can",
+    "tell inherited debt apart from a finding a branch actually introduced.",
+    "",
+    "ADDING AN ENTRY HERE IS A SECURITY DECISION, NOT A BUILD FIX. If CI tells you a new HIGH is",
+    "blocking, the answer is to fix the finding. Widening the baseline to make a build green is the",
+    "one thing this file must never be used for, and the delta gate deliberately reports the exact",
+    "rule and path so the temptation is visible in the diff.",
+    "",
+    "Pairs are (rule, path). Line numbers are deliberately EXCLUDED: they shift whenever an",
+    "unrelated edit moves code, which would make the baseline expire for no security reason and",
+    "train people to re-baseline reflexively."
+  ],
+  "baselinedAt": "2026-08-10",
+  "baselinedRef": "refs/heads/main",
+  "approvedBy": "owner decision \u2014 grandfather inherited CodeQL HIGH/CRITICAL present on main",
+  "policy": "A branch is release-blocking only when it introduces a NEW HIGH/CRITICAL pair, or when the CodeQL analysis fails to execute.",
+  "count": 30,
+  "pairs": [
+    {
+      "path": "server/reference-number.ts",
+      "rule": "js/biased-cryptographic-random",
+      "severity": "high"
+    },
+    {
+      "path": "server/storage.ts",
+      "rule": "js/biased-cryptographic-random",
+      "severity": "high"
+    },
+    {
+      "path": "client/src/components/faq-section.tsx",
+      "rule": "js/incomplete-multi-character-sanitization",
+      "severity": "high"
+    },
+    {
+      "path": "client/src/pages/journal-detail.tsx",
+      "rule": "js/incomplete-multi-character-sanitization",
+      "severity": "high"
+    },
+    {
+      "path": "server/showroom.ts",
+      "rule": "js/incomplete-multi-character-sanitization",
+      "severity": "high"
+    },
+    {
+      "path": "server/lib/twitter-publisher.ts",
+      "rule": "js/insufficient-password-hash",
+      "severity": "high"
+    },
+    {
+      "path": "server/index.ts",
+      "rule": "js/missing-rate-limiting",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/auth.ts",
+      "rule": "js/missing-rate-limiting",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/grader.ts",
+      "rule": "js/missing-rate-limiting",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/public.ts",
+      "rule": "js/missing-rate-limiting",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/staff.ts",
+      "rule": "js/missing-rate-limiting",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/submissions.ts",
+      "rule": "js/missing-rate-limiting",
+      "severity": "high"
+    },
+    {
+      "path": "server/index.ts",
+      "rule": "js/missing-token-validation",
+      "severity": "high"
+    },
+    {
+      "path": "server/account-switch.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/grader.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/partner/customer-service.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/auth.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/stolen.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/transfers.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/staff.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/static.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/vault-quest/lib/qa.ts",
+      "rule": "js/polynomial-redos",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/auth.ts",
+      "rule": "js/reflected-xss",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/vault-quest-admin.ts",
+      "rule": "js/reflected-xss",
+      "severity": "high"
+    },
+    {
+      "path": "server/email.ts",
+      "rule": "js/tainted-format-string",
+      "severity": "high"
+    },
+    {
+      "path": "server/routes/embedding.ts",
+      "rule": "js/tainted-format-string",
+      "severity": "high"
+    },
+    {
+      "path": "client/src/components/certificate-form.tsx",
+      "rule": "js/xss-through-dom",
+      "severity": "high"
+    },
+    {
+      "path": "client/src/pages/admin-submissions.tsx",
+      "rule": "js/xss-through-dom",
+      "severity": "high"
+    },
+    {
+      "path": "client/src/pages/mobile-upload.tsx",
+      "rule": "js/xss-through-dom",
+      "severity": "high"
+    },
+    {
+      "path": "client/src/pages/tools-estimate.tsx",
+      "rule": "js/xss-through-dom",
+      "severity": "high"
+    }
+  ]
+}

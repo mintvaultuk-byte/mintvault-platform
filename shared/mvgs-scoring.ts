@@ -315,7 +315,7 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
  * lowest-subgrade floor rule (below) needs the same bucketing the UI uses
  * for chip display.
  */
-function remainingToGrade(remaining: number): number {
+export function remainingToGrade(remaining: number): number {
   if (remaining >= 23) return 10;
   if (remaining >= 20) return 9;
   if (remaining >= 17) return 8;

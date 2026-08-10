@@ -15,7 +15,7 @@
  * exact vacuity class this file is meant to guard against. A missing file must throw.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const read = (...p: string[]): string => readFileSync(join(process.cwd(), ...p), "utf8");
@@ -202,12 +202,24 @@ describe("PartnerSessionInfo keeps BOTH field families", () => {
       "template path extraction found none — the regex has rotted"
     ).toBeGreaterThanOrEqual(4);
 
-    const all =
-      routes +
-      read("server", "partner", "public-routes.ts") +
-      read("server", "partner", "submission-routes.ts") +
-      read("server", "partner", "customer-routes.ts") +
-      read("server", "partner", "dashboard-routes.ts");
+    // Read EVERY partner router, derived from disk rather than hard-coded.
+    //
+    // This list used to name five files. server/partner/ contains eleven that register routes, and
+    // the two the client actually depends on — catalogue-routes.ts and grading-routes.ts — were
+    // both absent. So the assertion below reported "/catalogue/snapshot" as having no server route
+    // when it is registered at catalogue-routes.ts:16 and the router is mounted at mount.ts:157.
+    // A false positive in a guard is worse than no guard: it trains readers to discount it.
+    //
+    // Deriving the list from readdirSync means the next router added cannot silently fall outside
+    // the check. The union is a strict superset, so this can only remove false positives — it
+    // cannot mask a genuinely missing route.
+    const partnerDir = join(process.cwd(), "server", "partner");
+    const routerFiles = readdirSync(partnerDir).filter((f) => /routes\.ts$/.test(f));
+    expect(
+      routerFiles.length,
+      "partner router discovery found too few files — the glob has rotted"
+    ).toBeGreaterThanOrEqual(8);
+    const all = routes + routerFiles.map((f) => readFileSync(join(partnerDir, f), "utf8")).join("\n");
     const registered = new Set(
       [...all.matchAll(/\br\.(?:get|post|patch|put|delete)\(\s*"([^"]+)"/g)].map((m) =>
         m[1].replace(/:[A-Za-z0-9_]+/g, ":param").replace(/\/$/, "")

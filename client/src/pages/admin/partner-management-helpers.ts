@@ -170,7 +170,13 @@ export const PROFILE_FIELD_DEFS: readonly ProfileFieldDef[] = [
   { key: "address_city", label: "Town / city", type: "text", max: 500 },
   { key: "address_postcode", label: "Postcode", type: "text", max: 500 },
   { key: "address_country", label: "Country", type: "text", max: 500 },
-  { key: "health_note", label: "Internal notes", type: "textarea", max: 500, hint: "Internal only — never shown to the partner." },
+  {
+    key: "health_note",
+    label: "Internal notes",
+    type: "textarea",
+    max: 500,
+    hint: "Internal only — never shown to the partner.",
+  },
 ] as const;
 
 export type ProfileValues = Record<string, string>;
@@ -402,7 +408,9 @@ export function canCreateDespiteDuplicates(
 export function duplicateOverrideNote(matches: readonly DuplicateMatch[]): string {
   const soft = overridableDuplicates(matches);
   if (soft.length === 0) return "";
-  const kinds = Array.from(new Set(soft.map((m) => m.kind))).sort().join(", ");
+  const kinds = Array.from(new Set(soft.map((m) => m.kind)))
+    .sort()
+    .join(", ");
   return ` [duplicate override acknowledged: ${kinds}]`;
 }
 
@@ -417,6 +425,12 @@ export interface ChecklistInput {
   locationCount: number;
   hasBranding: boolean;
   hasProfileDetail: boolean;
+  ownerMfaConfigured: boolean;
+  walletConfigured: boolean;
+  creditAvailable: boolean;
+  publicListingConfigured: boolean;
+  publicProfileConfigured: boolean;
+  coordinatesConfigured: boolean;
 }
 
 export type ChecklistState = "done" | "todo" | "unavailable";
@@ -435,11 +449,10 @@ export interface ChecklistItemView {
  * not "owner login created" (an INVITED user cannot log in), and "Invitation sent" must not tick for
  * a DELIVERY_FAILED invitation. The caller is responsible for feeding those distinctions in.
  *
- * HONESTY RULE 2: "Device" and "Credits" have NO data source in the product today — device enrolment is
- * unbuilt and the credit ledger is Gate 4, deliberately not wired. The previous UI rendered them as a
- * permanently unticked circle, which reads as "you still have to do this" when in fact it cannot be
- * done. They are reported as `unavailable` instead, and are EXCLUDED from the percentage so the bar
- * can actually reach 100%. A progress bar that can never complete is a bug, not a motivator.
+ * HONESTY RULE 2: MFA, wallet/credit and public-listing inputs are server-derived from their existing
+ * authoritative sources. Device/station and scanner readiness still have no source, so those two
+ * items remain unavailable and are excluded from completion. A progress bar that can never complete
+ * is a bug, not a motivator; a bar that calls unavailable data complete is worse.
  */
 export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
   const b = (v: boolean): ChecklistState => (v ? "done" : "todo");
@@ -450,8 +463,19 @@ export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
     { key: "location", label: "Grading location", state: b(input.locationCount > 0) },
     { key: "profile", label: "Company profile completed", state: b(input.hasProfileDetail) },
     { key: "branding", label: "Branding configured", state: b(input.hasBranding) },
+    { key: "owner-mfa", label: "Owner MFA configured", state: b(input.ownerMfaConfigured) },
+    { key: "wallet", label: "Partner wallet opened", state: b(input.walletConfigured) },
+    { key: "credits", label: "Grading credits available", state: b(input.creditAvailable) },
+    { key: "public-listing", label: "Public listing created", state: b(input.publicListingConfigured) },
+    { key: "public-profile", label: "Public profile fields added", state: b(input.publicProfileConfigured) },
+    { key: "coordinates", label: "Public map coordinates approved", state: b(input.coordinatesConfigured) },
     { key: "device", label: "Device configured", state: "unavailable", hint: "Device enrolment is not built yet." },
-    { key: "credits", label: "Credits configured", state: "unavailable", hint: "Credit accounting is not enabled yet." },
+    {
+      key: "scanner",
+      label: "Scanner readiness",
+      state: "unavailable",
+      hint: "No tenant-linked scanner telemetry source exists yet.",
+    },
   ];
 }
 

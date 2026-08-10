@@ -180,6 +180,185 @@ interface MigrationFile {
   sql: string;
   checksum: string;
   noTransaction: boolean;
+  /** Per-file override in milliseconds; 0 = wait forever. undefined = use the run default. */
+  lockTimeoutMs?: number;
+}
+
+/**
+ * Default `lock_timeout` for every migration file, in milliseconds.
+ *
+ * WHY (lock-safety review, 2026-08-07): the runner wraps each transaction-safe file in ONE
+ * BEGIN..COMMIT, so every lock a file takes is held for the WHOLE FILE, not the statement.
+ * Measured on a disposable PostgreSQL 17 cluster:
+ *   - 0049 (grading bridge) takes ShareRowExclusive+Share on certificates/submissions/
+ *     submission_items and 9 partner tables. Blocks WRITES only. 13 ms @ 3k rows,
+ *     253 ms @ 600k, ~0.9-1.6 s @ 3M.
+ *   - 0047 (RLS repair) takes ACCESS EXCLUSIVE on partner_owner_invariant_tenants (2.4-7.9 ms).
+ *     Blocks reads AND writes, and a SECURITY INVOKER trigger on partner_users /
+ *     partner_user_roles / partner_organisations writes that table, so partner user
+ *     management stalls behind it too.
+ *   - rollback-0049 takes ACCESS EXCLUSIVE on `certificates` — the table behind PUBLIC
+ *     certificate lookup (~16 ms, does not scale with rows).
+ *
+ * The danger is not the hold time, it is the QUEUE. Proven: with a pre-existing transaction
+ * holding a mere AccessShareLock, an ACCESS EXCLUSIVE request queues — and a plain SELECT
+ * arriving BEHIND that waiter is blocked too. That is the mechanism that turns a 3 ms
+ * migration into an outage: one idle-in-transaction session is enough.
+ *
+ * `lock_timeout` bounds ONLY the wait to ACQUIRE a lock; it never interrupts a statement that
+ * already holds one. So a legitimately slow migration is unaffected — only a CONTENDED one
+ * aborts. Five seconds is long enough to ride out ordinary short transactions and far shorter
+ * than a user-visible outage.
+ *
+ * This is a behaviour change for EVERY future migration: a migration that cannot get its lock
+ * within the timeout now FAILS and ROLLS BACK instead of queueing production traffic behind
+ * itself. That is deliberate and it is the safe default — the failure mode is "re-run it",
+ * which is strictly better than "the site is down and nobody knows why". A migration that
+ * genuinely needs to wait longer must say so explicitly with
+ * `-- migrate:lock-timeout 30s` (or `0` to disable, for an owner-approved maintenance window).
+ */
+const DEFAULT_LOCK_TIMEOUT_MS = 5_000;
+
+const LOCK_TIMEOUT_DIRECTIVE_RE = /^\s*--\s*migrate:lock-timeout\s+(\d+)\s*(ms|s)?\s*$/gim;
+
+/** PostgreSQL SQLSTATE raised when `lock_timeout` expires. */
+const LOCK_NOT_AVAILABLE = "55P03";
+
+/**
+ * Convert a `<N>ms` / `<N>s` duration to milliseconds.
+ *
+ * A UNIT IS MANDATORY for any non-zero value. Rejecting bare numbers is deliberate: a bare `30`
+ * silently meant 30 MILLISECONDS, which aborts essentially every migration, and the author who
+ * wrote it plainly meant 30 seconds. An ambiguous bound is more dangerous than no bound, because
+ * it looks configured. `0` is the one value that needs no unit — zero milliseconds and zero
+ * seconds are the same instruction to PostgreSQL ("wait forever").
+ */
+function durationToMs(raw: string): number | null {
+  const m = /^(\d+)(ms|s)?$/.exec(raw.trim());
+  if (!m) return null;
+  const value = Number(m[1]);
+  if (m[2] === undefined) return value === 0 ? 0 : null; // bare non-zero => ambiguous, reject
+  return m[2] === "s" ? value * 1000 : value;
+}
+
+/**
+ * Parse an optional `-- migrate:lock-timeout <N>ms|<N>s` directive. `0` means "wait forever"
+ * (PostgreSQL's own semantics for lock_timeout = 0) and must be declared deliberately.
+ * More than one directive in a file is a hard error — an ambiguous bound is worse than none.
+ */
+export function parseLockTimeoutDirective(sql: string, filename = "migration"): number | undefined {
+  const matches = [...sql.matchAll(LOCK_TIMEOUT_DIRECTIVE_RE)];
+  if (matches.length === 0) return undefined;
+  if (matches.length > 1) {
+    throw new Error(`Migration ${filename} declares migrate:lock-timeout more than once. Refusing to guess.`);
+  }
+  const ms = durationToMs(`${matches[0][1]}${matches[0][2] ?? ""}`);
+  if (ms === null) {
+    throw new Error(
+      `Migration ${filename} declares migrate:lock-timeout without a unit ('${matches[0][1]}'). ` +
+        "A unit is required: write '30s' or '30000ms'. A bare number was previously read as " +
+        "MILLISECONDS, which is almost never what the author meant."
+    );
+  }
+  return assertSafeTimeoutMs(ms);
+}
+
+/**
+ * `--lock-timeout=<N>s` / `--lock-timeout <N>s` — a run-wide override for an owner-approved
+ * maintenance window. Absent, the run uses DEFAULT_LOCK_TIMEOUT_MS. `0` disables the bound.
+ *
+ * BOTH forms are accepted. The `=`-only version silently ignored `--lock-timeout 30s` and fell
+ * back to the 5 s default with no error at all, so an operator who believed they had widened the
+ * window in a maintenance window had not.
+ */
+export function parseLockTimeoutFlag(argv: readonly string[]): number {
+  const eq = argv.find((a) => a.startsWith("--lock-timeout="));
+  const spaceIdx = argv.indexOf("--lock-timeout");
+  if (eq !== undefined && spaceIdx !== -1) {
+    throw new Error("--lock-timeout was given twice (both '=' and space forms). Refusing to guess.");
+  }
+  let raw: string | undefined;
+  if (eq !== undefined) {
+    raw = eq.slice("--lock-timeout=".length);
+  } else if (spaceIdx !== -1) {
+    raw = argv[spaceIdx + 1];
+    if (raw === undefined || raw.startsWith("--")) {
+      throw new Error("--lock-timeout requires a value, e.g. --lock-timeout 30s.");
+    }
+  } else {
+    return DEFAULT_LOCK_TIMEOUT_MS;
+  }
+  const ms = durationToMs(raw);
+  if (ms === null) {
+    throw new Error(
+      `Invalid --lock-timeout value: '${raw}'. A unit is required — use e.g. --lock-timeout=30s ` +
+        "or --lock-timeout=5000ms (bare numbers are rejected because they were read as milliseconds)."
+    );
+  }
+  return assertSafeTimeoutMs(ms);
+}
+
+/**
+ * `--to=<number>` — apply pending migrations only UP TO and including this migration number.
+ *
+ * WHY THIS EXISTS (hostile review, 2026-08-07): the staging runbook prescribed applying the
+ * release in checkpointed groups, but `migrate.ts --apply` applies EVERY pending file in one run
+ * and there was no selector, so the sequence could not be executed as written. The only
+ * alternative was per-file `psql -f`, which writes no journal row and no checksum and therefore
+ * destroys the ratchet the runner exists to provide.
+ *
+ * This flag deliberately CANNOT reorder or skip. It only truncates the tail of the pending list,
+ * so files are still applied in strict numeric order with no gaps, and the journal stays a
+ * faithful prefix of the migration set. That preserves every existing guarantee while letting an
+ * operator stop at a checkpoint, verify, and continue.
+ */
+export function parseToFlag(argv: readonly string[]): number | undefined {
+  const eq = argv.find((a) => a.startsWith("--to="));
+  const spaceIdx = argv.indexOf("--to");
+  if (eq !== undefined && spaceIdx !== -1) {
+    throw new Error("--to was given twice (both '=' and space forms). Refusing to guess.");
+  }
+  let raw: string | undefined;
+  if (eq !== undefined) raw = eq.slice("--to=".length);
+  else if (spaceIdx !== -1) {
+    raw = argv[spaceIdx + 1];
+    if (raw === undefined || raw.startsWith("--")) throw new Error("--to requires a migration number, e.g. --to=0048.");
+  } else return undefined;
+  if (!/^\d{1,10}$/.test(raw.trim())) {
+    throw new Error(`Invalid --to value: '${raw}'. Give a migration number, e.g. --to=0048.`);
+  }
+  return Number(raw.trim());
+}
+
+/** Guard every value that reaches a `SET` statement — SET does not accept bind parameters. */
+function assertSafeTimeoutMs(ms: number): number {
+  if (!Number.isInteger(ms) || ms < 0 || ms > 3_600_000) {
+    throw new Error(`Refusing to apply an out-of-range lock_timeout: ${String(ms)}`);
+  }
+  return ms;
+}
+
+/**
+ * `-- migrate:no-transaction` must be a comment line on its OWN, with nothing after it.
+ *
+ * WHY ANCHORED (hostile review, 2026-08-07): the previous detector was an unanchored whole-file
+ * search, so it matched the directive's own NAME anywhere in prose. Measured:
+ * migrations/0022_print_workflow_lifecycle.sql:4-5 explains that it needs "no CONCURRENTLY, no
+ * migrate:no-transaction directive needed" — and because that sentence wraps, line 5 begins
+ * `-- migrate:no-transaction directive needed).`. The detector returned TRUE, silently taking a
+ * 12-statement DDL migration (including ALTER TABLE certificates ADD COLUMN NOT NULL DEFAULT and
+ * a backfill) OUT of the runner's transaction.
+ *
+ * That file's atomicity survived only because node-postgres sends a multi-statement string over
+ * the SIMPLE query protocol, where PostgreSQL wraps it in an implicit transaction. That is a
+ * driver property, not a design property: it evaporates the moment such a file contains an
+ * explicit COMMIT or a CONCURRENTLY statement. A migration must opt out of the transaction
+ * deliberately, never by writing about the directive.
+ */
+const NO_TRANSACTION_DIRECTIVE_RE = /^[ \t]*--[ \t]*migrate:no-transaction[ \t]*$/im;
+
+export function hasNoTransactionDirective(sql: string): boolean {
+  return NO_TRANSACTION_DIRECTIVE_RE.test(sql);
 }
 
 const ENSURE_VALID_CONCURRENT_INDEX_RE =
@@ -279,7 +458,8 @@ export function listMigrationFiles(dir: string = MIGRATIONS_DIR): MigrationFile[
         path,
         sql,
         checksum: sha256(sql),
-        noTransaction: /--\s*migrate:no-transaction/i.test(sql),
+        noTransaction: hasNoTransactionDirective(sql),
+        lockTimeoutMs: parseLockTimeoutDirective(sql, filename),
       };
     })
     // Deterministic NUMERIC ordering by the integer prefix (not lexical), then filename as a
@@ -350,7 +530,59 @@ export interface MigratePlan {
   alreadyApplied: string[];
   checksumMismatches: { filename: string; storedChecksum: string; currentChecksum: string }[];
   inconsistent: { filename: string; status: string }[]; // rows left in a non-'applied' state
+  /**
+   * Rows left in a non-'applied' state that the runner can PROVE it is able to repair, and will
+   * retry automatically. See isSelfHealing.
+   */
+  resumable: { filename: string; status: string }[];
   destructive: { filename: string; findings: ReturnType<typeof lintSql> }[];
+}
+
+/**
+ * Select the gap-free pending prefix an operator requested with `--to`.
+ *
+ * This selection is also the authority boundary for the destructive-SQL gate. A later migration
+ * must not require an owner to waive its destructive check merely to execute an earlier,
+ * non-destructive checkpoint; when that later migration is selected, the gate still applies.
+ */
+export function selectPendingMigrations(
+  pending: readonly string[],
+  files: readonly Pick<MigrationFile, "filename" | "number">[],
+  toNumber?: number
+): string[] {
+  if (toNumber === undefined) return [...pending];
+  const byName = new Map(files.map((f) => [f.filename, f]));
+  // `files` and `pending` come from the same immutable plan; fail closed rather than treating an
+  // unexpected missing file as eligible.
+  return pending.filter((name) => {
+    const file = byName.get(name);
+    if (!file) throw new Error(`Pending migration ${name} is absent from the discovered migration set.`);
+    return Number(file.number) <= toNumber;
+  });
+}
+
+/**
+ * Can the runner recover this file from a half-finished state WITHOUT a human inspecting the
+ * database?
+ *
+ * Only one shape qualifies: a `migrate:no-transaction` file that also declares
+ * `migrate:ensure-valid-concurrent-index`. For that shape the post-state is not unknown — the
+ * runner reads `pg_index.indisvalid`, drops an invalid index with DROP INDEX CONCURRENTLY,
+ * rebuilds it, and re-checks `indisvalid` before recording the migration as applied. Everything
+ * else stays fatal, because a partially-applied arbitrary SQL file genuinely IS unknown state and
+ * fail-closed is right.
+ *
+ * WHY THIS MATTERS (hostile review, 2026-08-07): only the no-transaction path ever writes an
+ * 'applying' row as a separate autocommit statement, so only the no-transaction path can leave a
+ * non-'applied' row behind. A transaction-safe file inserts its journal row INSIDE its own
+ * transaction, so it either commits as 'applied' or leaves no row at all. That means the
+ * inconsistent-journal guard was, in practice, firing exclusively on files the runner already had
+ * a verified repair for — and the guard fired BEFORE the repair could run, making the repair dead
+ * code. A routine lock-contention event therefore jammed the journal permanently, and recovery
+ * required a manual UPDATE/DELETE on schema_migrations — a protected action, during an incident.
+ */
+function isSelfHealing(f: MigrationFile): boolean {
+  return f.noTransaction && ensureValidConcurrentIndexTarget(f.sql) !== null;
 }
 
 /** Read-only planning: never mutates the database (does not create the journal table). */
@@ -361,6 +593,7 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
     alreadyApplied: [],
     checksumMismatches: [],
     inconsistent: [],
+    resumable: [],
     destructive: [],
   };
   for (const f of files) {
@@ -370,7 +603,15 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
       const findings = lintSql(f.sql);
       if (findings.length > 0) plan.destructive.push({ filename: f.filename, findings });
     } else if (row.status !== "applied") {
-      plan.inconsistent.push({ filename: f.filename, status: row.status });
+      // A stale row is only resumable if the runner can repair it AND the file has not changed
+      // since the attempt that left it behind. A checksum drift here means we would be
+      // "resuming" a different file, which is a checksum mismatch, not a resume.
+      if (isSelfHealing(f) && row.checksum === f.checksum) {
+        plan.resumable.push({ filename: f.filename, status: row.status });
+        plan.pending.push(f.filename);
+      } else {
+        plan.inconsistent.push({ filename: f.filename, status: row.status });
+      }
     } else if (row.checksum !== f.checksum) {
       plan.checksumMismatches.push({ filename: f.filename, storedChecksum: row.checksum, currentChecksum: f.checksum });
     } else {
@@ -380,11 +621,70 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
   return plan;
 }
 
+const FIND_THE_BLOCKER =
+  "Find the blocker (SELECT pid, state, query, state_change FROM pg_stat_activity " +
+  "WHERE state <> 'idle' OR xact_start IS NOT NULL), clear it or wait for a quieter moment, " +
+  "then re-run. Only raise the timeout with `-- migrate:lock-timeout <N>s` (or --lock-timeout) " +
+  "inside an agreed maintenance window.";
+
+/**
+ * Turn a raw driver error into something an operator can act on.
+ *
+ * MUST BE PATH-AWARE (hostile review, 2026-08-07). This function is shared by both branches of
+ * the apply loop, and the original text asserted "Nothing was applied and the transaction was
+ * rolled back" unconditionally. On the `migrate:no-transaction` path that sentence is simply
+ * FALSE: there is no transaction to roll back, statements before the failure have already
+ * committed, and a failed CREATE INDEX CONCURRENTLY leaves an INVALID index behind — which
+ * PostgreSQL maintains on every write and never uses for reads, i.e. all of the cost and none of
+ * the benefit. Telling an operator "nothing was applied" in that state is worse than saying
+ * nothing at all.
+ */
+export function describeMigrationFailure(
+  e: unknown,
+  ctx: { lockTimeoutMs: number; transactional: boolean; selfHealing?: boolean; indexName?: string }
+): string {
+  const err = e as { code?: string; message?: string };
+  const message = err?.message ?? String(e);
+  if (err?.code !== LOCK_NOT_AVAILABLE) return message;
+
+  const preamble = `${message} — lock_timeout (${ctx.lockTimeoutMs} ms) expired while WAITING for a lock.`;
+
+  if (ctx.transactional) {
+    return (
+      `${preamble} Nothing was applied and the transaction was rolled back — no journal row was ` +
+      `written, so re-running is clean. This is the guard working: a conflicting session held a ` +
+      `lock, and continuing to wait would have queued live traffic behind this migration. ` +
+      FIND_THE_BLOCKER
+    );
+  }
+
+  // Non-transactional path: be exact about what may survive.
+  const index = ctx.indexName ? ` (${ctx.indexName})` : "";
+  const residue =
+    `This migration ran OUTSIDE a transaction (migrate:no-transaction), so there was no ` +
+    `transaction to roll back: any statement that completed before the timeout HAS taken effect, ` +
+    `and a failed CREATE INDEX CONCURRENTLY leaves an INVALID index${index} behind. PostgreSQL ` +
+    `maintains an invalid index on every write and never uses it for reads.`;
+
+  const recovery = ctx.selfHealing
+    ? `The journal row is marked 'failed'. This file declares migrate:ensure-valid-concurrent-index, ` +
+      `so the runner will REPAIR it automatically on the next run: it drops the invalid index with ` +
+      `DROP INDEX CONCURRENTLY, rebuilds it, and verifies indisvalid before recording the migration ` +
+      `as applied. No manual journal edit is needed — clear the blocker and re-run the same command.`
+    : `The journal row is marked 'failed' and this file does NOT declare ` +
+      `migrate:ensure-valid-concurrent-index, so the runner cannot prove what survived and will ` +
+      `refuse to continue until the row is resolved by hand. Inspect the database state against ` +
+      `the file before doing anything — editing schema_migrations is a protected action.`;
+
+  return `${preamble} ${residue} ${recovery} ${FIND_THE_BLOCKER}`;
+}
+
 export async function applyMigrations(
   client: PgClientLike,
   files: MigrationFile[],
-  opts: { allowDestructive?: boolean } = {}
+  opts: { allowDestructive?: boolean; lockTimeoutMs?: number; toNumber?: number } = {}
 ): Promise<{ applied: string[] }> {
+  const runLockTimeoutMs = assertSafeTimeoutMs(opts.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS);
   // Serialise concurrent runners: a second runner fails fast instead of double-applying.
   // Capture the backend identity FIRST, so lock ownership can be proven against a specific
   // server process rather than assumed from a boolean.
@@ -441,7 +741,10 @@ export async function applyMigrations(
       throw new Error(
         `Journal inconsistent — rows not in 'applied' state (crashed run?): ${plan.inconsistent
           .map((i) => `${i.filename}=${i.status}`)
-          .join(", ")}. Resolve manually before proceeding.`
+          .join(", ")}. These are NOT self-repairable (they either ran outside a transaction ` +
+          `without migrate:ensure-valid-concurrent-index, or the file changed since the attempt), ` +
+          `so the runner cannot prove what survived. Inspect the database against the file before ` +
+          `touching schema_migrations — editing the journal is a protected action.`
       );
     }
     if (plan.checksumMismatches.length > 0) {
@@ -451,8 +754,13 @@ export async function applyMigrations(
           .join(", ")}. A migration was edited after being applied. Refusing to proceed.`
       );
     }
+    const byName = new Map(files.map((f) => [f.filename, f]));
+    // `--to=<n>` truncates the tail of the pending list. It can never reorder or skip, so the
+    // journal stays a faithful, gap-free prefix of the migration set.
+    const pending = selectPendingMigrations(plan.pending, files, opts.toNumber);
+    const selectedPending = new Set(pending);
     if (!opts.allowDestructive) {
-      const blocking = plan.destructive.filter((d) => hasBlocking(d.findings));
+      const blocking = plan.destructive.filter((d) => selectedPending.has(d.filename) && hasBlocking(d.findings));
       if (blocking.length > 0) {
         throw new Error(
           `Destructive SQL detected in pending migration(s): ${blocking
@@ -461,33 +769,69 @@ export async function applyMigrations(
         );
       }
     }
+    if (plan.resumable.length > 0) {
+      console.log(
+        `↻ Resuming ${plan.resumable.length} self-healing migration(s) left mid-run: ` +
+          `${plan.resumable.map((r) => `${r.filename}=${r.status}`).join(", ")}. ` +
+          "Each declares migrate:ensure-valid-concurrent-index, so the runner repairs the index " +
+          "and verifies indisvalid before recording it as applied."
+      );
+    }
     const applied: string[] = [];
-    const byName = new Map(files.map((f) => [f.filename, f]));
-    for (const filename of plan.pending) {
+    if (opts.toNumber !== undefined) {
+      const held = plan.pending.length - pending.length;
+      console.log(
+        `⏸ --to=${opts.toNumber}: applying ${pending.length} of ${plan.pending.length} pending migration(s)` +
+          (held > 0 ? `, holding back ${held} for a later run.` : ".")
+      );
+    }
+    for (const filename of pending) {
       // Re-prove exclusivity before EVERY file. If the connection were ever replaced or
       // recycled mid-run (the pooled-multiplexing hazard), the run stops between files
       // rather than applying the remainder without a provable lock.
       await assertLockOwned(`before ${filename}`);
       const f = byName.get(filename)!;
+      const fileLockTimeoutMs = assertSafeTimeoutMs(f.lockTimeoutMs ?? runLockTimeoutMs);
       if (f.noTransaction) {
         // Non-transactional migration (e.g. CREATE INDEX CONCURRENTLY): cannot run in a txn.
         // Record intent, run, then mark complete. Must be individually idempotent.
         await client.query(
-          "INSERT INTO schema_migrations (filename, checksum, status) VALUES ($1,$2,'applying') ON CONFLICT (filename) DO UPDATE SET status='applying', started_at=now()",
+          // checksum is refreshed on conflict too: a resumed row must never keep a stale checksum
+          // from an earlier attempt, or a later run would compare against the wrong file.
+          "INSERT INTO schema_migrations (filename, checksum, status) VALUES ($1,$2,'applying') ON CONFLICT (filename) DO UPDATE SET status='applying', checksum=EXCLUDED.checksum, started_at=now()",
           [f.filename, f.checksum]
         );
         try {
-          await applyNonTransactionalMigration(client, f);
+          // No enclosing transaction here, so SET LOCAL would be a no-op: set the GUC at
+          // session scope and put it back afterwards, whatever happens.
+          await client.query(`SET lock_timeout = ${fileLockTimeoutMs}`);
+          try {
+            await applyNonTransactionalMigration(client, f);
+          } finally {
+            await client.query("SET lock_timeout = DEFAULT");
+          }
           await client.query("UPDATE schema_migrations SET status='applied', completed_at=now() WHERE filename=$1", [
             f.filename,
           ]);
         } catch (e) {
           await client.query("UPDATE schema_migrations SET status='failed' WHERE filename=$1", [f.filename]);
-          throw new Error(`Non-transactional migration ${f.filename} failed: ${(e as Error).message}`);
+          throw new Error(
+            `Non-transactional migration ${f.filename} failed: ${describeMigrationFailure(e, {
+              lockTimeoutMs: fileLockTimeoutMs,
+              transactional: false,
+              selfHealing: isSelfHealing(f),
+              indexName: ensureValidConcurrentIndexTarget(f.sql)?.qualifiedName,
+            })}`
+          );
         }
       } else {
         await client.query("BEGIN");
         try {
+          // Bound the wait to ACQUIRE every lock this file takes. SET LOCAL is scoped to this
+          // transaction and is discarded at COMMIT/ROLLBACK, so it cannot leak into the
+          // journal write or the next file. It never interrupts a statement that already
+          // holds its locks — only a CONTENDED acquisition aborts.
+          await client.query(`SET LOCAL lock_timeout = ${fileLockTimeoutMs}`);
           await client.query(f.sql);
           await client.query(
             "INSERT INTO schema_migrations (filename, checksum, status, completed_at) VALUES ($1,$2,'applied',now())",
@@ -496,7 +840,12 @@ export async function applyMigrations(
           await client.query("COMMIT");
         } catch (e) {
           await client.query("ROLLBACK");
-          throw new Error(`Migration ${f.filename} failed and was rolled back: ${(e as Error).message}`);
+          throw new Error(
+            `Migration ${f.filename} failed and was rolled back: ${describeMigrationFailure(e, {
+              lockTimeoutMs: fileLockTimeoutMs,
+              transactional: true,
+            })}`
+          );
         }
       }
       applied.push(f.filename);
@@ -526,6 +875,16 @@ async function main(): Promise<void> {
   }
   const apply = process.argv.includes("--apply");
   const allowDestructive = process.argv.includes("--allow-destructive");
+  let lockTimeoutMs: number;
+  let toNumber: number | undefined;
+  try {
+    lockTimeoutMs = parseLockTimeoutFlag(process.argv);
+    toNumber = parseToFlag(process.argv);
+  } catch (e) {
+    console.error(`🚫 ${(e as Error).message}`);
+    process.exit(2);
+    return;
+  }
   const { Client } = await import("pg");
   // The lock-owning session must be a dedicated backend — see resolveMigrationEndpoint.
   // Throws rather than falling back to a pooled connection.
@@ -569,8 +928,15 @@ async function main(): Promise<void> {
     const plan = await planMigrations(client as unknown as PgClientLike, files);
     console.log(
       `Migrations: ${files.length} total, ${plan.alreadyApplied.length} applied, ${plan.pending.length} pending, ` +
-        `${plan.inconsistent.length} inconsistent, ${plan.checksumMismatches.length} checksum-mismatch.`
+        `${plan.resumable.length} resumable, ${plan.inconsistent.length} inconsistent, ` +
+        `${plan.checksumMismatches.length} checksum-mismatch.`
     );
+    if (plan.resumable.length > 0) {
+      console.log(
+        `↻ Resumable (self-healing, will be repaired automatically): ` +
+          plan.resumable.map((r) => `${r.filename}=${r.status}`).join(", ")
+      );
+    }
     if (plan.inconsistent.length > 0) {
       console.error(`🚫 Journal inconsistent: ${plan.inconsistent.map((i) => `${i.filename}=${i.status}`).join(", ")}`);
       process.exit(1);
@@ -587,7 +953,15 @@ async function main(): Promise<void> {
       console.log(`(dry-run) pending: ${plan.pending.join(", ") || "none"}. Re-run with --apply to execute.`);
       process.exit(0);
     }
-    const { applied } = await applyMigrations(client as unknown as PgClientLike, files, { allowDestructive });
+    console.log(
+      `🔒 lock_timeout for this run: ${lockTimeoutMs === 0 ? "DISABLED (will wait forever)" : `${lockTimeoutMs} ms`}` +
+        " (per-file `-- migrate:lock-timeout` overrides this)"
+    );
+    const { applied } = await applyMigrations(client as unknown as PgClientLike, files, {
+      allowDestructive,
+      lockTimeoutMs,
+      toNumber,
+    });
     console.log(`✓ Applied ${applied.length}: ${applied.join(", ") || "none"}`);
   } finally {
     await client.end();

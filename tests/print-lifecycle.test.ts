@@ -90,7 +90,10 @@ describe("Printed status", () => {
     expect(nextState("printing", "mark_printed", { batchKind: "batch" })).toMatchObject({ ok: true, to: "printed" });
   });
   it("mark_printed on a reprint batch → reprinted", () => {
-    expect(nextState("printing", "mark_printed", { batchKind: "reprint" })).toMatchObject({ ok: true, to: "reprinted" });
+    expect(nextState("printing", "mark_printed", { batchKind: "reprint" })).toMatchObject({
+      ok: true,
+      to: "reprinted",
+    });
   });
   it("cannot mark printed unless currently printing", () => {
     for (const s of ["needs_printing", "printed", "completed", "awaiting_approval"] as PrintState[]) {
@@ -182,6 +185,12 @@ describe("Permissions", () => {
     }
     expect(canPerform("complete", "staff_print")).toBe(false);
   });
+  it("partner_print can complete only through its separately constrained Partner adapter", () => {
+    expect(canPerform("create_batch", "partner_print")).toBe(true);
+    expect(canPerform("mark_printed", "partner_print")).toBe(true);
+    expect(canPerform("complete", "partner_print")).toBe(true);
+    expect(canPerform("reprint", "partner_print")).toBe(false);
+  });
   it("staff_readonly can do no mutating action", () => {
     for (const a of ["create_batch", "print_all_ready", "mark_printed", "reprint", "complete"] as const) {
       expect(canPerform(a, "staff_readonly")).toBe(false);
@@ -198,7 +207,15 @@ describe("Queue filters", () => {
   const BEFORE = DAY_START - 3600_000;
 
   it("exposes exactly the brief filters incl. Printing/In Progress", () => {
-    expect([...PRINT_QUEUE_FILTERS]).toEqual(["needs_printing", "printing", "printed_today", "printed", "reprints", "completed", "all"]);
+    expect([...PRINT_QUEUE_FILTERS]).toEqual([
+      "needs_printing",
+      "printing",
+      "printed_today",
+      "printed",
+      "reprints",
+      "completed",
+      "all",
+    ]);
   });
   it("Needs Printing shows only needs_printing", () => {
     expect(matchesFilter({ state: "needs_printing", printedAtMs: null }, "needs_printing", DAY_START)).toBe(true);

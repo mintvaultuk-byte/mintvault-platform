@@ -1,0 +1,12 @@
+{
+  "capturedAt": "2026-08-10T09:00:22Z",
+  "branch": "codex/mintvault-final-product-integration",
+  "commit": "cb70672181909bf90a3ceece3d329a9191727bd1",
+  "governanceVersion": "1.1",
+  "hashes": {
+    "governance-version.md": "c9504b22a066afbfc219bd85a76f7f9aaab756462bfccb63b1a416ef94c34207",
+    "governance-changelog.md": "549f742103db9df1cc8daff50b9de04d2f289ee77e53d3a67b0cad4cf4658833",
+    "controlled-code-lead/SKILL.md": "8df2dd4059c9f975d99e62bed70f1cff7fa0d11d5cf5cb698462b7afe801fced",
+    "protected-systems.md": "d582f96598ba278d39b467b84a4d89a66fdc1bcbea07e7c74ab2974636ffdaf3"
+  }
+}

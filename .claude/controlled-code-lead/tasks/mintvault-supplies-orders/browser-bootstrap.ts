@@ -1,0 +1,221 @@
+/** Local-only browser proof fixture. Run with SUPPLY_BROWSER_DATABASE_URL set to a disposable
+ * loopback database. It deliberately uses the repository's realistic migration helpers rather
+ * than a hand-written schema; all identities and credentials are synthetic. */
+import { Client } from "pg";
+import bcrypt from "bcryptjs";
+import {
+  applyEveryMigrationRealistic,
+  createMintvaultCertificatesTable,
+  createMintvaultLabelPrintsTable,
+  migratorUrlFrom,
+  provisionRealisticRoles,
+} from "../../../../tests/helpers/partner-realistic-db";
+
+const url = process.env.SUPPLY_BROWSER_DATABASE_URL;
+if (!url) throw new Error("SUPPLY_BROWSER_DATABASE_URL is required for this local-only proof fixture.");
+
+async function main(): Promise<void> {
+  const [adminPassphraseHash, adminPinHash, partnerPasswordHash] = await Promise.all([
+    bcrypt.hash("MintVaultLocalAdmin!2026", 12),
+    bcrypt.hash("682947", 12),
+    bcrypt.hash("MintVaultLocalPartner!2026", 12),
+  ]);
+  const admin = new Client({ connectionString: url });
+  await admin.connect();
+  try {
+    await provisionRealisticRoles(admin);
+    await createMintvaultCertificatesTable(admin);
+    await admin.query(`CREATE TABLE users (
+      id varchar primary key default gen_random_uuid(), email varchar unique, first_name varchar, last_name varchar,
+      profile_image_url varchar, role varchar(20) not null default 'customer', deleted_at timestamptz,
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now(), password_hash text,
+      display_name text, email_verified boolean not null default false, email_verified_at timestamptz, last_login_at timestamptz,
+      last_login_ip text, failed_login_count integer not null default 0, locked_until timestamptz, last_failed_login_at timestamptz,
+      credential_version integer not null default 1, admin_passphrase_hash text, pin_hash text, pin_set_at timestamptz,
+      pin_failed_count integer not null default 0, pin_locked_until timestamptz, public_name boolean not null default false,
+      can_grade boolean not null default false, can_scan boolean not null default false, can_print boolean not null default false,
+      can_edit_sets boolean not null default false, review_rate integer not null default 100
+    )`);
+    await admin.query(`CREATE TABLE submissions (
+      id serial primary key, user_id varchar, status varchar(30) not null default 'draft', tracking_number text unique,
+      deleted_at timestamptz, grading_status varchar(30), assigned_grader_id varchar, scan_status varchar(30),
+      scan_assigned_to varchar, shipped_at timestamptz, delivered_at timestamptz, completed_at timestamptz,
+      return_tracking text, return_carrier text, return_service text, status_history jsonb not null default '[]'::jsonb,
+      updated_at timestamptz not null default now()
+    )`);
+    await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
+    await createMintvaultLabelPrintsTable(admin);
+    await admin.query(`CREATE TABLE audit_log (
+      id serial primary key, entity_type text not null, entity_id text not null, action text not null,
+      admin_user text, details jsonb, created_at timestamptz not null default now()
+    )`);
+    for (const table of ["users", "submissions", "submission_items", "label_prints", "audit_log", "certificates"]) {
+      await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
+    }
+    const migrator = new Client({ connectionString: migratorUrlFrom(url) });
+    await migrator.connect();
+    try {
+      await applyEveryMigrationRealistic(migrator);
+    } finally {
+      await migrator.end();
+    }
+    await admin.query(
+      "CREATE TABLE session (sid varchar NOT NULL PRIMARY KEY, sess json NOT NULL, expire timestamptz NOT NULL)"
+    );
+    await admin.query("CREATE INDEX session_expire_idx ON session (expire)");
+    await admin.query(
+      `INSERT INTO users (id, email, role, admin_passphrase_hash, pin_hash, pin_set_at)
+      VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'mintvaultuk@gmail.com', 'admin', $1, $2, now())`,
+      [adminPassphraseHash, adminPinHash]
+    );
+    await admin.query(`INSERT INTO partner_organisations (id, public_ref, legal_name, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'browser-supply-org', 'Browser Supply Shop Ltd', 'ACTIVE')`);
+    await admin.query(`INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, address, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001', 'browser-supply-location',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'Browser Supply Shop', '10 Proof Street, Bristol, BS1 4AA', 'ACTIVE')`);
+    await admin.query(`INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, address, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0004', 'browser-supply-no-coordinate-location',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'Browser Text-Only Shop', '20 Proof Street, Bristol, BS1 4AB', 'ACTIVE')`);
+    // Deliberately unlisted: Super Admin browser proof uses the authoritative location chooser to
+    // create this location's DRAFT listing, then moves it through one audited lifecycle transition.
+    await admin.query(`INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, address, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0005', 'browser-supply-draft-location',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'Browser Draft Shop', '30 Proof Street, Bristol, BS1 4AC', 'ACTIVE')`);
+    await admin.query(
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002', 'browser-supply-owner',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'owner@browser-supply.test', $1, 'SUSPENDED')`,
+      [partnerPasswordHash]
+    );
+    await admin.query(`INSERT INTO partner_user_locations (tenant_id, user_id, location_id)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001')`);
+    await admin.query(`INSERT INTO partner_user_roles (tenant_id, user_id, role_id)
+      SELECT 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002', id
+        FROM partner_roles WHERE code='PARTNER_OWNER'`);
+    // Activate only once its owner role exists so the database-level final-owner invariant is
+    // exercised in the same way as a real invitation acceptance.
+    await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002'");
+    // Phase 27 readiness proof needs a factor STATE, never factor material. This synthetic handle
+    // is local fixture data only; the Super Admin readiness DTO must return only `mfaConfigured`.
+    await admin.query(`INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002',
+              'totp', 'local-browser-fixture-factor', 'ACTIVE')`);
+    // A ledger-derived credit position exercises the actual Partner Dashboard/readiness source.
+    // It is deliberately direct local fixture data, not a browser-supplied price or live payment.
+    await admin.query(`INSERT INTO partner_wallets (tenant_id)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      ON CONFLICT (tenant_id) DO NOTHING`);
+    await admin.query(`INSERT INTO partner_credit_ledger
+      (wallet_id, tenant_id, amount, entry_type, idempotency_key, source, reason, actor_type, metadata, request_fingerprint)
+      SELECT id, tenant_id, 25, 'admin_adjustment', 'browser-readiness-credit-25', 'admin',
+             'Synthetic local browser readiness credit', 'admin', '{}'::jsonb, repeat('a', 64)
+        FROM partner_wallets
+       WHERE tenant_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`);
+    // A deterministic Stripe-shaped ledger row proves the Super Admin purchase-history projection
+    // without a provider call. Real Checkout/webhook semantics stay covered by their own local
+    // service and HTTP tests; this is only browser fixture data in a disposable database.
+    await admin.query(`INSERT INTO partner_credit_ledger
+      (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
+       actor_type, external_ref, metadata, request_fingerprint)
+      SELECT id, tenant_id, 10, 'purchase', 'stripe-evt:browser-credit-purchase', 'cs_browser_credit_purchase',
+             'stripe', 'Stripe credit package purchase (10 grading credits)', 'service', 'pi_browser_credit_purchase',
+             '{"package_id":"credits-10","credits":10,"amount_paid_pence":10000,"currency":"gbp","stripe_session_id":"cs_browser_credit_purchase","stripe_payment_intent":"pi_browser_credit_purchase"}'::jsonb,
+             repeat('b', 64)
+        FROM partner_wallets
+       WHERE tenant_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`);
+    await admin.query(
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003', 'browser-supply-finance',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'finance@browser-supply.test', $1, 'SUSPENDED')`,
+      [partnerPasswordHash]
+    );
+    await admin.query(`INSERT INTO partner_user_locations (tenant_id, user_id, location_id)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001')`);
+    await admin.query(`INSERT INTO partner_user_roles (tenant_id, user_id, role_id)
+      SELECT 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003', id
+        FROM partner_roles WHERE code='PARTNER_FINANCE_VIEWER'`);
+    await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003'");
+    await admin.query(`INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES
+      (NULL, 'partner_portal_enabled', true), (NULL, 'partner_login_enabled', true),
+      (NULL, 'partner_public_network_enabled', true),
+      (NULL, 'partner_emergency_stop', false)`);
+    // The public reader may see this one approved, active location through the projection only.
+    // It makes browser map proof deterministic without teaching the Partner fixture any public
+    // identity/address/coordinate mutation capability.
+    await admin.query(`INSERT INTO partner_public_listings
+      (tenant_id, location_id, slug, public_display_name, trading_name_snapshot,
+       address_line_1, town_city, county, postcode, country, latitude, longitude,
+       public_phone, public_email, public_website, public_opening_info, public_description,
+       listing_status, approved_at, approved_by, public_since, verified_at, verified_by)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001',
+              'browser-supply-shop', 'Browser Supply Shop', 'Browser Supply Shop Ltd',
+              '10 Proof Street', 'Bristol', 'Bristol', 'BS1 4AA', 'GB', 51.4545, -2.5879,
+              '+441170000000', 'hello@browser-supply.test', 'https://browser-supply.test',
+              'Mon–Fri, 9am–5pm', 'A deterministic local-only public listing for browser proof.',
+              'ACTIVE', now(), 'local-browser-fixture', now(), now(), 'local-browser-fixture')`);
+    await admin.query(`INSERT INTO partner_public_listings
+      (tenant_id, location_id, slug, public_display_name, trading_name_snapshot,
+       address_line_1, town_city, county, postcode, country,
+       listing_status, approved_at, approved_by, public_since, verified_at, verified_by)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0004',
+              'browser-text-only-shop', 'Browser Text-Only Shop', 'Browser Supply Shop Ltd',
+              '20 Proof Street', 'Bristol', 'Bristol', 'BS1 4AB', 'GB',
+              'ACTIVE', now(), 'local-browser-fixture', now(), now(), 'local-browser-fixture')`);
+    await admin.query(
+      "UPDATE partner_supply_products SET active_price_pence=2000 WHERE code='holographic_printing_paper'"
+    );
+    // A paid, server-shaped local fixture lets the browser prove both Partner history and the
+    // Super Admin operational transitions without contacting Stripe. Provider payment/refund
+    // effects are proven separately by the real-PostgreSQL service contract test.
+    await admin.query(`INSERT INTO partner_supply_orders
+      (id, tenant_id, location_id, idempotency_key, status, delivery_address, gross_total_pence,
+       tax_treatment, submitted_by_user_id, paid_at)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0011', 'PAID',
+              '{"source":"approved_location","locationName":"Browser Supply Shop","address":"10 Proof Street, Bristol, BS1 4AA"}'::jsonb,
+              7500, 'UNCONFIGURED', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002', now())`);
+    await admin.query(`INSERT INTO partner_supply_order_items
+      (tenant_id, order_id, product_code, product_name_snapshot, units_per_pack_snapshot, quantity,
+       gross_unit_price_pence, gross_line_total_pence)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010',
+              'plastic_mintvault_slab_box', 'Plastic MintVault slabs', 50, 1, 7500, 7500)`);
+    await admin.query(`INSERT INTO partner_supply_payments
+      (tenant_id, order_id, stripe_checkout_session_id, stripe_payment_intent_id, status,
+       gross_total_pence, tax_treatment, paid_at)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010',
+              'cs_browser_paid_1', 'pi_browser_paid_1', 'PAID', 7500, 'UNCONFIGURED', now())`);
+    await admin.query(`INSERT INTO partner_supply_order_events
+      (tenant_id, order_id, action, actor_type, actor_user_id, actor_email, details)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010',
+              'stripe_payment_confirmed', 'stripe_webhook', NULL, NULL, '{"event_id":"evt_browser_paid_1"}'::jsonb)`);
+    // Roles are PostgreSQL-cluster-wide while this fixture database is deliberately fresh per
+    // browser run. Make the restricted local-only role reusable so a previous disposable proof
+    // cannot prevent a later fresh database from bootstrapping.
+    await admin.query(`DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='supply_browser_runtime') THEN
+          CREATE ROLE supply_browser_runtime LOGIN PASSWORD 'synthetic-browser-runtime' NOSUPERUSER NOBYPASSRLS INHERIT;
+        END IF;
+      END$$`);
+    await admin.query("GRANT partner_runtime TO supply_browser_runtime");
+    await admin.query("GRANT partner_public_reader TO supply_browser_runtime");
+  } finally {
+    await admin.end();
+  }
+}
+
+main().then(
+  () => console.log("local browser database ready"),
+  (error) => {
+    console.error(error);
+    process.exitCode = 1;
+  }
+);

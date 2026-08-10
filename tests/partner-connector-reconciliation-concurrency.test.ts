@@ -22,14 +22,23 @@
  *
  * Runs ONLY when PARTNER_CONNECTOR_RECON_LOAD_RT_ADMIN + PARTNER_CONNECTOR_RECON_LOAD_RT_URL are set.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G3F,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
+
+vi.mock("../server/r2", () => ({
+  headR2: vi.fn(async () => ({
+    lastModified: new Date("2026-08-05T00:00:00.000Z"),
+    contentLength: 1024,
+    contentType: "image/jpeg",
+    eTag: '"load-fixture"',
+  })),
+}));
 
 const ADMIN = process.env.PARTNER_CONNECTOR_RECON_LOAD_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_RECON_LOAD_RT_URL;
@@ -79,9 +88,33 @@ async function seedMintVaultTables(): Promise<void> {
     declared_value integer DEFAULT 0, declared_new boolean DEFAULT false, notes text,
     created_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY, certificate_number text, cert_id text, card_id integer, submission_item_id integer,
+    status text, label_type text, grade_type text, language text, card_game text, set_name text,
+    card_name text, card_number_display text, year_text text, variant text, front_image_path text,
+    back_image_path text, grading_front_original text, grading_back_original text, created_by text,
+    issued_at timestamptz, updated_at timestamptz, reference_number text, logbook_version integer,
+    logbook_last_issued_at timestamptz, integrity_hash text, print_state text, grader_status text,
+    origin_type text, origin_partner_id uuid, origin_partner_public_ref text, origin_partner_legal_name text,
+    origin_partner_trading_name text, origin_location_id uuid, origin_location_public_ref text,
+    origin_location_name text, origin_location_address text, origin_captured_at timestamptz,
+    origin_snapshot_version integer
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+    id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+    admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+    id integer PRIMARY KEY DEFAULT 1,
+    last_issued integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
   await admin.query("ALTER TABLE users OWNER TO pn_migrator");
   await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
   await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE certificates OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE audit_log OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE cert_counter OWNER TO pn_migrator");
 }
 
 async function seedTenant(): Promise<void> {
@@ -119,10 +152,18 @@ async function seedReadyForImport(claimant: string): Promise<{ connectorId: stri
      VALUES ($1,$2,$3,$4,$5,'standard',1500,1,'submitted_to_mintvault')`,
     [subId, A, L1, U1, custId]
   );
+  const cardId = uuid(seq + 400_000);
   await admin.query(
-    `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity)
-     VALUES ($1,$2,1,'Load Card',1000,1)`,
-    [A, subId]
+    `INSERT INTO partner_submission_cards
+       (id, tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity, front_image_key, back_image_key)
+     VALUES ($1,$2,$3,1,'Load Card',1000,1,$4,$5)`,
+    [
+      cardId,
+      A,
+      subId,
+      `partner-submissions/${A}/${subId}/${cardId}/front-seed.jpg`,
+      `partner-submissions/${A}/${subId}/${cardId}/back-seed.jpg`,
+    ]
   );
   const h = await admin.query(
     "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
@@ -156,11 +197,14 @@ async function seedReadyForImport(claimant: string): Promise<{ connectorId: stri
     beforeAll(async () => {
       admin = new Client({ connectionString: ADMIN });
       await admin.connect();
+      await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+      await admin.query("CREATE SCHEMA public");
+      await admin.query("GRANT ALL ON SCHEMA public TO public");
       await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
       await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
       await provisionRealisticRoles(admin);
       await seedMintVaultTables();
-      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3F);
+      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
 
       await admin.query("DROP ROLE IF EXISTS partner_connector_load_test").catch(() => {});
       await admin.query("CREATE ROLE partner_connector_load_test LOGIN PASSWORD 'synthetic'");

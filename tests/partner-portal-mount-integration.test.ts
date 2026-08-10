@@ -35,6 +35,14 @@ import type { AddressInfo } from "node:net";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
 import {
+  setupPartnerTestStorage,
+  partnerTestStorageConfigured,
+  ONE_PIXEL_PNG,
+  type PartnerTestStorage,
+} from "./helpers/partner-test-storage";
+
+let storage: PartnerTestStorage;
+import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS,
@@ -70,6 +78,17 @@ describe("Partner portal mount integration coverage is wired up", () => {
         isLocal,
         "PARTNER_MOUNT_RT_ADMIN and PARTNER_MOUNT_RT_RUNTIME must be set to loopback PostgreSQL " +
           "URLs in CI, or the partner portal mount suite does not run at all"
+      ).toBe(true);
+      /**
+       * Storage is now MANDATORY for this suite: submit verifies every card image with a live
+       * headR2, so without MinIO the lifecycle proof cannot run. Asserted here so a missing
+       * variable is diagnosed by this guard, rather than surfacing as an opaque beforeAll throw
+       * from deep inside the storage helper.
+       */
+      expect(
+        partnerTestStorageConfigured(),
+        "PARTNER_REAL_R2_PROOF_ENDPOINT/_KEY/_SECRET must be set in CI, or the mount suite cannot " +
+          "verify card images with a live headR2 and its submit proof is worthless"
       ).toBe(true);
     }
   });
@@ -245,6 +264,25 @@ async function login(
       [TENANT]
     );
 
+    /**
+     * A service tier. This suite seeded credits but NEVER a tier, so the lifecycle test's submit
+     * died at the tier gate with 400 "Select a service before submitting." — the mounted router,
+     * the session, the customer and the card were all fine.
+     */
+    await admin.query(
+      `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active)
+       VALUES (NULL,'standard','Vault Queue',1900,40,true) ON CONFLICT DO NOTHING`
+    );
+
+    /**
+     * REAL disposable MinIO, configured BEFORE any module that pulls in server/r2.ts is imported —
+     * that module memoises its S3 client at module scope, so the first getR2Client() wins for the
+     * whole file. This suite proves the real end-to-end wiring, so headR2 is NOT mocked and the
+     * images are really uploaded through the mounted route. Its own bucket, because the
+     * storage-proof suite refuses to run if its bucket holds anything outside ci-proof/.
+     */
+    storage = await setupPartnerTestStorage({ bucketSuffix: "mount" });
+
     // Submit reserves a grading credit PER CARD, so any suite that drives a real submission needs
     // a funded wallet. Seeded AFTER the organisation rows exist — ensureWallet resolves the org
     // first and fails with ORG_NOT_FOUND otherwise.
@@ -363,6 +401,7 @@ async function login(
   }, 180_000);
 
   afterAll(async () => {
+    await storage?.cleanup().catch(() => {});
     await new Promise<void>((r) => server?.close(() => r()));
     await closePartnerPools?.();
     await admin?.query("DROP ROLE IF EXISTS partner_app_test_mount").catch(() => {});
@@ -514,7 +553,14 @@ async function login(
 
       const users = await req("GET", "/api/partner/users", { cookie: owner.cookie });
       expect(users.status).toBe(200);
-      expect((users.body.users as Array<{ email: string }>).every((u) => u.email.endsWith("@example.test"))).toBe(true);
+      /**
+       * `[].every(...)` is TRUE, so the old single-line form passed against an empty list — a
+       * /api/partner/users that returned nothing for every caller would have satisfied it. Assert
+       * cardinality FIRST, then the per-item property.
+       */
+      const userList = users.body.users as Array<{ email: string }>;
+      expect(userList.length, "the tenant must have users, or the .every() below proves nothing").toBeGreaterThan(0);
+      expect(userList.every((u) => u.email.endsWith("@example.test"))).toBe(true);
 
       // --- 5. location switch (session state bound server-side) ---
       const switched = await req("POST", "/api/partner/session/location", {
@@ -539,7 +585,7 @@ async function login(
       expect(customerId).toBeTruthy();
 
       const draft = await req("POST", "/api/partner/submissions", {
-        body: { locationId: LOCATION, customerId },
+        body: { locationId: LOCATION, customerId, serviceTierCode: "standard" },
         cookie: relogin.cookie,
       });
       expect(draft.status, JSON.stringify(draft.body)).toBe(201);
@@ -551,6 +597,36 @@ async function login(
         cookie: relogin.cookie,
       });
       expect(card.status, JSON.stringify(card.body)).toBe(201);
+      const cardId = card.body.id as string;
+      expect(cardId).toBeTruthy();
+
+      /**
+       * Real multipart upload through the MOUNTED router, then a real HEAD against storage.
+       * Not mocked and not written straight to the bucket: the key must be the one production's
+       * cardImageKey generates, the magic bytes are validated by the real uploader, and submit
+       * verifies each object with a live headR2. A 200 from the upload route is not proof the
+       * bytes landed, so each object is HEADed explicitly.
+       */
+      const uploadedKeys: string[] = [];
+      for (const side of ["front", "back"] as const) {
+        const form = new FormData();
+        form.append("image", new Blob([new Uint8Array(ONE_PIXEL_PNG)], { type: "image/png" }), `${side}.png`);
+        const up = await fetch(`${base}/api/partner/submissions/${submissionId}/cards/${cardId}/images/${side}`, {
+          method: "POST",
+          headers: { cookie: relogin.cookie },
+          body: form,
+        });
+        const upBody = (await up.json().catch(() => ({}))) as Record<string, unknown>;
+        expect(up.status, JSON.stringify(upBody)).toBe(200);
+        const key = upBody.key as string;
+        expect(key, "the mounted upload route must return the stored object key").toBeTruthy();
+        // Production owns the key shape; assert it rather than constructing it.
+        expect(key.startsWith(`partner-submissions/${TENANT}/${submissionId}/${cardId}/${side}-`)).toBe(true);
+        expect(await storage.exists(key), `${side} image must really exist in storage`).toBe(true);
+        storage.track(key);
+        uploadedKeys.push(key);
+      }
+      expect(uploadedKeys).toHaveLength(2);
 
       const submitted = await req("POST", `/api/partner/submissions/${submissionId}/submit`, {
         body: { idempotencyKey: `mount-suite-submit-${Date.now()}` },
@@ -566,6 +642,87 @@ async function login(
         [submissionId]
       );
       expect(persisted.rows[0]).toEqual({ status: "submitted_to_mintvault", handoffs: 1 });
+
+      // Customer, service and card must all have PERSISTED, and be readable back through the
+      // Partner API — not merely present in the row the fixture wrote.
+      const detail = await req("GET", `/api/partner/submissions/${submissionId}`, { cookie: relogin.cookie });
+      expect(detail.status).toBe(200);
+      const submission = (detail.body as Record<string, any>).submission;
+      expect(submission.customerId).toBe(customerId);
+      expect(submission.serviceTierCode).toBe("standard");
+      expect(submission.status).toBe("submitted_to_mintvault");
+
+      // ONE credit per PHYSICAL card (SUM(quantity)), not one per submission.
+      // card_reference is `partner-submission-card:{cardId}:{ordinal}` — the per-card key that
+      // makes uq_partner_credit_reserve_card_live the real double-reserve guard. Counting by it
+      // proves credits are reserved PER PHYSICAL CARD, not once per submission.
+      const reserved = await admin.query<{ n: number; refs: string[] }>(
+        `SELECT count(*)::int n, array_agg(card_reference ORDER BY card_reference) AS refs
+           FROM partner_credit_reservations
+          WHERE tenant_id=$1 AND status='active' AND released_at IS NULL
+            AND card_reference LIKE 'partner-submission-card:' || $2 || ':%'`,
+        [TENANT, cardId]
+      );
+      expect(reserved.rows[0].n).toBe(1);
+      expect(reserved.rows[0].refs[0]).toBe(`partner-submission-card:${cardId}:1`);
+
+      /**
+       * STORAGE VERIFICATION IS ENFORCED, not merely satisfied.
+       *
+       * A fixture that always uploads real objects cannot distinguish "submit checks headR2" from
+       * "the headR2 check was deleted" — verified by mutation: removing the headR2 call from
+       * submitSubmission left this whole suite green. So this drives the negative case with a
+       * genuinely absent object.
+       */
+      {
+        const gapDraft = await req("POST", "/api/partner/submissions", {
+          body: { locationId: LOCATION, customerId, serviceTierCode: "standard" },
+          cookie: relogin.cookie,
+        });
+        expect(gapDraft.status).toBe(201);
+        const gapId = gapDraft.body.id as string;
+        const gapCard = await req("POST", `/api/partner/submissions/${gapId}/cards`, {
+          body: { cardName: "Vanished Image Card", game: "pokemon", quantity: 1 },
+          cookie: relogin.cookie,
+        });
+        expect(gapCard.status).toBe(201);
+        const gapCardId = gapCard.body.id as string;
+
+        let backKey = "";
+        for (const side of ["front", "back"] as const) {
+          const form = new FormData();
+          form.append("image", new Blob([new Uint8Array(ONE_PIXEL_PNG)], { type: "image/png" }), `${side}.png`);
+          const up = await fetch(`${base}/api/partner/submissions/${gapId}/cards/${gapCardId}/images/${side}`, {
+            method: "POST",
+            headers: { cookie: relogin.cookie },
+            body: form,
+          });
+          expect(up.status).toBe(200);
+          const k = ((await up.json()) as Record<string, unknown>).key as string;
+          storage.track(k);
+          if (side === "back") backKey = k;
+        }
+
+        // The DB still holds a valid, correctly-prefixed key — only the OBJECT is gone. So this
+        // cannot be satisfied by the key-shape check; only a live HEAD catches it.
+        await storage.remove(backKey);
+        expect(await storage.exists(backKey)).toBe(false);
+
+        const blocked = await req("POST", `/api/partner/submissions/${gapId}/submit`, {
+          body: { idempotencyKey: `mount-missing-object-${Date.now()}` },
+          cookie: relogin.cookie,
+        });
+        expect(blocked.status, JSON.stringify(blocked.body)).toBe(400);
+        expect(JSON.stringify(blocked.body)).toMatch(/could not be verified/i);
+
+        // Fails CLOSED: no handoff, and the submission never leaves draft.
+        const after = await admin.query<{ status: string; handoffs: number }>(
+          `SELECT s.status, (SELECT count(*)::int FROM partner_submission_handoffs h WHERE h.submission_id=s.id) AS handoffs
+             FROM partner_submissions s WHERE s.id=$1`,
+          [gapId]
+        );
+        expect(after.rows[0]).toEqual({ status: "draft", handoffs: 0 });
+      }
 
       // --- 7. MFA enrolment through the mount (proves PARTNER_MFA_ENC_KEY is wired end to end) ---
       const enrol = await req("POST", "/api/partner/mfa/enrol", {

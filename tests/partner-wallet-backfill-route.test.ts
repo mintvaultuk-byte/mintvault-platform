@@ -51,7 +51,7 @@ async function seedMintVaultTables(): Promise<void> {
     "CREATE TABLE submissions (id serial PRIMARY KEY, user_id varchar, status varchar(30), tracking_number text UNIQUE, deleted_at timestamptz, status_history jsonb NOT NULL DEFAULT '[]'::jsonb, updated_at timestamptz NOT NULL DEFAULT now())"
   );
   await admin.query("CREATE TABLE submission_items (id serial PRIMARY KEY, submission_id integer NOT NULL)");
-  await admin.query("CREATE TABLE certificates (id serial PRIMARY KEY, cert_id text, submission_id integer, secret text)");
+  await admin.query("CREATE TABLE certificates (id serial PRIMARY KEY, cert_id text, secret text)");
   await admin.query(
     "CREATE TABLE label_prints (id serial PRIMARY KEY, certificate_id integer, created_at timestamptz NOT NULL DEFAULT now())"
   );

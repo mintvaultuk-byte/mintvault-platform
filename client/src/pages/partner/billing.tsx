@@ -1,7 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { partnerCredits, partnerErrorMessage, type PartnerCreditLedgerEntry } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
+import { usePartnerSession } from "@/hooks/use-partner-session";
 
 function credit(value: number | null, configured: boolean) {
   return value == null ? (configured ? "Unknown" : "Not available") : value.toLocaleString("en-GB");
@@ -11,8 +14,24 @@ function entryLabel(entry: PartnerCreditLedgerEntry) {
   return entry.type.replaceAll("_", " ").replace(/^./, (value) => value.toUpperCase());
 }
 
+function returnPathFromSearch() {
+  const value = new URLSearchParams(window.location.search).get("returnTo");
+  return value?.startsWith("/partner/") && !value.startsWith("//") ? value : "/partner/billing";
+}
+
 export default function PartnerBillingPage() {
+  const { hasPermission } = usePartnerSession();
   const query = useQuery({ queryKey: ["/api/partner/credits"], queryFn: () => partnerCredits.view() });
+  const packages = useQuery({
+    queryKey: ["/api/partner/credits/packages"],
+    queryFn: () => partnerCredits.packages(),
+    enabled: hasPermission("partner.credits.view"),
+  });
+  const checkout = useMutation({
+    mutationFn: (packageId: string) => partnerCredits.checkout(packageId, returnPathFromSearch()),
+    onSuccess: ({ checkoutUrl }) => window.location.assign(checkoutUrl),
+  });
+  const returnPath = returnPathFromSearch();
 
   return (
     <div className="space-y-8">
@@ -46,6 +65,58 @@ export default function PartnerBillingPage() {
                 </CardContent>
               </Card>
             ))}
+          </section>
+
+          <section aria-labelledby="packages-title" className="space-y-3">
+            <div>
+              <h2 id="packages-title" className="text-base font-semibold">
+                Buy credits
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Select a server-priced package. Credits are added only after Stripe confirms payment.
+              </p>
+            </div>
+            {packages.isLoading && <p className="text-sm text-muted-foreground">Loading packages…</p>}
+            {packages.error && (
+              <PartnerErrorState message={partnerErrorMessage(packages.error)} onRetry={() => packages.refetch()} />
+            )}
+            {packages.data && (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="billing-credit-packages">
+                {packages.data.packages.map((pkg) => (
+                  <Card key={pkg.id} className="rounded-md">
+                    <CardContent className="space-y-3 p-4">
+                      <div>
+                        <p className="font-medium">{pkg.label}</p>
+                        <p className="text-sm text-muted-foreground">{pkg.credits} grading credits</p>
+                      </div>
+                      <p className="text-lg font-semibold">
+                        {new Intl.NumberFormat("en-GB", { style: "currency", currency: packages.data.currency }).format(
+                          pkg.pricePence / 100
+                        )}
+                      </p>
+                      <Button
+                        className="w-full"
+                        disabled={!hasPermission("partner.credits.purchase") || checkout.isPending}
+                        onClick={() => checkout.mutate(pkg.id)}
+                        data-testid={`button-buy-credit-package-${pkg.id}`}
+                      >
+                        {checkout.isPending ? "Opening checkout…" : "Buy credits"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+            {checkout.error && (
+              <p role="alert" className="text-sm text-destructive">
+                {partnerErrorMessage(checkout.error)}
+              </p>
+            )}
+            {returnPath !== "/partner/billing" && (
+              <Button asChild variant="outline">
+                <Link href={returnPath}>Return to draft</Link>
+              </Button>
+            )}
           </section>
 
           <section aria-labelledby="ledger-title" className="space-y-3">

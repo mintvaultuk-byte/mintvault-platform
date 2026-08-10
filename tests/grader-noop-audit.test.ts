@@ -53,6 +53,16 @@ describe("role write paths suppress no-op audit rows", () => {
       .mockResolvedValueOnce({
         rows: [{ id: 700, assigned_grader_id: "grader-1", grader_status: "pending_review" }],
       })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            grading_revision: 1,
+            evidence_revision: 0,
+            review_grading_revision: 1,
+            review_evidence_revision: 0,
+          },
+        ],
+      })
       .mockResolvedValueOnce({ rows: [{ id: 700 }] });
     runtime.getCertificate.mockResolvedValue({ ...certSnapshot });
 
@@ -68,7 +78,7 @@ describe("role write paths suppress no-op audit rows", () => {
         grade_edges: "9.0",
         grade_surface: "9.0",
       },
-      "admin@example.test",
+      "admin@example.test"
     );
 
     expect(result).toEqual({ ok: true });

@@ -1,5 +1,5 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM node:20-slim AS builder
+FROM node:20.20.2-slim AS builder
 
 # System libs required to compile canvas and sharp native modules
 RUN apt-get update && apt-get install -y \
@@ -28,7 +28,7 @@ ENV GIT_SHA=$GIT_SHA
 RUN npm run build
 
 # ── Production stage ──────────────────────────────────────────────────────────
-FROM node:20-slim AS production
+FROM node:20.20.2-slim AS production
 
 # Runtime libs for canvas (label/PDF generation) and sharp (image processing)
 RUN apt-get update && apt-get install -y \

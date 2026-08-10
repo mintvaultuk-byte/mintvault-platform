@@ -76,6 +76,71 @@ export const partnerAuth = {
   revokeAll: () => req<{ ok: boolean; revoked: number }>("POST", "/api/partner/auth/revoke-all"),
 };
 
+export interface PartnerCertificateSummary {
+  certificateNumber: string;
+  cardGame: string | null;
+  setName: string | null;
+  cardName: string | null;
+  cardNumber: string | null;
+  grade: string | null;
+  status: string | null;
+  approvalState: "APPROVED" | "PENDING_REVIEW";
+  printState: string | null;
+  nfcState: "NOT_WRITTEN" | "WRITTEN" | "VERIFIED" | "LOCKED";
+  originLocationName: string | null;
+  approvedAt: string | null;
+}
+
+export interface PartnerLabelPreview {
+  ok: boolean;
+  certificateNumber: string;
+  certificateNumbers: string[];
+  printState: string;
+  labelPreviewUrl: string;
+  expiresInSeconds: number;
+}
+
+export interface PartnerNfcOperation {
+  ok: boolean;
+  certificateNumber: string;
+  nfcState: "NOT_WRITTEN" | "WRITTEN" | "VERIFIED" | "LOCKED";
+  changed: boolean;
+}
+
+export interface PartnerCompletionOperation {
+  ok: boolean;
+  certificateNumber: string;
+  certificateNumbers: string[];
+  printState: string;
+}
+
+/** Tenant-scoped completion register and controlled physical operations. All authority stays server-side. */
+export const partnerCertificates = {
+  list: () => req<{ certificates: PartnerCertificateSummary[] }>("GET", "/api/partner/certificates"),
+  prepareLabel: (certificateNumber: string) =>
+    req<PartnerLabelPreview>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/print`, {}),
+  confirmLabelPrinted: (certificateNumber: string) =>
+    req<{ ok: boolean; certificateNumber: string; printState: string }>(
+      "POST",
+      `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/print/confirm`,
+      {}
+    ),
+  writeNfc: (certificateNumber: string, input: { uid: string; chipType?: string }) =>
+    req<PartnerNfcOperation>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/nfc`, input),
+  verifyNfc: (certificateNumber: string, uid: string) =>
+    req<PartnerNfcOperation>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/nfc/verify`, {
+      uid,
+    }),
+  lockNfc: (certificateNumber: string) =>
+    req<PartnerNfcOperation>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/nfc/lock`, {}),
+  complete: (certificateNumber: string) =>
+    req<PartnerCompletionOperation>(
+      "POST",
+      `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/complete`,
+      {}
+    ),
+};
+
 /**
  * Minimum password length the server enforces (server/partner/auth.ts MIN_PASSWORD_LEN). Mirrored
  * here ONLY to give the user an instant, plain-English hint before they submit — the server remains
@@ -137,6 +202,10 @@ export const partnerCustomers = {
     req<PartnerCustomer[]>("GET", `/api/partner/customers${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   create: (input: { fullName: string; email?: string | null; phone?: string | null; reference?: string | null }) =>
     req<PartnerCustomer>("POST", "/api/partner/customers", input),
+  edit: (
+    id: string,
+    input: { fullName: string; email?: string | null; phone?: string | null; reference?: string | null }
+  ) => req<PartnerCustomer>("PATCH", `/api/partner/customers/${id}`, input),
 };
 
 // ---- locations ----
@@ -248,8 +317,213 @@ export interface PartnerCreditView {
   purchaseHistory: PartnerCreditLedgerEntry[];
 }
 
+export interface PartnerCreditPackage {
+  id: string;
+  credits: number;
+  pricePence: number;
+  label: string;
+}
+
+export interface PartnerCreditCheckout {
+  checkoutUrl: string;
+  packageId: string;
+  credits: number;
+  pricePence: number;
+}
+
 export const partnerCredits = {
   view: () => req<PartnerCreditView>("GET", "/api/partner/credits"),
+  packages: () => req<{ packages: PartnerCreditPackage[]; currency: string }>("GET", "/api/partner/credits/packages"),
+  checkout: (packageId: string, returnPath: string) =>
+    req<PartnerCreditCheckout>("POST", "/api/partner/credits/checkout", { packageId, returnPath }),
+};
+
+// ---- supply orders ----
+export interface PartnerSupplyProduct {
+  code: string;
+  display_name: string;
+  units_per_pack: number;
+  pricing_mode: "LOCKED" | "CONFIGURABLE";
+  active_price_pence: number | null;
+  active: boolean;
+  purchasable: boolean;
+}
+
+export interface PartnerSupplyOrderItem {
+  productCode: string;
+  name: string;
+  unitsPerPack: number;
+  quantity: number;
+  grossUnitPricePence: number;
+  grossLineTotalPence: number;
+}
+
+export interface PartnerSupplyOrder {
+  id: string;
+  status: string;
+  delivery_address: Record<string, string>;
+  currency: string;
+  gross_total_pence: number;
+  tax_treatment: "UNCONFIGURED" | "VAT_INCLUDED";
+  vat_rate_basis_points: number | null;
+  net_total_pence: number | null;
+  vat_total_pence: number | null;
+  tracking_reference: string | null;
+  created_at: string;
+  payment_status: string;
+  refunded_total_pence: number;
+  items: PartnerSupplyOrderItem[];
+}
+
+export interface PartnerSupplyOperations {
+  cardsCompleted: number;
+  products: Array<{
+    code: string;
+    displayName: string;
+    unitsPerPack: number;
+    knownUnits: number | null;
+    paidOrderedUnits: number;
+    awaitingDispatchUnits: number;
+  }>;
+}
+
+export const partnerSupplies = {
+  products: () =>
+    req<{
+      currency: string;
+      taxTreatment: "UNCONFIGURED" | "VAT_INCLUDED";
+      vatRateBasisPoints: number | null;
+      products: PartnerSupplyProduct[];
+    }>("GET", "/api/partner/supplies/products"),
+  orders: () => req<{ orders: PartnerSupplyOrder[] }>("GET", "/api/partner/supplies/orders"),
+  operations: () => req<PartnerSupplyOperations>("GET", "/api/partner/supplies/operations"),
+  recordStock: (productCode: string, knownUnits: number) =>
+    req<{ productCode: string; knownUnits: number; countedAt: string }>(
+      "PUT",
+      `/api/partner/supplies/stock/${encodeURIComponent(productCode)}`,
+      { knownUnits }
+    ),
+  checkout: (input: {
+    items: Array<{ productCode: string; quantity: number }>;
+    deliveryAddress?: Record<string, string>;
+    idempotencyKey: string;
+    returnPath: string;
+  }) => req<{ orderId: string; checkoutUrl: string }>("POST", "/api/partner/supplies/checkout", input),
+};
+
+// ---- public partner network ----
+export interface PublicPartnerRating {
+  available: boolean;
+  isOverride: boolean;
+  rating: number | null;
+  label: string;
+  sampleSize: number;
+  minimumSample: number;
+  version: string | null;
+  calculatedAt: string | null;
+}
+
+export interface PublicPartnerShop {
+  slug: string;
+  displayName: string;
+  tradingName: string | null;
+  townCity: string | null;
+  county: string | null;
+  postcode: string | null;
+  country: string;
+  latitude: number | null;
+  longitude: number | null;
+  distanceKm: number | null;
+  verified: boolean;
+  rating: PublicPartnerRating;
+}
+
+export interface PublicPartnerShopProfile extends PublicPartnerShop {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  openingInfo: string | null;
+  description: string | null;
+  publicSince: string | null;
+  stats: { cardsGraded: number };
+  recentCards: Array<{
+    certId: string;
+    cardName: string | null;
+    cardSet: string | null;
+    cardYear: string | null;
+    cardNumber: string | null;
+    grade: string | null;
+    gradedDate: string | null;
+    frontImageUrl: string | null;
+  }>;
+}
+
+export const publicPartnerShops = {
+  find: (input: {
+    q?: string;
+    postcode?: string;
+    town?: string;
+    county?: string;
+    lat?: number;
+    lng?: number;
+    radiusKm?: number;
+    sort?: "distance" | "quality" | "name";
+  }) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(input))
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return req<{
+      rows: PublicPartnerShop[];
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+      appliedSort: string;
+      geo: boolean;
+    }>("GET", `/api/shops${suffix}`);
+  },
+  detail: (slug: string) => req<PublicPartnerShopProfile>("GET", `/api/shops/${encodeURIComponent(slug)}`),
+};
+
+export interface PartnerPublicListing {
+  id: string;
+  slug: string;
+  public_display_name: string;
+  listing_status: string;
+  town_city: string | null;
+  county: string | null;
+  postcode: string | null;
+  country: string;
+  public_phone: string | null;
+  public_email: string | null;
+  public_website: string | null;
+  public_opening_info: string | null;
+  public_description: string | null;
+  verified_at: string | null;
+  public_since: string | null;
+  current_public_rating: number | null;
+  current_rating_label: string | null;
+  current_rating_available: boolean;
+  current_sample_size: number;
+  current_minimum_sample: number;
+  current_rating_calculated_at: string | null;
+}
+
+export const partnerPublicListings = {
+  list: () => req<{ rows: PartnerPublicListing[] }>("GET", "/api/partner/public-listings"),
+  update: (
+    id: string,
+    input: {
+      phone?: string | null;
+      email?: string | null;
+      website?: string | null;
+      openingInfo?: string | null;
+      description?: string | null;
+    }
+  ) => req<{ ok: boolean; updated: number }>("PUT", `/api/partner/public-listings/${id}`, input),
 };
 
 // ---- own sessions ----
@@ -286,6 +560,14 @@ export interface SubmissionSummary {
   submittedAt: string | null;
 }
 
+export interface SubmissionCustomerSummary {
+  id: string;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  reference: string | null;
+}
+
 export interface SubmissionCard {
   id: string;
   sequence_number: number;
@@ -300,6 +582,10 @@ export interface SubmissionCard {
   quantity: number;
   customer_notes: string | null;
   intake_notes: string | null;
+  front_image_key: string | null;
+  back_image_key: string | null;
+  front_image_url: string | null;
+  back_image_url: string | null;
   created_at: string;
 }
 
@@ -315,8 +601,14 @@ export interface SubmissionEvent {
 
 export interface SubmissionDetail {
   submission: SubmissionSummary;
+  customer: SubmissionCustomerSummary | null;
   cards: SubmissionCard[];
   events: SubmissionEvent[];
+}
+
+export interface PartnerCatalogueSnapshotResponse {
+  snapshot: import("@shared/pokemon-rarity-catalogue").CatalogueSnapshot;
+  categories: string[];
 }
 
 export const partnerSubmissions = {
@@ -393,6 +685,29 @@ export const partnerCards = {
       `/api/partner/submissions/${submissionId}/cards/${cardId}`,
       reason ? { reason } : undefined
     ),
+  uploadImage: async (submissionId: string, cardId: string, side: "front" | "back", file: File) => {
+    const form = new FormData();
+    form.append("image", file);
+    const res = await fetch(`/api/partner/submissions/${submissionId}/cards/${cardId}/images/${side}`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!res.ok) {
+      let body: { error?: { code?: string; message?: string } } = {};
+      try {
+        body = await res.json();
+      } catch {
+        /* ignore */
+      }
+      throw new PartnerApiError(res.status, body.error?.code ?? "error", body.error?.message ?? "Upload failed.");
+    }
+    return (await res.json()) as { side: "front" | "back"; key: string; url: string | null };
+  },
+};
+
+export const partnerCatalogue = {
+  snapshot: () => req<PartnerCatalogueSnapshotResponse>("GET", "/api/partner/catalogue/snapshot"),
 };
 
 /** A stable idempotency key for one submit "session" — regenerated only when the user explicitly retries after a genuine error, never on every render. */

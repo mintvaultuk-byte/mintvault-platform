@@ -3,33 +3,11 @@
  * Mirrors server/grade-calculator.ts exactly — keep in sync.
  */
 
-import { legacyCeilingForFlags } from "@shared/mvgs-scoring";
-
-export interface SubGrades {
-  centering: number;
-  corners: number;
-  edges: number;
-  surface: number;
-}
-
-/**
- * Weighted-average + lowest-subgrade-floor calculation for non-MVGS-classified
- * cards (the fallback path when no MVGS pins exist yet). Structural ceilings
- * (crease / tear) now flow through the engine via `legacyCeilingForFlags`
- * — this helper no longer carries its own crease/tear numbers per MVGS-v2
- * §5 single-source-of-truth requirement. Phase 2 swaps the boolean flags for
- * measurement-driven inputs at the call sites.
- */
-export function calculateOverallGrade(sub: SubGrades, hasCrease: boolean, hasTear: boolean): number {
-  const weighted = sub.centering * 0.1 + sub.corners * 0.25 + sub.edges * 0.25 + sub.surface * 0.4;
-  let grade = Math.round(weighted);
-  const lowest = Math.min(sub.centering, sub.corners, sub.edges, sub.surface);
-  grade = Math.min(grade, lowest + 1.0);
-  // Structural ceiling sourced from the engine — single source of truth.
-  const ceiling = legacyCeilingForFlags({ hasCrease, hasTear });
-  if (ceiling) grade = Math.min(grade, ceiling.grade);
-  return Math.max(1, Math.min(10, grade));
-}
+// The zone-stepper sub-grade calculators and the weighted fallback formula MOVED to
+// shared/legacy-grade-fallback.ts so the server-authoritative partner adapter can run the
+// identical maths. Re-exported here unchanged — one implementation, every caller intact.
+export type { SubGrades, CornerValues, EdgeValues } from "@shared/legacy-grade-fallback";
+export { calculateOverallGrade, calcCornerSubgrade, calcEdgeSubgrade } from "@shared/legacy-grade-fallback";
 
 export function getGradeLabel(grade: number | string): string {
   if (grade === "AA") return "AUTHENTIC ALTERED";

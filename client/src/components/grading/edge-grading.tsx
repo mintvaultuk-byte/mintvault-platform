@@ -1,16 +1,12 @@
 import { useState } from "react";
 import { Minus } from "lucide-react";
 
-export interface EdgeValues {
-  frontTop: number;
-  frontBottom: number;
-  frontLeft: number;
-  frontRight: number;
-  backTop: number;
-  backBottom: number;
-  backLeft: number;
-  backRight: number;
-}
+// MOVED to shared/legacy-grade-fallback.ts — see corner-grading.tsx. Re-exported
+// unchanged so every existing import path keeps working. One implementation, no fork.
+export type { EdgeValues } from "@shared/legacy-grade-fallback";
+export { calcEdgeSubgrade } from "@shared/legacy-grade-fallback";
+import type { EdgeValues } from "@shared/legacy-grade-fallback";
+import { calcEdgeSubgrade } from "@shared/legacy-grade-fallback";
 
 interface Props {
   values: EdgeValues;
@@ -90,25 +86,6 @@ export function EdgeSelect({
       ))}
     </select>
   );
-}
-
-export function calcEdgeSubgrade(v: EdgeValues): { grade: number; worstKey: string } {
-  const entries: [string, number][] = [
-    ["Front Top", v.frontTop],
-    ["Front Bottom", v.frontBottom],
-    ["Front Left", v.frontLeft],
-    ["Front Right", v.frontRight],
-    ["Back Top", v.backTop],
-    ["Back Bottom", v.backBottom],
-    ["Back Left", v.backLeft],
-    ["Back Right", v.backRight],
-  ];
-  // Full marks by default — see calcCornerSubgrade. 0 = "unset" sentinel; no zone
-  // marked = no recorded deduction = perfect 10; deduct by marking a zone lower.
-  const set = entries.filter(([, g]) => g > 0);
-  if (set.length === 0) return { grade: 10, worstKey: "" };
-  const worst = set.reduce((a, b) => (a[1] <= b[1] ? a : b));
-  return { grade: worst[1], worstKey: worst[0] };
 }
 
 function EdgePanel({

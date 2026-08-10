@@ -139,6 +139,107 @@ describe("partner schema ↔ migration parity", () => {
       // 0044 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+      // 0045 is deliberately absent and must stay absent: 0046 is already journalled on staging and
+      // every rollback in this series refuses while a higher-numbered row exists, so anything at
+      // 0045 would be born un-rollbackable there. 0046 belongs to the partner MFA repair branch.
+      // See docs/migration-ownership-partner-0049.md.
+      "0047_partner_owner_invariant_tenants_rls.sql",
+      "0048_partner_location_snapshot_search_path.sql",
+      "0049_partner_grading_work_items.sql",
+      // 0050 is GRANT-ONLY: it gives partner_connector_runtime an RLS-scoped, column-level SELECT
+      // on partner_profiles(tenant_id, trading_name) so the connector importer can record the
+      // approved partner trading name in the immutable certificate origin snapshot 0035 created.
+      // It creates no object, modifies no row, and grants no write privilege. Its rollback is
+      // intentionally named rollback-0050-partner-connector-profile-read.sql (non-numbered) so the
+      // runner never applies it.
+      "0050_partner_connector_profile_read.sql",
+      // Security repair, not a schema change: revokes the INSERT/UPDATE/DELETE that
+      // 0001's blanket grant loop gave partner_runtime on the two super-admin-write-only
+      // kill-switch tables, and splits the feature-flag policy so its permissive
+      // `tenant_id IS NULL` branch governs SELECT only. It adds no table or column, so
+      // the Drizzle-parity assertions above are unaffected by design.
+      //
+      // NUMBER ARBITRATED by the release coordinator against staging's schema_migrations
+      // (36 rows applied), after an initial collision at 0050:
+      //   0045 permanently unused — anything placed there is born un-rollbackable, because
+      //        0046 is already applied on staging
+      //   0046 partner_mfa_pending_lifecycle          APPLIED ON STAGING
+      //   0047 partner_owner_invariant_tenants RLS    (concurrent renumbering branch)
+      //   0048 location snapshot search_path          (concurrent renumbering branch)
+      //   0049 grading bridge, renumbered from 0045   (concurrent renumbering branch)
+      //   0050 connector profile-read GRANT           (committed on the origin-trading-name branch)
+      //   0051 this file
+      "0051_partner_runtime_flag_control_least_privilege.sql",
+      // Security repair, not a schema change: revokes the dead partner_connector_runtime grant on
+      // the two internal-evidence tables and adds RLS to them, splits the partner_service_tiers
+      // policy so its permissive `tenant_id IS NULL` branch governs SELECT only (A8-F7), and
+      // replaces 0049's table-level cert_counter grant with column-level grants that exclude
+      // UPDATE(id) (A8-F5). It adds no table and no column, so the Drizzle-parity assertions above
+      // are unaffected by design.
+      //
+      // 0052 continues the arbitrated numbering recorded above: 0045 stays permanently unused, and
+      // 0046 (staging-applied) through 0051 are taken, so the next free number is 0052.
+      "0052_partner_internal_evidence_rls.sql",
+      // 0053 adds failed_mfa_count / mfa_locked_until to partner_users. Deliberately NOT reusing
+      // failed_login_count/locked_until: a successful login zeroes those, so an attacker holding a
+      // phished password owns a counter-reset primitive and the shared lock would never arm.
+      "0053_partner_mfa_failure_lockout.sql",
+      // 0054 closes the half of A8-F5 that 0052's column-level narrowing does NOT reach. 0052
+      // revoked UPDATE(id) so the allocator row cannot be RE-POINTED, but `last_issued` must keep
+      // UPDATE because that IS the increment — so re-seeding it to 0, rewinding it, or upserting
+      // `ON CONFLICT (id) DO UPDATE SET last_issued = 0` all still produced the identical
+      // platform-wide certificate-number collision, HQ's own certificates included. A privilege
+      // cannot express "increment only", so the constraint lives where OLD and NEW exist: an
+      // ENABLE ALWAYS BEFORE UPDATE OR DELETE trigger, plus a TRUNCATE guard. It also CREATEs
+      // cert_counter when absent (it is otherwise created at application boot by
+      // storage.ts:ensureCertCounterTable), because a silently absent integrity guard is the
+      // failure mode it exists to remove — so unlike its two siblings this file is NOT purely a
+      // privilege change, though it adds no column to any Drizzle-modelled table.
+      "0054_cert_counter_monotonic_allocator.sql",
+      // Security repair, not a schema change: pins search_path and schema-qualifies 0017's
+      // partner_credit_ledger_preserve_active_reservations(), which was SECURITY INVOKER with
+      // proconfig NULL and three unqualified reads and so was pg_temp-shadowable. Its post-flight
+      // additionally SWEEPS THE CLASS — no plpgsql/sql function in public may combine a NULL
+      // proconfig with an unqualified relation reference — because 0048 fixed one instance of this
+      // primitive and did not sweep, which is how the same defect sat in 0017 guarding money.
+      "0055_partner_ledger_preserve_search_path.sql",
+      // Security repair, not a schema change: completes the defence-in-depth layer 0051 described
+      // ("if a future blanket GRANT hands DELETE back, the row is still unreachable") but applied
+      // only to partner_feature_flags. partner_emergency_controls, partner_internal_notes and
+      // partner_management_audit kept FOR ALL tenant-equality policies, which admit the tenant's
+      // OWN rows into UPDATE/DELETE — and on those three tables the tenant's own rows ARE the
+      // asset. Emergency controls keep the tenant-scoped SELECT readEmergencyState() depends on;
+      // the two evidence tables are denied entirely. Adds no table and no column.
+      "0056_partner_hq_control_tables_write_deny.sql",
+      // RBAC catalogue extension, not a schema change: adds the single permission
+      // partner.credits.purchase and grants it to PARTNER_OWNER and PARTNER_MANAGER only. Spending
+      // authority is deliberately split from partner.credits.view, which PARTNER_FINANCE_VIEWER
+      // holds — a read-only oversight role must not be able to put £1,000 through Stripe. Written
+      // as a new file rather than an edit to 0034 because 0034 is already applied on staging and
+      // editing it would trip the runner's checksum refusal. Adds no table and no column.
+      "0057_partner_credits_purchase_permission.sql",
+      // 0058 builds the PUBLIC partner network: partner_public_listings (the approved public
+      // identity of one partner location), partner_public_rating_snapshots and
+      // partner_public_rating_overrides. Additive — partner_locations is deliberately NOT
+      // restructured, because its `address` column is the OPERATIONAL address that 0035 snapshots
+      // onto certificates as immutable provenance. The public address is a separate, approvable,
+      // changeable fact, and keeping the two apart is what lets a shop move premises without
+      // rewriting what its historical certificates claim.
+      "0058_partner_public_network.sql",
+      "0059_partner_public_eligibility_propagation.sql",
+      "0060_partner_public_rating_override_expiry.sql",
+      "0061_partner_public_reader.sql",
+      "0062_partner_rating_dirty_state.sql",
+      // Hostile-review remediation, 2026-08-09. Each closes a named BLOCKER/HIGH:
+      "0063_certificate_review_lifecycle_clock.sql", // B1 review clock + H9 boot-DDL columns
+      "0064_public_slab_image_projection.sql", // B2 anonymous image off the privileged pool
+      "0065_certificates_reviewed_unit_index.sql", // H10, CONCURRENTLY (migrate:no-transaction)
+      "0066_partner_rating_lifecycle_hardening.sql", // H2/H3/H4/H5/H6 rating CAS, lease, backoff
+      "0067_certificate_immutable_evidence_ledger.sql",
+      "0068_certificate_scan_status.sql",
+      "0069_partner_supply_orders.sql",
+      "0070_partner_supply_stock_indicators.sql",
+      "0071_certificate_review_revision_binding.sql",
     ]);
   });
 

@@ -127,7 +127,7 @@ describe("0018 correction audit index migration", () => {
     ).toBe("applied");
   });
 
-  it("does not mark a failed concurrent build as applied and fails closed on retry", async () => {
+  it("does not mark a failed concurrent build as applied, and retries the repair rather than jamming", async () => {
     await client.query(
       `INSERT INTO audit_log (entity_type, entity_id, action)
        VALUES ('certificate', '1', 'cert_live_record_edit'), ('certificate', '2', 'cert_live_record_edit')`
@@ -148,7 +148,56 @@ CREATE UNIQUE INDEX CONCURRENTLY ${INDEX_NAME} ON audit_log ((1));`,
         .rows[0]
     ).toEqual({ status: "failed", completed_at: null });
 
-    await expect(applyMigrations(client, [failed])).rejects.toThrow(/Journal inconsistent/);
+    /**
+     * RETRY CONTRACT CHANGED (lock-safety hostile review, 2026-08-07).
+     *
+     * This used to assert `/Journal inconsistent/` — the runner refused to look at the file ever
+     * again, and recovery needed a manual UPDATE/DELETE on schema_migrations, which is a protected
+     * action, during an incident. That refusal fired on EVERY non-'applied' row, and only the
+     * no-transaction path can leave one, so it was firing exclusively on the very files the runner
+     * already had a verified repair for — making migrate:ensure-valid-concurrent-index dead code
+     * in exactly the case it was written for. A routine lock-contention event jammed the journal
+     * permanently.
+     *
+     * A self-healing file at an unchanged checksum is now RESUMED: the runner re-attempts the
+     * repair. What must not change is that a genuinely impossible migration is never marked
+     * applied — and here it is genuinely impossible (a UNIQUE index on a constant expression over
+     * two rows), so the retry fails again for the REAL reason and the journal row stays 'failed'.
+     */
+    await expect(applyMigrations(client, [failed])).rejects.toThrow(
+      /Non-transactional migration .* could not create unique index/s
+    );
+    expect(await indexState()).toMatchObject({ valid: false });
+    expect(
+      (await client.query("SELECT status, completed_at FROM schema_migrations WHERE filename = $1", [failed.filename]))
+        .rows[0],
+      "a failing migration must never be journalled as applied, however many times it is retried"
+    ).toEqual({ status: "failed", completed_at: null });
+  });
+
+  it("a stale 'failed' row for a self-healing file is repaired on the next run, not jammed forever", async () => {
+    // The lock-contention case, end to end: an invalid index plus a 'failed' journal row is
+    // exactly what a lock_timeout during CREATE INDEX CONCURRENTLY leaves behind. The operator
+    // must recover by re-running the same command, with no journal surgery.
+    await createInvalidIndex();
+    await client.query(
+      `INSERT INTO schema_migrations (filename, checksum, status)
+       VALUES ($1, $2, 'failed')
+       ON CONFLICT (filename) DO UPDATE SET status = 'failed', checksum = EXCLUDED.checksum`,
+      [FILENAME, migration().checksum]
+    );
+    expect(await indexState()).toMatchObject({ valid: false });
+
+    const plan = await planMigrations(client, [migration()]);
+    expect(plan.resumable.map((r) => r.filename)).toEqual([FILENAME]);
+    expect(plan.inconsistent, "a repairable row must not be reported as fatally inconsistent").toEqual([]);
+
+    await applyMigrations(client, [migration()]);
+
+    expect(await indexState()).toMatchObject({ valid: true });
+    expect(
+      (await client.query("SELECT status FROM schema_migrations WHERE filename = $1", [FILENAME])).rows[0].status
+    ).toBe("applied");
   });
 
   it("discovers the complete migration inventory in a read-only dry-run", async () => {

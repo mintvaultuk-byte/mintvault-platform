@@ -3,6 +3,9 @@
  * routes are ever mounted here (see app.ts + the route-isolation test).
  */
 import { Router } from "express";
+import { APP_BASE_URL } from "../app-url";
+import { PARTNER_CREDIT_CURRENCY, PARTNER_CREDIT_PACKAGES } from "@shared/partner-credit-packages";
+import { PartnerCreditPurchaseError, createPartnerCreditCheckout } from "./credit-purchase-service";
 import {
   partnerLogin,
   partnerLogout,
@@ -10,6 +13,10 @@ import {
   markSessionMfaPassed,
   createPasswordResetToken,
   consumePasswordResetToken,
+  isPartnerMfaLocked,
+  recordPartnerMfaFailure,
+  clearPartnerMfaFailures,
+  retireExpiredPartnerMfaLock,
 } from "./auth";
 import {
   requirePartnerAuth,
@@ -24,6 +31,8 @@ import {
   partnerLoginIpLimiter,
   partnerLoginLimiter,
   partnerMfaLimiter,
+  partnerMfaAccountLimiter,
+  partnerMfaManagementLimiter,
   partnerResetLimiter,
   partnerLocationSwitchLimiter,
   partnerInviteLimiter,
@@ -158,7 +167,18 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 
-  r.post("/auth/mfa", partnerMfaLimiter, async (req, res) => {
+  /**
+   * SECOND-FACTOR CHALLENGE. Two rate-limit buckets, in this order and never one without the other,
+   * mirroring the login pair above:
+   *   partnerMfaLimiter        — IP only, 20/15min. Bounds anonymous flooding of this endpoint.
+   *   partnerMfaAccountLimiter — authenticated userId from the SESSION, 10/15min. Bounds the
+   *                              VICTIM's exposure, so an attacker rotating source addresses no
+   *                              longer multiplies its guesses against one account.
+   * Neither is body-derived, so nothing the caller can put in the request moves it to a fresh
+   * bucket. Below them sits the durable control: a 5-failure account lockout in PostgreSQL, which
+   * unlike the in-process limiters survives across machines and restarts.
+   */
+  r.post("/auth/mfa", partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -172,20 +192,49 @@ export function partnerApiRouter(): Router {
       return;
     }
     const { code, recoveryCode } = req.body ?? {};
-    const ok = await withTenant({ tenantId: req.partner.tenantId }, async (c) => {
+    const outcome = await withTenant({ tenantId: req.partner.tenantId }, async (c) => {
+      // A SPENT lock is retired before this attempt is judged, so re-locking costs a full fresh
+      // threshold of failures rather than one (see retireExpiredPartnerMfaLock).
+      await retireExpiredPartnerMfaLock(c, req.partner!.userId);
+      if (await isPartnerMfaLocked(c, req.partner!.userId)) return "locked" as const;
+
+      let ok = false;
       if (typeof recoveryCode === "string" && recoveryCode) {
         const rc = await c.query(
           "UPDATE partner_recovery_codes SET used_at=now() WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL RETURNING id",
           [req.partner!.userId, recoveryHash(recoveryCode)]
         );
-        return (rc.rowCount ?? 0) === 1;
+        ok = (rc.rowCount ?? 0) === 1;
+      } else if (typeof code === "string") {
+        ok = await verifyActiveTotpNoReplay(c, req.partner!.userId, code); // F3: replay-protected
       }
-      if (typeof code === "string") {
-        return verifyActiveTotpNoReplay(c, req.partner!.userId, code); // F3: replay-protected
+
+      if (ok) {
+        // Success retires the counter — this is what stops one mistyped code from accumulating
+        // towards a lockout across an ordinary working day.
+        await clearPartnerMfaFailures(c, req.partner!.userId);
+        return "ok" as const;
       }
-      return false;
+      // Every failure is now recorded (audit event + counter). It was previously silent: a bare
+      // 401 with no audit row and no security event, so the brute force was also invisible.
+      const { locked } = await recordPartnerMfaFailure(c, {
+        tenantId: req.partner!.tenantId,
+        userId: req.partner!.userId,
+        sessionId: req.partner!.sessionId,
+        ip: req.ip ?? null,
+        reason: typeof recoveryCode === "string" && recoveryCode ? "recovery_code" : "totp",
+      });
+      return locked ? ("just_locked" as const) : ("invalid" as const);
     });
-    if (!ok) {
+
+    if (outcome === "locked" || outcome === "just_locked") {
+      // 423, matching the codebase's existing "refused because a state bars you" status
+      // (requireNotViewOnly / requireNotSensitiveFrozen). No enumeration concern: reaching this
+      // endpoint at all requires having already completed the password step for this account.
+      res.status(423).json({ error: "mfa locked" });
+      return;
+    }
+    if (outcome === "invalid") {
       res.status(401).json({ error: "invalid code" });
       return;
     }
@@ -260,6 +309,11 @@ export function partnerApiRouter(): Router {
 
   // ---- session ----
   r.get("/session", async (req, res) => {
+    // The payload changes with the partner session cookie (including immediately after a successful
+    // sign-in). An ETag/304 response can otherwise reuse an anonymous or MFA-pending body and leave
+    // the browser unable to enter the authenticated portal. This endpoint is identity-bearing, so
+    // it must never be stored or conditionally replayed by a browser or intermediary.
+    res.setHeader("Cache-Control", "private, no-store");
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -309,6 +363,49 @@ export function partnerApiRouter(): Router {
         .status(500)
         .json({ error: { code: "credit_view_unavailable", message: "Credit information is unavailable." } });
     }
+  });
+
+  /**
+   * Start a Stripe Checkout for a credit package.
+   *
+   * Gated on partner.credits.purchase, NOT partner.credits.view — PARTNER_FINANCE_VIEWER holds the
+   * latter and is a read-only oversight role that must never be able to spend the shop's money.
+   *
+   * The body carries a packageId and an optional returnPath, and nothing else is read from it. The
+   * price, the credit quantity, the currency and the tenant are all derived server-side; see
+   * credit-purchase-service.ts. Crediting happens only in the Stripe webhook — the browser being
+   * redirected to success_url grants nothing.
+   */
+  r.post("/credits/checkout", requirePartnerCapability("partner.credits.purchase"), async (req, res) => {
+    try {
+      const origin = (req.headers.origin as string) || APP_BASE_URL;
+      const checkout = await createPartnerCreditCheckout(req.partner!, req.body?.packageId, {
+        origin,
+        returnPath: req.body?.returnPath,
+      });
+      res.json(checkout);
+    } catch (err) {
+      if (err instanceof PartnerCreditPurchaseError) {
+        return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+      }
+      console.error("[partner credits] checkout failed:", (err as Error).message);
+      res
+        .status(500)
+        .json({ error: { code: "checkout_unavailable", message: "Could not start checkout. Please try again." } });
+    }
+  });
+
+  /** The packages a shop may buy. Server-held, so the UI cannot render a price the server won't charge. */
+  r.get("/credits/packages", requirePartnerCapability("partner.credits.view"), async (_req, res) => {
+    res.json({
+      packages: PARTNER_CREDIT_PACKAGES.map((p) => ({
+        id: p.id,
+        credits: p.credits,
+        pricePence: p.pricePence,
+        label: p.label,
+      })),
+      currency: PARTNER_CREDIT_CURRENCY,
+    });
   });
 
   r.get("/sessions", requirePartnerAuth, async (req, res) => {
@@ -498,7 +595,7 @@ export function partnerApiRouter(): Router {
 
   // ---- MFA enrolment (Item 3) ----
   // enrol/confirm are reachable by an mfa-pending session (a user with mfa_required but no method yet).
-  r.post("/mfa/enrol", partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/enrol", partnerMfaManagementLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -531,7 +628,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, secret: out.secret, otpauthUri: out.otpauthUri }); // shown once; never logged
   });
 
-  r.post("/mfa/confirm", partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/confirm", partnerMfaManagementLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -557,7 +654,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once
   });
 
-  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaManagementLimiter, async (req, res) => {
     const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });
@@ -587,7 +684,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
   });
 
-  r.post("/mfa/disable", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/disable", requirePartnerAuth, partnerMfaManagementLimiter, async (req, res) => {
     const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });

@@ -22,6 +22,8 @@ export interface FingerprintCard {
   language: string | null;
   declaredValuePence: number | null;
   quantity: number;
+  frontImageKey: string | null;
+  backImageKey: string | null;
 }
 
 export interface FingerprintSource {
@@ -102,6 +104,8 @@ function serialise(source: FingerprintSource): string {
     parts.push(normaliseText(card.language));
     parts.push(normaliseNumber(card.declaredValuePence));
     parts.push(normaliseNumber(card.quantity));
+    parts.push(normaliseText(card.frontImageKey));
+    parts.push(normaliseText(card.backImageKey));
   }
 
   return parts.join("|");

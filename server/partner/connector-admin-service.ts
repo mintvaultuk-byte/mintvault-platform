@@ -433,14 +433,37 @@ export async function listConnectorRecords(
 
 export async function getRecordDetail(recordId: string) {
   const rec = await loadRecord(recordId);
-  const [validation, mapping, destination, attempts, consistency, partnerCredit] = await Promise.all([
-    getLatestValidationRun(rec.id),
-    getConnectorImport(rec.id),
-    getImportedDestination(rec.id),
-    getImportAttempts(rec.id),
-    inspectConnectorConsistency(rec.id).catch(() => null),
-    getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id),
-  ]);
+  // Keep an operational-detail failure diagnosable without exposing query text, values or
+  // credentials to the Super Admin HTTP response.  This route combines independent read-only
+  // projections; the projection name is the only extra context operators need in server logs.
+  const projection = async <T>(name: string, read: () => Promise<T>): Promise<T> => {
+    try {
+      return await read();
+    } catch (err) {
+      const e = err as { code?: unknown; message?: unknown };
+      // eslint-disable-next-line no-console
+      console.error("[partner connector] detail projection failed", {
+        recordId,
+        projection: name,
+        code: typeof e?.code === "string" ? e.code : "unknown",
+        message: typeof e?.message === "string" ? e.message : "unknown error",
+      });
+      throw err;
+    }
+  };
+  // These helpers each acquire from the intentionally small connector pool.  A detail request
+  // used to fan out six independent reads at once, while some helpers perform a second dependent
+  // connector query.  That can exceed the pool's bounded capacity and turn an otherwise healthy
+  // imported record into a transient 500.  This is an operator detail screen, not a latency-
+  // critical worker path, so bounded sequential reads are the correct fail-safe behaviour.
+  const validation = await projection("latest_validation", () => getLatestValidationRun(rec.id));
+  const mapping = await projection("mapping", () => getConnectorImport(rec.id));
+  const destination = await projection("destination", () => getImportedDestination(rec.id));
+  const attempts = await projection("attempts", () => getImportAttempts(rec.id));
+  const consistency = await projection("consistency", () => inspectConnectorConsistency(rec.id)).catch(() => null);
+  const partnerCredit = await projection("partner_credit", () =>
+    getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id)
+  );
   const findings = validation?.findings ?? [];
   const adminActions = await getRecordAuditHistory(recordId, 0, 50);
   return {
@@ -478,19 +501,6 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
       }
       throw error;
     }
-    const conflicts = await client.query<{ count: string }>(
-      `SELECT count(*)::text AS count
-         FROM partner_credit_reservations
-        WHERE tenant_id=$1 AND submission_reference=$2 AND source='portal'`,
-      [tenantId, partnerSubmissionId]
-    );
-    if (Number(conflicts.rows[0]?.count ?? "0") > 1) {
-      return {
-        error: "reservation_link_inconsistent",
-        message: "Partner submission has more than one authoritative credit reservation and requires reconciliation.",
-        reservationLinkConflict: true,
-      };
-    }
     const { rows } = await client.query<{
       reservation_id: string;
       reservation_status: string;
@@ -511,8 +521,7 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
         WHERE reservation.tenant_id = $1
           AND reservation.submission_reference = $2
           AND reservation.source = 'portal'
-        ORDER BY reservation.created_at ASC, reservation.id ASC
-        LIMIT 1`,
+        ORDER BY reservation.created_at ASC, reservation.id ASC`,
       [tenantId, partnerSubmissionId]
     );
     const holds = await client.query<{
@@ -533,6 +542,9 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
     if (!reservation && holds.rows.length === 0) return null;
     return {
       ...(reservation ?? {}),
+      reservations: rows.map(({ reservation_id, reservation_status }) => ({ reservation_id, reservation_status })),
+      reservationCount: rows.length,
+      activeReservationCount: rows.filter((row) => row.reservation_status === "active").length,
       destinationCreditHold: holds.rows[0] ?? null,
       reservationLinkConflict: false,
     };

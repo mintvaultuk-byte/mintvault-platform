@@ -1,11 +1,32 @@
 /** G6D: real PostgreSQL coverage for Partner submission credit lifecycle integration. */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
+import { randomUUID } from "node:crypto";
 import type { Express } from "express";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+/**
+ * DETERMINISTIC STORAGE SEAM — this suite is financial-only (see the sibling note in
+ * partner-recovery-cardinality.test.ts). submitSubmission requires per-card image keys plus a real
+ * headR2() existence check, and its return path signs keys via getR2SignedUrl(); both reach
+ * server/r2.ts, which throws when R2 is unconfigured. Production validation is unchanged.
+ */
+vi.mock("../server/r2", async () => {
+  const actual = await vi.importActual<typeof import("../server/r2")>("../server/r2");
+  return {
+    ...actual,
+    headR2: vi.fn(async () => ({
+      lastModified: new Date("2026-08-06T00:00:00Z"),
+      contentLength: 1024,
+      contentType: "image/jpeg",
+      eTag: '"fixture"',
+    })),
+    getR2SignedUrl: vi.fn(async (key: string) => `https://storage.invalid/${key}`),
+  };
+});
 
 let cluster: DisposablePostgres17;
 let admin: Client;
@@ -27,6 +48,8 @@ interface TenantFixture {
   tenantId: string;
   locationId: string;
   userId: string;
+  customerId: string;
+  serviceTierCode: string;
 }
 
 async function configureConnectorRuntime(): Promise<void> {
@@ -82,6 +105,8 @@ async function seedMintVaultTables(): Promise<void> {
   }
 }
 
+let moduleCustomerId: string;
+
 async function createTenant(): Promise<void> {
   tenantId = (
     await admin.query<{ id: string }>(
@@ -99,6 +124,19 @@ async function createTenant(): Promise<void> {
     `INSERT INTO partner_users (id,public_ref,tenant_id,partner_id,email,password_hash,status,mfa_required)
      VALUES ($1,'g6d-user',$2,$2,'partner@g6d.example','x','ACTIVE',false)`,
     [partnerUserId, tenantId]
+  );
+  // submitSubmission requires a customer and an ACTIVE tier. Tenant-scoped tier: a global row
+  // would collide on uq_partner_service_tiers_global across fixtures.
+  moduleCustomerId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_customers (tenant_id,full_name) VALUES ($1,'G6D Customer') RETURNING id",
+      [tenantId]
+    )
+  ).rows[0].id;
+  await admin.query(
+    `INSERT INTO partner_service_tiers (tenant_id,tier_code,label,price_per_card_pence,turnaround_days,is_active)
+     VALUES ($1,'g6d-tier','G6D Tier',1500,20,true)`,
+    [tenantId]
   );
 }
 
@@ -157,7 +195,18 @@ async function createTenantFixture(label: string): Promise<TenantFixture> {
     userId,
     locationId,
   ]);
-  return { tenantId, locationId, userId };
+  const customerId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_customers (tenant_id,full_name) VALUES ($1,$2) RETURNING id",
+      [tenantId, `G6D ${label} Customer`]
+    )
+  ).rows[0].id;
+  await admin.query(
+    `INSERT INTO partner_service_tiers (tenant_id,tier_code,label,price_per_card_pence,turnaround_days,is_active)
+     VALUES ($1,'g6d-tier','G6D Tier',1500,20,true)`,
+    [tenantId]
+  );
+  return { tenantId, locationId, userId, customerId, serviceTierCode: "g6d-tier" };
 }
 
 async function addCreditsFor(fixture: TenantFixture, amount: number, key: string): Promise<void> {
@@ -176,15 +225,23 @@ async function addCreditsFor(fixture: TenantFixture, amount: number, key: string
 async function makeDraftFor(fixture: TenantFixture): Promise<string> {
   const id = (
     await admin.query<{ id: string }>(
-      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status)
-       VALUES ($1,$2,$3,1,'draft') RETURNING id`,
-      [fixture.tenantId, fixture.locationId, fixture.userId]
+      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status,customer_id,service_tier_code)
+       VALUES ($1,$2,$3,1,'draft',$4,$5) RETURNING id`,
+      [fixture.tenantId, fixture.locationId, fixture.userId, fixture.customerId, fixture.serviceTierCode]
     )
   ).rows[0].id;
+  const isoCardId = randomUUID();
   await admin.query(
-    `INSERT INTO partner_submission_cards (tenant_id,submission_id,sequence_number,card_name,quantity)
-     VALUES ($1,$2,1,$3,1)`,
-    [fixture.tenantId, id, `G6D isolation card ${++sequence}`]
+    `INSERT INTO partner_submission_cards (id,tenant_id,submission_id,sequence_number,card_name,quantity,front_image_key,back_image_key)
+     VALUES ($1,$2,$3,1,$4,1,$5,$6)`,
+    [
+      isoCardId,
+      fixture.tenantId,
+      id,
+      `G6D isolation card ${++sequence}`,
+      `partner-submissions/${fixture.tenantId}/${id}/${isoCardId}/front-fixture.jpg`,
+      `partner-submissions/${fixture.tenantId}/${id}/${isoCardId}/back-fixture.jpg`,
+    ]
   );
   return id;
 }
@@ -214,15 +271,23 @@ async function makeDraft(): Promise<string> {
   sequence += 1;
   const id = (
     await admin.query<{ id: string }>(
-      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status)
-       VALUES ($1,$2,$3,1,'draft') RETURNING id`,
-      [tenantId, locationId, partnerUserId]
+      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status,customer_id,service_tier_code)
+       VALUES ($1,$2,$3,1,'draft',$4,'g6d-tier') RETURNING id`,
+      [tenantId, locationId, partnerUserId, moduleCustomerId]
     )
   ).rows[0].id;
+  const cardId = randomUUID();
   await admin.query(
-    `INSERT INTO partner_submission_cards (tenant_id,submission_id,sequence_number,card_name,quantity)
-     VALUES ($1,$2,1,$3,1)`,
-    [tenantId, id, `G6D Card ${sequence}`]
+    `INSERT INTO partner_submission_cards (id,tenant_id,submission_id,sequence_number,card_name,quantity,front_image_key,back_image_key)
+     VALUES ($1,$2,$3,1,$4,1,$5,$6)`,
+    [
+      cardId,
+      tenantId,
+      id,
+      `G6D Card ${sequence}`,
+      `partner-submissions/${tenantId}/${id}/${cardId}/front-fixture.jpg`,
+      `partner-submissions/${tenantId}/${id}/${cardId}/back-fixture.jpg`,
+    ]
   );
   return id;
 }
@@ -509,6 +574,36 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
     );
     expect(projection?.reservation_id).toEqual(expect.any(String));
     expect(after.rows).toEqual(before.rows); // the Super Admin projection is strictly read-only
+  });
+
+  it("projects every valid per-card reservation without raising a false reconciliation alert", async () => {
+    await addCredits(2, "g6d-admin-projection-per-card-credit");
+    const source = await makeDraft();
+    const secondCardId = randomUUID();
+    await admin.query(
+      `INSERT INTO partner_submission_cards
+         (id,tenant_id,submission_id,sequence_number,card_name,quantity,front_image_key,back_image_key)
+       VALUES ($1,$2,$3,2,'G6D second physical card',1,$4,$5)`,
+      [
+        secondCardId,
+        tenantId,
+        source,
+        `partner-submissions/${tenantId}/${source}/${secondCardId}/front-fixture.jpg`,
+        `partner-submissions/${tenantId}/${source}/${secondCardId}/back-fixture.jpg`,
+      ]
+    );
+    await admin.query("UPDATE partner_submissions SET card_count=2 WHERE id=$1", [source]);
+    await submitDraft(source, "g6d-admin-projection-per-card");
+
+    const projection = await connectorAdmin.getPartnerSubmissionCreditProjection(tenantId, source);
+
+    expect(projection).toMatchObject({
+      reservationCount: 2,
+      activeReservationCount: 2,
+      reservationLinkConflict: false,
+    });
+    expect(projection?.reservations).toHaveLength(2);
+    expect(projection?.reservations.every((reservation) => reservation.reservation_status === "active")).toBe(true);
   });
 
   it("fails closed for cross-tenant location, membership, submission, reserve, and cancellation attempts", async () => {
@@ -1300,6 +1395,15 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
        VALUES ($1,$2,$3,'validating','g6d-worker',1) RETURNING id, version`,
       [tenantId, validationSource, validationHandoff.rows[0].id]
     );
+    // This test exercises the validation-TERMINAL release path, so the record must genuinely fail
+    // validation. It previously did so by accident — the fixture created submissions with no
+    // customer and no service tier, which the validator rejects. Now that the fixtures satisfy the
+    // real submit contract, invalidity has to be caused deliberately.
+    //
+    // Deactivating the tier AFTER submit is the realistic trigger: a Super Admin disables a service
+    // tier while a submission is in flight, and connector-validation-service reports
+    // `service_tier_inactive`. That is a real production scenario, not a synthetic poke.
+    await admin.query("UPDATE partner_service_tiers SET is_active=false WHERE tenant_id=$1", [tenantId]);
     const validation = await import("../server/partner/connector-validation-service");
     const validationResult = await validation.validateConnectorRecord({
       connectorId: validationConnector.rows[0].id,
@@ -1308,6 +1412,8 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
       tenantId,
     });
     expect(validationResult.outcome).toBe("invalid");
+    // Restore, so later drafts in this suite can still submit.
+    await admin.query("UPDATE partner_service_tiers SET is_active=true WHERE tenant_id=$1", [tenantId]);
 
     const reconciliationSource = await makeDraft();
     await submitDraft(reconciliationSource, "g6d-reconciliation-terminal-submit");

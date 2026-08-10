@@ -21,6 +21,10 @@ export const PARTNER_PERMISSIONS = [
   "partner.documents.view",
   "partner.training.view",
   "partner.credits.view",
+  // Spending authority, deliberately separate from viewing. partner.credits.view is held by
+  // PARTNER_FINANCE_VIEWER, whose whole purpose is read-only oversight — it must never confer the
+  // ability to put £1,000 through Stripe. Seeded by migration 0057 for OWNER and MANAGER only.
+  "partner.credits.purchase",
   "partner.orders.view",
   "partner.orders.create",
   "partner.orders.edit",
@@ -48,6 +52,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.documents.view",
     "partner.training.view",
     "partner.credits.view",
+    "partner.credits.purchase",
     "partner.orders.view",
     "partner.orders.create",
     "partner.orders.edit",
