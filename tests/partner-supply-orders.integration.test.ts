@@ -339,4 +339,74 @@ describe("Partner supply orders — real PostgreSQL security and payment evidenc
       ])
     );
   });
+
+  it("records only a shop's explicit stock count and derives its order indicators from authoritative ledgers", async () => {
+    const before = await service.listPartnerSupplyOperations(principal);
+    const beforeSlabs = before.products.find(
+      (product: { code: string }) => product.code === "plastic_mintvault_slab_box"
+    );
+    expect(beforeSlabs).toBeTruthy();
+    expect(beforeSlabs!.knownUnits).toBeNull();
+
+    await expect(service.recordPartnerSupplyStock(principal, "plastic_mintvault_slab_box", -1)).rejects.toMatchObject({
+      code: "invalid_stock_count",
+    });
+    await expect(service.recordPartnerSupplyStock(principal, "not-a-product", 10)).rejects.toMatchObject({
+      code: "unknown_product",
+    });
+    await expect(service.recordPartnerSupplyStock(principal, "plastic_mintvault_slab_box", 144)).resolves.toMatchObject(
+      {
+        productCode: "plastic_mintvault_slab_box",
+        knownUnits: 144,
+      }
+    );
+
+    const checkout = await service.createPartnerSupplyCheckout(
+      principal,
+      {
+        idempotencyKey: "77777777-7777-4777-8777-777777777777",
+        items: [{ productCode: "plastic_mintvault_slab_box", quantity: 1 }],
+      },
+      { origin: "http://local.test" }
+    );
+    const session = await admin.query<{ stripe_checkout_session_id: string }>(
+      "SELECT stripe_checkout_session_id FROM partner_supply_payments WHERE order_id=$1",
+      [checkout.orderId]
+    );
+    await service.fulfilPartnerSupplyOrder("evt_supply_operations", {
+      id: session.rows[0].stripe_checkout_session_id,
+      payment_status: "paid",
+      payment_intent: "pi_supply_operations",
+      metadata: { type: "partner_supply_order", order_id: checkout.orderId, tenant_id: TENANT_A },
+    } as any);
+
+    // A second tenant's count is real but must not leak into the Partner's shop view.
+    await admin.query(
+      `INSERT INTO partner_supply_stock_counts
+         (tenant_id, location_id, product_code, known_units, counted_by_user_id)
+       VALUES ($1,$2,'plastic_mintvault_slab_box',999,NULL)`,
+      [TENANT_B, LOCATION_B]
+    );
+    const after = await service.listPartnerSupplyOperations(principal);
+    const afterSlabs = after.products.find(
+      (product: { code: string }) => product.code === "plastic_mintvault_slab_box"
+    );
+    expect(after.cardsCompleted).toBe(0);
+    expect(afterSlabs).toMatchObject({
+      knownUnits: 144,
+      paidOrderedUnits: beforeSlabs!.paidOrderedUnits + 50,
+      awaitingDispatchUnits: beforeSlabs!.awaitingDispatchUnits + 50,
+    });
+    const adminOperations = await service.listSupplyOperationsForSuperAdmin();
+    expect(adminOperations.products.find((product) => product.code === "plastic_mintvault_slab_box")).toMatchObject({
+      knownStockUnits: 1143,
+      shopsWithRecordedStock: 2,
+    });
+    const audit = await admin.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM partner_audit_events
+        WHERE tenant_id=$1 AND action='partner_supply_stock_recorded'`,
+      [TENANT_A]
+    );
+    expect(audit.rows[0].count).toBe(1);
+  });
 });

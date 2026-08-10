@@ -135,9 +135,15 @@ async function main(): Promise<void> {
       (tenant_id, order_id, action, actor_type, actor_user_id, actor_email, details)
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010',
               'stripe_payment_confirmed', 'stripe_webhook', NULL, NULL, '{"event_id":"evt_browser_paid_1"}'::jsonb)`);
-    await admin.query(
-      "CREATE ROLE supply_browser_runtime LOGIN PASSWORD 'synthetic-browser-runtime' NOSUPERUSER NOBYPASSRLS INHERIT"
-    );
+    // Roles are PostgreSQL-cluster-wide while this fixture database is deliberately fresh per
+    // browser run. Make the restricted local-only role reusable so a previous disposable proof
+    // cannot prevent a later fresh database from bootstrapping.
+    await admin.query(`DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='supply_browser_runtime') THEN
+          CREATE ROLE supply_browser_runtime LOGIN PASSWORD 'synthetic-browser-runtime' NOSUPERUSER NOBYPASSRLS INHERIT;
+        END IF;
+      END$$`);
     await admin.query("GRANT partner_runtime TO supply_browser_runtime");
   } finally {
     await admin.end();

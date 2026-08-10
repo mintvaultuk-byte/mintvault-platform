@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { APP_BASE_URL } from "../app-url";
-import { requirePartnerCapability, requireNotSensitiveFrozen } from "./session";
+import { requirePartnerCapability, requireNotSensitiveFrozen, requireNotViewOnly } from "./session";
 import {
   PartnerSupplyError,
   createPartnerSupplyCheckout,
+  listPartnerSupplyOperations,
   listPartnerSupplyOrders,
   listPartnerSupplyProducts,
+  recordPartnerSupplyStock,
 } from "./supply-service";
 
 function sendSupplyError(res: { status: (status: number) => { json: (body: unknown) => void } }, err: unknown): void {
@@ -36,6 +38,31 @@ export function partnerSupplyRouter(): Router {
       sendSupplyError(res, err);
     }
   });
+
+  r.get("/supplies/operations", requirePartnerCapability("partner.orders.view"), async (req, res) => {
+    try {
+      res.json(await listPartnerSupplyOperations(req.partner!));
+    } catch (err) {
+      sendSupplyError(res, err);
+    }
+  });
+
+  // Reception holds legacy orders.submit, so it is intentionally insufficient here. A recorded
+  // stock count is mutable operational evidence and is limited to the existing Owner/Manager
+  // purchase capability; Finance remains read-only.
+  r.put(
+    "/supplies/stock/:productCode",
+    requirePartnerCapability("partner.orders.submit"),
+    requirePartnerCapability("partner.credits.purchase"),
+    requireNotViewOnly,
+    async (req, res) => {
+      try {
+        res.json(await recordPartnerSupplyStock(req.partner!, req.params.productCode, req.body?.knownUnits));
+      } catch (err) {
+        sendSupplyError(res, err);
+      }
+    }
+  );
 
   // A Finance Viewer has partner.orders.view but deliberately lacks credits.purchase. The two
   // checks are both required so the historical broad orders.submit grant for Reception cannot

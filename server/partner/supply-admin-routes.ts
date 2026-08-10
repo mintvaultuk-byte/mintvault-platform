@@ -6,6 +6,7 @@ import {
   cancelSupplyOrderForSuperAdmin,
   listSupplyOrderAuditForSuperAdmin,
   listSupplyOrdersForSuperAdmin,
+  listSupplyOperationsForSuperAdmin,
   moveSupplyOrderForSuperAdmin,
   requestSupplyManualExceptionForSuperAdmin,
   refundSupplyOrderForSuperAdmin,
@@ -55,6 +56,13 @@ export function partnerSupplyAdminRouter(): Router {
     try {
       const { listPartnerSupplyProducts } = await import("./supply-service");
       res.json(await listPartnerSupplyProducts());
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+  r.get("/operations", async (_req, res) => {
+    try {
+      res.json(await listSupplyOperationsForSuperAdmin());
     } catch (err) {
       sendError(res, err);
     }

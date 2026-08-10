@@ -32,6 +32,12 @@ type SupplyProductRow = {
   active: boolean;
 };
 
+type SupplyOperationsRow = SupplyProductRow & {
+  known_units: number | null;
+  paid_ordered_units: number;
+  awaiting_dispatch_units: number;
+};
+
 type TaxSettingRow = {
   tax_treatment: PartnerSupplyTaxTreatment;
   vat_rate_basis_points: number | null;
@@ -492,6 +498,190 @@ export async function listPartnerSupplyOrders(principal: PartnerPrincipal): Prom
       [principal.tenantId]
     );
     return rows;
+  });
+}
+
+export async function listSupplyOperationsForSuperAdmin(): Promise<{
+  cardsCompleted: number;
+  products: Array<{
+    code: string;
+    displayName: string;
+    unitsPerPack: number;
+    knownStockUnits: number | null;
+    shopsWithRecordedStock: number;
+    paidOrderedUnits: number;
+    awaitingDispatchUnits: number;
+  }>;
+}> {
+  const [products, completed] = await Promise.all([
+    partnerAdminQuery<
+      SupplyProductRow & {
+        known_stock_units: number | null;
+        shops_with_recorded_stock: number;
+        paid_ordered_units: number;
+        awaiting_dispatch_units: number;
+      }
+    >(
+      `SELECT p.code, p.display_name, p.units_per_pack, p.pricing_mode, p.active_price_pence, p.active,
+              stock.known_stock_units, stock.shops_with_recorded_stock,
+              COALESCE(ordered.paid_ordered_units, 0)::int AS paid_ordered_units,
+              COALESCE(ordered.awaiting_dispatch_units, 0)::int AS awaiting_dispatch_units
+         FROM partner_supply_products p
+         LEFT JOIN (
+           SELECT product_code,
+                  SUM(known_units)::int AS known_stock_units,
+                  count(*)::int AS shops_with_recorded_stock
+             FROM partner_supply_stock_counts
+            GROUP BY product_code
+         ) stock ON stock.product_code=p.code
+         LEFT JOIN (
+           SELECT i.product_code,
+                  SUM(i.quantity * i.units_per_pack_snapshot) FILTER (
+                    WHERE o.status IN ('PAID','PROCESSING','DISPATCHED','COMPLETED','PARTIALLY_REFUNDED')
+                  ) AS paid_ordered_units,
+                  SUM(i.quantity * i.units_per_pack_snapshot) FILTER (
+                    WHERE o.status IN ('PAID','PROCESSING')
+                  ) AS awaiting_dispatch_units
+             FROM partner_supply_order_items i
+             JOIN partner_supply_orders o ON o.id=i.order_id
+            GROUP BY i.product_code
+         ) ordered ON ordered.product_code=p.code
+        ORDER BY p.code`
+    ),
+    partnerAdminQuery<{ cards_completed: number }>(
+      "SELECT count(*)::int AS cards_completed FROM partner_grading_work_items WHERE status='completed'"
+    ),
+  ]);
+  return {
+    cardsCompleted: completed.rows[0]?.cards_completed ?? 0,
+    products: products.rows.map((row) => ({
+      code: row.code,
+      displayName: row.display_name,
+      unitsPerPack: row.units_per_pack,
+      knownStockUnits: row.known_stock_units,
+      shopsWithRecordedStock: row.shops_with_recorded_stock ?? 0,
+      paidOrderedUnits: row.paid_ordered_units,
+      awaitingDispatchUnits: row.awaiting_dispatch_units,
+    })),
+  };
+}
+
+/**
+ * A deliberately small operations view. The count is the shop's explicitly recorded stock; the
+ * order and completed-card figures are derived from their immutable/authoritative ledgers. No
+ * consumption or "stock remaining" formula is inferred from those unrelated facts.
+ */
+export async function listPartnerSupplyOperations(principal: PartnerPrincipal): Promise<{
+  cardsCompleted: number;
+  products: Array<{
+    code: string;
+    displayName: string;
+    unitsPerPack: number;
+    knownUnits: number | null;
+    paidOrderedUnits: number;
+    awaitingDispatchUnits: number;
+  }>;
+}> {
+  if (!principal.locationId) {
+    throw new PartnerSupplyError(409, "location_required", "Choose an active shop before viewing supply operations.");
+  }
+  return withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, async (client) => {
+    const [products, completed] = await Promise.all([
+      client.query<SupplyOperationsRow>(
+        `SELECT p.code, p.display_name, p.units_per_pack, p.pricing_mode, p.active_price_pence, p.active,
+                sc.known_units,
+                COALESCE(ordered.paid_ordered_units, 0)::int AS paid_ordered_units,
+                COALESCE(ordered.awaiting_dispatch_units, 0)::int AS awaiting_dispatch_units
+           FROM partner_supply_products p
+           LEFT JOIN partner_supply_stock_counts sc
+             ON sc.tenant_id=$1 AND sc.location_id=$2 AND sc.product_code=p.code
+           LEFT JOIN (
+             SELECT i.product_code,
+                    SUM(i.quantity * i.units_per_pack_snapshot) FILTER (
+                      WHERE o.status IN ('PAID','PROCESSING','DISPATCHED','COMPLETED','PARTIALLY_REFUNDED')
+                    ) AS paid_ordered_units,
+                    SUM(i.quantity * i.units_per_pack_snapshot) FILTER (
+                      WHERE o.status IN ('PAID','PROCESSING')
+                    ) AS awaiting_dispatch_units
+               FROM partner_supply_order_items i
+               JOIN partner_supply_orders o ON o.id=i.order_id
+              WHERE o.tenant_id=$1 AND o.location_id=$2
+              GROUP BY i.product_code
+           ) ordered ON ordered.product_code=p.code
+          ORDER BY p.code`,
+        [principal.tenantId, principal.locationId]
+      ),
+      client.query<{ cards_completed: number }>(
+        `SELECT count(*)::int AS cards_completed
+           FROM partner_grading_work_items
+          WHERE tenant_id=$1 AND partner_location_id=$2 AND status='completed'`,
+        [principal.tenantId, principal.locationId]
+      ),
+    ]);
+    return {
+      cardsCompleted: completed.rows[0]?.cards_completed ?? 0,
+      products: products.rows.map((row) => ({
+        code: row.code,
+        displayName: row.display_name,
+        unitsPerPack: row.units_per_pack,
+        knownUnits: row.known_units,
+        paidOrderedUnits: row.paid_ordered_units,
+        awaitingDispatchUnits: row.awaiting_dispatch_units,
+      })),
+    };
+  });
+}
+
+export async function recordPartnerSupplyStock(
+  principal: PartnerPrincipal,
+  productCode: unknown,
+  knownUnits: unknown
+): Promise<{ productCode: string; knownUnits: number; countedAt: string }> {
+  if (!principal.locationId) {
+    throw new PartnerSupplyError(409, "location_required", "Choose an active shop before recording stock.");
+  }
+  if (typeof productCode !== "string" || !productCode.trim()) {
+    throw new PartnerSupplyError(400, "unknown_product", "Supply product is invalid.");
+  }
+  if (!Number.isSafeInteger(knownUnits) || (knownUnits as number) < 0) {
+    throw new PartnerSupplyError(400, "invalid_stock_count", "Known stock must be a whole number of units or zero.");
+  }
+  return withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, async (client) => {
+    const code = productCode.trim();
+    const product = await client.query<{ code: string }>("SELECT code FROM partner_supply_products WHERE code=$1", [
+      code,
+    ]);
+    if (product.rows.length !== 1)
+      throw new PartnerSupplyError(404, "unknown_product", "Supply product was not found.");
+    const before = await client.query<{ known_units: number }>(
+      `SELECT known_units FROM partner_supply_stock_counts
+        WHERE tenant_id=$1 AND location_id=$2 AND product_code=$3`,
+      [principal.tenantId, principal.locationId, code]
+    );
+    const saved = await client.query<{ known_units: number; counted_at: string }>(
+      `INSERT INTO partner_supply_stock_counts
+         (tenant_id, location_id, product_code, known_units, counted_by_user_id, counted_at)
+       VALUES ($1,$2,$3,$4,$5,now())
+       ON CONFLICT (tenant_id, location_id, product_code) DO UPDATE
+         SET known_units=EXCLUDED.known_units,
+             counted_by_user_id=EXCLUDED.counted_by_user_id,
+             counted_at=EXCLUDED.counted_at
+       RETURNING known_units, counted_at`,
+      [principal.tenantId, principal.locationId, code, knownUnits, principal.userId]
+    );
+    const row = saved.rows[0];
+    if (!row) throw new Error("Partner supply stock count could not be recorded.");
+    await writePartnerAudit(client as never, {
+      tenantId: principal.tenantId,
+      locationId: principal.locationId,
+      actorUserId: principal.userId,
+      action: "partner_supply_stock_recorded",
+      recordType: "partner_supply_stock_count",
+      recordId: `${principal.locationId}:${code}`,
+      before: { known_units: before.rows[0]?.known_units ?? null },
+      after: { known_units: row.known_units },
+    });
+    return { productCode: code, knownUnits: row.known_units, countedAt: row.counted_at };
   });
 }
 

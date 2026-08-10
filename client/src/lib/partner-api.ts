@@ -310,6 +310,18 @@ export interface PartnerSupplyOrder {
   items: PartnerSupplyOrderItem[];
 }
 
+export interface PartnerSupplyOperations {
+  cardsCompleted: number;
+  products: Array<{
+    code: string;
+    displayName: string;
+    unitsPerPack: number;
+    knownUnits: number | null;
+    paidOrderedUnits: number;
+    awaitingDispatchUnits: number;
+  }>;
+}
+
 export const partnerSupplies = {
   products: () =>
     req<{
@@ -319,6 +331,13 @@ export const partnerSupplies = {
       products: PartnerSupplyProduct[];
     }>("GET", "/api/partner/supplies/products"),
   orders: () => req<{ orders: PartnerSupplyOrder[] }>("GET", "/api/partner/supplies/orders"),
+  operations: () => req<PartnerSupplyOperations>("GET", "/api/partner/supplies/operations"),
+  recordStock: (productCode: string, knownUnits: number) =>
+    req<{ productCode: string; knownUnits: number; countedAt: string }>(
+      "PUT",
+      `/api/partner/supplies/stock/${encodeURIComponent(productCode)}`,
+      { knownUnits }
+    ),
   checkout: (input: {
     items: Array<{ productCode: string; quantity: number }>;
     deliveryAddress?: Record<string, string>;

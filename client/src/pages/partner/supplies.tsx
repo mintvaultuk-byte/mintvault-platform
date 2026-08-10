@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,9 +15,12 @@ const orderStatus = (status: string) => status.replaceAll("_", " ").replace(/\b\
 
 export default function PartnerSuppliesPage() {
   const { hasPermission } = usePartnerSession();
+  const queryClient = useQueryClient();
   const products = useQuery({ queryKey: ["/api/partner/supplies/products"], queryFn: partnerSupplies.products });
   const orders = useQuery({ queryKey: ["/api/partner/supplies/orders"], queryFn: partnerSupplies.orders });
+  const operations = useQuery({ queryKey: ["/api/partner/supplies/operations"], queryFn: partnerSupplies.operations });
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [stockInputs, setStockInputs] = useState<Record<string, string>>({});
   const [useOverride, setUseOverride] = useState(false);
   const [delivery, setDelivery] = useState({
     recipientName: "",
@@ -55,6 +58,11 @@ export default function PartnerSuppliesPage() {
       }),
     onSuccess: ({ checkoutUrl }) => window.location.assign(checkoutUrl),
   });
+  const recordStock = useMutation({
+    mutationFn: ({ productCode, knownUnits }: { productCode: string; knownUnits: number }) =>
+      partnerSupplies.recordStock(productCode, knownUnits),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/partner/supplies/operations"] }),
+  });
 
   return (
     <div className="space-y-8" data-testid="partner-supplies-page">
@@ -65,6 +73,85 @@ export default function PartnerSuppliesPage() {
           Prices are gross customer-facing prices. Every checkout preserves its final delivery address.
         </p>
       </header>
+
+      <section aria-labelledby="supply-operations-title" className="space-y-3">
+        <div>
+          <h2 id="supply-operations-title" className="text-base font-semibold">
+            Shop supply indicators
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Recorded stock, paid ordered units and completed cards are shown separately; MintVault does not estimate
+            consumption from them.
+          </p>
+        </div>
+        {operations.isLoading && <PartnerLoadingState label="Loading supply indicators…" />}
+        {operations.error && (
+          <PartnerErrorState message={partnerErrorMessage(operations.error)} onRetry={() => operations.refetch()} />
+        )}
+        {operations.data && (
+          <>
+            <Card className="rounded-md">
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">Cards completed at this shop</p>
+                <p className="text-2xl font-semibold">{operations.data.cardsCompleted.toLocaleString("en-GB")}</p>
+              </CardContent>
+            </Card>
+            <div className="grid gap-3 md:grid-cols-3">
+              {operations.data.products.map((product) => {
+                const entered = stockInputs[product.code] ?? product.knownUnits?.toString() ?? "";
+                const count = Number(entered);
+                const validCount = Number.isSafeInteger(count) && count >= 0;
+                return (
+                  <Card
+                    key={product.code}
+                    className="rounded-md"
+                    data-testid={`partner-supply-operations-${product.code}`}
+                  >
+                    <CardContent className="space-y-2 p-4">
+                      <p className="font-medium">{product.displayName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Known shop stock:{" "}
+                        {product.knownUnits == null
+                          ? "Not recorded"
+                          : `${product.knownUnits.toLocaleString("en-GB")} units`}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Paid ordered: {product.paidOrderedUnits.toLocaleString("en-GB")} units · Awaiting dispatch:{" "}
+                        {product.awaitingDispatchUnits.toLocaleString("en-GB")} units
+                      </p>
+                      {canPurchase && (
+                        <div className="flex flex-wrap items-end gap-2 pt-1">
+                          <div className="min-w-32 flex-1">
+                            <Label htmlFor={`stock-${product.code}`}>Record known stock (units)</Label>
+                            <Input
+                              id={`stock-${product.code}`}
+                              min={0}
+                              inputMode="numeric"
+                              type="number"
+                              value={entered}
+                              onChange={(event) =>
+                                setStockInputs((current) => ({ ...current, [product.code]: event.target.value }))
+                              }
+                            />
+                          </div>
+                          <Button
+                            variant="outline"
+                            disabled={!validCount || recordStock.isPending}
+                            onClick={() => recordStock.mutate({ productCode: product.code, knownUnits: count })}
+                          >
+                            Record count
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+            {recordStock.error && <PartnerErrorState message={partnerErrorMessage(recordStock.error)} />}
+          </>
+        )}
+      </section>
 
       {products.isLoading && <PartnerLoadingState label="Loading supplies…" />}
       {products.error && (

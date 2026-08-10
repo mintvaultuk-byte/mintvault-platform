@@ -703,7 +703,9 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 69,
-    standalone: true,
+    // 0070 owns the operational stock table and depends on 0069's catalogue, so 0069 may now
+    // only be reversed by the tested descending sequence.
+    standalone: false,
     migration: "0069_partner_supply_orders.sql",
     rollback: "rollback-0069-partner-supply-orders.sql",
     hole: "Partner supplies can be paid, fulfilled or refunded without an immutable tenant-isolated order/payment snapshot",
@@ -718,6 +720,21 @@ const ROUND_TRIPS: RoundTrip[] = [
                             'partner_supply_order_events')`
       );
       return rows[0].n === 7 ? "supply_order_ledger_present" : "supply_order_ledger_absent";
+    },
+  },
+  {
+    number: 70,
+    standalone: true,
+    migration: "0070_partner_supply_stock_indicators.sql",
+    rollback: "rollback-0070-partner-supply-stock-indicators.sql",
+    hole: "shop stock counts and order/card indicators have no tenant- and location-isolated source of truth",
+    whenApplied: "supply_stock_indicators_present",
+    whenRolledBack: "supply_stock_indicators_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ present: boolean }>(
+        "SELECT to_regclass('public.partner_supply_stock_counts') IS NOT NULL AS present"
+      );
+      return rows[0].present ? "supply_stock_indicators_present" : "supply_stock_indicators_absent";
     },
   },
   {
@@ -1080,7 +1097,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
     expect(after.rows[0]).toEqual({ idx: true, col: true, view: true });
   }, 120_000);
 
-  it("the whole 0068 -> 0047 descending rollback completes, and the runner restores every one", async () => {
+  it("the whole 0070 -> 0047 descending rollback completes, and the runner restores every one", async () => {
     const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
 
     for (const entry of descending) {

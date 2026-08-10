@@ -29,6 +29,18 @@ type Order = {
   refunded_total_pence: number;
   items: Array<{ name: string; quantity: number; unitsPerPack: number }>;
 };
+type Operations = {
+  cardsCompleted: number;
+  products: Array<{
+    code: string;
+    displayName: string;
+    unitsPerPack: number;
+    knownStockUnits: number | null;
+    shopsWithRecordedStock: number;
+    paidOrderedUnits: number;
+    awaitingDispatchUnits: number;
+  }>;
+};
 
 const money = (pence: number, currency = "GBP") =>
   new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(pence / 100);
@@ -65,6 +77,10 @@ export default function AdminSupplyOrdersPage() {
         taxTreatment: "UNCONFIGURED" | "VAT_INCLUDED";
         vatRateBasisPoints: number | null;
       }>("/catalogue"),
+  });
+  const operations = useQuery({
+    queryKey: ["supply-admin-operations"],
+    queryFn: () => supplyApi<Operations>("/operations"),
   });
   const audit = useQuery({
     queryKey: ["supply-admin-audit", auditOrder],
@@ -121,6 +137,45 @@ export default function AdminSupplyOrdersPage() {
             {message}
           </div>
         )}
+
+        <Panel
+          title="Operations indicators"
+          sub="Current shop-counted stock, paid order units and completed work items. These are indicators, not an inferred consumption model."
+        >
+          {operations.isLoading && <p>Loading operations indicators…</p>}
+          {operations.error && (
+            <p role="alert">
+              {operations.error instanceof Error ? operations.error.message : "Could not load operations indicators."}
+            </p>
+          )}
+          {operations.data && (
+            <div className="space-y-3">
+              <p>
+                <strong>{operations.data.cardsCompleted.toLocaleString("en-GB")}</strong> completed Partner work items
+              </p>
+              <div className="grid gap-3 md:grid-cols-3">
+                {operations.data.products.map((product) => (
+                  <div key={product.code} className="rounded border border-white/10 p-3">
+                    <strong>{product.displayName}</strong>
+                    <p className="mt-1 text-sm opacity-75">
+                      Known shop stock:{" "}
+                      {product.knownStockUnits == null
+                        ? "Not recorded"
+                        : `${product.knownStockUnits.toLocaleString("en-GB")} units`}
+                      {product.shopsWithRecordedStock > 0
+                        ? ` across ${product.shopsWithRecordedStock} shop${product.shopsWithRecordedStock === 1 ? "" : "s"}`
+                        : ""}
+                    </p>
+                    <p className="text-sm opacity-75">
+                      Paid ordered: {product.paidOrderedUnits.toLocaleString("en-GB")} units · Awaiting dispatch:{" "}
+                      {product.awaitingDispatchUnits.toLocaleString("en-GB")} units
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Panel>
 
         <Panel
           title="Current catalogue"
