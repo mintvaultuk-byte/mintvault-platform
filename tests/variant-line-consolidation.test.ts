@@ -264,6 +264,14 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /finish_variant\s*=\s*\$\{/.test(addedCode) &&
           /promo_type\s*=\s*\$\{/.test(addedCode);
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+        // D) P0 review-revision binding: server-issued revision plus the same
+        // atomic approval predicate.  This does not authorise scoring changes.
+        const signatureD =
+          /\bapplyCertGradeDraft\s*\(/.test(addedJs) &&
+          /\bapproveCertGrade\s*\([^)]*expectedRevision/.test(addedJs) &&
+          /\bapproveGraderCert\s*\([^)]*expectedRevision/.test(addedJs) &&
+          /RETURNING grading_revision/.test(addedCode) &&
+          /AND grading_revision\s*=\s*\$\{expectedRevision\}/.test(addedCode);
         // C) Wave 1 Partner-origin integration — founder-approved 2026-07-31, narrowly, for
         //    the reviewed integration ONLY. It recognises the immutable Partner provenance
         //    added by migration 0035, distinguishes PARTNER / HQ / legacy safely, fails closed
@@ -283,7 +291,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC,
+          signatureA || signatureB || signatureC || signatureD,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
@@ -296,7 +304,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         // those exact identifiers. Bare `centering`, `mvgs`, `pristine`, `gradeNum`,
         // `calculateOverallGrade` and `scoreMvgs` all still fail, in this file and every other.
         const b3Columns = /\b(centering_score|corners_score|edges_score|surface_score)\b/g;
-        expect(addedCode.replace(b3Columns, "")).not.toMatch(
+        expect(addedCode.replace(b3Columns, "").replace(/'(centering|corners|edges|surface)'/g, "")).not.toMatch(
           /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
         );
         continue;

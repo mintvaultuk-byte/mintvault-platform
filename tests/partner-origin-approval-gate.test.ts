@@ -80,6 +80,10 @@ const BASE_DDL = `
     graded_at timestamptz,
     rejection_reason text,
     redo_count integer NOT NULL DEFAULT 0,
+    -- Required by the revision-bound submit transition introduced in migration 0048.
+    -- This fixture deliberately omits only the earlier origin marker, not the current
+    -- grading concurrency contract under test.
+    grading_revision integer NOT NULL DEFAULT 1,
     graded_by varchar,
     operator_grade numeric,
     operator_subgrades jsonb,

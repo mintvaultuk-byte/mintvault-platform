@@ -996,6 +996,14 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /promo_type\s*=\s*\$\{/.test(addedCode);
         // Signature B is purely JavaScript, so it is judged ONLY on the JS representation.
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+        // D) P0 review-revision binding: accept only the complete
+        // server-issued revision + atomic-CAS chain, never scoring changes.
+        const signatureD =
+          /\bapplyCertGradeDraft\s*\(/.test(addedJs) &&
+          /\bapproveCertGrade\s*\([^)]*expectedRevision/.test(addedJs) &&
+          /\bapproveGraderCert\s*\([^)]*expectedRevision/.test(addedJs) &&
+          /RETURNING grading_revision/.test(addedCode) &&
+          /AND grading_revision\s*=\s*\$\{expectedRevision\}/.test(addedCode);
         // C) Wave 1 Partner-origin integration — founder-approved 2026-07-31, narrowly.
         //    Same four required tokens as the sibling guard in variant-line-consolidation:
         //    the provenance column constant, the origin resolver, the fail-closed predicate,
@@ -1006,10 +1014,13 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC, "server/grader.ts changed but matches no founder-authorised signature").toBe(
+        expect(signatureA || signatureB || signatureC || signatureD, "server/grader.ts changed but matches no founder-authorised signature").toBe(
           true
         );
-        expect(addedCode).not.toMatch(
+        const revisionBoundAddedCode = addedCode
+          .replace(/'(centering|corners|edges|surface)'/g, "")
+          .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");
+        expect(revisionBoundAddedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
         continue;

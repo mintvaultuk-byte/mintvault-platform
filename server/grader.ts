@@ -878,6 +878,86 @@ export async function approveCertGrade(certId: number, adminUser: string, expect
   return r.rows.length > 0;
 }
 
+/** Server-owned snapshot used to make a grader submit decision at one saved revision. */
+export async function getAssignedGradeSubmitSnapshot(certId: number, expectedRevision: number) {
+  const r = await db.execute(sql`
+    SELECT grade::text AS operator_grade, card_name
+    FROM certificates
+    WHERE id = ${certId}
+      AND grader_status = 'assigned'
+      AND grading_revision = ${expectedRevision}
+    LIMIT 1
+  `);
+  const row = r.rows[0] as { operator_grade?: string | null; card_name?: string | null } | undefined;
+  return row
+    ? { operatorGrade: row.operator_grade ?? null, cardName: row.card_name ?? null }
+    : null;
+}
+
+/**
+ * Atomically submit an assigned grade for human review at the exact server
+ * revision the route just saved/observed. This is intentionally the only
+ * assignment→pending_review transition used by the sampled submit flow.
+ */
+export async function submitAssignedGradeAtRevision(
+  certId: number,
+  graderId: string | null,
+  expectedRevision: number
+): Promise<boolean> {
+  const r = await db.execute(sql`
+    UPDATE certificates SET
+      grader_status = 'pending_review',
+      review_required = true,
+      graded_at = NOW(),
+      graded_by = COALESCE(${graderId}, assigned_grader_id),
+      operator_grade = grade,
+      operator_subgrades = jsonb_build_object(
+        'centering', centering_score, 'corners', corners_score,
+        'edges', edges_score, 'surface', surface_score),
+      updated_at = NOW()
+    WHERE id = ${certId}
+      AND grader_status = 'assigned'
+      AND grading_revision = ${expectedRevision}
+    RETURNING id
+  `);
+  return r.rows.length === 1;
+}
+
+/**
+ * Atomically publish an assigned card that sampling cleared at the exact
+ * revision previously saved by the grader. Approval is a persisted-row state
+ * transition: it snapshots `operator_grade = grade` but never promotes a
+ * separate stale `operator_grade` value into `grade`.
+ */
+export async function autoApproveAssignedGradeAtRevision(
+  certId: number,
+  graderEmail: string,
+  graderId: string | null,
+  expectedRevision: number
+): Promise<boolean> {
+  const r = await db.execute(sql`
+    UPDATE certificates SET
+      review_required = false,
+      graded_at = NOW(),
+      graded_by = COALESCE(${graderId}, assigned_grader_id),
+      operator_grade = grade,
+      operator_subgrades = jsonb_build_object(
+        'centering', centering_score, 'corners', corners_score,
+        'edges', edges_score, 'surface', surface_score),
+      grade_approved_at = NOW(),
+      grade_approved_by = ${graderEmail},
+      grader_status = 'approved',
+      status = 'active',
+      print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
+      updated_at = NOW()
+    WHERE id = ${certId}
+      AND grader_status = 'assigned'
+      AND grading_revision = ${expectedRevision}
+    RETURNING id
+  `);
+  return r.rows.length === 1;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // GRADER V2 — cert-level migration, assignment, reject/approve, earnings
 // ════════════════════════════════════════════════════════════════════════════
