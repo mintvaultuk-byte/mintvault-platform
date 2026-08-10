@@ -117,7 +117,14 @@ const SUITES = [
   // series and the only behavioural coverage of the descending recovery order, and it is exactly
   // the suite whose absence would be discovered during an incident.
   // MEASURED 2026-08-09 against a real disposable PostgreSQL 17 cluster.
-  { file: "tests/partner-rollback-integrity.test.ts", min: 45 },
+  { file: "tests/partner-rollback-integrity.test.ts", min: 50 },
+  /**
+   * Phase 4's only end-to-end proof joins the shipped 0067/0071 migrations, real local MinIO,
+   * the scanner ingest writer and the actual review approval CAS.  It self-provisions PostgreSQL,
+   * so a missing R2 proof variable would otherwise surface as a beforeAll-aborted file and be
+   * easy to mistake for an unrelated test omission in a large report.
+   */
+  { file: "tests/grading-review-revision-binding.test.ts", min: 4 },
   // B1's dedicated behavioural proof. It is the ONLY executable reproduction of the recency
   // exploit, and server/partner/public-network-service.ts names it in a comment as exactly that —
   // so it must not be deletable behind a green build.

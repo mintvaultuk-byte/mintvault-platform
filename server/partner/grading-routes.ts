@@ -773,6 +773,8 @@ async function partnerSubmitForReview(
                  'edges', certificates.edges_score,
                  'surface', certificates.surface_score
                ),
+               review_grading_revision = certificates.grading_revision,
+               review_evidence_revision = certificates.evidence_revision,
                updated_at = NOW()
          WHERE certificates.id = ${certId}
            AND certificates.grade_approved_at IS NULL
@@ -1025,12 +1027,10 @@ export function partnerGradingRouter(): Router {
         });
         if (!result.applied.includes(cert.certificateNumber)) {
           const rejected = result.rejected[0];
-          return res
-            .status(409)
-            .json({
-              error: rejected?.message ?? "The label could not be confirmed.",
-              code: rejected?.code ?? "PRINT_NOT_READY",
-            });
+          return res.status(409).json({
+            error: rejected?.message ?? "The label could not be confirmed.",
+            code: rejected?.code ?? "PRINT_NOT_READY",
+          });
         }
         res.json({ ok: true, certificateNumber: cert.certificateNumber, printState: "printed" });
       } catch (err) {

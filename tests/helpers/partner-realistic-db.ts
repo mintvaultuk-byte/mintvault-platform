@@ -305,6 +305,12 @@ export async function createMintvaultCertificatesTable(admin: pg.Client): Promis
     ["grade_approved_at", "timestamptz"],
     ["deleted_at", "timestamptz"],
     ["submission_item_id", "integer"],
+    ["grading_revision", "integer NOT NULL DEFAULT 1"],
+    ["evidence_revision", "integer NOT NULL DEFAULT 0"],
+    ["review_grading_revision", "integer"],
+    ["review_evidence_revision", "integer"],
+    ["approved_grading_revision", "integer"],
+    ["approved_evidence_revision", "integer"],
   ] as const) {
     await admin.query(`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ${col} ${type}`);
   }

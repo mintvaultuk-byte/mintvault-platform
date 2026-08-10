@@ -2,7 +2,7 @@
 -- Additive, append-only scanner master and derivative lineage. This migration
 -- intentionally does not alter historical certificate image columns.
 
-CREATE TABLE certificate_image_masters (
+CREATE TABLE IF NOT EXISTS certificate_image_masters (
   id BIGSERIAL PRIMARY KEY,
   certificate_id INTEGER NOT NULL REFERENCES certificates(id) ON DELETE RESTRICT,
   side VARCHAR(5) NOT NULL CHECK (side IN ('front', 'back')),
@@ -23,7 +23,7 @@ CREATE TABLE certificate_image_masters (
   UNIQUE (certificate_id, side, revision)
 );
 
-CREATE TABLE certificate_image_workings (
+CREATE TABLE IF NOT EXISTS certificate_image_workings (
   id BIGSERIAL PRIMARY KEY,
   master_id BIGINT NOT NULL REFERENCES certificate_image_masters(id) ON DELETE RESTRICT,
   object_key TEXT NOT NULL UNIQUE,
@@ -38,7 +38,7 @@ CREATE TABLE certificate_image_workings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE certificate_image_crops (
+CREATE TABLE IF NOT EXISTS certificate_image_crops (
   id BIGSERIAL PRIMARY KEY,
   working_id BIGINT NOT NULL REFERENCES certificate_image_workings(id) ON DELETE RESTRICT,
   object_key TEXT NOT NULL UNIQUE,
@@ -53,23 +53,26 @@ CREATE TABLE certificate_image_crops (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX certificate_image_masters_certificate_side_revision_idx
+CREATE INDEX IF NOT EXISTS certificate_image_masters_certificate_side_revision_idx
   ON certificate_image_masters (certificate_id, side, revision DESC);
-CREATE INDEX certificate_image_workings_master_created_idx ON certificate_image_workings (master_id, created_at DESC);
-CREATE INDEX certificate_image_crops_working_created_idx ON certificate_image_crops (working_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS certificate_image_workings_master_created_idx ON certificate_image_workings (master_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS certificate_image_crops_working_created_idx ON certificate_image_crops (working_id, created_at DESC);
 
-CREATE FUNCTION reject_certificate_evidence_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION reject_certificate_evidence_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'certificate evidence ledger is append-only';
 END;
 $$;
 
+DROP TRIGGER IF EXISTS certificate_image_masters_append_only ON certificate_image_masters;
 CREATE TRIGGER certificate_image_masters_append_only
   BEFORE UPDATE OR DELETE ON certificate_image_masters
   FOR EACH ROW EXECUTE FUNCTION reject_certificate_evidence_mutation();
+DROP TRIGGER IF EXISTS certificate_image_workings_append_only ON certificate_image_workings;
 CREATE TRIGGER certificate_image_workings_append_only
   BEFORE UPDATE OR DELETE ON certificate_image_workings
   FOR EACH ROW EXECUTE FUNCTION reject_certificate_evidence_mutation();
+DROP TRIGGER IF EXISTS certificate_image_crops_append_only ON certificate_image_crops;
 CREATE TRIGGER certificate_image_crops_append_only
   BEFORE UPDATE OR DELETE ON certificate_image_crops
   FOR EACH ROW EXECUTE FUNCTION reject_certificate_evidence_mutation();
@@ -84,4 +87,3 @@ ALTER TABLE certificate_image_crops ENABLE ROW LEVEL SECURITY;
 ALTER TABLE certificate_image_crops FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON certificate_image_masters, certificate_image_workings, certificate_image_crops FROM PUBLIC;
 REVOKE ALL ON certificate_image_masters, certificate_image_workings, certificate_image_crops FROM partner_runtime;
-

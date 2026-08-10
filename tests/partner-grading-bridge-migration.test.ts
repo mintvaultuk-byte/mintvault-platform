@@ -117,6 +117,11 @@ async function rollBackEverythingAbove0049(): Promise<void> {
       // rollback-0053 while anything >53), so omitting a newer file does not merely leave one
       // stray row — it makes the middle of this list refuse too, and 0049 then reports several
       // remaining rows rather than the one that was actually forgotten. Add new rollbacks here.
+      "rollback-0071-certificate-review-revision-binding.sql",
+      "rollback-0070-partner-supply-stock-indicators.sql",
+      "rollback-0069-partner-supply-orders.sql",
+      "rollback-0068-certificate-scan-status.sql",
+      "rollback-0067-certificate-immutable-evidence-ledger.sql",
       "rollback-0066-partner-rating-lifecycle-hardening.sql",
       "rollback-0065-certificates-reviewed-unit-index.sql",
       "rollback-0064-public-slab-image-projection.sql",
@@ -282,7 +287,9 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
       await admin.query(
         "CREATE TABLE IF NOT EXISTS submissions (id serial PRIMARY KEY, user_id varchar, tracking_number text UNIQUE)"
       );
-      await admin.query("CREATE TABLE IF NOT EXISTS submission_items (id serial PRIMARY KEY, submission_id integer NOT NULL)");
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submission_items (id serial PRIMARY KEY, submission_id integer NOT NULL)"
+      );
       await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
         id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
         admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now()
@@ -304,7 +311,15 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
          last_issued integer NOT NULL DEFAULT 0,
          updated_at timestamptz NOT NULL DEFAULT NOW()
        )`);
-      for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates", "label_prints", "cert_counter"]) {
+      for (const t of [
+        "users",
+        "submissions",
+        "submission_items",
+        "audit_log",
+        "certificates",
+        "label_prints",
+        "cert_counter",
+      ]) {
         await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
       }
       await applyAllRealistic();
@@ -446,10 +461,10 @@ async function seedWorkItem(tenant: string, opts: { linkCertificate?: boolean } 
          VALUES ($1, $1, $2, 'Grader', 'ACTIVE') RETURNING id`,
         [B, `grader45-${process.pid}@example.test`]
       );
-      await admin.query("UPDATE partner_grading_work_items SET assigned_partner_grader_id = $1, assigned_at = now() WHERE id = $2", [
-        u[0].id,
-        id,
-      ]);
+      await admin.query(
+        "UPDATE partner_grading_work_items SET assigned_partner_grader_id = $1, assigned_at = now() WHERE id = $2",
+        [u[0].id, id]
+      );
       await expect(runRollbackAsMigrator()).rejects.toThrow(/grader_assigned=1/);
     });
 

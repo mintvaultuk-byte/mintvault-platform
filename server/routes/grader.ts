@@ -475,6 +475,7 @@ export function registerGraderRoutes(app: Express): void {
         const pub = await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
             grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW(),
+            approved_grading_revision = grading_revision, approved_evidence_revision = evidence_revision,
             print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
           WHERE id = ${certId} AND grader_status = 'assigned'
           RETURNING id
@@ -492,7 +493,8 @@ export function registerGraderRoutes(app: Express): void {
       // Move to pending_review + snapshot the operator's submission (Phase 3).
       const toReview = await db.execute(sql`
         UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(),
-          ${captureOperatorSubmission}, updated_at = NOW()
+          ${captureOperatorSubmission}, review_grading_revision = grading_revision,
+          review_evidence_revision = evidence_revision, updated_at = NOW()
         WHERE id = ${certId} AND grader_status = 'assigned'
         RETURNING id
       `);
@@ -569,9 +571,14 @@ export function registerGraderRoutes(app: Express): void {
           grade_approved_by = 'auto',
           grader_status = 'approved',
           status = 'active',
+          approved_grading_revision = grading_revision,
+          approved_evidence_revision = evidence_revision,
           print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
           updated_at = NOW()
-        WHERE id = ${certId} AND grader_status = 'pending_review'
+        WHERE id = ${certId}
+          AND grader_status = 'pending_review'
+          AND review_grading_revision = grading_revision
+          AND review_evidence_revision = evidence_revision
         RETURNING id
       `);
       if (autoApp.rows.length === 0) {
@@ -641,6 +648,8 @@ export function registerGraderRoutes(app: Express): void {
           operator_subgrades = jsonb_build_object(
             'centering', centering_score, 'corners', corners_score,
             'edges', edges_score, 'surface', surface_score),
+          review_grading_revision = grading_revision,
+          review_evidence_revision = evidence_revision,
           updated_at = NOW()
         WHERE id = ${certId} AND grader_status = 'pending_review' AND graded_by = ${graderId}
         RETURNING id

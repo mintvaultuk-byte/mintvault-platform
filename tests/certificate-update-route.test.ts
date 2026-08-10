@@ -91,7 +91,7 @@ async function createSchema(p: pg.Pool): Promise<void> {
   // (credential-version check). Seeding it keeps the REAL authorization in the
   // loop rather than stubbing it out.
   await p.query(
-    `INSERT INTO users (id, email, role, credential_version) VALUES ('admin-1', 'mintvaultuk@gmail.com', 'admin', 1)`,
+    `INSERT INTO users (id, email, role, credential_version) VALUES ('admin-1', 'mintvaultuk@gmail.com', 'admin', 1)`
   );
   await p.query(`ALTER TABLE "audit_log" ALTER COLUMN "details" SET DEFAULT '{}'::jsonb`);
   await p.query(`ALTER TABLE "certificates" ALTER COLUMN "language" SET DEFAULT 'English'`);
@@ -107,6 +107,15 @@ async function createSchema(p: pg.Pool): Promise<void> {
   // here so the fail-closed rejection is exercised against a column that really
   // exists, rather than against a hypothetical one.
   await p.query(`ALTER TABLE "certificates" ADD COLUMN "grade_manual_override" boolean DEFAULT false`);
+  // 0071 binds draft/review/approval writes to the immutable evidence lineage.
+  // These are deliberately raw here because the production service queries them
+  // as migration-owned workflow state rather than through shared/schema.ts.
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grading_revision" integer NOT NULL DEFAULT 1`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "evidence_revision" integer NOT NULL DEFAULT 0`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "review_grading_revision" integer`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "review_evidence_revision" integer`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "approved_grading_revision" integer`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "approved_evidence_revision" integer`);
 
   // H-1 · paid-submission linkage. The create route validates
   // submissionItemId against these two tables, so the real guard runs.
@@ -215,7 +224,7 @@ beforeAll(async () => {
       resave: false,
       saveUninitialized: false,
       cookie: { httpOnly: true, sameSite: "lax", secure: false },
-    }),
+    })
   );
   app.post("/__test/admin-session", (req, res) => {
     Object.assign(req.session, {
@@ -235,7 +244,7 @@ beforeAll(async () => {
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
     ]),
-    handleCertificateMetadataUpdate as any,
+    handleCertificateMetadataUpdate as any
   );
 
   // The DEDICATED grading route, mounted exactly as registerRoutes mounts it, so
@@ -252,7 +261,7 @@ beforeAll(async () => {
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
     ]),
-    handleCertificateCreate as any,
+    handleCertificateCreate as any
   );
 
   server = app.listen(0, "127.0.0.1");
@@ -360,8 +369,18 @@ describe("H-1: a partial PUT changes ONLY the fields it submits", () => {
     expect(after.cardName).toBe("Charizard (corrected)");
     // Everything else is byte-for-byte what it was.
     for (const k of [
-      "setName", "cardNumber", "year", "language", "variant", "rarity",
-      "collectionCode", "finishVariant", "promoType", "subsetName", "rarityCode", "notes",
+      "setName",
+      "cardNumber",
+      "year",
+      "language",
+      "variant",
+      "rarity",
+      "collectionCode",
+      "finishVariant",
+      "promoType",
+      "subsetName",
+      "rarityCode",
+      "notes",
     ] as const) {
       expect(after[k], `${k} must be untouched`).toEqual((STORED as any)[k]);
     }
@@ -535,7 +554,7 @@ describe("MV700 identity/variant validation on the admin metadata route", () => 
         rarity_override_confirmed: true,
         rarity_override_from: "holo_rare_v",
         rarity_override_to: "",
-      }),
+      })
     ).resolves.toBe(true);
     expect((await readCert()).rarityCode).toBeNull();
   });
@@ -872,7 +891,7 @@ describe("HIGH-1: a metadata-only edit preserves the grade", () => {
     // storage layer on every write, not an editable business field, so it is
     // deliberately absent from the field-level change list.
     const reallyChanged = Object.keys(after).filter(
-      (k) => k !== "updatedAt" && JSON.stringify(after[k]) !== JSON.stringify(before[k]),
+      (k) => k !== "updatedAt" && JSON.stringify(after[k]) !== JSON.stringify(before[k])
     );
     expect(reallyChanged.sort()).toEqual(changes.map((c) => c.field).sort());
   });
@@ -1015,9 +1034,7 @@ describe("PR A: legitimate grading edits work on the dedicated grade route", () 
       // Fail CLOSED: the caller is told the save failed …
       expect(status).toBe(500);
       // … and the grading mutation rolled back with its unwritable audit row.
-      expect((await readCert()).gradeOverall, "the grade must NOT commit without its audit").toBe(
-        before.gradeOverall
-      );
+      expect((await readCert()).gradeOverall, "the grade must NOT commit without its audit").toBe(before.gradeOverall);
       expect(await readAudits()).toHaveLength(0);
     } finally {
       await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block2`);
@@ -1073,7 +1090,11 @@ describe("PR A: the metadata route cannot alter grading state", () => {
   it("7. gradeType, labelType and subgrades are equally rejected", async () => {
     const id = await certId();
     const before = await readCert();
-    for (const [field, value] of [["gradeType", "NO"], ["labelType", "black"], ["gradeCorners", "3.0"]] as const) {
+    for (const [field, value] of [
+      ["gradeType", "NO"],
+      ["labelType", "black"],
+      ["gradeCorners", "3.0"],
+    ] as const) {
       const { status, json } = await put(id, { [field]: value });
       expect(status, `${field} must be rejected`).toBe(409);
       expect(json.rejectedFields).toContain(field);
@@ -1103,7 +1124,7 @@ describe("PR A: the metadata route cannot alter grading state", () => {
     expect(status).toBe(200);
     const after = await readCert();
     expect(after.cardName).toBe("Metadata Only Edit");
-    expect(after.gradeOverall).toBe("10.0");     // <- the newer grade SURVIVES
+    expect(after.gradeOverall).toBe("10.0"); // <- the newer grade SURVIVES
   });
 
   it("metadata-only save leaves every grading column untouched", async () => {
@@ -1111,7 +1132,15 @@ describe("PR A: the metadata route cannot alter grading state", () => {
     const before = await readCert();
     await put(id, { cardName: "Grading Untouched" });
     const after = await readCert();
-    for (const k of ["gradeOverall","gradeType","labelType","gradeCentering","gradeCorners","gradeEdges","gradeSurface"] as const) {
+    for (const k of [
+      "gradeOverall",
+      "gradeType",
+      "labelType",
+      "gradeCentering",
+      "gradeCorners",
+      "gradeEdges",
+      "gradeSurface",
+    ] as const) {
       expect(after[k], `${k} must be unchanged`).toEqual(before[k]);
     }
   });
@@ -1170,7 +1199,7 @@ describe("PR A: the metadata route cannot alter grading state", () => {
     const audits = await readAudits();
     const rejected = audits.filter((a: any) => a.action === "metadata_grading_field_rejected");
     expect(rejected.length).toBeGreaterThan(0);
-    expect(rejected[rejected.length - 1].entityId).toBe("MV1");   // cert number, not numeric id
+    expect(rejected[rejected.length - 1].entityId).toBe("MV1"); // cert number, not numeric id
   });
 });
 
@@ -1485,13 +1514,13 @@ const NEW_CERT = {
 };
 
 async function seedSubmissionItem(status = "paid", deleted = false): Promise<number> {
-  const { rows } = await pool.query(
-    `INSERT INTO submissions (status, deleted_at) VALUES ($1, $2) RETURNING id`,
-    [status, deleted ? new Date() : null],
-  );
+  const { rows } = await pool.query(`INSERT INTO submissions (status, deleted_at) VALUES ($1, $2) RETURNING id`, [
+    status,
+    deleted ? new Date() : null,
+  ]);
   const { rows: itemRows } = await pool.query(
     `INSERT INTO submission_items (submission_id, card_name) VALUES ($1, 'Blastoise') RETURNING id`,
-    [rows[0].id],
+    [rows[0].id]
   );
   return itemRows[0].id as number;
 }
@@ -1682,7 +1711,7 @@ async function pngBuffer(r: number, g: number, b: number): Promise<Buffer> {
 async function putMultipart(
   id: number,
   fields: Record<string, string>,
-  files: Array<{ field: string; filename: string; type: string; buffer: Buffer }>,
+  files: Array<{ field: string; filename: string; type: string; buffer: Buffer }>
 ): Promise<{ status: number; json: any }> {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
@@ -1700,7 +1729,7 @@ async function putMultipart(
 describe("M-3: a same-path image replacement is auditable", () => {
   beforeEach(async () => {
     await pool.query(
-      `UPDATE certificates SET front_image_path = 'images/MV1/front.png', back_image_path = 'images/MV1/back.png' WHERE certificate_number = 'MV1'`,
+      `UPDATE certificates SET front_image_path = 'images/MV1/front.png', back_image_path = 'images/MV1/back.png' WHERE certificate_number = 'MV1'`
     );
   });
 
@@ -1726,9 +1755,7 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(rep.previousPath).toBe("images/MV1/front.png");
     // TRUTHFUL: it says the path did NOT change, and proves the content did.
     expect(rep.pathChanged).toBe(false);
-    expect(rep.contentSha256).toBe(
-      (await import("node:crypto")).createHash("sha256").update(buf).digest("hex"),
-    );
+    expect(rep.contentSha256).toBe((await import("node:crypto")).createHash("sha256").update(buf).digest("hex"));
     expect(rep.bytes).toBe(buf.length);
     expect(rep.contentType).toBe("image/png");
     // The stored path is unchanged and NOT fabricated as a change.
@@ -1740,7 +1767,7 @@ describe("M-3: a same-path image replacement is auditable", () => {
     const buf = await pngBuffer(200, 100, 50);
     expect(
       (await putMultipart(id, {}, [{ field: "backImage", filename: "back.png", type: "image/png", buffer: buf }]))
-        .status,
+        .status
     ).toBe(200);
     const events = (await readAudits()).filter((a: any) => a.action === "certificate_image_replaced");
     expect(events).toHaveLength(1);
@@ -2285,9 +2312,7 @@ describe("H-2/H-3 · the audit matches the committed row, for the REAL payload",
       }
     }
     // The omission is STATED, not silent.
-    expect(new Set(rows[0].details.unauditableFields)).toEqual(
-      new Set(["auth_status", "auth_notes", "private_notes"])
-    );
+    expect(new Set(rows[0].details.unauditableFields)).toEqual(new Set(["auth_status", "auth_notes", "private_notes"]));
   });
 
   it("H-2 · a genuine owned grading change still audits exactly once", async () => {
@@ -2367,7 +2392,8 @@ describe("H-2/H-3 · the audit matches the committed row, for the REAL payload",
       const audited = row.details.changed?.[pKey]?.to;
       if (audited === undefined) continue; // not reported as changed
       const stored = cert[cKey];
-      const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(Number(v) || v));
+      const norm = (v: unknown) =>
+        v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(Number(v) || v);
       expect(norm(audited), `${pKey}: audit says ${audited}, database holds ${stored}`).toBe(norm(stored));
     }
   });

@@ -724,7 +724,9 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 70,
-    standalone: true,
+    // 0071 binds review decisions to certificate revision columns, so 0070 must now be reversed
+    // only in the tested descending sequence.
+    standalone: false,
     migration: "0070_partner_supply_stock_indicators.sql",
     rollback: "rollback-0070-partner-supply-stock-indicators.sql",
     hole: "shop stock counts and order/card indicators have no tenant- and location-isolated source of truth",
@@ -735,6 +737,24 @@ const ROUND_TRIPS: RoundTrip[] = [
         "SELECT to_regclass('public.partner_supply_stock_counts') IS NOT NULL AS present"
       );
       return rows[0].present ? "supply_stock_indicators_present" : "supply_stock_indicators_absent";
+    },
+  },
+  {
+    number: 71,
+    standalone: true,
+    migration: "0071_certificate_review_revision_binding.sql",
+    rollback: "rollback-0071-certificate-review-revision-binding.sql",
+    hole: "a review can publish a grade against scanner evidence or draft data that changed after the review snapshot",
+    whenApplied: "review_revision_binding_present",
+    whenRolledBack: "review_revision_binding_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT count(*)::int n FROM information_schema.columns
+          WHERE table_schema='public' AND table_name='certificates'
+            AND column_name IN ('grading_revision','evidence_revision','review_grading_revision',
+                                'review_evidence_revision','approved_grading_revision','approved_evidence_revision')`
+      );
+      return rows[0].n === 6 ? "review_revision_binding_present" : "review_revision_binding_absent";
     },
   },
   {
@@ -1097,7 +1117,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
     expect(after.rows[0]).toEqual({ idx: true, col: true, view: true });
   }, 120_000);
 
-  it("the whole 0070 -> 0047 descending rollback completes, and the runner restores every one", async () => {
+  it("the whole 0071 -> 0047 descending rollback completes, and the runner restores every one", async () => {
     const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
 
     for (const entry of descending) {

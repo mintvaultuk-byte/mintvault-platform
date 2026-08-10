@@ -432,34 +432,53 @@ async function persistImmutableMaster(
       "SELECT object_key FROM certificate_image_masters WHERE object_key=$1",
       [objectKey]
     );
-    if (existing.rowCount === 0) {
-      const revision = await client.query<{ revision: number }>(
-        "SELECT COALESCE(MAX(revision), 0)::int + 1 AS revision FROM certificate_image_masters WHERE certificate_id=$1 AND side=$2",
-        [certificateId, side]
-      );
-      await client.query(
-        `INSERT INTO certificate_image_masters
-          (certificate_id,side,object_key,sha256,byte_length,format,mime_type,pixel_width,pixel_height,bit_depth,capture_dpi,capture_metadata,evidence_version,revision,actor)
-         VALUES ($1,$2,$3,$4,$5,'tiff','image/tiff',$6,$7,$8,$9,$10::jsonb,1,$11,'scanner')`,
-        [
-          certificateId,
-          side,
-          objectKey,
-          inspection.sha256,
-          inspection.byteLength,
-          inspection.width,
-          inspection.height,
-          inspection.bitDepth,
-          inspection.dpi,
-          JSON.stringify({
-            channels: inspection.channels,
-            colourSpace: inspection.colourSpace,
-            hasIccProfile: inspection.hasIccProfile,
-          }),
-          revision.rows[0].revision,
-        ]
-      );
+    // A retry of an ALREADY accepted master is not a recapture and must remain idempotent even if
+    // the card has since been approved.  Only a NEW immutable master needs the unapproved guard
+    // and evidence-revision advance below.
+    if (existing.rowCount !== 0) {
+      await client.query("COMMIT");
+      return objectKey;
     }
+    // Approval and evidence append intentionally contend on the certificate row.  A new master
+    // wins only while the card is still unapproved; if approval wins first, its immutable
+    // approved_evidence_revision remains the final audit fact and this recapture is refused.
+    const certificate = await client.query<{ id: number }>(
+      "SELECT id FROM certificates WHERE id=$1 AND grade_approved_at IS NULL AND deleted_at IS NULL FOR UPDATE",
+      [certificateId]
+    );
+    if (certificate.rowCount !== 1) {
+      throw new Error("Cannot append scanner evidence to an approved, deleted, or missing certificate");
+    }
+    const revision = await client.query<{ revision: number }>(
+      "SELECT COALESCE(MAX(revision), 0)::int + 1 AS revision FROM certificate_image_masters WHERE certificate_id=$1 AND side=$2",
+      [certificateId, side]
+    );
+    await client.query(
+      `INSERT INTO certificate_image_masters
+        (certificate_id,side,object_key,sha256,byte_length,format,mime_type,pixel_width,pixel_height,bit_depth,capture_dpi,capture_metadata,evidence_version,revision,actor)
+       VALUES ($1,$2,$3,$4,$5,'tiff','image/tiff',$6,$7,$8,$9,$10::jsonb,1,$11,'scanner')`,
+      [
+        certificateId,
+        side,
+        objectKey,
+        inspection.sha256,
+        inspection.byteLength,
+        inspection.width,
+        inspection.height,
+        inspection.bitDepth,
+        inspection.dpi,
+        JSON.stringify({
+          channels: inspection.channels,
+          colourSpace: inspection.colourSpace,
+          hasIccProfile: inspection.hasIccProfile,
+        }),
+        revision.rows[0].revision,
+      ]
+    );
+    await client.query(
+      "UPDATE certificates SET evidence_revision = evidence_revision + 1, updated_at = NOW() WHERE id=$1 AND grade_approved_at IS NULL",
+      [certificateId]
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

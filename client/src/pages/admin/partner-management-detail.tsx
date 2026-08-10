@@ -340,11 +340,11 @@ export default function PartnerManagementDetailPage() {
         hasBranding: !!branding.data?.branding,
         hasProfileDetail: profileHasDetail(profile),
         ownerMfaConfigured: onboardingUsers.some((u) => u.role === "OWNER" && u.mfaConfigured),
-        walletConfigured: onboardingReadiness?.wallet.configured === true,
-        creditAvailable: onboardingReadiness?.wallet.creditAvailable === true,
-        publicListingConfigured: onboardingReadiness?.publicListing.configured === true,
-        publicProfileConfigured: onboardingReadiness?.publicListing.publicProfileConfigured === true,
-        coordinatesConfigured: onboardingReadiness?.publicListing.coordinatesConfigured === true,
+        walletConfigured: onboardingReadiness?.wallet?.configured === true,
+        creditAvailable: onboardingReadiness?.wallet?.creditAvailable === true,
+        publicListingConfigured: onboardingReadiness?.publicListing?.configured === true,
+        publicProfileConfigured: onboardingReadiness?.publicListing?.publicProfileConfigured === true,
+        coordinatesConfigured: onboardingReadiness?.publicListing?.coordinatesConfigured === true,
       }),
     [org, userRows, statistics.data, branding.data, profile, onboardingUsers, onboardingReadiness]
   );
@@ -1812,7 +1812,31 @@ function OnboardingOperationalFacts({
   onOpenWallet: () => void;
 }) {
   if (!readiness) return null;
-  const { wallet, publicListing, deviceAndScanner } = readiness;
+  // The readiness endpoint is additive and can return a partial historical payload while an
+  // older API instance is being replaced.  Operational facts are advisory; missing groups must
+  // show their truthful "not configured" state rather than crashing the Super Admin user screen.
+  const wallet = readiness.wallet ?? {
+    configured: false,
+    status: null,
+    ledgerBalance: null,
+    reservedCredits: null,
+    availableCredits: null,
+    creditAvailable: false,
+  };
+  const publicListing = readiness.publicListing ?? {
+    configured: false,
+    statuses: null,
+    listingCount: 0,
+    activeListingCount: 0,
+    publicProfileConfigured: false,
+    publicProfileConfiguredCount: 0,
+    coordinatesConfigured: false,
+    coordinatesConfiguredCount: 0,
+  };
+  const deviceAndScanner = readiness.deviceAndScanner ?? {
+    configured: false as const,
+    reason: "Not available.",
+  };
   return (
     <div
       data-testid="pm-onboarding-operational-facts"

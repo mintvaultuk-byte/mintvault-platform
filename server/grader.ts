@@ -346,6 +346,13 @@ export interface CertAssignment {
   rejectionReason: string | null;
 }
 
+interface CertReviewRevision {
+  gradingRevision: number;
+  evidenceRevision: number;
+  reviewGradingRevision: number | null;
+  reviewEvidenceRevision: number | null;
+}
+
 /** Cert-level assignment/workflow read (grader v2 — no submission join). */
 export async function getCertAssignment(certId: number): Promise<CertAssignment | null> {
   const r = await db.execute(sql`
@@ -361,6 +368,27 @@ export async function getCertAssignment(certId: number): Promise<CertAssignment 
     gradingStatus: (row.grader_status ?? "unassigned") as GradingStatus,
     redoCount: Number(row.redo_count ?? 0),
     rejectionReason: row.rejection_reason ?? null,
+  };
+}
+
+/**
+ * Read the revision pair ONLY at the review boundary.  Normal draft/metadata routes need merely
+ * the assignment state and must not couple their read path to this additive migration.
+ */
+async function getCertReviewRevision(certId: number): Promise<CertReviewRevision | null> {
+  const r = await db.execute(sql`
+    SELECT grading_revision, evidence_revision, review_grading_revision, review_evidence_revision
+      FROM certificates
+     WHERE id = ${certId} AND deleted_at IS NULL
+     LIMIT 1
+  `);
+  const row = r.rows[0] as any;
+  if (!row) return null;
+  return {
+    gradingRevision: Number(row.grading_revision),
+    evidenceRevision: Number(row.evidence_revision),
+    reviewGradingRevision: row.review_grading_revision == null ? null : Number(row.review_grading_revision),
+    reviewEvidenceRevision: row.review_evidence_revision == null ? null : Number(row.review_evidence_revision),
   };
 }
 
@@ -809,10 +837,17 @@ export class GradeDraftRejected extends Error {
   }
 }
 
-export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
+export async function applyCertGradeDraft(
+  certId: number,
+  body: any,
+  options: { expectedEvidenceRevision?: number; refreshReviewRevision?: boolean } = {}
+): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
-  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
+  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(
+    cert,
+    body
+  );
 
   const overall = body.overall_grade;
   // grade_type used to be written VERBATIM from the request body, and the column is plain
@@ -892,15 +927,30 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       eye_appeal_modifier = ${num(body.eye_appeal_modifier, cert.eyeAppealModifier)},
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
+      grading_revision = grading_revision + 1,
+      review_grading_revision = CASE
+        WHEN ${options.refreshReviewRevision === true} THEN grading_revision + 1
+        ELSE review_grading_revision
+      END,
+      review_evidence_revision = CASE
+        WHEN ${options.refreshReviewRevision === true} THEN evidence_revision
+        ELSE review_evidence_revision
+      END,
       updated_at = NOW()
-    WHERE id = ${certId} AND grade_approved_at IS NULL
+    WHERE id = ${certId}
+      AND grade_approved_at IS NULL
+      AND (${options.expectedEvidenceRevision ?? null}::integer IS NULL OR evidence_revision = ${options.expectedEvidenceRevision ?? null})
     RETURNING id
   `);
   return r.rows.length > 0;
 }
 
 /** Publish a certificate's grade (admin approval): set approved_at + live status. */
-export async function approveCertGrade(certId: number, adminUser: string): Promise<boolean> {
+export async function approveCertGrade(
+  certId: number,
+  adminUser: string,
+  reviewed: CertReviewRevision
+): Promise<boolean> {
   // Phase 2 — atomic CAS publish: only publishes while still pending_review (its
   // sole caller, approveGraderCert, requires that). 0 rows ⇒ state changed
   // concurrently (e.g. a racing reject) → caller returns 409 instead of double-publishing.
@@ -908,8 +958,15 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
     UPDATE certificates
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
         grader_status = 'approved', graded_at = NOW(), updated_at = NOW(),
+        approved_grading_revision = grading_revision,
+        approved_evidence_revision = evidence_revision,
         print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
-    WHERE id = ${certId} AND grader_status = 'pending_review'
+    WHERE id = ${certId}
+      AND grader_status = 'pending_review'
+      AND grading_revision = ${reviewed.gradingRevision}
+      AND evidence_revision = ${reviewed.evidenceRevision}
+      AND review_grading_revision = ${reviewed.reviewGradingRevision}
+      AND review_evidence_revision = ${reviewed.reviewEvidenceRevision}
     RETURNING id
   `);
   return r.rows.length > 0;
@@ -1242,6 +1299,20 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   if (a.gradingStatus !== "pending_review") {
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   }
+  const reviewed = await getCertReviewRevision(certId);
+  if (!reviewed) return { ok: false as const, status: 404, error: "Certificate not found" };
+  if (
+    reviewed.reviewGradingRevision == null ||
+    reviewed.reviewEvidenceRevision == null ||
+    reviewed.reviewGradingRevision !== reviewed.gradingRevision ||
+    reviewed.reviewEvidenceRevision !== reviewed.evidenceRevision
+  ) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Grade or evidence changed after this review was prepared; refresh and re-review before approving.",
+    };
+  }
   // Both pre-publish gates (B3 sub-grade completeness + printable-grade), shared
   // verbatim with the auto-approve path. Runs BEFORE any approval write.
   const gates = await checkGradePublishGates(certId);
@@ -1253,9 +1324,13 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   // rather than flip grader_status on an unpublished grade.
   // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
   // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
-  const published = await approveCertGrade(certId, adminUser);
+  const published = await approveCertGrade(certId, adminUser, reviewed);
   if (!published) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Grade or evidence changed after this review was prepared; refresh and re-review before approving.",
+    };
   }
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
@@ -1268,6 +1343,8 @@ export async function approveGraderCert(certId: number, adminUser: string) {
       edges: c?.gradeEdges ?? null,
       surface: c?.gradeSurface ?? null,
     },
+    grading_revision: reviewed.gradingRevision,
+    evidence_revision: reviewed.evidenceRevision,
   });
   return { ok: true as const };
 }
@@ -1290,7 +1367,10 @@ async function gradeSnapshot(certId: number) {
   };
 }
 
-function sameGradeSnapshot(a: Awaited<ReturnType<typeof gradeSnapshot>>, b: Awaited<ReturnType<typeof gradeSnapshot>>): boolean {
+function sameGradeSnapshot(
+  a: Awaited<ReturnType<typeof gradeSnapshot>>,
+  b: Awaited<ReturnType<typeof gradeSnapshot>>
+): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -1306,10 +1386,15 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+  const reviewed = await getCertReviewRevision(certId);
+  if (!reviewed) return { ok: false as const, status: 404, error: "Certificate not found" };
   const before = await gradeSnapshot(certId);
   let saved = false;
   try {
-    saved = await applyCertGradeDraft(certId, body);
+    saved = await applyCertGradeDraft(certId, body, {
+      expectedEvidenceRevision: reviewed.evidenceRevision,
+      refreshReviewRevision: true,
+    });
   } catch (e) {
     if (e instanceof GradeDraftValidationError) {
       return { ok: false as const, status: e.status, error: e.message };
@@ -1317,7 +1402,11 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
     throw e;
   }
   if (!saved) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Evidence changed while this review was open; refresh and re-review before approving.",
+    };
   }
   const after = await gradeSnapshot(certId);
   if (!sameGradeSnapshot(before, after)) {

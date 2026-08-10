@@ -239,6 +239,7 @@ describe("partner schema ↔ migration parity", () => {
       "0068_certificate_scan_status.sql",
       "0069_partner_supply_orders.sql",
       "0070_partner_supply_stock_indicators.sql",
+      "0071_certificate_review_revision_binding.sql",
     ]);
   });
 
