@@ -364,6 +364,35 @@ async function usePartnerAdminRole(url: string): Promise<void> {
       };
       await wallet(P_CLEAN, 100, "clean");
       await wallet(P_LOWCREDIT, 5, "low");
+      const purchaseWallet = await wallet(P_SUSPENDED, 0, "purchase-history");
+      await admin.query(
+        `INSERT INTO partner_credit_ledger
+           (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
+            actor_type, external_ref, metadata, request_fingerprint)
+         VALUES ($1,$2,25,'purchase','stripe-evt:dashboard-history','cs_dashboard_history','stripe',
+                 'Stripe credit package purchase (25 grading credits)','service','pi_dashboard_history',$3::jsonb,$4)`,
+        [
+          purchaseWallet,
+          P_SUSPENDED,
+          JSON.stringify({
+            package_id: "credits-25",
+            credits: 25,
+            amount_paid_pence: 25_000,
+            currency: "gbp",
+            stripe_session_id: "cs_dashboard_history",
+            stripe_payment_intent: "pi_dashboard_history",
+          }),
+          fp("dashboardpurchasehistory"),
+        ]
+      );
+      await admin.query(
+        `INSERT INTO partner_credit_ledger
+           (wallet_id, tenant_id, amount, entry_type, idempotency_key, source, reason,
+            actor_type, external_ref, metadata, request_fingerprint)
+         VALUES ($1,$2,2,'purchase','stripe-evt:dashboard-history-legacy','stripe',
+                 'Legacy purchase with incomplete commercial snapshot','service','pi_dashboard_history_legacy',$3::jsonb,$4)`,
+        [purchaseWallet, P_SUSPENDED, JSON.stringify({ package_id: "legacy-unknown" }), fp("dashboardpurchaselegacy")]
+      );
       const noCreditWallet = await wallet(P_NOCREDIT, 0, "zero");
       // wallet with a ledger row netting to exactly 0 → "no available credits" → medium
       await admin.query(
@@ -482,6 +511,37 @@ async function usePartnerAdminRole(url: string): Promise<void> {
           }),
         }),
       ]);
+    });
+
+    it("shows ledger-snapshotted purchase history and references without a live Stripe read", async () => {
+      const res = await get(`/partners/${P_SUSPENDED}/wallet`);
+      expect(res.status).toBe(200);
+      expect(res.body.purchases).toMatchObject({ available: true });
+      const purchases = (res.body.purchases as { value: unknown[] }).value;
+      expect(purchases).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            credits: 25,
+            packageId: "credits-25",
+            amountPaidPence: 25_000,
+            currency: "gbp",
+            checkoutSessionId: "cs_dashboard_history",
+            paymentIntentId: "pi_dashboard_history",
+            source: "stripe",
+            reference: "pi_dashboard_history",
+          }),
+          expect.objectContaining({
+            credits: 2,
+            packageId: "legacy-unknown",
+            amountPaidPence: null,
+            currency: null,
+            reference: "pi_dashboard_history_legacy",
+          }),
+        ])
+      );
+      expect(rowsOf({ rows: res.body.recentLedger })).toEqual(
+        expect.arrayContaining([expect.objectContaining({ source: "stripe", reference: "pi_dashboard_history" })])
+      );
     });
 
     it("requires Super Admin authority for credit adjustments, not generic admin or partner sessions", async () => {

@@ -296,7 +296,8 @@ export interface PartnerWalletView {
   ledgerBalance: number | null;
   consumedReservations: number | null;
   recentLedger: LedgerEntryView[];
-  purchases: MetricUnavailable;
+  /** Ledger-backed purchases, separately queried so older funding is never hidden by the activity limit. */
+  purchases: Metric<PartnerCreditPurchaseView[]>;
   /** True when the audited Super Admin adjustment workflow is available. */
   manualAdjustmentEnabled: boolean;
   note: string;
@@ -310,7 +311,23 @@ export interface LedgerEntryView {
   reason: string;
   actorType: string;
   actorEmail: string | null;
+  /** Provider reference, correlation id or immutable idempotency key; never browser-derived. */
+  reference: string | null;
   createdAt: string;
+}
+
+/** A safe, ledger-snapshotted view of a purchase, not a live Stripe lookup. */
+export interface PartnerCreditPurchaseView {
+  ledgerEntryId: string;
+  credits: number;
+  packageId: string | null;
+  amountPaidPence: number | null;
+  currency: string | null;
+  checkoutSessionId: string | null;
+  paymentIntentId: string | null;
+  source: string;
+  reference: string | null;
+  purchasedAt: string;
 }
 
 export interface PartnerSubmissionsView {

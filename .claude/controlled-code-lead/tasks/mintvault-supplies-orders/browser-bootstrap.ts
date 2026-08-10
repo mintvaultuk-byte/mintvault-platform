@@ -116,6 +116,18 @@ async function main(): Promise<void> {
              'Synthetic local browser readiness credit', 'admin', '{}'::jsonb, repeat('a', 64)
         FROM partner_wallets
        WHERE tenant_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`);
+    // A deterministic Stripe-shaped ledger row proves the Super Admin purchase-history projection
+    // without a provider call. Real Checkout/webhook semantics stay covered by their own local
+    // service and HTTP tests; this is only browser fixture data in a disposable database.
+    await admin.query(`INSERT INTO partner_credit_ledger
+      (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
+       actor_type, external_ref, metadata, request_fingerprint)
+      SELECT id, tenant_id, 10, 'purchase', 'stripe-evt:browser-credit-purchase', 'cs_browser_credit_purchase',
+             'stripe', 'Stripe credit package purchase (10 grading credits)', 'service', 'pi_browser_credit_purchase',
+             '{"package_id":"credits-10","credits":10,"amount_paid_pence":10000,"currency":"gbp","stripe_session_id":"cs_browser_credit_purchase","stripe_payment_intent":"pi_browser_credit_purchase"}'::jsonb,
+             repeat('b', 64)
+        FROM partner_wallets
+       WHERE tenant_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`);
     await admin.query(
       `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status)
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003', 'browser-supply-finance',
