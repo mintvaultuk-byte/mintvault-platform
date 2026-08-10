@@ -634,7 +634,7 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 66,
-    standalone: true,
+    standalone: false,
     migration: "0066_partner_rating_lifecycle_hardening.sql",
     rollback: "rollback-0066-partner-rating-lifecycle-hardening.sql",
     hole: "mark-clean erases a quality event that lands mid-calculation, two reconcilers claim the same listing, a poisoned row starves every healthy one, a new shop is born clean, and a clock-only window change never refreshes",
@@ -662,6 +662,23 @@ const ROUND_TRIPS: RoundTrip[] = [
          )::int n`
       );
       return rows[0].n === 0 ? "rating_lifecycle_hardening_absent" : "rating_lifecycle_hardening_present";
+    },
+  },
+  {
+    number: 67,
+    standalone: true,
+    migration: "0067_certificate_immutable_evidence_ledger.sql",
+    rollback: "rollback-0067-certificate-immutable-evidence-ledger.sql",
+    hole: "scanner TIFF masters and their browser/crop lineage are missing or mutable",
+    whenApplied: "immutable_evidence_ledger_present",
+    whenRolledBack: "immutable_evidence_ledger_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT count(*)::int n FROM pg_class
+          WHERE relnamespace='public'::regnamespace AND relkind='r'
+            AND relname IN ('certificate_image_masters','certificate_image_workings','certificate_image_crops')`
+      );
+      return rows[0].n === 0 ? "immutable_evidence_ledger_absent" : "immutable_evidence_ledger_present";
     },
   },
   {
@@ -765,10 +782,9 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
         [t, `${tag} Trading`]
       );
       // 0047's asset: one row per tenant. A leak is visible as count > 1.
-      await admin.query(
-        `INSERT INTO partner_owner_invariant_tenants (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING`,
-        [t]
-      );
+      await admin.query(`INSERT INTO partner_owner_invariant_tenants (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING`, [
+        t,
+      ]);
       // 0052 / 0056's assets.
       await admin.query(
         `INSERT INTO partner_internal_notes (tenant_id, body, author_user_id, author_email)
@@ -780,10 +796,9 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
            VALUES ($1,'status_changed',gen_random_uuid(),'hq@mintvault.test',$2,'succeeded')`,
         [t, `req-${tag}`]
       );
-      await admin.query(
-        `INSERT INTO partner_emergency_controls (tenant_id, scope, frozen) VALUES ($1,'tenant',true)`,
-        [t]
-      );
+      await admin.query(`INSERT INTO partner_emergency_controls (tenant_id, scope, frozen) VALUES ($1,'tenant',true)`, [
+        t,
+      ]);
     }
     // 0051's asset: the PLATFORM-GLOBAL kill switch row.
     await admin.query(
@@ -796,10 +811,10 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
     // rejects an ACTIVE user in a tenant that already carries an owner-invariant row but no
     // PARTNER_OWNER assignment ("partner_final_owner_required"), and nothing below needs a user:
     // the wallet, ledger and reservation are keyed on tenant_id and wallet_id only.
-    await admin.query(
-      `INSERT INTO partner_wallets (id, tenant_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`,
-      [WALLET_A, A]
-    );
+    await admin.query(`INSERT INTO partner_wallets (id, tenant_id) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING`, [
+      WALLET_A,
+      A,
+    ]);
     await admin.query(
       `INSERT INTO partner_credit_ledger (wallet_id, tenant_id, amount, entry_type, idempotency_key,
                                           source, reason, actor_type, request_fingerprint)
@@ -815,9 +830,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
     // 0054's asset: the allocator, advanced past zero so a re-seed is observably a rewind.
     // 0054 seeds the row itself, so this must find exactly one row — a silent 0-row UPDATE here
     // would make every allocator probe below pass for the wrong reason.
-    const seeded = await admin.query(
-      "UPDATE cert_counter SET last_issued = 205, updated_at = NOW() WHERE id = 1"
-    );
+    const seeded = await admin.query("UPDATE cert_counter SET last_issued = 205, updated_at = NOW() WHERE id = 1");
     if (seeded.rowCount !== 1) {
       throw new Error(`cert_counter allocator row missing (UPDATE affected ${seeded.rowCount} rows)`);
     }
@@ -989,7 +1002,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
    */
   it("0063-0066 re-apply cleanly after a de-journal that did NOT run their rollbacks", async () => {
     const before = await admin.query<{ idx: boolean }>(
-      "SELECT to_regclass('public.idx_certificates_origin_location_reviewed') IS NOT NULL AS idx",
+      "SELECT to_regclass('public.idx_certificates_origin_location_reviewed') IS NOT NULL AS idx"
     );
     expect(before.rows[0].idx, "precondition: 0065's index is present").toBe(true);
 
@@ -1023,7 +1036,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
               EXISTS (SELECT 1 FROM information_schema.columns
                        WHERE table_schema='public' AND table_name='certificates'
                          AND column_name='review_entered_at') AS col,
-              to_regclass('public.public_slab_image_projection') IS NOT NULL AS view`,
+              to_regclass('public.public_slab_image_projection') IS NOT NULL AS view`
     );
     expect(after.rows[0]).toEqual({ idx: true, col: true, view: true });
   }, 120_000);
