@@ -395,11 +395,12 @@ const partnerIntakeSubmissionCount = () =>
         id: number;
         tracking_number: string;
         user_id: string;
+        status: string;
         card_count: number;
         service_type: string;
         customer_email: string;
       }>(
-        `SELECT s.id, s.tracking_number, s.user_id, s.card_count, s.service_type, s.customer_email
+        `SELECT s.id, s.tracking_number, s.user_id, s.status, s.card_count, s.service_type, s.customer_email
            FROM submissions s
            JOIN partner_connector_imports m ON m.destination_submission_id = s.id
           WHERE m.connector_record_id = $1`,
@@ -408,6 +409,7 @@ const partnerIntakeSubmissionCount = () =>
       expect(dest.rows.length).toBe(1);
       expect(dest.rows[0].tracking_number).toMatch(/^MV-SUB-\d{6}$/);
       expect(dest.rows[0].service_type).toBe("partner-intake");
+      expect(dest.rows[0].status).toBe("in_grading");
       expect(dest.rows[0].card_count).toBe(seeded.cardCount);
       expect(dest.rows[0].user_id).not.toBe("pre-existing-unrelated");
       expect(dest.rows[0].customer_email).toBe(seeded.customerEmail);

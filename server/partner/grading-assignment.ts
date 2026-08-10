@@ -76,11 +76,11 @@ export class PartnerGradingEvidenceLockError extends Error {
  * Refuse an ORDINARY partner cancellation once grading has begun on any card in the submission.
  *
  * WHY THIS EXISTS. `cancelSubmission` previously guarded only on the submission not already being
- * cancelled. The destination MintVault submission is created in status `draft`
- * (connector-import-service.ts) and nothing in the partner grading path advances it — only a
- * manual HQ action does. `PRE_GRADING_DESTINATION_STATUSES` includes `draft`, so the cancellation
- * window stayed open across import, assignment, grading and submit-for-review. Two consequences,
- * both real:
+ * cancelled. A completed connector import creates the MintVault destination in `in_grading`,
+ * which is the status required for the eventual `in_grading → ready_to_return` credit settlement.
+ * The Partner work-item guard remains necessary because a historical import or manual
+ * reconciliation can still leave a pre-grading destination status while work has already begun.
+ * Two consequences of permitting ordinary cancellation after that point are:
  *
  *   1. QUALITY LAUNDERING. A shop could see how grading went — a card sitting at
  *      `returned_for_change` after HQ bounced it — then cancel and re-submit the same physical

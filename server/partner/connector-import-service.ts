@@ -618,7 +618,7 @@ export async function importValidatedConnector(params: {
              (user_id, status, tracking_number, card_count, total_price, total_declared_value,
               payment_status, service_type, service_tier, grading_cost,
               customer_email, customer_first_name, customer_last_name)
-           VALUES ($1,'draft',$2,$3,$4,$5,'unpaid','partner-intake',$6,$7,$8,$9,$10)
+           VALUES ($1,'in_grading',$2,$3,$4,$5,'unpaid','partner-intake',$6,$7,$8,$9,$10)
            RETURNING id, tracking_number`,
           [
             owner.userId,
