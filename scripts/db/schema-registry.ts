@@ -381,6 +381,85 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     evidenceSource: "migration 0067 (immutable scanner evidence ledger)",
   },
 
+  // ---- Project Control durable sync / seed state ----
+  // These are deliberately inventory-owned rather than Drizzle-managed.  Staging carries
+  // applied journal rows for their immutable migrations 0039/0040, while this final
+  // integration branch intentionally does not carry those historical migration files.
+  // Classifying them explicitly prevents a schema-management surface from treating a live
+  // Project Control audit/synchronisation relation as disposable.
+  {
+    schema: "public",
+    name: "pc_sync_runs",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control durable synchronisation-attempt audit ledger",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "staging journalled migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as numbered-migration-owned; do not schema-sync or drop",
+    evidenceSource: "staging journal and historical migration 0039 (captured 2026-08-10)",
+  },
+  {
+    schema: "public",
+    name: "pc_sync_leases",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control cross-machine synchronisation lease state",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "staging journalled migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as numbered-migration-owned; do not schema-sync or drop",
+    evidenceSource: "staging journal and historical migration 0039 (captured 2026-08-10)",
+  },
+  {
+    schema: "public",
+    name: "pc_sync_checkpoints",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control source synchronisation cursors and ETag checkpoints",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "staging journalled migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as numbered-migration-owned; do not schema-sync or drop",
+    evidenceSource: "staging journal and historical migration 0039 (captured 2026-08-10)",
+  },
+  {
+    schema: "public",
+    name: "pc_evidence_snapshots",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control append-only evidence observations",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "staging journalled migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as numbered-migration-owned; do not schema-sync or drop",
+    evidenceSource: "staging journal and historical migration 0039 (captured 2026-08-10)",
+  },
+  {
+    schema: "public",
+    name: "pc_seed_state",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control singleton seed-manifest state",
+    active: true,
+    owningSubsystem: "project-control/seed-reconciliation",
+    reason: "staging journalled migration 0040_project_control_seed_reconciliation.sql",
+    futureDisposition: "preserve as numbered-migration-owned; do not schema-sync or drop",
+    evidenceSource: "staging journal and historical migration 0040 (captured 2026-08-10)",
+  },
+  {
+    schema: "public",
+    name: "pc_seed_runs",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control seed-reconciliation run history",
+    active: true,
+    owningSubsystem: "project-control/seed-reconciliation",
+    reason: "staging journalled migration 0040_project_control_seed_reconciliation.sql",
+    futureDisposition: "preserve as numbered-migration-owned; do not schema-sync or drop",
+    evidenceSource: "staging journal and historical migration 0040 (captured 2026-08-10)",
+  },
+
   // ---- Catalogue / misc ----
   {
     schema: "public",

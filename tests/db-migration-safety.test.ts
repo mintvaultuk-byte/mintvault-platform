@@ -147,6 +147,20 @@ describe("fail-closed preflight (all object types)", () => {
     expect(c.unknown).toEqual([]);
   });
 
+  it("classifies the staging Project Control sync and seed relations as protected migration-owned tables", () => {
+    const tables = [
+      "pc_sync_runs",
+      "pc_sync_leases",
+      "pc_sync_checkpoints",
+      "pc_evidence_snapshots",
+      "pc_seed_state",
+      "pc_seed_runs",
+    ];
+    const c = classifyLiveTables(tables);
+    expect(c.unknown).toEqual([]);
+    expect(c.unmanaged.sort()).toEqual([...tables].sort());
+  });
+
   it("reports objects in known non-public schemas as integration-owned, not unknown (F4)", () => {
     const c = classifyLiveObjects(
       objs({
