@@ -4,16 +4,20 @@ The one place to find current state without grepping the whole repo. Update on e
 Stage 0 (new task) and Stage 7 (final report). Programs group multi-phase work.
 
 ## Programs
-| ID | Title | Status | Branch | Baseline | Latest | Open High/Crit | Next authorised action | Path |
-|---|---|---|---|---|---|---|---|---|
+
+| ID          | Title                      | Status                            | Branch                                   | Baseline  | Latest    | Open High/Crit                                          | Next authorised action                          | Path                    |
+| ----------- | -------------------------- | --------------------------------- | ---------------------------------------- | --------- | --------- | ------------------------------------------------------- | ----------------------------------------------- | ----------------------- |
 | vault-quest | VQ hardening (Phases 1–8A) | staging-substrate; prod unchanged | `main` / `vq-phase8-staging-integration` | `1a2aeac` | `32f3f2b` | live-route wiring blocked on deployed 2-machine staging | provision deployed staging, wire routes, verify | `programs/vault-quest/` |
 
 ## Tasks
-| ID | Title | Status | Branch | Baseline | Latest | Open High/Crit | Next authorised action | Path |
-|---|---|---|---|---|---|---|---|---|
-| governance-phase-9 | Governance stabilisation/enforcement/scale | 9A+9B+9C done (local, unpushed) | `governance-phase-9` | `6439350` | (9C commit) | none blocking; restart to fully load ask/deny + non-Bash hook matchers | health report + await owner review | `tasks/governance-phase-9/` |
+
+| ID                                       | Title                                                     | Status                          | Branch                                      | Baseline   | Latest      | Open High/Crit                                                         | Next authorised action                                   | Path                                              |
+| ---------------------------------------- | --------------------------------------------------------- | ------------------------------- | ------------------------------------------- | ---------- | ----------- | ---------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
+| governance-phase-9                       | Governance stabilisation/enforcement/scale                | 9A+9B+9C done (local, unpushed) | `governance-phase-9`                        | `6439350`  | (9C commit) | none blocking; restart to fully load ask/deny + non-Bash hook matchers | health report + await owner review                       | `tasks/governance-phase-9/`                       |
+| mintvault-final-integration-local-proofs | Final integration local PostgreSQL/MinIO/browser evidence | complete (local, unpushed)      | `codex/mintvault-final-product-integration` | `cb706721` | this commit | none in scope; inherited dependency audit remains follow-up            | owner-approved scope for supplies/order commercial rules | `tasks/mintvault-final-integration-local-proofs/` |
 
 ## Conventions
+
 - Task slug = kebab-case, unique. Program-scoped finding IDs = `<PROG>-P<phase>-F<n>`.
 - A task/program is NOT "done"/"closed" until its Definition-of-Proof level is Activated
   (or explicitly owner-accepted as design/substrate). A landed substrate ≠ closed.

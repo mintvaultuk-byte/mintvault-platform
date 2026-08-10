@@ -7,7 +7,7 @@
  * a double-click or network retry can never create two submissions.
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,10 @@ export default function PartnerSubmissionWizardPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitResult, setSubmitResult] = useState<SubmissionSummary | null>(null);
   const idempotencyKey = useMemo(() => (submission ? newIdempotencyKey(submission.id) : ""), [submission?.id]);
+  const draftId = useMemo(() => readQueryValue("draft"), []);
+  const billingReturnPath = submission
+    ? `/partner/billing?returnTo=${encodeURIComponent(`/partner/submissions/new?draft=${submission.id}`)}`
+    : "/partner/billing";
 
   const invalidateSubmissionQueries = useCallback(
     (id?: string) => {
@@ -103,9 +107,13 @@ export default function PartnerSubmissionWizardPage() {
     [submission?.id, syncDraftDetail]
   );
 
-  // Create the draft ONCE on entry, using the session's currently-selected location.
+  // Create the draft once on entry, or resume the exact draft used to begin credit checkout.
   useEffect(() => {
     if (submission || initError) return;
+    if (draftId) {
+      void refreshDraft(draftId).catch((err) => setInitError(partnerErrorMessage(err)));
+      return;
+    }
     if (!session?.locationId) return; // waits for the "select a location" state below
     (async () => {
       try {
@@ -117,7 +125,7 @@ export default function PartnerSubmissionWizardPage() {
         setInitError(partnerErrorMessage(err));
       }
     })();
-  }, [session?.locationId, submission, initError, syncDraftDetail, invalidateSubmissionQueries]);
+  }, [draftId, session?.locationId, submission, initError, syncDraftDetail, invalidateSubmissionQueries, refreshDraft]);
 
   const { data: availableTiers } = useQuery({
     queryKey: ["/api/partner/service-tiers"],
@@ -388,6 +396,7 @@ export default function PartnerSubmissionWizardPage() {
           cards={cards}
           creditBalance={credits?.summary.availableCredits ?? null}
           creditConfigured={credits?.summary.configured ?? false}
+          billingHref={billingReturnPath}
           missing={missing}
           onEditStep={setStep}
         />
@@ -399,6 +408,7 @@ export default function PartnerSubmissionWizardPage() {
           cards={cards}
           creditBalance={credits?.summary.availableCredits ?? null}
           creditConfigured={credits?.summary.configured ?? false}
+          billingHref={billingReturnPath}
           submitting={submitting}
           error={submitError}
           onSubmit={handleSubmit}
@@ -1055,6 +1065,7 @@ function ReviewStep(props: {
   cards: SubmissionCard[];
   creditBalance: number | null;
   creditConfigured: boolean;
+  billingHref: string;
   missing: string[];
   onEditStep: (step: number) => void;
 }) {
@@ -1062,6 +1073,7 @@ function ReviewStep(props: {
   const missing = props.missing;
   const creditsRequired = physicalCardCount(props.cards);
   const remaining = props.creditBalance == null ? null : props.creditBalance - creditsRequired;
+  const shortfall = remaining == null ? null : Math.max(0, -remaining);
 
   return (
     <Card data-testid="wizard-step-review">
@@ -1087,6 +1099,9 @@ function ReviewStep(props: {
           value={tier ? `${tier.label} (${formatPence(tier.pricePerCardPence)})` : "Not set"}
           onEdit={() => props.onEditStep(1)}
         />
+        {shortfall != null && shortfall > 0 && (
+          <CreditShortfallPanel shortfall={shortfall} billingHref={props.billingHref} />
+        )}
         <ReviewRow
           label="Cards"
           value={`${creditsRequired} physical card${creditsRequired === 1 ? "" : "s"}`}
@@ -1138,6 +1153,7 @@ function SubmitStep({
   cards,
   creditBalance,
   creditConfigured,
+  billingHref,
   submitting,
   error,
   onSubmit,
@@ -1146,12 +1162,14 @@ function SubmitStep({
   cards: SubmissionCard[];
   creditBalance: number | null;
   creditConfigured: boolean;
+  billingHref: string;
   submitting: boolean;
   error: string | null;
   onSubmit: () => void;
 }) {
   const creditsRequired = physicalCardCount(cards);
   const remaining = creditBalance == null ? null : creditBalance - creditsRequired;
+  const shortfall = remaining == null ? null : Math.max(0, -remaining);
   return (
     <Card data-testid="wizard-step-submit">
       <CardHeader>
@@ -1174,6 +1192,7 @@ function SubmitStep({
           <p>Wallet balance: {creditConfigured && creditBalance != null ? creditBalance : "Not available"}</p>
           <p>Remaining balance: {remaining == null ? "Not available" : remaining}</p>
         </div>
+        {shortfall != null && shortfall > 0 && <CreditShortfallPanel shortfall={shortfall} billingHref={billingHref} />}
         {missing.length > 0 && (
           <div
             className="rounded-md border border-destructive/30 bg-destructive/5 p-3"
@@ -1195,7 +1214,7 @@ function SubmitStep({
         <Button
           size="lg"
           className="w-full"
-          disabled={submitting || missing.length > 0}
+          disabled={submitting || missing.length > 0 || (shortfall != null && shortfall > 0)}
           onClick={onSubmit}
           data-testid="button-confirm-submit"
         >
@@ -1206,8 +1225,33 @@ function SubmitStep({
   );
 }
 
+function CreditShortfallPanel({ shortfall, billingHref }: { shortfall: number; billingHref: string }) {
+  return (
+    <div
+      className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+      data-testid="credit-shortfall"
+    >
+      <p className="font-medium">
+        {shortfall} more grading credit{shortfall === 1 ? "" : "s"} needed
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        Add credits before submitting. Payment confirmation, not this page, updates the wallet.
+      </p>
+      <Button asChild className="mt-3" size="sm">
+        <Link href={billingHref} data-testid="button-buy-credits-shortfall">
+          Buy credits
+        </Link>
+      </Button>
+    </div>
+  );
+}
+
 function physicalCardCount(cards: SubmissionCard[]): number {
   return cards.reduce((sum, card) => sum + Math.max(1, Number(card.quantity) || 1), 0);
+}
+
+function readQueryValue(name: string): string | null {
+  return new URL(window.location.href).searchParams.get(name);
 }
 
 function SubmitSuccessPanel({

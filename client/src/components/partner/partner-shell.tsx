@@ -20,6 +20,7 @@ import {
   Users,
   MapPin,
   CreditCard,
+  Store,
   ClipboardCheck,
   Contact,
   HelpCircle,
@@ -47,6 +48,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
   { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
   { href: "/partner/billing", label: "Credits & Billing", icon: CreditCard, permission: "partner.credits.view" },
+  { href: "/partner/public-profile", label: "Public Profile", icon: Store, permission: "partner.location.view" },
   { href: "/partner/help", label: "Help", icon: HelpCircle },
   { href: "/partner/security", label: "Security & Account", icon: ShieldCheck },
 ];

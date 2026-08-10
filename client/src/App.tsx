@@ -152,8 +152,11 @@ const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
+const PartnerPublicProfilePage = lazy(() => import("@/pages/partner/public-profile"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
+const ShopFinderPage = lazy(() => import("@/pages/shop-finder"));
+const ShopProfilePage = lazy(() => import("@/pages/shop-profile"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -315,6 +318,11 @@ function PartnerPortalRoutes() {
             <PartnerBillingPage />
           </PartnerRouteGuard>
         </Route>
+        <Route path="/partner/public-profile">
+          <PartnerRouteGuard requiredPermission="partner.location.view">
+            <PartnerPublicProfilePage />
+          </PartnerRouteGuard>
+        </Route>
         <Route path="/partner/help">
           <PartnerRouteGuard>
             <PartnerHelpPage />
@@ -412,6 +420,8 @@ function Router() {
           <Route path="/cert/:id/report" component={GradingReportPage} />
           <Route path="/cert/:id" component={LogbookPage} />
           <Route path="/vault/:certId" component={LogbookPage} />
+          <Route path="/shops/:slug" component={ShopProfilePage} />
+          <Route path="/shops" component={ShopFinderPage} />
           <Route path="/" component={Home} />
           <Route path="/pricing" component={Pricing} />
           <Route path="/vault-club" component={VaultClub} />

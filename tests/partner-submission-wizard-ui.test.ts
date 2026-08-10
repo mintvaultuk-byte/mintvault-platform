@@ -57,7 +57,7 @@ describe("double-submit / duplication safety", () => {
     // Submit's enabled state must reuse the SAME "missing" check as the Review step's warning
     // banner (a real bug found in review: Submit was previously enabled by card-count alone,
     // letting a partner skip past an incomplete Review straight to an active Submit button).
-    expect(WIZARD).toContain("disabled={submitting || missing.length > 0}");
+    expect(WIZARD).toContain("disabled={submitting || missing.length > 0 || (shortfall != null && shortfall > 0)}");
     expect(WIZARD).toContain('data-testid="button-confirm-submit"');
   });
   it("Review and Submit steps share one computed 'missing' list, not two independent checks", () => {
@@ -278,6 +278,21 @@ describe("Locations and Billing use their real partner APIs", () => {
     expect(BILLING_PAGE).toContain("partnerCredits.view()");
     expect(BILLING_PAGE).toContain("Not available");
     expect(BILLING_PAGE).toContain("runningBalance");
+  });
+  it("Billing uses the authoritative package and checkout contracts without client-side prices", () => {
+    expect(API).toContain('"GET", "/api/partner/credits/packages"');
+    expect(API).toContain('"POST", "/api/partner/credits/checkout"');
+    expect(BILLING_PAGE).toContain("partnerCredits.packages()");
+    expect(BILLING_PAGE).toContain("partnerCredits.checkout(packageId, returnPathFromSearch())");
+    expect(BILLING_PAGE).toContain("window.location.assign(checkoutUrl)");
+    expect(BILLING_PAGE).not.toContain("credits-10");
+  });
+  it("a credit shortfall returns to the same draft and blocks submission until the wallet can cover it", () => {
+    expect(WIZARD).toContain('const draftId = useMemo(() => readQueryValue("draft"), []);');
+    expect(WIZARD).toContain("void refreshDraft(draftId)");
+    expect(WIZARD).toContain("billingReturnPath");
+    expect(WIZARD).toContain('data-testid="button-buy-credits-shortfall"');
+    expect(WIZARD).toContain("shortfall != null && shortfall > 0");
   });
 });
 

@@ -666,7 +666,7 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 67,
-    standalone: true,
+    standalone: false,
     migration: "0067_certificate_immutable_evidence_ledger.sql",
     rollback: "rollback-0067-certificate-immutable-evidence-ledger.sql",
     hole: "scanner TIFF masters and their browser/crop lineage are missing or mutable",
@@ -679,6 +679,24 @@ const ROUND_TRIPS: RoundTrip[] = [
             AND relname IN ('certificate_image_masters','certificate_image_workings','certificate_image_crops')`
       );
       return rows[0].n === 0 ? "immutable_evidence_ledger_absent" : "immutable_evidence_ledger_present";
+    },
+  },
+  {
+    number: 68,
+    standalone: true,
+    migration: "0068_certificate_scan_status.sql",
+    rollback: "rollback-0068-certificate-scan-status.sql",
+    hole: "the scanner recovery reconciler queries a certificate scan status column that a fresh migration never created",
+    whenApplied: "certificate_scan_status_present",
+    whenRolledBack: "certificate_scan_status_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ present: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='certificates' AND column_name='scan_status'
+         ) AS present`
+      );
+      return rows[0].present ? "certificate_scan_status_present" : "certificate_scan_status_absent";
     },
   },
   {
@@ -1041,7 +1059,7 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
     expect(after.rows[0]).toEqual({ idx: true, col: true, view: true });
   }, 120_000);
 
-  it("the whole 0066 -> 0047 descending rollback completes, and the runner restores every one", async () => {
+  it("the whole 0068 -> 0047 descending rollback completes, and the runner restores every one", async () => {
     const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
 
     for (const entry of descending) {

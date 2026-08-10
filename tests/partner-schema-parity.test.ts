@@ -235,6 +235,8 @@ describe("partner schema ↔ migration parity", () => {
       "0064_public_slab_image_projection.sql", // B2 anonymous image off the privileged pool
       "0065_certificates_reviewed_unit_index.sql", // H10, CONCURRENTLY (migrate:no-transaction)
       "0066_partner_rating_lifecycle_hardening.sql", // H2/H3/H4/H5/H6 rating CAS, lease, backoff
+      "0067_certificate_immutable_evidence_ledger.sql",
+      "0068_certificate_scan_status.sql",
     ]);
   });
 

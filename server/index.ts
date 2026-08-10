@@ -16,7 +16,7 @@ import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email
 import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
-import { getDatabaseUrl } from "./config";
+import { databaseSslConfig, getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import { validatePartnerRbacAtBoot } from "./partner/permissions";
@@ -220,9 +220,10 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 const PgStore = connectPgSimple(session);
+const sessionDatabaseUrl = getDatabaseUrl();
 const sessionPool = new pg.Pool({
-  connectionString: getDatabaseUrl(),
-  ssl: { rejectUnauthorized: false },
+  connectionString: sessionDatabaseUrl,
+  ssl: databaseSslConfig(sessionDatabaseUrl),
   max: 8,
   // 30s tolerates Neon autosuspend cold-start (see server/db.ts for the
   // same rationale). Session reads/writes happen on nearly every request,

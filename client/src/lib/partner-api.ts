@@ -252,8 +252,140 @@ export interface PartnerCreditView {
   purchaseHistory: PartnerCreditLedgerEntry[];
 }
 
+export interface PartnerCreditPackage {
+  id: string;
+  credits: number;
+  pricePence: number;
+  label: string;
+}
+
+export interface PartnerCreditCheckout {
+  checkoutUrl: string;
+  packageId: string;
+  credits: number;
+  pricePence: number;
+}
+
 export const partnerCredits = {
   view: () => req<PartnerCreditView>("GET", "/api/partner/credits"),
+  packages: () => req<{ packages: PartnerCreditPackage[]; currency: string }>("GET", "/api/partner/credits/packages"),
+  checkout: (packageId: string, returnPath: string) =>
+    req<PartnerCreditCheckout>("POST", "/api/partner/credits/checkout", { packageId, returnPath }),
+};
+
+// ---- public partner network ----
+export interface PublicPartnerRating {
+  available: boolean;
+  isOverride: boolean;
+  rating: number | null;
+  label: string;
+  sampleSize: number;
+  minimumSample: number;
+  version: string | null;
+  calculatedAt: string | null;
+}
+
+export interface PublicPartnerShop {
+  slug: string;
+  displayName: string;
+  tradingName: string | null;
+  townCity: string | null;
+  county: string | null;
+  postcode: string | null;
+  country: string;
+  latitude: number | null;
+  longitude: number | null;
+  distanceKm: number | null;
+  verified: boolean;
+  rating: PublicPartnerRating;
+}
+
+export interface PublicPartnerShopProfile extends PublicPartnerShop {
+  addressLine1: string | null;
+  addressLine2: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  openingInfo: string | null;
+  description: string | null;
+  publicSince: string | null;
+  stats: { cardsGraded: number };
+  recentCards: Array<{
+    certId: string;
+    cardName: string | null;
+    cardSet: string | null;
+    cardYear: string | null;
+    cardNumber: string | null;
+    grade: string | null;
+    gradedDate: string | null;
+    frontImageUrl: string | null;
+  }>;
+}
+
+export const publicPartnerShops = {
+  find: (input: {
+    q?: string;
+    postcode?: string;
+    town?: string;
+    county?: string;
+    lat?: number;
+    lng?: number;
+    radiusKm?: number;
+    sort?: "distance" | "quality" | "name";
+  }) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(input))
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    const suffix = query.size > 0 ? `?${query}` : "";
+    return req<{
+      rows: PublicPartnerShop[];
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+      appliedSort: string;
+      geo: boolean;
+    }>("GET", `/api/shops${suffix}`);
+  },
+  detail: (slug: string) => req<PublicPartnerShopProfile>("GET", `/api/shops/${encodeURIComponent(slug)}`),
+};
+
+export interface PartnerPublicListing {
+  id: string;
+  slug: string;
+  public_display_name: string;
+  listing_status: string;
+  town_city: string | null;
+  county: string | null;
+  postcode: string | null;
+  country: string;
+  public_phone: string | null;
+  public_email: string | null;
+  public_website: string | null;
+  public_opening_info: string | null;
+  public_description: string | null;
+  verified_at: string | null;
+  public_since: string | null;
+  current_public_rating: number | null;
+  current_rating_label: string | null;
+  current_rating_available: boolean;
+  current_sample_size: number;
+  current_minimum_sample: number;
+  current_rating_calculated_at: string | null;
+}
+
+export const partnerPublicListings = {
+  list: () => req<{ rows: PartnerPublicListing[] }>("GET", "/api/partner/public-listings"),
+  update: (
+    id: string,
+    input: {
+      phone?: string | null;
+      email?: string | null;
+      website?: string | null;
+      openingInfo?: string | null;
+      description?: string | null;
+    }
+  ) => req<{ ok: boolean; updated: number }>("PUT", `/api/partner/public-listings/${id}`, input),
 };
 
 // ---- own sessions ----

@@ -57,7 +57,12 @@ export default function PartnerLoginPage() {
         }
         setStep(enrolmentRequired ? "enrol" : "mfa");
       } else {
-        navigate("/partner/dashboard");
+        // The login page starts with an anonymous session query. Even after its refetch succeeds,
+        // React can render the newly selected guarded route once with that stale null context and
+        // immediately bounce the user straight back here. A document navigation makes the first
+        // protected-route session read use the newly minted cookie, matching the established
+        // admin PIN completion pattern.
+        window.location.assign("/partner/dashboard");
       }
     } catch (err) {
       const status = (err as { status?: number })?.status;

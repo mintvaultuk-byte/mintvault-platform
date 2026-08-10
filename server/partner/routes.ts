@@ -309,6 +309,11 @@ export function partnerApiRouter(): Router {
 
   // ---- session ----
   r.get("/session", async (req, res) => {
+    // The payload changes with the partner session cookie (including immediately after a successful
+    // sign-in). An ETag/304 response can otherwise reuse an anonymous or MFA-pending body and leave
+    // the browser unable to enter the authenticated portal. This endpoint is identity-bearing, so
+    // it must never be stored or conditionally replayed by a browser or intermediary.
+    res.setHeader("Cache-Control", "private, no-store");
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
