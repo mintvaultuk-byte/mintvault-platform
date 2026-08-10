@@ -50,6 +50,8 @@ import {
 import {
   mfaEnrolStart,
   mfaEnrolConfirm,
+  mfaEnrolRestart,
+  mfaEnrolCancel,
   mfaRegenerateRecovery,
   mfaDisable,
   verifyActiveTotpNoReplay,
@@ -65,6 +67,10 @@ import {
 function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
   const g5 = toG5Error(err);
   res.status(g5StatusFor(g5.code)).json({ error: { code: g5.code, message: g5.message } });
+}
+
+function noStore(res: import("express").Response): void {
+  res.setHeader("Cache-Control", "private, no-store");
 }
 
 /**
@@ -189,7 +195,10 @@ export function partnerApiRouter(): Router {
       res.status(401).json({ error: "invalid code" });
       return;
     }
-    await markSessionMfaPassed(req.partner.tenantId, req.partner.sessionId);
+    if (!(await markSessionMfaPassed(req.partner.tenantId, req.partner.sessionId, req.partner.userId))) {
+      res.status(401).json({ error: "authentication required" });
+      return;
+    }
     res.json({ ok: true });
   });
 
@@ -509,7 +518,12 @@ export function partnerApiRouter(): Router {
       return;
     }
     const out = await mfaEnrolStart(
-      { tenantId: req.partner.tenantId, userId: req.partner.userId, sessionMfaPassed: req.partner.mfaPassed },
+      {
+        tenantId: req.partner.tenantId,
+        userId: req.partner.userId,
+        sessionId: req.partner.sessionId,
+        sessionMfaPassed: req.partner.mfaPassed,
+      },
       password,
       // F3: only consulted when an ACTIVE authenticator already exists (i.e. this is a REPLACEMENT).
       // First-time enrolment is unaffected and still needs the password alone.
@@ -528,7 +542,42 @@ export function partnerApiRouter(): Router {
       res.status(status).json({ error: out.reason });
       return;
     }
-    res.json({ ok: true, secret: out.secret, otpauthUri: out.otpauthUri }); // shown once; never logged
+    noStore(res);
+    res.json({ ok: true, enrolmentId: out.enrolmentId, secret: out.secret, otpauthUri: out.otpauthUri, expiresAt: out.expiresAt }); // shown once; never logged
+  });
+
+  r.post("/mfa/restart", partnerMfaLimiter, async (req, res) => {
+    if (!req.partner) {
+      res.status(401).json({ error: "authentication required" });
+      return;
+    }
+    const out = await mfaEnrolRestart({
+      tenantId: req.partner.tenantId,
+      userId: req.partner.userId,
+      sessionId: req.partner.sessionId,
+      sessionMfaPassed: req.partner.mfaPassed,
+    });
+    if (!out.ok) {
+      const status = out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
+      res.status(status).json({ error: out.reason });
+      return;
+    }
+    noStore(res);
+    res.json({ ok: true, enrolmentId: out.enrolmentId, secret: out.secret, otpauthUri: out.otpauthUri, expiresAt: out.expiresAt });
+  });
+
+  r.post("/mfa/cancel", partnerMfaLimiter, async (req, res) => {
+    if (!req.partner) {
+      res.status(401).json({ error: "authentication required" });
+      return;
+    }
+    await mfaEnrolCancel({
+      tenantId: req.partner.tenantId,
+      userId: req.partner.userId,
+      sessionId: req.partner.sessionId,
+    });
+    clearPartnerCookie(res);
+    res.json({ ok: true });
   });
 
   r.post("/mfa/confirm", partnerMfaLimiter, async (req, res) => {
@@ -536,8 +585,9 @@ export function partnerApiRouter(): Router {
       res.status(401).json({ error: "authentication required" });
       return;
     }
-    const { code } = req.body ?? {};
-    if (typeof code !== "string") {
+    const { code, enrolmentId } = req.body ?? {};
+    const normalizedCode = typeof code === "string" ? code.replace(/\s/g, "") : "";
+    if (typeof enrolmentId !== "string" || !/^[0-9a-f-]{36}$/i.test(enrolmentId) || !/^\d{6}$/.test(normalizedCode)) {
       res.status(400).json({ error: "invalid request" });
       return;
     }
@@ -548,12 +598,14 @@ export function partnerApiRouter(): Router {
         sessionId: req.partner.sessionId,
         sessionMfaPassed: req.partner.mfaPassed,
       },
-      code
+      enrolmentId,
+      normalizedCode
     );
     if (!out.ok) {
       res.status(out.reason === "requires_current_factor" ? 403 : 400).json({ error: out.reason });
       return;
     }
+    noStore(res);
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once
   });
 
@@ -584,6 +636,7 @@ export function partnerApiRouter(): Router {
         .json({ error: out.reason });
       return;
     }
+    noStore(res);
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
   });
 
