@@ -1,11 +1,17 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { LocateFixed, MapPin, Search, ShieldCheck } from "lucide-react";
+import { ExternalLink, LocateFixed, MapPin, Navigation, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  googleMapsDirectionsUrl,
+  googleMapsSearchUrl,
+  PublicShopCoordinateMap,
+  publicShopAddress,
+} from "@/components/partner/public-shop-coordinate-map";
 import { partnerErrorMessage, publicPartnerShops, type PublicPartnerRating } from "@/lib/partner-api";
 
 function Rating({ rating }: { rating: PublicPartnerRating }) {
@@ -34,7 +40,14 @@ export default function ShopFinderPage() {
     lng: undefined as number | undefined,
   });
   const [form, setForm] = useState(submitted);
+  const [selectedMapShopSlug, setSelectedMapShopSlug] = useState<string | null>(null);
   const finder = useQuery({ queryKey: ["/api/shops", submitted], queryFn: () => publicPartnerShops.find(submitted) });
+  const selectedMapShop =
+    finder.data?.rows.find(
+      (shop) => shop.slug === selectedMapShopSlug && shop.latitude != null && shop.longitude != null
+    ) ??
+    finder.data?.rows.find((shop) => shop.latitude != null && shop.longitude != null) ??
+    null;
 
   function useLocation() {
     if (!navigator.geolocation) return;
@@ -125,35 +138,69 @@ export default function ShopFinderPage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-3">
-                {finder.data.rows.map((shop) => (
-                  <Card key={shop.slug} className="rounded-md">
-                    <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="font-semibold">{shop.displayName}</h2>
-                          {shop.verified && (
-                            <span className="inline-flex items-center gap-1 text-xs text-primary">
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                              Verified MintVault Partner
-                            </span>
-                          )}
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+                <div className="space-y-3 lg:sticky lg:top-4">
+                  <PublicShopCoordinateMap
+                    onSelect={(shop) => setSelectedMapShopSlug(shop.slug)}
+                    selectedSlug={selectedMapShop?.slug}
+                    shops={finder.data.rows}
+                  />
+                  {selectedMapShop && (
+                    <Card className="rounded-md" data-testid="public-shop-map-selection">
+                      <CardContent className="space-y-3 p-4">
+                        <div>
+                          <p className="font-semibold">{selectedMapShop.displayName}</p>
+                          <p className="mt-1 text-sm text-muted-foreground">{publicShopAddress(selectedMapShop)}</p>
                         </div>
-                        <p className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <MapPin className="h-4 w-4" />
-                          {[shop.townCity, shop.county, shop.postcode].filter(Boolean).join(", ")}
-                        </p>
-                        {shop.distanceKm != null && (
-                          <p className="text-sm text-muted-foreground">{shop.distanceKm.toFixed(1)} km away</p>
-                        )}
-                        <Rating rating={shop.rating} />
-                      </div>
-                      <Button asChild variant="outline">
-                        <Link href={`/shops/${shop.slug}`}>View shop</Link>
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
+                        <div className="flex flex-wrap gap-2">
+                          <Button asChild size="sm" variant="outline">
+                            <Link href={`/shops/${selectedMapShop.slug}`}>View shop profile</Link>
+                          </Button>
+                          <Button asChild size="sm" variant="outline">
+                            <a href={googleMapsSearchUrl(selectedMapShop)!} rel="noreferrer" target="_blank">
+                              Open in Google Maps <ExternalLink className="ml-1 h-3.5 w-3.5" />
+                            </a>
+                          </Button>
+                          <Button asChild size="sm">
+                            <a href={googleMapsDirectionsUrl(selectedMapShop)!} rel="noreferrer" target="_blank">
+                              Get directions <Navigation className="ml-1 h-3.5 w-3.5" />
+                            </a>
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+                <div className="grid gap-3">
+                  {finder.data.rows.map((shop) => (
+                    <Card key={shop.slug} className="rounded-md">
+                      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="font-semibold">{shop.displayName}</h2>
+                            {shop.verified && (
+                              <span className="inline-flex items-center gap-1 text-xs text-primary">
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                                Verified MintVault Partner
+                              </span>
+                            )}
+                          </div>
+                          <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <MapPin className="h-4 w-4" />
+                            {[shop.townCity, shop.county, shop.postcode].filter(Boolean).join(", ")}
+                          </p>
+                          {shop.distanceKm != null && (
+                            <p className="text-sm text-muted-foreground">{shop.distanceKm.toFixed(1)} km away</p>
+                          )}
+                          <Rating rating={shop.rating} />
+                        </div>
+                        <Button asChild variant="outline">
+                          <Link href={`/shops/${shop.slug}`}>View shop</Link>
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
               </div>
             )}
           </>

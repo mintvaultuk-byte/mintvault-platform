@@ -25,6 +25,7 @@ import {
   RATING_WINDOW_DAYS,
   type RatingCounters,
 } from "../server/partner/public-network-rating";
+import { publicRatingDto } from "../server/partner/public-network-service";
 
 const LOC = "11111111-1111-1111-1111-111111111111";
 
@@ -156,6 +157,21 @@ describe("scoring", () => {
 });
 
 describe("low-sample protection (RATING3)", () => {
+  it("never renders an uncalculated active listing as if its public threshold were zero", () => {
+    expect(
+      publicRatingDto({
+        current_rating_available: false,
+        current_rating_is_override: false,
+        current_public_rating: null,
+        current_rating_label: "Rating building",
+        current_sample_size: 0,
+        current_minimum_sample: 0,
+        current_rating_version: null,
+        current_rating_calculated_at: null,
+      })
+    ).toMatchObject({ available: false, rating: null, sampleSize: 0, minimumSample: MINIMUM_PUBLIC_SAMPLE });
+  });
+
   it("withholds a rating below the minimum sample, however perfect the evidence", () => {
     const r = rate({ reviewedUnits: 1, firstPassUnits: 1, totalRedos: 0 });
     // The headline failure this prevents: 1 completed card -> 5.0 stars.

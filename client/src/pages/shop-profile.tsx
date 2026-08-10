@@ -3,13 +3,12 @@ import { Link, useRoute } from "wouter";
 import { ExternalLink, Mail, MapPin, Navigation, Phone, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  googleMapsDirectionsUrl,
+  googleMapsSearchUrl,
+  PublicShopCoordinateMap,
+} from "@/components/partner/public-shop-coordinate-map";
 import { partnerErrorMessage, publicPartnerShops } from "@/lib/partner-api";
-
-function mapsUrl(address: string, latitude: number | null, longitude: number | null): string | null {
-  if (latitude != null && longitude != null)
-    return `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-  return address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : null;
-}
 
 export default function ShopProfilePage() {
   const [, params] = useRoute("/shops/:slug");
@@ -38,7 +37,8 @@ export default function ShopProfilePage() {
   const address = [shop.addressLine1, shop.addressLine2, shop.townCity, shop.county, shop.postcode]
     .filter(Boolean)
     .join(", ");
-  const directions = mapsUrl(address, shop.latitude, shop.longitude);
+  const googleMaps = googleMapsSearchUrl(shop);
+  const directions = googleMapsDirectionsUrl(shop);
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:py-14" data-testid="shop-profile-page">
       <Link href="/shops" className="text-sm text-primary">
@@ -114,6 +114,13 @@ export default function ShopProfilePage() {
                 <MapPin className="h-4 w-4 shrink-0 text-primary" />
                 {address || "Address available on request"}
               </p>
+              <PublicShopCoordinateMap shops={[shop]} />
+              {googleMaps && (
+                <a href={googleMaps} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary">
+                  <MapPin className="h-4 w-4" />
+                  Open in Google Maps
+                </a>
+              )}
               {directions && (
                 <a href={directions} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary">
                   <Navigation className="h-4 w-4" />

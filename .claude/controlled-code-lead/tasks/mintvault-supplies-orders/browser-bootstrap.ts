@@ -74,6 +74,10 @@ async function main(): Promise<void> {
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001', 'browser-supply-location',
               'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
               'Browser Supply Shop', '10 Proof Street, Bristol, BS1 4AA', 'ACTIVE')`);
+    await admin.query(`INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, address, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0004', 'browser-supply-no-coordinate-location',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'Browser Text-Only Shop', '20 Proof Street, Bristol, BS1 4AB', 'ACTIVE')`);
     await admin.query(
       `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status)
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002', 'browser-supply-owner',
@@ -106,7 +110,30 @@ async function main(): Promise<void> {
     await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003'");
     await admin.query(`INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES
       (NULL, 'partner_portal_enabled', true), (NULL, 'partner_login_enabled', true),
+      (NULL, 'partner_public_network_enabled', true),
       (NULL, 'partner_emergency_stop', false)`);
+    // The public reader may see this one approved, active location through the projection only.
+    // It makes browser map proof deterministic without teaching the Partner fixture any public
+    // identity/address/coordinate mutation capability.
+    await admin.query(`INSERT INTO partner_public_listings
+      (tenant_id, location_id, slug, public_display_name, trading_name_snapshot,
+       address_line_1, town_city, county, postcode, country, latitude, longitude,
+       public_phone, public_email, public_website, public_opening_info, public_description,
+       listing_status, approved_at, approved_by, public_since, verified_at, verified_by)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001',
+              'browser-supply-shop', 'Browser Supply Shop', 'Browser Supply Shop Ltd',
+              '10 Proof Street', 'Bristol', 'Bristol', 'BS1 4AA', 'GB', 51.4545, -2.5879,
+              '+441170000000', 'hello@browser-supply.test', 'https://browser-supply.test',
+              'Mon–Fri, 9am–5pm', 'A deterministic local-only public listing for browser proof.',
+              'ACTIVE', now(), 'local-browser-fixture', now(), now(), 'local-browser-fixture')`);
+    await admin.query(`INSERT INTO partner_public_listings
+      (tenant_id, location_id, slug, public_display_name, trading_name_snapshot,
+       address_line_1, town_city, county, postcode, country,
+       listing_status, approved_at, approved_by, public_since, verified_at, verified_by)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0004',
+              'browser-text-only-shop', 'Browser Text-Only Shop', 'Browser Supply Shop Ltd',
+              '20 Proof Street', 'Bristol', 'Bristol', 'BS1 4AB', 'GB',
+              'ACTIVE', now(), 'local-browser-fixture', now(), now(), 'local-browser-fixture')`);
     await admin.query(
       "UPDATE partner_supply_products SET active_price_pence=2000 WHERE code='holographic_printing_paper'"
     );
@@ -145,6 +172,7 @@ async function main(): Promise<void> {
         END IF;
       END$$`);
     await admin.query("GRANT partner_runtime TO supply_browser_runtime");
+    await admin.query("GRANT partner_public_reader TO supply_browser_runtime");
   } finally {
     await admin.end();
   }

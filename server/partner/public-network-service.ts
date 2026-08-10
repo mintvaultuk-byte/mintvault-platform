@@ -73,7 +73,7 @@ export class PublicNetworkError extends Error {
   constructor(
     public readonly code: string,
     message: string,
-    public readonly status = 400,
+    public readonly status = 400
   ) {
     super(message);
     this.name = "PublicNetworkError";
@@ -185,9 +185,10 @@ export interface PublicRecentCardDto {
   frontImageUrl: string | null;
 }
 
-function ratingDto(r: Record<string, unknown>): PublicRatingDto {
+export function publicRatingDto(r: Record<string, unknown>): PublicRatingDto {
   const available = r.current_rating_available === true;
   const isOverride = r.current_rating_is_override === true;
+  const storedMinimum = Number(r.current_minimum_sample);
   return {
     available,
     isOverride,
@@ -195,7 +196,11 @@ function ratingDto(r: Record<string, unknown>): PublicRatingDto {
     rating: available && r.current_public_rating !== null ? Number(r.current_public_rating) : null,
     label: String(r.current_rating_label ?? "Rating building"),
     sampleSize: Number(r.current_sample_size ?? 0),
-    minimumSample: Number(r.current_minimum_sample ?? MINIMUM_PUBLIC_SAMPLE),
+    // An active listing may exist briefly before its first rating calculation. The migration
+    // default is zero for that pre-calculation state, but telling a visitor "0 of 0" falsely
+    // implies that a rating threshold has been met. Until the authoritative calculation writes
+    // its value, display the stable public threshold instead.
+    minimumSample: Number.isFinite(storedMinimum) && storedMinimum > 0 ? storedMinimum : MINIMUM_PUBLIC_SAMPLE,
     // A hand-set override must NOT be attributed to PARTNER_QUALITY_V1 — the formula did not
     // produce it.
     version: available && !isOverride ? ((r.current_rating_version as string | null) ?? null) : null,
@@ -216,7 +221,7 @@ function summaryDto(r: Record<string, unknown>, distanceKm: number | null): Publ
     longitude: r.longitude === null || r.longitude === undefined ? null : Number(r.longitude),
     distanceKm,
     verified: r.verified_at !== null && r.verified_at !== undefined,
-    rating: ratingDto(r),
+    rating: publicRatingDto(r),
   };
 }
 
@@ -329,7 +334,7 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
         WHERE ${whereSql}
         ORDER BY slug
         LIMIT 500`,
-      params,
+      params
     );
     const radius = Math.min(MAX_RADIUS_KM, Math.max(1, query.radiusKm ?? DEFAULT_RADIUS_KM));
     const withDistance = rows
@@ -370,7 +375,7 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
 
   const countRes = await partnerPublicQuery<{ n: string }>(
     `SELECT count(*)::text n FROM partner_public_shop_projection WHERE ${whereSql}`,
-    params,
+    params
   );
   const total = Number(countRes.rows[0]?.n ?? 0);
 
@@ -380,7 +385,7 @@ export async function findShops(query: FinderQuery): Promise<FinderResult> {
       WHERE ${whereSql}
       ORDER BY ${orderSql}
       LIMIT ${add(query.pageSize)} OFFSET ${add(offset)}`,
-    params,
+    params
   );
 
   return {
@@ -416,7 +421,7 @@ export async function getShopProfile(slug: string): Promise<PublicShopProfileDto
        FROM partner_public_shop_projection
       WHERE slug = $1
       LIMIT 1`,
-    [slug],
+    [slug]
   );
   const row = rows[0];
   if (!row) return null;
@@ -530,7 +535,7 @@ export async function getRecentCards(locationId: string): Promise<PublicRecentCa
       WHERE origin_location_id = $1
       ORDER BY grade_approved_at DESC
       LIMIT ${RECENT_CARDS_LIMIT}`,
-    [locationId],
+    [locationId]
   );
   return rows.map((r) => ({
     certId: String(r.certificate_number),
@@ -556,7 +561,7 @@ export async function countPublicCards(locationId: string): Promise<number> {
   const { rows } = await partnerPublicQuery<{ n: string }>(
     `SELECT count(*)::text n FROM partner_public_card_projection
       WHERE origin_location_id = $1`,
-    [locationId],
+    [locationId]
   );
   return Number(rows[0]?.n ?? 0);
 }
@@ -570,8 +575,16 @@ export async function countPublicCards(locationId: string): Promise<number> {
  */
 export async function measureEvidence(locationId: string): Promise<RatingEvidence> {
   const { rows } = await partnerRatingQuery<{
-    w_units: string; w_first: string; w_redos: string; w_aband: string; w_oldest: Date | null;
-    a_units: string; a_first: string; a_redos: string; a_aband: string; a_oldest: Date | null;
+    w_units: string;
+    w_first: string;
+    w_redos: string;
+    w_aband: string;
+    w_oldest: Date | null;
+    a_units: string;
+    a_first: string;
+    a_redos: string;
+    a_aband: string;
+    a_oldest: Date | null;
   }>(
     `WITH units AS (
        SELECT redo_count,
@@ -626,7 +639,7 @@ export async function measureEvidence(locationId: string): Promise<RatingEvidenc
        count(*) FILTER (WHERE grade_approved_at IS NULL)::text AS a_aband,
        min(ev) AS a_oldest
      FROM units`,
-    [locationId, String(RATING_WINDOW_DAYS)],
+    [locationId, String(RATING_WINDOW_DAYS)]
   );
   const r = rows[0];
   const windowed = {
@@ -686,7 +699,7 @@ export async function recalculateRating(listingId: string, actor: string): Promi
   // the connections HQ approve/reject runs on — see getRatingPool in ./db.
   const listing = await partnerRatingQuery<{ id: string; tenant_id: string; location_id: string }>(
     "SELECT id, tenant_id, location_id FROM partner_public_listings WHERE id = $1",
-    [listingId],
+    [listingId]
   );
   const l = listing.rows[0];
   if (!l) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
@@ -716,7 +729,7 @@ export async function recalculateRating(listingId: string, actor: string): Promi
         JSON.stringify(computed.componentScores),
         JSON.stringify(computed.evidenceAvailability),
         actor,
-      ],
+      ]
     );
     const snapshotId = snap.rows[0].id;
 
@@ -731,7 +744,7 @@ export async function recalculateRating(listingId: string, actor: string): Promi
          FROM partner_public_rating_overrides
         WHERE listing_id = $1 AND removed_at IS NULL AND (expires_at IS NULL OR expires_at > now())
         LIMIT 1`,
-      [l.id],
+      [l.id]
     );
     const override = ov.rows[0];
 
@@ -789,7 +802,7 @@ export async function recalculateRating(listingId: string, actor: string): Promi
         computed.ratingAvailable,
         computed.version,
         isOverride ? (override?.expires_at ?? null) : null,
-      ],
+      ]
     );
 
     return {
@@ -807,7 +820,6 @@ export async function recalculateRating(listingId: string, actor: string): Promi
     };
   });
 }
-
 
 // =================================================================================================
 // RATING OVERRIDES — the atomic half of B5
@@ -845,12 +857,12 @@ async function auditOverrideTx(
   listingId: string,
   action: string,
   actor: string,
-  details: Record<string, unknown>,
+  details: Record<string, unknown>
 ): Promise<void> {
   await client.query(
     `INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
      VALUES ('partner_public_listing', $1, $2, $3, $4::jsonb)`,
-    [listingId, action, actor, JSON.stringify(details)],
+    [listingId, action, actor, JSON.stringify(details)]
   );
 }
 
@@ -883,21 +895,17 @@ export interface OverrideInput {
  * LOCK ORDER is preserved: partner_public_listings is the only listing-side table involved and
  * nothing here touches certificates, work items or wallets.
  */
-export async function createRatingOverride(
-  listingId: string,
-  actor: string,
-  input: OverrideInput,
-): Promise<string> {
+export async function createRatingOverride(listingId: string, actor: string, input: OverrideInput): Promise<string> {
   return withPartnerAdminTransaction(async (client: PoolClient) => {
     const l = await client.query<{ tenant_id: string }>(
       "SELECT tenant_id FROM partner_public_listings WHERE id = $1 FOR UPDATE",
-      [listingId],
+      [listingId]
     );
     if (!l.rows[0]) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
     const latest = await client.query<Record<string, unknown>>(
       `SELECT internal_score, public_rating, rating_label FROM partner_public_rating_snapshots
         WHERE listing_id = $1 ORDER BY calculated_at DESC LIMIT 1`,
-      [listingId],
+      [listingId]
     );
     const c = latest.rows[0] ?? {};
     const ins = await client.query<{ id: string }>(
@@ -916,7 +924,7 @@ export async function createRatingOverride(
         input.reason,
         actor,
         input.expiresAt,
-      ],
+      ]
     );
     const overrideId = ins.rows[0].id;
     await markRatingDirtyByListing(client, listingId);
@@ -949,7 +957,7 @@ export async function removeRatingOverride(listingId: string, actor: string, rea
       `UPDATE partner_public_rating_overrides
           SET removed_at = now(), removed_by = $2, removal_reason = $3
         WHERE listing_id = $1 AND removed_at IS NULL`,
-      [listingId, actor, reason],
+      [listingId, actor, reason]
     );
     if (upd.rowCount === 0) {
       throw new PublicNetworkError("NO_ACTIVE_OVERRIDE", "There is no active override to remove.", 404);
