@@ -148,6 +148,8 @@ const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
 const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
+const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
+const PartnerGradingPage = lazy(() => import("@/pages/partner/grading"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
@@ -287,6 +289,16 @@ function PartnerPortalRoutes() {
         <Route path="/partner/submissions">
           <PartnerRouteGuard>
             <PartnerSubmissionsPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/customers">
+          <PartnerRouteGuard>
+            <PartnerCustomersPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/grading">
+          <PartnerRouteGuard requiredPermission="partner.cards.assess">
+            <PartnerGradingPage />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/users">

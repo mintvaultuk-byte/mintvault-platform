@@ -33,7 +33,7 @@ import {
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { PARTNER_CARD_CATEGORIES } from "@shared/partner-card-categories";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { Trash2, Pencil, Check, X } from "lucide-react";
+import { Trash2, Pencil, Check, X, Upload, Image as ImageIcon } from "lucide-react";
 
 const STEPS = ["Customer", "Service", "Cards", "Review", "Submit"] as const;
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
@@ -191,6 +191,22 @@ export default function PartnerSubmissionWizardPage() {
     }
   }
 
+  async function handleUploadCardImage(cardId: string, side: "front" | "back", file: File) {
+    if (!submission) return;
+    const uploaded = await partnerCards.uploadImage(submission.id, cardId, side, file);
+    setCards((items) =>
+      items.map((card) =>
+        card.id === cardId
+          ? {
+              ...card,
+              [`${side}_image_key`]: uploaded.key,
+              [`${side}_image_url`]: uploaded.url,
+            }
+          : card
+      )
+    );
+  }
+
   async function handleSubmit() {
     if (!submission || submitting) return; // double-click safety: guard while a request is in flight
     setSubmitting(true);
@@ -298,6 +314,7 @@ export default function PartnerSubmissionWizardPage() {
           onAddCard={handleAddCard}
           onEditCard={handleEditCard}
           onRemoveCard={handleRemoveCard}
+          onUploadCardImage={handleUploadCardImage}
         />
       )}
 
@@ -594,6 +611,7 @@ function CardsStep(props: {
   onAddCard: (input: any) => Promise<void>;
   onEditCard: (id: string, input: any) => Promise<void>;
   onRemoveCard: (id: string) => Promise<void>;
+  onUploadCardImage: (id: string, side: "front" | "back", file: File) => Promise<void>;
 }) {
   const [form, setForm] = useState(emptyCardForm);
   const [adding, setAdding] = useState(false);
@@ -663,6 +681,10 @@ function CardsStep(props: {
                       Intake observation — not a MintVault grade: {c.intake_notes}
                     </p>
                   )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <CardImageUploadButton card={c} side="front" onUpload={props.onUploadCardImage} />
+                    <CardImageUploadButton card={c} side="back" onUpload={props.onUploadCardImage} />
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button
@@ -819,6 +841,52 @@ function CardsStep(props: {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CardImageUploadButton({
+  card,
+  side,
+  onUpload,
+}: {
+  card: SubmissionCard;
+  side: "front" | "back";
+  onUpload: (id: string, side: "front" | "back", file: File) => Promise<void>;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = side === "front" ? card.front_image_url : card.back_image_url;
+
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-accent">
+      {url ? <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" /> : <Upload className="h-3.5 w-3.5" aria-hidden="true" />}
+      <span>{uploading ? "Uploading..." : `${url ? "Replace" : "Upload"} ${side}`}</span>
+      <input
+        className="sr-only"
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/tiff"
+        data-testid={`input-upload-${side}-${card.id}`}
+        onChange={async (event) => {
+          const file = event.currentTarget.files?.[0];
+          if (!file) return;
+          setUploading(true);
+          setError(null);
+          try {
+            await onUpload(card.id, side, file);
+          } catch (err) {
+            setError(partnerErrorMessage(err));
+          } finally {
+            setUploading(false);
+            event.currentTarget.value = "";
+          }
+        }}
+      />
+      {error && (
+        <span role="alert" className="text-destructive" data-testid={`text-upload-${side}-error-${card.id}`}>
+          {error}
+        </span>
+      )}
+    </label>
   );
 }
 

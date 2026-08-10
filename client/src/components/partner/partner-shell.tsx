@@ -40,6 +40,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/partner/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
+  { href: "/partner/customers", label: "Customers", icon: Users, permission: "partner.customers.view" },
+  { href: "/partner/grading", label: "Grading", icon: LayoutDashboard, permission: "partner.cards.assess" },
   { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
   { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
   { href: "/partner/billing", label: "Credits & Billing", icon: CreditCard, permission: "partner.credits.view" },
