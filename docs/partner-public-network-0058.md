@@ -609,3 +609,76 @@ every image on it 503s without both. `reportPartnerPublicNetworkReadiness` logs
 `rollback-0061` deliberately REVOKES rather than DROPs `partner_public_reader`: a role is
 cluster-wide, not database-scoped, so dropping it reaches outside the migration's own database, and
 a NOSUPERUSER migrator may not hold ADMIN on a role another database's migrator created.
+
+---
+
+## 13. Release state — 2026-08-09
+
+**Authoritative backend SHA: `c3668cf7`** (branch `opus/partner-final-integration`; PR #288
+fast-forwarded to the same SHA). Staging unchanged, max applied migration **0046**. Production
+unchanged at `6f182624`. Nothing deployed.
+
+### 13.1 Database bootstrap contract — READ BEFORE PROVISIONING ANY ENVIRONMENT
+
+The numbered migration chain is a **PARTNER OVERLAY, not a from-zero installer.** A virgin cluster
+fails at `0010_partner_connector_import.sql` with `relation "users" does not exist`, because the
+MintVault HQ base schema is owned by `shared/schema.ts` + `drizzle-kit`, and there is no
+`0000_baseline`. The real contract is:
+
+```
+shared/schema.ts (drizzle) → numbered migration overlay 0001…0066
+```
+
+Do **not** claim, script or document "fresh database from the migrations". On that base, all 53
+numbered files apply cleanly first time, and the 0066→0063 round trip returns a byte-identical
+`pg_dump -s`.
+
+### 13.2 CI test topology
+
+`vitest.config.ts` sets `fileParallelism: !process.env.TEST_DATABASE_URL`, and `ci.yml` sets that
+variable — so **CI runs test FILES SEQUENTIALLY**, one at a time. A local `npx vitest run` without
+it runs up to 9 files concurrently, which is a HARSHER topology than the release gate. Reproduce
+release failures with the CI environment (`pgvector/pgvector:pg16` on 55432, MinIO on 9010), not
+with a bare parallel run.
+
+Measured at `c3668cf7` in CI-equivalent topology: **272 files passed, 28 skipped, 0 failed ·
+4853 tests passed, 828 skipped, 0 failed.** Zero all-skipped files.
+
+### 13.3 Deploy-order gate
+
+`npm run db:preflight-public` (`scripts/db/preflight-public-network.ts`) refuses the application
+rollout unless every dependency is present: migrations 0058–0066 journalled `applied`;
+`certificates.review_entered_at` and the six 0066 rating columns; all three public projections;
+`partner_public_reader` NOLOGIN/NOSUPERUSER/NOBYPASSRLS; the reviewed-unit index present AND
+`indisvalid`; the reader able to read each projection and **unable** to reach `certificates`;
+0054's `cert_counter` guard enabled; and the rollout flag OFF.
+
+Membership is proven by **doing it** — the gate connects as the login role and drops to the group
+role. Read-only throughout. `--expect-flag-off=false` is the post-enable verification run.
+
+### 13.4 The step no migration can perform
+
+```sql
+GRANT partner_public_reader TO <the login role in PARTNER_PUBLIC_DATABASE_URL>;
+```
+
+0061 creates `partner_public_reader` as a NOLOGIN GROUP role per the 0008 convention that
+infrastructure grants membership out of band. Without this grant **and**
+`PARTNER_PUBLIC_DATABASE_URL`, every public slab image 503s — and the slab showcase is a LIVE
+production surface today.
+
+### 13.5 Rollout order
+
+1. `npm run db:preflight-public` — expect failures naming what is missing.
+2. Apply migrations 0047 → 0066 in the grouped order and quiet windows of
+   `docs/partner-migration-lock-safety.md` §5.
+3. Set `PARTNER_PUBLIC_DATABASE_URL`; run the GRANT in 13.4.
+4. `npm run db:preflight-public` — must pass, flag still OFF.
+5. Deploy the application. Startup logs `[partner-public-network] READY … feature flag OFF`.
+6. Smoke: a public `/cert/{id}` lookup, and a public slab image.
+7. Enable `partner_public_network_enabled` (global row). Verify with
+   `npm run db:preflight-public -- --expect-flag-off=false`.
+
+Rollback is the exact reverse: flag OFF first (instant, no redeploy), then application, then
+migrations in descending order — each rollback de-journals itself and refuses to run beneath a
+later journal row.
