@@ -633,3 +633,60 @@ earlier floor audit separately flagged `partner-rls-isolation` as possibly stale
 (static expansion = 84 vs a floor of 85), which would be a spurious red. Both need settling from a
 real CI run, not from me. Every other critical floor matched its measured count EXACTLY: 84, 8, 13,
 44, 48, 42, 37, 27, 21, 18.
+
+---
+
+# ALL THREE REMAINING DETECTORS BUILT — mutation matrix complete for changed surfaces
+
+Governance note: this pass ran under `docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md`, installed at
+`d1f426f9`. Findings were fixed in-pass rather than reported and deferred.
+
+## RATING-DIRTY-WIRE1 — PROVEN (rejection AND approval)
+Both had to drive the REAL mirror. No harness provided a certificate-LINKED work item:
+`seedWorkItem` left `certificate_id` NULL and `pendingPartnerWorkItem` keys on exactly that, so a
+test built on it would have exercised the `not_partner` early return and proved nothing. The
+fixture now links one, satisfying 0049's composite FK and its `certificate_pair` CHECK
+(`certificate_id` and `certificate_linked_at` together).
+
+Removing BOTH transactional dirty writes → **RED on both tests**. Only detectable because the
+redundant post-commit mark was deleted earlier in this programme; while it existed, deleting the
+in-transaction write changed nothing observable.
+
+The approval case asserts the **ordering**: `mirrorPartnerApproval` commits its work-item
+transaction FIRST and drives settlement AFTER, so the approval and its rating obligation land
+together and a later settlement refusal cannot un-record a review that happened. The fixture is
+deliberately unfunded so settlement raises `credit_settlement_required` — honest behaviour, and
+`partner-full-pilot-workflow` covers the funded path.
+
+## RATING-AWAIT1 — PROVEN, on an explicit latency contract
+Rating pool sized to 1, its single connection held by the test, acquire timeout raised to 8s.
+Correct code: HQ rejection returns in **<1000 ms** because the heavy refresh is detached.
+Mutated (restore the synchronous await): **5718 ms → RED on the stated bound**, not on a vitest
+timeout. Also asserts primary state committed, rating still dirty, and the reconciler repairing it
+once the pool is healthy. Required a `__resetPartnerRatingPoolForTests` helper — the proof needs a
+deliberately unusable pool, impossible once healthy defaults are memoised.
+
+## Mutation matrix — final
+| Mutation | Result |
+|---|---|
+| Protected-engine scoping | RED ×2 |
+| `RECENCY-REVIEWDATE1` | RED ×4 |
+| `RATING-CAS1` · `RATING-HOL1` · `RECENCY-CLOCK1` · `PUBLIC-5031` | RED |
+| `PUBLIC-IMAGE-ADMIN1` | RED ×2 |
+| `DEPLOY-ORDER1` | RED ×2 (structural + behavioural) |
+| `OVERRIDE-ATOMIC1` | RED |
+| `RATING-DIRTY-WIRE1` | RED ×2 |
+| `RATING-AWAIT1` | RED (5718 ms vs 1000 ms bound) |
+| `PUBLIC-SETROLE1` | **FOLLOW_UP** — does not fire; the assertion is redundant belt-and-braces behind `SET LOCAL ROLE`, which already aborts the transaction. No independent detector. Not release-blocking: the fail-closed behaviour it guards IS proven, twice. |
+
+All type-clean while applied; all restored byte-identically.
+
+## FOLLOW_UP (not release-blocking, evidence recorded)
+- `PUBLIC-SETROLE1` has no independent detector (above).
+- `tests/helpers/postgres17-cluster.ts:42` — port allocated by bind-0/close/hand-off, a
+  multi-second TOCTOU window. No observed failure.
+- sharp's libvips and node-canvas each load their own glib/gio into one worker; macOS warns it
+  "may cause spurious casting failures".
+- Two execution floors unvalidated locally (`partner-management-migration` 0/14,
+  `partner-rls-isolation` 33/85) — env-gated suites this machine cannot fully run; the RLS floor
+  may additionally be stale-high by one.
