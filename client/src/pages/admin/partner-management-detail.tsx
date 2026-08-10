@@ -103,6 +103,7 @@ interface OnboardingUser {
   acceptedAt: string | null;
   lastLoginAt: string | null;
   activeSessions: number;
+  mfaConfigured: boolean;
   readiness: {
     organisationActive: boolean;
     userActive: boolean;
@@ -112,6 +113,29 @@ interface OnboardingUser {
     portalEnabled: boolean;
     blockedReasons: string[];
   };
+}
+
+interface OnboardingReadiness {
+  users: OnboardingUser[];
+  wallet: {
+    configured: boolean;
+    status: string | null;
+    ledgerBalance: string | null;
+    reservedCredits: string | null;
+    availableCredits: string | null;
+    creditAvailable: boolean;
+  };
+  publicListing: {
+    configured: boolean;
+    statuses: string | null;
+    listingCount: number;
+    activeListingCount: number;
+    publicProfileConfigured: boolean;
+    publicProfileConfiguredCount: number;
+    coordinatesConfigured: boolean;
+    coordinatesConfiguredCount: number;
+  };
+  deviceAndScanner: { configured: false; reason: string };
 }
 
 export default function PartnerManagementDetailPage() {
@@ -299,6 +323,8 @@ export default function PartnerManagementDetailPage() {
   });
 
   const userRows = useMemo(() => (users.data?.users ?? []) as PartnerUserRow[], [users.data]);
+  const onboardingReadiness = onboarding.data as OnboardingReadiness | undefined;
+  const onboardingUsers = onboardingReadiness?.users ?? [];
   const checklist = useMemo(
     () =>
       computeChecklist({
@@ -313,8 +339,14 @@ export default function PartnerManagementDetailPage() {
         locationCount: statistics.data?.locationCount ?? 0,
         hasBranding: !!branding.data?.branding,
         hasProfileDetail: profileHasDetail(profile),
+        ownerMfaConfigured: onboardingUsers.some((u) => u.role === "OWNER" && u.mfaConfigured),
+        walletConfigured: onboardingReadiness?.wallet.configured === true,
+        creditAvailable: onboardingReadiness?.wallet.creditAvailable === true,
+        publicListingConfigured: onboardingReadiness?.publicListing.configured === true,
+        publicProfileConfigured: onboardingReadiness?.publicListing.publicProfileConfigured === true,
+        coordinatesConfigured: onboardingReadiness?.publicListing.coordinatesConfigured === true,
       }),
-    [org, userRows, statistics.data, branding.data, profile]
+    [org, userRows, statistics.data, branding.data, profile, onboardingUsers, onboardingReadiness]
   );
 
   const [profileTouched, setProfileTouched] = useState(false);
@@ -652,7 +684,13 @@ export default function PartnerManagementDetailPage() {
                   <ChecklistItem key={item.key} state={item.state} label={item.label} hint={item.hint} />
                 ))}
               </div>
-              <OnboardingSection users={(onboarding.data?.users ?? []) as OnboardingUser[]} />
+              <OnboardingSection
+                users={onboardingUsers}
+                readiness={onboardingReadiness}
+                onOpenWallet={() =>
+                  navigate(`/admin/partners/dashboard?partner=${encodeURIComponent(partnerId)}&tab=wallet`)
+                }
+              />
               {!(users.data?.users ?? []).some((u: any) => u.role === "OWNER") && (
                 <div style={{ marginTop: 8 }}>
                   <AdminButton
@@ -683,7 +721,13 @@ export default function PartnerManagementDetailPage() {
             }
           >
             <div data-testid="pm-users">
-              <OnboardingSection users={(onboarding.data?.users ?? []) as OnboardingUser[]} />
+              <OnboardingSection
+                users={onboardingUsers}
+                readiness={onboardingReadiness}
+                onOpenWallet={() =>
+                  navigate(`/admin/partners/dashboard?partner=${encodeURIComponent(partnerId)}&tab=wallet`)
+                }
+              />
               {(users.data?.users ?? []).length === 0 ? (
                 <div data-testid="pm-users-empty">No partner users yet. Create the owner login first.</div>
               ) : (
@@ -1690,7 +1734,15 @@ function ChecklistItem({
   );
 }
 
-function OnboardingSection({ users }: { users: OnboardingUser[] }) {
+function OnboardingSection({
+  users,
+  readiness,
+  onOpenWallet,
+}: {
+  users: OnboardingUser[];
+  readiness?: OnboardingReadiness;
+  onOpenWallet: () => void;
+}) {
   const primary = users.find((u) => u.role === "OWNER") ?? users[0] ?? null;
   if (!primary) {
     return (
@@ -1698,6 +1750,7 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
         <h3 style={{ fontSize: 15, fontWeight: 700 }}>Onboarding</h3>
         <div data-testid="pm-login-readiness-status">LOGIN BLOCKED</div>
         <div data-testid="pm-login-readiness-reasons">Add a partner user before login can be enabled.</div>
+        <OnboardingOperationalFacts readiness={readiness} onOpenWallet={onOpenWallet} />
       </div>
     );
   }
@@ -1732,6 +1785,7 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
         <Field label="Accepted" v={primary.acceptedAt} />
         <Field label="Last login" v={primary.lastLoginAt} />
         <Field label="Active sessions" v={String(primary.activeSessions ?? 0)} />
+        <Field label="Owner MFA" v={primary.mfaConfigured ? "Configured" : "Not configured"} />
         <Field label="Portal enabled" v={primary.readiness.portalEnabled ? "yes" : "no"} />
       </div>
       <div data-testid="pm-login-readiness-reasons" style={{ marginTop: 8, fontSize: 13 }}>
@@ -1744,6 +1798,57 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
             ))}
           </ul>
         )}
+      </div>
+      <OnboardingOperationalFacts readiness={readiness} onOpenWallet={onOpenWallet} />
+    </div>
+  );
+}
+
+function OnboardingOperationalFacts({
+  readiness,
+  onOpenWallet,
+}: {
+  readiness?: OnboardingReadiness;
+  onOpenWallet: () => void;
+}) {
+  if (!readiness) return null;
+  const { wallet, publicListing, deviceAndScanner } = readiness;
+  return (
+    <div
+      data-testid="pm-onboarding-operational-facts"
+      style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.1)" }}
+    >
+      <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Operations readiness</h4>
+      <div style={{ display: "grid", gap: 4, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+        <Field label="Partner wallet" v={wallet.configured ? (wallet.status ?? "Opened") : "Not opened"} />
+        <Field label="Available grading credits" v={wallet.configured ? (wallet.availableCredits ?? "0") : "—"} />
+        <Field label="Reserved grading credits" v={wallet.configured ? (wallet.reservedCredits ?? "0") : "—"} />
+        <Field label="Ledger credit balance" v={wallet.configured ? (wallet.ledgerBalance ?? "0") : "—"} />
+        <Field
+          label="Public listings"
+          v={
+            publicListing.configured
+              ? `${publicListing.activeListingCount} active / ${publicListing.listingCount} total (${publicListing.statuses ?? "Created"})`
+              : "Not created"
+          }
+        />
+        <Field
+          label="Public profile fields"
+          v={`${publicListing.publicProfileConfiguredCount} / ${publicListing.listingCount} configured`}
+        />
+        <Field
+          label="Public map coordinates"
+          v={`${publicListing.coordinatesConfiguredCount} / ${publicListing.listingCount} approved`}
+        />
+        <Field label="Device / scanner" v="Not available" />
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }} data-testid="pm-onboarding-device-limitation">
+        {deviceAndScanner.reason}
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <AdminButton size="sm" variant="ghost" onClick={onOpenWallet} data-testid="pm-open-wallet-dashboard">
+          Open wallet and credits
+        </AdminButton>
       </div>
     </div>
   );

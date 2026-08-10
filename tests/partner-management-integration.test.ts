@@ -149,9 +149,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     );
     // 0041 attaches credit-hold guard triggers to certificates and label_prints and writes to
     // audit_log, so those three must exist before the credit-carrying migration list is applied.
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)"
-    );
+    await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)");
     await admin.query(
       "CREATE TABLE IF NOT EXISTS label_prints (id serial PRIMARY KEY, certificate_id integer, created_at timestamptz NOT NULL DEFAULT now())"
     );
@@ -368,10 +366,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(org.rows[0].status).toBe("ACTIVE");
     // Activation DOES now provision a wallet — the one intended side effect. Zero credits, zero
     // ledger rows, so it is a true zero balance rather than an asserted one.
-    const w = await admin.query<{ n: number }>(
-      "SELECT count(*)::int n FROM partner_wallets WHERE tenant_id=$1",
-      [A]
-    );
+    const w = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_wallets WHERE tenant_id=$1", [A]);
     expect(w.rows[0].n).toBe(1);
     expect(
       (await admin.query("SELECT count(*)::int n FROM partner_credit_ledger WHERE tenant_id=$1", [A])).rows[0].n
@@ -477,11 +472,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(malformed.status).toBe(400);
     expect((await malformed.json()).error.code).toBe("VALIDATION_ERROR");
 
-    const missingConfirm = await post(
-      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
-      { reason: "missing confirm" },
-      c
-    );
+    const missingConfirm = await post(`${PM}/wallet-backfills/WALLET-BACKFILL1`, { reason: "missing confirm" }, c);
     expect(missingConfirm.status).toBe(400);
     expect((await missingConfirm.json()).error.code).toBe("VALIDATION_ERROR");
 
@@ -582,6 +573,46 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(s.certificatesCount).toBeNull();
     expect(s.gradedCount).toBeNull();
     expect(s.unavailable).toEqual(expect.arrayContaining(["certificatesCount", "gradedCount"]));
+  });
+
+  it("onboarding readiness exposes tenant-scoped MFA and ledger facts without factor material", async () => {
+    const c = await cookie();
+    const ownerId = "bbbb1111-0000-0000-0000-0000000000e5";
+    await admin.query(
+      `INSERT INTO partner_users (id, tenant_id, partner_id, public_ref, email, status)
+       VALUES ($1,$2,$2,'readiness-owner-b','readiness-owner@b.example','SUSPENDED')`,
+      [ownerId, B]
+    );
+    await admin.query(
+      `INSERT INTO partner_user_roles (tenant_id, user_id, role_id)
+       SELECT $1,$2,id FROM partner_roles WHERE code='PARTNER_OWNER'`,
+      [B, ownerId]
+    );
+    await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE id=$1", [ownerId]);
+    await admin.query(
+      `INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status)
+       VALUES ($1,$2,'totp','synthetic-readiness-factor','ACTIVE')`,
+      [B, ownerId]
+    );
+    await admin.query("INSERT INTO partner_wallets (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING", [B]);
+    await admin.query(
+      `INSERT INTO partner_credit_ledger
+         (wallet_id, tenant_id, amount, entry_type, idempotency_key, source, reason, actor_type, metadata, request_fingerprint)
+       SELECT id, tenant_id, 25, 'admin_adjustment', 'readiness-facts-credit-25', 'admin',
+              'synthetic readiness proof', 'admin', '{}'::jsonb, repeat('b', 64)
+         FROM partner_wallets WHERE tenant_id=$1`,
+      [B]
+    );
+
+    const readiness = await (await g(`${PM}/partners/${B}/onboarding-readiness`, c)).json();
+    const owner = readiness.users.find((u: any) => u.id === ownerId);
+    expect(owner).toMatchObject({ role: "OWNER", mfaConfigured: true });
+    expect(readiness.wallet).toMatchObject({ configured: true, availableCredits: "25", creditAvailable: true });
+    // This focused G5 fixture intentionally does not install the later public-listing migration.
+    // The readiness route must preserve the valid MFA/wallet facts rather than fail 500.
+    expect(readiness.publicListing).toMatchObject({ configured: false, coordinatesConfigured: false });
+    expect(JSON.stringify(readiness)).not.toContain("secret_ref");
+    expect(JSON.stringify(readiness)).not.toContain("synthetic-readiness-factor");
   });
 
   it("create atomically creates exactly one ACTIVE Main location and idempotent replay does not duplicate it", async () => {

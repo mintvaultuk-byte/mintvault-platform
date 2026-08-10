@@ -94,6 +94,22 @@ async function main(): Promise<void> {
     // Activate only once its owner role exists so the database-level final-owner invariant is
     // exercised in the same way as a real invitation acceptance.
     await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002'");
+    // Phase 27 readiness proof needs a factor STATE, never factor material. This synthetic handle
+    // is local fixture data only; the Super Admin readiness DTO must return only `mfaConfigured`.
+    await admin.query(`INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002',
+              'totp', 'local-browser-fixture-factor', 'ACTIVE')`);
+    // A ledger-derived credit position exercises the actual Partner Dashboard/readiness source.
+    // It is deliberately direct local fixture data, not a browser-supplied price or live payment.
+    await admin.query(`INSERT INTO partner_wallets (tenant_id)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      ON CONFLICT (tenant_id) DO NOTHING`);
+    await admin.query(`INSERT INTO partner_credit_ledger
+      (wallet_id, tenant_id, amount, entry_type, idempotency_key, source, reason, actor_type, metadata, request_fingerprint)
+      SELECT id, tenant_id, 25, 'admin_adjustment', 'browser-readiness-credit-25', 'admin',
+             'Synthetic local browser readiness credit', 'admin', '{}'::jsonb, repeat('a', 64)
+        FROM partner_wallets
+       WHERE tenant_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`);
     await admin.query(
       `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status)
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003', 'browser-supply-finance',

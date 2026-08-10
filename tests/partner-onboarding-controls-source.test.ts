@@ -31,6 +31,18 @@ describe("partner onboarding and login-control source guards", () => {
     expect(svc).toContain("No valid invitation is available for the partner to create a password.");
   });
 
+  it("onboarding operational facts are tenant-scoped and never expose MFA material", () => {
+    const svc = read("server/partner/partner-management-service.ts");
+    const start = svc.indexOf("export async function getPartnerOnboardingReadiness");
+    const body = svc.slice(start, svc.indexOf("export async function resendPartnerInvitation", start));
+    expect(body).toContain("partner_credit_availability");
+    expect(body).toContain("partner_public_listings");
+    expect(body).toContain("WHERE tenant_id = $1");
+    expect(body).toContain("mfa_configured");
+    expect(body).not.toContain("secret_ref");
+    expect(body).toContain("optionalOnboardingRead");
+  });
+
   it("invitation preview is token-derived and acceptance reports pending organisation state", () => {
     const svc = read("server/partner/partner-management-service.ts");
     const routes = read("server/partner/public-routes.ts");

@@ -375,15 +375,22 @@ describe("setup checklist", () => {
     locationCount: 1,
     hasBranding: false,
     hasProfileDetail: false,
+    ownerMfaConfigured: false,
+    walletConfigured: false,
+    creditAvailable: false,
+    publicListingConfigured: false,
+    publicProfileConfigured: false,
+    coordinatesConfigured: false,
   };
 
-  it("marks device and credits unavailable rather than permanently unticked", () => {
+  it("marks only device/scanner status unavailable; credits use their shipped source", () => {
     const items = computeChecklist(input);
     expect(items.find((i) => i.key === "device")!.state).toBe("unavailable");
-    expect(items.find((i) => i.key === "credits")!.state).toBe("unavailable");
-    // and each explains why, so the admin does not go looking for a button that does not exist
+    expect(items.find((i) => i.key === "scanner")!.state).toBe("unavailable");
+    expect(items.find((i) => i.key === "credits")!.state).toBe("todo");
+    // Every unavailable item explains why, so the admin does not go looking for a button that does not exist.
     expect(items.find((i) => i.key === "device")!.hint).toBeTruthy();
-    expect(items.find((i) => i.key === "credits")!.hint).toBeTruthy();
+    expect(items.find((i) => i.key === "scanner")!.hint).toBeTruthy();
   });
 
   it("reflects the real state of the achievable items", () => {
@@ -401,13 +408,19 @@ describe("setup checklist", () => {
       locationCount: 1,
       hasBranding: true,
       hasProfileDetail: true,
+      ownerMfaConfigured: true,
+      walletConfigured: true,
+      creditAvailable: true,
+      publicListingConfigured: true,
+      publicProfileConfigured: true,
+      coordinatesConfigured: true,
     });
     expect(checklistPercent(complete)).toBe(100);
   });
 
   it("computes an honest intermediate percentage", () => {
-    // 6 achievable items; company + location done = 2/6 = 33%
-    expect(checklistPercent(computeChecklist(input))).toBe(33);
+    // 12 achievable items; company + location done = 2/12 = 17%.
+    expect(checklistPercent(computeChecklist(input))).toBe(17);
   });
 
   it("reports 0% for a bare company", () => {
@@ -418,6 +431,12 @@ describe("setup checklist", () => {
       locationCount: 0,
       hasBranding: false,
       hasProfileDetail: false,
+      ownerMfaConfigured: false,
+      walletConfigured: false,
+      creditAvailable: false,
+      publicListingConfigured: false,
+      publicProfileConfigured: false,
+      coordinatesConfigured: false,
     });
     expect(checklistPercent(items)).toBe(0);
   });
@@ -805,6 +824,20 @@ describe("detail page — checklist", () => {
   it("exposes progress to assistive technology, not colour alone", () => {
     expect(src).toContain('role="progressbar"');
     expect(src).toContain("aria-valuenow");
+  });
+
+  it("shows source-backed operational facts and only links to the existing wallet drilldown", () => {
+    expect(src).toContain('data-testid="pm-onboarding-operational-facts"');
+    expect(src).toContain('data-testid="pm-open-wallet-dashboard"');
+    expect(src).toContain("Owner MFA");
+    expect(src).toContain("Public map coordinates");
+    expect(src).toContain("activeListingCount");
+    const facts = src.slice(
+      src.indexOf("function OnboardingOperationalFacts"),
+      src.indexOf("function UserInput", src.indexOf("function OnboardingOperationalFacts"))
+    );
+    expect(facts).not.toContain("apiRequest(");
+    expect(facts).not.toContain("useMutation(");
   });
 });
 
