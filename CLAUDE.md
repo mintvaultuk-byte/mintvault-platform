@@ -2,22 +2,31 @@
 
 ---
 
-## ⛔ MANDATORY COMPLETION CONTROLLER — READ FIRST
+## ⛔ MANDATORY CONTROLLERS — READ BOTH FIRST
 
-Before every build, audit, repair, security, migration or release task, read and obey:
+Before every substantial engineering, build, audit, security, migration or release task, read and
+obey **both**:
+
+**[`docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md`](docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md)**
+> **No single self-improvement or review loop may certify itself.**
+> Independent loops — build, behavioural verification, mutation, held-out evaluation, drift,
+> release/canary, rollback/containment — with the owner as the highest ground-truth anchor.
 
 **[`docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md`](docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md)**
-
-This controller is permanent project governance. It applies to every future prompt unless the
-owner explicitly overrides it. Its core rule is:
-
 > **Fix all actionable in-scope BLOCKER/HIGH defects in the current pass.**
 > **Do not stop merely to report another problem.**
 > **Once the release bar passes, stop auditing and declare COMPLETE.**
 
-It SUPPLEMENTS the rules below — it does not replace or weaken any of them. Where there is a
+They are complementary: GRAPH OF LOOPS prevents **false confidence**; NO-BULLSHIT prevents
+**endless continuation**. Together — build it, independently prove reality, fix genuine failures,
+stop when proven.
+
+Both are permanent project governance and apply to every future prompt unless the owner explicitly
+overrides them.
+
+They SUPPLEMENT the rules below — they do not replace or weaken any of them. Where there is a
 conflict, the Golden Rules, the protected grading rules and the staging/production rules in this
-file remain **authoritative**. The controller never authorises modifying protected MVGS maths,
+file remain **authoritative**. Neither controller ever authorises modifying protected MVGS maths,
 deploying, applying migrations to a live host, destructive data operations, force pushes, or
 skipping an owner approval those rules require.
 
