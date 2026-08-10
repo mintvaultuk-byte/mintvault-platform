@@ -19,7 +19,9 @@
 | 4 — Change manifest | complete | `change-manifest.md` |
 | 5 — Implementation | complete | Partner-owned lookup adapter; cardinality-safe connector projection; no protected-engine diff |
 | 6 — Regression | complete locally | typecheck; 49 focused; 323 protected; 15 runtime; 21 pilot; 56 corrected importer/lifecycle/scale proofs; lint; production build. |
-| 7 — Staging activation | in progress | PFP-01/02 deployed and live-proven; PFP-03 requires a bounded importer-state repair, exact-SHA CI, staging redeploy, audited test-item transition/re-drive, then resume the live pilot. |
+| 7 — Staging activation | complete | `6f4e2652` deployed only through the safe staging path after all five required checks passed. `/api/version` and `/api/health` are green; PFP-01/02/03 are live-proven, including exactly-once two-credit settlement through audited normal status transitions. |
+| 8 — Post-settlement software proof | complete | Both certificates are approved; both label render endpoints return 200; a one-card print selection is refused, while the complete two-card batch renders and reaches `printing` with two events. Public Finder stays fail-closed with its flag off; public Needs Attention is empty. |
+| 9 — External pilot gates | blocked externally | No physical printer, scanner/V850, or NFC writer is available. Staging Stripe is in test mode but has no `STRIPE_WEBHOOK_SECRET`, so signed Supply Order webhook/replay proof cannot be run or safely fabricated. Browser interaction is unavailable in this execution environment. |
 
 ## Reviewers
 
