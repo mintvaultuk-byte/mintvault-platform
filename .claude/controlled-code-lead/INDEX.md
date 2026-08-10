@@ -21,7 +21,8 @@ Stage 0 (new task) and Stage 7 (final report). Programs group multi-phase work.
 | mintvault-partner-onboarding-readiness   | Phase 27 Super Admin onboarding truthfulness              | local proof complete                             | `codex/mintvault-final-product-integration` | `031fe2f1` | `7c64ad36`  | device/scanner source unavailable (honestly rendered; no local HIGH)   | continue Phase 28 operations-surface reconciliation      | `tasks/mintvault-partner-onboarding-readiness/`   |
 | mintvault-super-admin-public-listings    | Phase 28 public listing/rating operations                 | local proof complete                             | `codex/mintvault-final-product-integration` | `7c64ad36` | `c3459a9e`  | none                                                                   | continue final master reconciliation                     | `tasks/mintvault-super-admin-public-listings/`    |
 
-| mintvault-super-admin-credit-control | Phase 29 Super Admin credit-control truthfulness | local proof complete | `codex/mintvault-final-product-integration` | `c3459a9e` | pending commit | none | continue Phase 30 credit-purchase reconciliation | `tasks/mintvault-super-admin-credit-control/` |
+| mintvault-super-admin-credit-control | Phase 29 Super Admin credit-control truthfulness | local proof complete | `codex/mintvault-final-product-integration` | `c3459a9e` | `aaf1bfa0` | none | continue Phase 30 credit-purchase reconciliation | `tasks/mintvault-super-admin-credit-control/` |
+| mintvault-stripe-credit-purchase | Phase 30 Stripe credit-purchase proof | local proof complete; provider TEST external | `codex/mintvault-final-product-integration` | `aaf1bfa0` | pending commit | no local HIGH; provider TEST credentials unavailable | continue final master reconciliation | `tasks/mintvault-stripe-credit-purchase/` |
 
 ## Conventions
 
