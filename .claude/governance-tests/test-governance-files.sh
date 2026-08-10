@@ -7,7 +7,9 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DEFAULT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(printenv GOVERNANCE_ROOT 2>/dev/null || true)"
+[ -n "$ROOT" ] || ROOT="$ROOT_DEFAULT"
 FAIL=0
 
 require_file() {
@@ -19,10 +21,11 @@ require_file() {
   fi
 }
 
-# --- core governance files (v1.0 + v1.1) ---
+# --- core governance files (v1.0 + v1.1 + v1.2) ---
 require_file "CLAUDE.md"
 require_file "AGENTS.md"
 require_file "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md"
+require_file "docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md"
 require_file ".claude/governance-version.md"
 require_file ".claude/governance-changelog.md"
 require_file ".claude/project-memory.md"
@@ -98,13 +101,17 @@ else
   FAIL=1
 fi
 
-# Both root instruction entry points load the single canonical completion controller.
-controller="docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md"
-if grep -Fq "$controller" "$ROOT/CLAUDE.md" && grep -Fq "$controller" "$ROOT/AGENTS.md"; then
-  echo "ok: Claude + Codex entry points load the completion controller"
-else
-  echo "FAIL: completion controller missing from a root instruction entry point"
-  FAIL=1
-fi
+# Both root instruction entry points load the two canonical controllers. This
+# prevents either controller or one of its load paths from disappearing silently.
+for controller in \
+  "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md" \
+  "docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md"; do
+  if grep -Fq "$controller" "$ROOT/CLAUDE.md" && grep -Fq "$controller" "$ROOT/AGENTS.md"; then
+    echo "ok: Claude + Codex entry points load $controller"
+  else
+    echo "FAIL: controller missing from a root instruction entry point: $controller"
+    FAIL=1
+  fi
+done
 
 exit "$FAIL"

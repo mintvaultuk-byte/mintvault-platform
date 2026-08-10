@@ -1,0 +1,5 @@
+# Issue Register — Graph of Loops controller installation
+
+| ID | Severity | Source | Reproduction / reachability | Impact | Repair | Test / proof | Status |
+|---|---|---|---|---|---|---|---|
+| GOL-001 | HIGH | Owner installation requirement | Without a canonical Graph controller plus enforced root references, future agent sessions can optimise a single false-green loop or silently stop loading the governance. | Required independent verification and veto paths are absent from future-task instructions. | Create the canonical controller, reference it from `AGENTS.md` and `CLAUDE.md`, and make the governance suite enforce all paths. | Governance suite green; a deliberate temporary-copy reference removal makes the integrity test red. | PROVEN |

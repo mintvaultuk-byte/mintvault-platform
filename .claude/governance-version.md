@@ -2,20 +2,31 @@
 
 | Field | Value |
 |---|---|
-| **Governance Version** | 1.1 |
-| **Release Date** | 2026-07-11 |
-| **Author** | Claude (Lead session), commissioned and approved by Cornelius Oliver (owner) |
+| **Governance Version** | 1.2 |
+| **Release Date** | 2026-08-10 |
+| **Author** | Codex (Lead session), commissioned and approved by Cornelius Oliver (owner) |
 
 ## Summary
 
-Version 1.1 extends the `controlled-code-lead` governance system installed as
-Version 1.0 on 2026-07-11. All changes are **additive** — no v1.0 skill,
-agent, template, hook, or instruction was removed, rewritten, or weakened.
-The advisory protected-action hook remains advisory (see
-`.claude/hooks/HOOK-UPGRADE-ROADMAP.md` for the documented-but-not-enabled
-blocking design).
+Version 1.2 extends the `controlled-code-lead` governance system installed as
+Version 1.0 on 2026-07-11 and extended as Version 1.1 on 2026-07-11. All
+changes are **additive** — no prior skill, agent, template, hook, or
+instruction was removed, rewritten, or weakened. The advisory protected-action
+hook remains advisory (see `.claude/hooks/HOOK-UPGRADE-ROADMAP.md` for the
+documented-but-not-enabled blocking design).
 
-## Major changes (1.0 → 1.1)
+## Major changes (1.1 → 1.2)
+
+1. **Graph of Loops Build Controller** — a canonical owner-provided controller
+   that requires independent build, behavioural, adversarial, held-out, drift,
+   release, rollback, and owner-ground-truth loops for substantial work.
+2. **Root instruction loading** — both `AGENTS.md` and `CLAUDE.md` now require
+   the Graph controller alongside the No-Bullshit Completion Controller.
+3. **Controller-load integrity test** — the governance suite requires both
+   canonical controller files and both root load paths, so their deletion or
+   disconnection fails locally.
+
+## Prior major changes (1.0 → 1.1)
 
 1. **Governance versioning** — this file; future governance changes bump the
    version here and append to `.claude/governance-changelog.md`.

@@ -91,3 +91,33 @@ entry that references the old one.
 - **Rollback:** delete the files created above and remove the two appended
   sections (SKILL.md "Version 1.1 extensions"; CLAUDE.md v1.1 note). This
   restores exact v1.0 behaviour — v1.0 files were not edited otherwise.
+
+---
+
+## Version 1.2
+
+- **Version:** 1.2
+- **Date:** 2026-08-10
+- **Reason:** Install the owner-provided Graph of Loops Build Controller as
+  permanent governance alongside the existing No-Bullshit Completion
+  Controller. It prevents a single implementation, test, review, or metric
+  loop from certifying a false green, while the existing controller preserves
+  the release stop condition once independent proof is complete.
+- **Files changed:**
+  - Created: `docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md` (single canonical
+    Graph controller).
+  - Modified: `AGENTS.md` and `CLAUDE.md` (mandatory canonical-load references
+    to both controllers).
+  - Modified: `.claude/governance-tests/test-governance-files.sh` (requires
+    both canonical files and both entry-point references; supports a temporary
+    isolated root for adversarial mutation proof).
+  - Modified: `.claude/governance-version.md` and this append-only changelog.
+- **Breaking changes:** none. The installation is additive and leaves all
+  Golden Rules, protected grading authority, security/payment protections,
+  deployment gates, and the No-Bullshit controller intact.
+- **Migration required:** none. Future substantial engineering tasks read both
+  canonical controllers before work.
+- **Rollback:** locally revert the installation commit. This removes only the
+  Graph-controller document, its root references, the associated integrity
+  checks, and this Version 1.2 record; it does not affect runtime code,
+  database state, secrets, payments, grading, or deployments.
