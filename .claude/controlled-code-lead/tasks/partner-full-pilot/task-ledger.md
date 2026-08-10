@@ -18,7 +18,7 @@
 | 1–3 — Verify findings | complete | staging `GET /api/admin/submissions/327/certs` returned 500; connector detail marked the valid two-card reservation set inconsistent; final HQ approval exposed PFP-03: destination remained `draft`, so the database rejected `draft → ready_to_return` and no credits moved. |
 | 4 — Change manifest | complete | `change-manifest.md` |
 | 5 — Implementation | complete | Partner-owned lookup adapter; cardinality-safe connector projection; no protected-engine diff |
-| 6 — Regression | complete locally | typecheck; 49 focused; 323 protected; full suite; lint; production build |
+| 6 — Regression | complete locally | typecheck; 49 focused; 323 protected; 15 runtime; 21 pilot; 56 corrected importer/lifecycle/scale proofs; lint; production build. |
 | 7 — Staging activation | in progress | PFP-01/02 deployed and live-proven; PFP-03 requires a bounded importer-state repair, exact-SHA CI, staging redeploy, audited test-item transition/re-drive, then resume the live pilot. |
 
 ## Reviewers

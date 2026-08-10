@@ -609,7 +609,7 @@ async function seedReady(claimant: string): Promise<{
         [destId]
       );
       expect(destRow.rows[0].payment_intent_id).toBeNull();
-      expect(destRow.rows[0].status).toBe("draft");
+      expect(destRow.rows[0].status).toBe("in_grading");
       expect(destRow.rows[0].payment_status).toBe("unpaid");
     }, 60_000);
   });

@@ -607,9 +607,9 @@ function pct(sorted: number[], p: number): number {
     expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM labels")).rows[0].n).toBe(1);
     expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM payments")).rows[0].n).toBe(1);
     expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM cards")).rows[0].n).toBe(0);
-    // every connector-created submission is a normal draft/unpaid intake with no Stripe intent
+    // Every connector-created submission enters its normal in-grading/unpaid lifecycle with no Stripe intent.
     const bad = await admin.query<{ n: number }>(
-      "SELECT count(*)::int AS n FROM submissions WHERE service_type = 'partner-intake' AND (payment_intent_id IS NOT NULL OR status != 'draft' OR payment_status != 'unpaid')"
+      "SELECT count(*)::int AS n FROM submissions WHERE service_type = 'partner-intake' AND (payment_intent_id IS NOT NULL OR status != 'in_grading' OR payment_status != 'unpaid')"
     );
     expect(bad.rows[0].n).toBe(0);
   });

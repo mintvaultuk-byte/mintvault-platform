@@ -301,7 +301,7 @@ async function seedReadyForImport(
         const { rows } = await admin.query("SELECT * FROM submissions WHERE id = $1", [result.destinationSubmissionId]);
         expect(rows).toHaveLength(1);
         const sub = rows[0];
-        expect(sub.status).toBe("draft");
+        expect(sub.status).toBe("in_grading");
         expect(sub.payment_status).toBe("unpaid");
         expect(sub.payment_intent_id).toBeNull();
         expect(sub.service_type).toBe("partner-intake");
