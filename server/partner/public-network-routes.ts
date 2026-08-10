@@ -75,7 +75,10 @@ function sendError(res: Response, err: unknown): void {
     // to anonymous callers.
     console.error("[partner-network] public database unavailable:", e?.code, e?.message);
     res.status(503).json({
-      error: { code: "public_service_unavailable", message: "Shop finder is temporarily unavailable. Please try again shortly." },
+      error: {
+        code: "public_service_unavailable",
+        message: "Shop finder is temporarily unavailable. Please try again shortly.",
+      },
     });
     return;
   }
@@ -152,8 +155,10 @@ export function isPublicDbUnavailable(err: unknown): boolean {
  */
 function scalar(v: unknown, name: string): string | undefined {
   if (v === undefined || v === null) return undefined;
-  if (Array.isArray(v)) throw new PublicNetworkError("INVALID_INPUT", `The "${name}" parameter must be supplied at most once.`);
-  if (typeof v !== "string") throw new PublicNetworkError("INVALID_INPUT", `The "${name}" parameter must be a single value.`);
+  if (Array.isArray(v))
+    throw new PublicNetworkError("INVALID_INPUT", `The "${name}" parameter must be supplied at most once.`);
+  if (typeof v !== "string")
+    throw new PublicNetworkError("INVALID_INPUT", `The "${name}" parameter must be a single value.`);
   const t = v.trim();
   if (t === "") return undefined;
   if (t.length > MAX_TEXT) throw new PublicNetworkError("INVALID_INPUT", `The "${name}" parameter is too long.`);
@@ -288,13 +293,11 @@ function requireReason(body: Record<string, unknown>): string {
   return reason.trim();
 }
 
-
-
 async function auditAdmin(
   entityId: string,
   action: string,
   actor: string,
-  details: Record<string, unknown>,
+  details: Record<string, unknown>
 ): Promise<boolean> {
   try {
     await storage.writeAuditLog("partner_public_listing", entityId, action, actor, details);
@@ -302,7 +305,12 @@ async function auditAdmin(
   } catch (e) {
     // The mutation is already committed. Report the gap rather than letting a silent audit failure
     // make an unaudited governance decision look fully recorded.
-    console.error("[partner-network] AUDIT WRITE FAILED for a committed change:", action, entityId, (e as Error)?.message);
+    console.error(
+      "[partner-network] AUDIT WRITE FAILED for a committed change:",
+      action,
+      entityId,
+      (e as Error)?.message
+    );
     return false;
   }
 }
@@ -348,8 +356,10 @@ export function partnerNetworkAdminRouter(): Router {
       const params: unknown[] = [];
       const where = status ? `WHERE listing_status = $${params.push(status)}` : "";
       const { rows } = await partnerAdminQuery<Record<string, unknown>>(
-        `SELECT l.id, l.slug, l.public_display_name, l.listing_status, l.tenant_id, l.location_id,
-                l.town_city, l.county, l.postcode, l.latitude, l.longitude,
+        `SELECT l.id, l.slug, l.public_display_name, l.trading_name_snapshot, l.listing_status, l.tenant_id, l.location_id,
+                l.address_line_1, l.address_line_2, l.town_city, l.county, l.postcode, l.country,
+                l.latitude, l.longitude, l.public_phone, l.public_email, l.public_website,
+                l.public_opening_info, l.public_description,
                 l.verified_at, l.approved_at, l.approved_by, l.public_since,
                 l.current_public_rating, l.current_rating_label, l.current_rating_available,
                 l.current_sample_size, l.current_rating_is_override, l.current_rating_calculated_at,
@@ -359,7 +369,25 @@ export function partnerNetworkAdminRouter(): Router {
            ${where}
           ORDER BY l.created_at DESC, l.id ASC
           LIMIT 200`,
-        params,
+        params
+      );
+      res.json({ rows });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Active Partner locations not yet represented by a public listing. Server derives both tenant and eligibility. */
+  r.get("/locations", async (_req: Request, res: Response) => {
+    try {
+      const { rows } = await partnerAdminQuery<Record<string, unknown>>(
+        `SELECT l.id, l.tenant_id, l.name, l.address, l.status, o.legal_name AS tenant_legal_name
+           FROM partner_locations l
+           JOIN partner_organisations o ON o.id = l.tenant_id
+           LEFT JOIN partner_public_listings p ON p.location_id = l.id
+          WHERE l.status = 'ACTIVE' AND o.status = 'ACTIVE' AND p.id IS NULL
+          ORDER BY o.legal_name ASC, l.name ASC, l.id ASC
+          LIMIT 200`
       );
       res.json({ rows });
     } catch (err) {
@@ -384,14 +412,14 @@ export function partnerNetworkAdminRouter(): Router {
 
       const loc = await partnerAdminQuery<{ tenant_id: string }>(
         "SELECT tenant_id FROM partner_locations WHERE id = $1",
-        [locationId],
+        [locationId]
       );
       if (!loc.rows[0]) throw new PublicNetworkError("LOCATION_NOT_FOUND", "Partner location not found.", 404);
 
       const ins = await partnerAdminQuery<{ id: string }>(
         `INSERT INTO partner_public_listings (tenant_id, location_id, slug, public_display_name, created_by)
          VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-        [loc.rows[0].tenant_id, locationId, slug, displayName, actor],
+        [loc.rows[0].tenant_id, locationId, slug, displayName, actor]
       );
       const id = ins.rows[0].id;
       const audited = await auditAdmin(id, "partner_listing_created", actor, { locationId, slug, displayName });
@@ -416,7 +444,7 @@ export function partnerNetworkAdminRouter(): Router {
       const result = await withPartnerAdminTransaction(async (client) => {
         const cur = await client.query<{ listing_status: string; public_since: string | null; tenant_id: string }>(
           "SELECT listing_status, public_since, tenant_id FROM partner_public_listings WHERE id = $1 FOR UPDATE",
-          [id],
+          [id]
         );
         const row = cur.rows[0];
         if (!row) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
@@ -424,7 +452,7 @@ export function partnerNetworkAdminRouter(): Router {
           throw new PublicNetworkError(
             "ILLEGAL_TRANSITION",
             `A listing cannot move from ${row.listing_status} to ${target}.`,
-            409,
+            409
           );
         }
 
@@ -441,7 +469,7 @@ export function partnerNetworkAdminRouter(): Router {
                   suspended_at = CASE WHEN $2 = 'SUSPENDED' THEN now() ELSE suspended_at END,
                   removed_at = CASE WHEN $2 = 'REMOVED' THEN now() ELSE removed_at END
             WHERE id = $1`,
-          [id, target, actor, stampFirstActivation],
+          [id, target, actor, stampFirstActivation]
         );
         // Zero rows affected is a failure, never a success.
         if (upd.rowCount !== 1) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
@@ -507,7 +535,14 @@ export function partnerNetworkAdminRouter(): Router {
         } else {
           const nLat = Number(lat);
           const nLng = Number(lng);
-          if (!Number.isFinite(nLat) || nLat < -90 || nLat > 90 || !Number.isFinite(nLng) || nLng < -180 || nLng > 180) {
+          if (
+            !Number.isFinite(nLat) ||
+            nLat < -90 ||
+            nLat > 90 ||
+            !Number.isFinite(nLng) ||
+            nLng < -180 ||
+            nLng > 180
+          ) {
             throw new PublicNetworkError("INVALID_INPUT", "Coordinates are out of range.");
           }
           sets.push(`latitude = $${params.push(nLat)}`, `longitude = $${params.push(nLng)}`);
@@ -518,7 +553,7 @@ export function partnerNetworkAdminRouter(): Router {
 
       const upd = await partnerAdminQuery(
         `UPDATE partner_public_listings SET ${sets.join(", ")} WHERE id = $1`,
-        params,
+        params
       );
       if (upd.rowCount !== 1) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
 
@@ -545,10 +580,15 @@ export function partnerNetworkAdminRouter(): Router {
             SET verified_at = CASE WHEN $2 THEN now() ELSE NULL END,
                 verified_by = CASE WHEN $2 THEN $3 ELSE NULL END
           WHERE id = $1`,
-        [id, verified, actor],
+        [id, verified, actor]
       );
       if (upd.rowCount !== 1) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
-      const audited = await auditAdmin(id, verified ? "partner_listing_verified" : "partner_listing_unverified", actor, { reason });
+      const audited = await auditAdmin(
+        id,
+        verified ? "partner_listing_verified" : "partner_listing_unverified",
+        actor,
+        { reason }
+      );
       res.json({ ok: true, verified, audited });
     } catch (err) {
       sendError(res, err);
@@ -561,7 +601,7 @@ export function partnerNetworkAdminRouter(): Router {
       const id = String(req.params.id);
       const l = await partnerAdminQuery<{ location_id: string }>(
         "SELECT location_id FROM partner_public_listings WHERE id = $1",
-        [id],
+        [id]
       );
       if (!l.rows[0]) throw new PublicNetworkError("LISTING_NOT_FOUND", "Listing not found.", 404);
 
@@ -571,14 +611,14 @@ export function partnerNetworkAdminRouter(): Router {
                 sample_size, minimum_sample, component_scores, evidence_availability, calculated_at, calculated_by
            FROM partner_public_rating_snapshots
           WHERE listing_id = $1 ORDER BY calculated_at DESC LIMIT 20`,
-        [id],
+        [id]
       );
       const overrides = await partnerAdminQuery<Record<string, unknown>>(
         `SELECT id, override_public_rating, override_rating_label, reason, created_by, created_at,
                 expires_at, removed_at, removed_by, removal_reason
            FROM partner_public_rating_overrides
           WHERE listing_id = $1 ORDER BY created_at DESC LIMIT 20`,
-        [id],
+        [id]
       );
       res.json({ evidence, snapshots: snapshots.rows, overrides: overrides.rows });
     } catch (err) {
@@ -777,7 +817,7 @@ export function partnerNetworkSelfServeRouter(): Router {
              FROM partner_public_listings
             WHERE tenant_id = $1
             ORDER BY created_at ASC`,
-          [principal.tenantId],
+          [principal.tenantId]
         );
         return rows;
       });
@@ -810,7 +850,7 @@ export function partnerNetworkSelfServeRouter(): Router {
           throw new PublicNetworkError(
             "FIELD_NOT_EDITABLE",
             `These fields are managed by MintVault and cannot be edited here: ${forbidden.join(", ")}.`,
-            403,
+            403
           );
         }
 
@@ -844,7 +884,7 @@ export function partnerNetworkSelfServeRouter(): Router {
           const upd = await c.query(
             `UPDATE partner_public_listings SET ${sets.join(", ")}, updated_at = now()
               WHERE tenant_id = $1 AND id = $2`,
-            params,
+            params
           );
           if ((upd.rowCount ?? 0) === 0) {
             // RLS makes a cross-tenant write a silent no-op, so zero rows must be a failure here.
@@ -866,7 +906,7 @@ export function partnerNetworkSelfServeRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
   );
 
   return r;

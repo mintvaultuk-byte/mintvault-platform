@@ -78,6 +78,12 @@ async function main(): Promise<void> {
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0004', 'browser-supply-no-coordinate-location',
               'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
               'Browser Text-Only Shop', '20 Proof Street, Bristol, BS1 4AB', 'ACTIVE')`);
+    // Deliberately unlisted: Super Admin browser proof uses the authoritative location chooser to
+    // create this location's DRAFT listing, then moves it through one audited lifecycle transition.
+    await admin.query(`INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, address, status)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0005', 'browser-supply-draft-location',
+              'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              'Browser Draft Shop', '30 Proof Street, Bristol, BS1 4AC', 'ACTIVE')`);
     await admin.query(
       `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status)
       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002', 'browser-supply-owner',
