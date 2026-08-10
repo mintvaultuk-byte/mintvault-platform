@@ -10,7 +10,7 @@
  * report at docs/partner-migration-lock-safety.md; this file pins the invariants that
  * can be checked without a cluster.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -19,6 +19,8 @@ import {
   parseLockTimeoutDirective,
   parseLockTimeoutFlag,
   parseToFlag,
+  selectPendingMigrations,
+  applyMigrations,
 } from "../scripts/db/migrate";
 
 const MIGRATIONS = join(process.cwd(), "migrations");
@@ -110,7 +112,56 @@ describe("per-file and per-run overrides", () => {
     expect(() => parseToFlag(["node", "migrate.ts", "--to"])).toThrow(/requires a migration number/);
     // Filtering is `<= toNumber` over the ALREADY numerically ordered pending list, so the
     // journal can only ever be a gap-free prefix. Pin the comparison, not just the parser.
-    expect(RUNNER).toContain("plan.pending.filter((name) => Number(byName.get(name)!.number) <= opts.toNumber!)");
+    expect(RUNNER).toContain("return Number(file.number) <= toNumber;");
+  });
+
+  it("scopes the destructive gate to the selected --to prefix, not a later held-back migration", () => {
+    const files = [
+      { filename: "0048_safe.sql", number: "0048" },
+      { filename: "0071_owner_approved_constraint_replacement.sql", number: "0071" },
+    ];
+    const pending = files.map((f) => f.filename);
+    expect(selectPendingMigrations(pending, files, 48)).toEqual(["0048_safe.sql"]);
+    expect(selectPendingMigrations(pending, files, 71)).toEqual(pending);
+    expect(RUNNER).toContain("selectedPending.has(d.filename) && hasBlocking(d.findings)");
+  });
+
+  it("applies an earlier safe checkpoint without waiving a held-back destructive migration", async () => {
+    const query = vi.fn(async (statement: string) => {
+      if (statement.includes("FROM pg_locks")) return { rows: [{ pid: 73, current_pid: 73 }] };
+      if (statement.includes("SELECT pg_backend_pid() AS pid")) return { rows: [{ pid: 73 }] };
+      if (statement.includes("pg_try_advisory_lock")) return { rows: [{ got: true }] };
+      if (statement.includes("to_regclass('public.schema_migrations')"))
+        return { rows: [{ reg: "schema_migrations" }] };
+      if (statement === "SELECT filename, checksum, status FROM schema_migrations") return { rows: [] };
+      return { rows: [] };
+    });
+    const files = [
+      {
+        number: "0048",
+        filename: "0048_safe.sql",
+        path: "0048_safe.sql",
+        sql: "SELECT 48;",
+        checksum: "safe",
+        noTransaction: false,
+        lockTimeoutMs: undefined,
+      },
+      {
+        number: "0071",
+        filename: "0071_later_destructive.sql",
+        path: "0071_later_destructive.sql",
+        sql: "DROP TABLE later_only;",
+        checksum: "later",
+        noTransaction: false,
+        lockTimeoutMs: undefined,
+      },
+    ];
+
+    await expect(applyMigrations({ query } as never, files, { toNumber: 48 })).resolves.toEqual({
+      applied: ["0048_safe.sql"],
+    });
+    expect(query).toHaveBeenCalledWith("SELECT 48;");
+    expect(query).not.toHaveBeenCalledWith("DROP TABLE later_only;");
   });
 });
 
@@ -156,10 +207,7 @@ describe("migrate:no-transaction directive must be anchored", () => {
     //       CREATE INDEX takes ShareLock and scripts/db/migrate.ts holds a file's locks until it
     //       COMMITs, so an in-transaction build would block every certificate write for the
     //       duration. Measured on PG17: CONCURRENTLY takes ShareUpdateExclusive only.
-    expect(optedOut).toEqual([
-      "0018_correction_audit_index.sql",
-      "0065_certificates_reviewed_unit_index.sql",
-    ]);
+    expect(optedOut).toEqual(["0018_correction_audit_index.sql", "0065_certificates_reviewed_unit_index.sql"]);
   });
 
   it("every no-transaction migration also declares its self-healing index target", () => {

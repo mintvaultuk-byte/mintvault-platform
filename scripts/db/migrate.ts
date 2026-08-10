@@ -539,6 +539,29 @@ export interface MigratePlan {
 }
 
 /**
+ * Select the gap-free pending prefix an operator requested with `--to`.
+ *
+ * This selection is also the authority boundary for the destructive-SQL gate. A later migration
+ * must not require an owner to waive its destructive check merely to execute an earlier,
+ * non-destructive checkpoint; when that later migration is selected, the gate still applies.
+ */
+export function selectPendingMigrations(
+  pending: readonly string[],
+  files: readonly Pick<MigrationFile, "filename" | "number">[],
+  toNumber?: number
+): string[] {
+  if (toNumber === undefined) return [...pending];
+  const byName = new Map(files.map((f) => [f.filename, f]));
+  // `files` and `pending` come from the same immutable plan; fail closed rather than treating an
+  // unexpected missing file as eligible.
+  return pending.filter((name) => {
+    const file = byName.get(name);
+    if (!file) throw new Error(`Pending migration ${name} is absent from the discovered migration set.`);
+    return Number(file.number) <= toNumber;
+  });
+}
+
+/**
  * Can the runner recover this file from a half-finished state WITHOUT a human inspecting the
  * database?
  *
@@ -731,8 +754,13 @@ export async function applyMigrations(
           .join(", ")}. A migration was edited after being applied. Refusing to proceed.`
       );
     }
+    const byName = new Map(files.map((f) => [f.filename, f]));
+    // `--to=<n>` truncates the tail of the pending list. It can never reorder or skip, so the
+    // journal stays a faithful, gap-free prefix of the migration set.
+    const pending = selectPendingMigrations(plan.pending, files, opts.toNumber);
+    const selectedPending = new Set(pending);
     if (!opts.allowDestructive) {
-      const blocking = plan.destructive.filter((d) => hasBlocking(d.findings));
+      const blocking = plan.destructive.filter((d) => selectedPending.has(d.filename) && hasBlocking(d.findings));
       if (blocking.length > 0) {
         throw new Error(
           `Destructive SQL detected in pending migration(s): ${blocking
@@ -750,13 +778,6 @@ export async function applyMigrations(
       );
     }
     const applied: string[] = [];
-    const byName = new Map(files.map((f) => [f.filename, f]));
-    // `--to=<n>` truncates the tail of the pending list. It can never reorder or skip, so the
-    // journal stays a faithful, gap-free prefix of the migration set.
-    const pending =
-      opts.toNumber === undefined
-        ? plan.pending
-        : plan.pending.filter((name) => Number(byName.get(name)!.number) <= opts.toNumber!);
     if (opts.toNumber !== undefined) {
       const held = plan.pending.length - pending.length;
       console.log(
