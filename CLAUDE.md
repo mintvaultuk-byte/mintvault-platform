@@ -1,5 +1,28 @@
 # CLAUDE.md — MintVault Project Guardrails
 
+---
+
+## ⛔ MANDATORY COMPLETION CONTROLLER — READ FIRST
+
+Before every build, audit, repair, security, migration or release task, read and obey:
+
+**[`docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md`](docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md)**
+
+This controller is permanent project governance. It applies to every future prompt unless the
+owner explicitly overrides it. Its core rule is:
+
+> **Fix all actionable in-scope BLOCKER/HIGH defects in the current pass.**
+> **Do not stop merely to report another problem.**
+> **Once the release bar passes, stop auditing and declare COMPLETE.**
+
+It SUPPLEMENTS the rules below — it does not replace or weaken any of them. Where there is a
+conflict, the Golden Rules, the protected grading rules and the staging/production rules in this
+file remain **authoritative**. The controller never authorises modifying protected MVGS maths,
+deploying, applying migrations to a live host, destructive data operations, force pushes, or
+skipping an owner approval those rules require.
+
+---
+
 > **Owner:** Non-technical founder
 > **Project:** MintVault — Collectibles grading & certification platform (PSA-style)
 > **Stage:** MVP in progress
