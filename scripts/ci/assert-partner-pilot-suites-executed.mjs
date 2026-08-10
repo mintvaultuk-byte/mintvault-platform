@@ -117,7 +117,7 @@ const SUITES = [
   // series and the only behavioural coverage of the descending recovery order, and it is exactly
   // the suite whose absence would be discovered during an incident.
   // MEASURED 2026-08-09 against a real disposable PostgreSQL 17 cluster.
-  { file: "tests/partner-rollback-integrity.test.ts", min: 44 },
+  { file: "tests/partner-rollback-integrity.test.ts", min: 45 },
   // B1's dedicated behavioural proof. It is the ONLY executable reproduction of the recency
   // exploit, and server/partner/public-network-service.ts names it in a comment as exactly that —
   // so it must not be deletable behind a green build.

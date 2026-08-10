@@ -222,13 +222,21 @@ BEGIN
       '0063 completeness assertion failed: partner_public_reader can SELECT certificates.review_entered_at.';
   END IF;
 
-  -- THE LOCK DISCIPLINE IS ASSERTED, NOT JUST DOCUMENTED. This file holds ACCESS EXCLUSIVE on
-  -- `certificates` until it commits, so it must never grow a slow statement. An index created
-  -- here would be exactly that mistake, and it would be invisible in review once the header
-  -- comment had scrolled away.
-  IF to_regclass('public.idx_certificates_origin_location_reviewed') IS NOT NULL THEN
-    RAISE EXCEPTION '0063: the reviewed-unit index was built inside this file. It holds ACCESS EXCLUSIVE on certificates until COMMIT — build it CONCURRENTLY in 0065 instead.';
-  END IF;
+  -- NOTE FOR A FUTURE EDITOR, deliberately a comment and NOT an assertion.
+  --
+  -- This file holds ACCESS EXCLUSIVE on `certificates` until it commits, so it must never grow a
+  -- slow statement — an index built here would block every certificate READ for the whole build.
+  -- An earlier revision tried to enforce that with
+  --     IF to_regclass('public.idx_certificates_origin_location_reviewed') IS NOT NULL THEN RAISE
+  -- and that assertion was UNSOUND: it conflates "this file created the index" with "the index
+  -- exists anywhere". 0065 legitimately creates it, so on any estate where 0063 is re-applied
+  -- after 0065 has run — a de-journal-and-reapply, which is exactly what the security-repair and
+  -- migration suites do — 0063 failed with its own guard. CI run 31360382645, seven suites.
+  --
+  -- SQL cannot distinguish "created by this transaction" from "already present", so there is no
+  -- sound version of that check to write here. The real protections are: 0065 owns the index by
+  -- name, and tests/migrate-lock-timeout.test.ts pins the exact set of no-transaction migrations
+  -- so a new CONCURRENTLY build cannot appear unnoticed.
 
   -- The backfill must have left no reviewed-but-unapproved unit without a clock, or the rolling
   -- window would still be reading an intake date for it.

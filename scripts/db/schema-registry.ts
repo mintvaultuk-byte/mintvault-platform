@@ -190,6 +190,24 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
   },
   {
     schema: "public",
+    name: "public_slab_image_projection",
+    objectType: "view",
+    class: "migration_owned",
+    purpose:
+      "anonymous slab-image proxy lookup (migration 0064). Certificate number, one resolved storage key, one boolean — the publication gate lives in the view definition, and it is the ONLY certificates access partner_public_reader has.",
+    active: true,
+    owningSubsystem: "partner-network/public",
+    // NOT auto-classified by isPartnerNetworkName, and deliberately not renamed to earn that.
+    // 0061's two projections are `partner_*` because they serve partner listings only. This one
+    // serves the WHOLE public slab showcase — overwhelmingly HQ-originated certificates — so a
+    // `partner_` prefix would misdescribe it to the next reader. Classifying it explicitly is the
+    // honest option; renaming it to satisfy a prefix rule would not be.
+    reason: "created by migration 0064, not by Drizzle; name is not partner-prefixed by design",
+    futureDisposition: "keep; retire only with the anonymous slab-image proxy",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
     name: "reholder_credits",
     objectType: "view",
     class: "legacy_active",

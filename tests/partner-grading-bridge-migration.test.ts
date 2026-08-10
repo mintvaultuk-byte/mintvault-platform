@@ -101,7 +101,7 @@ async function runRollbackAsMigrator(): Promise<void> {
 /**
  * Roll back everything ABOVE 0049, newest first, as the migrator.
  *
- * This suite applies the FULL migration set, so 0050-0056 now sit above 0049. Every rollback in
+ * This suite applies the FULL migration set, so 0050-0066 now sit above 0049. Every rollback in
  * that series refuses while a higher-numbered journal row exists — correctly — so rollback-0049
  * cannot be exercised in isolation any more, and T7-T12 were failing with
  * "rollback-0049 refused: 7 later migration journal row(s) exist" instead of the 0049-specific
@@ -117,6 +117,10 @@ async function rollBackEverythingAbove0049(): Promise<void> {
       // rollback-0053 while anything >53), so omitting a newer file does not merely leave one
       // stray row — it makes the middle of this list refuse too, and 0049 then reports several
       // remaining rows rather than the one that was actually forgotten. Add new rollbacks here.
+      "rollback-0066-partner-rating-lifecycle-hardening.sql",
+      "rollback-0065-certificates-reviewed-unit-index.sql",
+      "rollback-0064-public-slab-image-projection.sql",
+      "rollback-0063-certificate-review-lifecycle-clock.sql",
       "rollback-0062-partner-rating-dirty-state.sql",
       "rollback-0061-partner-public-reader.sql",
       "rollback-0060-partner-public-rating-override-expiry.sql",

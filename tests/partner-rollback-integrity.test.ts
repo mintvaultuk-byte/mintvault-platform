@@ -970,6 +970,64 @@ describe("Rollback + guard integrity (dedicated disposable PostgreSQL 17 cluster
   // 3. THE FULL DESCENDING SEQUENCE — the one that was permanently bricked.
   // ===========================================================================================
 
+  /**
+   * DE-JOURNAL WITHOUT ROLLBACK, THEN RE-APPLY.
+   *
+   * This is what several migration suites do to restore state — they DELETE journal rows above a
+   * target and re-run the runner, without executing the intervening rollback files. So the objects
+   * still exist while the journal says they do not, and every migration above the target is
+   * re-applied onto a database that already has its effects.
+   *
+   * That path was broken by a guard I added to 0063: it raised if
+   * `idx_certificates_origin_location_reviewed` existed, intending to stop someone building an
+   * index inside a file that holds ACCESS EXCLUSIVE. The assertion was UNSOUND — it conflates
+   * "this file created it" with "it exists anywhere", and 0065 legitimately creates it. Seven
+   * migration suites went red in CI run 31360382645 with
+   * "0063: the reviewed-unit index was built inside this file".
+   *
+   * Every migration must be re-appliable onto its own effects. This pins that for 0063-0066.
+   */
+  it("0063-0066 re-apply cleanly after a de-journal that did NOT run their rollbacks", async () => {
+    const before = await admin.query<{ idx: boolean }>(
+      "SELECT to_regclass('public.idx_certificates_origin_location_reviewed') IS NOT NULL AS idx",
+    );
+    expect(before.rows[0].idx, "precondition: 0065's index is present").toBe(true);
+
+    // The journal forgets them; the objects remain. Exactly the state the restore helpers create.
+    await admin.query("DELETE FROM schema_migrations WHERE filename ~ '^006[3-6]_'");
+    expect(await journalRows("0063_certificate_review_lifecycle_clock.sql")).toBe(0);
+
+    // The runner must volunteer all four and re-apply them onto their own effects.
+    const pending = await pendingPerRunner();
+    for (const f of [
+      "0063_certificate_review_lifecycle_clock.sql",
+      "0064_public_slab_image_projection.sql",
+      "0065_certificates_reviewed_unit_index.sql",
+      "0066_partner_rating_lifecycle_hardening.sql",
+    ]) {
+      expect(pending, `${f} was not offered as pending after de-journalling`).toContain(f);
+    }
+    await runRunnerUnprompted();
+
+    for (const f of [
+      "0063_certificate_review_lifecycle_clock.sql",
+      "0064_public_slab_image_projection.sql",
+      "0065_certificates_reviewed_unit_index.sql",
+      "0066_partner_rating_lifecycle_hardening.sql",
+    ]) {
+      expect(await journalRows(f), `${f} did not re-apply`).toBe(1);
+    }
+    // And the estate is intact, not merely journalled.
+    const after = await admin.query<{ idx: boolean; col: boolean; view: boolean }>(
+      `SELECT to_regclass('public.idx_certificates_origin_location_reviewed') IS NOT NULL AS idx,
+              EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_schema='public' AND table_name='certificates'
+                         AND column_name='review_entered_at') AS col,
+              to_regclass('public.public_slab_image_projection') IS NOT NULL AS view`,
+    );
+    expect(after.rows[0]).toEqual({ idx: true, col: true, view: true });
+  }, 120_000);
+
   it("the whole 0066 -> 0047 descending rollback completes, and the runner restores every one", async () => {
     const descending = [...ROUND_TRIPS].sort((a, b) => b.number - a.number);
 
