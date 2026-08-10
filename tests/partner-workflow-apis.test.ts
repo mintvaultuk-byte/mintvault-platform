@@ -16,7 +16,7 @@
  *   PARTNER_RT_RUNTIME=postgresql://partner_app_test_rt:synthetic@127.0.0.1:5544/dispo \
  *   npx vitest run tests/partner-workflow-apis.test.ts
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
@@ -27,6 +27,15 @@ import {
   PARTNER_MIGRATIONS_WITH_G6D,
   provisionRealisticRoles,
 } from "./helpers/partner-realistic-db";
+
+const objectStore = vi.hoisted(() => new Map<string, { bytes: Buffer; mime: string }>());
+vi.mock("../server/r2", () => ({
+  uploadToR2: vi.fn(async (key: string, bytes: Buffer, mime: string) => {
+    if (objectStore.has(key)) throw new Error(`immutable test object collision: ${key}`);
+    objectStore.set(key, { bytes, mime });
+  }),
+  getR2SignedUrl: vi.fn(async (key: string) => `local-r2://${key}`),
+}));
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_RT_RUNTIME;
@@ -211,6 +220,17 @@ let admin: Client;
         headers: { "content-type": "application/json", cookie },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    };
+    const png = () =>
+      new Blob(
+        [Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9J4P8AAAAASUVORK5CYII=", "base64")],
+        { type: "image/png" }
+      );
+    const multipart = async (path: string, cookie: string, file: Blob | null = png(), filename = "card.png") => {
+      const body = new FormData();
+      if (file) body.append("image", file, filename);
+      const res = await fetch(`${base}${path}`, { method: "POST", headers: { cookie }, body });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     };
     async function draftId(cookie: string, locationId = L1): Promise<string> {
@@ -736,6 +756,63 @@ let admin: Client;
         const card = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "Auth Card" });
         const r = await j("PATCH", `/api/partner/submissions/${id}/cards/${card.body.id}`, "", { cardName: "Nope" });
         expect(r.status).toBe(401);
+      });
+    });
+
+    describe("POST /submissions/:id/cards/:cardId/images/:side — real multipart binding", () => {
+      const bindings = async (cardId: string) =>
+        (await admin.query("SELECT front_image_key, back_image_key FROM partner_submission_cards WHERE id=$1", [cardId])).rows[0];
+      const uploadEvents = async (submissionId: string) =>
+        Number((await admin.query("SELECT count(*)::int n FROM partner_submission_events WHERE submission_id=$1 AND event_type='card_image_uploaded'", [submissionId])).rows[0].n);
+
+      it("binds valid front and back uploads to exactly the selected tenant/card/sides and audits each once", async () => {
+        const cookie = await login("owner@apia.com");
+        const submissionId = await draftId(cookie);
+        const c1 = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, { cardName: "Image Card 1" });
+        const c2 = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, { cardName: "Image Card 2" });
+        const front = await multipart(`/api/partner/submissions/${submissionId}/cards/${c1.body.id}/images/front`, cookie);
+        expect(front.status).toBe(200);
+        const afterFront = await bindings(c1.body.id);
+        expect(afterFront.front_image_key).toBe(front.body.key);
+        expect(afterFront.back_image_key).toBeNull();
+        expect(front.body.key).toMatch(new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/front-`));
+        expect(objectStore.has(front.body.key)).toBe(true);
+        expect(await bindings(c2.body.id)).toEqual({ front_image_key: null, back_image_key: null });
+
+        const back = await multipart(`/api/partner/submissions/${submissionId}/cards/${c1.body.id}/images/back`, cookie);
+        expect(back.status).toBe(200);
+        expect((await bindings(c1.body.id)).back_image_key).toBe(back.body.key);
+        expect(back.body.key).toMatch(new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/back-`));
+        expect(await uploadEvents(submissionId)).toBe(2);
+      });
+
+      it("rejects side manipulation, malformed/empty files and records no binding event", async () => {
+        const cookie = await login("owner@apia.com");
+        const submissionId = await draftId(cookie);
+        const card = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, { cardName: "Reject Card" });
+        for (const [side, file, name] of [["left", png(), "card.png"], ["front", null, "card.png"], ["front", new Blob(["not an image"], { type: "image/png" }), "spoof.png"], ["front", png(), "card.exe"]] as const) {
+          const r = await multipart(`/api/partner/submissions/${submissionId}/cards/${card.body.id}/images/${side}`, cookie, file, name);
+          expect(r.status).toBeGreaterThanOrEqual(400);
+        }
+        expect(await bindings(card.body.id)).toEqual({ front_image_key: null, back_image_key: null });
+        expect(await uploadEvents(submissionId)).toBe(0);
+      });
+
+      it("fails closed for cross-tenant, cross-location and mixed submission/card attempts without mutation", async () => {
+        const ownerA = await login("owner@apia.com");
+        const ownerB = await login("owner@apib.com");
+        const sA = await draftId(ownerA, L2);
+        const cA = await j("POST", `/api/partner/submissions/${sA}/cards`, ownerA, { cardName: "A L2" });
+        const sB = await draftId(ownerB, LB);
+        const cB = await j("POST", `/api/partner/submissions/${sB}/cards`, ownerB, { cardName: "B" });
+        const reception = await login("reception@apia.com");
+        expect((await multipart(`/api/partner/submissions/${sA}/cards/${cA.body.id}/images/front`, reception)).status).toBe(404);
+        expect((await multipart(`/api/partner/submissions/${sB}/cards/${cB.body.id}/images/front`, ownerA)).status).toBe(404);
+        expect((await multipart(`/api/partner/submissions/${sA}/cards/${cB.body.id}/images/front`, ownerA)).status).toBe(404);
+        expect(await bindings(cA.body.id)).toEqual({ front_image_key: null, back_image_key: null });
+        expect(await bindings(cB.body.id)).toEqual({ front_image_key: null, back_image_key: null });
+        expect(await uploadEvents(sA)).toBe(0);
+        expect(await uploadEvents(sB)).toBe(0);
       });
     });
   }
