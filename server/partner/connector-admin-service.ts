@@ -433,13 +433,31 @@ export async function listConnectorRecords(
 
 export async function getRecordDetail(recordId: string) {
   const rec = await loadRecord(recordId);
+  // Keep an operational-detail failure diagnosable without exposing query text, values or
+  // credentials to the Super Admin HTTP response.  This route combines independent read-only
+  // projections; the projection name is the only extra context operators need in server logs.
+  const projection = async <T>(name: string, read: () => Promise<T>): Promise<T> => {
+    try {
+      return await read();
+    } catch (err) {
+      const e = err as { code?: unknown; message?: unknown };
+      // eslint-disable-next-line no-console
+      console.error("[partner connector] detail projection failed", {
+        recordId,
+        projection: name,
+        code: typeof e?.code === "string" ? e.code : "unknown",
+        message: typeof e?.message === "string" ? e.message : "unknown error",
+      });
+      throw err;
+    }
+  };
   const [validation, mapping, destination, attempts, consistency, partnerCredit] = await Promise.all([
-    getLatestValidationRun(rec.id),
-    getConnectorImport(rec.id),
-    getImportedDestination(rec.id),
-    getImportAttempts(rec.id),
-    inspectConnectorConsistency(rec.id).catch(() => null),
-    getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id),
+    projection("latest_validation", () => getLatestValidationRun(rec.id)),
+    projection("mapping", () => getConnectorImport(rec.id)),
+    projection("destination", () => getImportedDestination(rec.id)),
+    projection("attempts", () => getImportAttempts(rec.id)),
+    projection("consistency", () => inspectConnectorConsistency(rec.id)).catch(() => null),
+    projection("partner_credit", () => getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id)),
   ]);
   const findings = validation?.findings ?? [];
   const adminActions = await getRecordAuditHistory(recordId, 0, 50);
