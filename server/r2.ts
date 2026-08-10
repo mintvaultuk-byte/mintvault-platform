@@ -66,6 +66,49 @@ export async function uploadToR2(key: string, body: Buffer, contentType: string)
   return key;
 }
 
+/**
+ * Stores a content-addressed evidence object once. A retry may reuse only an
+ * object whose recorded hash and byte count prove it is the identical body;
+ * any other existing object is an overwrite attempt and fails closed.
+ */
+export async function uploadImmutableEvidenceToR2(
+  key: string,
+  body: Buffer,
+  metadata: Record<string, string>,
+  contentType: string
+): Promise<string> {
+  const client = getClient();
+  const bucket = getBucket();
+  try {
+    const existing = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    if (
+      existing.ContentLength === body.length &&
+      existing.Metadata?.sha256 === metadata.sha256 &&
+      existing.Metadata?.evidenceclass === metadata.evidenceclass
+    ) {
+      return key;
+    }
+    throw new Error(`Refusing to overwrite immutable evidence object ${key}`);
+  } catch (error) {
+    const candidate = error as { $metadata?: { httpStatusCode?: number }; name?: string };
+    const status = candidate.$metadata?.httpStatusCode;
+    if (status !== 404 && candidate.name !== "NotFound" && candidate.name !== "NoSuchKey") throw error;
+  }
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: "private, no-store",
+      Metadata: metadata,
+      IfNoneMatch: "*",
+    })
+  );
+  return key;
+}
+
 export async function getR2SignedUrl(key: string, expiresInSeconds: number = 600): Promise<string> {
   const client = getClient();
   return getSignedUrl(
@@ -79,6 +122,9 @@ export async function getR2SignedUrl(key: string, expiresInSeconds: number = 600
 }
 
 export async function deleteFromR2(key: string): Promise<void> {
+  if (key.startsWith("evidence/")) {
+    throw new Error("Evidence objects are immutable and cannot be deleted through the application");
+  }
   const client = getClient();
   await client.send(
     new DeleteObjectCommand({
@@ -165,9 +211,7 @@ export async function listR2Objects(
  * Failure modes (404, network, no creds) all return null → caller treats as
  * "no cache" and regenerates, which is the safe default.
  */
-export async function headR2(
-  key: string
-): Promise<{
+export async function headR2(key: string): Promise<{
   lastModified: Date;
   contentLength: number | null;
   contentType: string | null;

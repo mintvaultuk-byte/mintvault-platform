@@ -6,10 +6,16 @@
  */
 
 import { db, pool } from "./db";
+import { createHash } from "node:crypto";
 import { hashLockKey } from "./lib/advisory-lock";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
-import { uploadToR2, getR2Buffer, listR2Keys } from "./r2";
+import { uploadImmutableEvidenceToR2, uploadToR2, getR2Buffer, listR2Keys } from "./r2";
+import {
+  assertCompatibleEvidencePair,
+  inspectScannerEvidence,
+  type ScannerEvidenceInspection,
+} from "./lib/image-evidence";
 import {
   generateImageVariants,
   identifyCardFromBuffer,
@@ -376,6 +382,17 @@ export async function uploadRawScansToR2(
   front: { buffer: Buffer; mimeType: string; ext: string },
   back: { buffer: Buffer; mimeType: string; ext: string } | null
 ): Promise<{ frontKey: string; backKey: string | null }> {
+  const frontInspection = await inspectScannerEvidence(front.buffer);
+  const backInspection = back ? await inspectScannerEvidence(back.buffer) : null;
+  assertCompatibleEvidencePair(frontInspection, backInspection);
+
+  if (frontInspection.evidenceClass === "NEW_IMMUTABLE_MASTER") {
+    const frontKey = await persistImmutableMaster(certId, "front", front.buffer, frontInspection);
+    const backKey =
+      back && backInspection ? await persistImmutableMaster(certId, "back", back.buffer, backInspection) : null;
+    return { frontKey, backKey };
+  }
+
   const safeExt = (ext: string) => (ext.replace(/[^a-z0-9]/gi, "") || "bin").toLowerCase();
   const frontKey = `images/grading/${certId}/raw_front.${safeExt(front.ext)}`;
   const backKey = back ? `images/grading/${certId}/raw_back.${safeExt(back.ext)}` : null;
@@ -384,6 +401,73 @@ export async function uploadRawScansToR2(
     back && backKey ? uploadToR2(backKey, back.buffer, back.mimeType || "application/octet-stream") : Promise.resolve(),
   ]);
   return { frontKey, backKey };
+}
+
+async function persistImmutableMaster(
+  certificateId: number,
+  side: "front" | "back",
+  body: Buffer,
+  inspection: ScannerEvidenceInspection
+): Promise<string> {
+  if (inspection.evidenceClass !== "NEW_IMMUTABLE_MASTER") throw new Error("Only TIFF evidence can be a master");
+  const objectKey = `evidence/masters/${certificateId}/${side}/${inspection.sha256}.tif`;
+  await uploadImmutableEvidenceToR2(
+    objectKey,
+    body,
+    {
+      sha256: inspection.sha256,
+      evidenceclass: inspection.evidenceClass,
+      certificateid: String(certificateId),
+      side,
+      evidenceversion: "1",
+    },
+    inspection.mimeType
+  );
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock($1)", [hashLockKey(`evidence-master:${certificateId}:${side}`)]);
+    const existing = await client.query<{ object_key: string }>(
+      "SELECT object_key FROM certificate_image_masters WHERE object_key=$1",
+      [objectKey]
+    );
+    if (existing.rowCount === 0) {
+      const revision = await client.query<{ revision: number }>(
+        "SELECT COALESCE(MAX(revision), 0)::int + 1 AS revision FROM certificate_image_masters WHERE certificate_id=$1 AND side=$2",
+        [certificateId, side]
+      );
+      await client.query(
+        `INSERT INTO certificate_image_masters
+          (certificate_id,side,object_key,sha256,byte_length,format,mime_type,pixel_width,pixel_height,bit_depth,capture_dpi,capture_metadata,evidence_version,revision,actor)
+         VALUES ($1,$2,$3,$4,$5,'tiff','image/tiff',$6,$7,$8,$9,$10::jsonb,1,$11,'scanner')`,
+        [
+          certificateId,
+          side,
+          objectKey,
+          inspection.sha256,
+          inspection.byteLength,
+          inspection.width,
+          inspection.height,
+          inspection.bitDepth,
+          inspection.dpi,
+          JSON.stringify({
+            channels: inspection.channels,
+            colourSpace: inspection.colourSpace,
+            hasIccProfile: inspection.hasIccProfile,
+          }),
+          revision.rows[0].revision,
+        ]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+  return objectKey;
 }
 
 /**
@@ -420,9 +504,7 @@ export async function processScanInBackground(
     // Two-scanner safety: the other scanner may have deleted this cert between
     // ingest and this background job. Skip the whole pipeline — the UPDATE
     // guards downstream would no-op anyway, this just avoids the wasted work.
-    const live = await db.execute(
-      sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    const live = await db.execute(sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     if (live.rows.length === 0) {
       console.log(`[process-scan] cert=${certInfo.certId} soft-deleted mid-ingest — skipping pipeline`);
       return;
@@ -431,9 +513,7 @@ export async function processScanInBackground(
     // staleness marker. Bumping it when the job actually STARTS means
     // "stale processing" measures started-but-died pipelines, not certs
     // that merely sat in a busy queue behind 3-4 scanners' worth of cards.
-    await db.execute(
-      sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
@@ -741,6 +821,13 @@ async function uploadImagesToCertUnlocked(
     recorded_at: new Date().toISOString(),
   };
 
+  await Promise.all([
+    persistImmutableDerivatives(certId, "front", frontBuffer, frontResized, frontVariants.cropped, cropGeometry.front),
+    backBuffer && backResized && backVariants
+      ? persistImmutableDerivatives(certId, "back", backBuffer, backResized, backVariants.cropped, cropGeometry.back)
+      : Promise.resolve(),
+  ]);
+
   await db.execute(sql`
     UPDATE certificates SET
       grading_front_original    = ${uploadKeys.front_original || null},
@@ -765,6 +852,86 @@ async function uploadImagesToCertUnlocked(
   `);
 
   return { frontVariants, backVariants, timing: { sharpMs, r2Ms } };
+}
+
+/**
+ * A display/measurement derivative is append-only and linked to the exact
+ * TIFF master bytes that produced it. Legacy JPEG input deliberately produces
+ * no entry here: it remains readable through the old image path but can never
+ * masquerade as a newly qualified master chain.
+ */
+async function persistImmutableDerivatives(
+  certificateId: number,
+  side: "front" | "back",
+  raw: Buffer,
+  working: Buffer,
+  crop: Buffer,
+  geometry: unknown
+): Promise<void> {
+  const source = await inspectScannerEvidence(raw);
+  if (source.evidenceClass !== "NEW_IMMUTABLE_MASTER") return;
+  const master = await db.execute(sql`
+    SELECT id FROM certificate_image_masters
+    WHERE certificate_id=${certificateId} AND side=${side} AND sha256=${source.sha256}
+    ORDER BY revision DESC LIMIT 1
+  `);
+  const masterId = Number((master.rows[0] as { id?: unknown } | undefined)?.id);
+  if (!Number.isSafeInteger(masterId) || masterId < 1) {
+    throw new Error("TIFF master ledger entry is missing for derivative generation");
+  }
+
+  const sharp = (await import("sharp")).default;
+  const workingMeta = await sharp(working).metadata();
+  const cropMeta = await sharp(crop).metadata();
+  if (!workingMeta.width || !workingMeta.height || !cropMeta.width || !cropMeta.height) {
+    throw new Error("Evidence derivative dimensions are unavailable");
+  }
+  const workingHash = createHash("sha256").update(working).digest("hex");
+  const cropHash = createHash("sha256").update(crop).digest("hex");
+  const workingKey = `evidence/working/${certificateId}/${side}/${workingHash}.v1.jpg`;
+  const cropKey = `evidence/crops/${certificateId}/${side}/${cropHash}.v1.jpg`;
+  await uploadImmutableEvidenceToR2(
+    workingKey,
+    working,
+    {
+      sha256: workingHash,
+      evidenceclass: "WORKING_DERIVATIVE",
+      mastersha256: source.sha256,
+      side,
+      certificateid: String(certificateId),
+    },
+    "image/jpeg"
+  );
+  await uploadImmutableEvidenceToR2(
+    cropKey,
+    crop,
+    {
+      sha256: cropHash,
+      evidenceclass: "CROP_DERIVATIVE",
+      mastersha256: source.sha256,
+      side,
+      certificateid: String(certificateId),
+    },
+    "image/jpeg"
+  );
+  await db.execute(sql`
+    INSERT INTO certificate_image_workings
+      (master_id,object_key,sha256,pixel_width,pixel_height,format,settings,derivative_version,actor)
+    VALUES (${masterId},${workingKey},${workingHash},${workingMeta.width},${workingMeta.height},'jpeg',
+      ${JSON.stringify({ resize: "inside-2000", quality: 85, orientation: "rotate" })}::jsonb,'v1','scanner')
+    ON CONFLICT (object_key) DO NOTHING
+  `);
+  const workingRow = await db.execute(sql`SELECT id FROM certificate_image_workings WHERE object_key=${workingKey}`);
+  const workingId = Number((workingRow.rows[0] as { id?: unknown } | undefined)?.id);
+  if (!Number.isSafeInteger(workingId) || workingId < 1)
+    throw new Error("Evidence working derivative ledger entry is missing");
+  await db.execute(sql`
+    INSERT INTO certificate_image_crops
+      (working_id,object_key,sha256,geometry,pixel_width,pixel_height,format,derivative_version,actor)
+    VALUES (${workingId},${cropKey},${cropHash},${JSON.stringify(geometry ?? {})}::jsonb,
+      ${cropMeta.width},${cropMeta.height},'jpeg','v1','scanner')
+    ON CONFLICT (object_key) DO NOTHING
+  `);
 }
 
 /**
@@ -1150,9 +1317,8 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
  */
 export async function repairEmptyIdentityFromSnapshot(certId: number): Promise<boolean> {
   try {
-    const row = (
-      await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`)
-    ).rows[0] as any;
+    const row = (await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`))
+      .rows[0] as any;
     if (!row) return false;
     const nameEmpty = row.card_name == null || String(row.card_name).trim() === "";
     if (!nameEmpty) return false; // only repair a genuinely missing name

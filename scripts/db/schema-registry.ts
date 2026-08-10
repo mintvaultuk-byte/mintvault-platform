@@ -343,6 +343,44 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     evidenceSource: INSPECTION,
   },
 
+  // ---- Scanner evidence ledger ----
+  {
+    schema: "public",
+    name: "certificate_image_masters",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "append-only content-addressed TIFF scanner masters",
+    active: true,
+    owningSubsystem: "scanner/evidence",
+    reason: "migrations/0067_certificate_immutable_evidence_ledger.sql",
+    futureDisposition: "keep numbered-migration-managed",
+    evidenceSource: "migration 0067 (immutable scanner evidence ledger)",
+  },
+  {
+    schema: "public",
+    name: "certificate_image_workings",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "append-only browser/analysis derivatives linked to a TIFF master",
+    active: true,
+    owningSubsystem: "scanner/evidence",
+    reason: "migrations/0067_certificate_immutable_evidence_ledger.sql",
+    futureDisposition: "keep numbered-migration-managed",
+    evidenceSource: "migration 0067 (immutable scanner evidence ledger)",
+  },
+  {
+    schema: "public",
+    name: "certificate_image_crops",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "append-only crop/measurement derivatives linked to a working image",
+    active: true,
+    owningSubsystem: "scanner/evidence",
+    reason: "migrations/0067_certificate_immutable_evidence_ledger.sql",
+    futureDisposition: "keep numbered-migration-managed",
+    evidenceSource: "migration 0067 (immutable scanner evidence ledger)",
+  },
+
   // ---- Catalogue / misc ----
   {
     schema: "public",
