@@ -298,6 +298,18 @@ describe("Partner public network — behavioural rating evidence (disposable Pos
   }
 
   afterAll(async () => {
+    // CLOSE THE SERVER'S OWN POOLS BEFORE KILLING THE CLUSTER. This suite imports server/partner/db,
+    // which memoises up to five pools (runtime, admin, accounting-audit, public, rating) against
+    // the disposable cluster URL. Stopping the cluster underneath live connections makes every one
+    // of them emit `57P01 terminating connection due to administrator command`, which vitest
+    // reports as an UNHANDLED ERROR attributed to this file — CI run 31360382645 did exactly that.
+    // The pools are the server's, so the suite that created them has to close them.
+    try {
+      const dbmod = await import("../server/partner/db");
+      await dbmod.closePartnerPools();
+    } catch {
+      /* the module may not have been imported in a filtered run */
+    }
     await admin?.end().catch(() => {});
     await cluster?.stop?.();
   });

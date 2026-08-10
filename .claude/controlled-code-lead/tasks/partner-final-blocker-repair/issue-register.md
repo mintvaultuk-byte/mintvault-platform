@@ -690,3 +690,63 @@ All type-clean while applied; all restored byte-identically.
 - Two execution floors unvalidated locally (`partner-management-migration` 0/14,
   `partner-rls-isolation` 33/85) — env-gated suites this machine cannot fully run; the RLS floor
   may additionally be stale-high by one.
+
+---
+
+# CONTINUATION STATE — pushed, CI RED, exact next action
+
+**Pushed SHA `2c5d1f6b`** (branch `opus/partner-final-integration`; PR #288 head branch
+`codex/partner-grading-bridge-current-main` fast-forwarded to the same SHA, no force). 24 commits
+ahead of the previous remote tip; ancestry verified clean before pushing.
+
+## CI on `c3668cf7` — terminal, and RED
+
+| Check | Result |
+|---|---|
+| **linux/amd64 image build & boot** | **PASS** |
+| Secret scan (gitleaks) | PASS |
+| PR dependency review | PASS |
+| CodeQL (SAST) javascript-typescript | PASS |
+| CodeQL (aggregate) | FAIL |
+| **Lint, Type Check, Test & Build** | **FAIL — 7 files / 14 tests** |
+
+CI: `5667 passed | 14 failed (5681)`.
+My CI-equivalent local run at the same SHA: `4853 passed | 0 failed`, same 5681 total.
+
+**So these 14 are CI-ONLY and are NOT reproduced locally.** The environments differ in the gate
+variables CI sets and this machine does not — the same reason
+`partner-management-migration` (0/14) and `partner-rls-isolation` (33/85) could not be floor-checked
+locally. Do not classify them from the log alone; reproduce with CI's env first.
+
+Files implicated in the failing log (frequency-ranked, NOT yet confirmed as the 7):
+`partner-user-management-ui-render`, `partner-grading-http-routes`, `print-approval-gate`,
+`partner-full-pilot-workflow`, `admin-auth-reliability`, `grading-credit-owner-binding`,
+`certificate-image-upload-audit`, `b2-archival-partner-coverage`, `partner-dashboard-ui-render`,
+`estimate-credit-idempotency`, `set-library-postgres.integration`, `partner-public-network-behavioural`.
+
+Two concrete signals from the log:
+1. `tests/partner-security-repairs-0047-0048.test.ts:145` `restoreJournalAndSchema` —
+   *"Migration … failed and was rolled back"*. **Most likely candidate for a genuine regression from
+   this work**: that suite restores the journal and re-runs the chain, which now includes 0063–0066.
+   **Start here.**
+2. An unhandled `57P01 terminating connection due to administrator command` attributed to
+   `partner-public-network-behavioural`. **FIXED in this commit** — the suite imports
+   `server/partner/db`, which memoises five pools against the disposable cluster, and stopping the
+   cluster underneath them made every one emit 57P01. `afterAll` now calls `closePartnerPools()`
+   first. 87/87 locally with no unhandled error.
+
+## EXACT NEXT ACTION
+1. Push this commit; wait for CI on the new SHA.
+2. Take the 7 failing files from `vitest-report.json` in the CI artefact — **not** from log
+   frequency counts, which over-report.
+3. Reproduce each with CI's environment before classifying. Start with
+   `partner-security-repairs-0047-0048`: if 0063–0066 break its journal restore, that is a genuine
+   regression from this work and is release-blocking.
+4. The aggregate **CodeQL** check failed while `javascript-typescript` passed — check whether a
+   second CodeQL language/config exists, or whether the aggregate is a required-status rollup that
+   simply reflects the CI job failure.
+
+## What IS proven at this SHA
+Twelve mutations RED (matrix above) · CI-equivalent local suite 4853/0 · AMD64 PASS · gitleaks PASS
+· dependency review PASS · CodeQL javascript-typescript PASS · lint 0 errors · build green ·
+staging untouched (max 0046) · production untouched (`6f182624`) · MVGS maths unchanged.
