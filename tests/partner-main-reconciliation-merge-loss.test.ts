@@ -207,7 +207,12 @@ describe("PartnerSessionInfo keeps BOTH field families", () => {
       read("server", "partner", "public-routes.ts") +
       read("server", "partner", "submission-routes.ts") +
       read("server", "partner", "customer-routes.ts") +
-      read("server", "partner", "dashboard-routes.ts");
+      read("server", "partner", "dashboard-routes.ts") +
+      // Reconciliation adds two authenticated routers to the same production
+      // mount. Keep the client/server contract exhaustive rather than making
+      // new scoped surfaces invisible to this merge-loss sentinel.
+      read("server", "partner", "catalogue-routes.ts") +
+      read("server", "partner", "grading-routes.ts");
     const registered = new Set(
       [...all.matchAll(/\br\.(?:get|post|patch|put|delete)\(\s*"([^"]+)"/g)].map((m) =>
         m[1].replace(/:[A-Za-z0-9_]+/g, ":param").replace(/\/$/, "")
