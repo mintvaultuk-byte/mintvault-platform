@@ -21,6 +21,8 @@ require_file() {
 
 # --- core governance files (v1.0 + v1.1) ---
 require_file "CLAUDE.md"
+require_file "AGENTS.md"
+require_file "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md"
 require_file ".claude/governance-version.md"
 require_file ".claude/governance-changelog.md"
 require_file ".claude/project-memory.md"
@@ -93,6 +95,15 @@ if grep -q "GOLDEN RULES" "$ROOT/CLAUDE.md" && grep -q "controlled-code-lead" "$
   echo "ok: CLAUDE.md retains golden rules + governance section"
 else
   echo "FAIL: CLAUDE.md missing golden rules or governance section"
+  FAIL=1
+fi
+
+# Both root instruction entry points load the single canonical completion controller.
+controller="docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md"
+if grep -Fq "$controller" "$ROOT/CLAUDE.md" && grep -Fq "$controller" "$ROOT/AGENTS.md"; then
+  echo "ok: Claude + Codex entry points load the completion controller"
+else
+  echo "FAIL: completion controller missing from a root instruction entry point"
   FAIL=1
 fi
 
