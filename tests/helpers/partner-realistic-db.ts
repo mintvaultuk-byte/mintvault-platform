@@ -323,8 +323,9 @@ export async function createMintvaultCertificatesTable(admin: pg.Client): Promis
 export async function createMintvaultLabelPrintsTable(admin: pg.Client): Promise<void> {
   await admin.query(`CREATE TABLE IF NOT EXISTS label_prints (
     id serial PRIMARY KEY,
-    certificate_id integer,
-    cert_id text,
+    cert_id text NOT NULL UNIQUE,
+    sheet_ref text,
+    queued_at timestamptz NOT NULL DEFAULT now(),
     printed_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
   )`);

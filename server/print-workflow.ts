@@ -45,6 +45,20 @@ export interface ActorIdentity {
 }
 
 /**
+ * Optional immutable-origin fence for a Partner-owned print operation.
+ *
+ * The generic workflow is used by trusted HQ routes too, so it cannot assume a
+ * tenant.  The Partner adapter passes this fence on every reserve/duplicate
+ * path.  That makes the state-changing SQL itself fail closed if a certificate
+ * is moved, mixed, or requested across tenants between its route-level read and
+ * this workflow's write.
+ */
+export interface PartnerPrintScope {
+  tenantId: string;
+  locationId?: string | null;
+}
+
+/**
  * Resolve WHO is acting and their print role. Admin session → admin. A staffer
  * reaching an admin handler via the can_print proxy (__graderProxy set) → their
  * staff email + staff_print. Falls back to the literal "admin" only if nothing
@@ -512,10 +526,19 @@ export async function createBatchAtomic(params: {
   reason?: string | null;
   reasonCategory?: string | null;
   notes?: string | null;
+  partnerScope?: PartnerPrintScope;
 }): Promise<CreateBatchResult> {
   const { identity } = params;
   const requested = [...new Set(params.certIds)];
   const states = await loadEffectiveStates(requested);
+
+  const partnerScopeWhere = params.partnerScope
+    ? sql`
+        AND origin_type = 'PARTNER'
+        AND origin_partner_id = ${params.partnerScope.tenantId}
+        ${params.partnerScope.locationId ? sql`AND origin_location_id = ${params.partnerScope.locationId}` : sql``}
+      `
+    : sql``;
 
   const { deriveBatchId, CERTS_PER_PAGE, SHEET_LAYOUT_VERSION } = await import("./print-batch");
 
@@ -531,6 +554,22 @@ export async function createBatchAtomic(params: {
         SELECT batch_id, status, cert_ids, kind FROM print_batches
         WHERE created_by = ${identity.actor} AND status IN ('rendering', 'printing', 'printed')
           AND cert_ids @> ${sortedReq}::jsonb AND ${sortedReq}::jsonb @> cert_ids
+          ${
+            params.partnerScope
+              ? sql`
+            AND NOT EXISTS (
+              SELECT 1
+                FROM jsonb_array_elements_text(print_batches.cert_ids) AS scoped_cert(certificate_number)
+                LEFT JOIN certificates scoped_certificate
+                  ON scoped_certificate.certificate_number = scoped_cert.certificate_number
+               WHERE scoped_certificate.id IS NULL
+                  OR scoped_certificate.origin_type <> 'PARTNER'
+                  OR scoped_certificate.origin_partner_id <> ${params.partnerScope.tenantId}
+                  ${params.partnerScope.locationId ? sql`OR scoped_certificate.origin_location_id IS DISTINCT FROM ${params.partnerScope.locationId}` : sql``}
+            )
+          `
+              : sql``
+          }
         ORDER BY created_at DESC LIMIT 1
       `)
     : { rows: [] as unknown[] };
@@ -545,7 +584,7 @@ export async function createBatchAtomic(params: {
          WHERE certificate_number IN (${sql.join(
            ids.map((c) => sql`${c}`),
            sql`, `
-         )})
+         )}) ${partnerScopeWhere}
       `);
       const dupById = new Map(
         (
@@ -624,7 +663,7 @@ export async function createBatchAtomic(params: {
     WHERE certificate_number IN (${sql.join(
       eligible.map((e) => sql`${e.certId}`),
       sql`, `
-    )})
+    )}) ${partnerScopeWhere}
   `);
   const gradeOf = new Map(
     (
@@ -726,6 +765,7 @@ export async function createBatchAtomic(params: {
       const claim = await tx.execute(sql`
         UPDATE certificates SET print_state = 'printing', updated_at = NOW()
         WHERE certificate_number = ${certId} AND print_state IN ('needs_printing', 'reprint_required')
+          ${partnerScopeWhere}
         RETURNING certificate_number
       `);
       if (claim.rows.length === 0) {
@@ -1154,10 +1194,18 @@ const partnerGradedUnitsFullySettled = sql`
            )`;
 
 /**
- * Mark certs completed (terminal). Admin-only enforcement happens in the route;
- * the state machine still guards the transition (must be printed/reprinted).
+ * Mark certs completed (terminal). HQ routes and the constrained Partner
+ * adapter each enforce their own authority/prerequisites; the state machine
+ * still guards the transition (must be printed/reprinted).
  */
-export async function markCompleted(params: { certIds: string[]; identity: ActorIdentity }): Promise<WorkflowResult> {
+export async function markCompleted(params: {
+  certIds: string[];
+  identity: ActorIdentity;
+  /** Immutable Partner-origin write fence for the constrained shop workflow. */
+  partnerScope?: PartnerPrintScope;
+  /** Refuse rather than partially complete a Partner submission set. */
+  allOrNothing?: boolean;
+}): Promise<WorkflowResult> {
   const { certIds, identity } = params;
   const states = await loadEffectiveStates(certIds);
   const applied: string[] = [];
@@ -1173,36 +1221,51 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
     if (!t.ok) rejected.push({ certId, code: t.code, message: t.message });
     else targets.push({ certId, from });
   }
+  if (params.allOrNothing && rejected.length > 0) return { applied: [], rejected };
   if (targets.length === 0) return { applied, rejected };
   const partnerRejected = await requireCompletePartnerSubmissionSet(
     targets.map((t) => t.certId),
     "complete"
   );
   if (partnerRejected.length > 0) return { applied: [], rejected: [...partnerRejected, ...rejected] };
-  await db.transaction(async (tx) => {
-    for (const { certId, from } of targets) {
-      // CAS: complete only if still printed/reprinted; event on real change only.
-      const upd = await tx.execute(sql`
+  const partnerScopeWhere = params.partnerScope
+    ? sql`
+        AND origin_type = 'PARTNER'
+        AND origin_partner_id = ${params.partnerScope.tenantId}
+        ${params.partnerScope.locationId ? sql`AND origin_location_id = ${params.partnerScope.locationId}` : sql``}
+      `
+    : sql``;
+  let atomicRejection: WorkflowResult["rejected"][number] | null = null;
+  try {
+    await db.transaction(async (tx) => {
+      for (const { certId, from } of targets) {
+        // CAS: complete only if still printed/reprinted; event on real change only.
+        const upd = await tx.execute(sql`
         UPDATE certificates SET print_state = 'completed', updated_at = NOW()
-        WHERE certificate_number = ${certId} AND print_state = ${from}
+        WHERE certificate_number = ${certId} AND print_state = ${from} ${partnerScopeWhere}
         RETURNING certificate_number
       `);
-      if (upd.rows.length === 0) {
-        rejected.push({ certId, code: "state_changed", message: "Concurrently updated." });
-        continue;
-      }
-      applied.push(certId);
-      await tx.execute(sql`
+        if (upd.rows.length === 0) {
+          const conflict = { certId, code: "state_changed", message: "Concurrently updated or outside Partner scope." };
+          if (params.allOrNothing) {
+            atomicRejection = conflict;
+            throw new Error("partner_completion_atomic_abort");
+          }
+          rejected.push(conflict);
+          continue;
+        }
+        applied.push(certId);
+        await tx.execute(sql`
         INSERT INTO print_events (cert_id, actor, actor_role, action, from_state, to_state)
         VALUES (${certId}, ${identity.actor}, ${identity.role}, 'complete', ${from}, 'completed')
       `);
-    }
-    const partnerBridge =
-      applied.length > 0
-        ? await tx.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`)
-        : { rows: [] as unknown[] };
-    if (applied.length > 0 && (partnerBridge.rows[0] as { rel?: string | null } | undefined)?.rel) {
-      await tx.execute(sql`
+      }
+      const partnerBridge =
+        applied.length > 0
+          ? await tx.execute(sql`SELECT to_regclass('public.partner_grading_work_items')::text AS rel`)
+          : { rows: [] as unknown[] };
+      if (applied.length > 0 && (partnerBridge.rows[0] as { rel?: string | null } | undefined)?.rel) {
+        await tx.execute(sql`
         UPDATE partner_grading_work_items pgwi
            SET status = 'completed', updated_at = NOW()
           FROM certificates c
@@ -1213,7 +1276,7 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
            AND si.submission_id = pgwi.destination_submission_id
            AND pgwi.status = 'approved'
       `);
-      await tx.execute(sql`
+        await tx.execute(sql`
         WITH touched AS (
           SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
             FROM partner_grading_work_items pgwi
@@ -1249,7 +1312,7 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
          WHERE ps.id = cps.partner_submission_id
            AND ps.tenant_id = cps.tenant_id
       `);
-      await tx.execute(sql`
+        await tx.execute(sql`
         WITH touched AS (
           SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
             FROM partner_grading_work_items pgwi
@@ -1282,7 +1345,7 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
          WHERE s.id = cd.destination_submission_id
            AND s.status = 'ready_to_return'
       `);
-      await tx.execute(sql`
+        await tx.execute(sql`
         WITH touched AS (
           SELECT DISTINCT pgwi.tenant_id, pgwi.partner_submission_id, pgwi.destination_submission_id
             FROM partner_grading_work_items pgwi
@@ -1315,8 +1378,14 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
          WHERE s.id = cd.destination_submission_id
            AND s.status IN ('shipped','completed')
       `);
+      }
+    });
+  } catch (err) {
+    if (atomicRejection && err instanceof Error && err.message === "partner_completion_atomic_abort") {
+      return { applied: [], rejected: [...rejected, atomicRejection] };
     }
-  });
+    throw err;
+  }
   return { applied, rejected };
 }
 

@@ -154,6 +154,7 @@ const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
+const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
 const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
 const PartnerPublicProfilePage = lazy(() => import("@/pages/partner/public-profile"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
@@ -319,6 +320,11 @@ function PartnerPortalRoutes() {
         <Route path="/partner/billing">
           <PartnerRouteGuard>
             <PartnerBillingPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/certificates">
+          <PartnerRouteGuard requiredPermission="partner.cards.view">
+            <PartnerCertificatesPage />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/supplies">

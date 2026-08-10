@@ -76,6 +76,71 @@ export const partnerAuth = {
   revokeAll: () => req<{ ok: boolean; revoked: number }>("POST", "/api/partner/auth/revoke-all"),
 };
 
+export interface PartnerCertificateSummary {
+  certificateNumber: string;
+  cardGame: string | null;
+  setName: string | null;
+  cardName: string | null;
+  cardNumber: string | null;
+  grade: string | null;
+  status: string | null;
+  approvalState: "APPROVED" | "PENDING_REVIEW";
+  printState: string | null;
+  nfcState: "NOT_WRITTEN" | "WRITTEN" | "VERIFIED" | "LOCKED";
+  originLocationName: string | null;
+  approvedAt: string | null;
+}
+
+export interface PartnerLabelPreview {
+  ok: boolean;
+  certificateNumber: string;
+  certificateNumbers: string[];
+  printState: string;
+  labelPreviewUrl: string;
+  expiresInSeconds: number;
+}
+
+export interface PartnerNfcOperation {
+  ok: boolean;
+  certificateNumber: string;
+  nfcState: "NOT_WRITTEN" | "WRITTEN" | "VERIFIED" | "LOCKED";
+  changed: boolean;
+}
+
+export interface PartnerCompletionOperation {
+  ok: boolean;
+  certificateNumber: string;
+  certificateNumbers: string[];
+  printState: string;
+}
+
+/** Tenant-scoped completion register and controlled physical operations. All authority stays server-side. */
+export const partnerCertificates = {
+  list: () => req<{ certificates: PartnerCertificateSummary[] }>("GET", "/api/partner/certificates"),
+  prepareLabel: (certificateNumber: string) =>
+    req<PartnerLabelPreview>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/print`, {}),
+  confirmLabelPrinted: (certificateNumber: string) =>
+    req<{ ok: boolean; certificateNumber: string; printState: string }>(
+      "POST",
+      `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/print/confirm`,
+      {}
+    ),
+  writeNfc: (certificateNumber: string, input: { uid: string; chipType?: string }) =>
+    req<PartnerNfcOperation>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/nfc`, input),
+  verifyNfc: (certificateNumber: string, uid: string) =>
+    req<PartnerNfcOperation>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/nfc/verify`, {
+      uid,
+    }),
+  lockNfc: (certificateNumber: string) =>
+    req<PartnerNfcOperation>("POST", `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/nfc/lock`, {}),
+  complete: (certificateNumber: string) =>
+    req<PartnerCompletionOperation>(
+      "POST",
+      `/api/partner/certificates/${encodeURIComponent(certificateNumber)}/complete`,
+      {}
+    ),
+};
+
 /**
  * Minimum password length the server enforces (server/partner/auth.ts MIN_PASSWORD_LEN). Mirrored
  * here ONLY to give the user an instant, plain-English hint before they submit — the server remains

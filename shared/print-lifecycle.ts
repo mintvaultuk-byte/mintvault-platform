@@ -119,7 +119,11 @@ export const REPRINT_REASON_MIN = 10;
 export const REPRINT_REASON_MAX = 500;
 
 export function isValidReprintReason(reason: unknown): reason is string {
-  return typeof reason === "string" && reason.trim().length >= REPRINT_REASON_MIN && reason.trim().length <= REPRINT_REASON_MAX;
+  return (
+    typeof reason === "string" &&
+    reason.trim().length >= REPRINT_REASON_MIN &&
+    reason.trim().length <= REPRINT_REASON_MAX
+  );
 }
 
 // ── Actions ──────────────────────────────────────────────────────────────────
@@ -135,16 +139,24 @@ export type PrintAction = (typeof PRINT_ACTIONS)[number];
  *  - admin          → full access, including terminal `complete`.
  *  - staff_print    → staff user with can_print: all non-terminal print actions.
  *  - staff_readonly → authenticated staff without can_print: read-only.
+ *  - partner_print  → Partner-scoped label preparation and physical confirmation only.
  */
-export type PrintRole = "admin" | "staff_print" | "staff_readonly";
+/** `partner_print` is deliberately distinct from a MintVault admin/staff role.
+ * The Partner adapter additionally proves immutable certificate origin before it
+ * invokes this workflow; keeping the actor role separate preserves that fact in
+ * the append-only print ledger instead of mis-attributing shop operations to HQ.
+ */
+export type PrintRole = "admin" | "staff_print" | "staff_readonly" | "partner_print";
 
 const ACTION_PERMISSIONS: Record<PrintAction, ReadonlySet<PrintRole>> = {
-  create_batch: new Set<PrintRole>(["admin", "staff_print"]),
+  create_batch: new Set<PrintRole>(["admin", "staff_print", "partner_print"]),
   print_all_ready: new Set<PrintRole>(["admin", "staff_print"]),
-  mark_printed: new Set<PrintRole>(["admin", "staff_print"]),
+  mark_printed: new Set<PrintRole>(["admin", "staff_print", "partner_print"]),
   reprint: new Set<PrintRole>(["admin", "staff_print"]),
-  // Terminal state — admin only (matches "Super Admin: Full access").
-  complete: new Set<PrintRole>(["admin"]),
+  // HQ can complete any eligible certificate. The narrowly-scoped Partner
+  // completion adapter additionally requires immutable origin ownership,
+  // printed state and locked NFC before it calls this transition.
+  complete: new Set<PrintRole>(["admin", "partner_print"]),
 };
 
 export function canPerform(action: PrintAction, role: PrintRole): boolean {
@@ -188,7 +200,13 @@ export interface TransitionResult {
   /** The resulting state when ok. */
   to?: PrintState;
   /** Machine-readable reason when not ok. */
-  code?: "not_approved" | "already_printed" | "invalid_from" | "not_printed_yet" | "reason_required" | "already_completed";
+  code?:
+    | "not_approved"
+    | "already_printed"
+    | "invalid_from"
+    | "not_printed_yet"
+    | "reason_required"
+    | "already_completed";
   message?: string;
 }
 
@@ -226,7 +244,11 @@ export function nextState(
     }
     case "mark_printed": {
       if (from !== "printing") {
-        return { ok: false, code: "not_printed_yet", message: `Only a cert in "printing" can be marked printed (was "${from}").` };
+        return {
+          ok: false,
+          code: "not_printed_yet",
+          message: `Only a cert in "printing" can be marked printed (was "${from}").`,
+        };
       }
       // A reprint batch resolves to "reprinted"; a first-run batch to "printed".
       return { ok: true, to: opts.batchKind === "reprint" ? "reprinted" : "printed" };

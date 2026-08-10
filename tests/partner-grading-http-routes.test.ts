@@ -185,9 +185,7 @@ async function seedMintVaultTables(): Promise<void> {
   // fixture links certificates through submission_items. Without it every grading route 500s with
   // `relation "cards" does not exist` — which is exactly what an HTTP suite is for: no source-text
   // assertion could ever have found that.
-  await admin.query(
-    "CREATE TABLE cards (id serial PRIMARY KEY, submission_id integer REFERENCES submissions(id))"
-  );
+  await admin.query("CREATE TABLE cards (id serial PRIMARY KEY, submission_id integer REFERENCES submissions(id))");
   await admin.query(`CREATE TABLE audit_log (
     id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
     admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamptz NOT NULL DEFAULT now())`);
@@ -359,10 +357,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
   const certIds: number[] = [];
   const submissionItemIds: number[] = [];
   for (let i = 0; i < cardCount; i++) {
-    const itemId = await scalar<number>(
-      "INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id",
-      [destinationSubmissionId]
-    );
+    const itemId = await scalar<number>("INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id", [
+      destinationSubmissionId,
+    ]);
     const certId = await scalar<number>(
       // 0035's origin constraints are paired: a PARTNER certificate carries the full immutable
       // origin snapshot AND its capture metadata, or the row is rejected outright.
@@ -559,10 +556,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
       "SELECT private_notes, card_name FROM certificates WHERE id=$1",
       [certId]
     );
-    expect(
-      after.rows[0].card_name,
-      "positive control: the request really did write to this certificate"
-    ).toBe("Behavioural Control Card");
+    expect(after.rows[0].card_name, "positive control: the request really did write to this certificate").toBe(
+      "Behavioural Control Card"
+    );
     // THE SECURITY PROPERTY. This is GRADE1's behavioural replacement: delete the PII strip by ANY
     // spelling and the partner-supplied value lands here.
     expect(
@@ -721,10 +717,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
       "grade_approved_at is the publish marker — a partner submit must never set it"
     ).toBeNull();
 
-    const item = await scalar<string>(
-      "SELECT status FROM partner_grading_work_items WHERE certificate_id=$1",
-      [certId]
-    );
+    const item = await scalar<string>("SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [
+      certId,
+    ]);
     expect(item, "the work item must await Super Admin review, not be approved by the partner").toBe("pending_review");
 
     // And the settlement-side gate agrees: nothing is approved yet.
@@ -821,12 +816,13 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
       "a card awaiting HQ review must not be unassignable — moving it strands the work item"
     ).toBe(0);
 
-    const after = await admin.query<{ grader_status: string }>(
-      "SELECT grader_status FROM certificates WHERE id=$1",
-      [certId]
-    );
+    const after = await admin.query<{ grader_status: string }>("SELECT grader_status FROM certificates WHERE id=$1", [
+      certId,
+    ]);
     expect(after.rows[0].grader_status, "the certificate must stay at pending_review").toBe("pending_review");
-    const item = await scalar<string>("SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [certId]);
+    const item = await scalar<string>("SELECT status FROM partner_grading_work_items WHERE certificate_id=$1", [
+      certId,
+    ]);
     expect(item, "and the work item stays in lockstep with it").toBe("pending_review");
   });
 
@@ -893,6 +889,353 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
     // Positive control: the caller's own assigned cards ARE returned, so an empty queue cannot
     // make the isolation assertion pass vacuously.
     expect(ids).toEqual(expect.arrayContaining(mine.certIds));
+  });
+
+  it("G5A: the certificate register exposes only the caller's own safe completion summary", async () => {
+    const mine = await seedGradingFixture({ privateNotes: "completed-mine" });
+    const theirs = await seedGradingFixture({ privateNotes: "completed-theirs" });
+    const mineCert = mine.certIds[0];
+    const theirCert = theirs.certIds[0];
+    await admin.query(
+      `UPDATE certificates
+          SET grade=9.5, grade_approved_at=now(), print_state='printed', nfc_uid='local-only-nfc',
+              nfc_last_verified_at=now(), nfc_locked=true
+        WHERE id=$1`,
+      [mineCert]
+    );
+    const mineCertificateNumber = await scalar<string>("SELECT certificate_number FROM certificates WHERE id=$1", [
+      mineCert,
+    ]);
+    const theirCertificateNumber = await scalar<string>("SELECT certificate_number FROM certificates WHERE id=$1", [
+      theirCert,
+    ]);
+    const cookie = await login(mine.graderEmail);
+
+    const res = await req("GET", "/api/partner/certificates", { cookie });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const certificates = (res.body.certificates ?? []) as Record<string, unknown>[];
+    const mineRow = certificates.find((certificate) => certificate.certificateNumber === mineCertificateNumber);
+    expect(mineRow).toMatchObject({
+      certificateNumber: expect.any(String),
+      grade: "9.5",
+      approvalState: "APPROVED",
+      printState: "printed",
+      nfcState: "LOCKED",
+      originLocationName: expect.any(String),
+    });
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain(theirCertificateNumber);
+    expect(body).not.toContain("local-only-nfc");
+    expect(body).not.toContain("completed-mine");
+    expect(body).not.toContain("completed-theirs");
+  });
+
+  it("G5B: a Partner Owner can fulfil and complete an own settled submission — never another tenant's", async () => {
+    const mine = await seedGradingFixture({ privateNotes: "completion-mine" });
+    const theirs = await seedGradingFixture({ privateNotes: "completion-theirs" });
+    const myNumbers = await Promise.all(
+      mine.certIds.map((id) => scalar<string>("SELECT certificate_number FROM certificates WHERE id=$1", [id]))
+    );
+    const theirNumber = await scalar<string>("SELECT certificate_number FROM certificates WHERE id=$1", [
+      theirs.certIds[0],
+    ]);
+    // The existing print workflow only renders a complete Partner submission after credit settlement.
+    // This fixture starts pre-settlement because the grading tests normally exercise review, not fulfilment.
+    await admin.query(
+      "UPDATE certificates SET grade=9.5, grade_approved_at=now(), print_state='needs_printing', ownership_status='unclaimed' WHERE id = ANY($1::int[])",
+      [mine.certIds]
+    );
+    await admin.query("UPDATE submissions SET status='ready_to_return' WHERE id=$1", [mine.destinationSubmissionId]);
+    await admin.query("UPDATE partner_grading_work_items SET status='approved' WHERE partner_submission_id=$1", [
+      mine.partnerSubmissionId,
+    ]);
+    // Completion requires the exact consumed-reservation evidence the production settlement path
+    // writes: a funded wallet, canonical -1 debit and one linked consumed terminal event per card.
+    const walletId = await scalar<string>(
+      "INSERT INTO partner_wallets (tenant_id, status) VALUES ($1,'active') RETURNING id",
+      [mine.tenantId]
+    );
+    await admin.query(
+      `INSERT INTO partner_credit_ledger
+         (wallet_id, tenant_id, amount, entry_type, idempotency_key, source, reason, actor_type, request_fingerprint)
+       VALUES ($1,$2,10,'purchase',$3,'admin','grading HTTP completion fixture','admin',$4)`,
+      [walletId, mine.tenantId, `g5-completion-fund-${randomUUID()}`, "f".repeat(64)]
+    );
+    for (const certId of mine.certIds) {
+      const cardId = await scalar<string>(
+        "SELECT partner_submission_card_id::text FROM partner_grading_work_items WHERE certificate_id=$1",
+        [certId]
+      );
+      const reservationId = await scalar<string>(
+        `INSERT INTO partner_credit_reservations
+           (wallet_id, tenant_id, source, submission_reference, card_reference, reserved_credits,
+            status, consumed_at, idempotency_key, request_fingerprint, reason, actor_type, expires_at)
+         VALUES ($1,$2,'portal',$3,$4,1,'consumed',now(),$5,$6,'grading HTTP completion fixture','system',now() + interval '30 days')
+         RETURNING id`,
+        [
+          walletId,
+          mine.tenantId,
+          mine.partnerSubmissionId,
+          `partner-submission-card:${cardId}:1`,
+          `g5-completion-reservation-${randomUUID()}`,
+          "c".repeat(64),
+        ]
+      );
+      const ledgerEntryId = await scalar<string>(
+        `INSERT INTO partner_credit_ledger
+           (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason, actor_type, request_fingerprint)
+         VALUES ($1,$2,-1,'admin_adjustment',$3,$4,'system','MintVault grading completed for Partner submission card.','admin',$5)
+         RETURNING id`,
+        [walletId, mine.tenantId, `reservation-consume:${reservationId}`, reservationId, "d".repeat(64)]
+      );
+      await admin.query(
+        `INSERT INTO partner_credit_reservation_events
+           (reservation_id, wallet_id, tenant_id, event_type, amount, idempotency_key, request_fingerprint,
+            source, reason, actor_type, ledger_entry_id)
+         VALUES ($1,$2,$3,'consumed',1,$4,$5,'system','grading HTTP completion fixture','system',$6::uuid)`,
+        [reservationId, walletId, mine.tenantId, `g5-completion-event-${randomUUID()}`, "e".repeat(64), ledgerEntryId]
+      );
+    }
+    storage.trackPrefix("print-batches/");
+
+    const cookie = await login(mine.graderEmail);
+    const crossTenant = await req("POST", `/api/partner/certificates/${encodeURIComponent(theirNumber)}/print`, {
+      cookie,
+      body: {},
+    });
+    expect(crossTenant.status, "a Partner must not start another tenant's label batch").toBe(404);
+
+    const prepared = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/print`, {
+      cookie,
+      body: {},
+    });
+    expect(prepared.status, JSON.stringify(prepared.body)).toBe(200);
+    expect(prepared.body.certificateNumbers).toEqual(expect.arrayContaining(myNumbers));
+    const previewUrl = String(prepared.body.labelPreviewUrl ?? "");
+    expect(previewUrl, "the Partner receives a short-lived object URL, never an admin route").toContain("X-Amz-");
+    const preview = await fetch(previewUrl);
+    expect(preview.status, "the rendered preview must be a real MinIO object").toBe(200);
+    expect(preview.headers.get("content-type") ?? "").toContain("application/pdf");
+
+    const prematureNfc = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/nfc`, {
+      cookie,
+      body: { uid: "04:AA:BB:CC:01" },
+    });
+    expect(prematureNfc.status).toBe(409);
+    expect(prematureNfc.body.code).toBe("PRINT_CONFIRMATION_REQUIRED");
+
+    const confirmed = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/print/confirm`, {
+      cookie,
+      body: {},
+    });
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM print_events WHERE cert_id = ANY($1::text[]) AND actor_role='partner_print'",
+        [myNumbers]
+      ),
+      "the existing append-only print ledger must attribute the Partner action without pretending it was HQ"
+    ).toBe("4");
+
+    const uid = "04:AA:BB:CC:01";
+    const written = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/nfc`, {
+      cookie,
+      body: { uid, chipType: "NTAG215" },
+    });
+    expect(written.status, JSON.stringify(written.body)).toBe(200);
+    expect(written.body).toMatchObject({ nfcState: "WRITTEN", changed: true });
+
+    const duplicate = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[1])}/nfc`, {
+      cookie,
+      body: { uid },
+    });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.code).toBe("UID_IN_USE");
+
+    const wrongUid = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/nfc/verify`, {
+      cookie,
+      body: { uid: "04:AA:BB:CC:99" },
+    });
+    expect(wrongUid.status).toBe(409);
+    expect(wrongUid.body.code).toBe("UID_MISMATCH");
+
+    const verified = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/nfc/verify`, {
+      cookie,
+      body: { uid },
+    });
+    expect(verified.status, JSON.stringify(verified.body)).toBe(200);
+    expect(verified.body.nfcState).toBe("VERIFIED");
+    const locked = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/nfc/lock`, {
+      cookie,
+      body: {},
+    });
+    expect(locked.status, JSON.stringify(locked.body)).toBe(200);
+    expect(locked.body.nfcState).toBe("LOCKED");
+
+    const incompleteCompletion = await req(
+      "POST",
+      `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/complete`,
+      { cookie, body: {} }
+    );
+    expect(incompleteCompletion.status, JSON.stringify(incompleteCompletion.body)).toBe(409);
+    expect(incompleteCompletion.body.code).toBe("NFC_LOCK_REQUIRED");
+    expect(
+      await scalar<string>("SELECT print_state FROM certificates WHERE certificate_number=$1", [myNumbers[0]])
+    ).toBe("printed");
+    expect(
+      await scalar<string>("SELECT print_state FROM certificates WHERE certificate_number=$1", [myNumbers[1]])
+    ).toBe("printed");
+
+    const secondUid = "04:AA:BB:CC:02";
+    expect(
+      (
+        await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[1])}/nfc`, {
+          cookie,
+          body: { uid: secondUid, chipType: "NTAG215" },
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[1])}/nfc/verify`, {
+          cookie,
+          body: { uid: secondUid },
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[1])}/nfc/lock`, {
+          cookie,
+          body: {},
+        })
+      ).status
+    ).toBe(200);
+
+    const completed = await req("POST", `/api/partner/certificates/${encodeURIComponent(myNumbers[0])}/complete`, {
+      cookie,
+      body: {},
+    });
+    expect(completed.status, JSON.stringify(completed.body)).toBe(200);
+    expect(completed.body).toMatchObject({
+      certificateNumbers: expect.arrayContaining(myNumbers),
+      printState: "completed",
+    });
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM certificates WHERE certificate_number = ANY($1::text[]) AND print_state='completed'",
+        [myNumbers]
+      )
+    ).toBe("2");
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM print_events WHERE cert_id = ANY($1::text[]) AND actor_role='partner_print' AND action='complete'",
+        [myNumbers]
+      )
+    ).toBe("2");
+    expect(await scalar<string>("SELECT status FROM partner_submissions WHERE id=$1", [mine.partnerSubmissionId])).toBe(
+      "completed"
+    );
+    expect(await scalar<string>("SELECT status FROM submissions WHERE id=$1", [mine.destinationSubmissionId])).toBe(
+      "completed"
+    );
+
+    const crossTenantCompletion = await req(
+      "POST",
+      `/api/partner/certificates/${encodeURIComponent(theirNumber)}/complete`,
+      { cookie, body: {} }
+    );
+    expect(crossTenantCompletion.status, "a Partner must not complete another tenant's certificate").toBe(404);
+
+    const register = await req("GET", "/api/partner/certificates", { cookie });
+    expect(register.status).toBe(200);
+    const registerJson = JSON.stringify(register.body);
+    expect(registerJson).not.toContain(uid);
+    expect(registerJson).not.toContain(theirNumber);
+    expect(
+      await scalar<string>(
+        "SELECT count(*)::text FROM partner_audit_events WHERE tenant_id=$1 AND action IN ('certificate.nfc_written','certificate.nfc_verified','certificate.nfc_locked')",
+        [mine.tenantId]
+      ),
+      "NFC steps must be durable Partner audit events, not only UI state"
+    ).toBe("6");
+  }, 120_000);
+
+  it("G5C: a location-scoped technician cannot confirm a malformed mixed-location Partner batch", async () => {
+    const mine = await seedGradingFixture({ privateNotes: "completion-location-mine", cards: 1 });
+    const mineNumber = await scalar<string>("SELECT certificate_number FROM certificates WHERE id=$1", [
+      mine.certIds[0],
+    ]);
+
+    // Simulate a legacy/corrupt print-batch row: its certificate list crosses locations but carries
+    // the caller's tenant snapshot. The route must not let that malformed row turn into a cross-
+    // location state mutation merely because its requested certificate is in scope.
+    const otherLocationId = await scalar<string>(
+      "INSERT INTO partner_locations (tenant_id, partner_id, public_ref, name, status) VALUES ($1,$1,$2,$3,'ACTIVE') RETURNING id",
+      [mine.tenantId, `gh-loc-mixed-${randomUUID().slice(0, 8)}`, "Mixed batch other location"]
+    );
+    const otherSubmissionId = await scalar<number>(
+      "INSERT INTO submissions (user_id, tracking_number, status, service_tier) VALUES ('gh-mixed',$1,'in_grading','standard') RETURNING id",
+      [`MV-GH-MIXED-${randomUUID().slice(0, 8)}`]
+    );
+    const otherItemId = await scalar<number>("INSERT INTO submission_items (submission_id) VALUES ($1) RETURNING id", [
+      otherSubmissionId,
+    ]);
+    const theirNumber = `MVGHMIXED${randomUUID().replace(/-/g, "").slice(0, 10)}`;
+    await admin.query(
+      `INSERT INTO certificates
+         (certificate_number, submission_item_id, status, grade_type, grader_status,
+          print_state, created_by, issued_at, updated_at, private_notes,
+          origin_type, origin_partner_id, origin_partner_public_ref, origin_partner_legal_name,
+          origin_location_id, origin_location_public_ref, origin_location_name,
+          origin_captured_at, origin_snapshot_version, grade, grade_approved_at)
+       VALUES ($1,$2,'active','numeric','assigned','printing','partner_connector',now(),now(),'completion-location-other',
+               'PARTNER',$3,'mixed-location-tenant','Mixed Location Tenant Ltd',$4,'mixed-location','Mixed batch other location',
+               now(),1,9.5,now())`,
+      [theirNumber, otherItemId, mine.tenantId, otherLocationId]
+    );
+    await admin.query(
+      "UPDATE certificates SET grade=9.5, grade_approved_at=now(), print_state='printing' WHERE id=$1",
+      [mine.certIds[0]]
+    );
+
+    const technicianEmail = `gh-tech-${randomUUID().slice(0, 8)}@example.test`;
+    const technicianId = await scalar<string>(
+      `INSERT INTO partner_users (public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required)
+       VALUES ($1,$2,$2,$3,$4,'ACTIVE',false) RETURNING id`,
+      [`gh-tech-${randomUUID().slice(0, 8)}`, mine.tenantId, technicianEmail, await bcrypt.hash(OWNER_PASSWORD, 10)]
+    );
+    await admin.query(
+      "INSERT INTO partner_user_roles (tenant_id, user_id, role_id) SELECT $1,$2,id FROM partner_roles WHERE code='MVGS_ASSESSMENT_TECHNICIAN'",
+      [mine.tenantId, technicianId]
+    );
+    await admin.query("INSERT INTO partner_user_locations (tenant_id, user_id, location_id) VALUES ($1,$2,$3)", [
+      mine.tenantId,
+      technicianId,
+      mine.locationId,
+    ]);
+
+    const batchId = `mixed-location-${randomUUID()}`;
+    await admin.query(
+      `INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by, created_by_role, layout_version)
+       VALUES ($1,'batch','printing',$2::jsonb,2,$3,'partner_print','v1')`,
+      [batchId, JSON.stringify([mineNumber, theirNumber]), `partner:${mine.tenantId}:${technicianId}`]
+    );
+
+    const cookie = await login(technicianEmail);
+    const confirmed = await req("POST", `/api/partner/certificates/${encodeURIComponent(mineNumber)}/print/confirm`, {
+      cookie,
+      body: {},
+    });
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(409);
+    expect(confirmed.body.code).toBe("PRINT_NOT_READY");
+    expect(await scalar<string>("SELECT status FROM print_batches WHERE batch_id=$1", [batchId])).toBe("printing");
+    expect(await scalar<string>("SELECT print_state FROM certificates WHERE certificate_number=$1", [mineNumber])).toBe(
+      "printing"
+    );
+    expect(
+      await scalar<string>("SELECT print_state FROM certificates WHERE certificate_number=$1", [theirNumber])
+    ).toBe("printing");
   });
 
   // =====================================================================================
@@ -1009,7 +1352,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
       deductions: result.deductions,
       basis: "authentication",
     });
-    const storedKind = String(c.grade_type ?? "numeric").trim().toLowerCase();
+    const storedKind = String(c.grade_type ?? "numeric")
+      .trim()
+      .toLowerCase();
     if (c.auth_status === "authentic_altered") return nonNum("AA");
     if (c.auth_status === "not_original") return nonNum("NO");
     if (storedKind === "authentic_altered" || storedKind === "aa") return nonNum("AA");
@@ -1040,20 +1385,29 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
     }
 
     const zeroC = {
-      frontTL: 0, frontTR: 0, frontBL: 0, frontBR: 0, backTL: 0, backTR: 0, backBL: 0, backBR: 0,
+      frontTL: 0,
+      frontTR: 0,
+      frontBL: 0,
+      frontBR: 0,
+      backTL: 0,
+      backTR: 0,
+      backBL: 0,
+      backBR: 0,
     };
     const zeroE = {
-      frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0,
-      backTop: 0, backBottom: 0, backLeft: 0, backRight: 0,
+      frontTop: 0,
+      frontBottom: 0,
+      frontLeft: 0,
+      frontRight: 0,
+      backTop: 0,
+      backBottom: 0,
+      backLeft: 0,
+      backRight: 0,
     };
     const subgrades = {
       centering:
-        centeringSubgradeStrict(
-          c.centering_front_lr,
-          c.centering_front_tb,
-          c.centering_back_lr,
-          c.centering_back_tb
-        )?.subgrade ?? 10,
+        centeringSubgradeStrict(c.centering_front_lr, c.centering_front_tb, c.centering_back_lr, c.centering_back_tb)
+          ?.subgrade ?? 10,
       corners: calcCornerSubgrade({ ...zeroC, ...(c.corner_values ?? {}) }).grade,
       edges: calcEdgeSubgrade({ ...zeroE, ...(c.edge_values ?? {}) }).grade,
       surface,
@@ -1137,7 +1491,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
     expect(after.centering_front_lr, "the server stored the centering measurement the client supplied").toBe("90/10");
 
     const engine = await engineOverPersistedEvidence(certId);
-    expect(engine.grade!, "sanity: the maths must rate this evidence poorly, or the test proves nothing").toBeLessThan(5);
+    expect(engine.grade!, "sanity: the maths must rate this evidence poorly, or the test proves nothing").toBeLessThan(
+      5
+    );
 
     // THE ARCHITECTURE FACT, inverted from what this test used to assert. Changed deliberately:
     // the previous expectation was `.toBe(10)` / `.not.toBe(engineGrade)`, characterising the
@@ -1184,10 +1540,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
     expect(res.body.gradingStatus).toBe("pending_review");
 
     const after = await authorityColumns(certId);
-    const grader = await admin.query<{ grader_status: string }>(
-      "SELECT grader_status FROM certificates WHERE id=$1",
-      [certId]
-    );
+    const grader = await admin.query<{ grader_status: string }>("SELECT grader_status FROM certificates WHERE id=$1", [
+      certId,
+    ]);
 
     // Positive control — the submit transition really happened.
     expect(grader.rows[0].grader_status, "positive control: the card really did move to review").toBe("pending_review");
@@ -1315,10 +1670,9 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
       ),
       "the shared Pristine gate refuses the persisted row: the client's claim of four 10s was discarded"
     ).toBe(false);
-    expect(
-      Number(row.surface_score),
-      "the surface SUB-grade reflects the real pin, not the client's 10"
-    ).toBeLessThan(10);
+    expect(Number(row.surface_score), "the surface SUB-grade reflects the real pin, not the client's 10").toBeLessThan(
+      10
+    );
 
     // NEGATIVE CONTROL — the gate is evidence-driven, not merely "always refuse".
     const clean = await seedGradingFixture({ privateNotes: "pristine-earned" });
@@ -1470,9 +1824,8 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
   // ── The whitelist itself ────────────────────────────────────────────────────────────────
 
   it("W: partnerGradeBody is a WHITELIST — unknown and authority-bearing keys never cross the boundary", async () => {
-    const { partnerGradeBody, PARTNER_GRADE_SERVER_AUTHORED_FIELDS } = await import(
-      "../server/partner/grading-authority"
-    );
+    const { partnerGradeBody, PARTNER_GRADE_SERVER_AUTHORED_FIELDS } =
+      await import("../server/partner/grading-authority");
     const out = partnerGradeBody({
       centering_front_lr: "50/50",
       card_name: "kept",
@@ -1785,9 +2138,7 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
 
     expect(Number(stored.grade), "the partner path used the SAME fallback the HQ panel uses").toBe(hqGrade);
     expect(Number(stored.grade), "and did NOT inflate a stepper-graded card to a bare engine 10").not.toBe(10);
-    expect((res.body as any).authority.basis, "the response says which decision was used").toBe(
-      "legacy-zone-fallback"
-    );
+    expect((res.body as any).authority.basis, "the response says which decision was used").toBe("legacy-zone-fallback");
     await assertRowMatchesSharedMaths(certId, "F2 zone-stepper probe");
 
     // Secondary from the review: the row must not carry the Pristine shape.
@@ -1837,7 +2188,10 @@ async function seedGradingFixture(opts: { privateNotes: string; cards?: number }
         "SELECT auth_notes FROM certificates WHERE id=$1",
         [certId]
       );
-      expect(notes.rows[0].auth_notes, "auth_notes stays refused — the verdict is evidence, the notes are not").toBeNull();
+      expect(
+        notes.rows[0].auth_notes,
+        "auth_notes stays refused — the verdict is evidence, the notes are not"
+      ).toBeNull();
       // grade_strength_score is left alone for a non-numeric card, matching the HQ approve route.
       expect(stored.grade_strength_score, "no strength score for a Not-Graded card").toBeNull();
       await assertRowMatchesSharedMaths(certId, `F3 ${status}`);
