@@ -237,6 +237,7 @@ describe("partner schema ↔ migration parity", () => {
       "0066_partner_rating_lifecycle_hardening.sql", // H2/H3/H4/H5/H6 rating CAS, lease, backoff
       "0067_certificate_immutable_evidence_ledger.sql",
       "0068_certificate_scan_status.sql",
+      "0069_partner_supply_orders.sql",
     ]);
   });
 

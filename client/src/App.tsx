@@ -135,6 +135,7 @@ const AdminProjectControlPackagePage = lazy(() => import("@/pages/admin/project-
 const AdminProjectControlShopLaunchPage = lazy(() => import("@/pages/admin/project-control-shop-launch"));
 const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-control-scanner"));
 const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
+const AdminSupplyOrdersPage = lazy(() => import("@/pages/admin/supply-orders"));
 
 // Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
@@ -152,6 +153,7 @@ const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
+const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
 const PartnerPublicProfilePage = lazy(() => import("@/pages/partner/public-profile"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
@@ -318,6 +320,11 @@ function PartnerPortalRoutes() {
             <PartnerBillingPage />
           </PartnerRouteGuard>
         </Route>
+        <Route path="/partner/supplies">
+          <PartnerRouteGuard requiredPermission="partner.orders.view">
+            <PartnerSuppliesPage />
+          </PartnerRouteGuard>
+        </Route>
         <Route path="/partner/public-profile">
           <PartnerRouteGuard requiredPermission="partner.location.view">
             <PartnerPublicProfilePage />
@@ -403,6 +410,7 @@ function Router() {
           {/* Most-specific first. /admin/partners/dashboard MUST stay above any future
               /admin/partners/:partnerId route, or wouter captures the literal "dashboard". */}
           <Route path="/admin/partners/dashboard" component={AdminPartnerDashboardPage} />
+          <Route path="/admin/supplies" component={AdminSupplyOrdersPage} />
           {/* The two blocks above are disjoint prefixes (/admin/project-control* vs
               /admin/partners/dashboard) and do not shadow one another. */}
           <Route path="/admin/partner-network/partners/:partnerId" component={AdminPartnerManagementDetailPage} />

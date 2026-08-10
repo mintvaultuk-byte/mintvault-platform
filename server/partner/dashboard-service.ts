@@ -1057,7 +1057,7 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
   // partner count, on an endpoint that auto-refreshes. `limit` bounds each source, and the
   // severity sort still runs across the combined set, so prioritisation is unchanged for any
   // realistic alert volume.
-  const [orgs, security, escalations, lockedUsers, lowCredit] = await Promise.all([
+  const [orgs, security, escalations, lockedUsers, lowCredit, supplyExceptions] = await Promise.all([
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT id, legal_name, status, created_at FROM partner_organisations
         WHERE status IN ('SUSPENDED','PENDING')
@@ -1111,6 +1111,26 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
           null
         )
       : null,
+    // Supply orders arrive after the original dashboard estate. A post-dispatch cancellation or
+    // refund is deliberately NOT automatic, so its immutable exception event must be surfaced to
+    // an operator rather than becoming an audit-only dead end. Older estates degrade cleanly.
+    tolerateMissingTable(
+      async () =>
+        (
+          await partnerAdminQuery<Record<string, unknown>>(
+            `SELECT e.order_id, e.tenant_id, o.legal_name, max(e.created_at) AS created_at,
+                  string_agg(DISTINCT COALESCE(e.details->>'requested_action', 'review'), ', ' ORDER BY COALESCE(e.details->>'requested_action', 'review')) AS requested_actions
+             FROM partner_supply_order_events e
+             JOIN partner_organisations o ON o.id=e.tenant_id
+            WHERE e.action='manual_exception_required'
+            GROUP BY e.order_id, e.tenant_id, o.legal_name
+            ORDER BY max(e.created_at) DESC, e.order_id ASC
+            LIMIT $1`,
+            [limit]
+          )
+        ).rows,
+      [] as Record<string, unknown>[]
+    ),
   ]);
 
   const alerts: DashboardAlert[] = [];
@@ -1194,6 +1214,22 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
       // must not be presented as a detection timestamp.
       detectedAt: null,
       link: `/admin/partners/dashboard?partner=${u.tenant_id}&tab=staff`,
+    });
+  }
+
+  for (const exception of supplyExceptions) {
+    const actions = String(exception.requested_actions ?? "review");
+    alerts.push({
+      id: `supply-exception-${exception.order_id}`,
+      partnerId: String(exception.tenant_id),
+      partnerName: String(exception.legal_name),
+      severity: "medium",
+      kind: "supply_manual_exception",
+      reason: `A ${actions} request for a dispatched or completed supply order requires manual review.`,
+      recommendedAction:
+        "Open Supply Orders, inspect its audit trail, and resolve the exception through the original payment/fulfilment process.",
+      detectedAt: iso(exception.created_at),
+      link: "/admin/supplies",
     });
   }
 

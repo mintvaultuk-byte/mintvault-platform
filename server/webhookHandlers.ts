@@ -1,8 +1,6 @@
 import Stripe from "stripe";
-import {
-  PARTNER_CREDITS_CHECKOUT_TYPE,
-  fulfilPartnerCreditPurchase,
-} from "./partner/credit-purchase-service";
+import { PARTNER_CREDITS_CHECKOUT_TYPE, fulfilPartnerCreditPurchase } from "./partner/credit-purchase-service";
+import { PARTNER_SUPPLY_CHECKOUT_TYPE, fulfilPartnerSupplyOrder } from "./partner/supply-service";
 import { getStripeSecretKey } from "./stripeClient";
 import { storage } from "./storage";
 import { db } from "./db";
@@ -266,6 +264,12 @@ export class WebhookHandlers {
       if (meta.type === PARTNER_CREDITS_CHECKOUT_TYPE) {
         await fulfilPartnerCreditPurchase(event.id, session);
       }
+
+      // Supply orders have their own immutable payment record. A signed Stripe event can advance
+      // PENDING_PAYMENT; a browser return, a Partner route, and a replayed event cannot.
+      if (meta.type === PARTNER_SUPPLY_CHECKOUT_TYPE) {
+        await fulfilPartnerSupplyOrder(event.id, session);
+      }
     }
 
     // ── Vault Club subscription events ────────────────────────────────────────
@@ -476,8 +480,8 @@ export class WebhookHandlers {
     if (userRow?.email) {
       // Same visibility fix as the welcome email above — a failed send must
       // not fail the webhook, but must not vanish silently either.
-      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(
-        (e: any) => writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
+      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch((e: any) =>
+        writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
       );
     }
 

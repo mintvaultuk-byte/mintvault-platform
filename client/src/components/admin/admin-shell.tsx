@@ -93,6 +93,7 @@ const NAV: NavSection[] = [
       { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },
       { href: "/admin/partner-network/partners", label: "Partners", icon: Users },
       { href: "/admin/partners/dashboard", label: "Partner Dashboard", icon: PackageCheck },
+      { href: "/admin/supplies", label: "Supply Orders", icon: Package },
     ],
   },
   {

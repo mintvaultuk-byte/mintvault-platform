@@ -273,6 +273,60 @@ export const partnerCredits = {
     req<PartnerCreditCheckout>("POST", "/api/partner/credits/checkout", { packageId, returnPath }),
 };
 
+// ---- supply orders ----
+export interface PartnerSupplyProduct {
+  code: string;
+  display_name: string;
+  units_per_pack: number;
+  pricing_mode: "LOCKED" | "CONFIGURABLE";
+  active_price_pence: number | null;
+  active: boolean;
+  purchasable: boolean;
+}
+
+export interface PartnerSupplyOrderItem {
+  productCode: string;
+  name: string;
+  unitsPerPack: number;
+  quantity: number;
+  grossUnitPricePence: number;
+  grossLineTotalPence: number;
+}
+
+export interface PartnerSupplyOrder {
+  id: string;
+  status: string;
+  delivery_address: Record<string, string>;
+  currency: string;
+  gross_total_pence: number;
+  tax_treatment: "UNCONFIGURED" | "VAT_INCLUDED";
+  vat_rate_basis_points: number | null;
+  net_total_pence: number | null;
+  vat_total_pence: number | null;
+  tracking_reference: string | null;
+  created_at: string;
+  payment_status: string;
+  refunded_total_pence: number;
+  items: PartnerSupplyOrderItem[];
+}
+
+export const partnerSupplies = {
+  products: () =>
+    req<{
+      currency: string;
+      taxTreatment: "UNCONFIGURED" | "VAT_INCLUDED";
+      vatRateBasisPoints: number | null;
+      products: PartnerSupplyProduct[];
+    }>("GET", "/api/partner/supplies/products"),
+  orders: () => req<{ orders: PartnerSupplyOrder[] }>("GET", "/api/partner/supplies/orders"),
+  checkout: (input: {
+    items: Array<{ productCode: string; quantity: number }>;
+    deliveryAddress?: Record<string, string>;
+    idempotencyKey: string;
+    returnPath: string;
+  }) => req<{ orderId: string; checkoutUrl: string }>("POST", "/api/partner/supplies/checkout", input),
+};
+
 // ---- public partner network ----
 export interface PublicPartnerRating {
   available: boolean;

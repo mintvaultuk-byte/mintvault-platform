@@ -683,7 +683,9 @@ const ROUND_TRIPS: RoundTrip[] = [
   },
   {
     number: 68,
-    standalone: true,
+    // 0069 is now above this migration, so 0068's own later-migration guard must refuse an
+    // isolated rollback. The supported descending sequence below proves its reversible path.
+    standalone: false,
     migration: "0068_certificate_scan_status.sql",
     rollback: "rollback-0068-certificate-scan-status.sql",
     hole: "the scanner recovery reconciler queries a certificate scan status column that a fresh migration never created",
@@ -697,6 +699,25 @@ const ROUND_TRIPS: RoundTrip[] = [
          ) AS present`
       );
       return rows[0].present ? "certificate_scan_status_present" : "certificate_scan_status_absent";
+    },
+  },
+  {
+    number: 69,
+    standalone: true,
+    migration: "0069_partner_supply_orders.sql",
+    rollback: "rollback-0069-partner-supply-orders.sql",
+    hole: "Partner supplies can be paid, fulfilled or refunded without an immutable tenant-isolated order/payment snapshot",
+    whenApplied: "supply_order_ledger_present",
+    whenRolledBack: "supply_order_ledger_absent",
+    probe: async () => {
+      const { rows } = await admin.query<{ n: number }>(
+        `SELECT count(*)::int n FROM pg_class
+          WHERE relnamespace='public'::regnamespace AND relkind='r'
+            AND relname IN ('partner_supply_products','partner_supply_tax_settings','partner_supply_orders',
+                            'partner_supply_order_items','partner_supply_payments','partner_supply_refunds',
+                            'partner_supply_order_events')`
+      );
+      return rows[0].n === 7 ? "supply_order_ledger_present" : "supply_order_ledger_absent";
     },
   },
   {
