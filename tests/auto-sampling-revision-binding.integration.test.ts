@@ -13,7 +13,7 @@ vi.mock("../server/db", () => ({ db: { execute: runtime.execute } }));
 vi.mock("../server/storage", () => ({ storage: {} }));
 vi.mock("../server/r2", () => ({ getR2SignedUrl: vi.fn(async () => "https://example.invalid/signed") }));
 
-import { autoApproveAssignedGradeAtRevision, submitAssignedGradeAtRevision } from "../server/grader";
+import { approveCertGrade, autoApproveAssignedGradeAtRevision, submitAssignedGradeAtRevision } from "../server/grader";
 
 let cluster: DisposablePostgres17;
 let pool: pg.Pool;
@@ -132,6 +132,27 @@ describe("Model A sampled auto-approval revision binding", () => {
     expect(outcomes.filter(Boolean)).toHaveLength(1);
     expect(await autoApproveAssignedGradeAtRevision(1, "replay@example.test", "grader-1", revision)).toBe(false);
     expect(await state()).toMatchObject({ grader_status: "approved", status: "active" });
+  });
+
+  it("makes simultaneous sampled-auto and human-review workflow claims mutually exclusive", async () => {
+    const revision = (await state()).grading_revision;
+    const outcomes = await Promise.all([
+      autoApproveAssignedGradeAtRevision(1, "sampler@example.test", "grader-1", revision),
+      submitAssignedGradeAtRevision(1, "grader-1", revision),
+    ]);
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+
+    const current = await state();
+    if (current.grader_status === "approved") {
+      // A manual approval is never a second way to publish an auto-finalised row.
+      await expect(approveCertGrade(1, "reviewer@example.test", revision)).resolves.toBe(false);
+      expect((await state()).grade_approved_by).toBe("sampler@example.test");
+    } else {
+      expect(current).toMatchObject({ grader_status: "pending_review", status: "pending", grade_approved_at: null });
+      // The human reviewer may publish only the same revision that won the review claim.
+      await expect(approveCertGrade(1, "reviewer@example.test", revision)).resolves.toBe(true);
+      expect((await state()).grader_status).toBe("approved");
+    }
   });
 
   it("binds the mandatory-review transition to R and cannot turn a newer grade pending review", async () => {
