@@ -27,7 +27,6 @@ import {
   assignCerts,
   reassignCerts,
   unassignCerts,
-  getCertsForSubmission,
   buildCertImagesPayload,
   buildCertGradingPayload,
   applyCertGradeDraft,
@@ -50,6 +49,7 @@ import {
 } from "../grader";
 // Partner assignment lives in partner-owned code so the protected grader module stays untouched.
 import { assignPartnerCerts } from "../partner/grading-assignment";
+import { getAssignmentCertificatesForSubmission } from "../partner/assignment-certificate-query";
 import { mirrorPartnerApproval, mirrorPartnerRejection } from "../partner/grading-review-mirror";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { db } from "../db";
@@ -1040,7 +1040,7 @@ export function registerGraderRoutes(app: Express): void {
   // ── Admin: cert-level assignment ────────────────────────────────────────────
   app.get("/api/admin/submissions/:id/certs", requireAdmin, async (req: Request, res: Response) => {
     const sid = parseInt(String(req.params.id), 10);
-    return res.json({ certs: await getCertsForSubmission(sid) });
+    return res.json({ certs: await getAssignmentCertificatesForSubmission(sid) });
   });
 
   app.post("/api/admin/graders/assign", requireAdmin, async (req: Request, res: Response) => {

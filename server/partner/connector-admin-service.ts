@@ -501,19 +501,6 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
       }
       throw error;
     }
-    const conflicts = await client.query<{ count: string }>(
-      `SELECT count(*)::text AS count
-         FROM partner_credit_reservations
-        WHERE tenant_id=$1 AND submission_reference=$2 AND source='portal'`,
-      [tenantId, partnerSubmissionId]
-    );
-    if (Number(conflicts.rows[0]?.count ?? "0") > 1) {
-      return {
-        error: "reservation_link_inconsistent",
-        message: "Partner submission has more than one authoritative credit reservation and requires reconciliation.",
-        reservationLinkConflict: true,
-      };
-    }
     const { rows } = await client.query<{
       reservation_id: string;
       reservation_status: string;
@@ -534,8 +521,7 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
         WHERE reservation.tenant_id = $1
           AND reservation.submission_reference = $2
           AND reservation.source = 'portal'
-        ORDER BY reservation.created_at ASC, reservation.id ASC
-        LIMIT 1`,
+        ORDER BY reservation.created_at ASC, reservation.id ASC`,
       [tenantId, partnerSubmissionId]
     );
     const holds = await client.query<{
@@ -556,6 +542,9 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
     if (!reservation && holds.rows.length === 0) return null;
     return {
       ...(reservation ?? {}),
+      reservations: rows.map(({ reservation_id, reservation_status }) => ({ reservation_id, reservation_status })),
+      reservationCount: rows.length,
+      activeReservationCount: rows.filter((row) => row.reservation_status === "active").length,
       destinationCreditHold: holds.rows[0] ?? null,
       reservationLinkConflict: false,
     };

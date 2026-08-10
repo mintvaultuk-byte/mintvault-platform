@@ -378,8 +378,20 @@ export default function PartnerNetworkOpsPage() {
                         Partner: {detail.data.partnerCredit.partner_legal_name} ({detail.data.partnerCredit.partner_id})
                       </div>
                       <div>
-                        Credit reservation: {detail.data.partnerCredit.reservation_id} (
-                        {detail.data.partnerCredit.reservation_status})
+                        Credit reservations: {detail.data.partnerCredit.reservationCount ?? 1}
+                        {Array.isArray(detail.data.partnerCredit.reservations) ? (
+                          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                            {detail.data.partnerCredit.reservations.map((reservation: { reservation_id: string; reservation_status: string }) => (
+                              <li key={reservation.reservation_id}>
+                                {reservation.reservation_id} ({reservation.reservation_status})
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span>
+                            : {detail.data.partnerCredit.reservation_id} ({detail.data.partnerCredit.reservation_status})
+                          </span>
+                        )}
                       </div>
                       <div>Wallet: {detail.data.partnerCredit.wallet_status ?? "unavailable"}</div>
                       {detail.data.partnerCredit.reservationLinkConflict && (

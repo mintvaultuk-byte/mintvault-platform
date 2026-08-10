@@ -576,6 +576,36 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
     expect(after.rows).toEqual(before.rows); // the Super Admin projection is strictly read-only
   });
 
+  it("projects every valid per-card reservation without raising a false reconciliation alert", async () => {
+    await addCredits(2, "g6d-admin-projection-per-card-credit");
+    const source = await makeDraft();
+    const secondCardId = randomUUID();
+    await admin.query(
+      `INSERT INTO partner_submission_cards
+         (id,tenant_id,submission_id,sequence_number,card_name,quantity,front_image_key,back_image_key)
+       VALUES ($1,$2,$3,2,'G6D second physical card',1,$4,$5)`,
+      [
+        secondCardId,
+        tenantId,
+        source,
+        `partner-submissions/${tenantId}/${source}/${secondCardId}/front-fixture.jpg`,
+        `partner-submissions/${tenantId}/${source}/${secondCardId}/back-fixture.jpg`,
+      ]
+    );
+    await admin.query("UPDATE partner_submissions SET card_count=2 WHERE id=$1", [source]);
+    await submitDraft(source, "g6d-admin-projection-per-card");
+
+    const projection = await connectorAdmin.getPartnerSubmissionCreditProjection(tenantId, source);
+
+    expect(projection).toMatchObject({
+      reservationCount: 2,
+      activeReservationCount: 2,
+      reservationLinkConflict: false,
+    });
+    expect(projection?.reservations).toHaveLength(2);
+    expect(projection?.reservations.every((reservation) => reservation.reservation_status === "active")).toBe(true);
+  });
+
   it("fails closed for cross-tenant location, membership, submission, reserve, and cancellation attempts", async () => {
     const tenantA = await createTenantFixture("A");
     const tenantB = await createTenantFixture("B");

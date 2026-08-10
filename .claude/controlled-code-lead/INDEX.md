@@ -23,6 +23,7 @@ Stage 0 (new task) and Stage 7 (final report). Programs group multi-phase work.
 
 | mintvault-super-admin-credit-control | Phase 29 Super Admin credit-control truthfulness | local proof complete | `codex/mintvault-final-product-integration` | `c3459a9e` | `aaf1bfa0` | none | continue Phase 30 credit-purchase reconciliation | `tasks/mintvault-super-admin-credit-control/` |
 | mintvault-stripe-credit-purchase | Phase 30 Stripe credit-purchase proof | local proof complete; provider TEST external | `codex/mintvault-final-product-integration` | `aaf1bfa0` | pending commit | no local HIGH; provider TEST credentials unavailable | continue final master reconciliation | `tasks/mintvault-stripe-credit-purchase/` |
+| partner-full-pilot | Owner-authorised staging pilot | staging activation in progress | `codex/mintvault-final-product-integration` | `f51f0a4c` | working tree | PFP-01/PFP-02 locally verified; staging retest pending exact-SHA CI/deploy | push bounded repair, CI, redeploy, resume pilot | `tasks/partner-full-pilot/` |
 
 ## Conventions
 
