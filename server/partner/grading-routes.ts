@@ -474,7 +474,8 @@ export function partnerGradingRouter(): Router {
       if (currentRevision !== expected) {
         return res.status(409).json({
           code: "STALE_REVIEW",
-          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          error:
+            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
         });
       }
       res.setHeader("Content-Type", "image/png");
@@ -725,4 +726,21 @@ export function partnerGradingRouter(): Router {
   );
 
   return r;
+}
+
+/**
+ * Shared target authorisation for the STATION capture adapter.
+ *
+ * It deliberately reuses the same Partner certificate/assignment binding as grading rather than
+ * accepting an arbitrary certificate ID from a Mac: a signed station may only ever act on a card
+ * that is already assigned to the operator and reachable through that tenant's connector import.
+ * Ported into the unified lineage from the signed-station release — server/partner/station-routes.ts
+ * imports it, and without it the station arm path would have no target authority at all.
+ */
+export async function authorizePartnerScannerCertificate(
+  principal: PartnerPrincipal,
+  certId: number
+): Promise<PartnerCertAuth | null> {
+  const authorised = authorizeAssignedPartnerCert(principal, await loadPartnerCert(principal, certId));
+  return authorised.ok ? authorised.auth : null;
 }

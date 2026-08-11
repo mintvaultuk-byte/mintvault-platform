@@ -582,8 +582,10 @@ async function login(
       expect(storedSecret.rows[0].secret_ref).not.toContain(secret); // stored ENCRYPTED, never plaintext
       expect(storedSecret.rows[0].status).toBe("PENDING"); // an unconfirmed factor does not satisfy MFA
       const { currentTotp } = await import("../server/partner/mfa");
+      // Confirm is BY ENROLMENT ID since migration 0044 (applied in production): the pending secret
+      // is bound to the session that issued it and expires, so it is confirmed explicitly.
       const confirmed = await req("POST", "/api/partner/mfa/confirm", {
-        body: { code: currentTotp(secret, Date.now()) },
+        body: { enrolmentId: enrol.body.enrolmentId as string, code: currentTotp(secret, Date.now()) },
         cookie: owner.cookie,
       });
       expect(confirmed.status).toBe(200);

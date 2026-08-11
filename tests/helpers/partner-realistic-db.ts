@@ -23,7 +23,7 @@ export const PARTNER_MIGRATIONS = [
   "0003_partner_auth_hardening",
   "0004_partner_mfa_enrol",
   "0005_partner_mfa_replay_and_grants",
-  "0046_partner_mfa_pending_lifecycle",
+  "0044_partner_mfa_pending_lifecycle",
   "0006_partner_definer_role",
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
@@ -157,13 +157,16 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0033_partner_audit_action_precision",
   "0034_partner_rbac_seed",
   // 0035 is included because the partner→certificate link lives there
-  // (certificates.origin_partner_id). 0044 deliberately adds no second link, and a suite that
-  // cannot see 0035's columns could not prove that.
+  // (certificates.origin_partner_id). The lifecycle migration deliberately adds no second link,
+  // and a suite that cannot see 0035's columns could not prove that.
   "0035_partner_certificate_origin",
   "0041_partner_submission_credit_lifecycle",
   "0042_partner_per_card_credit_settlement",
   "0043_partner_credit_hold_per_card",
-  "0044_partner_submission_lifecycle_and_location_snapshot",
+  // RENUMBERED 0044 -> 0048 (2026-08-11): production had already applied a different 0044
+  // (0044_partner_mfa_pending_lifecycle), and the migration runner rejects duplicate NUMBERS
+  // before it runs anything. The applied file could not move, so this unapplied one did.
+  "0074_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
@@ -303,9 +306,7 @@ export async function applyMigrationsRealistic(
       if (name === "0042_partner_per_card_credit_settlement") {
         // SET FALSE is NOT optional. PostgreSQL 16+ defaults a role grant to SET TRUE, so
         // `WITH INHERIT TRUE` alone would silently also confer SET ROLE into the definer.
-        await migrator.query(
-          `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`
-        );
+        await migrator.query(`GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`);
       }
       // EVERY migration — including 0041 and 0042 — runs as the NON-SUPERUSER pn_migrator.
       // There is deliberately no executor swap here any more.
@@ -408,9 +409,7 @@ export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise
     // asserts exactly this membership is ABSENT when a suite applies 0041 without 0042. 0041's own
     // closing REVOKE happens to clear it today because pn_migrator is its own grantor, but relying
     // on that makes the outcome order-dependent. Revoke it explicitly instead.
-    await migrator
-      .query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator")
-      .catch(() => {}); // best-effort: never mask the real failure from applyMigrations
+    await migrator.query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator").catch(() => {}); // best-effort: never mask the real failure from applyMigrations
   }
 }
 

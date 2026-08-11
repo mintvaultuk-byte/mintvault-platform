@@ -1014,13 +1014,27 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC || signatureD, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
-        const revisionBoundAddedCode = addedCode
-          .replace(/'(centering|corners|edges|surface)'/g, "")
-          .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");
-        expect(revisionBoundAddedCode).not.toMatch(
+        // E) Scanner evidence revision selection. Restricted to the immutable-master query and
+        //    the explicit current pointer so the grade workflow cannot be widened under this
+        //    exception. Both tokens are SQL identifiers, so they are matched against addedCode.
+        //    Kept identical in both guards.
+        const signatureE =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC || signatureD || signatureE,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
+        // The B3 sub-grade COMPLETENESS check that the authorised signatures extract verbatim from
+        // approveGraderCert names the four sub-grade COLUMNS, one of which is `centering_score`.
+        // Those are column identifiers in a NULL-completeness predicate, not centering MATHS — the
+        // centering calculation lives in shared/centering.ts, which remains byte-identical and is
+        // still hard-blocked by `calcEngine`. The four exact identifiers are therefore removed
+        // before the calculation-token test, and ONLY those: bare `centering`, `mvgs`, `pristine`,
+        // `calculateOverallGrade`, `scoreMvgs`, `cert_id` and `certificate_number` all still fail.
+        // This mirrors the identical treatment already carried by the sibling guard in
+        // tests/variant-line-consolidation.test.ts, so neither can drift into being the weaker one.
+        const b3Columns = /\b(centering_score|corners_score|edges_score|surface_score)\b/g;
+        expect(addedCode.replace(b3Columns, "").replace(/'(centering|corners|edges|surface)'/g, "")).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
         continue;
@@ -1040,7 +1054,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bcertificateOrigin\s*\(/.test(addedJs),
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
         ).toBe(true);
-        expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
+        expect(addedJs).not.toMatch(
+          /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i
+        );
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

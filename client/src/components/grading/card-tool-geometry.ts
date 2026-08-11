@@ -71,6 +71,64 @@ function clampPct(v: number): number {
 }
 
 /**
+ * Convert a browser client-pixel event into a percentage in the source-image
+ * frame.  This deliberately accepts CSS-pixel geometry only: browser zoom and
+ * devicePixelRatio change the relationship between source pixels and CSS
+ * pixels, but must never change a persisted measurement.
+ *
+ * `bounds` is the transformed element's getBoundingClientRect(), while
+ * `sourceDisplayWidth/Height` are its untransformed CSS dimensions
+ * (offsetWidth/offsetHeight).  Supplying both makes the inverse transform
+ * explicit when the capture stage is temporarily deskewed.  A point in the
+ * empty corners of a rotated element is rejected rather than silently clamped
+ * onto an image edge.
+ */
+export function screenPointToSourcePct(input: {
+  clientX: number;
+  clientY: number;
+  bounds: { left: number; top: number; width: number; height: number };
+  sourceDisplayWidth: number;
+  sourceDisplayHeight: number;
+  rotationDeg?: number;
+}): Point | null {
+  const { clientX, clientY, bounds, sourceDisplayWidth: w, sourceDisplayHeight: h, rotationDeg = 0 } = input;
+  if (
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY) ||
+    !Number.isFinite(w) ||
+    !Number.isFinite(h) ||
+    w <= 0 ||
+    h <= 0
+  ) {
+    return null;
+  }
+
+  let ux: number;
+  let uy: number;
+  if (rotationDeg === 0) {
+    // With no transform the rendered bounds and image content box coincide.
+    ux = clientX - bounds.left;
+    uy = clientY - bounds.top;
+  } else {
+    // getBoundingClientRect is the rotated AABB.  Its centre remains the CSS
+    // transform-origin, so inverse-rotate back into the actual image box.
+    const cx = bounds.left + bounds.width / 2;
+    const cy = bounds.top + bounds.height / 2;
+    const rad = (rotationDeg * Math.PI) / 180;
+    const sx = clientX - cx;
+    const sy = clientY - cy;
+    ux = sx * Math.cos(rad) + sy * Math.sin(rad) + w / 2;
+    uy = -sx * Math.sin(rad) + sy * Math.cos(rad) + h / 2;
+  }
+
+  // Do not let a click in letterbox/rotated-AABB empty space manufacture an
+  // apparent edge measurement. A tiny epsilon tolerates browser subpixels.
+  const epsilon = 1e-6;
+  if (ux < -epsilon || uy < -epsilon || ux > w + epsilon || uy > h + epsilon) return null;
+  return { x: clampPct((ux / w) * 100), y: clampPct((uy / h) * 100) };
+}
+
+/**
  * Axis-aligned rect from the four EDGE points: each side contributes only its
  * relevant coordinate — left = LEFT.x, right = RIGHT.x, top = TOP.y,
  * bottom = BOTTOM.y. Feeding the outer and inner edge rects into

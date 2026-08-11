@@ -15,7 +15,7 @@
  * exact vacuity class this file is meant to guard against. A missing file must throw.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const read = (...p: string[]): string => readFileSync(join(process.cwd(), ...p), "utf8");
@@ -202,17 +202,17 @@ describe("PartnerSessionInfo keeps BOTH field families", () => {
       "template path extraction found none — the regex has rotted"
     ).toBeGreaterThanOrEqual(4);
 
-    const all =
-      routes +
-      read("server", "partner", "public-routes.ts") +
-      read("server", "partner", "submission-routes.ts") +
-      read("server", "partner", "customer-routes.ts") +
-      read("server", "partner", "dashboard-routes.ts") +
-      // Reconciliation adds two authenticated routers to the same production
-      // mount. Keep the client/server contract exhaustive rather than making
-      // new scoped surfaces invisible to this merge-loss sentinel.
-      read("server", "partner", "catalogue-routes.ts") +
-      read("server", "partner", "grading-routes.ts");
+    // DERIVED, not a hard-coded list. This previously named five route modules explicitly, and
+    // went stale the moment the signed-station work added catalogue/grading/station routers —
+    // reporting `/catalogue/snapshot` as unserved when server/partner/catalogue-routes.ts
+    // registers it and mount.ts mounts it. A guard whose job is detecting merge loss must not
+    // itself produce a false positive every time a route module is added, so it now reads every
+    // `*routes*.ts` module in server/partner/ — which is the set mount.ts actually composes.
+    const routeModules = readdirSync(join(process.cwd(), "server", "partner"))
+      .filter((f) => /routes.*\.ts$/.test(f))
+      .sort();
+    expect(routeModules.length, "route-module discovery found none — the glob has rotted").toBeGreaterThan(5);
+    const all = routeModules.map((f) => read("server", "partner", f)).join("\n");
     const registered = new Set(
       [...all.matchAll(/\br\.(?:get|post|patch|put|delete)\(\s*"([^"]+)"/g)].map((m) =>
         m[1].replace(/:[A-Za-z0-9_]+/g, ":param").replace(/\/$/, "")

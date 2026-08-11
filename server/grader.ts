@@ -649,6 +649,36 @@ export async function buildCertImagesPayload(
       }
     })
   );
+
+  // Phase 58A: the immutable-evidence ledger owns native-geometry browser
+  // working assets. Keep this additive and fail closed to the established
+  // legacy URL map while a rolling deployment is creating the new table.
+  // A TIFF master is deliberately never handed to the browser workstation.
+  try {
+    const rows = (
+      await db.execute(sql`
+        SELECT side, working_object_key
+        FROM certificate_image_evidence
+        WHERE certificate_id = ${certId}
+          AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+          AND is_current = true
+      `)
+    ).rows as Array<{ side: string; working_object_key: string | null }>;
+    await Promise.all(
+      rows.map(async (row) => {
+        if ((row.side !== "front" && row.side !== "back") || !row.working_object_key) return;
+        try {
+          urls[`${row.side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
+        } catch {
+          urls[`${row.side}_working`] = null;
+        }
+      })
+    );
+  } catch {
+    // The evidence table is additive and may not exist during a rolling
+    // deployment. Legacy image URLs remain available; new evidence does not
+    // silently fall back until its working derivative has been recorded.
+  }
   return { urls, quality: c.imageQualityChecks || {} };
 }
 
@@ -889,9 +919,7 @@ export async function getAssignedGradeSubmitSnapshot(certId: number, expectedRev
     LIMIT 1
   `);
   const row = r.rows[0] as { operator_grade?: string | null; card_name?: string | null } | undefined;
-  return row
-    ? { operatorGrade: row.operator_grade ?? null, cardName: row.card_name ?? null }
-    : null;
+  return row ? { operatorGrade: row.operator_grade ?? null, cardName: row.card_name ?? null } : null;
 }
 
 /**

@@ -12,7 +12,7 @@
  * no error, no log line and no failing request to notice it by.
  *
  * This is a live production risk, not a hypothetical: production's migration
- * journal does NOT contain 0046_partner_mfa_pending_lifecycle — its 0046 slot
+ * journal does NOT contain 0044_partner_mfa_pending_lifecycle — its 0046 slot
  * holds a different scanner migration entirely.
  */
 import { describe, expect, it } from "vitest";
@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 const AUTH = readFileSync("server/partner/auth.ts", "utf8");
 const PUBLIC_ROUTES = readFileSync("server/partner/public-routes.ts", "utf8");
 const PORTAL_ROUTES = readFileSync("server/partner/routes.ts", "utf8");
-const MIGRATION_0046 = readFileSync("migrations/0046_partner_mfa_pending_lifecycle.sql", "utf8");
+const MIGRATION_0046 = readFileSync("migrations/0044_partner_mfa_pending_lifecycle.sql", "utf8");
 
 describe("partner login fails CLOSED when the MFA projection is missing", () => {
   it("refuses rather than trusting an absent has_active_mfa", () => {
@@ -61,7 +61,9 @@ describe("partner login fails CLOSED when the MFA projection is missing", () => 
       expect(src, `${name} must map mfa_state_unavailable to 503`).toContain(
         'if (result.reason === "mfa_state_unavailable")'
       );
-      expect(src, `${name} must not leak the reason`).toContain('res.status(503).json({ error: "partner login unavailable" })');
+      expect(src, `${name} must not leak the reason`).toContain(
+        'res.status(503).json({ error: "partner login unavailable" })'
+      );
     }
   });
 
@@ -101,7 +103,9 @@ describe("partner MFA restart requires elevated verification", () => {
   it("still refuses to become a factor-REPLACEMENT path even with a valid password", () => {
     const fnAt = MFA_SERVICE.indexOf("export async function mfaEnrolRestart(");
     const body = MFA_SERVICE.slice(fnAt, fnAt + 2600);
-    expect(body).toContain('if (await hasActiveMethod(c, ctx.userId)) return { ok: false, reason: "requires_current_factor" };');
+    expect(body).toContain(
+      'if (await hasActiveMethod(c, ctx.userId)) return { ok: false, reason: "requires_current_factor" };'
+    );
   });
 
   it("preserves session-bound pending enrolment and its expiry", () => {

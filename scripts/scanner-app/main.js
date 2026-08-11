@@ -14,7 +14,7 @@
  * icon reappears or it doesn't — no silent drift.
  */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, clipboard, powerMonitor } = require("electron");
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, powerMonitor } = require("electron");
 const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
@@ -22,8 +22,9 @@ const os    = require("node:os");
 
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
-const { Watcher, INBOX, FAILED } = require("./lib/watcher");
-const agentPlist = require("./lib/agent-plist");
+const { Watcher } = require("./lib/watcher");
+const stationClient = require("./lib/station-client");
+const stationIdentity = require("./lib/station-identity");
 
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
@@ -163,25 +164,27 @@ function loadTrayPng(file) {
   }
 }
 
-function trayImageForState(s, paused) {
+function trayImageForState(s) {
   // Template images are auto-tinted by macOS — black source becomes white
   // in dark mode, accent in light mode. All four states ship as templates
   // for visual consistency; differentiation is via glyph shape (M / M+arrow
-  // / M+exclamation / pause-bars).
-  // Paused wins over any logical state — when the watcher is muted, the
-  // operator sees the pause glyph regardless of upload state.
-  if (paused) {
-    const img = loadTrayPng("tray-paused.png");
-    img.setTemplateImage(true);
-    return img;
-  }
+  // / M+exclamation). The scanner has one target-bound capture mode, so the
+  // tray never presents a paused/manual/watch-folder state as normal work.
   const map = {
     idle:            "tray-idle.png",
-    front_buffered:  "tray-busy.png",
+    starting:        "tray-busy.png",
+    scanning_front:  "tray-busy.png",
+    scanning_back:   "tray-busy.png",
+    awaiting_scan:   "tray-idle.png",
+    preview_ready:   "tray-idle.png",
+    preview_error:   "tray-error.png",
+    expired:         "tray-error.png",
+    finalising:      "tray-busy.png",
     uploading:       "tray-busy.png",
+    validating:      "tray-busy.png",
+    retrying:        "tray-busy.png",
     success:         "tray-idle.png",
     error:           "tray-error.png",
-    manual_pending:  "tray-busy.png",
   };
   const file = map[s] || "tray-idle.png";
   const img = loadTrayPng(file);
@@ -190,28 +193,30 @@ function trayImageForState(s, paused) {
 }
 
 function trayTooltipForState(s) {
-  const paused = stateMod.isPaused();
-  if (paused) {
-    const minsLeft = Math.max(0, Math.ceil((s.pausedUntil - Date.now()) / 60_000));
-    return `MintVault Scanner — Paused (${minsLeft}m remaining)`;
-  }
   const stateLabels = {
-    idle:           "Idle — waiting for scan",
-    front_buffered: "Front captured — scan back",
-    uploading:      "Uploading…",
-    success:        "Upload succeeded",
-    error:          "Upload failed",
-    manual_pending: "Manual mode — waiting for scan",
+    idle:           "Ready — waiting for a server-owned capture",
+    starting:       "Starting scanner…",
+    scanning_front: "Scanning front…",
+    scanning_back:  "Scanning back…",
+    awaiting_scan:  "Target armed — waiting for operator Scan",
+    preview_ready:  "Preview ready — accept or rescan",
+    preview_error:  "Preview needs attention",
+    expired:        "Capture target expired",
+    finalising:     "Processing image…",
+    uploading:      "Uploading original TIFF…",
+    validating:     "Validating evidence…",
+    retrying:       "Retrying current side…",
+    success:        "Capture accepted",
+    error:          "Capture needs attention",
   };
   const label = stateLabels[s.state] || s.state;
-  return `MintVault Scanner — ${label} (${s.mode})`;
+  return `MintVault Scanner — ${label}`;
 }
 
 function refreshTray() {
   if (!tray) return;
   const s = stateMod.get();
-  const paused = stateMod.isPaused();
-  tray.setImage(trayImageForState(s.state, paused));
+  tray.setImage(trayImageForState(s.state));
   tray.setToolTip(trayTooltipForState(s));
   buildTrayMenu();
 }
@@ -221,22 +226,11 @@ function buildTrayMenu() {
   const s = stateMod.get();
   const menu = Menu.buildFromTemplate([
     { label: `MintVault Scanner — ${s.state}`, enabled: false },
-    { label: `Mode: ${s.mode}`, enabled: false },
     { label: `Last: ${s.lastUploadedCert || "—"}`, enabled: false },
     { type: "separator" },
     { label: "Show window", click: () => showPopover() },
-    { label: "Open inbox folder", click: () => shell.openPath(INBOX) },
-    { label: "Show logs", click: () => shell.openPath(SCANNER_LOG) },
-    { label: "Retry failed (today)", click: async () => {
-      const result = watcher.retryFailed();
-      if (result.moved > 0) {
-        await watcher.stop();
-        await watcher.start();
-        refreshTray();
-      }
-    }},
-    { label: "Restart watcher", click: async () => { await watcher.stop(); await watcher.start(); refreshTray(); } },
-    { label: "Reboot scanner", click: () => rebootScanner() },
+    { label: "Show service logs", click: () => shell.openPath(SCANNER_LOG) },
+    { label: "Restart scanner service", click: () => rebootScanner() },
     { type: "separator" },
     { label: "About", click: () => showPopover() },
   ]);
@@ -247,7 +241,7 @@ function setupTray() {
   const s = stateMod.get();
   let img;
   try {
-    img = trayImageForState(s.state, stateMod.isPaused());
+    img = trayImageForState(s.state);
     console.log(`[tray] created with image (empty=${img.isEmpty()}, template=${img.isTemplateImage()}, size=${JSON.stringify(img.getSize())})`);
   } catch (err) {
     console.error(`[tray] image load failed entirely: ${err.message} — using inline fallback`);
@@ -269,17 +263,18 @@ function setupTray() {
 
 function createPopover() {
   popover = new BrowserWindow({
-    // Wider/taller so the scan-confirm popup can render the Front + Back card
-    // thumbnails large enough to read at a glance (two portrait cards side by
-    // side). Still comfortably fits top-right over the scanner UI on a Mac.
-    width: 560,
-    height: 660,
+    // A durable half-screen station surface, not a transient tiny popover.
+    // It remains open while the operator selects the next target in MintVault.
+    width: 660,
+    height: 760,
     show: false,
     frame: false,
     transparent: false,
-    resizable: false,
+    resizable: true,
+    minWidth: 580,
+    minHeight: 620,
     alwaysOnTop: false,
-    skipTaskbar: true,
+    skipTaskbar: false,
     backgroundColor: "#0f0f0f",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -288,10 +283,6 @@ function createPopover() {
     },
   });
   popover.loadFile(path.join(__dirname, "renderer", "index.html"));
-
-  popover.on("blur", () => {
-    if (!popover.webContents.isDevToolsOpened()) popover.hide();
-  });
 
   popover.on("close", (e) => {
     if (!isQuitting) {
@@ -306,12 +297,22 @@ function positionPopoverNearTray() {
   const trayBounds = tray.getBounds();
   const winBounds  = popover.getBounds();
   const display    = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-  // Place under the tray icon, clamped to display.
+  // A menu-bar item can be at the top *or* bottom of a display. The previous
+  // unconditional "under" placement put the Scanner window below a bottom
+  // menu bar, making the app appear to have vanished just when the operator
+  // needed to review a positioning scan.
   const x = Math.round(Math.min(
     Math.max(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2, display.workArea.x + 8),
     display.workArea.x + display.workArea.width - winBounds.width - 8,
   ));
-  const y = Math.round(trayBounds.y + trayBounds.height + 4);
+  const trayAtTop = trayBounds.y <= display.workArea.y + 32;
+  const preferredY = trayAtTop
+    ? trayBounds.y + trayBounds.height + 4
+    : trayBounds.y - winBounds.height - 4;
+  const y = Math.round(Math.min(
+    Math.max(preferredY, display.workArea.y + 8),
+    display.workArea.y + display.workArea.height - winBounds.height - 8,
+  ));
   popover.setPosition(x, y, false);
 }
 
@@ -337,22 +338,89 @@ function pushStateToRenderer() {
   refreshTray();
 }
 
+function stationSummary(sessionBody) {
+  if (!sessionBody || typeof sessionBody !== "object") return null;
+  return {
+    organisationName: typeof sessionBody.organisationName === "string" ? sessionBody.organisationName : null,
+    locationName: typeof sessionBody.locationName === "string" ? sessionBody.locationName : null,
+    displayName: typeof sessionBody.displayName === "string" ? sessionBody.displayName : null,
+  };
+}
+
+/** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
+async function stationSetupState() {
+  let session;
+  try {
+    session = await stationClient.stationSession();
+  } catch (error) {
+    return { ok: true, stage: "sign_in", error: error?.message || "Sign in to MintVault" };
+  }
+  if (!session.ok || !session.body?.mfaPassed) {
+    if (session.status === 503) {
+      return { ok: true, stage: "station_unavailable", error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin." };
+    }
+    return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
+  }
+  const summary = stationSummary(session.body);
+  const code = stationIdentity.currentStationCode();
+  if (!code) {
+    const locations = await stationClient.enrolmentLocations();
+    if (!locations.ok) {
+      return {
+        ok: true,
+        stage: "station_unavailable",
+        summary,
+        error: locations.status === 503
+          ? "MintVault station enrolment is temporarily unavailable. Contact a MintVault Super Admin."
+          : "MintVault could not confirm this station’s authorised location.",
+      };
+    }
+    return {
+      ok: true,
+      stage: "register",
+      summary,
+      locations: locations.ok && Array.isArray(locations.body?.locations) ? locations.body.locations.map((location) => ({
+        id: String(location.id), name: String(location.name),
+      })) : [],
+    };
+  }
+  const status = await stationClient.enrolmentStatus(code);
+  if (!status.ok || !status.body?.station) {
+    return { ok: true, stage: "station_unavailable", summary, stationCode: code };
+  }
+  const station = status.body.station;
+  try { stationIdentity.setStationStatus(station.status); } catch {}
+  return {
+    ok: true,
+    stage: String(station.status || "PENDING").toLowerCase(),
+    summary,
+    stationCode: code,
+    calibrationStatus: station.calibrationStatus || "UNPROVISIONED",
+  };
+}
+
+function heartbeatPayload() {
+  const state = stateMod.get();
+  const health = state.scannerHealth || {};
+  const scannerStatus = String(health.status || "checking");
+  return {
+    appVersion: APP_VERSION,
+    scannerConnected: ["ready", "busy", "profile_unprovisioned"].includes(scannerStatus),
+    scannerHardware: {
+      manufacturer: "Canon",
+      model: String(health.model || "CanoScan LiDE 400"),
+      ...(health.serial ? { serial: String(health.serial) } : {}),
+      ...(health.deviceId ? { deviceId: String(health.deviceId) } : {}),
+    },
+    scannerProfileVersion: String(health.profileVersion || "mintvault-canon-lide-400-v3"),
+    pendingUploadCount: watcher ? watcher.targetedPendingUploadCount() : 0,
+    captureState: String(state.activeCapture?.stage || state.state || "IDLE").slice(0, 64),
+    ...(state.lastError ? { lastFailureCode: String(state.lastError).slice(0, 120) } : {}),
+  };
+}
+
 function setupIpc() {
   ipcMain.handle("get-state", () => stateMod.get());
-
-  ipcMain.handle("set-mode", (_e, mode) => {
-    watcher.setMode(mode);
-    return { ok: true, mode };
-  });
-
-  // Pause toggle. setPaused(true) sets a 30-min ceiling on pausedUntil so
-  // a forgotten pause auto-clears. Tray + popover update via the same
-  // state-update push that other transitions use.
-  ipcMain.handle("set-paused", (_e, paused) => {
-    stateMod.setPaused(!!paused);
-    pushStateToRenderer();
-    return { ok: true, paused: stateMod.isPaused(), pausedUntil: stateMod.get().pausedUntil };
-  });
 
   // Generic settings setter — only allows keys whitelisted in lib/state.js.
   // Used by the popover's Settings section (auto-open-on-error checkbox).
@@ -363,87 +431,13 @@ function setupIpc() {
     return { ok: true };
   });
 
-  // Test-scan — write a 1×1 transparent PNG to ~/mintvault-scans/inbox/
-  // with a .tif extension. Chokidar will pick it up like a real scan and
-  // route through the same pipeline. Creates a real cert (server has no
-  // way to know it's a test), so the operator must soft-delete via the
-  // orphan picker afterwards. Documented in README.
-  ipcMain.handle("test-scan", () => {
-    try {
-      const { INBOX } = require("./lib/watcher");
-      const ts = Date.now();
-      const dest = path.join(INBOX, `test-scan-${ts}.tif`);
-      // 1×1 transparent PNG — sharp on the server side decodes it fine.
-      // Renamed to .tif so it passes the watcher's accepted-ext filter.
-      const TINY_PNG = Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgYGD4DwABAQEAH" +
-        "9N6GgAAAABJRU5ErkJggg==",
-        "base64",
-      );
-      fs.writeFileSync(dest, TINY_PNG);
-      console.log(`[test-scan] wrote ${dest} (${TINY_PNG.length} bytes)`);
-      return { ok: true, path: dest };
-    } catch (err) {
-      console.error("[test-scan] failed:", err);
-      return { ok: false, error: err.message };
-    }
-  });
-
-  ipcMain.handle("attach-manual-scan", async (_e, payload) => {
-    return watcher.attachManualScan(payload || {});
-  });
-
   ipcMain.handle("fetch-orphans", async () => {
     return server.getOrphans();
   });
 
-  ipcMain.handle("arm-one-shot", async (_e, payload) => {
-    if (!payload?.certId || !payload?.side) return { ok: false, error: "certId + side required" };
-    watcher.armOneShot(payload);
-    return { ok: true };
-  });
-
-  ipcMain.handle("cancel-one-shot", async () => watcher.cancelOneShot());
-
-  ipcMain.handle("delete-cert", async (_e, { certId, reason }) => {
-    if (!certId || !reason || reason.length < 10) return { ok: false, error: "certId + reason ≥10 chars" };
-    return server.softDeleteCert(certId, reason);
-  });
-
-  ipcMain.handle("retry-last", async () => watcher.retryLastPair());
-
-  ipcMain.handle("reset-buffered", async () => watcher.resetBuffered());
-
-  // Operator acknowledged the blocking scan-confirmation popup. Clear it, then
-  // drain any scans the gate HELD while it was up (scan-one-write-one). The
-  // drain re-gates as soon as the next pair completes, so one card at a time.
-  ipcMain.handle("ack-confirm-card", async () => {
-    stateMod.set({ confirmCard: null });
-    pushStateToRenderer();
-    // Drain held scans in the BACKGROUND — do NOT await. The ack must return
-    // immediately so the modal closes promptly and the OK button never hangs on
-    // a slow upload; drainInbox sets the next confirmCard when the next held
-    // pair completes, which re-opens the modal via the state-driven render.
-    watcher.drainInbox().catch((e) => console.error("[main] drainInbox after ack failed:", e?.message));
-    return { ok: true };
-  });
-
-  // Operator pressed "Reject & rescan" on the confirmation popup. The watcher
-  // soft-deletes the cert + cleans held files; on success clear-and-drain
-  // exactly like ack (popup closes state-driven; next held scan surfaces).
-  // On failure the popup stays up and the renderer shows the error.
-  ipcMain.handle("reject-confirm-card", async () => {
-    const r = await watcher.rejectConfirmCard();
-    if (r.ok) {
-      pushStateToRenderer();
-      watcher.drainInbox().catch((e) => console.error("[main] drainInbox after reject failed:", e?.message));
-    }
-    return r;
-  });
-
-  // "Grade ↗" on the confirmation popup — open the admin panel in the
-  // default browser with the cert pre-searched (exact-number match lands on
-  // exactly this card). Non-destructive; the popup stays up for OK/Reject.
+  // Recovery opens the exact historic certificate in the authenticated web
+  // workstation. That page creates the server-owned capture session; this app
+  // never arms arbitrary certificate/side combinations from a scanner token.
   ipcMain.handle("open-grade-cert", async (_e, certId) => {
     if (!certId || !/^MV\d+$/i.test(String(certId))) return { ok: false, error: "format MV###" };
     const base = server.API_BASE.replace(/\/$/, "");
@@ -453,6 +447,79 @@ function setupIpc() {
   });
 
   ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
+
+  ipcMain.handle("get-station-setup", () => stationSetupState());
+  ipcMain.handle("station-sign-in", async (_event, payload) => {
+    const email = typeof payload?.email === "string" ? payload.email.trim() : "";
+    const password = typeof payload?.password === "string" ? payload.password : "";
+    if (!email || !password) return { ok: false, error: "Email and password are required" };
+    const result = await stationClient.signIn(email, password);
+    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error || "MintVault sign-in failed" };
+  });
+  ipcMain.handle("station-complete-mfa", async (_event, payload) => {
+    const code = typeof payload?.code === "string" ? payload.code.trim() : "";
+    const recoveryCode = typeof payload?.recoveryCode === "string" ? payload.recoveryCode.trim() : "";
+    if (!code && !recoveryCode) return { ok: false, error: "Authentication code or recovery code is required" };
+    const result = await stationClient.completeMfa({ code, recoveryCode });
+    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error || "Authentication code was not accepted" };
+  });
+  ipcMain.handle("register-station", async (_event, payload) => {
+    const locationId = typeof payload?.locationId === "string" && payload.locationId ? payload.locationId : undefined;
+    if (locationId) {
+      const selected = await stationClient.selectLocation(locationId);
+      if (!selected.ok) return { ok: false, error: selected.body?.error || "Selected location is not available" };
+    }
+    const result = await stationClient.registerThisMac({ locationId, appVersion: APP_VERSION });
+    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
+  });
+  ipcMain.handle("station-sign-out", async () => {
+    if (stateMod.get().activeCapture || watcher?.targetedPendingUploadCount()) {
+      return { ok: false, error: "Finish or safely retry the current card before switching operator" };
+    }
+    stationIdentity.clearOperatorSession();
+    return { ok: true, stage: "sign_in" };
+  });
+
+  // These are purpose-built station controls. The renderer never receives a
+  // local TIFF path and never supplies a certificate/card/side: Watcher derives
+  // all of that from its server-claimed active target and rejects stale IDs.
+  ipcMain.handle("scan-target", async () => {
+    if (!watcher) return { ok: false, error: "Scanner service is starting" };
+    return watcher.scanActiveTarget();
+  });
+
+  // Setup Preview is intentionally not a target operation. The renderer can
+  // request the one fixed full-platen local JPEG scan, but supplies neither a
+  // file path nor any certificate/card/side identity.
+  ipcMain.handle("run-positioning-preview", async () => {
+    if (!watcher) return { ok: false, error: "Scanner service is starting" };
+    return watcher.runPositioningPreview();
+  });
+
+  ipcMain.handle("get-positioning-preview", (_event, previewId) => {
+    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
+    return watcher.positioningPreviewData(previewId);
+  });
+
+  ipcMain.handle("apply-positioning-preview", (_event, previewId) => {
+    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
+    return watcher.applyPositioningPreview(previewId);
+  });
+
+  ipcMain.handle("get-capture-preview", (_event, previewId) => {
+    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
+    return watcher.previewData(previewId);
+  });
+
+  ipcMain.handle("accept-capture-preview", async (_event, previewId) => {
+    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
+    return watcher.acceptPreview(previewId);
+  });
+
+  ipcMain.handle("rescan-capture-preview", async (_event, previewId) => {
+    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
+    return watcher.rescanPreview(previewId);
+  });
 
   // "Update app" — run update.sh DETACHED (git pull + npm install + launchctl
   // kickstart). Detached because kickstart kills THIS process; the script must
@@ -473,32 +540,25 @@ function setupIpc() {
     }
   });
 
-  ipcMain.handle("restart-watcher", async () => {
-    await watcher.stop();
-    await watcher.start();
-    return { ok: true };
-  });
-
   // Reset the scanner — 3-tier escalation against the LIVE com.mintvault.scanner
   // agent (this app), never the decommissioned scanner-watcher. Tier 1 (Soft)
-  // restarts the in-process chokidar watcher here; if that can't recover, we
+  // restarts the in-process station service here; if that can't recover, we
   // hand off to reset-agent.sh (Reload/Repair) which outlives this process
   // being killed by kickstart. The operator gets a plain-English status, never
   // a raw exit code.
   ipcMain.handle("reset-scanner", async () => {
-    // Tier 1 — Soft: restart the in-process watcher + clear the buffered pair.
+    // Tier 1 — Soft: restart the in-process station service.
     try {
-      logToFile("Soft: in-process watcher restart");
+      logToFile("Soft: in-process scanner service restart");
       await watcher.stop();
-      watcher.resetBuffered();
       await watcher.start();
       if (watcher.chokidar) {
-        logToFile("Soft OK → watching");
+        logToFile("Soft OK → scanner service running");
         pushStateToRenderer();
         refreshTray();
         return { ok: true, tier: "soft", status: "Restarted" };
       }
-      logToFile("Soft: watcher did not come back up → escalating");
+      logToFile("Soft: scanner service did not come back up → escalating");
     } catch (err) {
       logToFile(`Soft failed: ${err.message} → escalating`);
     }
@@ -507,27 +567,7 @@ function setupIpc() {
     return { ok: true, tier: "reload", status: "Reloading agent…", escalated: true };
   });
 
-  ipcMain.handle("forward-to-cert", async (_e, certId) => {
-    if (!certId || !/^MV\d+$/i.test(certId)) return { ok: false, error: "format MV###" };
-    stateMod.set({ nextCertOverride: certId.toUpperCase() });
-    pushStateToRenderer();
-    return { ok: true };
-  });
-
   ipcMain.handle("hide-popover", () => { if (popover) popover.hide(); return { ok: true }; });
-
-  ipcMain.handle("open-inbox", () => { shell.openPath(INBOX); return { ok: true }; });
-
-  // SilverFast export path — the absolute inbox the watcher is ACTUALLY
-  // watching (INBOX from lib/watcher, which respects MINTVAULT_SCANS_DIR), so
-  // the operator can copy it straight into SilverFast's Path field and scans
-  // can't land somewhere the watcher never looks (e.g. ~/Pictures). Pure read.
-  ipcMain.handle("get-inbox-path", () => INBOX);
-
-  ipcMain.handle("copy-inbox-path", () => {
-    clipboard.writeText(INBOX);
-    return { ok: true, path: INBOX };
-  });
 
   ipcMain.handle("open-logs", () => {
     shell.openPath(SCANNER_LOG);
@@ -535,9 +575,8 @@ function setupIpc() {
   });
 
   // Open the public logbook page for the most-recently-uploaded cert.
-  // Reuses the existing lastUploadedCert state field (already set on every
-  // successful upload — auto + manual + one-shot all write to it). The
-  // /cert/:id route is public (no auth), shows images + grade.
+  // Reuses the existing lastUploadedCert state field after an accepted
+  // target-bound capture. The public /cert/:id route shows its evidence.
   ipcMain.handle("open-last-cert", () => {
     const certId = stateMod.get().lastUploadedCert;
     if (!certId) return { ok: false, error: "no cert uploaded yet this session" };
@@ -558,24 +597,24 @@ app.whenReady().then(async () => {
   watcher = new Watcher();
   let lastErrorState = false;
   let lastSuccessState = false;
-  let lastConfirmPending = false;
+  let lastPositioningPreviewId = null;
   watcher.on("state-changed", () => {
     pushStateToRenderer();
     const s = stateMod.get();
     const isError   = s.state === "error";
     const isSuccess = s.state === "success";
-    const hasConfirm = !!s.confirmCard;
-
     // Auto-open popover on error transition (idle→error edge only).
     if (isError && !lastErrorState && s.autoOpenOnError && popover && !popover.isVisible()) {
       console.log(`[main] auto-opening popover on error: ${s.lastError || "(no message)"}`);
       showPopover();
     }
-
-    // Auto-open the popover when a scan confirmation appears (edge) — the
-    // blocking popup needs the window visible so the operator can't miss it.
-    if (hasConfirm && !lastConfirmPending && popover && !popover.isVisible()) {
-      console.log(`[main] auto-opening popover for scan confirmation: ${s.confirmCard.certId || "incomplete scan"}`);
+    const positioning = s.positioningPreview;
+    if (
+      positioning?.id &&
+      positioning.id !== lastPositioningPreviewId &&
+      ["detected", "reposition", "not_detected"].includes(positioning.status)
+    ) {
+      lastPositioningPreviewId = positioning.id;
       showPopover();
     }
 
@@ -589,13 +628,6 @@ app.whenReady().then(async () => {
 
     lastErrorState     = isError;
     lastSuccessState   = isSuccess;
-    lastConfirmPending = hasConfirm;
-  });
-  watcher.on("scan-detected", (evt) => {
-    if (popover && !popover.isDestroyed()) {
-      popover.webContents.send("scan-detected", evt);
-      showPopover();
-    }
   });
 
   setupTray();
@@ -603,6 +635,67 @@ app.whenReady().then(async () => {
   setupIpc();
 
   await watcher.start();
+  // Session polling is deliberately inside the one existing scanner process.
+  // It never watches a staging folder or calls the legacy unbound ingest.
+  let targetedCapturePollInFlight = false;
+  const pollTargetedCapture = async () => {
+    if (targetedCapturePollInFlight) return;
+    targetedCapturePollInFlight = true;
+    try {
+      await watcher.refreshScannerHealth();
+      await watcher.pollTargetedCapture();
+    } catch (err) {
+      console.error(`[targeted-capture] poll failed: ${err?.message || err}`);
+    } finally {
+      targetedCapturePollInFlight = false;
+    }
+  };
+  // Target polling is not fleet telemetry. Enrolled stations use a jittered
+  // idle cadence to avoid a 5,000-Mac synchronised 3-second request storm;
+  // a local development proof retains its short feedback loop. Once a target
+  // is active the cadence tightens solely for that one station/session.
+  const targetPollDelayMs = () => {
+    if (!stationIdentity.hasActiveStationSession()) return 3_000;
+    if (stateMod.get().activeCapture) return 5_000;
+    return 25_000 + Math.floor(Math.random() * 10_000);
+  };
+  const scheduleTargetPoll = () => {
+    setTimeout(async () => {
+      await pollTargetedCapture();
+      scheduleTargetPoll();
+    }, targetPollDelayMs());
+  };
+  void pollTargetedCapture();
+  scheduleTargetPoll();
+
+  // Lightweight current-state heartbeat. It is intentionally independent of
+  // target polling and carries no TIFF/certificate payload. Server-side it
+  // appends events only for meaningful connection/hardware transitions.
+  let heartbeatInFlight = false;
+  const sendHeartbeat = async () => {
+    if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
+    heartbeatInFlight = true;
+    try {
+      const result = await stationClient.heartbeat(heartbeatPayload());
+      if (!result.ok) {
+        console.warn(`[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`);
+        if ([401, 403, 404].includes(result.status)) await stationSetupState();
+      }
+    } catch (error) {
+      console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
+    } finally {
+      heartbeatInFlight = false;
+    }
+  };
+  const scheduleHeartbeat = () => {
+    const delay = 75_000 + Math.floor(Math.random() * 30_000); // 75–105 seconds, per-Mac jitter
+    setTimeout(async () => {
+      await sendHeartbeat();
+      scheduleHeartbeat();
+    }, delay);
+  };
+  void sendHeartbeat();
+  scheduleHeartbeat();
 
   // ── Maintenance (scanner ops pack) ────────────────────────────────────
   // Log rotation: launchd holds the log fd, so rotate copy-truncate style.
@@ -615,29 +708,16 @@ app.whenReady().then(async () => {
       const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
       fs.copyFileSync(SCANNER_LOG, path.join(dir, `scanner-app-${stamp}.log`));
       fs.truncateSync(SCANNER_LOG, 0);
-      const archives = fs.readdirSync(dir).filter((f) => f.startsWith("scanner-app-")).sort();
-      for (const f of archives.slice(0, Math.max(0, archives.length - 10))) {
-        fs.unlinkSync(path.join(dir, f));
-      }
       console.log(`[maintenance] rotated scanner-app.log (${Math.round(st.size / 1e6)}MB) → logs-archive/`);
     } catch (err) {
       console.error(`[maintenance] log rotation failed: ${err?.message}`);
     }
   };
-  // Folder hygiene: purge processed/ date-folders older than 90 days; warn
-  // when failed/ + rejected/ together exceed 500MB (operator should review).
-  const cleanupScanFolders = () => {
+  // Scanner TIFFs and diagnostic logs are evidence/support material.  Never
+  // auto-delete them on a workstation.  We only warn when attention is needed;
+  // any retention decision is an explicit operator action outside this app.
+  const reportScanFolderPressure = () => {
     try {
-      const cutoff = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-      const processed = path.join(SCANS_BASE, "processed");
-      if (fs.existsSync(processed)) {
-        for (const d of fs.readdirSync(processed)) {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d < cutoff) {
-            fs.rmSync(path.join(processed, d), { recursive: true, force: true });
-            console.log(`[maintenance] purged processed/${d} (>90 days)`);
-          }
-        }
-      }
       const duDir = (dir) => {
         let total = 0;
         if (!fs.existsSync(dir)) return 0;
@@ -656,9 +736,9 @@ app.whenReady().then(async () => {
     }
   };
   rotateLogIfNeeded();
-  cleanupScanFolders();
+  reportScanFolderPressure();
   setInterval(rotateLogIfNeeded, 6 * 3600 * 1000);
-  setInterval(cleanupScanFolders, 24 * 3600 * 1000);
+  setInterval(reportScanFolderPressure, 24 * 3600 * 1000);
 
   // Wake-from-sleep recovery: FSEvents subscriptions can go stale across a
   // long sleep — restart the folder watcher and immediately sweep the inbox.

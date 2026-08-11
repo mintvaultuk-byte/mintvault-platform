@@ -7,7 +7,7 @@
  * a double-click or network retry can never create two submissions.
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,8 @@ import {
   partnerCards,
   partnerCustomers,
   partnerServiceTiers,
+  partnerCredits,
+  partnerCatalogue,
   partnerErrorMessage,
   PartnerApiError,
   newIdempotencyKey,
@@ -33,7 +35,7 @@ import {
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { PARTNER_CARD_CATEGORIES } from "@shared/partner-card-categories";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { Trash2, Pencil, Check, X, Upload, Image as ImageIcon } from "lucide-react";
+import { Trash2, Pencil, Check, X, Upload, Image as ImageIcon, CreditCard } from "lucide-react";
 
 const STEPS = ["Customer", "Service", "Cards", "Review", "Submit"] as const;
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
@@ -71,10 +73,31 @@ export default function PartnerSubmissionWizardPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitResult, setSubmitResult] = useState<SubmissionSummary | null>(null);
   const idempotencyKey = useMemo(() => (submission ? newIdempotencyKey(submission.id) : ""), [submission?.id]);
+  const draftId = useMemo(() => readQueryValue("draft"), []);
+  const billingReturnPath = submission
+    ? `/partner/billing?returnTo=${encodeURIComponent(`/partner/submissions/new?draft=${submission.id}`)}`
+    : "/partner/billing";
 
-  // Create the draft ONCE on entry, using the session's currently-selected location.
+  // Create the draft ONCE on entry, using the session's currently-selected location, or resume the
+  // exact draft returned from billing.
   useEffect(() => {
     if (submission || initError) return;
+    if (draftId) {
+      (async () => {
+        try {
+          const detail = await partnerSubmissions.detail(draftId);
+          setSubmission(detail.submission);
+          setCustomerId(detail.submission.customerId);
+          setCustomerDisplay(detail.submission.customerId ? "Selected customer" : "");
+          setInternalReference(detail.submission.internalReference ?? "");
+          setServiceTierCode(detail.submission.serviceTierCode);
+          setCards(detail.cards);
+        } catch (err) {
+          setInitError(partnerErrorMessage(err));
+        }
+      })();
+      return;
+    }
     if (!session?.locationId) return; // waits for the "select a location" state below
     (async () => {
       try {
@@ -84,7 +107,7 @@ export default function PartnerSubmissionWizardPage() {
         setInitError(partnerErrorMessage(err));
       }
     })();
-  }, [session?.locationId, submission, initError]);
+  }, [draftId, session?.locationId, submission, initError]);
 
   const { data: availableTiers } = useQuery({
     queryKey: ["/api/partner/service-tiers"],
@@ -95,6 +118,16 @@ export default function PartnerSubmissionWizardPage() {
     queryKey: ["/api/partner/customers", customerSearch],
     queryFn: () => partnerCustomers.list(customerSearch || undefined),
     enabled: !!submission && customerSearch.length > 0,
+  });
+  const { data: credits } = useQuery({
+    queryKey: ["/api/partner/credits"],
+    queryFn: () => partnerCredits.view(),
+    enabled: !!submission,
+  });
+  const { data: catalogue } = useQuery({
+    queryKey: ["/api/partner/catalogue/snapshot"],
+    queryFn: () => partnerCatalogue.snapshot(),
+    enabled: !!submission,
   });
 
   const saveField = useCallback(
@@ -168,14 +201,21 @@ export default function PartnerSubmissionWizardPage() {
   async function handleAddCard(input: Parameters<typeof partnerCards.add>[1]) {
     if (!submission) return;
     const created = await partnerCards.add(submission.id, input);
-    setCards((c) => [...c, created]);
-    setSubmission((s) => (s ? { ...s, cardCount: s.cardCount + 1 } : s));
+    setCards((c) => {
+      const next = [...c, created];
+      setSubmission((s) => (s ? { ...s, cardCount: physicalCardCount(next) } : s));
+      return next;
+    });
   }
 
   async function handleEditCard(cardId: string, input: Parameters<typeof partnerCards.edit>[2]) {
     if (!submission) return;
     const updated = await partnerCards.edit(submission.id, cardId, input);
-    setCards((c) => c.map((card) => (card.id === cardId ? updated : card)));
+    setCards((c) => {
+      const next = c.map((card) => (card.id === cardId ? updated : card));
+      setSubmission((s) => (s ? { ...s, cardCount: physicalCardCount(next) } : s));
+      return next;
+    });
     setEditingCardId(null);
   }
 
@@ -184,8 +224,11 @@ export default function PartnerSubmissionWizardPage() {
     setRemoveCardError(null);
     try {
       await partnerCards.remove(submission.id, cardId, "Removed by partner");
-      setCards((c) => c.filter((card) => card.id !== cardId));
-      setSubmission((s) => (s ? { ...s, cardCount: Math.max(s.cardCount - 1, 0) } : s));
+      setCards((c) => {
+        const next = c.filter((card) => card.id !== cardId);
+        setSubmission((s) => (s ? { ...s, cardCount: physicalCardCount(next) } : s));
+        return next;
+      });
     } catch (err) {
       setRemoveCardError(partnerErrorMessage(err));
     }
@@ -315,6 +358,7 @@ export default function PartnerSubmissionWizardPage() {
           onEditCard={handleEditCard}
           onRemoveCard={handleRemoveCard}
           onUploadCardImage={handleUploadCardImage}
+          catalogue={catalogue?.snapshot ?? null}
         />
       )}
 
@@ -325,13 +369,25 @@ export default function PartnerSubmissionWizardPage() {
           serviceTierCode={serviceTierCode}
           tiers={availableTiers ?? []}
           cards={cards}
+          creditBalance={credits?.summary.availableCredits ?? null}
+          creditConfigured={credits?.summary.configured ?? false}
+          billingHref={billingReturnPath}
           missing={missing}
           onEditStep={setStep}
         />
       )}
 
       {step === 4 && (
-        <SubmitStep missing={missing} submitting={submitting} error={submitError} onSubmit={handleSubmit} />
+        <SubmitStep
+          missing={missing}
+          cards={cards}
+          creditBalance={credits?.summary.availableCredits ?? null}
+          creditConfigured={credits?.summary.configured ?? false}
+          billingHref={billingReturnPath}
+          submitting={submitting}
+          error={submitError}
+          onSubmit={handleSubmit}
+        />
       )}
 
       <div className="flex items-center justify-between pt-4 border-t">
@@ -612,6 +668,7 @@ function CardsStep(props: {
   onEditCard: (id: string, input: any) => Promise<void>;
   onRemoveCard: (id: string) => Promise<void>;
   onUploadCardImage: (id: string, side: "front" | "back", file: File) => Promise<void>;
+  catalogue: import("@shared/pokemon-rarity-catalogue").CatalogueSnapshot | null;
 }) {
   const [form, setForm] = useState(emptyCardForm);
   const [adding, setAdding] = useState(false);
@@ -770,21 +827,41 @@ function CardsStep(props: {
             </div>
             <div className="space-y-2">
               <Label htmlFor="card-variant">Variant</Label>
-              <Input
-                id="card-variant"
-                value={form.variant}
-                onChange={(e) => setForm({ ...form, variant: e.target.value })}
-                data-testid="input-card-variant"
-              />
+              <Select
+                value={form.variant || "__none__"}
+                onValueChange={(v) => setForm({ ...form, variant: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger id="card-variant" data-testid="select-card-variant">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Not selected</SelectItem>
+                  {(props.catalogue?.finishes ?? []).map((finish) => (
+                    <SelectItem key={finish.value} value={finish.label}>
+                      {finish.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="card-language">Language</Label>
-              <Input
-                id="card-language"
-                value={form.language}
-                onChange={(e) => setForm({ ...form, language: e.target.value })}
-                data-testid="input-card-language"
-              />
+              <Select
+                value={form.language || "__none__"}
+                onValueChange={(v) => setForm({ ...form, language: v === "__none__" ? "" : v })}
+              >
+                <SelectTrigger id="card-language" data-testid="select-card-language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Not selected</SelectItem>
+                  {(props.catalogue?.languages ?? []).map((language) => (
+                    <SelectItem key={language.value} value={language.label}>
+                      {language.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="card-quantity">Quantity</Label>
@@ -856,18 +933,21 @@ function CardImageUploadButton({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const url = side === "front" ? card.front_image_url : card.back_image_url;
-
   return (
-    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-accent">
-      {url ? <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" /> : <Upload className="h-3.5 w-3.5" aria-hidden="true" />}
+    <label className="inline-flex items-center gap-1.5 text-xs rounded-md border px-2 py-1 cursor-pointer hover:bg-accent">
+      {url ? (
+        <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+      ) : (
+        <Upload className="h-3.5 w-3.5" aria-hidden="true" />
+      )}
       <span>{uploading ? "Uploading..." : `${url ? "Replace" : "Upload"} ${side}`}</span>
       <input
         className="sr-only"
         type="file"
         accept="image/jpeg,image/png,image/webp,image/tiff"
         data-testid={`input-upload-${side}-${card.id}`}
-        onChange={async (event) => {
-          const file = event.currentTarget.files?.[0];
+        onChange={async (e) => {
+          const file = e.currentTarget.files?.[0];
           if (!file) return;
           setUploading(true);
           setError(null);
@@ -877,7 +957,7 @@ function CardImageUploadButton({
             setError(partnerErrorMessage(err));
           } finally {
             setUploading(false);
-            event.currentTarget.value = "";
+            e.currentTarget.value = "";
           }
         }}
       />
@@ -957,11 +1037,17 @@ function ReviewStep(props: {
   serviceTierCode: string | null;
   tiers: AvailableServiceTier[];
   cards: SubmissionCard[];
+  creditBalance: number | null;
+  creditConfigured: boolean;
+  billingHref: string;
   missing: string[];
   onEditStep: (step: number) => void;
 }) {
   const tier = props.tiers.find((t) => t.tierCode === props.serviceTierCode);
   const missing = props.missing;
+  const creditsRequired = physicalCardCount(props.cards);
+  const remaining = props.creditBalance == null ? null : props.creditBalance - creditsRequired;
+  const shortfall = remaining == null ? null : Math.max(0, -remaining);
 
   return (
     <Card data-testid="wizard-step-review">
@@ -989,9 +1075,26 @@ function ReviewStep(props: {
         />
         <ReviewRow
           label="Cards"
-          value={`${props.cards.length} card${props.cards.length === 1 ? "" : "s"}`}
+          value={`${creditsRequired} physical card${creditsRequired === 1 ? "" : "s"}`}
           onEdit={() => props.onEditStep(2)}
         />
+        <ReviewRow
+          label="Credits"
+          value={
+            props.creditConfigured && props.creditBalance != null
+              ? `${creditsRequired} required · ${props.creditBalance} available · ${remaining} remaining`
+              : `${creditsRequired} required · balance unavailable`
+          }
+          onEdit={() => props.onEditStep(2)}
+        />
+        {shortfall != null && shortfall > 0 && (
+          <CreditShortfallPanel
+            required={creditsRequired}
+            available={props.creditBalance ?? 0}
+            shortfall={shortfall}
+            billingHref={props.billingHref}
+          />
+        )}
 
         <p className="text-xs text-muted-foreground">
           Intake observations recorded on cards are not MintVault grades. Estimated pricing is confirmed by MintVault.
@@ -1026,15 +1129,26 @@ function ReviewRow({ label, value, onEdit }: { label: string; value: string; onE
 // ---------------- Step 5: Submit ----------------
 function SubmitStep({
   missing,
+  cards,
+  creditBalance,
+  creditConfigured,
+  billingHref,
   submitting,
   error,
   onSubmit,
 }: {
   missing: string[];
+  cards: SubmissionCard[];
+  creditBalance: number | null;
+  creditConfigured: boolean;
+  billingHref: string;
   submitting: boolean;
   error: string | null;
   onSubmit: () => void;
 }) {
+  const creditsRequired = physicalCardCount(cards);
+  const remaining = creditBalance == null ? null : creditBalance - creditsRequired;
+  const shortfall = remaining == null ? null : Math.max(0, -remaining);
   return (
     <Card data-testid="wizard-step-submit">
       <CardHeader>
@@ -1046,8 +1160,25 @@ function SubmitStep({
           <li>Submitted data becomes locked.</li>
           <li>MintVault may request more information.</li>
           <li>Intake observations are not grades.</li>
+          <li>
+            {creditsRequired} grading credit{creditsRequired === 1 ? "" : "s"} will be reserved when you submit.
+          </li>
           <li>Price remains subject to your approved Partner agreement where applicable.</li>
         </ul>
+        <div className="rounded-md border p-3 text-sm" data-testid="credit-preview">
+          <p>Physical cards: {creditsRequired}</p>
+          <p>Credits required: {creditsRequired}</p>
+          <p>Wallet balance: {creditConfigured && creditBalance != null ? creditBalance : "Not available"}</p>
+          <p>Remaining balance: {remaining == null ? "Not available" : remaining}</p>
+        </div>
+        {shortfall != null && shortfall > 0 && (
+          <CreditShortfallPanel
+            required={creditsRequired}
+            available={creditBalance ?? 0}
+            shortfall={shortfall}
+            billingHref={billingHref}
+          />
+        )}
         {missing.length > 0 && (
           <div
             className="rounded-md border border-destructive/30 bg-destructive/5 p-3"
@@ -1069,7 +1200,7 @@ function SubmitStep({
         <Button
           size="lg"
           className="w-full"
-          disabled={submitting || missing.length > 0}
+          disabled={submitting || missing.length > 0 || (shortfall != null && shortfall > 0)}
           onClick={onSubmit}
           data-testid="button-confirm-submit"
         >
@@ -1078,6 +1209,56 @@ function SubmitStep({
       </CardContent>
     </Card>
   );
+}
+
+function CreditShortfallPanel({
+  required,
+  available,
+  shortfall,
+  billingHref,
+}: {
+  required: number;
+  available: number;
+  shortfall: number;
+  billingHref: string;
+}) {
+  return (
+    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-3" data-testid="credit-shortfall">
+      <div className="grid grid-cols-3 gap-2 text-sm">
+        <div>
+          <p className="text-xs text-muted-foreground">Required</p>
+          <p className="font-semibold">{required}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Available</p>
+          <p className="font-semibold">{available}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Shortfall</p>
+          <p className="font-semibold text-primary">{shortfall}</p>
+        </div>
+      </div>
+      <Button asChild>
+        <Link href={billingHref} data-testid="button-buy-credits-shortfall">
+          <CreditCard className="h-4 w-4 mr-1.5" aria-hidden="true" />
+          Buy Credits
+        </Link>
+      </Button>
+    </div>
+  );
+}
+
+function physicalCardCount(cards: SubmissionCard[]): number {
+  return cards.reduce((sum, card) => sum + Math.max(1, Number(card.quantity) || 1), 0);
+}
+
+function readQueryValue(key: string): string | null {
+  const query = window.location.search.startsWith("?") ? window.location.search.slice(1) : window.location.search;
+  for (const part of query.split("&")) {
+    const [rawKey, rawValue = ""] = part.split("=");
+    if (decodeURIComponent(rawKey) === key) return decodeURIComponent(rawValue.replace(/\+/g, " "));
+  }
+  return null;
 }
 
 function SubmitSuccessPanel({
@@ -1109,8 +1290,8 @@ function SubmitSuccessPanel({
           >
             View Submission
           </Button>
-          <Button variant="outline" onClick={() => window.print()} data-testid="button-print-receipt">
-            Print Intake Receipt
+          <Button variant="outline" onClick={() => navigate("/partner/grading")} data-testid="button-open-grading">
+            Open Grading
           </Button>
           <Button variant="ghost" onClick={onStartAnother} data-testid="button-start-another">
             Start Another Submission

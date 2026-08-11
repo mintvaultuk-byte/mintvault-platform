@@ -1,202 +1,74 @@
-# MintVault Scanner — Menu-Bar App
+# MintVault Scanner — Canon CanoScan LiDE 400
 
-Single-process Electron app replacing `scripts/scanner-watcher/`'s three-piece setup (watcher.mjs daemon + Electron guide window + SwiftBar plugin) with one tray icon and one LaunchAgent.
+The MintVault Electron menu-bar app is the single workstation-side process for target-bound Canon LiDE 400 capture. It uses macOS ImageCaptureCore directly; it does not automate Canon IJ Scan Utility, SilverFast, or any other GUI.
 
-> **Why?** The old setup was three processes, three LaunchAgents, three failure modes. When any one died silently, the others kept lying. This is one process: if it dies, LaunchAgent restarts the whole thing — tray icon either appears or it doesn't, no silent drift.
+## Normal capture flow
 
-## Phase 0 — Investigation findings
+1. In the existing MintVault Card Details workstation, choose the preselected card and click **SCAN FRONT**.
+2. The server creates a five-minute, certificate/card/submission/side-bound session for the provisioned workstation.
+3. This app claims only that session and displays the exact card and required side. **It does not scan automatically.** Position the card and press **SCAN FRONT** or **SCAN BACK** in the scanner app.
+4. For initial placement setup only, press **PREVIEW**. The app physically acquires the full platen at 300 DPI as a local JPEG, detects the card, and shows a compact card-centred display crop with visible surrounding scanner background. The broad source image, geometry, and acquisition boundary are under **Service & diagnostics**. Preview has no target, TIFF, upload, certificate mutation, or evidence capability. Save only a visibly detected, safe zone.
+5. The normal target-bound flow then makes one locked 1200 DPI RGB TIFF capture using that station's fixed 100 × 130 mm hardware acquisition region, then generates a fast JPEG preview from that same TIFF. It does not perform a second low-resolution scan during normal card capture. Card-edge detection must prove visible scanner background around all four sides before Accept is offered.
+6. Review the explicitly labelled non-authoritative preview. **ACCEPT FRONT/BACK** uploads that exact TIFF to the session-aware evidence branch; **RESCAN FRONT/BACK** archives the candidate locally and retains the same server-owned card-side target.
+7. The server verifies TIFF identity, 1200 DPI, geometry, profile provenance, station, selected side, and immutable storage before it marks the accepted capture authoritative. Flip only after an accepted front. Grading uses derivatives only; the master TIFF remains immutable evidence.
 
-Mapped before coding (per spec §5 Phase 0). Source files referenced:
+The browser never reads the scanner filesystem or controls a physical scanner. The scanner never supplies a free-form certificate, card, or side with a TIFF.
 
-- `scripts/scanner-watcher/watcher.mjs` — strict-alternating state machine (idle → front_buffered → uploading → success/error → idle), chokidar on `~/mintvault-scans/inbox/*.tif`, FormData multipart POST to `/api/admin/scan-ingest` with `front` (required), `back` (optional), `client_source` fields. Auth via `x-scanner-token` header reading `SCANNER_API_TOKEN` from `~/.mintvault-scanner.env`. Manual mode added later: `manual_pending` state + control endpoints.
-- `scripts/scanner-watcher/guide-window/main.js` — Electron main pattern: hidden Dock icon, BrowserWindow with `frame: false`, IPC handlers via `ipcMain.handle`, polls `watcher-state.json` from disk every 1s.
-- `scripts/scanner-watcher/com.mintvault.scanner-watcher.plist` — `RunAtLoad: true`, `KeepAlive: true`, `ThrottleInterval: 30`, paths templated with `__WRAPPER_PATH__` / `__HOME__` substituted at install time.
-- `server/lib/scanner-auth.ts` — `requireScannerOrAdmin` middleware: timing-safe match of `x-scanner-token` header against `SCANNER_API_TOKEN` env, falls through to admin cookie auth if header absent.
-- `server/routes.ts` — endpoints in use:
-  - `POST /api/admin/scan-ingest` — multipart `front`/`back`, returns `{ certId, ... }`
-  - `POST /api/admin/certs/:certId/image` — multipart `image`, fields `side` + `replace_existing`
-  - `GET /api/admin/certs/:certId/preview`
-  - `DELETE /api/admin/certs/:certId` (body `{ reason: string ≥10 chars }`)
+## Required station provisioning
 
-**New endpoints added by this PR** (`server/routes.ts`):
+The production app does **not** use a shared scanner API token or a manually
+assigned station ID. On first launch it shows **Sign in to MintVault**:
 
-- `GET /api/admin/next-cert-id` — read-only allocation hint, returns `{ next: "MV61", next_numeric: 61 }`
-- `GET /api/admin/orphan-certs` — certs missing front or back, ordered newest-first, limit 50
+1. An authorised operator signs in and completes MFA.
+2. The operator selects only a server-authorised location (automatic when there is one).
+3. The app creates an Ed25519 Mac identity in macOS Keychain-backed storage and requests enrolment.
+4. A Super Admin approves the server-assigned `MV-STN-…` station code.
+5. The station reports its Canon hardware/profile, saves its own approved calibration, then can claim target-bound captures.
 
-Both gated `requireScannerOrAdmin`, identical pattern to the existing per-cert endpoints.
+The non-secret `~/.mintvault-scanner.env` can contain only a controlled API-base override and `MINTVAULT_STATION_CONFIG_PATH` for local calibration storage. Leave X/Y values absent until a disposable card has been visibly detected in **PREVIEW**. Saving that safe proposal writes `MINTVAULT_LIDE_SCAN_X_MM` and `MINTVAULT_LIDE_SCAN_Y_MM` only to the explicit local station configuration path. They locate one fixed 100 × 130 mm hardware acquisition box for a simple bottom-left jig; they are not day-to-day controls.
 
-## Architecture
+Install a new station with:
 
-```
-~/.mintvault-scanner.env  ──reads──>  scanner-app  ──HTTPS──>  api.mintvaultuk.com
-       SCANNER_API_TOKEN                  │
-                                          │
-                          chokidar  ──>   │   ──>  Tray icon
-                          ~/mintvault-    │        Popover (BrowserWindow)
-                          scans/inbox     │
-                                          │
-                                          ▼
-                                   ~/Library/Application Support/
-                                   MintVaultScanner/state.json
+```sh
+cd ~/mintvault-platform/scripts/scanner-app
+./setup-new-mac.sh
 ```
 
-One Electron process. One LaunchAgent (`com.mintvault.scanner-app`). Renderer talks to main via `contextBridge` exposing a `scanner` global.
+It renders the one canonical LaunchAgent (`com.mintvault.scanner`) and starts the Electron app. It does not prompt staff for a secret, station ID or X/Y values: sign in, wait for station approval, then run **PREVIEW** with a disposable card. The app builds its small ImageCaptureCore adapter locally with Xcode command-line tools; it adds no scanner npm dependency.
 
-## Files
+For an isolated local compatibility proof only, both client and server require
+`MINTVAULT_ALLOW_LEGACY_SCANNER_TOKEN=1` in addition to a non-production
+environment. That bridge is rejected by production server code and must not be
+used for a deployed station.
 
-```
-scanner-app/
-├── package.json                     electron + chokidar + form-data + node-fetch
-├── main.js                          Electron main, tray, IPC, BrowserWindow
-├── preload.js                       contextBridge for renderer
-├── lib/
-│   ├── watcher.js                   chokidar + state machine (port of watcher.mjs)
-│   ├── server-client.js             HTTPS to mintvaultuk.com, auth, all endpoints
-│   └── state.js                     persistence to App Support/state.json
-├── renderer/
-│   ├── index.html                   popover layout
-│   ├── styles.css                   dark + gold theme
-│   └── app.js                       state rendering, modals, IPC client
-├── assets/                          tray icons (PNGs — see "Tray icons" below)
-├── launchd-wrapper.sh               sources env file, execs electron
-├── com.mintvault.scanner-app.plist  LaunchAgent template (paths substituted)
-├── install.sh                       npm install + render plist + launchctl bootstrap
-├── uninstall.sh                     bootout new + old agents, remove plists
-├── README.md                        ← you are here
-└── CUTOVER.md                       step-by-step swap from old watcher
-```
+## Device health
 
-## Operator runbook
+The popover's Canon LiDE status is device/profile health, not merely server reachability:
 
-### New scanning station (e.g. a second Mac) → use `setup-new-mac.sh`
+- `ready` — Canon device visible and jig origin provisioned.
+- `profile_unprovisioned` — device is visible but fixture calibration is absent.
+- `disconnected`, `busy`, or `control_unavailable` — do not capture until corrected.
 
-> ⚠️ **Label divergence — read this before running `install.sh`.** `install.sh`
-> below bootstraps the LaunchAgent under the label **`com.mintvault.scanner-app`**.
-> But the app's single source of truth (`lib/agent-plist.js`) and its own
-> self-repair tiers (`reset-agent.sh`, `main.js`) manage **`com.mintvault.scanner`**.
-> If you install with `install.sh`, the bootstrapped agent and the app's
-> restart/repair buttons target _different_ labels and can drift into two
-> competing agents. For a fresh station, prefer:
->
-> ```
-> cd ~/mintvault-platform/scripts/scanner-app
-> ./setup-new-mac.sh
-> ```
->
-> It renders + loads the plist from `lib/agent-plist.js` (same label the app
-> self-manages), creates the scan folders, prompts for `SCANNER_API_TOKEN`
-> without leaking it to shell history, runs `npm install` only if needed, and
-> bootstraps `com.mintvault.scanner`. Leaves `MINTVAULT_API_BASE` unset → PROD
-> (`https://mintvaultuk.com`). Per-machine only; it cannot touch another station.
-> Prereqs (Homebrew, Node 22 LTS, git) are not installed by it — see the repo
-> root setup. Verify after: `launchctl print gui/$(id -u)/com.mintvault.scanner | grep state`.
+## Retired hot-folder path
 
-### First install
+`~/mintvault-scans/inbox` is quarantined for forensic recovery only. Any TIFF placed there is moved to `rejected/` with a reason; it cannot mint a certificate or attach/rewrite evidence. AUTO pairing, one-shot attachment, SilverFast export, synthetic test scans, and unbound TIFF attachment are retired because they cannot establish target binding.
 
-```
-cd ~/mintvault-platform
-git pull
-./scripts/scanner-app/install.sh
-```
+The app preserves `processed/`, `failed/`, `rejected/`, and `capture-staging/` locally. It does not delete evidence.
 
-The installer:
+## Operations
 
-1. Creates `~/mintvault-scans/{inbox,processed,failed,discarded}` if missing.
-2. Creates `~/Library/Application Support/MintVaultScanner/`.
-3. Creates `~/.mintvault-scanner.env` template if missing (won't overwrite existing).
-4. Runs `npm install` in the app directory (downloads Electron, ~150MB first time).
-5. Renders the LaunchAgent plist with absolute paths into `~/Library/LaunchAgents/`.
-6. `launchctl bootstrap`s the agent into `gui/$(id -u)`.
-
-After install, edit the env file with the SCANNER_API_TOKEN value:
-
-```
-open -e ~/.mintvault-scanner.env
-launchctl kickstart -k gui/$(id -u)/com.mintvault.scanner-app
-```
-
-### Daily operation
-
-- **Tray icon**: left-click opens popover. Right-click for native menu (Restart watcher, Show logs, Open inbox, Quit).
-- **AUTO mode** (default): scan front → scan back → upload. Same workflow as the old watcher.
-- **MANUAL mode**: every detected `.tif` opens a prompt — pick a cert + side. Cancelling leaves the file in inbox; nothing auto-deleted.
-- **Fix orphan…**: lists certs missing a side or with no images. "Attach back" arms a one-shot manual upload — next scan attaches to that cert. "Soft-delete" requires a reason (≥10 chars).
-- **Forward to cert…**: cosmetic override of the displayed "Next cert" line. Server still allocates via `/api/admin/next-cert-id` on the actual scan.
-
-### Logs
-
-```
+```sh
+launchctl print gui/$(id -u)/com.mintvault.scanner
 tail -f ~/mintvault-scans/scanner-app.log
+./uninstall.sh
 ```
 
-Both stdout and stderr from the Electron process are captured here by launchd.
+Do not load a legacy scanner watcher alongside `com.mintvault.scanner`.
 
-### Restart / kickstart
+## Tests
 
-```
-launchctl kickstart -k gui/$(id -u)/com.mintvault.scanner-app
-```
-
-Or use the popover header's `↻` button (calls `chokidar.close()` then re-`watch()` without restarting Electron itself).
-
-### Uninstall
-
-```
-./scripts/scanner-app/uninstall.sh
+```sh
+npm test
 ```
 
-Tears down `com.mintvault.scanner-app`, `com.mintvault.scanner-watcher`, `com.mintvault.scanner-guide`, and removes the SwiftBar plugin if present. Leaves env file, `~/mintvault-scans/`, and state.json untouched (recoverable).
-
-## Tray icons
-
-Assets at `assets/tray-{idle,busy,error}.png` are template PNGs (16×16 + 32×32 @2x). On first install they may not exist — main.js falls back to an empty `nativeImage` so the tray slot still appears, but the icon will be invisible.
-
-To add icons, drop PNG files at:
-
-```
-scripts/scanner-app/assets/tray-idle.png    # 16×16, template
-scripts/scanner-app/assets/tray-idle@2x.png # 32×32, template
-scripts/scanner-app/assets/tray-busy.png    # 16×16, non-template
-scripts/scanner-app/assets/tray-busy@2x.png # 32×32, non-template
-scripts/scanner-app/assets/tray-error.png   # 16×16, non-template
-scripts/scanner-app/assets/tray-error@2x.png # 32×32, non-template
-```
-
-Template images auto-tint with the menu bar (dark/light); non-template images keep their source colour.
-
-## QoL toggles (added after initial ship)
-
-- **Pause / Resume** — button in the status row. While paused, the watcher logs `paused — ignoring foo.tif` for any new arrival and leaves the file untouched in inbox. Auto-clears after 30 minutes (so a forgotten pause can't strand grading overnight). Tray icon switches to a pause-bars glyph; tooltip shows "Paused (Nm remaining)". State persists across app restarts via `pausedUntil` in state.json.
-- **Auto-open on error** — when the watcher transitions to `error` state, the popover auto-shows so the operator sees the failure without having to click the tray. Only fires on the idle→error edge, not every error tick. Toggle in Settings (default ON).
-- **Orphan-attach defaults to replace** — when you click "Attach back" in the orphan picker, the one-shot is armed with `replaceExisting: true`. Reasoning: the operator has already confirmed they want this orphan fixed, so a 409 (side already occupied) shouldn't block them. Manual mode (modal-prompted scans) still defaults replace OFF — only the orphan-flow changes.
-- **Test scan** — button in Settings that drops a 1×1 PNG named `test-scan-{timestamp}.tif` into inbox. Chokidar picks it up and routes through the normal pipeline → creates a real cert. Use sparingly, soft-delete via Fix orphan after testing.
-- **Manual mode supports back-only attach** — verified: the manual-prompt modal exposes both Front and Back radios with no enforced order, and `/api/admin/certs/:id/image` accepts `side=back` regardless of whether front exists. No code change needed.
-
-## Manual decisions made during build
-
-Per spec §9: "make a call, document it, keep moving". Calls made:
-
-- **node-fetch v3 (ESM-only) loaded via dynamic `import()` from CommonJS**. node-fetch 3.x dropped CommonJS support; staying on v3 avoids the v2 deprecation warnings. Lazy-load preserves CJS interop without rewriting the whole app as ESM.
-- **Recent-scans list capped at 5** (matching the spec mockup), kept in state.json so it survives crashes.
-- **Session counter resets at process boot, not at midnight.** A "session" = one continuous run of the app. Matches the old watcher's behaviour.
-- **No DB index migration.** The orphan-certs query filters on `deleted_at IS NULL` and `front_image_url IS NULL OR back_image_url IS NULL`. With ~150 rows in production, a sequential scan is fast enough; an index isn't justified yet.
-- **Forward-to-cert is purely cosmetic** (per spec §3.5). It updates the displayed "Next cert" but does not bypass the server's allocation. Spec called this out explicitly.
-- **Old `scripts/scanner-watcher/` left in place** (not deleted) so the rollback path in CUTOVER.md works. It's deprecated, not removed.
-
-## Known limitations / open items
-
-- No tray icon PNGs shipped yet — see "Tray icons" above. App works, just no glyph.
-- No notification sounds. The old watcher used `osascript display notification`. Could be added later via `new Notification()` from the renderer or `Notification` from Node, but launchd-spawned processes can't emit user notifications without entitlements; not worth it for v1.
-- The popover uses `popover.on("blur", () => popover.hide())` — clicking the dock to switch focus closes it. This matches the spec's "behave like a menu-bar popover" intent but means the operator can't keep it open while interacting with another app. If that's a problem in practice, change to a sticky window with manual close.
-- `chokidar.close()` + `watch()` on the existing watcher path is a bit slow (~1s) because the previous chokidar instance has to release its FSEvents subscription. Acceptable for a manual restart action.
-
-## What the spec said NOT to do (and didn't)
-
-- ✗ No new database tables.
-- ✗ No change to scan-ingest signature.
-- ✗ No R2 layout change.
-- ✗ No electron-builder packaging — ships as raw Electron under launchd.
-- ✗ No auto-cutover. Operator runs `uninstall.sh` then `install.sh` manually per CUTOVER.md.
-- ✗ Not deleting `scripts/scanner-watcher/` — kept for rollback.
-- ✗ No telemetry.
-- ✗ No login UI in the app — reads existing scanner credentials.
+The scanner-client tests prove that claiming never scans, a Scan creates only a non-authoritative derivative preview, only Accept posts the original TIFF, and stale/double/expired preview actions cannot duplicate or cross card sides.

@@ -24,6 +24,8 @@ const COMING_SOON = read("client/src/pages/partner/coming-soon.tsx");
 const LOCATIONS_PAGE = read("client/src/pages/partner/locations.tsx");
 const BILLING_PAGE = read("client/src/pages/partner/billing.tsx");
 const SHELL = read("client/src/components/partner/partner-shell.tsx");
+const APP = read("client/src/App.tsx");
+const WORKFLOW_PLACEHOLDER = read("client/src/pages/partner/workflow-placeholder.tsx");
 
 describe("wizard has all 5 steps with a visible progress indicator", () => {
   it("declares all 5 step labels in order", () => {
@@ -56,7 +58,7 @@ describe("double-submit / duplication safety", () => {
     // Submit's enabled state must reuse the SAME "missing" check as the Review step's warning
     // banner (a real bug found in review: Submit was previously enabled by card-count alone,
     // letting a partner skip past an incomplete Review straight to an active Submit button).
-    expect(WIZARD).toContain("disabled={submitting || missing.length > 0}");
+    expect(WIZARD).toContain("disabled={submitting || missing.length > 0 || (shortfall != null && shortfall > 0)}");
     expect(WIZARD).toContain('data-testid="button-confirm-submit"');
   });
   it("Review and Submit steps share one computed 'missing' list, not two independent checks", () => {
@@ -65,7 +67,7 @@ describe("double-submit / duplication safety", () => {
     expect(WIZARD).toContain('if (cards.length === 0) missing.push("At least one card");');
     // ReviewStep/SubmitStep receive it as a prop rather than recomputing their own copy.
     expect(WIZARD).toMatch(/<ReviewStep[\s\S]*?missing=\{missing\}/);
-    expect(WIZARD).toContain("<SubmitStep missing={missing}");
+    expect(WIZARD).toMatch(/<SubmitStep[\s\S]*?missing=\{missing\}/);
   });
   it("passes the idempotency key through to partnerSubmissions.submit", () => {
     expect(WIZARD).toContain("partnerSubmissions.submit(submission.id, idempotencyKey)");
@@ -153,22 +155,22 @@ describe("wizard never touches protected grading surfaces", () => {
 });
 
 describe("success screen offers the required next actions without duplicating submission", () => {
-  it("renders View Submission, Print Intake Receipt, and Start Another Submission", () => {
+  it("renders View Submission, Open Grading, and Start Another Submission", () => {
     expect(WIZARD).toContain('data-testid="button-view-submission"');
-    expect(WIZARD).toContain('data-testid="button-print-receipt"');
+    expect(WIZARD).toContain('data-testid="button-open-grading"');
     expect(WIZARD).toContain('data-testid="button-start-another"');
   });
   it("does not call partnerSubmissions.create again from the success panel (no accidental double draft)", () => {
     const panel = WIZARD.slice(WIZARD.indexOf("function SubmitSuccessPanel"));
     expect(panel).not.toContain("partnerSubmissions.create");
   });
-  it("Print Intake Receipt is a real, non-fabricated action (uses window.print — no fake network call, no dead onClick)", () => {
+  it("Open Grading is a real navigation action (no fake network call, no dead onClick)", () => {
     const panel = WIZARD.slice(WIZARD.indexOf("function SubmitSuccessPanel"));
-    const printButton = panel.slice(
-      panel.indexOf('data-testid="button-print-receipt"') - 200,
-      panel.indexOf('data-testid="button-print-receipt"') + 100
+    const gradingButton = panel.slice(
+      panel.indexOf('data-testid="button-open-grading"') - 200,
+      panel.indexOf('data-testid="button-open-grading"') + 100
     );
-    expect(printButton).toContain("window.print()");
+    expect(gradingButton).toContain('navigate("/partner/grading")');
   });
 });
 
@@ -242,6 +244,63 @@ describe("Locations and Billing use their real partner APIs", () => {
     expect(BILLING_PAGE).toContain("partnerCredits.view()");
     expect(BILLING_PAGE).toContain("Not available");
     expect(BILLING_PAGE).toContain("runningBalance");
+  });
+  it("Billing does not invent partner Stripe credit packages before the server catalogue exists", () => {
+    expect(BILLING_PAGE).toContain("Package pricing must come from the partner credit package API");
+    expect(BILLING_PAGE).toContain("Credits are never added from a success URL");
+    expect(BILLING_PAGE).not.toMatch(/partnerCredits\.(checkout|packages|purchase)/);
+  });
+});
+
+describe("partner workstation IA has mounted destinations for shell links", () => {
+  it("shell exposes the requested partner workstation destinations", () => {
+    for (const href of [
+      "/partner/submissions/new",
+      "/partner/certificates",
+      "/partner/supplies",
+      "/partner/orders",
+      "/partner/public-profile",
+    ]) {
+      expect(SHELL).toContain(href);
+    }
+  });
+  it("App mounts the placeholder destinations instead of falling through to dashboard", () => {
+    for (const route of [
+      'path="/partner/certificates"',
+      'path="/partner/supplies"',
+      'path="/partner/orders"',
+      'path="/partner/public-profile"',
+    ]) {
+      expect(APP).toContain(route);
+    }
+    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
+    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="supplies" />');
+    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="orders" />');
+    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
+  });
+  it("placeholder copy is explicit about missing server contracts, not fake live data", () => {
+    expect(WORKFLOW_PLACEHOLDER).toContain("partner-to-certificate contract");
+    expect(WORKFLOW_PLACEHOLDER).toContain("Supply catalogue");
+    expect(WORKFLOW_PLACEHOLDER).toContain("public partner network contract");
+    expect(WORKFLOW_PLACEHOLDER).not.toMatch(/Math\.random|mock|demo/i);
+  });
+});
+
+describe("insufficient credit recovery returns to the same draft", () => {
+  it("wizard opens billing with a returnTo link containing the current draft id", () => {
+    expect(WIZARD).toContain("billingReturnPath");
+    expect(WIZARD).toContain("returnTo=${encodeURIComponent(`/partner/submissions/new?draft=${submission.id}`)}");
+    expect(WIZARD).toContain('data-testid="button-buy-credits-shortfall"');
+  });
+  it("wizard can resume an existing draft from the billing return URL instead of creating another draft", () => {
+    expect(WIZARD).toContain('const draftId = useMemo(() => readQueryValue("draft"), []);');
+    expect(WIZARD).toContain("function readQueryValue");
+    expect(WIZARD).toContain("partnerSubmissions.detail(draftId)");
+    expect(WIZARD).toContain("setCards(detail.cards)");
+  });
+  it("submit is blocked while a known credit shortfall remains", () => {
+    expect(WIZARD).toContain("const shortfall = remaining == null ? null : Math.max(0, -remaining);");
+    expect(WIZARD).toContain("shortfall != null && shortfall > 0");
   });
 });
 

@@ -136,20 +136,38 @@ describe("partner schema ↔ migration parity", () => {
       // policy 0041 omitted on partner_submission_credit_holds. It contains an INTENTIONAL
       // DROP INDEX, so the runner requires --allow-destructive for it.
       "0043_partner_credit_hold_per_card.sql",
-      // 0044 widens partner submission lifecycle states after handover and stores an immutable
+      "0044_partner_mfa_pending_lifecycle.sql",
+      // Distributed Grading Network foundation: station identity/calibration,
+      // durable derivative jobs, and server-owned opaque evidence staging.
+      // These are deliberately migration-authoritative raw-SQL surfaces.
+      "0045_partner_stations.sql",
+      "0046_scanner_processing_jobs.sql",
+      "0047_scanner_evidence_staging.sql",
+      // 0074 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
-      "0044_partner_submission_lifecycle_and_location_snapshot.sql",
-      "0046_partner_mfa_pending_lifecycle.sql",
-      // 0047 and 0048 were WITHDRAWN, not renamed. Both were still unapplied on every
-      // host, and their numbers were already occupied by DIFFERENT migrations in the
-      // production scanner lineage and the staging final-product-integration lineage.
-      // Their semantics moved forward into 0073 under the owner's forward-only
-      // decision; the applied 0046 stays because staging holds it as immutable history.
+      // 0073 — FORWARD-ONLY LINEAGE CONVERGENCE. 0047 and 0048 from the
+      // final-product-integration lineage were WITHDRAWN, not renamed: both were still
+      // unapplied on every host, and their numbers were already occupied by DIFFERENT
+      // migrations in the production scanner lineage. Their semantics moved forward into
+      // 0073, which adds the grading_revision CAS token and its ENABLE ALWAYS trigger,
+      // grants partner.cards.preview, and verifies the MFA projection the fail-closed
+      // login guard depends on.
       //
-      // Forward-only lineage convergence: adds the grading_revision CAS token and its
-      // ENABLE ALWAYS trigger where absent, grants partner.cards.preview, and verifies
-      // the MFA projection the fail-closed login guard depends on.
+      // 0046_partner_mfa_pending_lifecycle.sql is NOT in this list. It is byte-identical
+      // (sha256 6243d1d8…) to 0044_partner_mfa_pending_lifecycle.sql above — the same
+      // migration under the number STAGING gave it. Production applied it as 0044 and
+      // gave 0046 to scanner_processing_jobs, so carrying staging's alias here made the
+      // runner refuse the whole tree on a duplicate number. Staging's applied journal row
+      // is untouched and remains immutable history on its own lineage; this is a
+      // production-targeted release tree, so it carries production's identities.
       "0073_lineage_convergence.sql",
+      // RENUMBERED from 0044 to 0074 during the 2026-08-11 reconciliation. Production had
+      // already applied a DIFFERENT 0044 (the MFA pending lifecycle above), and the runner
+      // rejects duplicate NUMBERS before it runs anything. The MFA file could not move
+      // (renaming an applied migration makes it pending again and re-runs it); this one is
+      // unapplied everywhere this release targets, so it moved instead. 0074 is above the
+      // global high-water mark 0073 recorded across every reachable ref.
+      "0074_partner_submission_lifecycle_and_location_snapshot.sql",
     ]);
   });
 

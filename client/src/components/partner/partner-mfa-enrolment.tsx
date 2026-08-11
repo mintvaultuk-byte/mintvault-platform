@@ -331,7 +331,12 @@ export function PartnerMfaEnrolment({
         </p>
       )}
 
-      <Button type="submit" className="w-full" disabled={submitting || restarting || cancelling} data-testid="button-mfa-enrol-confirm">
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={submitting || restarting || cancelling}
+        data-testid="button-mfa-enrol-confirm"
+      >
         {submitting ? "Confirming…" : "Confirm and finish"}
       </Button>
       <Button
