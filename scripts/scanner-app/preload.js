@@ -1,52 +1,36 @@
 /**
- * Preload bridge — exposes a minimal `scanner` global to the renderer.
- * No nodeIntegration in renderer; this is the only way IPC happens.
+ * Preload bridge for the target-bound scanner station. The renderer receives
+ * state and recovery/diagnostic actions only; it cannot select a scan mode,
+ * attach a local file, choose a certificate target, or set a profile.
  */
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("scanner", {
-  // Read current state once (renderer also subscribes via onStateUpdate).
   getState: () => ipcRenderer.invoke("get-state"),
-
-  // Subscribers — the main process pushes state changes and scan events.
-  onStateUpdate: (cb) => {
-    const wrap = (_e, payload) => cb(payload);
-    ipcRenderer.on("state-update", wrap);
-    return () => ipcRenderer.removeListener("state-update", wrap);
+  onStateUpdate: (callback) => {
+    const wrapped = (_event, payload) => callback(payload);
+    ipcRenderer.on("state-update", wrapped);
+    return () => ipcRenderer.removeListener("state-update", wrapped);
   },
-  onScanDetected: (cb) => {
-    const wrap = (_e, payload) => cb(payload);
-    ipcRenderer.on("scan-detected", wrap);
-    return () => ipcRenderer.removeListener("scan-detected", wrap);
-  },
-
-  setMode:           (mode)        => ipcRenderer.invoke("set-mode", mode),
-  attachManualScan:  (payload)     => ipcRenderer.invoke("attach-manual-scan", payload),
-  fetchOrphans:      ()            => ipcRenderer.invoke("fetch-orphans"),
-  armOneShot:        (payload)     => ipcRenderer.invoke("arm-one-shot", payload),
-  cancelOneShot:     ()            => ipcRenderer.invoke("cancel-one-shot"),
-  deleteCert:        (payload)     => ipcRenderer.invoke("delete-cert", payload),
-  retryLast:         ()            => ipcRenderer.invoke("retry-last"),
-  resetBuffered:     ()            => ipcRenderer.invoke("reset-buffered"),
-  ackConfirmCard:    ()            => ipcRenderer.invoke("ack-confirm-card"),
-  rejectConfirmCard: ()            => ipcRenderer.invoke("reject-confirm-card"),
-  openGradeCert:     (certId)      => ipcRenderer.invoke("open-grade-cert", certId),
-  getVersion:        ()            => ipcRenderer.invoke("get-version"),
-  updateApp:         ()            => ipcRenderer.invoke("update-app"),
-  restartWatcher:    ()            => ipcRenderer.invoke("restart-watcher"),
-  resetScanner:      ()            => ipcRenderer.invoke("reset-scanner"),
-  forwardToCert:     (certId)      => ipcRenderer.invoke("forward-to-cert", certId),
-  hidePopover:       ()            => ipcRenderer.invoke("hide-popover"),
-  openInbox:         ()            => ipcRenderer.invoke("open-inbox"),
-  openLogs:          ()            => ipcRenderer.invoke("open-logs"),
-  openLastCert:      ()            => ipcRenderer.invoke("open-last-cert"),
-
-  // SilverFast export path — read the watched inbox + copy it to the clipboard.
-  getInboxPath:      ()            => ipcRenderer.invoke("get-inbox-path"),
-  copyInboxPath:     ()            => ipcRenderer.invoke("copy-inbox-path"),
-
-  // ── QoL toggles (added in scanner toggles pack) ────────────────────────
-  setPaused:         (paused)      => ipcRenderer.invoke("set-paused", paused),
-  setSetting:        (key, value)  => ipcRenderer.invoke("set-setting", { key, value }),
-  testScan:          ()            => ipcRenderer.invoke("test-scan"),
+  fetchOrphans: () => ipcRenderer.invoke("fetch-orphans"),
+  deleteCert: (payload) => ipcRenderer.invoke("delete-cert", payload),
+  openGradeCert: (certId) => ipcRenderer.invoke("open-grade-cert", certId),
+  getVersion: () => ipcRenderer.invoke("get-version"),
+  getStationSetup: () => ipcRenderer.invoke("get-station-setup"),
+  stationSignIn: (payload) => ipcRenderer.invoke("station-sign-in", payload),
+  stationCompleteMfa: (payload) => ipcRenderer.invoke("station-complete-mfa", payload),
+  registerStation: (payload) => ipcRenderer.invoke("register-station", payload),
+  updateApp: () => ipcRenderer.invoke("update-app"),
+  resetScanner: () => ipcRenderer.invoke("reset-scanner"),
+  hidePopover: () => ipcRenderer.invoke("hide-popover"),
+  openLogs: () => ipcRenderer.invoke("open-logs"),
+  openLastCert: () => ipcRenderer.invoke("open-last-cert"),
+  setSetting: (key, value) => ipcRenderer.invoke("set-setting", { key, value }),
+  scanTarget: () => ipcRenderer.invoke("scan-target"),
+  runPositioningPreview: () => ipcRenderer.invoke("run-positioning-preview"),
+  getPositioningPreview: (previewId) => ipcRenderer.invoke("get-positioning-preview", previewId),
+  applyPositioningPreview: (previewId) => ipcRenderer.invoke("apply-positioning-preview", previewId),
+  getCapturePreview: (previewId) => ipcRenderer.invoke("get-capture-preview", previewId),
+  acceptCapturePreview: (previewId) => ipcRenderer.invoke("accept-capture-preview", previewId),
+  rescanCapturePreview: (previewId) => ipcRenderer.invoke("rescan-capture-preview", previewId),
 });

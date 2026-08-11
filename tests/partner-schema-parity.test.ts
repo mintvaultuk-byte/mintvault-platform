@@ -128,6 +128,12 @@ describe("partner schema ↔ migration parity", () => {
       "0042_partner_per_card_credit_settlement.sql",
       "0043_partner_credit_hold_per_card.sql",
       "0044_partner_mfa_pending_lifecycle.sql",
+      // Distributed Grading Network foundation: station identity/calibration,
+      // durable derivative jobs, and server-owned opaque evidence staging.
+      // These are deliberately migration-authoritative raw-SQL surfaces.
+      "0045_partner_stations.sql",
+      "0046_scanner_processing_jobs.sql",
+      "0047_scanner_evidence_staging.sql",
     ]);
   });
 

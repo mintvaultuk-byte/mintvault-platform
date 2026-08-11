@@ -232,6 +232,84 @@ export function registerStaffRoutes(app: Express): void {
     }
   });
 
+  // The staff scan queue uses the same server-owned session lifecycle as the
+  // Super Admin workstation. `can_scan` and the assigned-submission check stay
+  // authoritative; the scanner token itself can only claim the resulting
+  // workstation-bound session and never receives a free-form staff target.
+  app.post(
+    "/api/staff/scan/certificates/:id/scanner-capture-sessions",
+    requireCapability("scan"),
+    async (req: Request, res: Response) => {
+      try {
+        const certificateId = Number.parseInt(String(req.params.id), 10);
+        if (!Number.isSafeInteger(certificateId) || certificateId <= 0) {
+          return res.status(400).json({ error: "valid certificate id required" });
+        }
+        const staffId = (req.session as any).staffId as string;
+        const submissionId = await authorizeScanCert(staffId, certificateId);
+        if (!submissionId) return res.status(403).json({ error: "This card is not in your scan queue" });
+        const { createScannerCaptureSession } = await import("../scanner-capture-service");
+        const { CANON_LIDE_400_PROFILE } = await import("../lib/lide400-profile");
+        const { assertStationCaptureReady, resolveActiveStationByCode } = await import("../partner/station-service");
+        const station = await resolveActiveStationByCode(req.body?.workstation_id);
+        if (!station) return res.status(409).json({ error: "Select an active, provisioned MintVault station" });
+        try {
+          assertStationCaptureReady(station, CANON_LIDE_400_PROFILE.version);
+        } catch {
+          return res.status(409).json({ error: "Station needs a current calibration for the locked Canon profile" });
+        }
+        const capture = await createScannerCaptureSession({
+          certificateId,
+          side: req.body?.side,
+          workstationId: station.code,
+          stationId: station.id,
+          actorId: staffId,
+          recapture: req.body?.recapture === true,
+          scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
+        });
+        await storage.writeAuditLog(
+          "certificate",
+          String(certificateId),
+          "staff_scanner_capture_armed",
+          (req.session as any).staffEmail ?? staffId,
+          {
+            capture_session_id: capture.id,
+            submission_id: submissionId,
+            side: capture.side,
+            workstation_id: capture.workstationId,
+            recapture: capture.recapture,
+          }
+        );
+        return res.status(201).json({ capture });
+      } catch (error: any) {
+        const message = error?.message || "Unable to arm scanner capture";
+        return res.status(/not found|already|valid|must be/.test(message) ? 409 : 500).json({ error: message });
+      }
+    }
+  );
+
+  app.get(
+    "/api/staff/scan/certificates/:id/scanner-capture-sessions/:sessionId",
+    requireCapability("scan"),
+    async (req: Request, res: Response) => {
+      try {
+        const certificateId = Number.parseInt(String(req.params.id), 10);
+        const staffId = (req.session as any).staffId as string;
+        if (!(await authorizeScanCert(staffId, certificateId)))
+          return res.status(403).json({ error: "This card is not in your scan queue" });
+        const row = await db.execute(sql`
+          SELECT id, certificate_id, side, workstation_id, state, failure_reason, recapture, expires_at
+          FROM scanner_capture_sessions
+          WHERE id = ${String(req.params.sessionId)} AND certificate_id = ${certificateId}
+          LIMIT 1`);
+        if (!row.rows.length) return res.status(404).json({ error: "capture session not found" });
+        return res.json({ capture: row.rows[0] });
+      } catch (error) {
+        return sendServerError(res, error);
+      }
+    }
+  );
+
   app.post(
     "/api/staff/scan/certificates/:id/upload",
     requireCapability("scan"),

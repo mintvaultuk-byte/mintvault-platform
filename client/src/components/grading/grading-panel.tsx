@@ -12,7 +12,6 @@ import type { SurfaceValues } from "./surface-grading";
 import GradeDisplay from "./grade-display";
 import Authentication, { type AuthStatus } from "./authentication";
 import GradingNotes from "./grading-notes";
-import CaptureWizard from "./capture-wizard";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
 import ManualCardTool from "./manual-card-tool";
 // MeasurementTool retired in v2.1 — line drawing now lives inside image-viewer
@@ -2054,11 +2053,10 @@ export default function GradingPanel({
 
   if (!hasAnyImage) {
     return (
-      <CaptureWizard
-        certId={certId}
-        onComplete={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
-        existingQuality={imageData?.quality}
-      />
+      <div className="rounded-xl border border-[var(--admin-gold)]/20 bg-[var(--admin-panel)] p-5 text-sm text-[var(--admin-ink-dim)]">
+        No accepted card images yet. Return to <strong className="text-[var(--admin-ink)]">Card Details</strong> and
+        complete the target-bound Canon capture before grading.
+      </div>
     );
   }
 

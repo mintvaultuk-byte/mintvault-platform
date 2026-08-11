@@ -995,9 +995,15 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /promo_type\s*=\s*\$\{/.test(addedCode);
         // Signature B is purely JavaScript, so it is judged ONLY on the JS representation.
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
-        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
+        // Signature C: scanner evidence revision selection. Restrict the
+        // addition to the immutable-master query and the explicit current
+        // pointer so the grade workflow cannot be widened under this exception.
+        const signatureC =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
         expect(addedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );

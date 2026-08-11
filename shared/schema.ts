@@ -2657,8 +2657,9 @@ export const insertPcTestRunSchema = createInsertSchema(pcTestRuns).omit({ id: t
 
 /**
  * Append-only scanner-evidence ledger. Legacy JPEGs are recorded honestly as
- * derived-only; only TIFF objects may be NEW_IMMUTABLE_MASTER. The database
- * uniqueness constraint binds a certificate side to one immutable source hash.
+ * derived-only; only TIFF objects may be NEW_IMMUTABLE_MASTER. A recapture
+ * appends a revision and atomically switches the explicit `is_current` pointer;
+ * historical source hashes and objects are never overwritten or deleted.
  */
 export const certificateImageEvidence = pgTable(
   "certificate_image_evidence",
@@ -2683,10 +2684,15 @@ export const certificateImageEvidence = pgTable(
     workingHeight: integer("working_height"),
     workingFormat: varchar("working_format", { length: 16 }),
     workingSettings: jsonb("working_settings"),
+    isCurrent: boolean("is_current").notNull().default(true),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    supersededById: integer("superseded_by_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    uqCertificateSide: uniqueIndex("uq_certificate_image_evidence_side").on(t.certificateId, t.side),
+    // Migration 0047 creates the authoritative partial unique current-side
+    // index; Drizzle's schema DSL has no portable partial-index expression.
+    idxCurrentSide: index("idx_certificate_image_evidence_current_side").on(t.certificateId, t.side, t.isCurrent),
     uqObjectKey: uniqueIndex("uq_certificate_image_evidence_object_key").on(t.objectKey),
     idxSha: index("idx_certificate_image_evidence_sha").on(t.sha256),
   })

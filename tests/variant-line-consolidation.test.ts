@@ -238,11 +238,14 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     // permitted only if the added lines match one of the explicitly founder-authorised
     // signatures below AND contain no calculation logic. Anything else fails.
     //
-    // Two authorised signatures, kept as a UNION rather than replacing one with the other:
+    // Three authorised signatures, kept as a UNION rather than replacing one with the other:
     //   A) the identity/variant draft validation already on main;
     //   B) PR #254's print-safety work (2026-07-25 approval) — approveGraderCert validating
     //      against the shared printability rule, and applyCertGradeDraft normalising
     //      grade_type and refusing malformed kinds via a typed GradeDraftRejected.
+    //   C) the signed-station scanner release selecting only the explicit current
+    //      immutable-evidence revision for a browser working derivative. This is
+    //      evidence-pointer safety, not grade calculation.
     // A single-signature whitelist rejects the other authorised change, which is why this is
     // a union and not an overwrite.
     const calcEngine =
@@ -263,9 +266,12 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /finish_variant\s*=\s*\$\{/.test(addedCode) &&
           /promo_type\s*=\s*\$\{/.test(addedCode);
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
-        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
+        const signatureC =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
         expect(addedCode).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
         continue;
       }

@@ -11,8 +11,10 @@
 const fs        = require("node:fs");
 const os        = require("node:os");
 const path      = require("node:path");
+const crypto    = require("node:crypto");
 const { Transform } = require("node:stream");
 const FormData  = require("form-data");
+const stationIdentity = require("./station-identity");
 // node-fetch v3 is ESM-only. Lazy-load via dynamic import; cache the promise.
 let _fetchPromise = null;
 function getFetch() {
@@ -70,6 +72,57 @@ function appendTiffMaster(form, field, filePath) {
   });
 }
 
+/** Hash directly from the durable local TIFF; never materialise a master in Electron heap. */
+function fingerprintTiffMaster(filePath) {
+  const byteLength = assertTiffMaster(filePath);
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve({ byteLength, sha256: hash.digest("hex") }));
+  });
+}
+
+/** PUT an exact TIFF stream to a server-minted R2 staging URL. */
+async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
+  const fetch = await getFetch();
+  const stream = fs.createReadStream(filePath);
+  const controller = new AbortController();
+  let lastProgressAt = Date.now();
+  let sent = 0;
+  const counter = new Transform({
+    transform(chunk, _encoding, callback) {
+      sent += chunk.length;
+      lastProgressAt = Date.now();
+      callback(null, chunk);
+    },
+  });
+  stream.on("error", (error) => counter.destroy(error));
+  stream.pipe(counter);
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) controller.abort();
+  }, 5_000);
+  try {
+    const response = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { ...suppliedHeaders, "content-length": String(byteLength) },
+      body: counter,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      return { ok: false, status: response.status, body: { error: message || `R2 staging PUT failed — HTTP ${response.status}` } };
+    }
+    if (sent !== byteLength) return { ok: false, status: 0, body: { error: "R2 staging stream ended before all TIFF bytes were sent" } };
+    return { ok: true, status: response.status, body: {} };
+  } catch (error) {
+    return { ok: false, status: 0, body: { error: error?.name === "AbortError" ? "R2 staging upload stalled" : (error?.message || String(error)) } };
+  } finally {
+    clearInterval(watchdog);
+  }
+}
+
 // POST a form-data body with a stall watchdog. Streams the form through a
 // counting Transform so we can detect when bytes stop flowing; aborts after
 // STALL_TIMEOUT_MS of zero progress. Content-Length is set explicitly
@@ -86,7 +139,16 @@ async function postForm(url, form, extraHeaders = {}) {
 
   let contentLength;
   try { contentLength = form.getLengthSync(); } catch { contentLength = undefined; }
-  const headers = { ...authHeaders(), ...form.getHeaders(), ...extraHeaders };
+  const requestUrl = new URL(url);
+  // Multipart evidence is intentionally streamed from disk.  The canonical
+  // server still validates and hashes the uploaded TIFF bytes before it can
+  // become evidence; the signed envelope binds the station, method and exact
+  // route without materialising a 1200-DPI TIFF in Electron memory.
+  const headers = {
+    ...requestAuthHeaders("POST", `${requestUrl.pathname}${requestUrl.search}`, Buffer.alloc(0)),
+    ...form.getHeaders(),
+    ...extraHeaders,
+  };
   if (contentLength != null) headers["content-length"] = String(contentLength);
 
   const controller = new AbortController();
@@ -162,8 +224,28 @@ function loadEnv() {
   return out;
 }
 
+function baseFromLegacyIngestUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(String(value));
+    // Older stations stored the complete legacy ingest endpoint.  Preserve its
+    // origin (and any non-root deployment prefix), removing only the retired
+    // endpoint suffix so the new session routes stay on that same server.
+    url.pathname = url.pathname.replace(/\/api\/admin\/scan-ingest\/?$/, "") || "/";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return String(value).replace(/\/api\/admin\/scan-ingest\/?(?:\?.*)?$/, "").replace(/\/$/, "");
+  }
+}
+
 const env = loadEnv();
-const API_BASE = process.env.MINTVAULT_API_BASE || env.MINTVAULT_API_BASE || "https://mintvaultuk.com";
+const API_BASE =
+  process.env.MINTVAULT_API_BASE ||
+  env.MINTVAULT_API_BASE ||
+  baseFromLegacyIngestUrl(process.env.MINTVAULT_INGEST_URL || env.MINTVAULT_INGEST_URL) ||
+  "https://mintvaultuk.com";
 
 // Live credentials: the env file is re-read whenever its mtime changes, so a
 // rotated SCANNER_API_TOKEN takes effect on the next request WITHOUT an app
@@ -184,7 +266,7 @@ function liveEnv() {
   return _envCache.vals;
 }
 
-function authHeaders() {
+function legacyAuthHeaders() {
   const vals = liveEnv();
   const token = vals.SCANNER_API_TOKEN || process.env.SCANNER_API_TOKEN || "";
   const operator = vals.SCANNER_OPERATOR || process.env.SCANNER_OPERATOR || "";
@@ -193,9 +275,23 @@ function authHeaders() {
   return headers;
 }
 
+function requestAuthHeaders(method, urlPath, body) {
+  if (stationIdentity.hasActiveStationSession()) {
+    return stationIdentity.signStoredRequest({ method, path: urlPath, body: Buffer.isBuffer(body) ? body : Buffer.from(body || "") });
+  }
+  // Old shared-token stations remain usable only for the isolated local/dev
+  // proof flow.  The server independently rejects this path in production.
+  return process.env.NODE_ENV !== "production" && process.env.MINTVAULT_ALLOW_LEGACY_SCANNER_TOKEN === "1"
+    ? legacyAuthHeaders()
+    : {};
+}
+
 async function getJson(urlPath) {
   const fetch = await getFetch();
-  const res = await fetch(`${API_BASE}${urlPath}`, { method: "GET", headers: authHeaders() });
+  const res = await fetch(`${API_BASE}${urlPath}`, {
+    method: "GET",
+    headers: requestAuthHeaders("GET", urlPath, Buffer.alloc(0)),
+  });
   const text = await res.text();
   let body;
   try { body = JSON.parse(text); } catch { body = { raw: text }; }
@@ -204,10 +300,11 @@ async function getJson(urlPath) {
 
 async function postJson(urlPath, payload) {
   const fetch = await getFetch();
+  const requestBody = JSON.stringify(payload || {});
   const res = await fetch(`${API_BASE}${urlPath}`, {
     method: "POST",
-    headers: { ...authHeaders(), "content-type": "application/json" },
-    body: JSON.stringify(payload || {}),
+    headers: { ...requestAuthHeaders("POST", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
+    body: requestBody,
   });
   const text = await res.text();
   let body;
@@ -217,10 +314,11 @@ async function postJson(urlPath, payload) {
 
 async function deleteJson(urlPath, payload) {
   const fetch = await getFetch();
+  const requestBody = JSON.stringify(payload || {});
   const res = await fetch(`${API_BASE}${urlPath}`, {
     method: "DELETE",
-    headers: { ...authHeaders(), "content-type": "application/json" },
-    body: JSON.stringify(payload || {}),
+    headers: { ...requestAuthHeaders("DELETE", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
+    body: requestBody,
   });
   const text = await res.text();
   let body;
@@ -283,11 +381,78 @@ async function attachImage(certId, side, filePath, replaceExisting) {
   return postForm(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, form);
 }
 
+/** Claim only a server-armed, workstation-bound capture target. */
+async function claimNextCapture(workstationId, deviceId) {
+  return getJson(
+    `/api/admin/scanner/capture-sessions/next?workstation_id=${encodeURIComponent(workstationId)}&device_id=${encodeURIComponent(deviceId)}`
+  );
+}
+
+/**
+ * Upload to a server-owned R2 staging key, then ask the server to validate and
+ * promote that exact object. Older/local development servers retain the
+ * bounded multipart route as a compatibility fallback only.
+ */
+async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) {
+  const expected = await fingerprintTiffMaster(filePath);
+  const grant = await postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload`, {
+    device_id: deviceId,
+    sha256: expected.sha256,
+    byte_length: expected.byteLength,
+    capture_provenance: provenance,
+  });
+  // A local proof adapter intentionally has no presigned R2 endpoint, and a
+  // rolling server can briefly lack migration 0047/routes. Both fall back to
+  // the existing bounded receive path; production rejects static-token use and
+  // the current route always chooses direct staging.
+  if (grant.ok && grant.body?.transport === "direct" && grant.body?.upload_url && grant.body?.staging_id) {
+    const staged = await putStagedTiff(grant.body.upload_url, grant.body.headers || {}, filePath, expected.byteLength);
+    if (!staged.ok) return staged;
+    return postJson(
+      `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload/${encodeURIComponent(grant.body.staging_id)}/finalise`,
+      { device_id: deviceId }
+    );
+  }
+  if (!grant.ok && ![404, 405, 501].includes(grant.status)) return grant;
+  const form = new FormData();
+  appendTiffMaster(form, "image", filePath);
+  form.append("device_id", deviceId);
+  form.append("capture_provenance", JSON.stringify(provenance));
+  return postForm(`${API_BASE}/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/evidence`, form);
+}
+
+/**
+ * Confirm a direct upload after a transport timeout.  The server derives
+ * `accepted` from immutable evidence provenance for this exact session, so a
+ * lost 201 never forces an operator to rescan a successfully captured side.
+ */
+async function getCaptureStatus(sessionId, deviceId) {
+  return getJson(
+    `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}?device_id=${encodeURIComponent(deviceId)}`
+  );
+}
+
+/** Keep only this already-claimed station target alive during operator review. */
+async function renewCapture(sessionId, deviceId) {
+  return postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/keepalive`, {
+    device_id: deviceId,
+  });
+}
+
+/** Release a claimed session when ImageCaptureCore cannot start or complete it. */
+async function failCapture(sessionId, deviceId, reason) {
+  return postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/failed`, {
+    device_id: deviceId,
+    reason,
+  });
+}
+
 module.exports = {
   API_BASE,
   hasToken: () => {
     const vals = liveEnv();
-    return !!(vals.SCANNER_API_TOKEN || process.env.SCANNER_API_TOKEN);
+    return stationIdentity.hasActiveStationSession() ||
+      (process.env.NODE_ENV !== "production" && process.env.MINTVAULT_ALLOW_LEGACY_SCANNER_TOKEN === "1" && !!(vals.SCANNER_API_TOKEN || process.env.SCANNER_API_TOKEN));
   },
   getNextCertId,
   getOrphans,
@@ -295,7 +460,12 @@ module.exports = {
   softDeleteCert,
   uploadPair,
   attachImage,
+  claimNextCapture,
+  uploadCaptureEvidence,
+  getCaptureStatus,
+  renewCapture,
+  failCapture,
   getScanStatus,
   // Deliberately exposed for the scanner-app regression test only.
-  _private: { assertTiffMaster },
+  _private: { assertTiffMaster, fingerprintTiffMaster, putStagedTiff, baseFromLegacyIngestUrl, legacyAuthHeaders, requestAuthHeaders },
 };

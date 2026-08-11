@@ -145,12 +145,7 @@ type CorrectionFeedback = {
   changes: { field: string; before: unknown; after: unknown }[];
 };
 type StaffQueueSort =
-  | "queue-oldest"
-  | "queue-newest"
-  | "cert-asc"
-  | "cert-desc"
-  | "submission-oldest"
-  | "submission-newest";
+  "queue-oldest" | "queue-newest" | "cert-asc" | "cert-desc" | "submission-oldest" | "submission-newest";
 
 const STAFF_QUEUE_SORT_KEY = "mv.staff.queueSort";
 const STAFF_QUEUE_SORT_DEFAULT: StaffQueueSort = "queue-oldest";
@@ -427,37 +422,40 @@ function GradeTab() {
       // the canonical workstation (flex-1) fills exactly the available height —
       // no fixed offset, no black band. Fixed inset-0 takes over the screen for
       // rapid grading (breadcrumb has the ← back to exit).
-      <div className="fixed inset-0 z-40 flex flex-col bg-[var(--admin-bg)] text-[var(--admin-ink)]" data-testid="staff-grading-focus">
+      <div
+        className="fixed inset-0 z-40 flex flex-col bg-[var(--admin-bg)] text-[var(--admin-ink)]"
+        data-testid="staff-grading-focus"
+      >
         {/* Same shared AdminHeaderRow primitive as the outer Staff header and
             Super Admin — this breadcrumb previously used raw ad-hoc markup
             (hardcoded #D4AF37 hex, no shared row rhythm), which is exactly
             what made the live grading workflow look like a second, legacy
             standalone shell stacked beneath the real header. */}
         <div className="shrink-0">
-        <AdminHeaderRow
-          testId="staff-grading-breadcrumb"
-          left={
-            <>
-              <button onClick={() => setActive(null)} className="text-[var(--admin-gold)] text-xs hover:underline">
-                ← Back
-              </button>
-              <span className="text-[var(--admin-gold)] font-mono text-xs">{active.ref}</span>
-              {c.gradingStatus === "pending_review" && (
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                  Submitted · editing (stays pending review)
-                </span>
-              )}
-            </>
-          }
-        />
-        {c.rejectionReason && (
-          <div className="mx-auto max-w-3xl mt-3 px-4">
-            <div className="border border-amber-500/50 bg-amber-950/30 text-amber-300 rounded-lg px-4 py-2 text-sm">
-              <span className="font-bold uppercase text-[11px] tracking-wide">Sent back for redo</span> —{" "}
-              {c.rejectionReason}
+          <AdminHeaderRow
+            testId="staff-grading-breadcrumb"
+            left={
+              <>
+                <button onClick={() => setActive(null)} className="text-[var(--admin-gold)] text-xs hover:underline">
+                  ← Back
+                </button>
+                <span className="text-[var(--admin-gold)] font-mono text-xs">{active.ref}</span>
+                {c.gradingStatus === "pending_review" && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                    Submitted · editing (stays pending review)
+                  </span>
+                )}
+              </>
+            }
+          />
+          {c.rejectionReason && (
+            <div className="mx-auto max-w-3xl mt-3 px-4">
+              <div className="border border-amber-500/50 bg-amber-950/30 text-amber-300 rounded-lg px-4 py-2 text-sm">
+                <span className="font-bold uppercase text-[11px] tracking-wide">Sent back for redo</span> —{" "}
+                {c.rejectionReason}
+              </div>
             </div>
-          </div>
-        )}
+          )}
         </div>
         <GradingWorkstation
           mode="staff"
@@ -637,7 +635,7 @@ function GradeTab() {
   );
 }
 
-// ── SCAN tab — upload raw front/back onto assigned cards ──────────────────────
+// ── SCAN tab — arm target-bound Canon capture onto assigned cards ─────────────
 type SCard = {
   certId: number;
   certIdStr: string;
@@ -652,6 +650,12 @@ function ScanTab() {
   const [queue, setQueue] = useState<SItem[]>([]);
   const [busyCert, setBusyCert] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [workstationId, setWorkstationId] = useState(() =>
+    typeof window === "undefined" ? "" : window.localStorage.getItem("mintvault-scanner-workstation-id") || ""
+  );
+  const [sessions, setSessions] = useState<
+    Record<string, { id: string; side: "front" | "back"; state: string; failure_reason?: string | null }>
+  >({});
   const load = useCallback(async () => {
     const r = await fetch("/api/staff/scan/queue", { credentials: "include" });
     if (r.ok) setQueue((await r.json()).items || []);
@@ -660,22 +664,62 @@ function ScanTab() {
     load();
   }, [load]);
 
-  async function upload(certId: number, side: "front" | "back", file: File) {
+  useEffect(() => {
+    const active = Object.values(sessions).filter((session) =>
+      ["armed", "claimed", "capturing"].includes(session.state)
+    );
+    if (!active.length) return;
+    const poll = async () => {
+      for (const session of active) {
+        const certificateId = Number(session.id.split(":")[0]);
+        try {
+          const response = await fetch(
+            `/api/staff/scan/certificates/${certificateId}/scanner-capture-sessions/${session.id.split(":")[1]}`,
+            { credentials: "include" }
+          );
+          if (!response.ok) continue;
+          const { capture } = await response.json();
+          if (!capture?.id || !capture?.side) continue;
+          const key = `${certificateId}:${capture.id}`;
+          setSessions((previous) => ({ ...previous, [key]: { ...capture, id: key } }));
+          if (capture.state === "captured") void load();
+          if (capture.state === "failed" || capture.state === "expired")
+            setMsg(capture.failure_reason || `Scanner session ${capture.state}`);
+        } catch {
+          // Keep the known session state through a transient network failure.
+        }
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [load, sessions]);
+
+  async function arm(certId: number, side: "front" | "back") {
+    const station = workstationId.trim();
+    if (!station) {
+      setMsg("Enter this Mac's provisioned workstation ID before arming a capture.");
+      return;
+    }
     setBusyCert(certId);
     setMsg(null);
     try {
-      const fd = new FormData();
-      fd.append(side, file);
-      const r = await fetch(`/api/staff/scan/certificates/${certId}/upload`, {
+      window.localStorage.setItem("mintvault-scanner-workstation-id", station);
+      const r = await fetch(`/api/staff/scan/certificates/${certId}/scanner-capture-sessions`, {
         method: "POST",
         credentials: "include",
-        body: fd,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ side, workstation_id: station }),
       });
+      const data = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        setMsg(d.error || "Upload failed");
+        setMsg(data.error || "Unable to arm scanner");
       } else {
-        await load();
+        const capture = data.capture;
+        setSessions((previous) => ({
+          ...previous,
+          [`${certId}:${capture.id}`]: { ...capture, id: `${certId}:${capture.id}` },
+        }));
       }
     } finally {
       setBusyCert(null);
@@ -687,6 +731,15 @@ function ScanTab() {
       {msg && (
         <div className="text-red-400 text-xs bg-red-950/40 border border-red-900 rounded px-3 py-2 mb-3">{msg}</div>
       )}
+      <label className="block mb-4 text-xs text-[#E8E4DC]/70">
+        Provisioned workstation ID
+        <input
+          value={workstationId}
+          onChange={(event) => setWorkstationId(event.target.value)}
+          placeholder="e.g. mintvault-london-01"
+          className="mt-1 w-full rounded border border-[#D4AF37]/30 bg-black/20 px-3 py-2 text-sm text-[#E8E4DC]"
+        />
+      </label>
       {queue.length === 0 ? (
         <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No submissions awaiting scan.</p>
       ) : (
@@ -708,7 +761,7 @@ function ScanTab() {
                   </div>
                   <div className="flex items-center gap-3">
                     {(["front", "back"] as const).map((side) => (
-                      <label key={side} className="text-[11px] flex flex-col items-center gap-0.5 cursor-pointer">
+                      <div key={side} className="text-[11px] flex flex-col items-center gap-0.5">
                         <span
                           className={
                             card[side === "front" ? "hasFront" : "hasBack"] ? "text-emerald-400" : "text-[#E8E4DC]/50"
@@ -717,18 +770,44 @@ function ScanTab() {
                           {card[side === "front" ? "hasFront" : "hasBack"] ? "✓ " : ""}
                           {side}
                         </span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          disabled={busyCert === card.certId}
-                          className="hidden"
-                          onChange={(e) => e.target.files?.[0] && upload(card.certId, side, e.target.files[0])}
-                        />
-                        <span className="border border-[#D4AF37]/40 rounded px-2 py-0.5 hover:bg-[#D4AF37]/10">
-                          upload
-                        </span>
-                      </label>
+                        {(() => {
+                          const active = Object.values(sessions).find(
+                            (session) => session.id.startsWith(`${card.certId}:`) && session.side === side
+                          );
+                          const captured =
+                            card[side === "front" ? "hasFront" : "hasBack"] || active?.state === "captured";
+                          const backBlocked =
+                            side === "back" &&
+                            !card.hasFront &&
+                            !Object.values(sessions).some(
+                              (session) =>
+                                session.id.startsWith(`${card.certId}:`) &&
+                                session.side === "front" &&
+                                session.state === "captured"
+                            );
+                          return (
+                            <button
+                              type="button"
+                              disabled={
+                                captured ||
+                                busyCert === card.certId ||
+                                (!!active && ["armed", "claimed", "capturing"].includes(active.state)) ||
+                                backBlocked
+                              }
+                              onClick={() => void arm(card.certId, side)}
+                              className="border border-[#D4AF37]/40 rounded px-2 py-0.5 hover:bg-[#D4AF37]/10 disabled:opacity-40"
+                            >
+                              {captured
+                                ? "captured"
+                                : active
+                                  ? active.state
+                                  : side === "front"
+                                    ? "scan front"
+                                    : "flip / scan back"}
+                            </button>
+                          );
+                        })()}
+                      </div>
                     ))}
                   </div>
                 </li>

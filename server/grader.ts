@@ -532,6 +532,7 @@ export async function buildCertImagesPayload(
         FROM certificate_image_evidence
         WHERE certificate_id = ${certId}
           AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+          AND is_current = true
       `)
     ).rows as Array<{ side: string; working_object_key: string | null }>;
     await Promise.all(

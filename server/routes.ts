@@ -67,6 +67,7 @@ import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
+import { registerPartnerStationAdminRoutes } from "./partner/station-admin-routes";
 import { registerPartnerPublicRoutes } from "./partner/public-routes";
 import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
@@ -117,6 +118,7 @@ import { languageLabel, normalizePokemonLanguage } from "@shared/pokemon-rarity-
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
 import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
+import { scannerEvidenceAdmission } from "./lib/scanner-evidence-admission";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import {
@@ -176,7 +178,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
-import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
+import { uploadToR2, getR2SignedUrl, getR2Buffer, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import {
   persistImageUploadAudited,
   IMAGE_UPLOAD_JSONB_COLUMNS,
@@ -254,7 +256,7 @@ import {
   sendAccountDeletedEmail,
 } from "./email";
 import { requireAuth } from "./middleware/auth";
-import { requireScannerOrAdmin } from "./lib/scanner-auth";
+import { requireScannerOrAdmin, requireStationCaptureAgent } from "./lib/scanner-auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
@@ -2730,15 +2732,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // CREATE TABLE IF NOT EXISTS that raced the catalogs under concurrent scans
   // (SQLSTATE 23505 pg_type_typname_nsp_index / 42710). Idempotent + race-safe.
   await storage.ensureCertCounterTable().catch((e: any) => console.error("[cert_counter-migrate] error:", e?.message));
-  // Scanner durability columns (raw_uploaded + ingest_idempotency_key + the
-  // unique gate) — awaited before listen so the idempotent ingest path can rely
-  // on them existing. Additive + idempotent.
-  await import("./scan-ingest-service")
-    .then(async (m) => {
-      await m.ensureCertDurabilitySchema();
-      await m.ensureImageEvidenceSchema();
-    })
-    .catch((e: any) => console.error("[cert-durability-migrate] error:", e?.message));
+  // Scanner persistence is supplied by numbered migrations 0045–0047 before
+  // this application release is deployed. Do not issue scanner DDL at boot:
+  // a missing prerequisite must fail closed in the capture path rather than
+  // silently mutating a production schema after rollout.
   recordLabelArtworkV424Audit().catch(() => {});
   seedEstimateCreditsTable().catch(() => {});
   seedAdminCredits().catch(() => {});
@@ -2819,6 +2816,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSuperAdminPartnerRoutes(app); // Phase 1 partner-network super-admin control shell (requireAdmin-gated)
   registerConnectorOpsRoutes(app); // G4 partner-connector operations (requireAdmin-gated, internal)
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
+  registerPartnerStationAdminRoutes(app); // server-paginated station fleet control
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
   registerPartnerFlagAdminRoutes(app); // GLOBAL partner feature flags (requireSuperAdmin-gated, audited)
   registerRarityMappingRoutes(app);
@@ -7941,6 +7939,7 @@ Defects (admin-confirmed): ${defectLines}`;
             FROM certificate_image_evidence
             WHERE certificate_id = ${id}
               AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+              AND is_current = true
           `)
         ).rows as Array<{ side: string; working_object_key: string | null }>;
         await Promise.all(
@@ -10204,6 +10203,415 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── Target-bound scanner capture sessions ──────────────────────────────────
+  // The workstation creates one of these BEFORE the scanner receives a capture
+  // request.  The local app can only claim a station-matching session; it never
+  // supplies a free-form certificate, card or side along with a TIFF.
+  app.post("/api/admin/certificates/:id/scanner-capture-sessions", requireAdmin, async (req, res) => {
+    try {
+      const certificateId = Number.parseInt(String(req.params.id), 10);
+      if (!Number.isSafeInteger(certificateId) || certificateId <= 0) {
+        return res.status(400).json({ error: "valid certificate id required" });
+      }
+      const { createScannerCaptureSession } = await import("./scanner-capture-service");
+      const { CANON_LIDE_400_PROFILE } = await import("./lib/lide400-profile");
+      const { resolveActiveStationByCode } = await import("./partner/station-service");
+      const requestedStation = await resolveActiveStationByCode(req.body?.workstation_id);
+      if (!requestedStation) {
+        return res.status(409).json({ error: "Select an active, provisioned MintVault station" });
+      }
+      const { assertStationCaptureReady } = await import("./partner/station-service");
+      try {
+        assertStationCaptureReady(requestedStation, CANON_LIDE_400_PROFILE.version);
+      } catch {
+        return res.status(409).json({ error: "Station needs a current calibration for the locked Canon profile" });
+      }
+      const session = await createScannerCaptureSession({
+        certificateId,
+        side: req.body?.side,
+        workstationId: requestedStation.code,
+        stationId: requestedStation.id,
+        actorId: (req.session as any)?.adminUser ?? (req.session as any)?.adminEmail ?? null,
+        recapture: req.body?.recapture === true,
+        scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
+      });
+      await storage.writeAuditLog(
+        "certificate",
+        String(certificateId),
+        "scanner_capture_armed",
+        (req.session as any)?.adminEmail ?? "admin",
+        {
+          capture_session_id: session.id,
+          side: session.side,
+          card_id: session.cardId,
+          submission_item_id: session.submissionItemId,
+          submission_id: session.submissionId,
+          workstation_id: session.workstationId,
+          scanner_profile_version: session.scannerProfileVersion,
+          recapture: session.recapture,
+          expires_at: session.expiresAt.toISOString(),
+        }
+      );
+      return res.status(201).json({ capture: session });
+    } catch (error: any) {
+      const message = error?.message || "Unable to arm scanner capture";
+      const status = /not found|already|valid|must be/.test(message) ? 409 : 500;
+      return res.status(status).json({ error: message });
+    }
+  });
+
+  app.get(
+    "/api/admin/scanner/capture-sessions/next",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    async (req, res) => {
+      try {
+        const { claimNextScannerCapture } = await import("./scanner-capture-service");
+        const station = req.scannerStation;
+        const capture = await claimNextScannerCapture(
+          station?.code ?? req.query.workstation_id,
+          station?.code ?? req.query.device_id,
+          station?.id ?? null
+        );
+        return res.json({ capture });
+      } catch (error: any) {
+        return res.status(400).json({ error: error?.message || "Unable to claim scanner capture" });
+      }
+    }
+  );
+
+  // The scanner process uses this after an interrupted/late HTTP response.
+  // It is scoped to the device that claimed the session and derives acceptance
+  // from immutable provenance, not an optimistic client-side upload result.
+  app.get(
+    "/api/admin/scanner/capture-sessions/:sessionId",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    async (req, res) => {
+      try {
+        const { getScannerCaptureStatus } = await import("./scanner-capture-service");
+        const result = await getScannerCaptureStatus(
+          String(req.params.sessionId),
+          req.scannerStation?.code ?? req.query.device_id
+        );
+        return res.json({ capture: result.session, accepted: result.accepted });
+      } catch (error: any) {
+        return res.status(400).json({ error: error?.message || "Unable to read scanner capture status" });
+      }
+    }
+  );
+
+  // The Electron station keeps an already-claimed target alive while an
+  // operator positions the card or reviews a local, non-authoritative preview.
+  // It accepts no certificate/card/side fields and cannot revive a terminal
+  // session, so it cannot broaden the scanner token's authority.
+  app.post(
+    "/api/admin/scanner/capture-sessions/:sessionId/keepalive",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    async (req, res) => {
+      try {
+        const { renewScannerCapture } = await import("./scanner-capture-service");
+        const capture = await renewScannerCapture(
+          String(req.params.sessionId),
+          req.scannerStation?.code ?? req.body?.device_id
+        );
+        return res.json({ capture });
+      } catch (error: any) {
+        return res.status(409).json({ error: error?.message || "Unable to renew scanner capture" });
+      }
+    }
+  );
+
+  app.get("/api/admin/certificates/:id/scanner-capture-sessions/:sessionId", requireAdmin, async (req, res) => {
+    try {
+      const certificateId = Number.parseInt(String(req.params.id), 10);
+      const row = await db.execute(sql`
+        SELECT id, certificate_id, card_id, submission_item_id, submission_id, side, workstation_id,
+               scanner_profile_version, state, claimed_by_device_id, recapture, failure_reason,
+               created_at, claimed_at, captured_at, expires_at
+        FROM scanner_capture_sessions
+        WHERE id = ${String(req.params.sessionId)} AND certificate_id = ${certificateId}
+        LIMIT 1`);
+      if (!row.rows.length) return res.status(404).json({ error: "capture session not found" });
+      return res.json({ capture: row.rows[0] });
+    } catch (error) {
+      return sendServerError(res, error);
+    }
+  });
+
+  app.post(
+    "/api/admin/scanner/capture-sessions/:sessionId/failed",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    async (req, res) => {
+      try {
+        const { failScannerCapture } = await import("./scanner-capture-service");
+        await failScannerCapture(
+          String(req.params.sessionId),
+          req.scannerStation?.code ?? req.body?.device_id,
+          String(req.body?.reason || "Local scanner capture failed")
+        );
+        return res.status(204).end();
+      } catch (error: any) {
+        return res.status(400).json({ error: error?.message || "Unable to mark scanner capture failed" });
+      }
+    }
+  );
+
+  // Direct-staging grant. The station never chooses an R2 key: the server
+  // creates one opaque key for this exact claimed session, binds its expected
+  // bytes/hash/provenance, and signs a short-lived TIFF-only PUT URL. The
+  // following finalise route is still the only authority that can promote
+  // anything into immutable evidence.
+  app.post(
+    "/api/admin/scanner/capture-sessions/:sessionId/staged-upload",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    async (req, res) => {
+      try {
+        const { grantScannerEvidenceStaging } = await import("./scanner-evidence-staging-service");
+        const { createScannerEvidenceStagingUpload } = await import("./r2");
+        const deviceId = req.scannerStation?.code ?? req.body?.device_id;
+        const grant = await grantScannerEvidenceStaging({
+          sessionId: String(req.params.sessionId),
+          deviceId,
+          authenticatedStationId: req.scannerStation?.id ?? null,
+          expectedSha256: req.body?.sha256,
+          expectedBytes: req.body?.byte_length,
+          provenance: req.body?.capture_provenance,
+        });
+        const upload = await createScannerEvidenceStagingUpload(grant.staging.objectKey);
+        return res.status(201).json({
+          staging_id: grant.staging.id,
+          expires_at: grant.staging.expiresAt.toISOString(),
+          transport: upload.transport,
+          upload_url: upload.uploadUrl,
+          headers: upload.headers,
+          upload_expires_in_seconds: upload.expiresInSeconds,
+        });
+      } catch (error: any) {
+        const message = error?.message || "Unable to create staged scanner upload";
+        return res
+          .status(/invalid|not found|not bound|not awaiting|expired|already/.test(message) ? 409 : 500)
+          .json({ error: message });
+      }
+    }
+  );
+
+  // The R2 object is deliberately non-authoritative. This bounded server path
+  // reads it back, verifies the exact client-declared content hash/length,
+  // applies the same decoded TIFF/profile/card-frame gates as the legacy route,
+  // then writes a content-addressed immutable evidence revision.
+  app.post(
+    "/api/admin/scanner/capture-sessions/:sessionId/staged-upload/:stagingId/finalise",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    scannerEvidenceAdmission.middleware,
+    async (req, res) => {
+      const sessionId = String(req.params.sessionId);
+      const stagingId = String(req.params.stagingId);
+      let activeSession: any = null;
+      let evidenceCommitted = false;
+      try {
+        const { beginScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
+        const prepared = await beginScannerEvidenceFinalisation({
+          sessionId,
+          stagingId,
+          deviceId: req.scannerStation?.code ?? req.body?.device_id,
+          authenticatedStationId: req.scannerStation?.id ?? null,
+        });
+        if (prepared.alreadyAccepted) {
+          return res.json({ ok: true, already_accepted: true });
+        }
+        const { beginScannerCapture, finishScannerCapture } = await import("./scanner-capture-service");
+        activeSession = await beginScannerCapture(sessionId, req.scannerStation?.code ?? req.body?.device_id);
+        const { getR2Buffer } = await import("./r2");
+        const stagedTiff = await getR2Buffer(prepared.staging.objectKey);
+        if (!stagedTiff) throw new Error("Staged TIFF object is unavailable");
+        if (stagedTiff.length !== prepared.staging.expectedBytes) {
+          throw new Error("Staged TIFF byte length does not match the accepted candidate");
+        }
+        const actualHash = crypto.createHash("sha256").update(stagedTiff).digest("hex");
+        if (actualHash !== prepared.staging.expectedSha256) {
+          throw new Error("Staged TIFF hash does not match the accepted candidate");
+        }
+        const { finaliseScannerEvidence, recordAcceptedScannerEvidence } =
+          await import("./scanner-evidence-finalisation");
+        const evidence = await finaliseScannerEvidence({
+          session: activeSession,
+          buffer: stagedTiff,
+          mimeType: "image/tiff",
+          provenanceInput: prepared.staging.provenance,
+          trusted: {
+            stationId: req.scannerStation?.id ?? null,
+            tenantId: req.scannerStation?.tenantId ?? null,
+            locationId: req.scannerStation?.locationId ?? null,
+            actorId: req.scannerOperator?.userId ?? activeSession.actorId,
+          },
+        });
+        evidenceCommitted = true;
+        const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
+        await enqueueScannerProcessing(activeSession.certificateId, activeSession.stationId);
+        await finishScannerCapture(sessionId, true);
+        await recordAcceptedScannerEvidence({
+          session: activeSession,
+          evidence,
+          trusted: {
+            stationId: req.scannerStation?.id ?? null,
+            tenantId: req.scannerStation?.tenantId ?? null,
+            locationId: req.scannerStation?.locationId ?? null,
+            actorId: req.scannerOperator?.userId ?? activeSession.actorId,
+          },
+        });
+        const { completeScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
+        await completeScannerEvidenceFinalisation(stagingId);
+        return res
+          .status(201)
+          .json({ ok: true, certId: activeSession.certificateNumber, side: activeSession.side, raw_uploaded: true });
+      } catch (error: any) {
+        const reason = error?.message || "staged scanner capture rejected";
+        if (!evidenceCommitted) {
+          const retryable =
+            /(timeout|timed out|temporar|network|socket|econn|eai_again|r2|object storage|unavailable)/i.test(reason);
+          try {
+            const { failScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
+            await failScannerEvidenceFinalisation(stagingId, reason, retryable);
+          } catch {}
+          try {
+            const { finishScannerCapture } = await import("./scanner-capture-service");
+            await finishScannerCapture(sessionId, false, reason, retryable);
+          } catch {}
+        }
+        const status =
+          /required|invalid|must|does not|refused|expired|not claimed|not found|already|hash|byte length/.test(reason)
+            ? 409
+            : 500;
+        return res.status(status).json({ error: reason });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/scanner/capture-sessions/:sessionId/evidence",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    // Must precede multer: otherwise a concurrent TIFF burst has already
+    // consumed its 128 MiB memory buffer before we can apply backpressure.
+    scannerEvidenceAdmission.middleware,
+    scanUpload.single("image"),
+    async (req, res) => {
+      const sessionId = String(req.params.sessionId);
+      try {
+        const { beginScannerCapture, finishScannerCapture } = await import("./scanner-capture-service");
+        const { parseLide400CaptureProvenance, assertLide400Evidence } = await import("./lib/lide400-profile");
+        const { inspectScannerEvidence, uploadRawScannerSide, markRawUploaded, setScanStatus } =
+          await import("./scan-ingest-service");
+        const deviceId = req.scannerStation?.code ?? req.body?.device_id;
+        const session = await beginScannerCapture(sessionId, deviceId);
+        const file = req.file;
+        if (!file) throw new Error("TIFF image is required");
+        const inspection = await inspectScannerEvidence(file.buffer);
+        const provenance = parseLide400CaptureProvenance(JSON.parse(String(req.body?.capture_provenance || "")));
+        assertLide400Evidence(inspection, provenance);
+        const { assessLide400CardFrame } = await import("./lib/lide400-card-frame");
+        const frameAssessment = await assessLide400CardFrame(file.buffer, inspection, provenance.scanAreaMm);
+        if (!frameAssessment.accepted) {
+          throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
+        }
+        if (
+          provenance.profileVersion !== session.scannerProfileVersion ||
+          provenance.workstationId !== session.workstationId
+        ) {
+          throw new Error("Capture provenance does not match the armed workstation/profile");
+        }
+        if (req.scannerStation && session.stationId !== req.scannerStation.id) {
+          throw new Error("Capture session is not bound to this authenticated station");
+        }
+        // Fail before writing any immutable back evidence. A back-only master
+        // would be an incomplete target capture, not a recoverable partial
+        // upload, and must not alter the current evidence selection.
+        if (session.side === "back") {
+          const front = await db.execute(sql`
+            SELECT 1 FROM certificate_image_evidence
+            WHERE certificate_id = ${session.certificateId} AND side = 'front' AND is_current = true
+            LIMIT 1`);
+          if (!front.rows.length) throw new Error("Back capture refused until an immutable front master exists");
+        }
+        await uploadRawScannerSide(
+          session.certificateId,
+          session.side,
+          { buffer: file.buffer, mimeType: file.mimetype, ext: "tif", inspection },
+          {
+            allowRecapture: session.recapture,
+            captureMetadata: {
+              captureSessionId: session.id,
+              cardId: session.cardId,
+              submissionItemId: session.submissionItemId,
+              submissionId: session.submissionId,
+              cardFrameAssessment: frameAssessment,
+              ...provenance,
+              // These values are never trusted from multipart provenance.
+              // They resolve only from the armed session and station/operator
+              // principals authenticated by the server.
+              stationId: req.scannerStation?.id ?? session.stationId,
+              tenantId: req.scannerStation?.tenantId ?? null,
+              locationId: req.scannerStation?.locationId ?? null,
+              actorId: req.scannerOperator?.userId ?? session.actorId,
+            },
+          }
+        );
+        await markRawUploaded(session.certificateId);
+        await setScanStatus(session.certificateId, "processing");
+        const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
+        await enqueueScannerProcessing(session.certificateId, session.stationId);
+        await finishScannerCapture(sessionId, true);
+        await storage.writeAuditLog(
+          "certificate",
+          String(session.certificateId),
+          "scanner_capture_accepted",
+          "scanner",
+          {
+            capture_session_id: session.id,
+            side: session.side,
+            card_id: session.cardId,
+            submission_item_id: session.submissionItemId,
+            submission_id: session.submissionId,
+            workstation_id: session.workstationId,
+            station_id: req.scannerStation?.id ?? session.stationId,
+            tenant_id: req.scannerStation?.tenantId ?? null,
+            location_id: req.scannerStation?.locationId ?? null,
+            actor_id: req.scannerOperator?.userId ?? session.actorId,
+            scanner_device_id: provenance.scannerDeviceId,
+            scanner_model: provenance.scannerModel,
+            scanner_profile_version: provenance.profileVersion,
+            sha256: inspection.sha256,
+            recapture: session.recapture,
+          }
+        );
+        return res
+          .status(201)
+          .json({ ok: true, certId: session.certificateNumber, side: session.side, raw_uploaded: true });
+      } catch (error: any) {
+        const reason = error?.message || "scanner capture rejected";
+        try {
+          const { finishScannerCapture } = await import("./scanner-capture-service");
+          // Only transport/storage failures can return this claimed session to
+          // the same scanner for the already-staged TIFF.  Profile, target,
+          // expiry and decoded-image failures stay terminal and fail closed.
+          const retryable = /(timeout|timed out|temporar|network|socket|econn|eai_again|r2|object storage)/i.test(
+            reason
+          );
+          await finishScannerCapture(sessionId, false, reason, retryable);
+        } catch {}
+        const status = /required|invalid|must|does not|refused|expired|not claimed|not found|already/.test(reason)
+          ? 409
+          : 500;
+        return res.status(status).json({ error: reason });
+      }
+    }
+  );
+
   // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
 
   app.post(
@@ -10220,6 +10628,19 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
+      // A physical scanner may no longer mint an unbound certificate. The
+      // target-bound session endpoint above uses the same evidence/pipeline
+      // service after it proves certificate/card/submission/side ownership.
+      // Keep this route as an explicit failure rather than leaving the old
+      // allocation behaviour reachable to a leaked/stale scanner token.
+      const unboundIngestDisabled = () => true;
+      if (unboundIngestDisabled()) {
+        return res.status(410).json({
+          error: "Unbound scanner ingest is retired. Arm a certificate-side capture session before scanning.",
+        });
+      }
+      /* c8 ignore next -- historical handler below is unreachable during the
+         cutover window and retained only to make rollback diffable. */
       const {
         createCertForScan,
         resolveScanOperatorId,

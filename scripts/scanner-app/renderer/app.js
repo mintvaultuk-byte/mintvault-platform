@@ -1,666 +1,753 @@
 /**
- * Renderer logic for the popover. Vanilla JS — no framework. State comes
- * in via IPC pushes; user actions go out via the same channel. Modals are
- * plain divs toggled with .visible.
+ * Scanner-station renderer. The normal path deliberately has no file picker,
+ * mode selector, profile selector, or free-form certificate target: MintVault
+ * arms the exact server-owned capture session before this app scans.
  */
 
 const els = {
-  // Header
-  hideBtn:    document.getElementById("hideBtn"),
-  restartBtn: document.getElementById("restartBtn"),
-
-  // Mode segmented control
-  modeBtns:   Array.from(document.querySelectorAll(".seg-btn")),
-
-  // Stats
-  nextCert:   document.getElementById("nextCert"),
-  lastScan:   document.getElementById("lastScan"),
-  session:    document.getElementById("session"),
-
-  // Status
-  dot:        document.getElementById("dot"),
+  hideBtn: document.getElementById("hideBtn"),
+  appVersion: document.getElementById("appVersion"),
+  updateBtn: document.getElementById("updateBtn"),
+  scannerHealth: document.getElementById("scannerHealth"),
+  stationIdentityRow: document.getElementById("stationIdentityRow"),
+  stationIdentity: document.getElementById("stationIdentity"),
+  targetCert: document.getElementById("targetCert"),
+  targetSide: document.getElementById("targetSide"),
+  targetHint: document.getElementById("targetHint"),
+  dot: document.getElementById("dot"),
   statusText: document.getElementById("statusText"),
-  statusSub:  document.getElementById("statusSub"),
-
-  // Recent
+  statusSub: document.getElementById("statusSub"),
   recentList: document.getElementById("recentList"),
-
-  // Actions
-  orphansBtn:  document.getElementById("orphansBtn"),
-  forwardBtn:  document.getElementById("forwardBtn"),
-  inboxBtn:    document.getElementById("inboxBtn"),
-  lastCertBtn: document.getElementById("lastCertBtn"),
-  logsBtn:     document.getElementById("logsBtn"),
-
-  // SilverFast export path
-  sfPathVal:     document.getElementById("sfPathVal"),
-  sfPathCopyBtn: document.getElementById("sfPathCopyBtn"),
-
-  // Manual scan modal
-  manualModal:  document.getElementById("manualModal"),
-  manualMeta:   document.getElementById("manualMeta"),
-  manualCert:   document.getElementById("manualCert"),
-  manualReplace:document.getElementById("manualReplace"),
-  manualSubmit: document.getElementById("manualSubmit"),
-  manualCancel: document.getElementById("manualCancel"),
-
-  // Orphan picker
+  orphansBtn: document.getElementById("orphansBtn"),
   orphanModal: document.getElementById("orphanModal"),
-  orphanList:  document.getElementById("orphanList"),
+  orphanList: document.getElementById("orphanList"),
   orphanClose: document.getElementById("orphanClose"),
-
-  // Forward-to-cert
-  forwardModal:      document.getElementById("forwardModal"),
-  forwardServerNext: document.getElementById("forwardServerNext"),
-  forwardCert:       document.getElementById("forwardCert"),
-  forwardCancel:     document.getElementById("forwardCancel"),
-  forwardApply:      document.getElementById("forwardApply"),
-
-  // Scan confirmation (blocking)
-  confirmModal: document.getElementById("confirmModal"),
-  confirmImg:   document.getElementById("confirmImg"),
-  confirmImgPlaceholder: document.getElementById("confirmImgPlaceholder"),
-  confirmImgBack: document.getElementById("confirmImgBack"),
-  confirmImgBackPlaceholder: document.getElementById("confirmImgBackPlaceholder"),
-  confirmZoom:    document.getElementById("confirmZoom"),
-  confirmZoomImg: document.getElementById("confirmZoomImg"),
-  confirmLabel: document.getElementById("confirmLabel"),
-  confirmCert:  document.getElementById("confirmCert"),
-  confirmNote:  document.getElementById("confirmNote"),
-  confirmOk:    document.getElementById("confirmOk"),
-  confirmReject: document.getElementById("confirmReject"),
-  confirmGrade: document.getElementById("confirmGrade"),
-  appVersion:   document.getElementById("appVersion"),
-  updateBtn:    document.getElementById("updateBtn"),
-
-  // Soft-delete confirm
-  deleteModal:   document.getElementById("deleteModal"),
-  deleteCertId:  document.getElementById("deleteCertId"),
-  deleteReason:  document.getElementById("deleteReason"),
-  deleteCancel:  document.getElementById("deleteCancel"),
+  lastCertBtn: document.getElementById("lastCertBtn"),
+  logsBtn: document.getElementById("logsBtn"),
+  deleteModal: document.getElementById("deleteModal"),
+  deleteCertId: document.getElementById("deleteCertId"),
+  deleteReason: document.getElementById("deleteReason"),
+  deleteCancel: document.getElementById("deleteCancel"),
   deleteConfirm: document.getElementById("deleteConfirm"),
-
-  // Pause + Settings + Test scan (toggles QoL pack)
-  pauseBtn:        document.getElementById("pauseBtn"),
-  settingsToggle:  document.getElementById("settingsToggle"),
-  settingsBody:    document.getElementById("settingsBody"),
+  settingsToggle: document.getElementById("settingsToggle"),
+  settingsBody: document.getElementById("settingsBody"),
+  diagnosticsRow: document.getElementById("diagnosticsRow"),
   autoOpenOnError: document.getElementById("autoOpenOnError"),
-  soundEnabled:    document.getElementById("soundEnabled"),
-  testScanBtn:     document.getElementById("testScanBtn"),
-  clearBufferedBtn:document.getElementById("clearBufferedBtn"),
+  soundEnabled: document.getElementById("soundEnabled"),
+  restartServiceBtn: document.getElementById("clearBufferedBtn"),
+  scanCardBtn: document.getElementById("scanCardBtn"),
+  previewPanel: document.getElementById("previewPanel"),
+  capturePreview: document.getElementById("capturePreview"),
+  acceptPreviewBtn: document.getElementById("acceptPreviewBtn"),
+  rescanPreviewBtn: document.getElementById("rescanPreviewBtn"),
+  rescanErrorBtn: document.getElementById("rescanErrorBtn"),
+  captureActionHint: document.getElementById("captureActionHint"),
+  positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
+  positioningHint: document.getElementById("positioningHint"),
+  positioningPanel: document.getElementById("positioningPanel"),
+  positioningCardPreviewViewport: document.getElementById("positioningCardPreviewViewport"),
+  positioningCardPreview: document.getElementById("positioningCardPreview"),
+  positioningFullPreview: document.getElementById("positioningFullPreview"),
+  fullPlatenDiagnostics: document.getElementById("fullPlatenDiagnostics"),
+  cardBoundaryOverlay: document.getElementById("cardBoundaryOverlay"),
+  acquisitionBoundaryOverlay: document.getElementById("acquisitionBoundaryOverlay"),
+  positioningResult: document.getElementById("positioningResult"),
+  positioningGeometry: document.getElementById("positioningGeometry"),
+  savePlacementBtn: document.getElementById("savePlacementBtn"),
+  stationSetupModal: document.getElementById("stationSetupModal"),
+  stationSetupTitle: document.getElementById("stationSetupTitle"),
+  stationSetupText: document.getElementById("stationSetupText"),
+  stationSetupError: document.getElementById("stationSetupError"),
+  stationSignInForm: document.getElementById("stationSignInForm"),
+  stationEmail: document.getElementById("stationEmail"),
+  stationPassword: document.getElementById("stationPassword"),
+  stationSignInBtn: document.getElementById("stationSignInBtn"),
+  stationMfaForm: document.getElementById("stationMfaForm"),
+  stationMfaCode: document.getElementById("stationMfaCode"),
+  stationRecoveryCode: document.getElementById("stationRecoveryCode"),
+  stationMfaBtn: document.getElementById("stationMfaBtn"),
+  stationRegisterPanel: document.getElementById("stationRegisterPanel"),
+  stationLocationField: document.getElementById("stationLocationField"),
+  stationLocation: document.getElementById("stationLocation"),
+  stationRegisterBtn: document.getElementById("stationRegisterBtn"),
 };
 
-// ── Modal helpers ────────────────────────────────────────────────────────
-
-function openModal(m) { m.classList.add("visible"); }
-function closeModal(m) { m.classList.remove("visible"); }
-
-// Set one side's thumbnail (or show its placeholder when the data-URL is absent —
-// e.g. a single-sided scan has no back, or a side's thumb failed to render).
-function setConfirmThumb(imgEl, phEl, dataUrl) {
-  if (!imgEl) return;
-  if (dataUrl) {
-    imgEl.src = dataUrl;
-    imgEl.style.display = "";
-    if (phEl) phEl.style.display = "none";
-  } else {
-    imgEl.removeAttribute("src");
-    imgEl.style.display = "none";
-    if (phEl) phEl.style.display = "";
-  }
-}
-
-// Click-to-enlarge: tapping either confirm thumbnail opens it full-size in the
-// zoom overlay so the operator can read the card; clicking the overlay closes it.
-function wireConfirmZoom() {
-  const open = (el) => {
-    if (!el || !el.getAttribute("src") || !els.confirmZoom) return;
-    els.confirmZoomImg.src = el.getAttribute("src");
-    els.confirmZoom.style.display = "flex";
-  };
-  if (els.confirmImg) els.confirmImg.addEventListener("click", () => open(els.confirmImg));
-  if (els.confirmImgBack) els.confirmImgBack.addEventListener("click", () => open(els.confirmImgBack));
-  if (els.confirmZoom) {
-    els.confirmZoom.addEventListener("click", () => {
-      els.confirmZoom.style.display = "none";
-      els.confirmZoomImg.removeAttribute("src");
-    });
-  }
-}
-wireConfirmZoom();
-
-// ── State rendering ──────────────────────────────────────────────────────
-
 const STATE_LABELS = {
-  idle:           "Idle — waiting for scan",
-  front_buffered: "Front captured — scan back",
-  uploading:      "Uploading…",
-  success:        "Upload succeeded",
-  error:          "Upload failed",
-  manual_pending: "Manual mode — waiting for scan",
+  idle: "Ready — waiting for a server-owned capture",
+  starting: "Starting scanner…",
+  scanning_front: "Scanning front…",
+  scanning_back: "Scanning back…",
+  finalising: "Processing image…",
+  uploading: "Uploading original TIFF…",
+  validating: "Validating evidence…",
+  retrying: "Retrying current side…",
+  positioning_preview_scanning: "Scanning local placement preview…",
+  positioning_preview_error: "Placement Preview needs attention",
+  awaiting_scan: "Card positioned? Press Scan",
+  processing_preview: "Generating scan preview…",
+  preview_ready: "Preview ready — choose Accept or Rescan",
+  preview_error: "Preview needs attention",
+  expired: "Capture target expired",
+  success: "Capture accepted",
+  error: "Capture needs attention",
 };
 
 let lastState = null;
-function renderState(s) {
-  lastState = s;
-  // Mode segmented control
-  for (const b of els.modeBtns) {
-    b.classList.toggle("active", b.dataset.mode === s.mode);
-  }
+let renderedPreviewId = null;
+let renderedPositioningPreviewId = null;
+let actionInFlight = false;
+let actionError = null;
+let stationSetup = null;
+let stationSetupBusy = false;
+let stationSetupPoll = null;
 
-  // Pause button + status dot precedence: pause masks all other states.
-  const paused = s.pausedUntil != null && s.pausedUntil > Date.now();
-  els.pauseBtn.textContent = paused ? "Resume" : "Pause";
-  els.pauseBtn.classList.toggle("active", paused);
+function openModal(modal) {
+  modal?.classList.add("visible");
+}
 
-  // Settings checkbox state — fall back to default true if absent.
-  if (els.autoOpenOnError) {
-    els.autoOpenOnError.checked = s.autoOpenOnError !== false;
-  }
-  if (els.soundEnabled) {
-    els.soundEnabled.checked = s.soundEnabled !== false;
-  }
+function closeModal(modal) {
+  modal?.classList.remove("visible");
+}
 
-  // Stats — display server prediction unless operator has set an override.
-  els.nextCert.textContent = s.nextCertOverride || s.predictedNextCert || "—";
-  if (s.recent && s.recent.length > 0) {
-    const r = s.recent[0];
-    const t = r.ts ? new Date(r.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-    els.lastScan.textContent = `${r.certId} ${r.side.toUpperCase()} · ${t}`;
-  } else {
-    els.lastScan.textContent = "—";
-  }
-  els.session.textContent = `${s.sessionPaired || 0} scan${s.sessionPaired === 1 ? "" : "s"}`;
+function toTitle(value) {
+  return String(value || "").replace(/[_-]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
-  // Status — paused wins over the underlying state.
-  if (paused) {
-    els.dot.className = "dot paused";
-    els.statusText.textContent = "Paused — clicking will resume";
-    const minsLeft = Math.max(0, Math.ceil((s.pausedUntil - Date.now()) / 60_000));
-    els.statusSub.textContent = `auto-resume in ${minsLeft} min`;
-  } else {
-    els.dot.className = `dot ${s.state}`;
-    els.statusText.textContent = STATE_LABELS[s.state] || s.state;
-    els.statusSub.textContent = (() => {
-      if (s.state === "manual_pending" && s.manualPending) {
-        return `→ ${s.manualPending.certId} ${s.manualPending.side.toUpperCase()}${s.manualPending.replaceExisting ? " (replace)" : ""}`;
-      }
-      if (s.state === "error" && s.lastError) return s.lastError.slice(0, 80);
-      if (s.state === "front_buffered" && s.bufferedFront) {
-        return `${s.bufferedFront.split("/").pop()} buffered — no timer, take your time`;
-      }
-      return "";
-    })();
-  }
+function renderHealth(health) {
+  const status = String(health?.status || "checking");
+  if (status === "ready") return "Connected • 1200 DPI";
+  if (status === "busy") return "Scanner busy • 1200 DPI";
+  if (status === "profile_unprovisioned") return "Connected • setup required • 1200 DPI";
+  if (status === "disconnected") return "Scanner disconnected";
+  if (status === "checking") return "Checking device…";
+  return `${toTitle(status)}${health?.error ? ` — ${health.error}` : ""}`.slice(0, 120);
+}
 
-  // Recent — last 5
-  if (s.recent && s.recent.length > 0) {
-    els.recentList.innerHTML = s.recent.map(r => {
-      const t = r.ts ? new Date(r.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      const tag = r.source && r.source !== "auto" ? `<span class="src">${r.source}</span>` : "";
-      return `<li><span>${r.certId} ${r.side}</span><span>${tag} ${t}</span></li>`;
-    }).join("");
-  } else {
-    els.recentList.innerHTML = `<li><span style="color:var(--muted)">No scans yet</span></li>`;
-  }
-
-  // Server-next display in forward modal stays fresh while it's open
-  els.forwardServerNext.textContent = `Server says next is: ${s.predictedNextCert || "—"}`;
-
-  // Quick-action button: only enabled once a cert has been uploaded.
-  // Tooltip surfaces the target cert so the operator knows what they'll open.
-  if (els.lastCertBtn) {
-    const lastCert = s.lastUploadedCert;
-    els.lastCertBtn.disabled = !lastCert;
-    els.lastCertBtn.title = lastCert
-      ? `Open ${lastCert} logbook page in browser`
-      : "No cert uploaded yet this session";
-    els.lastCertBtn.textContent = lastCert ? `Open ${lastCert}` : "Open last cert";
-  }
-
-  // Scan-confirmation popup — BLOCKING. Shows THIS Mac's ASSIGNED cert number
-  // (s.confirmCard.certId, from this Mac's own ingest response), NEVER the
-  // global predictedNextCert forecast. Dismissed only by OK (ack-confirm-card).
-  if (els.confirmModal) {
-    const c = s.confirmCard;
-    if (c) {
-      // Render front AND back so the operator can confirm both sides scanned.
-      // Each is clickable to enlarge (see the confirm-zoom handler below).
-      setConfirmThumb(els.confirmImg, els.confirmImgPlaceholder, c.thumb);
-      setConfirmThumb(els.confirmImgBack, els.confirmImgBackPlaceholder, c.backThumb);
-      const incomplete = c.status === "incomplete" || !c.certId;
-      els.confirmLabel.textContent = incomplete ? "" : "This card is";
-      els.confirmCert.textContent = incomplete ? "SCAN INCOMPLETE" : c.certId;
-      els.confirmCert.classList.toggle("warn", incomplete);
-      els.confirmCert.classList.toggle("pending", !incomplete && c.status === "raw_pending");
-      els.confirmNote.textContent = c.note || "";
-      // Red note for an incomplete scan OR an unconfirmed front/back (c.warn).
-      // The big number stays gold for c.warn — the NUMBER is correct; only the
-      // front/back image labelling needs a human glance.
-      els.confirmNote.classList.toggle("warn", incomplete || !!c.warn);
-      els.confirmOk.textContent = incomplete ? "OK — rescan this card" : "OK — number written, next card";
-      // Reject only makes sense when a cert number was actually minted —
-      // an incomplete scan already has "OK — rescan" as its only action.
-      if (els.confirmReject) {
-        els.confirmReject.style.display = incomplete ? "none" : "";
-        resetRejectArm();
-      }
-      // Grade needs a real cert number; hidden for incomplete scans.
-      if (els.confirmGrade) els.confirmGrade.style.display = incomplete ? "none" : "";
-      openModal(els.confirmModal);
+function renderTarget(state) {
+  const active = state.activeCapture;
+  if (active?.certId) {
+    els.targetCert.textContent = active.certId;
+    els.targetSide.textContent = toTitle(active.side) || "—";
+    const stage = String(active.stage || "");
+    if (stage === "awaiting_scan") {
+      els.targetHint.textContent = `Position the card, then press Scan ${toTitle(active.side)}. This station cannot retarget it.`;
+    } else if (stage === "preview_ready") {
+      els.targetHint.textContent = `Review this exact ${toTitle(active.side)} candidate before accepting or rescanning it.`;
+    } else if (stage === "preview_error") {
+      els.targetHint.textContent = `This ${toTitle(active.side)} candidate failed its safety check. Review it, reposition the card, then Rescan; it cannot be accepted.`;
     } else {
-      closeModal(els.confirmModal);
-      // Drop any open enlarge overlay when the card is dismissed.
-      if (els.confirmZoom) els.confirmZoom.style.display = "none";
+      els.targetHint.textContent = `This station is processing the server-owned ${toTitle(active.side)} target.`;
     }
+    return;
+  }
+
+  els.targetCert.textContent = "No card armed";
+  els.targetSide.textContent = "—";
+  els.targetHint.textContent = state.state === "error"
+    ? "Retry this side from the MintVault card record. This app cannot retarget a capture."
+    : "Arm a card side in MintVault. This station will only scan that server-owned target.";
+}
+
+function renderStationIdentity(setup) {
+  const active = setup?.stage === "active";
+  els.stationIdentityRow.hidden = !active;
+  if (!active) return;
+  const parts = [setup.summary?.organisationName, setup.summary?.locationName, setup.stationCode, setup.summary?.displayName].filter(Boolean);
+  els.stationIdentity.textContent = parts.join(" • ");
+}
+
+function renderStationSetup(next) {
+  stationSetup = next || { stage: "sign_in" };
+  const stage = String(stationSetup.stage || "sign_in");
+  const active = stage === "active";
+  renderStationIdentity(stationSetup);
+  els.stationSetupModal.classList.toggle("visible", !active);
+  els.stationSignInForm.hidden = stage !== "sign_in";
+  els.stationMfaForm.hidden = stage !== "mfa";
+  els.stationRegisterPanel.hidden = stage !== "register";
+  els.stationSetupError.textContent = stationSetup.error || "";
+  els.stationSignInBtn.disabled = stationSetupBusy;
+  els.stationMfaBtn.disabled = stationSetupBusy;
+  els.stationRegisterBtn.disabled = stationSetupBusy;
+
+  if (stage === "mfa") {
+    els.stationSetupTitle.textContent = "Verify your MintVault sign-in";
+    els.stationSetupText.textContent = "Enter your authenticator or recovery code. This Mac cannot scan until both you and the station are authorised.";
+  } else if (stage === "register") {
+    const locations = Array.isArray(stationSetup.locations) ? stationSetup.locations : [];
+    els.stationSetupTitle.textContent = "Connect this station";
+    els.stationSetupText.textContent = stationSetup.summary?.organisationName
+      ? `${stationSetup.summary.organisationName}${stationSetup.summary.locationName ? ` — ${stationSetup.summary.locationName}` : ""}. Register this Mac for its authorised location.`
+      : "Register this Mac for an authorised MintVault location.";
+    els.stationLocation.replaceChildren();
+    for (const location of locations) {
+      const option = document.createElement("option");
+      option.value = location.id;
+      option.textContent = location.name;
+      els.stationLocation.append(option);
+    }
+    els.stationLocationField.hidden = locations.length <= 1;
+    if (locations.length === 0) {
+      els.stationSetupError.textContent = "No active authorised location is available for this account.";
+      els.stationRegisterBtn.disabled = true;
+    }
+  } else if (stage === "pending") {
+    els.stationSetupTitle.textContent = "Waiting for MintVault approval";
+    els.stationSetupText.textContent = `${stationSetup.stationCode || "This Mac"} is registered and awaiting Super Admin approval. Keep the app open; no card can be scanned yet.`;
+  } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
+    els.stationSetupTitle.textContent = "Station unavailable";
+    els.stationSetupText.textContent = "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
+  } else if (active) {
+    els.stationSetupTitle.textContent = "Station ready";
+    els.stationSetupText.textContent = "This station is authorised. Complete placement setup before its first evidence scan.";
+  } else {
+    els.stationSetupTitle.textContent = "Sign in to MintVault";
+    els.stationSetupText.textContent = "Use your authorised MintVault account to set up this Mac.";
+  }
+
+  if (stationSetupPoll) clearTimeout(stationSetupPoll);
+  if (stage === "pending") {
+    stationSetupPoll = setTimeout(() => void refreshStationSetup(), 15_000);
   }
 }
 
-// ── Header buttons ───────────────────────────────────────────────────────
-
-els.hideBtn.addEventListener("click", () => window.scanner.hidePopover());
-els.restartBtn.addEventListener("click", async () => {
-  els.restartBtn.disabled = true;
-  await window.scanner.getState().then(renderState);
-  els.restartBtn.disabled = false;
-});
-
-// Scan-confirmation OK — acknowledge, clear the popup, and let the main process
-// drain any scans the gate held while it was up (scan-one-write-one).
-els.confirmOk.addEventListener("click", async () => {
-  // No explicit closeModal here: the state-driven render hides the modal when
-  // confirmCard becomes null, and re-opens it if drainInbox surfaces the next
-  // held card. An explicit close would race with — and wrongly dismiss — that
-  // next confirmation.
-  els.confirmOk.disabled = true;
+async function refreshStationSetup() {
+  if (stationSetupBusy) return;
   try {
-    await window.scanner.ackConfirmCard();
-  } finally {
-    els.confirmOk.disabled = false;
+    const result = await window.scanner.getStationSetup();
+    renderStationSetup(result);
+  } catch {
+    renderStationSetup({ stage: "sign_in", error: "MintVault station status is unavailable" });
   }
-});
-
-// Reject & rescan — two-step to prevent an accidental single-click deleting a
-// cert: first click ARMS (button asks for confirmation), second click within
-// 5s fires. The watcher soft-deletes the cert, cleans held files, and the
-// popup closes via the state-driven render. On failure the popup stays up.
-let rejectArmTimer = null;
-function resetRejectArm() {
-  if (rejectArmTimer) { clearTimeout(rejectArmTimer); rejectArmTimer = null; }
-  if (els.confirmReject) {
-    els.confirmReject.textContent = "Reject & rescan";
-    els.confirmReject.disabled = false;
-    els.confirmReject.classList.remove("armed");
-  }
-  if (els.confirmOk) els.confirmOk.disabled = false;
 }
-if (els.confirmReject) {
-  els.confirmReject.addEventListener("click", async () => {
-    const st = lastState || {};
-    const certId = st.confirmCard?.certId;
-    if (!certId) return; // incomplete cards hide this button anyway
-    if (!els.confirmReject.classList.contains("armed")) {
-      els.confirmReject.classList.add("armed");
-      els.confirmReject.textContent = `Click again — deletes ${certId}`;
-      rejectArmTimer = setTimeout(resetRejectArm, 5000);
+
+async function runStationSetupAction(action) {
+  if (stationSetupBusy) return;
+  stationSetupBusy = true;
+  renderStationSetup(stationSetup);
+  try {
+    const result = await action();
+    if (!result?.ok) {
+      renderStationSetup({ ...(stationSetup || {}), error: result?.error || "Station setup action was not accepted" });
+    } else {
+      renderStationSetup(result);
+    }
+  } catch (error) {
+    renderStationSetup({ ...(stationSetup || {}), error: error?.message || "Station setup failed" });
+  } finally {
+    stationSetupBusy = false;
+    renderStationSetup(stationSetup);
+  }
+}
+
+function setActionButton(button, label, visible, disabled) {
+  if (!button) return;
+  button.hidden = !visible;
+  button.disabled = Boolean(disabled);
+  button.textContent = label;
+}
+
+function formatMm(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} mm` : "—";
+}
+
+/**
+ * Map one physical ImageCaptureCore rectangle through the shared coordinate
+ * contract and then through the actual object-fit:contain image rectangle.
+ * This deliberately uses measured DOM geometry, never a guessed offset.
+ */
+function positionPreviewOverlay(element, physicalRect, entry, className) {
+  const transform = window.MintVaultLidePreviewTransform;
+  const area = entry?.capture?.areaMm;
+  const image = els.positioningFullPreview;
+  const viewport = image?.parentElement;
+  if (!transform || !element || !physicalRect || !area || !image?.naturalWidth || !image?.naturalHeight || !viewport) {
+    if (element) element.hidden = true;
+    return;
+  }
+  const imageRect = image.getBoundingClientRect();
+  const viewportRect = viewport.getBoundingClientRect();
+  if (imageRect.width <= 0 || imageRect.height <= 0 || viewportRect.width <= 0 || viewportRect.height <= 0) {
+    element.hidden = true;
+    return;
+  }
+  try {
+    const mapped = transform.physicalRectToContainedViewportRect(
+      physicalRect,
+      area,
+      { width: image.naturalWidth, height: image.naturalHeight },
+      { width: imageRect.width, height: imageRect.height },
+    );
+    Object.assign(element.style, {
+      left: `${imageRect.left - viewportRect.left + mapped.x}px`,
+      top: `${imageRect.top - viewportRect.top + mapped.y}px`,
+      width: `${mapped.width}px`,
+      height: `${mapped.height}px`,
+    });
+    element.className = className;
+    element.hidden = false;
+  } catch {
+    element.hidden = true;
+  }
+}
+
+/**
+ * The broad 300-DPI positioning capture remains the calibration source, but
+ * the normal operator view is a display-only crop around the detected card.
+ * It retains eight millimetres of visible scanner background on every
+ * available side. No pixels are written, uploaded, or reused as evidence.
+ */
+function renderPositioningCardCrop(entry) {
+  const transform = window.MintVaultLidePreviewTransform;
+  const area = entry?.capture?.areaMm;
+  const card = entry?.cardCandidate?.cardBoundsMm;
+  const image = els.positioningCardPreview;
+  const viewport = els.positioningCardPreviewViewport;
+  if (!transform || !area || !card || !image?.naturalWidth || !image?.naturalHeight || !viewport) return;
+  const marginMm = 8;
+  const x = Math.max(area.x, card.x - marginMm);
+  const y = Math.max(area.y, card.y - marginMm);
+  const right = Math.min(area.x + area.width, card.x + card.width + marginMm);
+  const bottom = Math.min(area.y + area.height, card.y + card.height + marginMm);
+  if (right <= x || bottom <= y) return;
+  try {
+    const crop = transform.physicalRectToRasterRect(
+      { x, y, width: right - x, height: bottom - y },
+      area,
+      { width: image.naturalWidth, height: image.naturalHeight },
+    );
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+    if (viewportWidth <= 0 || viewportHeight <= 0 || crop.width <= 0 || crop.height <= 0) return;
+    const scale = Math.min(viewportWidth / crop.width, viewportHeight / crop.height);
+    Object.assign(image.style, {
+      width: `${image.naturalWidth * scale}px`,
+      height: `${image.naturalHeight * scale}px`,
+      left: `${(viewportWidth - crop.width * scale) / 2 - crop.x * scale}px`,
+      top: `${(viewportHeight - crop.height * scale) / 2 - crop.y * scale}px`,
+    });
+  } catch {
+    // The original full preview remains available under diagnostics. Do not
+    // invent a crop or affect capture safety when Preview geometry is invalid.
+  }
+}
+
+function renderPositioningOverlays(entry) {
+  const candidate = entry?.cardCandidate?.cardBoundsMm;
+  positionPreviewOverlay(els.cardBoundaryOverlay, candidate, entry, "card-boundary-overlay");
+  const proposal = entry?.placement?.proposedHardwareRectMm;
+  const safe = Boolean(entry?.placement?.ready && ["detected", "saved"].includes(entry.status));
+  positionPreviewOverlay(
+    els.acquisitionBoundaryOverlay,
+    proposal,
+    entry,
+    `acquisition-boundary-overlay ${safe ? "safe" : "unsafe"}`,
+  );
+}
+
+function renderPositioningPreview(entry, scannerHealth) {
+  const status = String(entry?.status || "");
+  const canStart = ["ready", "profile_unprovisioned"].includes(String(scannerHealth?.status || ""));
+  const scanning = status === "scanning";
+  setActionButton(els.positioningPreviewBtn, scanning ? "PREVIEWING…" : "PREVIEW", true, actionInFlight || scanning || !canStart);
+
+  if (!entry) {
+    els.positioningPanel.hidden = true;
+    els.fullPlatenDiagnostics.hidden = true;
+    els.positioningHint.textContent = "Preview checks card placement only. It never becomes card evidence.";
+    return;
+  }
+  if (scanning) {
+    els.positioningPanel.hidden = true;
+    els.fullPlatenDiagnostics.hidden = true;
+    els.positioningHint.textContent = "Scanning a local placement Preview. No certificate, TIFF, or upload is involved.";
+    return;
+  }
+
+  const showImage = ["detected", "reposition", "not_detected", "saved"].includes(status);
+  els.positioningPanel.hidden = !showImage && status !== "error";
+  els.fullPlatenDiagnostics.hidden = !showImage;
+  if (showImage && entry.id !== renderedPositioningPreviewId) {
+    renderedPositioningPreviewId = entry.id;
+    els.positioningCardPreview.removeAttribute("src");
+    els.positioningFullPreview.removeAttribute("src");
+    window.scanner.getPositioningPreview(entry.id).then((result) => {
+      if (lastState?.positioningPreview?.id !== entry.id || !result?.ok) return;
+      els.positioningFullPreview.onload = () => {
+        if (lastState?.positioningPreview?.id === entry.id) renderPositioningOverlays(lastState.positioningPreview);
+      };
+      els.positioningCardPreview.onload = () => {
+        if (lastState?.positioningPreview?.id === entry.id) renderPositioningCardCrop(lastState.positioningPreview);
+      };
+      els.positioningCardPreview.src = result.dataUrl;
+      els.positioningFullPreview.src = result.dataUrl;
+    }).catch(() => {});
+  }
+
+  const candidate = entry.cardCandidate?.cardBoundsMm;
+  const area = entry.capture?.areaMm;
+  if (showImage && els.positioningFullPreview.complete) renderPositioningOverlays(entry);
+  if (showImage && els.positioningCardPreview.complete) renderPositioningCardCrop(entry);
+
+  if (status === "detected") {
+    els.positioningResult.textContent = "CARD DETECTED — PLACEMENT IS READY";
+    const placement = entry.placement;
+    els.positioningGeometry.textContent = `Card ${formatMm(candidate.x)}, ${formatMm(candidate.y)} · ${formatMm(candidate.width)} × ${formatMm(candidate.height)}. Proposed hardware region ${formatMm(placement.areaMm.width)} × ${formatMm(placement.areaMm.height)} at ${formatMm(placement.originMm.x)}, ${formatMm(placement.originMm.y)}; usable placement tolerance ${formatMm(placement.placementToleranceMm)}.`;
+    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", true, actionInFlight);
+    els.positioningHint.textContent = "All four edges and corners are visible with scanner background. Saving only enables this local station’s final 1200-DPI capture profile.";
+  } else if (status === "reposition") {
+    els.positioningResult.textContent = "CARD DETECTED — MOVE SLIGHTLY INWARD, THEN PREVIEW";
+    const proposal = entry.placement || {};
+    const margins = proposal.surroundingAvailableMm || {};
+    const movement = proposal.minimumMoveInwardMm || {};
+    const moveRightMm = Math.ceil(Number(movement.x) || 0);
+    const moveUpMm = Math.ceil(Number(movement.y) || 0);
+    const evidenceStatus = proposal.evidenceMarginSatisfied
+      ? `All four card edges are visible; observed minimum background is ${formatMm(proposal.observedEvidenceMarginMm)} (requirement ${formatMm(proposal.evidenceMarginRequiredMm)}).`
+      : "At least one card edge does not have the required evidence background.";
+    els.positioningGeometry.textContent = `Detected card ${formatMm(candidate?.x)}, ${formatMm(candidate?.y)} · ${formatMm(candidate?.width)} × ${formatMm(candidate?.height)}. Broad Preview background: left ${formatMm(margins.left)}, top ${formatMm(margins.top)}, right ${formatMm(margins.right)}, bottom ${formatMm(margins.bottom)}. ${evidenceStatus} The 100 × 130 mm area is clipped by the platen, so it is not saved. Measured inward movement: ${moveRightMm} mm right and ${moveUpMm} mm up.`;
+    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
+    els.positioningHint.textContent = "The card is complete, but the placement zone needs a little more room at the glass edge for ordinary staff variation.";
+  } else if (status === "not_detected") {
+    els.positioningResult.textContent = "CARD NOT DETECTED — REPOSITION AND PREVIEW";
+    els.positioningGeometry.textContent = area ? `Broad hardware preview area: ${formatMm(area.width)} × ${formatMm(area.height)} at ${formatMm(area.x)}, ${formatMm(area.y)}.` : "The scanner did not return usable positioning geometry.";
+    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
+    els.positioningHint.textContent = "No placement was saved and no evidence was created. Reposition the card, then Preview again.";
+  } else if (status === "saved") {
+    els.positioningResult.textContent = "PLACEMENT ZONE SAVED";
+    const placement = entry.persisted || entry.placement;
+    els.positioningGeometry.textContent = `Local station origin ${formatMm(placement.originMm?.x)}, ${formatMm(placement.originMm?.y)} · hardware region ${formatMm(placement.areaMm?.width)} × ${formatMm(placement.areaMm?.height)}.`;
+    setActionButton(els.savePlacementBtn, "PLACEMENT ZONE SAVED", true, true);
+    els.positioningHint.textContent = "Normal SCAN FRONT / SCAN BACK remains target-bound and uses the locked 1200-DPI TIFF profile.";
+  } else {
+    els.positioningResult.textContent = "POSITIONING PREVIEW FAILED";
+    els.positioningGeometry.textContent = entry.error || "No card position was saved.";
+    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
+    els.positioningHint.textContent = "No certificate or evidence was changed. Check scanner readiness and Preview again.";
+  }
+}
+
+function renderPreview(active) {
+  const previewId = active?.previewId;
+  if (!previewId || previewId === renderedPreviewId) return;
+  renderedPreviewId = previewId;
+  els.capturePreview.removeAttribute("src");
+  window.scanner.getCapturePreview(previewId).then((result) => {
+    if (lastState?.activeCapture?.previewId !== previewId) return;
+    if (!result?.ok) {
+      actionError = result?.error || "Preview is no longer available";
+      renderState(lastState);
       return;
     }
-    // Armed second click — fire.
-    if (rejectArmTimer) { clearTimeout(rejectArmTimer); rejectArmTimer = null; }
-    els.confirmReject.disabled = true;
-    els.confirmOk.disabled = true;
-    els.confirmReject.textContent = "Rejecting…";
-    const r = await window.scanner.rejectConfirmCard();
-    if (!r?.ok) {
-      resetRejectArm();
-      alert(`Reject failed — the cert still exists: ${r?.error || "unknown error"}`);
+    els.capturePreview.src = result.dataUrl;
+  }).catch(() => {
+    if (lastState?.activeCapture?.previewId === previewId) {
+      actionError = "Preview could not be loaded";
+      renderState(lastState);
     }
-    // On success the popup closes via the state update (confirmCard: null).
   });
 }
 
-// Grade ↗ — open the admin panel in the browser with this cert pre-searched.
-// Non-destructive: the popup stays up; the operator still OKs (or rejects).
-if (els.confirmGrade) {
-  els.confirmGrade.addEventListener("click", async () => {
-    const certId = lastState?.confirmCard?.certId;
-    if (!certId) return;
-    const r = await window.scanner.openGradeCert(certId);
-    if (!r?.ok) alert(`Couldn't open the grading page: ${r?.error || "unknown error"}`);
-  });
+function renderCaptureActions(state) {
+  const active = state.activeCapture;
+  const stage = String(active?.stage || "");
+  const side = toTitle(active?.side || "card");
+  const scanning = ["scanning", "retrying_scan", "processing_preview"].includes(stage);
+  const previewReady = stage === "preview_ready" && Boolean(active?.previewId);
+  const previewError = stage === "preview_error" && Boolean(active?.previewId);
+  const previewVisible = previewReady || previewError;
+  const awaitingScan = stage === "awaiting_scan";
+  const hasTarget = Boolean(active?.certId && active?.side);
+  const scanLabel = hasTarget ? `SCAN ${side}` : "SCAN CARD";
+  const scanEnabled = awaitingScan && state.scannerHealth?.status === "ready" && !actionInFlight;
+
+  // Keep the final evidence action visible in every state. A disabled,
+  // explained SCAN CARD makes the target-bound rule clear without implying
+  // Preview itself can become an authoritative capture.
+  setActionButton(els.scanCardBtn, scanLabel, true, !scanEnabled);
+  els.previewPanel.hidden = !previewVisible;
+  setActionButton(els.acceptPreviewBtn, `ACCEPT ${side}`, previewReady, actionInFlight);
+  setActionButton(els.rescanPreviewBtn, `RESCAN ${side}`, previewReady, actionInFlight);
+  setActionButton(els.rescanErrorBtn, `RESCAN ${side}`, previewError, actionInFlight);
+
+  if (previewVisible) renderPreview(active);
+  if (!previewVisible && renderedPreviewId) {
+    renderedPreviewId = null;
+    els.capturePreview.removeAttribute("src");
+  }
+
+  els.captureActionHint.textContent = !hasTarget
+    ? "Open or arm a card in MintVault to enable final scanning."
+    : awaitingScan
+    ? `Position the ${side.toLowerCase()}, then press Scan. No scan starts automatically.`
+    : scanning
+      ? "The locked 1200 DPI TIFF is being captured once; its derivative preview follows."
+      : previewReady
+        ? "Accept uploads this exact TIFF. Rescan archives it locally and keeps the same card-side target."
+        : previewError
+          ? "Safety check rejected this staged TIFF before upload. Review the preview, reposition the card, then Rescan; Accept is unavailable."
+          : active
+            ? "This target remains bound while the current operation finishes."
+            : "Final scanning remains disabled until this server-owned card side is ready.";
 }
 
-// Version display + one-click update.
+function explainFailure(message) {
+  const detail = String(message || "");
+  const lower = detail.toLowerCase();
+  if (lower.includes("expired")) return "Capture expired — retry this side in MintVault";
+  if (lower.includes("disconnect") || lower.includes("not detected")) return "Scanner disconnected — check the USB connection";
+  if (lower.includes("busy")) return "Scanner busy — wait briefly, then retry this side";
+  if (lower.includes("timeout")) return "Scan timed out — retry this side";
+  if (lower.includes("upload") || lower.includes("network") || lower.includes("http")) return "Upload interrupted — retrying may be required";
+  if (lower.includes("dpi") || lower.includes("dimension") || lower.includes("profile") || lower.includes("tiff")) return "Image rejected — invalid locked capture";
+  return detail || "Scanner service needs attention — see service logs";
+}
+
+function renderRecent(recent) {
+  els.recentList.replaceChildren();
+  if (!Array.isArray(recent) || recent.length === 0) {
+    const item = document.createElement("li");
+    item.textContent = "No accepted captures yet";
+    item.style.color = "var(--muted)";
+    els.recentList.append(item);
+    return;
+  }
+
+  for (const entry of recent.slice(0, 5)) {
+    const item = document.createElement("li");
+    const target = document.createElement("span");
+    target.textContent = `${entry.certId || "—"} ${toTitle(entry.side)}`;
+    const time = document.createElement("span");
+    time.textContent = entry.ts
+      ? new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "";
+    item.append(target, time);
+    els.recentList.append(item);
+  }
+}
+
+function renderState(state) {
+  lastState = state || {};
+  els.scannerHealth.textContent = renderHealth(lastState.scannerHealth);
+  renderTarget(lastState);
+  renderPositioningPreview(lastState.positioningPreview, lastState.scannerHealth);
+
+  if (els.autoOpenOnError) els.autoOpenOnError.checked = lastState.autoOpenOnError !== false;
+  if (els.soundEnabled) els.soundEnabled.checked = lastState.soundEnabled !== false;
+
+  const activeState = String(lastState.state || "idle");
+  els.dot.className = `dot ${activeState}`;
+  els.statusText.textContent = STATE_LABELS[activeState] || toTitle(activeState);
+  els.statusSub.textContent = actionError || (activeState === "error"
+    ? explainFailure(lastState.lastError)
+    : activeState === "success"
+      ? "The original TIFF was accepted for the selected card side."
+      : lastState.activeCapture?.side
+        ? `${toTitle(lastState.activeCapture.side)} • ${lastState.activeCapture.certId || "server target"}`
+        : "");
+
+  renderCaptureActions(lastState);
+
+  renderRecent(lastState.recent);
+
+  const lastCert = lastState.lastUploadedCert;
+  els.lastCertBtn.disabled = !lastCert;
+  els.lastCertBtn.title = lastCert
+    ? `Open ${lastCert} in the MintVault logbook`
+    : "No accepted capture on this station yet";
+  els.lastCertBtn.textContent = lastCert ? `Open ${lastCert}` : "Open latest certificate";
+}
+
+async function runCaptureAction(action) {
+  if (actionInFlight) return;
+  const previewId = lastState?.activeCapture?.previewId;
+  actionInFlight = true;
+  actionError = null;
+  renderState(lastState);
+  try {
+    const result = await action(previewId);
+    if (!result?.ok) actionError = result?.error || "Scanner action was not accepted";
+  } catch (error) {
+    actionError = error?.message || "Scanner action failed";
+  } finally {
+    actionInFlight = false;
+    renderState(lastState);
+  }
+}
+
+function createText(className, value) {
+  const element = document.createElement("span");
+  element.className = className;
+  element.textContent = value;
+  return element;
+}
+
+function renderMissingImages(orphans) {
+  els.orphanList.replaceChildren();
+  if (!orphans.length) {
+    els.orphanList.textContent = "No certificates are missing images.";
+    return;
+  }
+
+  for (const orphan of orphans) {
+    const missing = orphan.missingFront && orphan.missingBack
+      ? "missing front and back"
+      : orphan.missingFront
+        ? "missing front"
+        : orphan.missingBack
+          ? "missing back"
+          : "complete";
+    const row = document.createElement("div");
+    row.className = "orphan-row";
+    const info = document.createElement("div");
+    info.className = "orphan-info";
+    info.append(
+      createText("orphan-id", orphan.certId || "Unknown certificate"),
+      createText("orphan-meta", `${orphan.cardName || "(unnamed card)"}${orphan.set ? ` · ${orphan.set}` : ""} — ${missing}`),
+    );
+    const actions = document.createElement("div");
+    actions.className = "orphan-actions";
+    if (orphan.missingFront || orphan.missingBack) {
+      const recover = document.createElement("button");
+      recover.className = "btn primary";
+      recover.textContent = "Open in MintVault";
+      recover.addEventListener("click", async () => {
+        const result = await window.scanner.openGradeCert(orphan.certId);
+        if (!result?.ok) return alert(`Couldn't open MintVault: ${result?.error || "unknown error"}`);
+        closeModal(els.orphanModal);
+      });
+      actions.append(recover);
+    }
+    const remove = document.createElement("button");
+    remove.className = "btn danger";
+    remove.textContent = "Soft-delete";
+    remove.addEventListener("click", () => {
+      els.deleteCertId.textContent = orphan.certId;
+      els.deleteReason.value = "";
+      els.deleteConfirm.dataset.cert = orphan.certId || "";
+      openModal(els.deleteModal);
+      setTimeout(() => els.deleteReason.focus(), 50);
+    });
+    actions.append(remove);
+    row.append(info, actions);
+    els.orphanList.append(row);
+  }
+}
+
+els.hideBtn.addEventListener("click", () => window.scanner.hidePopover());
+
+els.stationSignInForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const email = els.stationEmail.value.trim();
+  const password = els.stationPassword.value;
+  els.stationPassword.value = "";
+  void runStationSetupAction(() => window.scanner.stationSignIn({ email, password }));
+});
+els.stationMfaForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const code = els.stationMfaCode.value.trim();
+  const recoveryCode = els.stationRecoveryCode.value.trim();
+  els.stationMfaCode.value = "";
+  els.stationRecoveryCode.value = "";
+  void runStationSetupAction(() => window.scanner.stationCompleteMfa({ code, recoveryCode }));
+});
+els.stationRegisterBtn.addEventListener("click", () => {
+  const locationId = els.stationLocation.value || undefined;
+  void runStationSetupAction(() => window.scanner.registerStation({ locationId }));
+});
+
 if (els.appVersion) {
-  window.scanner.getVersion?.().then((r) => {
-    if (r?.ok) els.appVersion.textContent = `v${r.version}`;
+  window.scanner.getVersion?.().then((result) => {
+    if (result?.ok) els.appVersion.textContent = `v${result.version}`;
   }).catch(() => {});
 }
-if (els.updateBtn) {
-  els.updateBtn.addEventListener("click", async () => {
-    if (!confirm("Update the scanner app to the latest version and restart it?\nScanning pauses for ~1 minute.")) return;
-    const r = await window.scanner.updateApp();
-    if (r?.ok) {
-      alert("Updating — the app will restart itself shortly. The tray icon will reappear when done.");
-    } else {
-      alert(`Update failed to start: ${r?.error || "unknown error"}`);
-    }
-  });
-}
 
-// ── Mode toggle ──────────────────────────────────────────────────────────
-
-for (const b of els.modeBtns) {
-  b.addEventListener("click", async () => {
-    const mode = b.dataset.mode;
-    await window.scanner.setMode(mode);
-  });
-}
-
-// ── Manual scan modal — auto-opens when main emits scan-detected ─────────
-
-let pendingScanFile = null;
-
-window.scanner.onScanDetected((evt) => {
-  pendingScanFile = evt.filePath;
-  const sizeKb = (evt.sizeBytes / 1024).toFixed(0);
-  els.manualMeta.textContent = `${evt.filename} (${sizeKb} KB, ${new Date().toLocaleTimeString()})`;
-  els.manualCert.value = "";
-  els.manualReplace.checked = false;
-  // Default to "back" — most common gap when the operator forgot a side
-  document.querySelector('input[name="manualSide"][value="back"]').checked = true;
-  openModal(els.manualModal);
-  setTimeout(() => els.manualCert.focus(), 50);
+els.updateBtn.addEventListener("click", async () => {
+  if (!confirm("Update the scanner app to the latest version and restart it?\nScanning pauses for about one minute.")) return;
+  const result = await window.scanner.updateApp();
+  alert(result?.ok
+    ? "Updating — the scanner app will restart shortly."
+    : `Update failed to start: ${result?.error || "unknown error"}`);
 });
-
-els.manualSubmit.addEventListener("click", async () => {
-  // Backward-compatible parse: input is digits-only by design (the static
-  // MV prefix lives in HTML), but operators occasionally paste a full
-  // "MV58" / "mv 58" / "  MV 58  " from elsewhere. Strip everything
-  // that isn't a digit, then re-prefix MV — same result either way.
-  const digits = (els.manualCert.value || "").replace(/[^0-9]/g, "");
-  if (!digits) {
-    els.manualCert.style.borderColor = "var(--red)";
-    return;
-  }
-  const certId = `MV${digits}`;
-  const side = (document.querySelector('input[name="manualSide"]:checked') || {}).value || "front";
-  const replaceExisting = !!els.manualReplace.checked;
-  els.manualSubmit.disabled = true;
-  els.manualSubmit.textContent = "Attaching…";
-  const r = await window.scanner.attachManualScan({ certId, side, replaceExisting });
-  els.manualSubmit.disabled = false;
-  els.manualSubmit.textContent = "Attach";
-  if (!r?.ok) {
-    els.manualMeta.textContent = `Failed: ${r?.error || "unknown"}`;
-    return;
-  }
-  pendingScanFile = null;
-  closeModal(els.manualModal);
-});
-
-els.manualCancel.addEventListener("click", async () => {
-  await window.scanner.attachManualScan({ cancel: true });
-  pendingScanFile = null;
-  closeModal(els.manualModal);
-});
-
-// Live-strip non-digits as the operator types — handles paste of "MV58"
-// without the operator having to backspace the prefix.
-els.manualCert.addEventListener("input", () => {
-  const cleaned = els.manualCert.value.replace(/[^0-9]/g, "");
-  if (cleaned !== els.manualCert.value) els.manualCert.value = cleaned;
-  els.manualCert.style.borderColor = "";
-});
-
-// ── Orphan picker ────────────────────────────────────────────────────────
 
 els.orphansBtn.addEventListener("click", async () => {
   els.orphanList.textContent = "Loading…";
   openModal(els.orphanModal);
-  const r = await window.scanner.fetchOrphans();
-  if (!r.ok) {
-    els.orphanList.innerHTML = `<div style="color:var(--red)">Fetch failed: ${r.body?.error || r.status}</div>`;
+  const result = await window.scanner.fetchOrphans();
+  if (!result?.ok) {
+    els.orphanList.textContent = `Could not load missing images: ${result?.body?.error || result?.status || "unknown error"}`;
     return;
   }
-  const orphans = r.body?.orphans || [];
-  if (orphans.length === 0) {
-    els.orphanList.innerHTML = `<div style="color:var(--muted)">No orphans — every cert has both sides.</div>`;
-    return;
-  }
-  els.orphanList.innerHTML = orphans.map(o => {
-    const missing = o.missingFront && o.missingBack ? "no images" :
-                    o.missingFront ? "missing front" :
-                    o.missingBack  ? "missing back"  : "complete";
-    const card = o.cardName || "(empty)";
-    const setLine = o.set ? ` · ${o.set}` : "";
-    const armSide = o.missingFront ? "front" : "back";
-    return `
-      <div class="orphan-row" data-cert="${o.certId}" data-side="${armSide}">
-        <div class="orphan-info">
-          <span class="orphan-id">${o.certId}</span>
-          <span class="orphan-meta">${card}${setLine} — ${missing}</span>
-        </div>
-        <div class="orphan-actions">
-          ${o.missingFront || o.missingBack ? `<button class="btn primary" data-action="attach">Attach ${armSide}</button>` : ""}
-          <button class="btn danger" data-action="delete">Soft-delete</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  els.orphanList.querySelectorAll('[data-action="attach"]').forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const row    = btn.closest(".orphan-row");
-      const certId = row.dataset.cert;
-      const side   = row.dataset.side;
-      // Orphan-attach defaults replaceExisting=true: the operator has
-      // explicitly chosen "Attach back to MVxx" from a list filtered to
-      // orphan certs — if the targeted side is somehow already present,
-      // they want to overwrite it, not get a 409.
-      const r = await window.scanner.armOneShot({ certId, side, replaceExisting: true, fromOrphanPicker: true });
-      if (r.ok) {
-        closeModal(els.orphanModal);
-      } else {
-        alert(`Arm failed: ${r.error || "unknown"}`);
-      }
-    });
-  });
-  els.orphanList.querySelectorAll('[data-action="delete"]').forEach(btn => {
-    btn.addEventListener("click", () => {
-      const row    = btn.closest(".orphan-row");
-      const certId = row.dataset.cert;
-      els.deleteCertId.textContent = certId;
-      els.deleteReason.value = "";
-      openModal(els.deleteModal);
-      els.deleteConfirm.dataset.cert = certId;
-      setTimeout(() => els.deleteReason.focus(), 50);
-    });
-  });
+  renderMissingImages(result.body?.orphans || []);
 });
 
 els.orphanClose.addEventListener("click", () => closeModal(els.orphanModal));
-
 els.deleteCancel.addEventListener("click", () => closeModal(els.deleteModal));
 els.deleteConfirm.addEventListener("click", async () => {
   const certId = els.deleteConfirm.dataset.cert;
-  const reason = (els.deleteReason.value || "").trim();
-  if (reason.length < 10) {
+  const reason = els.deleteReason.value.trim();
+  if (!certId || reason.length < 10) {
     els.deleteReason.style.borderColor = "var(--red)";
     return;
   }
   els.deleteConfirm.disabled = true;
-  const r = await window.scanner.deleteCert({ certId, reason });
+  const result = await window.scanner.deleteCert({ certId, reason });
   els.deleteConfirm.disabled = false;
-  if (!r.ok) {
-    alert(`Delete failed: ${r.body?.error || r.error || "unknown"}`);
+  if (!result?.ok) {
+    alert(`Soft-delete failed — the certificate was not changed: ${result?.body?.error || result?.error || "unknown error"}`);
     return;
   }
   closeModal(els.deleteModal);
-  // Refresh orphan list — it'll drop the deleted row
   els.orphansBtn.click();
 });
 
-// ── Forward to cert ──────────────────────────────────────────────────────
-
-els.forwardBtn.addEventListener("click", () => {
-  els.forwardCert.value = "";
-  openModal(els.forwardModal);
-  setTimeout(() => els.forwardCert.focus(), 50);
-});
-els.forwardCancel.addEventListener("click", () => closeModal(els.forwardModal));
-els.forwardApply.addEventListener("click", async () => {
-  // Backward-compatible parse: input is digits-only by design (the static
-  // MV prefix lives in HTML), but operators occasionally paste a full
-  // "MV57" / "mv 57" / "  MV 57  " from elsewhere. Strip everything
-  // that isn't a digit, then re-prefix MV — same result either way.
-  const digits = (els.forwardCert.value || "").replace(/[^0-9]/g, "");
-  if (!digits) {
-    els.forwardCert.style.borderColor = "var(--red)";
-    return;
-  }
-  const certId = `MV${digits}`;
-  const r = await window.scanner.forwardToCert(certId);
-  if (!r.ok) {
-    alert(`Failed: ${r.error || "unknown"}`);
-    return;
-  }
-  closeModal(els.forwardModal);
-});
-
-// Live-strip non-digits as the operator types — handles paste of "MV57"
-// without the operator having to backspace the prefix.
-els.forwardCert.addEventListener("input", () => {
-  const cleaned = els.forwardCert.value.replace(/[^0-9]/g, "");
-  if (cleaned !== els.forwardCert.value) els.forwardCert.value = cleaned;
-  els.forwardCert.style.borderColor = "";
-});
-
-// ── Logs / quick actions ─────────────────────────────────────────────────
-
 els.logsBtn.addEventListener("click", () => window.scanner.openLogs());
-els.inboxBtn.addEventListener("click", () => window.scanner.openInbox());
-els.lastCertBtn.addEventListener("click", async () => {
-  if (els.lastCertBtn.disabled) return;
-  await window.scanner.openLastCert();
+els.lastCertBtn.addEventListener("click", () => {
+  if (!els.lastCertBtn.disabled) window.scanner.openLastCert();
 });
 
-// ── SilverFast export path ───────────────────────────────────────────────
-// Show the absolute inbox the watcher is actually watching (respects
-// MINTVAULT_SCANS_DIR — comes straight from main's INBOX), with one-click
-// copy so the operator can paste it into SilverFast's Path field. This is the
-// fix for scans being exported to the wrong folder after a setup/reset.
-// Pure display + clipboard — no writes, no behaviour change.
-if (els.sfPathVal) {
-  window.scanner.getInboxPath().then((p) => {
-    els.sfPathVal.textContent = p || "—";
-    els.sfPathVal.title = p || "";
-  });
-}
-if (els.sfPathCopyBtn) {
-  els.sfPathCopyBtn.addEventListener("click", async () => {
-    const r = await window.scanner.copyInboxPath();
-    if (!r || !r.ok) return;
-    const original = els.sfPathCopyBtn.textContent;
-    els.sfPathCopyBtn.textContent = "Copied";
-    els.sfPathCopyBtn.classList.add("copied");
-    setTimeout(() => {
-      els.sfPathCopyBtn.textContent = original;
-      els.sfPathCopyBtn.classList.remove("copied");
-    }, 1500);
-  });
-}
-
-// ── Pause toggle ─────────────────────────────────────────────────────────
-
-els.pauseBtn.addEventListener("click", async () => {
-  const cur = await window.scanner.getState();
-  const isPaused = cur.pausedUntil != null && cur.pausedUntil > Date.now();
-  els.pauseBtn.disabled = true;
-  await window.scanner.setPaused(!isPaused);
-  els.pauseBtn.disabled = false;
-});
-
-// ── Settings collapsible ─────────────────────────────────────────────────
-
-els.settingsToggle.addEventListener("click", () => {
-  const open = !els.settingsBody.hasAttribute("hidden");
-  if (open) {
-    els.settingsBody.setAttribute("hidden", "");
-    els.settingsToggle.textContent = "Settings ⌄";
-  } else {
-    els.settingsBody.removeAttribute("hidden");
-    els.settingsToggle.textContent = "Settings ⌃";
+els.diagnosticsRow.addEventListener("toggle", () => {
+  els.settingsBody.toggleAttribute("hidden", !els.diagnosticsRow.open);
+  if (els.diagnosticsRow.open && lastState?.positioningPreview) {
+    requestAnimationFrame(() => renderPositioningOverlays(lastState.positioningPreview));
   }
 });
+els.autoOpenOnError.addEventListener("change", () => window.scanner.setSetting("autoOpenOnError", els.autoOpenOnError.checked));
+els.soundEnabled.addEventListener("change", () => window.scanner.setSetting("soundEnabled", els.soundEnabled.checked));
+els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.scanTarget()));
+els.positioningPreviewBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.runPositioningPreview()));
+els.savePlacementBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.applyPositioningPreview(lastState?.positioningPreview?.id || previewId)));
+els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId)));
+els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
+els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 
-els.autoOpenOnError.addEventListener("change", async () => {
-  await window.scanner.setSetting("autoOpenOnError", !!els.autoOpenOnError.checked);
+els.restartServiceBtn.addEventListener("click", async () => {
+  if (!confirm("Restart the scanner service?\n\nUse this only when the service is unresponsive. An active capture may be interrupted.")) return;
+  const original = els.restartServiceBtn.textContent;
+  els.restartServiceBtn.disabled = true;
+  els.restartServiceBtn.textContent = "Restarting…";
+  const result = await window.scanner.resetScanner();
+  els.restartServiceBtn.textContent = result?.status || (result?.ok ? "Restarted" : "Manual fix needed");
+  setTimeout(() => {
+    els.restartServiceBtn.disabled = false;
+    els.restartServiceBtn.textContent = original;
+  }, result?.escalated ? 4_000 : 1_800);
 });
-
-els.soundEnabled.addEventListener("change", async () => {
-  await window.scanner.setSetting("soundEnabled", !!els.soundEnabled.checked);
-});
-
-// ── Test scan ────────────────────────────────────────────────────────────
-
-els.testScanBtn.addEventListener("click", async () => {
-  els.testScanBtn.disabled = true;
-  const original = els.testScanBtn.textContent;
-  els.testScanBtn.textContent = "Triggering…";
-  const r = await window.scanner.testScan();
-  if (r.ok) {
-    els.testScanBtn.textContent = "Triggered — watch tray";
-    setTimeout(() => {
-      els.testScanBtn.textContent = original;
-      els.testScanBtn.disabled = false;
-    }, 3000);
-  } else {
-    els.testScanBtn.textContent = `Failed: ${(r.error || "unknown").slice(0, 30)}`;
-    setTimeout(() => {
-      els.testScanBtn.textContent = original;
-      els.testScanBtn.disabled = false;
-    }, 4000);
-  }
-});
-
-// Reset the scanner — escalates Soft (in-process restart) → Reload → Repair
-// against the live com.mintvault.scanner agent. Shows a plain-English status.
-// If it escalates, the agent restarts and surfaces the final outcome
-// ("Reloaded agent" / "Repaired + reinstalled agent" / "Manual fix needed")
-// via a notification on relaunch.
-els.clearBufferedBtn.addEventListener("click", async () => {
-  if (!window.confirm("Reset the scanner?\n\nRestarts the watcher; if needed, reloads or repairs the scanner agent. Safe to run anytime.")) return;
-  els.clearBufferedBtn.disabled = true;
-  const original = els.clearBufferedBtn.textContent;
-  els.clearBufferedBtn.textContent = "Resetting…";
-  const r = await window.scanner.resetScanner();
-  setTimeout(async () => {
-    const cur = await window.scanner.getState();
-    if (cur) renderState(cur);
-    els.clearBufferedBtn.disabled = false;
-    // Plain-English status — never a raw exit code.
-    els.clearBufferedBtn.textContent = (r && r.status) ? r.status : (r && r.ok ? "Done" : "Manual fix needed");
-    setTimeout(() => { els.clearBufferedBtn.textContent = original; }, (r && r.escalated) ? 4000 : 1800);
-  }, (r && r.escalated) ? 300 : 1500);
-});
-
-// ── Boot ─────────────────────────────────────────────────────────────────
 
 window.scanner.onStateUpdate(renderState);
 window.scanner.getState().then(renderState);
+void refreshStationSetup();
+window.addEventListener("resize", () => {
+  if (!lastState?.positioningPreview) return;
+  renderPositioningCardCrop(lastState.positioningPreview);
+  if (els.diagnosticsRow.open) renderPositioningOverlays(lastState.positioningPreview);
+});
 
-// Close modals with Escape
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  for (const m of [els.manualModal, els.orphanModal, els.forwardModal, els.deleteModal]) {
-    if (m.classList.contains("visible")) {
-      // Manual modal needs the cancel side-effect (releases pending scan)
-      if (m === els.manualModal && pendingScanFile) {
-        window.scanner.attachManualScan({ cancel: true });
-        pendingScanFile = null;
-      }
-      closeModal(m);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  for (const modal of [els.orphanModal, els.deleteModal]) {
+    if (modal.classList.contains("visible")) {
+      closeModal(modal);
       return;
     }
   }
