@@ -162,6 +162,25 @@ function authorizeAssignedPartnerCert(principal: PartnerPrincipal, auth: Partner
   return { ok: true as const, auth };
 }
 
+/** Shared target authorisation for the station capture adapter. It deliberately
+ * reuses the same Partner certificate/assignment binding as grading, rather
+ * than accepting an arbitrary certificate ID from a Mac.
+ *
+ * MERGE NOTE (2026-08-11, sibling reconciliation): this arrived on the v1069
+ * scanner lineage bound to that lineage's `authorizeAssigned` + the pre-repair
+ * `loadPartnerCert`. It is re-pointed here at the canonical
+ * `authorizeAssignedPartnerCert` and the canonical `loadPartnerCert`, so a
+ * station capture now inherits the full provenance JOIN chain
+ * (partner_connector_records / partner_submissions / partner_submission_handoffs)
+ * rather than the weaker tenant-only binding it shipped with. */
+export async function authorizePartnerScannerCertificate(
+  principal: PartnerPrincipal,
+  certId: number
+): Promise<PartnerCertAuth | null> {
+  const authorised = authorizeAssignedPartnerCert(principal, await loadPartnerCert(principal, certId));
+  return authorised.ok ? authorised.auth : null;
+}
+
 function partnerDraftWriteGuard(principal: PartnerPrincipal) {
   return sql`
     AND assigned_grader_id = ${principal.userId}

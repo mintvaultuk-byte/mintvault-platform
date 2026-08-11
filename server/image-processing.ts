@@ -276,7 +276,7 @@ export function detectCardBoundary(
   h: number,
   ch: number,
   certId?: string | number,
-  options?: { safetyPadPx?: number }
+  options?: { safetyPadPx?: number; preserveRawBounds?: boolean }
 ): BoundaryDetection | null {
   const certTag = certId != null ? ` cert=${certId}` : "";
   const safetyPadPx = options?.safetyPadPx ?? CARD_DETECT_SAFETY_PAD_PX;
@@ -291,7 +291,12 @@ export function detectCardBoundary(
   const matBased = detectBoundaryWithTest(pixels, w, h, ch, matIsBg);
   if (matBased) {
     console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels${certTag}`);
-    return { ...tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag, safetyPadPx), matRgb };
+    return {
+      ...(options?.preserveRawBounds
+        ? matBased
+        : tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag, safetyPadPx)),
+      matRgb,
+    };
   }
 
   // Fallback 1: adaptive-luma (Fix 0 — mat-aware branching, uses isBackground closure)
@@ -307,7 +312,9 @@ export function detectCardBoundary(
   if (adaptive) {
     console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg${certTag}`);
     return {
-      ...tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag, safetyPadPx),
+      ...(options?.preserveRawBounds
+        ? adaptive
+        : tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag, safetyPadPx)),
       matRgb: bgRgb,
     };
   }
@@ -317,7 +324,9 @@ export function detectCardBoundary(
   const fixed = detectBoundaryWithTest(pixels, w, h, ch, isBackground);
   if (!fixed) return null;
   return {
-    ...tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag, safetyPadPx),
+    ...(options?.preserveRawBounds
+      ? fixed
+      : tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag, safetyPadPx)),
     matRgb: { r: 0, g: 0, b: 0 },
   };
 }

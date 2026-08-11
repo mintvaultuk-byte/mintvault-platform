@@ -91,17 +91,25 @@ export const partnerMfa = {
   /**
    * Start enrolment. `secondFactor` is only required when REPLACING an authenticator that is already
    * set up (server-enforced — F3); first-time setup takes the password alone. Never persisted.
+   *
+   * The returned `enrolmentId` must be echoed back to `confirm` — since 0044 a pending secret is
+   * bound to the session that issued it and expires at `expiresAt`, so confirmation is by explicit
+   * id rather than "whatever pending row is newest".
    */
   enrol: (password: string, secondFactor?: { code?: string; recoveryCode?: string }) =>
-    req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>("POST", "/api/partner/mfa/enrol", {
-      password,
-      ...(secondFactor?.code ? { code: secondFactor.code } : {}),
-      ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
-    }),
+    req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
+      "POST",
+      "/api/partner/mfa/enrol",
+      {
+        password,
+        ...(secondFactor?.code ? { code: secondFactor.code } : {}),
+        ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
+      }
+    ),
   /**
-   * Abandon the pending setup and get a FRESH secret. This mints a new
-   * authenticator, so the server demands the same elevated verification as
-   * `enrol` — the password is forwarded for this one call and never persisted.
+   * Re-issue the pending enrolment secret (expired QR / lost screen). Requires the account
+   * password — server-enforced. Without it, anyone reaching a bootstrap-state user's browser could
+   * mint themselves a fresh authenticator from the QR screen. Never persisted.
    */
   restart: (password: string) =>
     req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(

@@ -12,8 +12,18 @@
  * no error, no log line and no failing request to notice it by.
  *
  * This is a live production risk, not a hypothetical: production's migration
- * journal does NOT contain 0046_partner_mfa_pending_lifecycle — its 0046 slot
- * holds a different scanner migration entirely.
+ * journal does NOT contain the MFA pending-lifecycle migration under the number
+ * the canonical lineage used — production's 0046 slot holds a different scanner
+ * migration entirely.
+ *
+ * SIBLING MERGE (2026-08-11): that lineage split is now RESOLVED in the tree. The
+ * canonical lineage shipped this migration as 0046 and the scanner lineage shipped
+ * the byte-identical file as 0044. Keeping both put TWO files on number 0046 (the
+ * other being 0046_scanner_processing_jobs), which the runner rejects at file
+ * collection, before it opens a database at all. Production's 0044 identity was
+ * kept because production is this release's target, so this test reads the 0044
+ * filename. The migration CONTENT asserted below is unchanged — the two files
+ * were byte-identical (sha256 6243d1d8…).
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -21,7 +31,7 @@ import { readFileSync } from "node:fs";
 const AUTH = readFileSync("server/partner/auth.ts", "utf8");
 const PUBLIC_ROUTES = readFileSync("server/partner/public-routes.ts", "utf8");
 const PORTAL_ROUTES = readFileSync("server/partner/routes.ts", "utf8");
-const MIGRATION_0046 = readFileSync("migrations/0046_partner_mfa_pending_lifecycle.sql", "utf8");
+const MIGRATION_MFA_PENDING = readFileSync("migrations/0044_partner_mfa_pending_lifecycle.sql", "utf8");
 
 describe("partner login fails CLOSED when the MFA projection is missing", () => {
   it("refuses rather than trusting an absent has_active_mfa", () => {
@@ -68,10 +78,10 @@ describe("partner login fails CLOSED when the MFA projection is missing", () => 
   it("the projection the guard depends on is exactly what 0046 installs", () => {
     // If this drifts, the guard would refuse every login on a correctly-migrated
     // database — so the two must be pinned together.
-    expect(MIGRATION_0046).toContain("has_active_mfa boolean");
-    expect(MIGRATION_0046).toMatch(/EXISTS\s*\(\s*SELECT 1 FROM partner_mfa_methods/);
-    expect(MIGRATION_0046).toContain("status = 'ACTIVE'");
-    expect(MIGRATION_0046).toContain("secret_ref IS NOT NULL");
+    expect(MIGRATION_MFA_PENDING).toContain("has_active_mfa boolean");
+    expect(MIGRATION_MFA_PENDING).toMatch(/EXISTS\s*\(\s*SELECT 1 FROM partner_mfa_methods/);
+    expect(MIGRATION_MFA_PENDING).toContain("status = 'ACTIVE'");
+    expect(MIGRATION_MFA_PENDING).toContain("secret_ref IS NOT NULL");
   });
 
   it("the MFA-pending decision still consults BOTH signals once the projection is trusted", () => {
@@ -113,9 +123,20 @@ describe("partner MFA restart requires elevated verification", () => {
 
   it("the route rejects a body with no password before calling the service", () => {
     const routeAt = PORTAL_ROUTES.indexOf('r.post("/mfa/restart"');
-    const route = PORTAL_ROUTES.slice(routeAt, routeAt + 1400);
-    expect(route).toContain('if (typeof password !== "string")');
-    const guardAt = route.indexOf('if (typeof password !== "string")');
+    const route = PORTAL_ROUTES.slice(routeAt, routeAt + 1800);
+    // SIBLING MERGE (2026-08-11): this asserted the guard's exact source text,
+    // `if (typeof password !== "string")`. The merged route keeps that check and
+    // ADDS the v1069 lineage's empty-string rejection, so the literal no longer
+    // matches even though the guard is strictly stronger. Pinning syntax would
+    // mean this test blocks its own hardening, so it now pins the two properties
+    // that actually matter — the type check exists, and it runs BEFORE the
+    // service call — plus the empty-string rejection as a floor that cannot be
+    // silently dropped later.
+    const guardAt = route.indexOf('typeof password !== "string"');
+    expect(guardAt, "the restart route must type-check the password").toBeGreaterThan(-1);
+    expect(route, "an empty password must be refused at the route, not handed to bcrypt").toContain(
+      "password.length === 0"
+    );
     const callAt = route.indexOf("await mfaEnrolRestart(");
     expect(callAt).toBeGreaterThan(guardAt);
   });

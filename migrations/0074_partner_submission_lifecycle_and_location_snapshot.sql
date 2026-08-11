@@ -1,7 +1,7 @@
--- 0044_partner_submission_lifecycle_and_location_snapshot.sql
+-- 0074_partner_submission_lifecycle_and_location_snapshot.sql
 -- Partner Network: the post-handover submission lifecycle, and an immutable location snapshot.
 --
--- UNAPPLIED AND FORWARD-ONLY. Additive; it edits no applied migration. Apply AFTER 0043.
+-- UNAPPLIED AND FORWARD-ONLY. Additive; it edits no applied migration. Apply AFTER 0047. RENUMBERED 0044 -> 0074 on 2026-08-11. Production had already applied a DIFFERENT 0044 (0044_partner_mfa_pending_lifecycle.sql) and the runner rejects duplicate NUMBERS before it runs anything. 0048 was NOT a safe destination either: 0048_partner_location_snapshot_search_path.sql (commit 098345f7, on several unmerged branches and APPLIED on staging) is a SECURITY REPAIR to the very function PART 2 below creates, so reusing 48 would have collided again and, on staging, re-run this pre-repair body over the hardened one. 0074 is above the global high-water mark across every branch and both journals. Body unchanged apart from this header and the assertion labels.
 --
 -- ===========================================================================================
 -- PART 1 — THE SUBMISSION LIFECYCLE DID NOT EXIST PAST HANDOVER
@@ -192,20 +192,20 @@ BEGIN
        AND conname = 'chk_partner_submissions_status'
        AND pg_get_constraintdef(oid) LIKE '%awaiting_settlement%'
   ) THEN
-    RAISE EXCEPTION '0044 assertion failed: status constraint was not widened';
+    RAISE EXCEPTION '0074 assertion failed: status constraint was not widened';
   END IF;
 
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
      WHERE table_name = 'partner_submissions' AND column_name = 'location_name_snapshot'
   ) THEN
-    RAISE EXCEPTION '0044 assertion failed: location_name_snapshot column is absent';
+    RAISE EXCEPTION '0074 assertion failed: location_name_snapshot column is absent';
   END IF;
 
   IF EXISTS (
     SELECT 1 FROM partner_submissions WHERE location_name_snapshot IS NULL
   ) THEN
-    RAISE EXCEPTION '0044 assertion failed: backfill left rows without a location snapshot';
+    RAISE EXCEPTION '0074 assertion failed: backfill left rows without a location snapshot';
   END IF;
 
   IF NOT EXISTS (
@@ -214,7 +214,7 @@ BEGIN
        AND tgname = 'trg_partner_submissions_location_snapshot'
        AND NOT tgisinternal
   ) THEN
-    RAISE EXCEPTION '0044 assertion failed: location snapshot trigger is absent';
+    RAISE EXCEPTION '0074 assertion failed: location snapshot trigger is absent';
   END IF;
 
   IF NOT EXISTS (
@@ -223,6 +223,6 @@ BEGIN
        AND conname = 'chk_partner_management_audit_action'
        AND pg_get_constraintdef(oid) LIKE '%partner_wallet_backfilled%'
   ) THEN
-    RAISE EXCEPTION '0044 assertion failed: partner_wallet_backfilled audit action is absent';
+    RAISE EXCEPTION '0074 assertion failed: partner_wallet_backfilled audit action is absent';
   END IF;
 END$$;

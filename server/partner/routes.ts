@@ -562,8 +562,12 @@ export function partnerApiRouter(): Router {
     // A second factor is deliberately NOT accepted — the service refuses this path
     // outright while an ACTIVE authenticator exists.
     const { password } = req.body ?? {};
-    if (typeof password !== "string") {
-      res.status(400).json({ error: "elevated verification required" });
+    // MERGE (2026-08-11): the v1069 lineage's stricter guard is kept — an EMPTY
+    // password is rejected here rather than being handed to bcrypt, and the
+    // response is an undifferentiated 401 so a caller cannot distinguish
+    // "no password supplied" from "wrong password".
+    if (typeof password !== "string" || password.length === 0) {
+      res.status(401).json({ error: "unauthorised" });
       return;
     }
     const out = await mfaEnrolRestart(

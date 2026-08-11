@@ -7,7 +7,7 @@
  *
  * Schema:
  *   {
- *     state:           "idle" | "front_buffered" | "uploading" | "success" | "error" | "manual_pending",
+ *     state:           "idle" | "scanning_front" | "scanning_back" | "uploading" | "success" | "error",
  *     mode:            "AUTO" | "MANUAL",
  *     bufferedFront:   absolute path or null,
  *     manualPending:   { certId, side, replaceExisting } or null,
@@ -72,6 +72,17 @@ const DEFAULT = Object.freeze({
   // Audible feedback. Plays Glass.aiff on success, Sosumi.aiff on error
   // via macOS afplay. No-op on non-darwin.
   soundEnabled:     true,
+  // Direct ImageCaptureCore device/profile state, refreshed by the existing
+  // scanner process. This is intentionally distinct from HTTP health.
+  scannerHealth:    { status: "checking" },
+  // Setup-only broad JPEG Preview. It has no certificate/session identifier,
+  // no TIFF, and is never an evidence source; the renderer can display only
+  // the restricted local derivative referenced by this transient record.
+  positioningPreview: null,
+  activeCapture:    null,
+  // Briefly displayed after a server acknowledgement so staff receive a clear
+  // Front Saved / Back Saved outcome before MintVault arms the next side.
+  lastAcceptedCapture: null,
   updatedAt:        null,
 });
 

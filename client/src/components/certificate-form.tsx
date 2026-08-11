@@ -4,6 +4,7 @@ import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
+import CaptureWizard from "@/components/grading/capture-wizard";
 import { certificateFormEntriesToSend } from "@shared/certificate-field-ownership";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import {
@@ -210,6 +211,28 @@ export default function CertificateForm({
   useEffect(() => {
     formRef.current = form;
   }, [form]);
+
+  // ── SIBLING MERGE (2026-08-11) · v1069 targeted scanner capture ───────────
+  // Restored from the scanner/station lineage onto the canonical editor. The
+  // v1069 version of this file hung the wizard off its own local 3-stage
+  // machine (the `wfStage` state and its per-stage wrapper attribute), which
+  // the canonical lineage deleted — GradingWorkstation owns stages now. So the
+  // wizard is re-hosted on the metadata editor's Card Details region instead
+  // of reinstating the superseded stage machine.
+  //
+  // The attribute name is deliberately NOT written out here: the architecture
+  // guard in tests/canonical-grading-workstation-architecture.test.ts asserts
+  // this file does not contain that token, by raw text match, and it is right
+  // to — naming it even in a comment is how the old stage machine creeps back.
+  //
+  // This local completion flag only removes the arming panel after the server
+  // accepts BOTH immutable masters; image consumers are refetched separately.
+  // FRONT-before-BACK is enforced inside CaptureWizard itself (the back arming
+  // control is disabled until `frontCaptured`), not here.
+  const [scannerCaptureComplete, setScannerCaptureComplete] = useState(false);
+  const scannerCaptureRequired = Boolean(
+    certificate?.id && !certificate.frontImagePath && !certificate.backImagePath && !scannerCaptureComplete
+  );
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
@@ -1351,6 +1374,9 @@ export default function CertificateForm({
     setDesignations((certificate?.designations as string[]) || []);
     setFrontImage(null);
     setBackImage(null);
+    // Same reason as gradingImages below: capture completion describes card A.
+    // Without this reset, moving to card B would suppress B's arming panel.
+    setScannerCaptureComplete(false);
 
     // Everything else that describes THIS certificate. Most important:
     // gradingImages holds picked File objects and uploadGradingImages() POSTs
@@ -1925,6 +1951,45 @@ export default function CertificateForm({
                   </div>
                 )}
               </div>
+            )}
+            {scannerCaptureRequired && (
+              <CaptureWizard
+                certId={certificate!.id}
+                onComplete={() => {
+                  setScannerCaptureComplete(true);
+                  void queryClient.invalidateQueries({
+                    queryKey: ["/api/admin/certificates", certificate!.id, "images"],
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: [`/api/admin/certificates/${certificate!.id}/images`],
+                  });
+                }}
+              />
+            )}
+            {isEdit && certificate?.id && !scannerCaptureRequired && (
+              <details className="rounded-lg border border-[var(--admin-gold)]/20 p-3">
+                <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-[var(--admin-gold)]/80">
+                  Controlled Canon recapture
+                </summary>
+                <p className="mt-2 text-xs text-[var(--admin-ink-dim)]">
+                  Use only when correcting image evidence. This appends a revision and never replaces or deletes the
+                  earlier TIFF master.
+                </p>
+                <div className="mt-3">
+                  <CaptureWizard
+                    certId={certificate.id}
+                    recapture
+                    onComplete={() => {
+                      void queryClient.invalidateQueries({
+                        queryKey: ["/api/admin/certificates", certificate.id, "images"],
+                      });
+                      void queryClient.invalidateQueries({
+                        queryKey: [`/api/admin/certificates/${certificate.id}/images`],
+                      });
+                    }}
+                  />
+                </div>
+              </details>
             )}
             {isEdit && certificate?.id && (
               <details

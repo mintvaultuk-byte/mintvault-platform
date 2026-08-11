@@ -1014,9 +1014,21 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC || signatureD, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
+        // E) Scanner evidence revision selection (v1069 lineage, admitted here as a SEPARATE
+        //    signature rather than replacing D). Both parents independently defined a
+        //    "signatureD"; they authorise DIFFERENT things — D is the canonical review-revision
+        //    CAS chain, E is the immutable-master evidence read that buildCertImagesPayload
+        //    performs. The merged server/grader.ts contains BOTH, so collapsing them would
+        //    let either change pass while claiming the other's authorisation. Restricted to the
+        //    immutable-master query and the explicit current pointer so the grade workflow
+        //    cannot be widened under this exception. Both tokens are SQL identifiers, so they
+        //    are matched against addedCode.
+        const signatureE =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC || signatureD || signatureE,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
         const revisionBoundAddedCode = addedCode
           .replace(/'(centering|corners|edges|surface)'/g, "")
           .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");
@@ -1040,7 +1052,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bcertificateOrigin\s*\(/.test(addedJs),
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
         ).toBe(true);
-        expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
+        expect(addedJs).not.toMatch(
+          /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i
+        );
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);
