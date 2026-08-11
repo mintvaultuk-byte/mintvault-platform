@@ -42,6 +42,25 @@ tenant boundary in the Partner runtime.
 
 ## Step 1 — Restricted Partner runtime LOGIN (OWNER, in Neon console)
 
+**STATUS: SQL VALIDATED.** The statements below were executed end to end against a
+disposable PostgreSQL 17.10 cluster on 2026-08-11, reproducing 0001's security
+model (`partner_runtime` NOLOGIN, `ENABLE`+`FORCE ROW LEVEL SECURITY`, the
+`tenant_id = partner_current_tenant()` policy and 0001's grants). Measured result:
+
+| Check | Result |
+| --- | --- |
+| `CREATE ROLE` + `GRANT partner_runtime` | OK |
+| Attributes | `super=f bypassrls=f createrole=f createdb=f repl=f login=t` |
+| `pg_has_role(..., 'partner_runtime', 'member')` | `t` |
+| Restricted role, **no** tenant context | **0 rows — fails closed** |
+| Restricted role, tenant-A context | 1 row, tenant A only |
+| **BYPASSRLS owner-style role, no context** | **2 rows — sees every tenant** |
+| Restricted role attempting `CREATE ROLE` | denied |
+
+That second-to-last row is the whole argument: an owner/`BYPASSRLS` credential
+silently returns every tenant's rows with no context set. It must never be used
+for Partner runtime.
+
 Run against production `neondb`. **Do not create a second database.**
 
 ```sql
@@ -50,49 +69,42 @@ CREATE ROLE partner_runtime_app WITH LOGIN PASSWORD '<generate 32+ random chars>
 GRANT partner_runtime TO partner_runtime_app;
 ```
 
-Then verify — all three must hold:
+Verify (all four must hold):
 
 ```sql
-SELECT rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication, rolcanlogin
-  FROM pg_roles WHERE rolname = 'partner_runtime_app';
--- expect: super=f bypassrls=f createrole=f createdb=f replication=f canlogin=t
-
-SELECT pg_has_role('partner_runtime_app', 'partner_runtime', 'member');  -- expect t
-
--- RLS actually applies to this role (the whole point):
+SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication, rolcanlogin
+  FROM pg_roles WHERE rolname = 'partner_runtime_app';   -- f f f f f t
+SELECT pg_has_role('partner_runtime_app', 'partner_runtime', 'member');  -- t
 SET ROLE partner_runtime_app;
-SELECT count(*) FROM partner_organisations;   -- expect 0 rows with no app.tenant_id set
+SELECT count(*) FROM partner_organisations;   -- MUST be 0 with no app.tenant_id
 RESET ROLE;
 ```
 
-The connection URL must point at the **same** `neondb` (direct or `-pooler`
-hostname; `server/partner/db.ts` normalises the `-pooler` label and asserts
-same-database topology at startup).
+The URL must point at the **same** `neondb` (direct or `-pooler` hostname —
+`server/partner/db.ts` normalises the `-pooler` label and asserts same-database
+topology at startup).
 
-## Step 2 — Generate the MFA key (OWNER or Lead)
+## Steps 2–3 — MFA key + both secrets, in ONE command
 
 `server/partner/mfa.ts` decodes **exactly 32 bytes** (64 hex chars, or base64
-decoding to 32 bytes), AES-256-GCM for TOTP secrets and HMAC-SHA-256 for
-recovery-code hashes.
+decoding to 32 bytes): AES-256-GCM for TOTP secrets, HMAC-SHA-256 for recovery
+codes. Generate it *inline* so the value is never printed, pasted or stored
+anywhere but the production secret manager:
 
 ```bash
-openssl rand -hex 32
+fly secrets set --app mintvault \
+  PARTNER_DATABASE_URL='postgresql://partner_runtime_app:<password>@<neon-host>/neondb?sslmode=require' \
+  PARTNER_MFA_ENC_KEY="$(openssl rand -hex 32)"
 ```
+
+**Both in one command, deliberately.** Two reasons: a DB URL present without an
+MFA key returns 503 by design, and each `fly secrets set` restarts production —
+so setting the MFA key on its own would restart the live site for no functional
+gain while the Partner mount is still 503 on the missing DB URL.
 
 Production currently has **zero** Partner MFA and recovery-code rows, so there is
 no ciphertext-compatibility burden *before first use*. After the first enrolment
 there is — see the rotation note at the end.
-
-## Step 3 — Set the two secrets (single restart)
-
-```bash
-fly secrets set --app mintvault \
-  PARTNER_DATABASE_URL='<step 1 URL>' \
-  PARTNER_MFA_ENC_KEY='<step 2 hex>'
-```
-
-Setting both in one command avoids a window where the mount has a DB URL but no
-MFA key (which returns 503 by design).
 
 ## Step 4 — Pre-flight the RBAC seed (READ-ONLY, against production)
 
@@ -136,10 +148,35 @@ cover them.
 MINTVAULT_DATABASE_URL='<prod>' npm run db:migrate -- --apply
 ```
 
-⚠️ **Never `psql -f` this file.** It has no `BEGIN` (the runner supplies the
+### If the dry run shows OTHER pending migrations
+
+Do not use `--apply` — it has no single-file selector and would apply them all,
+beyond what was authorised. Use the transactional psql form instead, which was
+proven correct on a disposable cluster (6 roles / 20 permissions / 70 mappings):
+
+```bash
+psql "<prod-url>" -v ON_ERROR_STOP=1 -1 -f migrations/0034_partner_rbac_seed.sql
+```
+
+`-1` supplies the single transaction the file expects and `-v ON_ERROR_STOP=1`
+makes any failure a non-zero exit. This path does **not** write the
+`schema_migrations` journal row, so follow it with:
+
+```sql
+INSERT INTO schema_migrations (filename, checksum, status, started_at, completed_at, applied_by)
+VALUES ('0034_partner_rbac_seed.sql',
+        '9600c9d0a031db626b86ac49af89377869a23e96bb9b639bfbeefb2c93c3115f',
+        'applied', now(), now(), 'manual-single-file');
+```
+
+That checksum is the sha256 of 0034 at this commit; the runner hard-errors on any
+later edit once pinned, so it must match exactly.
+
+⚠️ **Never plain `psql -f` this file.** It has no `BEGIN` (the runner supplies the
 transaction) and its temp tables are `ON COMMIT DROP`. Under psql autocommit
 every subsequent statement errors and **psql still exits 0** — a false green that
 writes nothing. Verified on a disposable cluster: exit 0, 0 roles / 0 perms / 0 maps.
+The `-1` flag above is what makes the difference; do not omit it.
 
 Verify by **row count, never by exit code**:
 
@@ -190,10 +227,32 @@ never rolled back; anything stateful is forward-fix only.
 
 ## Step 8 — Physical canary
 
-Blocked independently of everything above: **the Canon LiDE 400 is not connected
-to this Mac** (no USB match in `system_profiler SPUSBDataType`, no device in
-`/Library/Image Capture/Devices/`). The canary needs the owner to connect the
-scanner and place a real card.
+**CORRECTION (2026-08-11): the Canon LiDE 400 IS connected and working.** An
+earlier note in this file said it was not; that was wrong. `system_profiler
+SPUSBDataType` returns empty for *all* USB devices on this Mac, so its silence
+was not evidence of absence. `ioreg -p IOUSB -l` shows the device registered,
+matched and active:
+
+```
++-o LiDE 400@00100000  <class IOUSBHostDevice, ..., registered, matched, active>
+      "USB Vendor Name"  = "Canon"
+      "USB Product Name" = "LiDE 400"
+```
+
+Scanner v1.2.1 is running as LaunchAgent `com.mintvault.scanner.devproof` and is
+actively driving it — `positioning-preview` runs logged at 15:30, 15:35, 15:39,
+15:43 and 16:01 on 2026-08-11, every one reporting `cardDetected: true`. A card
+is physically on the platen.
+
+So the canary is **not** hardware-blocked. It is blocked only by the release
+chain above: it needs the deployed signed-station routes (currently 404 on
+production), an approved station, and a target armed from the website.
+
+One observation worth watching during the canary: every logged preview ended
+`placementReady: false` after 9–17 seconds, i.e. the card was detected but never
+passed the placement gate. If that repeats once the full flow is live it is a
+§29 tolerance question (staff must not have to align to millimetres), not a
+numbering or evidence problem.
 
 At canary time, re-read the counter and use whatever number is naturally next —
 do **not** force MV837:
