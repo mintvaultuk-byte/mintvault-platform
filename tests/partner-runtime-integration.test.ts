@@ -848,7 +848,14 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect(pending.rows[0].n).toBe(0);
     const session = await (await get("/api/partner/session", cookie)).json();
     expect(session.mfaPassed).toBe(true);
-    expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(403);
+    // Restart now takes the same elevated verification as /mfa/enrol (2026-08-11).
+    // No password at all is a 400; the CORRECT password is still 403, because
+    // restart is a bootstrap convenience and never a factor-replacement path —
+    // an account with an ACTIVE authenticator cannot restart, password or not.
+    expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(400);
+    expect(
+      (await post("/api/partner/mfa/restart", { password: "correct-horse-battery" }, cookie)).status
+    ).toBe(403);
     const replaySession = await login("enrol@a.com");
     expect(
       (await post("/api/partner/auth/mfa", { code: currentTotp(secret, Date.now()) }, replaySession.cookie)).status
@@ -865,7 +872,19 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     const first = await post("/api/partner/mfa/enrol", { password: "correct-horse-battery" }, cookie);
     expect(first.status).toBe(200);
     const firstBody = await first.json();
-    const restart = await post("/api/partner/mfa/restart", {}, cookie);
+    // HOSTILE: a stolen mfa-pending session alone must NOT be able to mint a fresh
+    // authenticator secret. Without a password, and with the WRONG password, the
+    // request is refused AND no new PENDING row is created — otherwise restart
+    // would be a way around the password gate on /mfa/enrol that this same
+    // bootstrap state cannot pass.
+    expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(400);
+    expect((await post("/api/partner/mfa/restart", { password: "wrong-password" }, cookie)).status).toBe(401);
+    const afterRefused = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_mfa_methods WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='PENDING'"
+    );
+    expect(afterRefused.rows[0].n, "a refused restart must not mint a secret").toBe(1);
+
+    const restart = await post("/api/partner/mfa/restart", { password: "correct-horse-battery" }, cookie);
     expect(restart.status).toBe(200);
     const secondBody = await restart.json();
     expect(secondBody.enrolmentId).not.toBe(firstBody.enrolmentId);

@@ -65,7 +65,15 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // workstation's own flex-1 stayed inert and the shell's h-full resolved against
     // an auto-height ancestor — the missing-bound regression behind the PR #234
     // same-day production rollback. Both halves are now required.
-    expect(DASH).toMatch(/className="flex min-h-0 flex-1 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
+    // NO `flex-1` in this assertion, and that is the whole point. `flex-1` is
+    // `flex: 1 1 0%`, and on a flex ITEM flex-basis REPLACES height for main-axis
+    // sizing — so with it present the bound is computed and discarded and the item
+    // stretches to its auto-height parent. Measured in a real browser against the
+    // compiled CSS at 1280x800: with flex-1 the workspace was 2568px, the document
+    // scrolled, the right pane did NOT scroll internally and the Live Certificate
+    // Preview sat at y=2552. Without it: 728px, right pane scrolls, preview bottom
+    // 763px, document not scrollable. Same result at 1024x768 (696px / 731px).
+    expect(DASH).toMatch(/className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
     // The panels container is a flex row at md+ (column-stack below): 40% preview
     // aside on the left, flex-1 control panel on the right.
     expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");

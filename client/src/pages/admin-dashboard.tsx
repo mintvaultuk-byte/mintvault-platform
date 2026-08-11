@@ -487,14 +487,26 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               grew instead, and the Live Certificate Preview was pushed far below
               the fold. That is the same missing-bound regression that caused the
               PR #234 same-day production rollback.
-              Two changes, both required:
+              Three changes, all required:
                 • flex + flex-col — this box was a BLOCK box, so the workstation's
                   own `flex-1` was inert and could never claim a definite height.
                 • md:h-[calc(100dvh-4.5rem)] — the bound itself, desktop-only, so
                   below `md` the surface still flows and the page scrolls (the
                   documented fallback). 4.5rem is the compact AdminHeaderRow +
-                  container padding above this box. */}
-          <div className="flex min-h-0 flex-1 flex-col md:h-[calc(100dvh-4.5rem)]">
+                  container padding above this box.
+                • NO `flex-1` — and this one is load-bearing, not tidying.
+                  `flex-1` is `flex: 1 1 0%`, and on a flex ITEM `flex-basis`
+                  REPLACES `height` for main-axis sizing. With `flex-1` present the
+                  height above is computed and then discarded, the item stretches to
+                  its parent, and the parent here is `min-h-[100dvh]` with height
+                  AUTO — so it grows to content and every descendant grows with it.
+                  Measured in a real browser at 1280x800 against the compiled CSS:
+                  with `flex-1` the workspace was 2568px tall, the page itself
+                  scrolled, the right pane never scrolled internally, and the Live
+                  Certificate Preview landed at y=2552 — i.e. the exact reported
+                  defect survived the "fix". Without it: 728px, right pane scrolls,
+                  preview bottom at 763px, document not scrollable. */}
+          <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]">
             {editingCert ? (
               <GradingWorkstation
                 mode="super-admin"
