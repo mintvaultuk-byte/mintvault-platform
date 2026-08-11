@@ -108,6 +108,72 @@ Added:
   both clobber directions, and the override's failure modes. Replaying the real
   incident against real git objects now yields `DIVERGENT_LIVE_ANCESTRY`.
 
+## PRODUCTION MOVED DURING THIS PASS — release is BLOCKED
+
+| | at start | at end |
+| --- | --- | --- |
+| release | v1071 | **v1074** |
+| serving | `c788fa68` | **`ae8edd2e`** |
+
+`ae8edd2e` is a **competing reconciliation of the same two parents**, produced by a
+concurrent session on `release/unified-scanner-lineage-20260811` and deployed while
+this merge was being resolved. Both `c788fa68` and `7d20196c` are ancestors of it.
+
+Relative to this candidate (`45a63251`) it is a **divergent sibling**: neither
+contains the other. The new GUARD 1L, run against the real running server,
+correctly refuses:
+
+    🚫 BLOCKED [DIVERGENT_LIVE_ANCESTRY]
+       prod is serving ae8edd2e, which is NOT an ancestor of candidate 45a63251
+
+That is the guard doing its job on a live, third occurrence — not a hypothetical.
+
+### What each side uniquely holds
+
+Live has, and this candidate lacks: **two documentation commits only**
+(`38f4b075`, `eaa33274`, both touching `issue-register.md`).
+
+This candidate has, and live lacks:
+
+- `6ad84fbb` — the scoped migration runner (`--only`, `--convergence-mode`).
+- The entire live-ancestry deploy guard and its 18 tests.
+- **Client-side Canon capture.** The two reconciliations resolved three files
+  differently, and live took the PRE-SCANNER side on all three:
+
+  | file | scanner parent | live v1074 | this candidate |
+  | --- | --- | --- | --- |
+  | `capture-wizard.tsx` | `92f9263a` | `adab69c7` (old) | `92f9263a` ✔ |
+  | `manual-card-tool.tsx` | `80400356` | `3dd2cb69` (old) | `80400356` ✔ |
+  | `grading-panel.tsx` | scanner gate present | gate absent | gate present ✔ |
+
+  Marker counts, merged tree vs live:
+
+  | marker | this candidate | live v1074 |
+  | --- | --- | --- |
+  | `scannerCaptureRequired` | 3 | **0** |
+  | `Controlled Canon Recapture` | 1 | **0** |
+  | "target-bound Canon capture" | 2 | 1 |
+  | `partnerStationRouter` | 3 | 3 |
+  | `authorizePartnerScannerCertificate` | 3 | 3 |
+  | `NEW_IMMUTABLE_MASTER` | 12 | 12 |
+  | FRONT-before-BACK | 1 | 1 |
+
+  So production currently runs the scanner/station BACKEND with **no /admin Canon
+  capture UI** — `788d680a` ("signed station staged evidence release") is in
+  `ae8edd2e`'s history but its file content was reverted by that merge. Capture is
+  unreachable from /admin on live, which is the same dead-code state this merge
+  found and fixed.
+
+### The remedy (an owner decision, not taken here)
+
+Merge `ae8edd2e` into this branch and deploy the result. Live then becomes an
+ancestor and GUARD 1L passes by construction rather than by override — that is the
+shape the guard is designed to reward. When doing it, **do not take live's side on
+the three files above**: its resolution drops the capture UI.
+
+Do NOT reach for `--reconciled-from ae8edd2e` here. This candidate does not carry
+live's two docs commits forward, so the assertion it demands would not be true.
+
 ## Do not
 
 - Do not deploy this branch without a fresh live-ancestry check.
