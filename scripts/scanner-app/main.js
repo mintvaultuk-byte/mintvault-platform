@@ -263,16 +263,18 @@ function setupTray() {
 
 function createPopover() {
   popover = new BrowserWindow({
-    width: 430,
-    height: 620,
+    // A durable half-screen station surface, not a transient tiny popover.
+    // It remains open while the operator selects the next target in MintVault.
+    width: 660,
+    height: 760,
     show: false,
     frame: false,
     transparent: false,
     resizable: true,
-    minWidth: 400,
-    minHeight: 480,
+    minWidth: 580,
+    minHeight: 620,
     alwaysOnTop: false,
-    skipTaskbar: true,
+    skipTaskbar: false,
     backgroundColor: "#0f0f0f",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -281,10 +283,6 @@ function createPopover() {
     },
   });
   popover.loadFile(path.join(__dirname, "renderer", "index.html"));
-
-  popover.on("blur", () => {
-    if (!popover.webContents.isDevToolsOpened()) popover.hide();
-  });
 
   popover.on("close", (e) => {
     if (!isQuitting) {
@@ -358,12 +356,25 @@ async function stationSetupState() {
     return { ok: true, stage: "sign_in", error: error?.message || "Sign in to MintVault" };
   }
   if (!session.ok || !session.body?.mfaPassed) {
+    if (session.status === 503) {
+      return { ok: true, stage: "station_unavailable", error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin." };
+    }
     return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
   }
   const summary = stationSummary(session.body);
   const code = stationIdentity.currentStationCode();
   if (!code) {
     const locations = await stationClient.enrolmentLocations();
+    if (!locations.ok) {
+      return {
+        ok: true,
+        stage: "station_unavailable",
+        summary,
+        error: locations.status === 503
+          ? "MintVault station enrolment is temporarily unavailable. Contact a MintVault Super Admin."
+          : "MintVault could not confirm this station’s authorised location.",
+      };
+    }
     return {
       ok: true,
       stage: "register",
@@ -424,11 +435,6 @@ function setupIpc() {
     return server.getOrphans();
   });
 
-  ipcMain.handle("delete-cert", async (_e, { certId, reason }) => {
-    if (!certId || !reason || reason.length < 10) return { ok: false, error: "certId + reason ≥10 chars" };
-    return server.softDeleteCert(certId, reason);
-  });
-
   // Recovery opens the exact historic certificate in the authenticated web
   // workstation. That page creates the server-owned capture session; this app
   // never arms arbitrary certificate/side combinations from a scanner token.
@@ -465,6 +471,13 @@ function setupIpc() {
     }
     const result = await stationClient.registerThisMac({ locationId, appVersion: APP_VERSION });
     return result.ok ? stationSetupState() : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
+  });
+  ipcMain.handle("station-sign-out", async () => {
+    if (stateMod.get().activeCapture || watcher?.targetedPendingUploadCount()) {
+      return { ok: false, error: "Finish or safely retry the current card before switching operator" };
+    }
+    stationIdentity.clearOperatorSession();
+    return { ok: true, stage: "sign_in" };
   });
 
   // These are purpose-built station controls. The renderer never receives a

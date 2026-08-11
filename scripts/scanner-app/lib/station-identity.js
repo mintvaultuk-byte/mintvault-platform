@@ -169,6 +169,11 @@ function setOperatorSession(token) {
   writeIdentity(identity);
 }
 
+/** Signing out a person never changes this Mac's enrolled station identity. */
+function clearOperatorSession() {
+  setOperatorSession(null);
+}
+
 function enrolmentPublicPayload(appVersion) {
   const identity = loadOrCreateIdentity();
   return {
@@ -208,6 +213,7 @@ module.exports = {
   saveEnrollment,
   setStationStatus,
   setOperatorSession,
+  clearOperatorSession,
   signStoredRequest,
   currentStationCode,
   hasActiveStationSession,

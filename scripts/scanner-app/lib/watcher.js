@@ -438,7 +438,10 @@ class Watcher extends EventEmitter {
   async createPreviewDerivative(masterPath, previewPath) {
     const sharp = require("sharp");
     await sharp(masterPath, { limitInputPixels: false })
-      .rotate()
+      // The LiDE platen is physically inverted relative to how staff place a
+      // card. This affects the non-authoritative operator derivative only;
+      // masterPath remains the byte-identical hardware TIFF for evidence.
+      .rotate(180)
       .resize(PREVIEW_MAX_EDGE_PX, PREVIEW_MAX_EDGE_PX, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 84, mozjpeg: true })
       .toFile(previewPath);
@@ -459,6 +462,9 @@ class Watcher extends EventEmitter {
     const metadata = await image.metadata();
     assertUprightOrientation(metadata.orientation);
     const info = await image
+      // Keep the setup Preview in the exact same presentation coordinate
+      // space as a final Front/Back preview and its card/area overlays.
+      .rotate(180)
       .resize(POSITIONING_PREVIEW_MAX_EDGE_PX, POSITIONING_PREVIEW_MAX_EDGE_PX, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 86, mozjpeg: true })
       .toFile(previewPath);
@@ -477,6 +483,9 @@ class Watcher extends EventEmitter {
     const orientation = assertUprightOrientation(metadata.orientation);
     const { data, info } = await image
       .clone()
+      // detectCardBounds returns a physical rectangle through the shared
+      // transform. Analyse the displayed 180° raster, not a hidden raw view.
+      .rotate(180)
       .resize({ width: Math.min(POSITIONING_PREVIEW_MAX_EDGE_PX, metadata.width), height: POSITIONING_PREVIEW_MAX_EDGE_PX, fit: "inside", withoutEnlargement: true })
       .removeAlpha()
       .raw()
@@ -726,7 +735,13 @@ class Watcher extends EventEmitter {
     if (entry.previewPath && fs.existsSync(entry.previewPath)) this.moveFile(entry.previewPath, this.dateFolder(PROCESSED));
     this.removeTargetedPending(entry.sessionId);
     const certId = capture?.certificateNumber || entry.certId;
-    stateMod.set({ state: "success", activeCapture: null, lastUploadedCert: certId, lastError: null });
+    stateMod.set({
+      state: "success",
+      activeCapture: null,
+      lastUploadedCert: certId,
+      lastAcceptedCapture: { certId, side: entry.side, acceptedAt: new Date().toISOString() },
+      lastError: null,
+    });
     stateMod.pushRecent({ certId, side: entry.side, source: "targeted-lide" });
     this.emitState();
     this.logCaptureStage(entry, "accepted", { certId, elapsedMs: entry.capturedAtMs ? Date.now() - entry.capturedAtMs : null });

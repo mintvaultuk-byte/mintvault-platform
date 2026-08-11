@@ -80,6 +80,9 @@ const DEFAULT = Object.freeze({
   // the restricted local derivative referenced by this transient record.
   positioningPreview: null,
   activeCapture:    null,
+  // Briefly displayed after a server acknowledgement so staff receive a clear
+  // Front Saved / Back Saved outcome before MintVault arms the next side.
+  lastAcceptedCapture: null,
   updatedAt:        null,
 });
 

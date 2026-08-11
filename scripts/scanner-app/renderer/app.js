@@ -10,10 +10,17 @@ const els = {
   updateBtn: document.getElementById("updateBtn"),
   scannerHealth: document.getElementById("scannerHealth"),
   stationIdentityRow: document.getElementById("stationIdentityRow"),
+  stationOrganisation: document.getElementById("stationOrganisation"),
   stationIdentity: document.getElementById("stationIdentity"),
+  stationUser: document.getElementById("stationUser"),
   targetCert: document.getElementById("targetCert"),
   targetSide: document.getElementById("targetSide"),
   targetHint: document.getElementById("targetHint"),
+  workflowGuide: document.getElementById("workflowGuide"),
+  placementVisual: document.getElementById("placementVisual"),
+  workflowGuideStep: document.getElementById("workflowGuideStep"),
+  workflowGuideTitle: document.getElementById("workflowGuideTitle"),
+  workflowGuideHint: document.getElementById("workflowGuideHint"),
   dot: document.getElementById("dot"),
   statusText: document.getElementById("statusText"),
   statusSub: document.getElementById("statusSub"),
@@ -24,11 +31,6 @@ const els = {
   orphanClose: document.getElementById("orphanClose"),
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn: document.getElementById("logsBtn"),
-  deleteModal: document.getElementById("deleteModal"),
-  deleteCertId: document.getElementById("deleteCertId"),
-  deleteReason: document.getElementById("deleteReason"),
-  deleteCancel: document.getElementById("deleteCancel"),
-  deleteConfirm: document.getElementById("deleteConfirm"),
   settingsToggle: document.getElementById("settingsToggle"),
   settingsBody: document.getElementById("settingsBody"),
   diagnosticsRow: document.getElementById("diagnosticsRow"),
@@ -70,6 +72,7 @@ const els = {
   stationLocationField: document.getElementById("stationLocationField"),
   stationLocation: document.getElementById("stationLocation"),
   stationRegisterBtn: document.getElementById("stationRegisterBtn"),
+  signOutBtn: document.getElementById("signOutBtn"),
 };
 
 const STATE_LABELS = {
@@ -115,8 +118,8 @@ function toTitle(value) {
 
 function renderHealth(health) {
   const status = String(health?.status || "checking");
-  if (status === "ready") return "Connected • 1200 DPI";
-  if (status === "busy") return "Scanner busy • 1200 DPI";
+  if (status === "ready") return "Connected • 1200 DPI • Locked";
+  if (status === "busy") return "Scanner busy • 1200 DPI • Locked";
   if (status === "profile_unprovisioned") return "Connected • setup required • 1200 DPI";
   if (status === "disconnected") return "Scanner disconnected";
   if (status === "checking") return "Checking device…";
@@ -141,7 +144,17 @@ function renderTarget(state) {
     return;
   }
 
-  els.targetCert.textContent = "No card armed";
+  if (state.state === "success" && state.lastAcceptedCapture?.certId) {
+    const accepted = state.lastAcceptedCapture;
+    els.targetCert.textContent = accepted.certId;
+    els.targetSide.textContent = `${toTitle(accepted.side)} SAVED`;
+    els.targetHint.textContent = accepted.side === "front"
+      ? "Front saved. MintVault will prepare Back when it is required."
+      : "Card complete. MintVault will provide the next required card.";
+    return;
+  }
+
+  els.targetCert.textContent = "No card ready";
   els.targetSide.textContent = "—";
   els.targetHint.textContent = state.state === "error"
     ? "Retry this side from the MintVault card record. This app cannot retarget a capture."
@@ -151,9 +164,51 @@ function renderTarget(state) {
 function renderStationIdentity(setup) {
   const active = setup?.stage === "active";
   els.stationIdentityRow.hidden = !active;
+  els.signOutBtn.hidden = !active;
   if (!active) return;
-  const parts = [setup.summary?.organisationName, setup.summary?.locationName, setup.stationCode, setup.summary?.displayName].filter(Boolean);
-  els.stationIdentity.textContent = parts.join(" • ");
+  const organisation = [setup.summary?.organisationName, setup.summary?.locationName].filter(Boolean).join(" — ");
+  els.stationOrganisation.textContent = organisation || "MintVault location";
+  els.stationIdentity.textContent = setup.stationCode || "Station";
+  els.stationUser.textContent = setup.summary?.displayName || "Authorised user";
+}
+
+function renderWorkflowGuide(state) {
+  const active = state.activeCapture;
+  const stage = String(active?.stage || "");
+  const awaitingScan = stage === "awaiting_scan";
+  const presentationPending = ["scanning", "retrying_scan", "processing_preview", "preview_ready", "preview_error", "upload"].includes(stage);
+  els.workflowGuide.hidden = presentationPending;
+  if (presentationPending) return;
+
+  const accepted = state.state === "success" ? state.lastAcceptedCapture : null;
+  if (accepted?.certId) {
+    const frontAccepted = accepted.side === "front";
+    els.workflowGuide.dataset.guideState = frontAccepted ? "back" : "complete";
+    els.placementVisual.classList.toggle("flip-required", frontAccepted);
+    els.workflowGuideStep.textContent = frontAccepted ? "FRONT SAVED" : "CARD COMPLETE";
+    els.workflowGuideTitle.textContent = frontAccepted ? "Flip the card for Back" : "Both sides are saved";
+    els.workflowGuideHint.textContent = frontAccepted
+      ? "MintVault will prepare Back when it is required. Front remains saved."
+      : "MintVault will provide the next required card.";
+    return;
+  }
+
+  const isBack = awaitingScan && active?.side === "back";
+  els.workflowGuide.dataset.guideState = isBack ? "back" : awaitingScan ? "front" : "setup";
+  els.placementVisual.classList.toggle("flip-required", isBack);
+  if (isBack) {
+    els.workflowGuideStep.textContent = "STEP 2 — FLIP THE CARD";
+    els.workflowGuideTitle.textContent = "Flip the card, then scan Back";
+    els.workflowGuideHint.textContent = "Place the back face-down in the guide. Preview if needed, then press Scan Back.";
+  } else if (awaitingScan) {
+    els.workflowGuideStep.textContent = "STEP 1 — PLACE CARD";
+    els.workflowGuideTitle.textContent = "Place the card face-down in the guide";
+    els.workflowGuideHint.textContent = "Preview if needed, then press Scan Front. The scanner only captures this MintVault target.";
+  } else {
+    els.workflowGuideStep.textContent = "SETUP — CHECK PLACEMENT";
+    els.workflowGuideTitle.textContent = "Place a card, then Preview";
+    els.workflowGuideHint.textContent = "Preview checks that the complete card is visible. Open a card in MintVault to enable final scanning.";
+  }
 }
 
 function renderStationSetup(next) {
@@ -345,13 +400,14 @@ function renderPositioningOverlays(entry) {
   );
 }
 
-function renderPositioningPreview(entry, scannerHealth) {
+function renderPositioningPreview(entry, scannerHealth, activeCapture) {
+  const evidenceReviewActive = ["scanning", "retrying_scan", "processing_preview", "preview_ready", "preview_error", "upload"].includes(String(activeCapture?.stage || ""));
   const status = String(entry?.status || "");
   const canStart = ["ready", "profile_unprovisioned"].includes(String(scannerHealth?.status || ""));
   const scanning = status === "scanning";
   setActionButton(els.positioningPreviewBtn, scanning ? "PREVIEWING…" : "PREVIEW", true, actionInFlight || scanning || !canStart);
 
-  if (!entry) {
+  if (!entry || evidenceReviewActive) {
     els.positioningPanel.hidden = true;
     els.fullPlatenDiagnostics.hidden = true;
     els.positioningHint.textContent = "Preview checks card placement only. It never becomes card evidence.";
@@ -478,6 +534,8 @@ function renderCaptureActions(state) {
 
   els.captureActionHint.textContent = !hasTarget
     ? "Open or arm a card in MintVault to enable final scanning."
+    : awaitingScan && state.scannerHealth?.status !== "ready"
+    ? "Finish this station’s placement setup before final scanning is enabled."
     : awaitingScan
     ? `Position the ${side.toLowerCase()}, then press Scan. No scan starts automatically.`
     : scanning
@@ -498,6 +556,7 @@ function explainFailure(message) {
   if (lower.includes("disconnect") || lower.includes("not detected")) return "Scanner disconnected — check the USB connection";
   if (lower.includes("busy")) return "Scanner busy — wait briefly, then retry this side";
   if (lower.includes("timeout")) return "Scan timed out — retry this side";
+  if (lower.includes("keeping this accepted side")) return "Upload pending — reconnecting";
   if (lower.includes("upload") || lower.includes("network") || lower.includes("http")) return "Upload interrupted — retrying may be required";
   if (lower.includes("dpi") || lower.includes("dimension") || lower.includes("profile") || lower.includes("tiff")) return "Image rejected — invalid locked capture";
   return detail || "Scanner service needs attention — see service logs";
@@ -530,7 +589,8 @@ function renderState(state) {
   lastState = state || {};
   els.scannerHealth.textContent = renderHealth(lastState.scannerHealth);
   renderTarget(lastState);
-  renderPositioningPreview(lastState.positioningPreview, lastState.scannerHealth);
+  renderWorkflowGuide(lastState);
+  renderPositioningPreview(lastState.positioningPreview, lastState.scannerHealth, lastState.activeCapture);
 
   if (els.autoOpenOnError) els.autoOpenOnError.checked = lastState.autoOpenOnError !== false;
   if (els.soundEnabled) els.soundEnabled.checked = lastState.soundEnabled !== false;
@@ -618,17 +678,6 @@ function renderMissingImages(orphans) {
       });
       actions.append(recover);
     }
-    const remove = document.createElement("button");
-    remove.className = "btn danger";
-    remove.textContent = "Soft-delete";
-    remove.addEventListener("click", () => {
-      els.deleteCertId.textContent = orphan.certId;
-      els.deleteReason.value = "";
-      els.deleteConfirm.dataset.cert = orphan.certId || "";
-      openModal(els.deleteModal);
-      setTimeout(() => els.deleteReason.focus(), 50);
-    });
-    actions.append(remove);
     row.append(info, actions);
     els.orphanList.append(row);
   }
@@ -654,6 +703,16 @@ els.stationMfaForm.addEventListener("submit", (event) => {
 els.stationRegisterBtn.addEventListener("click", () => {
   const locationId = els.stationLocation.value || undefined;
   void runStationSetupAction(() => window.scanner.registerStation({ locationId }));
+});
+
+els.signOutBtn.addEventListener("click", async () => {
+  if (!confirm("Sign out the current scanner user?\n\nThis Mac remains registered as the same MintVault station.")) return;
+  const result = await window.scanner.stationSignOut();
+  if (!result?.ok) {
+    alert(result?.error || "Unable to switch user safely");
+    return;
+  }
+  renderStationSetup(result);
 });
 
 if (els.appVersion) {
@@ -682,24 +741,6 @@ els.orphansBtn.addEventListener("click", async () => {
 });
 
 els.orphanClose.addEventListener("click", () => closeModal(els.orphanModal));
-els.deleteCancel.addEventListener("click", () => closeModal(els.deleteModal));
-els.deleteConfirm.addEventListener("click", async () => {
-  const certId = els.deleteConfirm.dataset.cert;
-  const reason = els.deleteReason.value.trim();
-  if (!certId || reason.length < 10) {
-    els.deleteReason.style.borderColor = "var(--red)";
-    return;
-  }
-  els.deleteConfirm.disabled = true;
-  const result = await window.scanner.deleteCert({ certId, reason });
-  els.deleteConfirm.disabled = false;
-  if (!result?.ok) {
-    alert(`Soft-delete failed — the certificate was not changed: ${result?.body?.error || result?.error || "unknown error"}`);
-    return;
-  }
-  closeModal(els.deleteModal);
-  els.orphansBtn.click();
-});
 
 els.logsBtn.addEventListener("click", () => window.scanner.openLogs());
 els.lastCertBtn.addEventListener("click", () => {
@@ -745,7 +786,7 @@ window.addEventListener("resize", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  for (const modal of [els.orphanModal, els.deleteModal]) {
+  for (const modal of [els.orphanModal]) {
     if (modal.classList.contains("visible")) {
       closeModal(modal);
       return;

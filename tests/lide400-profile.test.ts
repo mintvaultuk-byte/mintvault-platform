@@ -8,6 +8,7 @@ import {
   assertLide400Evidence,
   parseLide400CaptureProvenance,
 } from "../server/lib/lide400-profile";
+import { LIDE_400_PRESENTATION_ROTATION_DEGREES, orientLide400Presentation } from "../server/lib/lide400-presentation";
 
 const provenance = () => ({
   profileVersion: CANON_LIDE_400_PROFILE.version,
@@ -67,5 +68,35 @@ describe("Canon LiDE 400 locked profile", () => {
     expect(bridge).toContain('@"public.jpeg"');
     expect(bridge).toContain("ICSize physical = unit.physicalSize");
     expect(bridge).toContain('@"positioning_preview"');
+  });
+
+  it("keeps the TIFF source independent while all LiDE presentation derivatives rotate 180 degrees", async () => {
+    const width = 20;
+    const height = 20;
+    const raw = Buffer.alloc(width * height * 3, 0);
+    const setPixel = (x: number, y: number, rgb: [number, number, number]) => raw.set(rgb, (y * width + x) * 3);
+    for (let y = 0; y < 10; y++) for (let x = 0; x < 10; x++) setPixel(x, y, [240, 20, 20]);
+    for (let y = 10; y < 20; y++) for (let x = 10; x < 20; x++) setPixel(x, y, [20, 20, 240]);
+
+    const source = await sharp(raw, { raw: { width, height, channels: 3 } })
+      .tiff()
+      .toBuffer();
+    const sourceDigest = (await import("node:crypto")).createHash("sha256").update(source).digest("hex");
+    const presentation = await orientLide400Presentation(sharp(source)).raw().toBuffer();
+    const topLeft = presentation.subarray(0, 3);
+    const bottomRight = presentation.subarray((width * height - 1) * 3, width * height * 3);
+
+    expect(LIDE_400_PRESENTATION_ROTATION_DEGREES).toBe(180);
+    expect(CANON_LIDE_400_PROFILE.presentationRotationDegrees).toBe(180);
+    expect(topLeft[2]).toBeGreaterThan(topLeft[0]);
+    expect(bottomRight[0]).toBeGreaterThan(bottomRight[2]);
+    expect((await import("node:crypto")).createHash("sha256").update(source).digest("hex")).toBe(sourceDigest);
+  });
+
+  it("recognises the verified session profile provenance stored by both staged and compatibility finalisation", () => {
+    const ingest = readFileSync(path.join(process.cwd(), "server/scan-ingest-service.ts"), "utf8");
+    expect(ingest).toContain("capture_metadata->>'scannerProfileVersion'");
+    expect(ingest).toContain("capture_metadata->>'profileVersion'");
+    expect(ingest).toContain("COALESCE(");
   });
 });

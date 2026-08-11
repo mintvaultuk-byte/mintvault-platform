@@ -8,6 +8,8 @@
 import { db, pool } from "./db";
 import { createHash } from "node:crypto";
 import { hashLockKey } from "./lib/advisory-lock";
+import { orientLide400Presentation } from "./lib/lide400-presentation";
+import { CANON_LIDE_400_PROFILE } from "./lib/lide400-profile";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { uploadToR2, uploadImmutableEvidenceToR2, getR2Buffer, listR2Keys } from "./r2";
@@ -719,14 +721,19 @@ async function uploadImagesToCertUnlocked(
   // master bytes bound in the evidence ledger. This deliberately makes legacy
   // bulk-reprocess paths fail for new evidence rather than laundering a q85
   // derivative back into an authoritative working pointer.
-  let masterRows: Array<{ side: string; sha256: string }> = [];
+  let masterRows: Array<{ side: string; sha256: string; scannerProfileVersion: string | null }> = [];
   try {
     masterRows = (
       await db.execute(sql`
-        SELECT side, sha256 FROM certificate_image_evidence
+        SELECT side, sha256,
+          COALESCE(
+            capture_metadata->>'scannerProfileVersion',
+            capture_metadata->>'profileVersion'
+          ) AS "scannerProfileVersion"
+          FROM certificate_image_evidence
         WHERE certificate_id = ${certId} AND evidence_class = 'NEW_IMMUTABLE_MASTER' AND is_current = true
       `)
-    ).rows as Array<{ side: string; sha256: string }>;
+    ).rows as Array<{ side: string; sha256: string; scannerProfileVersion: string | null }>;
   } catch {
     // Table is additive during a rolling deployment; legacy processing remains
     // available until it exists. New ingestion creates the ledger before this
@@ -750,9 +757,15 @@ async function uploadImagesToCertUnlocked(
   // once from the master with deterministic orientation only: no crop, resize,
   // denoise, sharpening, or perspective correction. The old 2000px output
   // remains a non-authoritative analysis/display branch below.
-  const makeNativeWorkingAsset = async (buf: Buffer) => {
-    const result = await sharp(buf, { limitInputPixels: 30_000_000, failOn: "error" })
-      .rotate()
+  const isLide400Master = (side: "front" | "back") =>
+    masterRows.find((row) => row.side === side)?.scannerProfileVersion === CANON_LIDE_400_PROFILE.version;
+
+  const makeNativeWorkingAsset = async (buf: Buffer, isLide400: boolean) => {
+    const source = sharp(buf, { limitInputPixels: 30_000_000, failOn: "error" });
+    // Scanner evidence preserves its source TIFF untouched. Its working and
+    // display derivatives, however, are always upright for the operator.
+    const oriented = isLide400 ? orientLide400Presentation(source) : source.rotate();
+    const result = await oriented
       .jpeg({ quality: 95, chromaSubsampling: "4:4:4", progressive: false })
       .toBuffer({ resolveWithObject: true });
     return {
@@ -763,8 +776,8 @@ async function uploadImagesToCertUnlocked(
     };
   };
   const [frontWorking, backWorking] = await Promise.all([
-    makeNativeWorkingAsset(frontBuffer),
-    backBuffer ? makeNativeWorkingAsset(backBuffer) : Promise.resolve(null),
+    makeNativeWorkingAsset(frontBuffer, isLide400Master("front")),
+    backBuffer ? makeNativeWorkingAsset(backBuffer, isLide400Master("back")) : Promise.resolve(null),
   ]);
 
   // WORKING resolution for the legacy variant pipeline. This is deliberately

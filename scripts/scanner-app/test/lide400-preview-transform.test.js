@@ -11,11 +11,11 @@ function close(actual, expected, tolerance = 0.01) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} within ${tolerance} of ${expected}`);
 }
 
-test("ImageCaptureCore physical millimetres round-trip through the upright Preview raster", () => {
+test("ImageCaptureCore physical millimetres round-trip through the upright 180-degree presentation raster", () => {
   const preview = { width: 2550, height: 3508 };
   const raster = transform.physicalRectToRasterRect(observedCard, fullPlaten, preview);
-  close(raster.x, 54.6, 0.2);
-  close(raster.y, 109.1, 0.2);
+  close(raster.x, 1737.04, 0.2);
+  close(raster.y, 2346.46, 0.2);
   const roundTrip = transform.rasterRectToPhysicalRect(raster, fullPlaten, preview);
   for (const key of ["x", "y", "width", "height"]) close(roundTrip[key], observedCard[key], 1e-9);
   assert.equal(transform.assertUprightOrientation(1), 1);
@@ -23,7 +23,7 @@ test("ImageCaptureCore physical millimetres round-trip through the upright Previ
   assert.throws(() => transform.assertUprightOrientation(6), /upright/);
 });
 
-test("contained Preview overlay uses the real portrait image rectangle, not the full letterboxed viewport", () => {
+test("contained Preview overlay uses the real portrait image rectangle and 180-degree presentation mapping", () => {
   // The Scanner preview is 480 × 260 CSS pixels while the physical Preview is
   // portrait. object-fit: contain centres a 188.9 px-wide image at x=145.5.
   const mapped = transform.physicalRectToContainedViewportRect(
@@ -34,12 +34,13 @@ test("contained Preview overlay uses the real portrait image rectangle, not the 
   );
   close(mapped.imageRect.x, 145.53, 0.1);
   close(mapped.imageRect.width, 188.93, 0.1);
-  close(mapped.x, 149.58, 0.2);
-  close(mapped.y, 8.09, 0.2);
+  close(mapped.x, 274.23, 0.2);
+  close(mapped.y, 173.91, 0.2);
   close(mapped.width, 56.22, 0.2);
-  // The obsolete percentage mapping placed this at 10 px, visibly to the
-  // left of the actual card. The canonical contained mapping cannot regress.
-  assert.ok(mapped.x > 100);
+  // The obsolete percentage mapping placed this by a raw physical edge. The
+  // canonical contained presentation mapping retains the 180° transform.
+  assert.ok(mapped.x > 250);
+  assert.ok(mapped.y > 150);
 });
 
 test("edge-adjacent broad Preview produces an unsaveable, visibly clipped final-area proposal", () => {
@@ -76,15 +77,17 @@ test("positioning Preview detects an isolated card despite a full-width dark pla
   const pixel = (x, y, rgb) => raw.set(rgb, (y * width + x) * 3);
   // A card at the measured physical scale. Its dark border is connected and
   // fills its expected bounds, but its inner artwork has normal variation.
-  for (let y = 38; y < 577; y++) {
-    for (let x = 36; x < 423; x++) {
-      pixel(x, y, (x === 36 || x === 422 || y === 38 || y === 576) ? [35, 35, 35] : [125, 80, 165]);
+  // This is the 180-degree presentation raster. Its physical top-left card
+  // therefore appears bottom-right in the image returned to the detector.
+  for (let y = 1223; y < 1762; y++) {
+    for (let x = 885; x < 1272; x++) {
+      pixel(x, y, (x === 885 || x === 1271 || y === 1223 || y === 1761) ? [35, 35, 35] : [125, 80, 165]);
     }
   }
   // This is a separate reflection in a real full-platen Preview. Projection
   // occupancy now touches every column and would make the former detector
   // return null; it must not hide the physically visible card.
-  for (let y = 1209; y < 1631; y++) {
+  for (let y = 169; y < 591; y++) {
     for (let x = 0; x < width; x++) pixel(x, y, [40, 40, 40]);
   }
   const candidate = detectCardBounds(raw, width, height, fullPlaten);

@@ -115,14 +115,92 @@ body {
   gap: 10px;
 }
 .station-identity {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
+}
+.station-identity-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.identity-key {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.7px;
+}
+.identity-value {
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .capture-target {
   background: linear-gradient(90deg, rgba(212, 168, 67, 0.08), transparent);
+}
+.workflow-guide {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 126px minmax(0, 1fr);
+  min-height: 112px;
+}
+.placement-visual {
+  align-items: center;
+  background: radial-gradient(circle at 50% 44%, #303132, #171717 64%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  height: 92px;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.placement-zone {
+  align-items: center;
+  border: 2px dashed rgba(96, 165, 250, 0.82);
+  border-radius: 6px;
+  display: flex;
+  height: 74px;
+  justify-content: center;
+  width: 60px;
+}
+.guide-card {
+  background: linear-gradient(145deg, #c58be7, #6b3d92 62%, #f4c8f2);
+  border: 2px solid rgba(255, 255, 255, 0.68);
+  border-radius: 3px;
+  box-shadow: 0 3px 7px rgba(0, 0, 0, 0.58);
+  height: 58px;
+  width: 42px;
+}
+.flip-mark {
+  bottom: 7px;
+  color: var(--green);
+  display: none;
+  font-size: 21px;
+  font-weight: 800;
+  position: absolute;
+  right: 9px;
+}
+.placement-visual.flip-required .flip-mark {
+  display: block;
+}
+.workflow-guide-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.workflow-guide-copy .row-header {
+  margin: 0;
+}
+.workflow-guide-copy strong {
+  font-size: 16px;
+  line-height: 1.14;
 }
 .positioning-panel {
   align-items: center;
@@ -137,8 +215,8 @@ body {
 .positioning-card-preview-viewport {
   background: #000;
   border-radius: 5px;
-  height: 195px;
-  max-width: 158px;
+  height: 270px;
+  max-width: 218px;
   overflow: hidden;
   position: relative;
   width: 100%;
@@ -302,9 +380,9 @@ body {
   grid-template-columns: 1fr 1.25fr;
 }
 .capture-primary {
-  font-size: 13px;
+  font-size: 15px;
   letter-spacing: 0.7px;
-  min-height: 48px;
+  min-height: 54px;
   width: 100%;
 }
 .action-hint {
@@ -328,7 +406,7 @@ body {
   background: #000;
   border-radius: 5px;
   display: block;
-  height: 186px;
+  height: 338px;
   object-fit: contain;
   width: 100%;
 }
@@ -345,8 +423,8 @@ body {
   grid-template-columns: 1fr 1fr;
 }
 .preview-actions .btn {
-  font-size: 12px;
-  min-height: 42px;
+  font-size: 14px;
+  min-height: 50px;
 }
 .btn {
   background: var(--bg-3);
@@ -480,7 +558,7 @@ body {
   width: 90%;
 }
 .modal-card.wide {
-  max-width: 420px;
+  max-width: 520px;
 }
 .modal-title {
   color: var(--gold);

@@ -352,6 +352,32 @@ test("explicit Scan creates a JPEG derivative preview without uploading the TIFF
   assert.match(preview.dataUrl, /^data:image\/jpeg;base64,/);
 });
 
+test("Front and Back preview derivatives rotate 180 degrees without changing either TIFF master", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  const width = 80;
+  const height = 100;
+  const raw = Buffer.alloc(width * height * 3, 0);
+  const fill = (fromX, fromY, toX, toY, rgb) => {
+    for (let y = fromY; y < toY; y++) for (let x = fromX; x < toX; x++) raw.set(rgb, (y * width + x) * 3);
+  };
+  fill(0, 0, 40, 50, [240, 20, 20]);
+  fill(40, 50, 80, 100, [20, 20, 240]);
+
+  for (const side of ["front", "back"]) {
+    const masterPath = path.join(fixture.tempDir, `${side}.tif`);
+    const previewPath = path.join(fixture.tempDir, `${side}.jpg`);
+    await sharp(raw, { raw: { width, height, channels: 3 } }).tiff().toFile(masterPath);
+    const sourceBefore = fs.readFileSync(masterPath);
+    await fixture.watcher.createPreviewDerivative(masterPath, previewPath);
+    const { data } = await sharp(previewPath).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const topLeft = data.subarray(0, 3);
+    const bottomRight = data.subarray((width * height - 1) * 3, width * height * 3);
+    assert.ok(topLeft[2] > topLeft[0], `${side} Preview top-left is the original bottom-right after rotation`);
+    assert.ok(bottomRight[0] > bottomRight[2], `${side} Preview bottom-right is the original top-left after rotation`);
+    assert.deepEqual(fs.readFileSync(masterPath), sourceBefore, `${side} TIFF master bytes remain untouched`);
+  }
+});
+
 test("a frame that lacks four-side evidence margin is previewed but can only be rescanned, never accepted", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
@@ -534,6 +560,8 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   await fixture.watcher.pollTargetedCapture();
   await fixture.watcher.scanActiveTarget();
   assert.equal((await fixture.watcher.acceptPreview(fixture.state.get().activeCapture.previewId)).ok, true);
+  assert.deepEqual(fixture.state.get().lastAcceptedCapture?.side, "front");
+  assert.equal(fixture.state.get().lastAcceptedCapture?.certId, "MV902");
   const acceptedFront = path.join(fixture.tempDir, "processed", new Date().toISOString().slice(0, 10), path.basename(frontPath));
   assert.equal(fs.existsSync(acceptedFront), true);
   const acceptedFrontBytes = fs.readFileSync(acceptedFront);
@@ -694,8 +722,9 @@ test("calibration analysis reports a conservative standard-card physical candida
   const width = 1200;
   const height = 1600;
   const raw = Buffer.alloc(width * height * 3, 245);
-  const left = 280;
-  const top = 340;
+  // Presentation raster: a physical X=76/Y=102 card is rotated 180°.
+  const left = 290;
+  const top = 380;
   const cardWidth = 630;
   const cardHeight = 880;
   for (let y = top; y < top + cardHeight; y++) {

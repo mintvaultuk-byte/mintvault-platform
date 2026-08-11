@@ -6,7 +6,7 @@
  * EXIF orientation) preview raster is accepted. Detection, the proposed final
  * acquisition rectangle, and the renderer all use this one mapping:
  *
- *   ImageCaptureCore scan-area mm <-> upright Preview raster pixels
+ *   ImageCaptureCore scan-area mm <-> upright, 180° presentation raster pixels
  *     <-> the contained image rectangle inside the Scanner UI viewport.
  *
  * No calibration offset is stored here. Any unexpected rotation/mirror fails
@@ -17,7 +17,13 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.MintVaultLidePreviewTransform = api;
 })(typeof globalThis === "undefined" ? this : globalThis, () => {
-  const COORDINATE_SPACE = "imagecapturecore-scan-area-upright-raster-v1";
+  // ImageCaptureCore reports physical scanner coordinates in the source raster
+  // direction. A card placed upright for the operator is physically inverted
+  // in the LiDE 400 output, so every *presentation* preview is turned 180°.
+  // This contract maps a physical rectangle directly into that displayed
+  // raster; overlays and detected bounds must never use a separate offset.
+  const COORDINATE_SPACE = "imagecapturecore-scan-area-presentation-raster-rotate-180-v2";
+  const PRESENTATION_ROTATION_DEGREES = 180;
 
   function finite(value, name) {
     const number = Number(value);
@@ -56,11 +62,17 @@
     const physical = rect(physicalRect, "physical rectangle");
     const area = rect(acquisitionAreaMm, "ImageCaptureCore acquisition area");
     const pixels = raster(previewRaster, "Preview raster");
-    return {
+    const sourceRect = {
       x: ((physical.x - area.x) / area.width) * pixels.width,
       y: ((physical.y - area.y) / area.height) * pixels.height,
       width: (physical.width / area.width) * pixels.width,
       height: (physical.height / area.height) * pixels.height,
+    };
+    return {
+      x: pixels.width - (sourceRect.x + sourceRect.width),
+      y: pixels.height - (sourceRect.y + sourceRect.height),
+      width: sourceRect.width,
+      height: sourceRect.height,
     };
   }
 
@@ -68,9 +80,15 @@
     const pixels = rect(rasterRect, "raster rectangle");
     const area = rect(acquisitionAreaMm, "ImageCaptureCore acquisition area");
     const source = raster(previewRaster, "Preview raster");
+    const sourceRect = {
+      x: source.width - (pixels.x + pixels.width),
+      y: source.height - (pixels.y + pixels.height),
+      width: pixels.width,
+      height: pixels.height,
+    };
     return {
-      x: area.x + (pixels.x / source.width) * area.width,
-      y: area.y + (pixels.y / source.height) * area.height,
+      x: area.x + (sourceRect.x / source.width) * area.width,
+      y: area.y + (sourceRect.y / source.height) * area.height,
       width: (pixels.width / source.width) * area.width,
       height: (pixels.height / source.height) * area.height,
     };
@@ -105,6 +123,7 @@
 
   return {
     COORDINATE_SPACE,
+    PRESENTATION_ROTATION_DEGREES,
     assertUprightOrientation,
     physicalRectToRasterRect,
     rasterRectToPhysicalRect,

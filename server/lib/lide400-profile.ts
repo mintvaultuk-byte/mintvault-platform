@@ -1,4 +1,5 @@
 import type { ScannerEvidenceInspection } from "./image-evidence";
+import { LIDE_400_PRESENTATION_ROTATION_DEGREES } from "./lide400-presentation";
 
 /**
  * The only production profile accepted from the LiDE control bridge.  The
@@ -20,6 +21,9 @@ export const CANON_LIDE_400_PROFILE = Object.freeze({
   colourMode: "rgb",
   bitDepth: 8,
   outputFormat: "tiff",
+  // Presentation derivatives only. The immutable TIFF keeps its exact
+  // scanner-produced bytes and orientation for provenance.
+  presentationRotationDegrees: LIDE_400_PRESENTATION_ROTATION_DEGREES,
   areaMm: Object.freeze({ width: 100, height: 130 }),
   // Actual ICA output can differ by a few pixels because the driver rounds the
   // physical rectangle to native sensor coordinates.  This is a geometry check

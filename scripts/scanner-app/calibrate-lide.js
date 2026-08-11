@@ -36,7 +36,9 @@ function rounded(value) {
 }
 
 async function reviewCalibration(pathname, appliedRegionMm, previewDirectory) {
-  const image = sharp(pathname, { limitInputPixels: false }).rotate();
+  // Diagnostic calibration uses the same upright presentation space as the
+  // Scanner UI. It never changes the TIFF retained by the bridge.
+  const image = sharp(pathname, { limitInputPixels: false }).rotate(180);
   const metadata = await image.metadata();
   if (metadata.format !== "tiff" || !metadata.width || !metadata.height) {
     throw new Error("Calibration bridge did not return a readable TIFF");

@@ -19,8 +19,18 @@
   </section>
 
   <section class="row station-identity" id="stationIdentityRow" hidden>
-    <span class="row-label">Station</span>
-    <span class="row-value" id="stationIdentity">Station sign-in required</span>
+    <div class="station-identity-cell">
+      <span class="identity-key">LOCATION</span>
+      <span class="identity-value" id="stationOrganisation">—</span>
+    </div>
+    <div class="station-identity-cell">
+      <span class="identity-key">STATION</span>
+      <span class="identity-value" id="stationIdentity">—</span>
+    </div>
+    <div class="station-identity-cell">
+      <span class="identity-key">SIGNED IN</span>
+      <span class="identity-value" id="stationUser">—</span>
+    </div>
   </section>
 
   <section class="row capture-target" id="captureTargetRow">
@@ -36,6 +46,18 @@
       </div>
     </div>
     <p class="hint capture-hint" id="targetHint">Arm a card side in MintVault. This station will only scan that server-owned target.</p>
+  </section>
+
+  <section class="row workflow-guide" id="workflowGuide" data-guide-state="setup">
+    <div class="placement-visual" id="placementVisual" data-asset-slot="scanner-placement-guide" aria-hidden="true">
+      <div class="placement-zone"><div class="guide-card"></div></div>
+      <div class="flip-mark">↻</div>
+    </div>
+    <div class="workflow-guide-copy">
+      <span class="row-header" id="workflowGuideStep">SETUP — CHECK PLACEMENT</span>
+      <strong id="workflowGuideTitle">Place a card, then Preview</strong>
+      <p class="hint" id="workflowGuideHint">Preview checks that the complete card is visible before a final scan.</p>
+    </div>
   </section>
 
   <section class="row" id="statusRow">
@@ -58,12 +80,11 @@
       </div>
       <p class="positioning-result" id="positioningResult"></p>
       <p class="hint" id="positioningHint">Preview is a local placement check only. It never becomes card evidence.</p>
-      <button class="btn primary" id="savePlacementBtn" hidden>SAVE PLACEMENT ZONE</button>
-      <p class="preview-note">SETUP PREVIEW — LOCAL JPEG ONLY · NO TIFF · NO UPLOAD</p>
+      <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
     </div>
     <div class="preview-card" id="previewPanel" hidden>
       <img class="capture-preview" id="capturePreview" alt="Non-authoritative scan preview" />
-      <p class="preview-note">PREVIEW ONLY — the TIFF is not card evidence until you accept.</p>
+      <p class="preview-note">CHECK THE WHOLE CARD, ALL EDGES AND ALL CORNERS</p>
       <div class="preview-actions">
         <button class="btn primary" id="acceptPreviewBtn">ACCEPT</button>
         <button class="btn danger" id="rescanPreviewBtn">RESCAN</button>
@@ -90,6 +111,7 @@
           <div class="acquisition-boundary-overlay" id="acquisitionBoundaryOverlay" hidden aria-hidden="true"><span>FINAL 1200 DPI AREA</span></div>
         </div>
         <p class="hint positioning-geometry" id="positioningGeometry"></p>
+        <button class="btn primary" id="savePlacementBtn" hidden>SAVE PLACEMENT ZONE</button>
       </div>
       <label class="checkbox">
         <input type="checkbox" id="autoOpenOnError" />
@@ -99,6 +121,10 @@
         <input type="checkbox" id="soundEnabled" />
         <span>Sound on scan events <span class="hint inline">(success / error chimes)</span></span>
       </label>
+      <div class="settings-test">
+        <button class="btn" id="signOutBtn" hidden>SIGN OUT / SWITCH USER</button>
+        <p class="hint">Signs out the current person. This Mac stays registered as the same MintVault station.</p>
+      </div>
       <div class="settings-test">
         <button class="btn" id="updateBtn">Update scanner app</button>
         <p class="hint">Downloads the current approved station build and restarts this app.</p>
@@ -164,21 +190,6 @@
         <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
       </div>
       <p class="hint station-setup-error" id="stationSetupError"></p>
-    </div>
-  </div>
-
-  <!-- Soft-delete confirm -->
-  <div class="modal" id="deleteModal">
-    <div class="modal-card">
-      <div class="modal-title">Soft-delete <span id="deleteCertId">—</span></div>
-      <label class="field">
-        <span>Reason (≥10 chars)</span>
-        <input type="text" id="deleteReason" placeholder="why this cert is being removed" />
-      </label>
-      <div class="modal-actions">
-        <button class="btn ghost" id="deleteCancel">Cancel</button>
-        <button class="btn danger" id="deleteConfirm">Soft-delete</button>
-      </div>
     </div>
   </div>
 
