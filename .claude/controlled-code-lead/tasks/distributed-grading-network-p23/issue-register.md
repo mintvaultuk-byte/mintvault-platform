@@ -190,3 +190,54 @@ session cannot and must not work around. Reusing `neondb_owner` is exactly what
 must not happen.
 
 Status: **EXTERNAL_BLOCKER — owner action required.**
+
+### DGN-13 — BLOCKER: a concurrent session clobbered the v1069 release
+
+Timeline, measured from the Fly release list and the production journal:
+
+| Time (UTC) | Event |
+| --- | --- |
+| 20:25:05 | **This session** applied `0035_partner_certificate_origin.sql` (`applied_by=owner-authorised-single-file`) |
+| ~20:41 | **This session** deployed **v1069 / `7d20196c`**, GUARD 2 verified live |
+| 20:44:54 | **Another session** applied `0073_lineage_convergence.sql` (`applied_by=neondb_owner`) |
+| 20:53:21 | Another session committed `c788fa68` "feat(migrations): forward-only lineage convergence at 0073" on `codex/canonical-grading-reconciliation-20260810` |
+| ~20:57 | **v1070 / v1071 deployed `c788fa68`**, replacing v1069 |
+
+`7d20196c` and `c788fa68` are DIVERGENT — neither is an ancestor of the other;
+their merge-base is `be8a501e`. The live commit is not on `origin/main`.
+
+What production lost by reverting to `c788fa68`:
+
+| Property | v1069 (`7d20196c`) | LIVE (`c788fa68`) |
+| --- | --- | --- |
+| Transactional gapless MV allocator | present | **ABSENT** (`getNextCertId(executor)` ×0, `IdempotencyRaceLost` ×0) |
+| HQ grading-origin stamp | present | present (×2) — works only because 0035 is applied |
+| Station→admin route confinement | present | **ABSENT** (`station-request-scope.ts` missing) |
+| `mfaDisable` keeps `mfa_required` | present | **ABSENT** |
+| `/mfa/restart` password gate | present | **ABSENT** |
+
+**The burnable, gappable allocator is therefore live on production again.** No
+harm has occurred yet: `cert_counter.last_issued` = **836**, 836 certificates,
+0 stamped, health 200.
+
+Re-deploying v1069 would clobber the other session's work in exactly the way this
+project has already been bitten twice. That is an OWNER DECISION, not a
+lead-engineer call.
+
+Status: **OWNER_DECISION — blocks the physical canary.**
+
+### DGN-14 — EXTERNAL BLOCKER: PARTNER_DATABASE_URL carries an unsubstituted placeholder
+
+Both Partner secrets are now Deployed, and `PARTNER_MFA_ENC_KEY` is present. But
+the runtime cannot connect:
+
+```
+ERR getaddrinfo ENOTFOUND NEON_HOST_HERE
+```
+
+The URL's hostname is the literal template token `NEON_HOST_HERE`, so
+`/api/partner/me` and `/api/partner/stations/enrolment-locations` remain **503**
+(correctly fail-closed). Station enrolment, the HQ MFA operator and the canary
+are unreachable until the secret is re-set with the real Neon host.
+
+Status: **EXTERNAL_BLOCKER — owner action required.**
