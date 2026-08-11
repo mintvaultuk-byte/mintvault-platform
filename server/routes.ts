@@ -90,7 +90,13 @@ import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerGraderRoutes } from "./routes/grader";
 import { registerCorrectionModeRoutes } from "./correction-mode";
-import { migrateGraderSchema, migrateGraderCertSchema, migratePerOperatorSchema, isGraderLocked } from "./grader";
+import {
+  migrateGraderSchema,
+  migrateGraderCertSchema,
+  migratePerOperatorSchema,
+  isGraderLocked,
+  checkGradePublishGates,
+} from "./grader";
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
@@ -8120,11 +8126,29 @@ Defects (admin-confirmed): ${defectLines}`;
       // from the MVGS workstation and must all be present here. Non-numeric
       // grades (NO/AA) are exempt (their sub-grades are NULL by design).
       // Gate only — no scoring, weights, or formula logic is touched.
-      if (!isNonNum && (storedCentering == null || storedCorners == null || storedEdges == null || storedSurface == null)) {
-        return res.status(400).json({
-          error:
-            "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
-        });
+      // ── OWNER-AUTHORISED REPAIR (2026-08-11) — ONE SHARED PRINTABILITY AUTHORITY ──
+      //
+      // This route used to re-derive its own publish rules while its sibling
+      // (approveGraderCert / the auto-publish path) used the shared
+      // checkGradePublishGates -> checkPrintableGrade. Two authorities meant two
+      // answers, and hostile review found the gap: this route decides "is it
+      // non-numeric?" with kindOfGradeType, which TRIMS and accepts legacy long
+      // forms, and then skips every gate for a non-numeric kind. So
+      //   • grade_type 'NO' WITH a stored numeric grade published here but is a
+      //     kind_grade_contradiction — unprintable, and refused by the sibling; and
+      //   • a padded ' NO ' published with a NULL grade, while the renderer's EXACT
+      //     predicate reads it as numeric-with-no-grade and prints "0 / POOR".
+      // Both produce a PUBLISHED certificate that cannot legitimately print — the
+      // MV205 defect class, on the one path that had not adopted the shared rule.
+      //
+      // checkGradePublishGates reads the STORED row (never the request), applies the
+      // B3 four-sub-grade completeness rule and then the renderer's own
+      // checkPrintableGrade. The business rule is unchanged — this deletes a
+      // divergent copy of it, it does not add or relax anything, and no threshold,
+      // ladder or scoring logic is touched.
+      const publishGate = await checkGradePublishGates(id);
+      if (!publishGate.ok) {
+        return res.status(publishGate.status).json({ error: publishGate.error, code: publishGate.code });
       }
 
       // Overall-grade presence gate. The B3 gate above only inspects sub-grades, so a
@@ -8147,6 +8171,11 @@ Defects (admin-confirmed): ${defectLines}`;
       // a certificate whose stored `grade` was still NULL — and a NULL grade renders
       // as "0/POOR" on the printed label. The grade that is validated here is now
       // exactly the grade that gets published.
+      // RETAINED IN ADDITION to the shared gate above, because it enforces something
+      // checkPrintableGrade deliberately does not: LADDER MEMBERSHIP. checkPrintableGrade
+      // answers "can this print?", which an off-ladder value like 7.3 technically can.
+      // This answers "is it a grade MintVault issues?" — membership only, no scoring.
+      // Still read from the STORED row, never the request.
       if (!isNonNum && (storedGrade == null || !isValidNumericGrade(storedGrade))) {
         return res.status(400).json({
           error:

@@ -68,7 +68,7 @@ beforeAll(async () => {
     CREATE TABLE audit_log (id bigserial PRIMARY KEY, action text NOT NULL);
   `);
   await pool.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
-  await pool.query(await import("node:fs").then(({ readFileSync }) => readFileSync("migrations/0048_grading_review_revision.sql", "utf8")));
+  await pool.query(await import("node:fs").then(({ readFileSync }) => readFileSync("migrations/0073_lineage_convergence.sql", "utf8")));
 
   runtime.execute.mockImplementation(async (statement: any) => {
     const query = dialect.sqlToQuery(statement.getSQL());

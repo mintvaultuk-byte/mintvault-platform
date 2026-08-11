@@ -221,7 +221,18 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve", () => {
   });
 
   it("keeps the pre-existing B3 sub-grade completeness gate", () => {
-    expect(approveHandler()).toMatch(/storedCentering == null \|\| storedCorners == null/);
+    // The B3 four-sub-grade rule is PRESERVED but no longer duplicated here: it now
+    // comes from the shared checkGradePublishGates, which both approval paths use.
+    // Asserting the shared call (and that it precedes the write) is the stronger
+    // invariant — a re-derived local copy is exactly how this route drifted from its
+    // sibling and let an unprintable NO/AA state publish.
+    const h = approveHandler();
+    const gateAt = h.indexOf("const publishGate = await checkGradePublishGates(id);");
+    expect(gateAt, "approve must use the SHARED publish gate").toBeGreaterThan(0);
+    expect(h).toContain("if (!publishGate.ok) {");
+    expect(gateAt).toBeLessThan(h.indexOf("UPDATE certificates SET"));
+    // And it must not have grown a private copy of the rule back.
+    expect(h).not.toMatch(/storedCentering == null \|\| storedCorners == null/);
   });
 
   it("keeps the print-state promotion guarded so an in-flight print is never regressed", () => {

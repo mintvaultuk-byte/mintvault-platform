@@ -351,6 +351,13 @@ export interface MigratePlan {
   checksumMismatches: { filename: string; storedChecksum: string; currentChecksum: string }[];
   inconsistent: { filename: string; status: string }[]; // rows left in a non-'applied' state
   destructive: { filename: string; findings: ReturnType<typeof lintSql> }[];
+  /**
+   * EVERY filename the journal already holds, not just the ones this release ships.
+   * The migration identity guard needs the full set: a colliding historical
+   * migration is by definition one this release does NOT contain, so it can only be
+   * seen by reading the journal itself.
+   */
+  journalFilenames: string[];
 }
 
 /** Read-only planning: never mutates the database (does not create the journal table). */
@@ -362,6 +369,7 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
     checksumMismatches: [],
     inconsistent: [],
     destructive: [],
+    journalFilenames: [...journal.keys()],
   };
   for (const f of files) {
     const row = journal.get(f.filename);
@@ -449,6 +457,53 @@ export async function applyMigrations(
         `Checksum mismatch on already-applied migration(s): ${plan.checksumMismatches
           .map((m) => m.filename)
           .join(", ")}. A migration was edited after being applied. Refusing to proceed.`
+      );
+    }
+    /**
+     * MIGRATION IDENTITY GUARD (owner-authorised, 2026-08-11).
+     *
+     * The duplicate-number check in listMigrationFiles() only compares files WITHIN
+     * one release. It cannot see that this database already applied a DIFFERENT
+     * migration at the same numeric slot, because the journal's key is `filename`
+     * and numbers are used only for sort order. So a release whose 0046 is
+     * `partner_mfa_pending_lifecycle` applied cleanly to a database whose 0046 is
+     * `scanner_processing_jobs`: the filename was simply absent from the journal,
+     * the runner treated it as new, and the database ended up holding two different
+     * migrations at 0046 — permanently ambiguous, and silently, because nothing
+     * errored.
+     *
+     * That is exactly how MintVault ended up with three incompatible lineages
+     * forking at 0045-0048 across production, staging and main.
+     *
+     * This guard fails closed BEFORE anything is applied: if a pending migration's
+     * number is already occupied in the journal by a different filename, stop and
+     * name both identities. It never rewrites, renames or deletes a journal row —
+     * applied history stays immutable, which is the whole point. The forward-only
+     * fix is to converge with a NEW migration at the next globally free number,
+     * never to replay a colliding historical one.
+     */
+    const journalByNumber = new Map<number, string>();
+    for (const journalledName of plan.journalFilenames) {
+      const m = journalledName.match(FILE_RE);
+      if (m) journalByNumber.set(Number(m[1]), journalledName);
+    }
+    const identityConflicts = plan.pending
+      .map((filename) => {
+        const m = filename.match(FILE_RE);
+        if (!m) return null;
+        const occupant = journalByNumber.get(Number(m[1]));
+        return occupant && occupant !== filename ? { number: m[1], incoming: filename, applied: occupant } : null;
+      })
+      .filter((x): x is { number: string; incoming: string; applied: string } => x !== null);
+    if (identityConflicts.length > 0) {
+      throw new Error(
+        "Migration identity conflict — this database already applied a DIFFERENT migration at the same number:\n" +
+          identityConflicts
+            .map((c) => `  ${c.number}: applied '${c.applied}' vs release '${c.incoming}'`)
+            .join("\n") +
+          "\nApplying would leave two different migrations sharing one numeric slot. Applied history is immutable: " +
+          "do NOT renumber or delete the applied row. Converge with a NEW forward migration at the next globally " +
+          "free number instead, and exclude the colliding file from this environment."
       );
     }
     if (!opts.allowDestructive) {

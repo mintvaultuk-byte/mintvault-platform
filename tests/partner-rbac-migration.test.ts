@@ -93,7 +93,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
 
     const upTo = PARTNER_MIGRATIONS_WITH_RBAC_SEED.filter(
-      (m) => m !== "0034_partner_rbac_seed" && m !== "0047_partner_label_preview_permission"
+      (m) => m !== "0034_partner_rbac_seed" && m !== "0073_lineage_convergence"
     );
     await applyMigrationsRealistic(admin, ADMIN_DB!, upTo);
   };
@@ -102,11 +102,11 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
   const runRealRunnerFor0034 = async () => {
     const files = listMigrationFiles(join(process.cwd(), "migrations")).filter(
       (f) =>
-        f.filename === "0034_partner_rbac_seed.sql" || f.filename === "0047_partner_label_preview_permission.sql"
+        f.filename === "0034_partner_rbac_seed.sql" || f.filename === "0073_lineage_convergence.sql"
     );
     expect(files.map((f) => f.filename), "both cumulative RBAC migrations must be visible to the real runner").toEqual([
       "0034_partner_rbac_seed.sql",
-      "0047_partner_label_preview_permission.sql",
+      "0073_lineage_convergence.sql",
     ]);
     return applyMigrations(admin as never, files);
   };
@@ -245,7 +245,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     const first = await runRealRunnerFor0034();
     expect(first.applied).toEqual([
       "0034_partner_rbac_seed.sql",
-      "0047_partner_label_preview_permission.sql",
+      "0073_lineage_convergence.sql",
     ]);
     const afterFirst = await counts();
 
@@ -264,7 +264,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     expect(rows[0].status).toBe("applied");
 
     const { rows: previewRows } = await admin.query<{ n: string; status: string }>(
-      "SELECT count(*)::text AS n, min(status) AS status FROM schema_migrations WHERE filename='0047_partner_label_preview_permission.sql'"
+      "SELECT count(*)::text AS n, min(status) AS status FROM schema_migrations WHERE filename='0073_lineage_convergence.sql'"
     );
     expect(+previewRows[0].n).toBe(1);
     expect(previewRows[0].status).toBe("applied");

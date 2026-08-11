@@ -30,7 +30,7 @@ import {
 
 const MIGRATION = "0034_partner_rbac_seed.sql";
 const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
-const ADDITIVE_MIGRATION = "0047_partner_label_preview_permission.sql";
+const ADDITIVE_MIGRATION = "0073_lineage_convergence.sql";
 const additiveSql = readFileSync(join(process.cwd(), "migrations", ADDITIVE_MIGRATION), "utf8");
 
 /** Body of the `INSERT INTO _rbac_roles ... VALUES (...);` block. */

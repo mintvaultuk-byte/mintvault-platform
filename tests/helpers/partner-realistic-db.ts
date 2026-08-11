@@ -120,7 +120,7 @@ export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
 export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   ...PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION,
   "0034_partner_rbac_seed",
-  "0047_partner_label_preview_permission",
+  "0073_lineage_convergence",
 ] as const;
 
 /** G6D — Partner submission credit reservation, consumption and release integration. */

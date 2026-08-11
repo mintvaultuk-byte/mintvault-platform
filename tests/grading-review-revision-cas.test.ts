@@ -19,7 +19,7 @@ const GRADER = read("server/grader.ts");
 const ROUTES = read("server/routes/grader.ts");
 const ADMIN_ROUTES = read("server/routes.ts");
 const SCHEMA = read("shared/schema.ts");
-const MIGRATION = read("migrations/0048_grading_review_revision.sql");
+const MIGRATION = read("migrations/0073_lineage_convergence.sql");
 
 let cluster: DisposablePostgres17;
 let pool: pg.Pool;

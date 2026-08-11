@@ -70,5 +70,8 @@ ALTER TABLE certificates
   ADD COLUMN IF NOT EXISTS centering_outer_back       jsonb,
   ADD COLUMN IF NOT EXISTS centering_inner_front      jsonb,
   ADD COLUMN IF NOT EXISTS centering_inner_back       jsonb,
-  ADD COLUMN IF NOT EXISTS centering_method           text;
+  ADD COLUMN IF NOT EXISTS centering_method           text,
+  -- Versioned from 0073: the reviewer edits it, and it is published on the
+  -- UNAUTHENTICATED /api/cert/:id/report and /api/cert/:id/report/pdf surfaces.
+  ADD COLUMN IF NOT EXISTS grade_explanation          text;
 `;

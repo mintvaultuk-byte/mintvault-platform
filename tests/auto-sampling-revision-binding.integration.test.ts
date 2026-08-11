@@ -67,7 +67,7 @@ beforeAll(async () => {
     );
   `);
   await pool.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
-  await pool.query(readFileSync("migrations/0048_grading_review_revision.sql", "utf8"));
+  await pool.query(readFileSync("migrations/0073_lineage_convergence.sql", "utf8"));
   runtime.execute.mockImplementation(async (statement: any) => {
     const query = dialect.sqlToQuery(statement.getSQL());
     const result = await pool.query(query.sql, query.params as unknown[]);

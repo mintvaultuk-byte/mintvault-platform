@@ -140,9 +140,16 @@ describe("partner schema ↔ migration parity", () => {
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
       "0046_partner_mfa_pending_lifecycle.sql",
-      "0047_partner_label_preview_permission.sql",
-      // Server-authoritative CAS token for the canonical pending-review approval path.
-      "0048_grading_review_revision.sql",
+      // 0047 and 0048 were WITHDRAWN, not renamed. Both were still unapplied on every
+      // host, and their numbers were already occupied by DIFFERENT migrations in the
+      // production scanner lineage and the staging final-product-integration lineage.
+      // Their semantics moved forward into 0073 under the owner's forward-only
+      // decision; the applied 0046 stays because staging holds it as immutable history.
+      //
+      // Forward-only lineage convergence: adds the grading_revision CAS token and its
+      // ENABLE ALWAYS trigger where absent, grants partner.cards.preview, and verifies
+      // the MFA projection the fail-closed login guard depends on.
+      "0073_lineage_convergence.sql",
     ]);
   });
 
