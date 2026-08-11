@@ -80,3 +80,34 @@ establish a baseline. Result:
 - The running Scanner is v1.2.1 from this repository, but is a manually launched Electron process rather than the `com.mintvault.scanner` LaunchAgent. It has no stored signed-station identity and its only local endpoint is the legacy production host.
 - Port 5000 is owned by macOS Control Center, not a MintVault development server. The only local PostgreSQL databases are `postgres` and an unrelated Vault Quest database.
 - The configured R2 bucket is documented shared production infrastructure and was not read or written. No R2 profile/CLI or pre-provisioned non-production bucket was available. This is an external-provisioning gap, not a scanner-code regression.
+
+## Production runtime bootstrap — EXECUTED 2026-08-11
+
+Intentional production mutations, in order (all verified by row count, never by exit code):
+
+1. `fly secrets set` → `PARTNER_DATABASE_URL` (restricted `partner_runtime_app` LOGIN) + `PARTNER_MFA_ENC_KEY` (fresh 32-byte, generated inline, never printed). Release **v1067 → v1068**, rolling, both machines healthy. `[config]` confirms `DB_HOST=ep-wispy-morning-…-pooler DB_NAME=neondb`; no topology error.
+2. Applied **`0034_partner_rbac_seed.sql`** → verified **6 roles / 20 permissions / 70 mappings**, journal checksum `9600c9d0…3115f`. `MVGS_ASSESSMENT_TECHNICIAN` = 10 perms, holds none of credit/orders-submit/user-admin.
+3. Applied **`0031`, `0032`, `0033`, `0044_partner_mfa_pending_lifecycle`** under a second, explicit owner authorisation — required because `team-service.ts` needs `partner_invitations` and `mfa-service.ts` needs `enrolment_session_id`. Verified present. **`0041`/`0042`/`0043` (credit/settlement) deliberately NOT applied** — proved unreachable at boot and on the station/scan path.
+
+Method: each file copied into the running machine with sha256 verified against the local file, then a dry run that had to show exactly the authorised filenames, then `--apply`. The production DB credential never left Fly. Journal: 31 rows. `cert_counter.last_issued` unchanged at **836**.
+
+### DGN-11 — BLOCKER: candidate branch would regress production on deploy
+
+`psp/partner-rbac-hybrid` is 10+ commits behind `origin/main`. Critically,
+`f51beb10 fix(cert): stamp HQ grading origin on the two raw certificate INSERT paths`
+is on main and not here, and it edits `server/routes.ts` +
+`server/scan-ingest-service.ts` — the same two files the allocator work changed.
+Deploying this branch would silently revert it. `safe-deploy.sh` GUARD 1 would
+correctly refuse.
+
+Also: two different migrations are numbered 0044 —
+`0044_partner_mfa_pending_lifecycle.sql` (this branch, APPLIED to production) and
+`0044_partner_submission_lifecycle_and_location_snapshot.sql` (origin/main,
+unapplied). Filenames differ so the filename-keyed journal tolerates both, but the
+sequence is ambiguous across branches and should be reconciled.
+
+Repair: integrate `origin/main` into the candidate, preserving BOTH the
+HQ-grading-origin fix and the transactional allocator (they touch the same
+functions — expect a real conflict in `createCertForScan`), re-run the allocator
+and ordering suites, then deploy. Status: OPEN — blocks deploy, station enrolment
+and the physical canary.
