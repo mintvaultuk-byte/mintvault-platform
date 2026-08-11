@@ -5246,13 +5246,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/certificates/new", requireAdmin, async (_req, res) => {
     try {
       const { generateReferenceNumber } = await import("./reference-number");
-      const certNumber = await storage.getNextCertId();
       const refNum = generateReferenceNumber();
-      const result = await db.execute(sql`
-        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number)
-        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW(), ${refNum})
-        RETURNING *
-      `);
+      // Allocate + insert ATOMICALLY so a failed INSERT rolls the counter
+      // increment back instead of permanently burning an MV integer (the MV
+      // number is the physical card's identity; gaps are not acceptable).
+      const result = await db.transaction(async (tx) => {
+        const certNumber = await storage.getNextCertId(tx);
+        return await tx.execute(sql`
+          INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number)
+          VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW(), ${refNum})
+          RETURNING *
+        `);
+      });
       const row = result.rows[0] as any;
       // Build full camelCase cert object for frontend
       const cert = {
@@ -5274,7 +5279,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         variant: row.variant || "",
         designations: row.designations || [],
       };
-      console.log(`[admin] created new cert: ${certNumber} (id=${row.id})`);
+      // Log the COMMITTED number off the returned row, not a pre-commit local.
+      console.log(`[admin] created new cert: ${row.certificate_number} (id=${row.id})`);
       res.json(cert);
     } catch (err: any) {
       console.error("[admin] new cert error:", err.message);
@@ -8844,20 +8850,30 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const side = (req.body.side || "front") as "front" | "back";
 
-      // Determine target cert: explicit or current queue item
+      // Determine target cert: explicit, else the current queue pointer.
+      //
+      // There is deliberately NO "first ungraded" fallback. It used to select
+      // `ORDER BY created_at ASC LIMIT 1` whenever the target could not be
+      // resolved, which silently bound this upload to an ARBITRARY, unrelated
+      // certificate — attaching one customer's card photo to another customer's
+      // record with a 200 response and no warning. That is reachable in normal
+      // operation because `_currentGradingCertId` is in-process state and
+      // production runs multiple Fly machines: the admin sets the pointer on one
+      // machine and the phone upload lands on another, where it is null.
+      //
+      // If the target is unknown the only safe answer is to refuse. The caller
+      // must pass an explicit certId.
       const certId = req.body.certId || _currentGradingCertId;
       let dbCert: any = null;
       if (certId) {
         dbCert = await findCertByIdFlex(String(certId));
       }
       if (!dbCert) {
-        // Fall back to first ungraded
-        const rows = await db.execute(
-          sql`SELECT * FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1`
-        );
-        dbCert = rows.rows?.[0];
+        return res.status(400).json({
+          error:
+            "No target certificate for this upload. Pass an explicit certId — the server will not guess which card an image belongs to.",
+        });
       }
-      if (!dbCert) return res.status(404).json({ error: "No active certificate found for upload" });
 
       const { autoCrop } = await import("./image-processing");
       const file = req.file || (req.files as any)?.[side]?.[0];
@@ -11047,23 +11063,25 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // GET /preview — light metadata used by Manual Mode UI to confirm cert
   // exists and which side(s) are populated before uploading.
-  // GET /api/admin/next-cert-id — read-only next-cert allocation.
-  // Used by the scanner-app to display the upcoming MV number before a scan
-  // arrives. Reservation is owned by the scan-ingest endpoint; this is just
-  // a hint, hence the comment "may differ from final allocation if multiple
-  // scans race". Skips soft-deleted rows so a deleted MV60 doesn't become
-  // the predicted next when the real next is MV62.
+  // GET /api/admin/next-cert-id — ADVISORY display hint only.
+  //
+  // This reads the ONE authoritative allocator (cert_counter.last_issued + 1).
+  // It previously derived its own answer from
+  // MAX(regexp_replace(certificate_number,…)) over live certificates, which was
+  // a SECOND formula over a DIFFERENT source of truth and could disagree with
+  // what the card actually receives: soft-deleting the newest certificate made
+  // it re-predict a number the counter will never reissue, and out-of-band rows
+  // in a higher band (the staging harness seeds MV900001+) made it predict from
+  // that band instead. One number space, one formula.
+  //
+  // It remains a HINT and is never a reservation — issuance is owned solely by
+  // the transactional allocator. A concurrent issuance can still consume this
+  // number first, so no caller may treat it as assigned.
   app.get("/api/admin/next-cert-id", requireScannerOrAdmin, async (_req, res) => {
     try {
-      const r = await db.execute(sql`
-        SELECT COALESCE(
-          (SELECT MAX(NULLIF(regexp_replace(certificate_number, '[^0-9]', '', 'g'), '')::int)
-             FROM certificates WHERE deleted_at IS NULL),
-          0
-        ) + 1 AS next_numeric
-      `);
-      const n = parseInt(String((r.rows[0] as any)?.next_numeric ?? 1), 10);
-      res.json({ next: `MV${n}`, next_numeric: n });
+      const { lastIssued } = await storage.getLastIssuedMvNumber();
+      const n = lastIssued + 1;
+      res.json({ next: `MV${n}`, next_numeric: n, advisory: true });
     } catch (err: any) {
       console.error("[next-cert-id] failed:", err);
       sendServerError(res, err);

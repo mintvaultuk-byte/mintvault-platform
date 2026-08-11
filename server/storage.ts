@@ -37,6 +37,15 @@ import { db } from "./db";
 import crypto from "crypto";
 
 /**
+ * The minimal surface shared by the drizzle database handle and a drizzle
+ * transaction handle (`db.transaction(async (tx) => …)`). Lets a query run
+ * either standalone or enlisted in a caller's transaction — used by the
+ * certificate-number allocator so the increment commits atomically with the
+ * certificate INSERT.
+ */
+export type SqlExecutor = Pick<typeof db, "execute">;
+
+/**
  * Thrown by ownership-mutating storage methods when the cert has been reported
  * stolen and the caller did not supply an explicit override. Routes catch this
  * and surface 403 + the verbatim PR #75 error message. Mirrors the dispute /
@@ -158,7 +167,13 @@ export interface IStorage {
   ): Promise<CertificateRecord | undefined>;
   listCertificates(filters?: CertificateFilters): Promise<CertificateRecord[]>;
   searchCertificates(query: string): Promise<CertificateRecord[]>;
-  getNextCertId(): Promise<string>;
+  /**
+   * Allocate the next MV number. The executor MUST be the transaction that also
+   * INSERTs the certificate, so the increment and the row commit together; see
+   * the implementation for why an autocommitting increment burns integers.
+   * For a read-only display hint use getLastIssuedMvNumber() instead.
+   */
+  getNextCertId(executor: SqlExecutor): Promise<string>;
   ensureCertCounterTable(): Promise<void>;
 
   saveNfcData(
@@ -845,12 +860,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord> {
-    const certId = await this.getNextCertId();
-    const hash = crypto
-      .createHash("sha256")
-      .update(certId + Date.now())
-      .digest("hex");
-
     const { getDatabaseUrl } = await import("./config");
     const dbUrl = getDatabaseUrl();
     let dbHost = "";
@@ -859,36 +868,54 @@ export class DatabaseStorage implements IStorage {
     } catch {}
     const env = process.env.NODE_ENV || "development";
 
-    await this.writeAuditLog("certificate", certId, "CERT_ID_ALLOCATED", adminUser || null, {
-      mvNumber: certId,
-      env,
-      dbHost,
-      timestamp: new Date().toISOString(),
-    });
-
+    // Generated OUTSIDE the transaction: nothing but the counter increment and
+    // the certificate INSERT may sit inside the cert_counter critical section.
+    let refNum: string | undefined;
     try {
-      // Generate reference number for new certs
-      let refNum: string | undefined;
-      try {
-        const { generateReferenceNumber } = await import("./reference-number");
-        refNum = generateReferenceNumber();
-      } catch {}
+      const { generateReferenceNumber } = await import("./reference-number");
+      refNum = generateReferenceNumber();
+    } catch {}
 
-      const [cert] = await db
-        .insert(certificates)
-        .values({
-          ...data,
-          certId,
-          integrityHash: hash,
-          ...(refNum ? { referenceNumber: refNum } : {}),
-          logbookVersion: 1,
-          logbookLastIssuedAt: new Date(),
-        } as any)
-        .returning();
+    let certId = "";
+    try {
+      // Allocate + insert ATOMICALLY. Previously the allocation autocommitted on
+      // its own and a failing INSERT permanently burned that MV integer, leaving
+      // a gap in the physical-card identity sequence. Sharing one transaction
+      // means a failed insert rolls the increment back and the number is still
+      // available to the next legitimate issuance.
+      const cert = await db.transaction(async (tx) => {
+        certId = await this.getNextCertId(tx);
+        const hash = crypto
+          .createHash("sha256")
+          .update(certId + Date.now())
+          .digest("hex");
+        const [row] = await tx
+          .insert(certificates)
+          .values({
+            ...data,
+            certId,
+            integrityHash: hash,
+            ...(refNum ? { referenceNumber: refNum } : {}),
+            logbookVersion: 1,
+            logbookLastIssuedAt: new Date(),
+          } as any)
+          .returning();
+        return row;
+      });
+
+      // Issuance is audited only once the identity is COMMITTED, so the audit
+      // trail never claims an MV number that was rolled back.
+      await this.writeAuditLog("certificate", certId, "CERT_ID_ALLOCATED", adminUser || null, {
+        mvNumber: certId,
+        env,
+        dbHost,
+        timestamp: new Date().toISOString(),
+      });
       return cert;
     } catch (error: any) {
-      await this.writeAuditLog("certificate", certId, "CERT_CREATE_FAILED", adminUser || null, {
-        mvNumber: certId,
+      await this.writeAuditLog("certificate", certId || "unallocated", "CERT_CREATE_FAILED", adminUser || null, {
+        attemptedMvNumber: certId || null,
+        rolledBack: true,
         env,
         dbHost,
         reason: error.message,
@@ -1271,16 +1298,54 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getNextCertId(): Promise<string> {
-    // DDL-free hot path: the cert_counter table is created once at startup by
-    // ensureCertCounterTable() (registerRoutes), NOT here. This path now does
-    // only concurrency-safe DML against the existing table — an idempotent seed
-    // then an atomic increment — so concurrent scans can no longer race the
-    // system catalogs (the 23505/42710 incident on the per-scan CREATE TABLE).
-    await db.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
-    const result = await db.execute(
+  /**
+   * Allocate the next MV number.
+   *
+   * MUST be called with the transaction executor that also INSERTs the
+   * certificate row. The counter increment and the certificate INSERT have to
+   * commit or roll back TOGETHER: an increment that autocommits on its own
+   * permanently consumes an integer even when no card identity is ever
+   * committed, which produces a gap in the MV sequence. A gap is not cosmetic —
+   * the MV number is the physical card's permanent identity and the owner
+   * requirement is that every consumed integer corresponds to a committed card.
+   *
+   * The executor parameter is REQUIRED and must be a transaction handle. It is
+   * deliberately not optional: an optional executor would let a future caller
+   * write `getNextCertId()`, type-check cleanly, and silently reintroduce the
+   * burnable autocommit increment. The compiler now enforces the invariant.
+   * Read-only "what is the next number" callers must use
+   * getLastIssuedMvNumber() instead — that is a hint, not an allocation.
+   *
+   * The critical section is deliberately ONE statement on the hot path. The
+   * cert_counter row lock is held until the caller's transaction commits, so the
+   * caller must keep that transaction tiny — no R2, no Sharp, no grading, no
+   * email, no label generation inside it.
+   *
+   * A lock_timeout bounds the wait: because this row is a global mutex for
+   * certificate creation and the pool is small, one stalled holder would
+   * otherwise block issuance estate-wide and park pooled connections until the
+   * 30s connection timeout. Failing fast rolls the waiter back, which returns
+   * its integer to the sequence — the safe outcome.
+   *
+   * DDL-free: the table is created once at startup by ensureCertCounterTable()
+   * (registerRoutes), NOT here — concurrent CREATE TABLE IF NOT EXISTS raced the
+   * system catalogs and 500-ed scan ingest (SQLSTATE 23505/42710).
+   */
+  async getNextCertId(executor: SqlExecutor): Promise<string> {
+    await executor.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    let result = await executor.execute(
       sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
     );
+    if (!result.rows.length) {
+      // Fresh database that never ran ensureCertCounterTable() — seed the single
+      // counter row once, then retry. Idempotent DML, safe under concurrency.
+      await executor.execute(
+        sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`
+      );
+      result = await executor.execute(
+        sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
+      );
+    }
     if (!result.rows.length) {
       throw new Error("FATAL: cert_counter UPDATE returned no rows — cannot allocate certificate number");
     }

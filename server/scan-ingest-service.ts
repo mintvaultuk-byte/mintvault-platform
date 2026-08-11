@@ -162,12 +162,14 @@ export async function ensureImageEvidenceSchema(): Promise<void> {
  * (crash recovery, or a retry racing the original) resolves to the SAME cert,
  * never a duplicate:
  *   1. fast path — a committed cert for this key exists → return it (no alloc).
- *   2. else allocate a number + INSERT gated by the UNIQUE index
- *      (ON CONFLICT DO NOTHING). The index, not a check-then-insert, is the
- *      atomic primitive against concurrent same-key POSTs.
+ *   2. else, in ONE transaction, allocate a number + INSERT gated by the UNIQUE
+ *      index (ON CONFLICT DO NOTHING). The index, not a check-then-insert, is
+ *      the atomic primitive against concurrent same-key POSTs.
  *   3. lost the concurrent race (a sibling POST with the same key inserted
- *      first) → re-select the winner. The number from step 2's getNextCertId()
- *      becomes a harmless counter gap; NO second cert is created.
+ *      first) → roll the transaction back, which RETURNS the allocated number
+ *      to the sequence, then re-select the winner. NO second cert is created
+ *      and NO integer is consumed. (This step previously left the number behind
+ *      as a permanent gap in the MV sequence.)
  * A null key (interactive admin_ui ingest) skips the gate and always allocates —
  * NULLs don't collide in the unique index.
  */
@@ -202,6 +204,19 @@ export async function resolveScanOperatorId(operatorHeader?: string | null): Pro
   } catch (err: any) {
     console.warn(`[scan-ingest] operator resolution failed (${err?.message}) → scanned_by NULL`);
     return null;
+  }
+}
+
+/**
+ * Internal sentinel: a concurrent same-key ingest committed first, so this
+ * transaction must roll back — which returns its MV number to the sequence —
+ * and then resolve to the winning row. This is a normal, expected outcome of
+ * the idempotency race, not a failure; it never escapes createCertForScan().
+ */
+class IdempotencyRaceLost extends Error {
+  constructor() {
+    super("concurrent same-key ingest committed first");
+    this.name = "IdempotencyRaceLost";
   }
 }
 
@@ -263,32 +278,52 @@ export async function createCertForScan(
     }
   }
 
-  // 2. Allocate + insert, gated by the unique index on ingest_idempotency_key.
+  // 2. Allocate + insert ATOMICALLY, gated by the unique index on
+  //    ingest_idempotency_key. The counter increment and the INSERT share ONE
+  //    transaction. If a sibling POST with the same key committed first, the
+  //    ON CONFLICT returns no row and we roll the whole transaction back, which
+  //    RETURNS the MV integer to the sequence. Previously the allocation
+  //    autocommitted separately and the loser's number became a permanent gap in
+  //    the physical-card identity sequence. The unique index — not a
+  //    check-then-insert — remains the atomic primitive against concurrent
+  //    same-key POSTs. Nothing but these two statements is inside the
+  //    transaction: the cert_counter row lock is held until it commits.
   const { generateReferenceNumber } = await import("./reference-number");
-  const certNumber = await storage.getNextCertId();
   const refNum = generateReferenceNumber();
-  const ins = await db.execute(sql`
-    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key)
-    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null})
-    ON CONFLICT (ingest_idempotency_key) DO NOTHING
-    RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
-  `);
-  if (ins.rows.length) {
-    const row = mapRow(ins.rows[0], false);
+  let created: Record<string, unknown> | null = null;
+  try {
+    created = await db.transaction(async (tx) => {
+      const certNumber = await storage.getNextCertId(tx);
+      const ins = await tx.execute(sql`
+        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key)
+        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null})
+        ON CONFLICT (ingest_idempotency_key) DO NOTHING
+        RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
+      `);
+      if (!ins.rows.length) throw new IdempotencyRaceLost();
+      return ins.rows[0] as Record<string, unknown>;
+    });
+  } catch (err) {
+    // Only the race sentinel is swallowed; a real failure still propagates (and
+    // its rollback has already returned the MV integer to the sequence).
+    if (!(err instanceof IdempotencyRaceLost)) throw err;
+    created = null;
+  }
+  if (created) {
+    const row = mapRow(created, false);
     console.log(`[scan-ingest] created cert ${row.certId} (id=${row.id}) ref=${refNum}`);
     return row;
   }
 
   // 3. Lost a concurrent same-key race — a sibling POST inserted first. Our
-  //    getNextCertId() number is a harmless counter gap; resolve to the winner.
+  //    allocation was rolled back with the transaction, so NO number was
+  //    consumed; resolve to the winner.
   const winner = await db.execute(sql`
     SELECT id, certificate_number, reference_number, raw_uploaded, scan_status
     FROM certificates WHERE ingest_idempotency_key = ${idempotencyKey} LIMIT 1`);
   if (!winner.rows.length) throw new Error(`idempotency conflict but no winning row for key`);
   const row = mapRow(winner.rows[0], true);
-  console.log(
-    `[scan-ingest] concurrent same-key race resolved → ${row.certId} (counter tick MV${certNumber.replace(/\D/g, "")} skipped)`
-  );
+  console.log(`[scan-ingest] concurrent same-key race resolved → ${row.certId} (no counter tick consumed)`);
   return row;
 }
 
@@ -711,11 +746,22 @@ async function uploadImagesToCertUnlocked(
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
-  // certificate_number is already normalised ("MV145", not "MV-0000000145");
-  // fall back to synthesising from db id if somehow missing.
+  // certificate_number is already normalised ("MV145", not "MV-0000000145").
+  //
+  // There is deliberately NO fallback. This previously synthesised `MV${certId}`
+  // from the numeric PRIMARY KEY, which is not a certificate number at all: it
+  // would mint a plausible-looking but fake MV identity and write this card's
+  // images under a key belonging to a DIFFERENT real certificate. A missing row
+  // (the cert was hard-deleted mid-pipeline) must abort the image write, never
+  // invent an identity.
   const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`))
-    .rows[0] as any;
-  const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
+    .rows[0] as { certificate_number?: string } | undefined;
+  const certNumber = certRow?.certificate_number;
+  if (!certNumber) {
+    throw new Error(
+      `cannot resolve certificate_number for certificate id=${certId} — refusing to write images under a synthesised key`
+    );
+  }
 
   // A NEW_IMMUTABLE_MASTER working derivative may only be built from the exact
   // master bytes bound in the evidence ledger. This deliberately makes legacy
