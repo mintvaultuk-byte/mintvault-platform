@@ -369,6 +369,17 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
 
   it("refuses a TOTP replay within the same step (F3 preserved)", async () => {
     const secret = process.env.__MFA_TEST_SECRET!;
+    // Start from a KNOWN-CLEAN counter. mfaEnrolConfirm now records the counter it consumed
+    // (last_totp_counter), and earlier tests in this file authenticate with their own codes, so
+    // whatever window this test picked could already be at or below the stored counter — the first
+    // use would then be rejected as a replay and the test would prove nothing. Clearing the counter
+    // makes the FIRST use genuinely valid, so the SECOND use is the only thing under test.
+    //
+    // This does not weaken the assertion: the subject is "the same code cannot be used twice", and
+    // the guard being exercised (counter <= last) is untouched — mutation-checked by reverting it.
+    await admin.query("UPDATE partner_mfa_methods SET last_totp_counter=NULL WHERE user_id=$1 AND status='ACTIVE'", [
+      OWNER,
+    ]);
     const code = currentTotp(secret, Date.now());
 
     await call("POST", "/api/partner/auth/login", { email: OWNER_EMAIL, password: OWNER_PASSWORD });
@@ -382,7 +393,8 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
   it("does not leak the enrolment secret through any other authenticated route", async () => {
     const secret = process.env.__MFA_TEST_SECRET!;
     await call("POST", "/api/partner/auth/login", { email: OWNER_EMAIL, password: OWNER_PASSWORD });
-    await call("POST", "/api/partner/auth/mfa", { code: currentTotp(secret, Date.now() + 30_000) });
+    // A later window than the replay test consumed above — the counter only moves forward.
+    await call("POST", "/api/partner/auth/mfa", { code: currentTotp(secret, Date.now() + 60_000) });
 
     for (const path of [
       "/api/partner/session",
