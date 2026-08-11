@@ -261,13 +261,39 @@ export async function mfaEnrolConfirm(
   });
 }
 
-/** Replace an abandoned bootstrap setup without reusing its secret or enrolment id. */
+/**
+ * Replace an abandoned bootstrap setup without reusing its secret or enrolment id.
+ *
+ * OWNER-AUTHORISED REPAIR (2026-08-11) — ELEVATED VERIFICATION IS REQUIRED, exactly
+ * as on `mfaEnrolStart`. This function performs the same security-relevant act as
+ * POST /mfa/enrol: it generates, stores and DISCLOSES a brand-new TOTP secret bound
+ * to the calling session. It must therefore demand the same proof.
+ *
+ * Without the password, a stolen mfa-pending cookie in the BOOTSTRAP state
+ * (mfa_required with no ACTIVE method — every newly-invited user, every account
+ * after an admin MFA reset, every account after mfaDisable) could route around the
+ * /mfa/enrol gate it cannot pass: restart → confirm activates an attacker-controlled
+ * authenticator, issues ten recovery codes and flips mfa_passed on that same
+ * session, with the password never once presented.
+ *
+ * NO SECOND FACTOR IS TAKEN, and that is not an omission: the hasActiveMethod gate
+ * below makes this path unreachable while an ACTIVE authenticator exists, so there
+ * is by definition no current factor to present. This mirrors mfaEnrolStart's
+ * BOOTSTRAP arm (password alone) and leaves its REPLACEMENT arm as the only route to
+ * swapping a live factor. Recovery codes are untouched, and the pending row keeps
+ * its enrolment_session_id binding and 10-minute expiry.
+ *
+ * Verification ORDER matches mfaEnrolStart: password, then active-method, then
+ * session liveness.
+ */
 export async function mfaEnrolRestart(
   ctx: { tenantId: string; userId: string; sessionId: string; email?: string; sessionMfaPassed?: boolean },
+  password: string,
 ): Promise<EnrolResult> {
   if (!mfaEncryptionConfigured()) return { ok: false, reason: "encryption_unavailable" };
   const secret = generateTotpSecret();
   return withTenant({ tenantId: ctx.tenantId }, async (c): Promise<EnrolResult> => {
+    if (!(await verifyPassword(c, ctx.userId, password))) return { ok: false, reason: "unauthorised" };
     // Restart is a bootstrap convenience, never an alternate factor-replacement path.
     if (await hasActiveMethod(c, ctx.userId)) return { ok: false, reason: "requires_current_factor" };
     const live = await c.query(

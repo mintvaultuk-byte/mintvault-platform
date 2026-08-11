@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { CERTIFICATES_PROTECTED_COLUMNS_SQL } from "./helpers/certificates-protected-columns";
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const GRADER = read("server/grader.ts");
@@ -84,6 +85,7 @@ beforeAll(async () => {
     );
     CREATE TABLE audit_log (id bigserial PRIMARY KEY, action text NOT NULL);
   `);
+  await pool.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
   await pool.query(MIGRATION);
 }, 60_000);
 
@@ -173,14 +175,20 @@ describe("grading review revision CAS — real PostgreSQL", () => {
     expect(await revision()).toBe(3);
     await pool.query("UPDATE certificates SET auth_status = 'authentic_altered' WHERE id = 1");
     expect(await revision()).toBe(4);
-    await pool.query("UPDATE certificates SET is_black_label = true WHERE id = 1");
-    expect(await revision()).toBe(5);
+    // NOTE: `is_black_label` was asserted here and has been REMOVED, because it
+    // never protected anything. `certificates` has no such column — the repo's
+    // only `ADD COLUMN ... is_black_label` targets `grading_sessions`. Under the
+    // old jsonb-lookup comparison a name with no column returned NULL on both
+    // sides, was never "distinct", and so was silently unprotected; this fixture
+    // declared the column locally and therefore asserted protection the real
+    // database never had. Black-label/Pristine is gate-derived at render time,
+    // not a stored certificates column.
     await pool.query("UPDATE certificates SET card_name = 'Changed identity' WHERE id = 1");
-    expect(await revision()).toBe(6);
+    expect(await revision()).toBe(5);
 
     // A timestamp-only maintenance write must not manufacture a stale review.
     await pool.query("UPDATE certificates SET updated_at = NOW() WHERE id = 1");
-    expect(await revision()).toBe(6);
+    expect(await revision()).toBe(5);
   });
 
   it("rejects Reviewer A's stale approval after Reviewer B changes 7 -> 6, with zero approval side effects", async () => {

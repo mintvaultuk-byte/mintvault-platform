@@ -476,7 +476,25 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               (card tool + defects, passed into the form as workstationSlot) →
               Card Details → Grade — with Ownership + NFC in the tools drawer.
               The form fills the remaining height (fixed-height workstation). */}
-          <div className="min-h-0 flex-1">
+          {/* OWNER-AUTHORISED REPAIR (2026-08-11) — BOUNDED DESKTOP WORKSTATION.
+              AdminShell(focus) deliberately uses min-height and no overflow
+              clipping, and documents that "the workstation itself sets a bounded,
+              viewport-relative height at desktop so its right column scrolls
+              internally". certificate-form.tsx used to supply that bound; the
+              canonical-workstation refactor removed it and nothing replaced it,
+              so on /admin the shell's h-full resolved against an auto-height
+              parent, the internal overflow-y-auto never engaged, the whole page
+              grew instead, and the Live Certificate Preview was pushed far below
+              the fold. That is the same missing-bound regression that caused the
+              PR #234 same-day production rollback.
+              Two changes, both required:
+                • flex + flex-col — this box was a BLOCK box, so the workstation's
+                  own `flex-1` was inert and could never claim a definite height.
+                • md:h-[calc(100dvh-4.5rem)] — the bound itself, desktop-only, so
+                  below `md` the surface still flows and the page scrolls (the
+                  documented fallback). 4.5rem is the compact AdminHeaderRow +
+                  container padding above this box. */}
+          <div className="flex min-h-0 flex-1 flex-col md:h-[calc(100dvh-4.5rem)]">
             {editingCert ? (
               <GradingWorkstation
                 mode="super-admin"

@@ -63,6 +63,56 @@ export async function runReviewTransitionBarrier<TPreview>(args: {
   return { ok: true, snapshot };
 }
 
+/**
+ * The authoritative clean baseline: the grading payload as the server last
+ * confirmed it, and the revision that state is bound to.
+ */
+export interface ReviewCleanBaseline {
+  certId: number;
+  fingerprint: string;
+  revision: number;
+}
+
+export type ReviewPersistDecision = { mode: "reuse"; revision: number } | { mode: "persist" };
+
+/**
+ * OWNER-AUTHORISED REPAIR (2026-08-11) — does entering Review need to WRITE?
+ *
+ * Reading a review must not mutate the record. Entering Review used to always
+ * PUT the entire grading payload (grade, sub-grades, centering, defects) merely
+ * because the reviewer opened the card, and that write carried no optimistic
+ * lock — so reviewer A simply *looking* at a card could overwrite reviewer B's
+ * newer work from another tab or session.
+ *
+ * The decision is a byte comparison against the baseline, because the
+ * fingerprint is `JSON.stringify(buildPayload())` — precisely the bytes that
+ * would be sent. That gives three properties we want:
+ *   • it covers exactly the fields this save owns, so unrelated UI state (stage,
+ *     zoom, which side is showing) can never make a clean card look dirty;
+ *   • an edit that is reverted to its original value is clean again, so no
+ *     pointless write is issued;
+ *   • an unknown or mismatched baseline falls through to `persist`, i.e. it
+ *     fails toward the previous always-write behaviour rather than toward
+ *     silently skipping a save the operator needed.
+ *
+ * `reuse` does NOT weaken the P0 revision binding. The caller still previews and
+ * still requires an exact revision match before Review becomes ready; LOAD
+ * simply takes the place of SAVE as the origin of the revision for a card that
+ * was never modified.
+ */
+export function decideReviewPersist(args: {
+  baseline: ReviewCleanBaseline | null | undefined;
+  certId: number;
+  payloadFingerprint: string;
+}): ReviewPersistDecision {
+  const baseline = args.baseline;
+  if (!baseline) return { mode: "persist" };
+  if (baseline.certId !== args.certId) return { mode: "persist" };
+  if (baseline.fingerprint !== args.payloadFingerprint) return { mode: "persist" };
+  if (!Number.isFinite(baseline.revision) || baseline.revision < 1) return { mode: "persist" };
+  return { mode: "reuse", revision: baseline.revision };
+}
+
 export function reviewBarrierAllowsAction(args: {
   certId: number;
   currentPayloadFingerprint: string;

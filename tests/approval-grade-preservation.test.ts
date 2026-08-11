@@ -157,19 +157,49 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve", () => {
     const h = approveHandler();
     // Anchor on the overall-grade gate specifically — the B3 sub-grade gate also
     // begins "if (!isNonNum &&" and appears earlier in the handler.
-    const at = h.indexOf("if (!isNonNum && (gradeNum == null");
+    //
+    // 2026-08-11: the gate now reads `storedGrade`, not the request-derived
+    // `gradeNum`. That rename is the whole point of the repair, not cosmetic —
+    // the approval UPDATE persists no certificate-facing field, so validating a
+    // request value while publishing the stored row let `{"overall_grade":9}`
+    // publish a certificate whose stored `grade` was NULL (printing "0/POOR").
+    const at = h.indexOf("if (!isNonNum && (storedGrade == null");
     expect(at).toBeGreaterThan(0);
     const gate = h.slice(at, at + 400);
-    expect(gate).toContain("gradeNum == null");
-    expect(gate).toContain("isValidNumericGrade(gradeNum)");
+    expect(gate).toContain("storedGrade == null");
+    expect(gate).toContain("isValidNumericGrade(storedGrade)");
     expect(gate).toContain("res.status(400)");
+  });
+
+  it("derives every publish gate from the STORED row, never from the request body", () => {
+    // The invariant the MV205-class defect violated: what is validated must be
+    // exactly what is published. The approval UPDATE writes no grade, so any gate
+    // reading req.body is validating a value this route will never persist.
+    const h = approveHandler();
+    const gateRegion = h.slice(0, h.indexOf("UPDATE certificates SET"));
+    // The four sub-grade gate inputs and the overall grade all read `cert`/`certRow`.
+    expect(gateRegion).toContain("const storedGrade = isNonNum ? null : strictGrade(certRow.gradeOverall)");
+    for (const f of ["gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"]) {
+      expect(gateRegion, `stored sub-grade ${f} must come from the row`).toContain(`num(certRow.${f})`);
+    }
+    // And the pre-UPDATE region must not reintroduce body-derived grade inputs.
+    expect(gateRegion).not.toMatch(/\bnum\(b\.grade_(centering|corners|edges|surface)\)/);
+    expect(gateRegion).not.toMatch(/strictGrade\(overallGrade\)/);
+  });
+
+  it("decides numeric-vs-authentication kind from the STORED grade_type, not the payload", () => {
+    // A one-key body ({"overall_grade":"NO"}) must not be able to steer the
+    // publish gates down the non-numeric branch and skip them entirely.
+    const h = approveHandler();
+    expect(h).toContain('const isNonNum = kindOfGradeType((cert as { gradeType?: string | null }).gradeType) !== "numeric"');
+    expect(h).not.toContain('const isNonNum = overallGrade === "AA" || overallGrade === "NO"');
   });
 
   it("places the gate BEFORE the UPDATE, so a rejected payload never reaches the write", () => {
     // Without this, a gate accidentally placed after the UPDATE would satisfy every
     // other assertion in this file while being completely useless.
     const h = approveHandler();
-    const gateAt = h.indexOf("isValidNumericGrade(gradeNum)");
+    const gateAt = h.indexOf("isValidNumericGrade(storedGrade)");
     const updateAt = h.indexOf("UPDATE certificates SET");
     expect(gateAt).toBeGreaterThan(0);
     expect(updateAt).toBeGreaterThan(0);
@@ -191,7 +221,7 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve", () => {
   });
 
   it("keeps the pre-existing B3 sub-grade completeness gate", () => {
-    expect(approveHandler()).toMatch(/finalCentering == null \|\| finalCorners == null/);
+    expect(approveHandler()).toMatch(/storedCentering == null \|\| storedCorners == null/);
   });
 
   it("keeps the print-state promotion guarded so an in-flight print is never regressed", () => {
@@ -481,7 +511,7 @@ describe("grading engine and MVGS remain untouched by this fix", () => {
   it("the fix adds no scoring, weighting or formula logic", () => {
     // Slice ONLY the gate block that this fix introduced (not the surrounding handler,
     // which legitimately runs MVGS to derive label_type).
-    const at = ROUTES.indexOf("if (!isNonNum && (gradeNum == null");
+    const at = ROUTES.indexOf("if (!isNonNum && (storedGrade == null");
     expect(at).toBeGreaterThan(0);
     const gate = ROUTES.slice(at, ROUTES.indexOf("}", ROUTES.indexOf("});", at)) + 1);
     // The gate is a presence check only — it must not compute or adjust a grade.

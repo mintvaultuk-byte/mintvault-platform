@@ -46,7 +46,12 @@ import {
   decideExplicitGradingSave,
   decideGradingShortcut,
 } from "@shared/grading-persistence-lifecycle";
-import { reviewBarrierAllowsAction, type PersistedReviewRevision } from "@shared/grading-review-barrier";
+import {
+  decideReviewPersist,
+  reviewBarrierAllowsAction,
+  type PersistedReviewRevision,
+  type ReviewCleanBaseline,
+} from "@shared/grading-review-barrier";
 import { autofillCard } from "@/lib/api";
 
 /** A grade write may trigger a non-review preview refresh. Only propagate a
@@ -1213,6 +1218,24 @@ export default function GradingPanel({
   const approveInFlightRef = useRef(false);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
+  /**
+   * OWNER-AUTHORISED REPAIR (2026-08-11) — READ-ONLY REVIEW OPEN.
+   *
+   * The authoritative CLEAN baseline for this certificate: the grading payload
+   * exactly as the server last confirmed it, plus the revision that state is
+   * bound to. Entering Review used to unconditionally PUT the full grading
+   * payload — every grade, sub-grade, centering ratio and defect — merely
+   * because the reviewer OPENED the card. Opening a record must not mutate it,
+   * and with no optimistic lock on that write a reviewer simply looking at a
+   * card could clobber a newer grader's work from another tab or session.
+   *
+   * Captured ONCE per certId on the first committed render after hydration, and
+   * refreshed only after a save this panel itself performed (at which point the
+   * local state IS the authoritative state). It is deliberately NOT refreshed on
+   * background refetches: doing so would re-baseline a payload the operator has
+   * already edited and silently discard their pending changes.
+   */
+  const cleanBaselineRef = useRef<ReviewCleanBaseline | null>(null);
 
   useEffect(() => {
     gradingPanelMountedRef.current = true;
@@ -2190,6 +2213,17 @@ export default function GradingPanel({
     payloadFingerprint: currentPayloadFingerprint,
     preview: currentPreviewFields,
   };
+  // Capture the clean baseline (see cleanBaselineRef). Read during render, from
+  // the very same buildPayload() output this render committed, so the baseline
+  // can never be a payload that was never on screen. Guarded on hydration for
+  // THIS certId, so UI defaults are never mistaken for authoritative state, and
+  // written once per certId so later edits cannot move it.
+  if (gradingHydratedForRef.current === certId && cleanBaselineRef.current?.certId !== certId) {
+    const hydratedRevision = readReviewRevision(gradingData);
+    if (hydratedRevision != null) {
+      cleanBaselineRef.current = { certId, fingerprint: currentPayloadFingerprint, revision: hydratedRevision };
+    }
+  }
   const reviewActionReady = reviewBarrierAllowsAction({
     certId,
     currentPayloadFingerprint,
@@ -2227,6 +2261,40 @@ export default function GradingPanel({
     if (!draft || draft.certId !== certId) throw new Error("Grading payload changed before Review could save.");
     const transitionCertId = draft.certId;
     const payloadFingerprint = draft.payloadFingerprint;
+
+    // ── OWNER-AUTHORISED REPAIR (2026-08-11) — CLEAN OPEN PERFORMS NO WRITE ──
+    // Reading a review must not mutate the record. When the local payload is
+    // byte-identical to the authoritative baseline, there is nothing to persist:
+    // the saved state already IS the state being reviewed, so we adopt the
+    // baseline's revision and let the caller preview against it. The barrier is
+    // otherwise unchanged — the caller still previews and still requires an exact
+    // revision match before Review becomes ready, so the P0 binding
+    // (SAVE → revision R → PREVIEW R → REVIEW READY R → APPROVE expected R) holds
+    // with LOAD taking the place of SAVE for an unmodified card.
+    //
+    // This also removes the multi-session clobber: reviewer A merely opening a
+    // card at revision R can no longer overwrite reviewer B's newer revision,
+    // because A performs no write at all. A still discovers the staleness the
+    // correct way — through the revision-aware preview and the approval CAS.
+    //
+    // Fingerprint equality is the dirty check because payloadFingerprint is
+    // JSON.stringify(buildPayload()) — exactly the bytes that would be PUT — so
+    // it covers precisely the fields this save owns and nothing else. An edit
+    // that is reverted to its original value is therefore correctly clean again.
+    const decision = decideReviewPersist({
+      baseline: cleanBaselineRef.current,
+      certId: transitionCertId,
+      payloadFingerprint,
+    });
+    if (decision.mode === "reuse") {
+      return {
+        revision: decision.revision,
+        certId: transitionCertId,
+        payloadFingerprint,
+        preview: draft.preview,
+      };
+    }
+
     reviewAbortRef.current?.abort();
     const controller = new AbortController();
     reviewAbortRef.current = controller;
@@ -2258,6 +2326,10 @@ export default function GradingPanel({
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${transitionCertId}/grading`] });
       setAutoSaveStatus("saved");
+      // This panel just made the server agree with local state, so local state is
+      // authoritative again at the returned revision. Re-baselining here means a
+      // later Review re-entry with no further edits performs no second write.
+      cleanBaselineRef.current = { certId: transitionCertId, fingerprint: payloadFingerprint, revision };
       return { revision, certId: transitionCertId, payloadFingerprint, preview: draft.preview };
     } catch (error) {
       if (gradingPanelMountedRef.current && reviewAbortRef.current === controller) setAutoSaveStatus("error");

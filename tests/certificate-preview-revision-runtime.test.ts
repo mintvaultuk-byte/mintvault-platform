@@ -101,6 +101,32 @@ async function advanceUntil(predicate: () => boolean, maxMs = 20_000): Promise<b
   return predicate();
 }
 
+/**
+ * Make a REAL grading edit, so entering Review actually persists.
+ *
+ * Required since the 2026-08-11 read-only-open repair: a Review transition whose
+ * payload is byte-identical to the authoritative baseline no longer issues a PUT
+ * at all (opening a card must not mutate it). Every test below that exercises the
+ * SAVE half of the barrier — save failure, delayed-save ordering, unmount abort —
+ * therefore has to dirty the panel first, or the barrier correctly takes the
+ * no-write path and the save under test never happens.
+ *
+ * `wrinkle_severity` is used because it is a genuine grading field carried in
+ * buildPayload() (`out.wrinkle_severity = wrinkleSeverity`), so changing it moves
+ * the payload fingerprint exactly as an operator edit would — no test-only hook,
+ * no back door into the component.
+ */
+async function dirtyGrading(value: "tiny_back" | "longer_back" | "small_front" = "tiny_back") {
+  const select = host.querySelector<HTMLSelectElement>('[data-testid="select-wrinkle-severity"]');
+  expect(select, "grading fixture must expose a real editable grading field").not.toBeNull();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+    setter?.call(select, value);
+    select!.dispatchEvent(new Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 async function requestReview(doubleClick = false) {
   const review = host.querySelector<HTMLButtonElement>('[data-testid="workflow-stage-review"]');
   expect(review).not.toBeNull();
@@ -308,6 +334,7 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
 
   it("keeps the full workstation on Grade with a terminal error after save failure", async () => {
     const state = await mountProductionWorkstation();
+    await dirtyGrading();
     state.failNext("save", 409);
     await requestReview();
     expect(
@@ -349,6 +376,7 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
 
   it("rejects an edit arriving behind an old delayed save response", async () => {
     const state = await mountProductionWorkstation();
+    await dirtyGrading();
     state.delayNext("save", 500);
     await requestReview();
     await act(async () => vi.advanceTimersByTimeAsync(100));
@@ -368,6 +396,7 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
 
   it("rejects an old delayed preview after navigation at the server revision boundary and accepts only the retry", async () => {
     const state = await mountProductionWorkstation();
+    await dirtyGrading();
     state.staleNextPreview(1_000);
     await requestReview();
     expect(await advanceUntil(() => state.snapshot().some((request) => request.operation === "preview"), 1_000)).toBe(
@@ -376,6 +405,13 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     const grade = host.querySelector<HTMLButtonElement>('[data-testid="workflow-stage-grade"]');
     await act(async () => grade!.click());
     expect(workstationStage()).toBe("1");
+    // A SECOND real edit, so the retry genuinely saves R3. Since the 2026-08-11
+    // read-only-open repair, re-entering Review with an unchanged payload performs
+    // no write at all — which is the point of that repair — so without a fresh edit
+    // the revision would stay at R2 and the delayed R2 preview would merely be
+    // client-side 'stale' rather than server-side 'blocked'. The blocked outcome is
+    // what this test exists to prove, and it requires a newer server revision.
+    await dirtyGrading("longer_back");
     await requestReview();
     expect(await advanceUntil(() => workstationStage() === "2", 2_000)).toBe(true);
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
@@ -390,6 +426,7 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
 
   it("invalidates an edit made during preview and makes the same Review stage retry actionable", async () => {
     const state = await mountProductionWorkstation();
+    await dirtyGrading();
     state.delayNext("preview", 1_000);
     await requestReview();
     expect(await advanceUntil(() => state.snapshot().some((request) => request.operation === "preview"), 1_000)).toBe(
@@ -475,6 +512,7 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
   it("aborts a delayed save on full-workstation unmount without preview or state-update warnings", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const state = await mountProductionWorkstation();
+    await dirtyGrading();
     state.delayNext("save", 1_000);
     await requestReview();
     expect(await advanceUntil(() => state.snapshot().some((request) => request.operation === "save"), 200)).toBe(true);

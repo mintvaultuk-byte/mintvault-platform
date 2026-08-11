@@ -24,9 +24,12 @@ function sha256(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
 }
 
+/** Logged once per process, not per request — same shape as mount.ts's incoherent-env report. */
+let loggedMissingMfaProjection = false;
+
 export interface LoginResult {
   ok: boolean;
-  reason?: "invalid" | "locked" | "suspended" | "mfa_required";
+  reason?: "invalid" | "locked" | "suspended" | "mfa_required" | "mfa_state_unavailable";
   // present only on ok:
   sessionToken?: string;
   userId?: string;
@@ -46,7 +49,18 @@ interface AuthRow {
   failed_login_count: number;
   locked_until: string | null;
   mfa_required: boolean;
-  has_active_mfa: boolean;
+  /**
+   * OPTIONAL BY TYPE, ON PURPOSE. `SELECT * FROM partner_auth_lookup($1)` returns
+   * exactly the columns the DEPLOYED function declares, and this one exists only
+   * from migration 0046 — 0002's original signature stops at `mfa_required`.
+   * Declaring it non-optional was a claim the compiler could not check: on a
+   * database without 0046 the value is `undefined`, `mfa_required || has_active_mfa`
+   * evaluated to `undefined` for an account with `mfa_required = false` and an
+   * ACTIVE authenticator, and the session was minted with `mfa_passed = !undefined
+   * = true` — the second factor silently disabled. Optional so the fail-closed
+   * check below is a real narrowing rather than a cast.
+   */
+  has_active_mfa?: boolean;
 }
 
 /**
@@ -66,6 +80,39 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   // L3 (timing oracle): ALWAYS run the bcrypt compare first — before the suspended/locked branches —
   // so locked/suspended accounts incur the same cost as an active wrong-password attempt.
   const good = u.password_hash ? await bcrypt.compare(password, u.password_hash) : false;
+
+  // ── OWNER-AUTHORISED REPAIR (2026-08-11) — FAIL CLOSED ON A MISSING MFA PROJECTION ──
+  //
+  // `has_active_mfa` is the only thing stopping an account that HAS an authenticator
+  // but does not carry `mfa_required` from being handed a fully-authenticated
+  // session. It exists only in migration 0046's partner_auth_lookup signature.
+  // Against a database still on 0002's ten-column form the column is simply absent
+  // from the result row, `mfaPending` below evaluates to `undefined`, and every such
+  // login is minted with `mfa_passed = true`. That is a silent MFA bypass caused by
+  // schema drift, with no error, no log line and no failing request to notice it by.
+  // Refusing is the only safe reading of "we cannot tell whether this account has a
+  // second factor".
+  //
+  // POSITION IS DELIBERATE. It sits AFTER the constant-cost bcrypt compare above, so
+  // the L3 timing property is untouched, and BEFORE every branch that mutates state
+  // or mints a session — no lockout counter is armed, no session row is written. A
+  // missing projection is a property of the DEPLOYMENT, identical for every caller,
+  // so this adds no per-account oracle.
+  //
+  // BOUNDARY, NOT STARTUP GATE. The served login route (server/partner/public-routes.ts)
+  // is mounted OUTSIDE partnerPortalRouter's four gates, so a gate in mount.ts would
+  // not cover the one route that decides mfa_passed. Logged once per process — an
+  // operator must be able to see WHY every partner login is suddenly refused.
+  if (typeof u.has_active_mfa !== "boolean") {
+    if (!loggedMissingMfaProjection) {
+      loggedMissingMfaProjection = true;
+      console.error(
+        "[partner] refusing ALL partner logins: partner_auth_lookup() does not project has_active_mfa. " +
+          "Apply migrations/0046_partner_mfa_pending_lifecycle.sql, then restart."
+      );
+    }
+    return { ok: false, reason: "mfa_state_unavailable" };
+  }
 
   if (u.org_status !== "ACTIVE" || u.user_status !== "ACTIVE") {
     // P0-F: a suspended/invited/revoked account is refused REGARDLESS of the password, so counting

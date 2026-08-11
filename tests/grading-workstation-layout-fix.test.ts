@@ -119,7 +119,13 @@ describe("6. desktop shell is a real two-column layout at desktop breakpoints", 
   });
   it("the workstation is viewport-bounded at desktop (not an unbounded h-full chain)", () => {
     // The shell fills the bounded flex slot supplied by every route shell.
-    expect(DASH).toContain('className="min-h-0 flex-1"');
+    // /admin is the only non-overlay surface, so it must supply the height bound
+    // itself. The previous assertion accepted `className="min-h-0 flex-1"`, which
+    // proved nothing: `flex-1` is a flex-ITEM property on a BLOCK box, so the
+    // workstation's own flex-1 stayed inert and the shell's h-full resolved against
+    // an auto-height ancestor — the missing-bound regression behind the PR #234
+    // same-day production rollback. Both halves are now required.
+    expect(DASH).toMatch(/className="flex min-h-0 flex-1 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
     expect(CANON_SHELL).toContain("flex min-h-0 flex-col h-full");
   });
 });

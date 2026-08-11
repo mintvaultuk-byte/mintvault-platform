@@ -8055,7 +8055,16 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const b = req.body;
       const overallGrade = b.overall_grade;
-      const isNonNum = overallGrade === "AA" || overallGrade === "NO";
+      // ── OWNER-AUTHORISED REPAIR (2026-08-11) — STORED-GRADE APPROVAL AUTHORITY ──
+      // Which kind of certificate this is comes from the STORED row, never the
+      // request. The approval UPDATE below persists no certificate-facing field,
+      // so the request's `overall_grade` is not what gets published — gating on it
+      // let a payload-supplied grade satisfy the publish gates while the stored
+      // `grade` column was still NULL, producing an `active` certificate with no
+      // grade (which the label renderer prints as "0/POOR"). The request kind is
+      // still compared against the stored kind further below by rejectKindChange,
+      // which is the anti-conversion guard; this constant is the publish authority.
+      const isNonNum = kindOfGradeType((cert as { gradeType?: string | null }).gradeType) !== "numeric";
 
       // P0 preservation helpers — see /grade handler for rationale.
       const num = (v: unknown): number | null => {
@@ -8082,11 +8091,22 @@ Defects (admin-confirmed): ${defectLines}`;
         const n = Number(t);
         return Number.isFinite(n) ? n : null;
       };
-      const gradeNum = isNonNum ? null : strictGrade(overallGrade);
-      const sentCentering = isNonNum ? null : num(b.grade_centering);
-      const sentCorners = isNonNum ? null : num(b.grade_corners);
-      const sentEdges = isNonNum ? null : num(b.grade_edges);
-      const sentSurface = isNonNum ? null : num(b.grade_surface);
+      // The four values the publish gates below validate, and the ONLY values this
+      // route can publish, all read from the authoritative stored row. strictGrade
+      // still guards the shape, so a malformed legacy persisted value fails closed
+      // instead of being published.
+      const certRow = cert as {
+        gradeOverall?: unknown;
+        gradeCentering?: unknown;
+        gradeCorners?: unknown;
+        gradeEdges?: unknown;
+        gradeSurface?: unknown;
+      };
+      const storedGrade = isNonNum ? null : strictGrade(certRow.gradeOverall);
+      const storedCentering = isNonNum ? null : num(certRow.gradeCentering);
+      const storedCorners = isNonNum ? null : num(certRow.gradeCorners);
+      const storedEdges = isNonNum ? null : num(certRow.gradeEdges);
+      const storedSurface = isNonNum ? null : num(certRow.gradeSurface);
 
       // Grading time (admin opens the grading workstation → clicks Approve).
       // Capped at 1800s (30 min) to keep the dashboard average representative —
@@ -8094,21 +8114,13 @@ Defects (admin-confirmed): ${defectLines}`;
       const rawTime = Number(b.grading_time_seconds);
       const clampedTime = Number.isFinite(rawTime) && rawTime > 0 ? Math.min(1800, Math.round(rawTime)) : null;
 
-      // Final state for label_type computation: payload value if present, else existing.
-      // SQL COALESCE will produce the same final state in DB; we mirror it here so
-      // label_type reflects what's actually saved when a partial payload comes in.
-      const finalCentering = sentCentering ?? num(cert.gradeCentering);
-      const finalCorners = sentCorners ?? num(cert.gradeCorners);
-      const finalEdges = sentEdges ?? num(cert.gradeEdges);
-      const finalSurface = sentSurface ?? num(cert.gradeSurface);
-
       // B3 completeness gate (owner-approved 2026-07-02): the MVGS overall
       // grade is COMPUTED FROM the four sub-grades, so a numeric grade must
       // never publish with any of them blank — sub-grades come automatically
       // from the MVGS workstation and must all be present here. Non-numeric
       // grades (NO/AA) are exempt (their sub-grades are NULL by design).
       // Gate only — no scoring, weights, or formula logic is touched.
-      if (!isNonNum && (finalCentering == null || finalCorners == null || finalEdges == null || finalSurface == null)) {
+      if (!isNonNum && (storedCentering == null || storedCorners == null || storedEdges == null || storedSurface == null)) {
         return res.status(400).json({
           error:
             "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
@@ -8129,10 +8141,16 @@ Defects (admin-confirmed): ${defectLines}`;
       // engine can emit is a member of NUMERIC_GRADE_VALUES, and neither staging nor
       // production holds a single off-ladder grade, so no legitimate re-approval is
       // newly rejected. Membership check only — no scoring or formula logic.
-      if (!isNonNum && (gradeNum == null || !isValidNumericGrade(gradeNum))) {
+      // OWNER-AUTHORISED REPAIR (2026-08-11): this gate now inspects the STORED
+      // grade. Previously it inspected the request payload while the UPDATE below
+      // persisted nothing from that payload, so `{"overall_grade":9,...}` published
+      // a certificate whose stored `grade` was still NULL — and a NULL grade renders
+      // as "0/POOR" on the printed label. The grade that is validated here is now
+      // exactly the grade that gets published.
+      if (!isNonNum && (storedGrade == null || !isValidNumericGrade(storedGrade))) {
         return res.status(400).json({
           error:
-            "Cannot approve without a valid numeric overall grade (1–10, half grades allowed). The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+            "Cannot approve: this card has no valid saved overall grade (1–10, half grades allowed). Save the grade in the grading workstation first, then approve — approval publishes the saved grade, not the one on screen.",
         });
       }
 
@@ -8176,12 +8194,9 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(400).json({ error: kindRejection });
       }
 
-      // Strength score is calibrated to the AI's overall grade. If the admin
-      // changes the grade manually here, the AI-derived score is stale and
-      // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
-      const fmt = (n: number | null) => (n == null ? "" : n.toFixed(1));
-      const oldGradeNum = (cert as any).gradeOverall != null ? parseFloat(String((cert as any).gradeOverall)) : null;
-      const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
+      // (The former "did the admin change the grade here?" comparison has been
+      // removed: approval is a state transition only and can no longer alter the
+      // grade, so the AI strength score can never be invalidated by this route.)
 
       // Pristine 10P / black label — shared gate (one source of truth with the
       // client panel and the approve-grade route). Mirror that route: run MVGS
@@ -8196,56 +8211,39 @@ Defects (admin-confirmed): ${defectLines}`;
         // measurement (creaseSpanPct / tearSeverity) is null.
         const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
         const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
-        const finalDefects: any[] = Array.isArray(b.defects)
-          ? b.defects
-          : Array.isArray((cert as any).defects)
-            ? (cert as any).defects
-            : [];
-        const mvgsPins = finalDefects
+        // OWNER-AUTHORISED REPAIR (2026-08-11): every engine input now reads the
+        // STORED row. The body-preferred fallbacks that used to sit here let an
+        // approval payload steer the Pristine/black-label gate toward a tier the
+        // saved record does not support. Approval publishes stored state, so the
+        // tier must be derived from exactly that state. The scoreMvgsV2 call and
+        // the isBlackLabel gate below are UNCHANGED — no scoring, weighting,
+        // threshold or calibration logic is touched, only which row feeds them.
+        const certAny = cert as any;
+        const storedDefects: any[] = Array.isArray(certAny.defects) ? certAny.defects : [];
+        const mvgsPins = storedDefects
           .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
           .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
         const calibration = await loadMvgsCalibration();
-        // Prefer the submitted body's v2 inputs (operator's just-set values)
-        // when present, else fall back to the cert's persisted columns.
-        // Body schema: { whitening_lines, crease_span_pct, wrinkle_severity,
-        // tear_severity, surface: { hasCrease, hasTear } } — same names as
-        // the grade panel payload (buildPayload in grading-panel.tsx).
-        const bAny = b as any;
-        const bodySurface = (bAny.surface as any) ?? {};
-        const certAny = cert as any;
         const certSurface = (certAny.surfaceValues as any) ?? {};
         const r = scoreMvgsV2(
           {
-            centeringFrontLr: txt(b.centering_front_lr) ?? certAny.centeringFrontLr ?? null,
-            centeringFrontTb: txt(b.centering_front_tb) ?? certAny.centeringFrontTb ?? null,
-            centeringBackLr: txt(b.centering_back_lr) ?? certAny.centeringBackLr ?? null,
-            centeringBackTb: txt(b.centering_back_tb) ?? certAny.centeringBackTb ?? null,
+            centeringFrontLr: certAny.centeringFrontLr ?? null,
+            centeringFrontTb: certAny.centeringFrontTb ?? null,
+            centeringBackLr: certAny.centeringBackLr ?? null,
+            centeringBackTb: certAny.centeringBackTb ?? null,
             defects: mvgsPins,
             darkBorderFront: certAny.darkBorderFront ?? !!certAny.darkBorder,
             darkBorderBack: certAny.darkBorderBack ?? !!certAny.darkBorder,
             eyeAppealModifier: Number(certAny.eyeAppealModifier ?? 0) || 0,
-            whiteningLines: Array.isArray(bAny.whitening_lines)
-              ? bAny.whitening_lines
-              : Array.isArray(certAny.whiteningLines)
-                ? certAny.whiteningLines
-                : null,
+            whiteningLines: Array.isArray(certAny.whiteningLines) ? certAny.whiteningLines : null,
             // v2.1 — multi-crease list. Engine input is max(spanPct) at the
             // builder boundary. creaseSpanPct legacy field kept as fallback.
-            creaseLines: Array.isArray(bAny.crease_lines)
-              ? bAny.crease_lines
-              : Array.isArray(certAny.creaseLines)
-                ? certAny.creaseLines
-                : null,
-            creaseSpanPct:
-              bAny.crease_span_pct != null
-                ? Number(bAny.crease_span_pct)
-                : certAny.creaseSpanPct != null
-                  ? Number(certAny.creaseSpanPct)
-                  : null,
-            wrinkleSeverity: bAny.wrinkle_severity ?? certAny.wrinkleSeverity ?? null,
-            tearSeverity: bAny.tear_severity ?? certAny.tearSeverity ?? null,
-            hasCrease: bodySurface.hasCrease != null ? !!bodySurface.hasCrease : !!certSurface.hasCrease,
-            hasTear: bodySurface.hasTear != null ? !!bodySurface.hasTear : !!certSurface.hasTear,
+            creaseLines: Array.isArray(certAny.creaseLines) ? certAny.creaseLines : null,
+            creaseSpanPct: certAny.creaseSpanPct != null ? Number(certAny.creaseSpanPct) : null,
+            wrinkleSeverity: certAny.wrinkleSeverity ?? null,
+            tearSeverity: certAny.tearSeverity ?? null,
+            hasCrease: !!certSurface.hasCrease,
+            hasTear: !!certSurface.hasTear,
           },
           calibration
         );
@@ -8255,12 +8253,12 @@ Defects (admin-confirmed): ${defectLines}`;
         !isNonNum &&
         isBlackLabel(
           {
-            centering: finalCentering ?? -1,
-            corners: finalCorners ?? -1,
-            edges: finalEdges ?? -1,
-            surface: finalSurface ?? -1,
+            centering: storedCentering ?? -1,
+            corners: storedCorners ?? -1,
+            edges: storedEdges ?? -1,
+            surface: storedSurface ?? -1,
           },
-          gradeNum ?? -1,
+          storedGrade ?? -1,
           blackDeductions
         )
           ? "black"

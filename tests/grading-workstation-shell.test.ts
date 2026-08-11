@@ -59,7 +59,13 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     expect(SHELL_SRC).toMatch(/data-testid="grading-workspace"[^>]*/);
     expect(SHELL_SRC).toContain("flex min-h-0 flex-col");
     expect(SHELL_SRC).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
-    expect(DASH).toContain('className="min-h-0 flex-1"');
+    // /admin is the only non-overlay surface, so it must supply the height bound
+    // itself. The previous assertion accepted `className="min-h-0 flex-1"`, which
+    // proved nothing: `flex-1` is a flex-ITEM property on a BLOCK box, so the
+    // workstation's own flex-1 stayed inert and the shell's h-full resolved against
+    // an auto-height ancestor — the missing-bound regression behind the PR #234
+    // same-day production rollback. Both halves are now required.
+    expect(DASH).toMatch(/className="flex min-h-0 flex-1 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
     // The panels container is a flex row at md+ (column-stack below): 40% preview
     // aside on the left, flex-1 control panel on the right.
     expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");

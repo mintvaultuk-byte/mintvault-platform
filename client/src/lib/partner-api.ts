@@ -98,10 +98,16 @@ export const partnerMfa = {
       ...(secondFactor?.code ? { code: secondFactor.code } : {}),
       ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
     }),
-  restart: () =>
+  /**
+   * Abandon the pending setup and get a FRESH secret. This mints a new
+   * authenticator, so the server demands the same elevated verification as
+   * `enrol` — the password is forwarded for this one call and never persisted.
+   */
+  restart: (password: string) =>
     req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
       "POST",
-      "/api/partner/mfa/restart"
+      "/api/partner/mfa/restart",
+      { password }
     ),
   cancel: () => req<{ ok: boolean }>("POST", "/api/partner/mfa/cancel"),
   confirm: (input: { enrolmentId: string; code: string }) =>

@@ -7,6 +7,7 @@ import pg from "pg";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { readFileSync } from "node:fs";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { CERTIFICATES_PROTECTED_COLUMNS_SQL } from "./helpers/certificates-protected-columns";
 
 const runtime = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("../server/db", () => ({ db: { execute: runtime.execute } }));
@@ -65,6 +66,7 @@ beforeAll(async () => {
       partner_credit_settled boolean NOT NULL DEFAULT false
     );
   `);
+  await pool.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
   await pool.query(readFileSync("migrations/0048_grading_review_revision.sql", "utf8"));
   runtime.execute.mockImplementation(async (statement: any) => {
     const query = dialect.sqlToQuery(statement.getSQL());

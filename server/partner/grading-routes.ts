@@ -12,6 +12,7 @@
  */
 import { Router } from "express";
 import type { Response } from "express";
+import type { PoolClient } from "pg";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { getR2SignedUrl } from "../r2";
@@ -194,20 +195,82 @@ function partnerDraftWriteGuard(principal: PartnerPrincipal) {
   `;
 }
 
+/**
+ * Resolve the ONE partner intake card whose images belong to a destination
+ * `submission_items.card_index`.
+ *
+ * OWNER-AUTHORISED REPAIR (2026-08-11). WHY THIS IS NOT `sequence_number = card_index`:
+ * connector-import-service.ts expands each intake card by its `quantity` BEFORE
+ * numbering the destination items —
+ *
+ *     const expandedItems = rows.cards.flatMap((card) =>
+ *       Array.from({ length: Math.max(1, card.quantity) }, () => card));
+ *     let cardIndex = 1; for (const card of expandedItems) { INSERT ... card_index = cardIndex++ }
+ *
+ * so `card_index` is an ordinal over the EXPANDED unit list while `sequence_number`
+ * is an ordinal over the intake ROWS. They coincide only when every card has
+ * quantity 1 and the sequence numbers are gapless. With card A (seq 1, qty 2) and
+ * card B (seq 2, qty 1) the destination items are [A, A, B] at card_index 1,2,3, so
+ * the old predicate handed item 2 card B's photographs and item 3 none at all — and
+ * because imagesForPartnerCert() spreads this AFTER buildCertImagesPayload(), the
+ * wrong photograph OVERRODE the certificate's own. A grader could assess the wrong
+ * card. `addCard` allocates MAX(sequence_number)+1 over LIVE rows only, so a removed
+ * middle card leaves a gap and breaks the equality for the same reason.
+ *
+ * The expansion is reproduced in SQL rather than joined on a stored id because no
+ * per-item link exists: submission_items has no partner column, the credit tables
+ * bind per SUBMISSION, and 0035's origin columns are per ORGANISATION. It is
+ * faithful — same ordering as the importer's card load (ORDER BY sequence_number
+ * ASC) and the same GREATEST(1, quantity) floor as Math.max(1, card.quantity).
+ * `c.id` is a total-order tiebreak that is unreachable in practice (0007 makes
+ * (submission_id, sequence_number) unique among live rows) but removes any
+ * dependence on Postgres's choice between equal keys.
+ *
+ * CARDINALITY GUARD: the intake rows cannot legitimately change after import
+ * (addCard/editCard/removeCard are all draft-only), so the reconstruction is exact.
+ * If they ever DID drift, the expanded count would no longer equal the destination
+ * item count and this returns NO row rather than a plausible-looking wrong one.
+ * Showing nothing makes requireBothImages() block the submit; showing the wrong card
+ * does not, and is the harm this function exists to prevent.
+ *
+ * Exported so the binding can be proven against a REAL imported submission without
+ * standing up the certificates table.
+ */
+export async function partnerCardImagesForCardIndex(
+  client: { query: PoolClient["query"] },
+  params: { tenantId: string; partnerSubmissionId: string; destinationSubmissionId: number; cardIndex: number }
+): Promise<{ front_image_key: string | null; back_image_key: string | null } | null> {
+  const { rows } = await client.query<{ front_image_key: string | null; back_image_key: string | null }>(
+    `WITH expanded AS (
+       SELECT c.front_image_key,
+              c.back_image_key,
+              row_number() OVER (ORDER BY c.sequence_number ASC, c.id ASC, ord.n ASC) AS card_index
+         FROM partner_submission_cards c
+         CROSS JOIN LATERAL generate_series(1, GREATEST(1, c.quantity)) AS ord(n)
+        WHERE c.tenant_id = $1
+          AND c.submission_id = $2
+          AND c.removed_at IS NULL
+     )
+     SELECT e.front_image_key, e.back_image_key
+       FROM expanded e
+      WHERE e.card_index = $3
+        AND (SELECT count(*) FROM expanded)
+            = (SELECT count(*) FROM submission_items si WHERE si.submission_id = $4)`,
+    [params.tenantId, params.partnerSubmissionId, params.cardIndex, params.destinationSubmissionId]
+  );
+  return rows[0] ?? null;
+}
+
 async function partnerImageFallback(auth: PartnerCertAuth): Promise<Record<string, string | null>> {
   if (!auth.cardIndex) return {};
-  const { rows } = await withPartnerAdminTransaction((client) =>
-    client.query<{ front_image_key: string | null; back_image_key: string | null }>(
-      `SELECT front_image_key, back_image_key
-         FROM partner_submission_cards
-        WHERE tenant_id = $1
-          AND submission_id = $2
-          AND sequence_number = $3
-          AND removed_at IS NULL`,
-      [auth.tenantId, auth.partnerSubmissionId, auth.cardIndex]
-    )
+  const row = await withPartnerAdminTransaction((client) =>
+    partnerCardImagesForCardIndex(client, {
+      tenantId: auth.tenantId,
+      partnerSubmissionId: auth.partnerSubmissionId,
+      destinationSubmissionId: auth.destinationSubmissionId,
+      cardIndex: auth.cardIndex as number,
+    })
   );
-  const row = rows[0];
   if (!row) return {};
   const urls: Record<string, string | null> = {};
   if (row.front_image_key) {

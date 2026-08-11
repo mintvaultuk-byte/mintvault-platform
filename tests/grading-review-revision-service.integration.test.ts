@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import pg from "pg";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { CERTIFICATES_PROTECTED_COLUMNS_SQL } from "./helpers/certificates-protected-columns";
 
 const runtime = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -66,6 +67,7 @@ beforeAll(async () => {
     );
     CREATE TABLE audit_log (id bigserial PRIMARY KEY, action text NOT NULL);
   `);
+  await pool.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
   await pool.query(await import("node:fs").then(({ readFileSync }) => readFileSync("migrations/0048_grading_review_revision.sql", "utf8")));
 
   runtime.execute.mockImplementation(async (statement: any) => {

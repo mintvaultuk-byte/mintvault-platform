@@ -76,6 +76,14 @@ export function partnerPublicRouter(): Router {
     }
     const result = await partnerLogin(email, password, req.ip);
     if (!result.ok) {
+      // A missing MFA projection is a DEPLOYMENT fault, not a credential fault: 503
+      // with the same body the flag gates above use, so it is indistinguishable from
+      // any other closed gate and a legitimate user is never told their password is
+      // wrong. Every other reason stays generic.
+      if (result.reason === "mfa_state_unavailable") {
+        res.status(503).json({ error: "partner login unavailable" });
+        return;
+      }
       res.status(401).json({ error: "invalid credentials" });
       return;
     }

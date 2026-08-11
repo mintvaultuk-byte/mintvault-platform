@@ -152,6 +152,12 @@ export function partnerApiRouter(): Router {
     }
     const result = await partnerLogin(email, password, req.ip);
     if (!result.ok) {
+      // Parity with public-routes.ts: a missing MFA projection is a deployment fault
+      // (503), not a credential fault.
+      if (result.reason === "mfa_state_unavailable") {
+        res.status(503).json({ error: "partner login unavailable" });
+        return;
+      }
       // generic — never disclose which of unknown/invalid/locked/suspended (except a soft MFA hint)
       res.status(401).json({ error: "invalid credentials" });
       return;
@@ -551,12 +557,24 @@ export function partnerApiRouter(): Router {
       res.status(401).json({ error: "authentication required" });
       return;
     }
-    const out = await mfaEnrolRestart({
-      tenantId: req.partner.tenantId,
-      userId: req.partner.userId,
-      sessionId: req.partner.sessionId,
-      sessionMfaPassed: req.partner.mfaPassed,
-    });
+    // Same elevated-verification precondition as /mfa/enrol above: restart issues a
+    // NEW authenticator secret, so it is the same operation and takes the same proof.
+    // A second factor is deliberately NOT accepted — the service refuses this path
+    // outright while an ACTIVE authenticator exists.
+    const { password } = req.body ?? {};
+    if (typeof password !== "string") {
+      res.status(400).json({ error: "elevated verification required" });
+      return;
+    }
+    const out = await mfaEnrolRestart(
+      {
+        tenantId: req.partner.tenantId,
+        userId: req.partner.userId,
+        sessionId: req.partner.sessionId,
+        sessionMfaPassed: req.partner.mfaPassed,
+      },
+      password
+    );
     if (!out.ok) {
       const status = out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
       res.status(status).json({ error: out.reason });

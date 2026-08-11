@@ -80,7 +80,16 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(SHELL).toContain(GEOMETRY_COL);
     // The shell must NEVER own a viewport-height calc (that was the black-bar bug).
     expect(SHELL).not.toMatch(/h-\[calc\(100dvh/);
-    expect(CERT_FORM).not.toMatch(/md:h-\[calc\(100dvh/);
+    // certificate-form must not own workstation GEOMETRY (the two-column row and
+    // the control column) — asserted by the ROUTE_MOUNTS loop above.
+    //
+    // It deliberately does NOT assert the absence of a bounded height. A previous
+    // revision of this test asserted `CERT_FORM` carried no `md:h-[calc(100dvh…)]`,
+    // which encoded the WRONG invariant: it locked in the removal of the only
+    // bound on the /admin surface and made the PR #234 regression permanent and
+    // test-approved. "Who owns the geometry" and "who supplies the height bound"
+    // are separate questions. The shell fills its parent; the ROUTE supplies the
+    // bound. Test 7 below asserts every route, /admin included, actually does.
   });
 
   it("6. no max-w-6xl grading wrapper remains anywhere in the grading shell/adapter", () => {
@@ -93,7 +102,18 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(SHELL).toContain('data-testid="grading-workspace"');
     expect(SHELL).toContain('data-canonical-shell="true"');
     // Every route, including /admin, provides a bounded flex-height parent.
-    expect(ADMIN_DASH).toContain('className="min-h-0 flex-1"');
+    //
+    // /admin is the ONLY surface that is not a `fixed inset-0` overlay, so it must
+    // supply the bound explicitly. The previous assertion here was `toContain(
+    // 'className="min-h-0 flex-1"')`, which proved nothing: `flex-1` is a flex-ITEM
+    // property on a BLOCK box, so the workstation's own `flex-1` stayed inert, the
+    // shell's `h-full` resolved against an auto-height ancestor, and the internal
+    // `overflow-y-auto` never engaged. Both halves are now required — the box must
+    // be a flex COLUMN (so the child can claim height) and must carry a real
+    // desktop viewport bound (so there is a height to claim).
+    expect(ADMIN_DASH, "/admin workstation wrapper must be a flex column").toMatch(
+      /className="flex min-h-0 flex-1 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/
+    );
     expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(ADMIN_STAFF).toMatch(/fixed inset-0 z-50 flex flex-col/);
