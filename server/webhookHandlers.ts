@@ -1,4 +1,8 @@
 import Stripe from "stripe";
+import {
+  PARTNER_CREDITS_CHECKOUT_TYPE,
+  fulfilPartnerCreditPurchase,
+} from "./partner/credit-purchase-service";
 import { getStripeSecretKey } from "./stripeClient";
 import { storage } from "./storage";
 import { db } from "./db";
@@ -247,6 +251,20 @@ export class WebhookHandlers {
       // condition (duplicate / not-paid / malformed) returns without throwing.
       if (meta.type === "estimate_credits") {
         await fulfilEstimateCreditsPurchase(event.id, event.type, session);
+      }
+
+      // Partner grading credits — the ONLY way a Partner shop gains credits without an audited
+      // Super Admin adjustment. Crediting happens here and nowhere else: the browser returning to
+      // success_url grants nothing.
+      //
+      // Idempotency is the partner ledger's own UNIQUE (source, idempotency_key) keyed on this
+      // event id, NOT the stripe_webhook_events claim used above. The claim cannot be reused here
+      // because appendFoundationCredit writes through a different pool, so a claim on this
+      // connection would not share its transaction — and a claim that committed while the append
+      // failed would mark the event processed forever and lose a credit the shop had paid for.
+      // See server/partner/credit-purchase-service.ts for the full reasoning.
+      if (meta.type === PARTNER_CREDITS_CHECKOUT_TYPE) {
+        await fulfilPartnerCreditPurchase(event.id, session);
       }
     }
 

@@ -1,0 +1,37 @@
+# Phase 0 freeze — partner full pilot
+
+Captured: 2026-08-06T17:09:08Z
+
+branch: codex/partner-grading-bridge-current-main
+HEAD: c0171d3c335205e68140ecc30a5ad3577cf1e065
+origin/main: be8a501e0cdeb56d0569733cd41d3d3a55ffac16
+remote branch: c0171d3c335205e68140ecc30a5ad3577cf1e065
+ahead/behind vs origin/main: 0	28
+worktree clean: NO
+in-progress merge/rebase/cherry-pick: NONE
+
+PR #288: OPEN draft MERGEABLE, head c0171d3c
+staging (mintvault-v2): 9e185484
+production (mintvault): 6f182624
+
+## Protected artefact SHA-256 (all byte-identical to origin/main)
+32b57f7e49de7f77fa1f9209b58c52c4fba34f7b81f594694b06e8c8adde439d  server/grader.ts
+2e59035285773c890a60fa159a34cbe2a7201e0cc10f255e425b5acaadfe25e6  shared/mvgs-scoring.ts
+ee8c3b4f011a967b80b2b81fcf2c67df1da66fd8f29554f559c5a0bbe7384b1c  shared/centering.ts
+3b8251d57647fb0fb6b770c7d906f84e1a3b75877f3d83768f56606d15d798c8  shared/pristine.ts
+23b999dfafd76c1123e0eac8c1bc5076d796c6700d02a3c98184c90771a26f3d  shared/mvgs-input-builder.ts
+a5b5a580e467bc0d388af9815fff4c3caa09f076eb340ce7b4519f05eb8472f7  server/mvgs-scoring.ts
+87fb76465e9e89f63e1e63e19ecd25ef49b538810a751e822d84bd5cd0090980  tests/mvgs-scoring.test.ts
+6a099741aaa409aa3b8fe8810000f0a765c771419b357cb5577feeff079f2d42  tests/mvgs-guard-strip.test.ts
+8841d92a0ddfe0de82348c9188e46854bc484139c47ff182939e80185fac3e79  tests/mvgs-calibration-validation.test.ts
+e880f8268786564a9067a817cb231202d177dd5908c0483946d3b3696add0d67  tests/pristine.test.ts
+12c7199b5214b7318a24dacebe34bbeffa02193e863c7d38df3167f80af2d547  tests/centering.test.ts
+623781c5562a8ae726ef89ae9b873ba3deb27963604ac4ca470eeb361a68ea7a  tests/mvgs-input-builder.test.ts
+
+## Migration checksums verified against staging schema_migrations
+0035 f2f0ab27cf0eeb129a98d22a3fb91b3a4da0db6e1a3889f2caf2c30a5f2ec609  MATCH
+0041 dd7e29cf768c9a4746a77e74f25ee640c8d58a3ec9bbfb091dd3dcce16f3e07a  MATCH
+0042 fe301caef63cd023ec8f86b344e2a3541a02c8ed24a6570eb6cc67bd25dc6018  MATCH
+0043 3e02a1ca3803ea592e4adfc2d92b39e34ae8c4b7d386ecdcfa18ab75dda308c0  MATCH
+0044 f3f121a0bc209832990767fed51c1e95bc7788e5abff91bcd79c62534fa7924d  MATCH
+0045 a0f4ed4222d7fece726d7c50abc2ddade2647260b491e4feeda4aa67a71c5884  NOT APPLIED to staging (to_regclass('partner_grading_work_items') IS NULL)

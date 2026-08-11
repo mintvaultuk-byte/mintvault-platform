@@ -150,7 +150,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     // 0041 attaches credit-hold guard triggers to certificates and label_prints and writes to
     // audit_log, so those three must exist before the credit-carrying migration list is applied.
     await admin.query(
-      "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, submission_id integer, secret text)"
+      "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)"
     );
     await admin.query(
       "CREATE TABLE IF NOT EXISTS label_prints (id serial PRIMARY KEY, certificate_id integer, created_at timestamptz NOT NULL DEFAULT now())"

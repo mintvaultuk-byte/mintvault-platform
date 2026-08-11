@@ -1,0 +1,44 @@
+{
+  "matrix": "A",
+  "phase": "after",
+  "endpoint": "http://127.0.0.1:9020",
+  "buckets": [
+    {
+      "name": "partner-real-r2-proof",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-conn",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-fpilot",
+      "objects": 16,
+      "sample": [
+        "print-batches/45d7a7d648776a53-v32-cricut-cut.svg",
+        "print-batches/45d7a7d648776a53-v32-print.png",
+        "print-batches/45d7a7d648776a53-v32.pdf",
+        "print-batches/45d7a7d648776a53-v32.png",
+        "print-batches/8777720206314e83-v32-cricut-cut.svg",
+        "print-batches/8777720206314e83-v32-print.png",
+        "print-batches/8777720206314e83-v32.pdf",
+        "print-batches/8777720206314e83-v32.png",
+        "print-batches/912ed4ef84cf19dd-v32-cricut-cut.svg",
+        "print-batches/912ed4ef84cf19dd-v32-print.png"
+      ]
+    },
+    {
+      "name": "partner-real-r2-proof-mount",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-wf",
+      "objects": 0,
+      "sample": []
+    }
+  ],
+  "totalObjects": 16
+}

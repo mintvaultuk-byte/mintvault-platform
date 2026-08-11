@@ -116,7 +116,9 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
   // catches up over multiple ticks if the backlog grows.
   const ageDaysInt = Math.max(0, Math.floor(ageDays));
   const rows = await db.execute(sql`
-    SELECT id, certificate_number, grade_approved_at
+    SELECT id, certificate_number, grade_approved_at,
+           front_image_path, back_image_path,
+           grading_front_original, grading_back_original
     FROM certificates
     WHERE grade_approved_at < NOW() - (${ageDaysInt}::int * INTERVAL '1 day')
       AND deleted_at IS NULL
@@ -125,7 +127,15 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
     LIMIT ${batchSize}
   `);
 
-  const certs = rows.rows as { id: number; certificate_number: string; grade_approved_at: Date }[];
+  const certs = rows.rows as {
+    id: number;
+    certificate_number: string;
+    grade_approved_at: Date;
+    front_image_path: string | null;
+    back_image_path: string | null;
+    grading_front_original: string | null;
+    grading_back_original: string | null;
+  }[];
   if (certs.length === 0) {
     console.log(`[archival-b2] no candidates (ageDays=${ageDaysInt}, batchSize=${batchSize})`);
     return summary;
@@ -140,17 +150,43 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
     // Prefixes the cert's image artefacts could live under. Both ingest
     // paths still write to all three at various times — see audit
     // 2026-05-11 image pipeline notes.
+    // The keys this certificate ITSELF says it depends on.
+    //
+    // The three prefixes below encode the pre-partner assumption that every certificate's images
+    // live under images/{certNumber}/ or grading/{certNumber}/. Partner-origin certificates do not:
+    // connector import writes the partner key `partner-submissions/{tenant}/{sub}/{card}/{side}-…`
+    // into front_image_path, back_image_path, grading_front_original AND grading_back_original, and
+    // that key is enumerated by none of the three. The worker therefore listed nothing, took the
+    // "nothing to copy" branch, and stamped archived_to_b2_at on a certificate with ZERO B2 copies.
+    //
+    // All four columns are read, not just the *_image_path pair: the grading pipeline overwrites
+    // front_image_path/back_image_path with derived HQ-namespace keys after a recrop, while
+    // grading_*_original keeps pointing at the partner original. Reading only the first pair would
+    // miss the original on any cropped certificate.
+    const expectedKeys = Array.from(
+      new Set(
+        [cert.front_image_path, cert.back_image_path, cert.grading_front_original, cert.grading_back_original].filter(
+          (k): k is string => typeof k === "string" && k.trim().length > 0
+        )
+      )
+    );
+
     const prefixes = [
       `images/${certNumber}/`,
       `grading/${certNumber}/`,
       `images/grading/${certId}/`,
+      // Exact keys, used as prefixes: ListObjectsV2 returns that one object or nothing. Exact keys
+      // rather than the card directory, so what is enumerated is exactly what is asserted below.
+      ...expectedKeys,
     ];
 
-    const objectsForThisCert: { key: string; size: number }[] = [];
+    // Dedupe by key — an expected key already covered by a broad prefix would otherwise be listed
+    // twice and double-counted in bytesCopied.
+    const seenKeys = new Map<string, { key: string; size: number }>();
     try {
       for (const p of prefixes) {
         const objs = await listR2Prefix(p);
-        objectsForThisCert.push(...objs);
+        for (const o of objs) if (!seenKeys.has(o.key)) seenKeys.set(o.key, o);
       }
     } catch (e: any) {
       console.warn(`[archival-b2] cert=${certNumber}: R2 list failed: ${e.message}`);
@@ -164,9 +200,31 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
       } catch {}
       continue;
     }
+    const objectsForThisCert = Array.from(seenKeys.values());
 
     if (objectsForThisCert.length === 0) {
-      console.log(`[archival-b2] cert=${certNumber}: no R2 objects found — marking archived (nothing to copy)`);
+      if (expectedKeys.length > 0) {
+        // The certificate names image keys that do not exist in R2. "Found nothing" is NOT
+        // "nothing to back up" here — it is "I could not find what this row says it depends on".
+        // Refuse, leave archived_to_b2_at NULL, and let the next tick retry.
+        console.warn(
+          `[archival-b2] cert=${certNumber}: REFUSING — expected ${expectedKeys.length} object(s), found 0`
+        );
+        summary.errors++;
+        if (!dryRun) {
+          try {
+            await db.execute(sql`
+              INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+              VALUES ('certificate', ${certNumber}, 'archive_failed', 'system',
+                ${JSON.stringify({ stage: "expected_keys_missing", expected_keys: expectedKeys, found: 0 })}::jsonb)
+            `);
+          } catch {}
+        }
+        continue;
+      }
+      // Genuinely imageless certificate — no image column is populated, so there is nothing to
+      // copy and marking it archived is truthful.
+      console.log(`[archival-b2] cert=${certNumber}: no images expected — marking archived`);
       if (!dryRun) {
         await db.execute(sql`
           UPDATE certificates SET archived_to_b2_at = NOW(), updated_at = NOW()
@@ -175,7 +233,7 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
         await db.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
           VALUES ('certificate', ${certNumber}, 'archived_to_b2', 'system',
-            ${JSON.stringify({ r2_keys_archived: [], total_bytes: 0, note: "no_r2_objects_found" })}::jsonb)
+            ${JSON.stringify({ r2_keys_archived: [], total_bytes: 0, note: "no_images_expected" })}::jsonb)
         `);
       }
       continue;
@@ -183,6 +241,10 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
 
     if (dryRun) {
       const totalBytes = objectsForThisCert.reduce((a, o) => a + o.size, 0);
+      const wouldMiss = expectedKeys.filter((k) => !objectsForThisCert.some((o) => o.key === k));
+      if (wouldMiss.length > 0) {
+        console.warn(`[archival-b2] cert=${certNumber}: WOULD REFUSE — ${wouldMiss.length} expected object(s) absent`);
+      }
       console.log(`[archival-b2] cert=${certNumber}: WOULD copy ${objectsForThisCert.length} objects (${(totalBytes / 1024).toFixed(0)} KB)`);
       for (const o of objectsForThisCert) {
         console.log(`[archival-b2]   ${(o.size / 1024).toFixed(0).padStart(6)} KB  ${o.key}`);
@@ -209,6 +271,13 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
         }
         const { body, contentType } = await downloadR2(obj.key);
         await uploadToB2(obj.key, body, contentType, 90);
+        // uploadToB2 returns its own key argument, so it carries no evidence. existsInB2 is the
+        // checkable primitive: it returns false ONLY on a normalised 404 and rethrows auth/network
+        // errors, so it cannot mistake a broken connection for "absent". A throw here lands in the
+        // existing catch and routes to the existing failure path — no new control flow.
+        if (!(await existsInB2(obj.key))) {
+          throw new Error(`post-upload verification failed: ${obj.key} not present in B2`);
+        }
         summary.objectsCopied++;
         summary.bytesCopied += body.length;
         certBytes += body.length;
@@ -237,7 +306,34 @@ export async function archiveStaleImages(opts: ArchivalOpts): Promise<ArchivalSu
       continue;
     }
 
-    // All objects copied successfully — mark cert complete + audit log.
+    // Gate the success path too, not just the empty branch.
+    //
+    // Without this, a partner certificate that also has label or derivative objects under
+    // images/{certNumber}/ takes THIS path — non-empty result set, everything found was copied —
+    // and is marked archived while its partner-submissions/ originals were never touched. Half the
+    // repair would leave that silent.
+    const missing = expectedKeys.filter((k) => !keysArchived.includes(k));
+    if (missing.length > 0) {
+      console.warn(
+        `[archival-b2] cert=${certNumber}: REFUSING — ${missing.length} expected object(s) not copied`
+      );
+      summary.errors++;
+      try {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES ('certificate', ${certNumber}, 'archive_failed', 'system',
+            ${JSON.stringify({
+              stage: "expected_keys_not_copied",
+              expected_keys: expectedKeys,
+              missing_keys: missing,
+              partial_keys_archived: keysArchived,
+            })}::jsonb)
+        `);
+      } catch {}
+      continue;
+    }
+
+    // Every required object copied AND verified present in B2 — mark cert complete + audit log.
     await db.execute(sql`
       UPDATE certificates SET archived_to_b2_at = NOW(), updated_at = NOW()
       WHERE id = ${certId}

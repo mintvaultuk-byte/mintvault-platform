@@ -7,18 +7,22 @@
  *
  * Runs ONLY when PARTNER_CONNECTOR_FAULT_RT_ADMIN + PARTNER_CONNECTOR_FAULT_RT_URL are set.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G3F,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_FAULT_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_FAULT_RT_URL;
 const isLocal = !!ADMIN && !!CONNECTOR_URL && /@(127\.0\.0\.1|localhost)[:/]/.test(ADMIN);
+
+vi.mock("../server/r2", () => ({
+  headR2: vi.fn(async () => ({ size: 1024, contentType: "image/jpeg" })),
+}));
 
 const A = "aaaaaaaa-8000-0000-0000-000000000001";
 const L1 = "10000000-8000-0000-0000-0000000000c1";
@@ -45,7 +49,59 @@ async function seedMintVaultTables(): Promise<void> {
     game text, card_set text, card_name text, card_number text, year text,
     declared_value integer DEFAULT 0, declared_new boolean DEFAULT false, notes text,
     created_at timestamptz NOT NULL DEFAULT now())`);
-  for (const t of ["users", "submissions", "submission_items"])
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY,
+    cert_id text,
+    certificate_number text UNIQUE,
+    card_id integer,
+    submission_item_id integer,
+    status varchar(10) NOT NULL DEFAULT 'active',
+    label_type text NOT NULL DEFAULT 'Standard',
+    grade_type text NOT NULL DEFAULT 'numeric',
+    language text DEFAULT 'English',
+    card_game text,
+    set_name text,
+    card_name text,
+    card_number_display text,
+    year_text text,
+    variant text,
+    front_image_path text,
+    back_image_path text,
+    grading_front_original text,
+    grading_back_original text,
+    created_by text,
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    reference_number text UNIQUE,
+    logbook_version integer NOT NULL DEFAULT 1,
+    logbook_last_issued_at timestamptz,
+    integrity_hash text,
+    print_state varchar(24) NOT NULL DEFAULT 'awaiting_approval',
+    grader_status varchar(20) NOT NULL DEFAULT 'unassigned',
+    origin_type text,
+    origin_partner_id uuid,
+    origin_partner_public_ref text,
+    origin_partner_legal_name text,
+    origin_partner_trading_name text,
+    origin_location_id uuid,
+    origin_location_public_ref text,
+    origin_location_name text,
+    origin_location_address text,
+    origin_captured_at timestamptz,
+    origin_snapshot_version integer,
+    deleted_at timestamptz,
+    grade_approved_at timestamptz
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+    id integer PRIMARY KEY,
+    last_issued integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+    id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+    admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now()
+  )`);
+  for (const t of ["users", "submissions", "submission_items", "certificates", "cert_counter", "audit_log"])
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
 }
 
@@ -73,14 +129,15 @@ async function seedClaimedReady(
   claimant: string,
   itemCount = 2
 ): Promise<{ connectorId: string; version: number; customerId: string }> {
-  seq += 1;
-  const subId = uuid(seq);
-  const custId = uuid(seq + 300_000);
+  seq += 10;
+  const base = seq;
+  const subId = uuid(base);
+  const custId = uuid(base + 300_000);
   await admin.query("INSERT INTO partner_customers (id, tenant_id, full_name, email) VALUES ($1,$2,$3,$4)", [
     custId,
     A,
-    `Fault Customer ${seq}`,
-    `fault${seq}@example.com`,
+    `Fault Customer ${base}`,
+    `fault${base}@example.com`,
   ]);
   await admin.query(
     `INSERT INTO partner_submissions (id, tenant_id, location_id, created_by, customer_id, service_tier_code, estimated_price_pence, card_count, status)
@@ -88,9 +145,20 @@ async function seedClaimedReady(
     [subId, A, L1, U1, custId, 1500 * itemCount, itemCount]
   );
   for (let i = 1; i <= itemCount; i++) {
+    const cardId = uuid(base + 400_000 + i);
     await admin.query(
-      `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity) VALUES ($1,$2,$3,$4,50000,1)`,
-      [A, subId, i, `Card ${i}`]
+      `INSERT INTO partner_submission_cards
+         (id, tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity, front_image_key, back_image_key)
+       VALUES ($1,$2,$3,$4,$5,50000,1,$6,$7)`,
+      [
+        cardId,
+        A,
+        subId,
+        i,
+        `Card ${i}`,
+        `partner-submissions/${A}/${subId}/${cardId}/front-seed.jpg`,
+        `partner-submissions/${A}/${subId}/${cardId}/back-seed.jpg`,
+      ]
     );
   }
   const h = await admin.query(
@@ -172,9 +240,12 @@ const ROLLBACK_POINTS = [
     await admin.connect();
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
+    await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await admin.query("CREATE SCHEMA public");
+    await admin.query("GRANT ALL ON SCHEMA public TO public");
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3F);
+    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
     await admin.query("DROP ROLE IF EXISTS partner_connector_fault_test").catch(() => {});
     await admin.query("CREATE ROLE partner_connector_fault_test LOGIN PASSWORD 'synthetic'");
     await admin.query("GRANT partner_connector_runtime TO partner_connector_fault_test");

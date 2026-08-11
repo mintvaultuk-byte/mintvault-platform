@@ -13,10 +13,11 @@
  *
  * The whole file is a mutation target: CARD1-CARD6 and LEDGER1-LEDGER2 must turn it red.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
+import { randomUUID } from "node:crypto";
 import {
   applyMigrationsRealistic,
   migratorUrlFrom,
@@ -24,6 +25,31 @@ import {
   provisionRealisticRoles,
 } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+/**
+ * DETERMINISTIC STORAGE SEAM — see the sibling note in partner-recovery-cardinality.test.ts.
+ *
+ * submitSubmission requires per-card image keys plus a real headR2() existence check, and its
+ * return path signs keys via getR2SignedUrl(). Both reach server/r2.ts, which throws when R2 is
+ * unconfigured. This suite proves credit cardinality, not storage, so both are stubbed.
+ *
+ * The production gate is NOT weakened, and this suite carries the behavioural proof of it: the
+ * "storage existence gate refuses" test below drives headR2 to null and asserts submit refuses
+ * with zero reservations — so the mock cannot go quietly vacuous.
+ */
+const storageExists = { present: true };
+vi.mock("../server/r2", async () => {
+  const actual = await vi.importActual<typeof import("../server/r2")>("../server/r2");
+  return {
+    ...actual,
+    headR2: vi.fn(async () =>
+      storageExists.present
+        ? { lastModified: new Date("2026-08-06T00:00:00Z"), contentLength: 1024, contentType: "image/jpeg", eTag: '"fixture"' }
+        : null
+    ),
+    getR2SignedUrl: vi.fn(async (key: string) => `https://storage.invalid/${key}`),
+  };
+});
 
 let cluster: DisposablePostgres17;
 let admin: Client;
@@ -39,6 +65,8 @@ interface TenantFixture {
   tenantId: string;
   locationId: string;
   userId: string;
+  customerId: string;
+  serviceTierCode: string;
 }
 
 async function seedMintVaultTables(): Promise<void> {
@@ -86,7 +114,20 @@ async function createTenantFixture(label: string): Promise<TenantFixture> {
       [`percard-${ordinal}`, tenantId, `percard-${ordinal}@example.test`]
     )
   ).rows[0].id;
-  return { tenantId, locationId, userId };
+  const customerId = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_customers (tenant_id,full_name) VALUES ($1,$2) RETURNING id",
+      [tenantId, `PerCard ${label} Customer ${ordinal}`]
+    )
+  ).rows[0].id;
+  // Tenant-scoped tier: a global (tenant_id IS NULL) row would collide on the partial unique
+  // index uq_partner_service_tiers_global for the second fixture.
+  await admin.query(
+    `INSERT INTO partner_service_tiers (tenant_id,tier_code,label,price_per_card_pence,turnaround_days,is_active)
+     VALUES ($1,'percard-tier','Per-card Tier',1500,20,true)`,
+    [tenantId]
+  );
+  return { tenantId, locationId, userId, customerId, serviceTierCode: "percard-tier" };
 }
 
 function principalFor(f: TenantFixture) {
@@ -122,17 +163,29 @@ async function addCredits(f: TenantFixture, amount: number, key: string): Promis
 async function makeDraft(f: TenantFixture, cards: Array<[string, number]>): Promise<string> {
   const id = (
     await admin.query<{ id: string }>(
-      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status)
-       VALUES ($1,$2,$3,$4,'draft') RETURNING id`,
-      [f.tenantId, f.locationId, f.userId, cards.length]
+      `INSERT INTO partner_submissions (tenant_id,location_id,created_by,card_count,status,customer_id,service_tier_code)
+       VALUES ($1,$2,$3,$4,'draft',$5,$6) RETURNING id`,
+      [f.tenantId, f.locationId, f.userId, cards.length, f.customerId, f.serviceTierCode]
     )
   ).rows[0].id;
   let seq = 0;
   for (const [name, quantity] of cards) {
+    // Generate the card id client-side so the image keys can embed it in one statement. The keys
+    // must match cardImageKeyAllowed()'s tenant/submission/card/side prefix exactly.
+    const cardId = randomUUID();
     await admin.query(
-      `INSERT INTO partner_submission_cards (tenant_id,submission_id,sequence_number,card_name,quantity)
-       VALUES ($1,$2,$3,$4,$5)`,
-      [f.tenantId, id, ++seq, name, quantity]
+      `INSERT INTO partner_submission_cards (id,tenant_id,submission_id,sequence_number,card_name,quantity,front_image_key,back_image_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        cardId,
+        f.tenantId,
+        id,
+        ++seq,
+        name,
+        quantity,
+        `partner-submissions/${f.tenantId}/${id}/${cardId}/front-fixture.jpg`,
+        `partner-submissions/${f.tenantId}/${id}/${cardId}/back-fixture.jpg`,
+      ]
     );
   }
   return id;
@@ -391,6 +444,129 @@ describe("Per-card credit lifecycle (real PostgreSQL)", () => {
     const position = await creditReservations.getCreditPosition(f.tenantId);
     expect(position.activeReserved).toBe(0);
     expect(position.availableBalance).toBe(40 - cards);
+  });
+
+  /**
+   * THE AUTHORITATIVE TWO-CARD WALLET PROGRESSION.
+   *
+   * The pilot acceptance criterion is stated as three wallet triples —
+   * available/reserved/consumed — and the suite proved each transition only in isolation:
+   * "settling a 2-card submission consumes every reservation" never asserts the RESERVED state in
+   * between, and the reserve tests never carry through to consumption. A wallet that reserved 2 and
+   * consumed 2 while briefly showing the wrong reserved figure would satisfy both and still be
+   * wrong on the operator's screen.
+   *
+   * This walks ONE submission of TWO physical cards through all three states and asserts the FULL
+   * triple at each step:
+   *
+   *      10 / 0 / 0   ->   8 / 2 / 0   ->   8 / 0 / 2
+   *      available     reserved          consumed
+   *
+   * `consumed` is derived the way the ledger derives it — the count of -1 debit rows — because
+   * balance is DERIVED from the append-only ledger, never stored on the wallet (proven separately
+   * in block F). Asserting a stored figure would prove nothing about what an operator sees.
+   */
+  it("PILOT: two physical cards walk 10/0/0 -> 8/2/0 -> 8/0/2, and every step replays clean", async () => {
+    const f = await createTenantFixture("pilot-two-card");
+    await addCredits(f, 10, "pilot-two-card-credits");
+
+    /** available / reserved / consumed, exactly as the operator surface reports them. */
+    const triple = async () => {
+      const position = await creditReservations.getCreditPosition(f.tenantId);
+      const debits = await admin.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0",
+        [f.tenantId]
+      );
+      return {
+        available: position.availableBalance,
+        reserved: position.activeReserved,
+        consumed: Number(debits.rows[0].n),
+      };
+    };
+
+    // --- 10 / 0 / 0 : funded, nothing in flight. A draft alone must move nothing.
+    const draft = await makeDraft(f, nCards(2, "pilot"));
+    expect(await triple()).toEqual({ available: 10, reserved: 0, consumed: 0 });
+
+    // --- 8 / 2 / 0 : submit reserves ONE credit per PHYSICAL card.
+    await submissions.submitSubmission(principalFor(f), draft, "pilot-two-card-submit");
+    expect(await triple()).toEqual({ available: 8, reserved: 2, consumed: 0 });
+
+    const reservedRows = await reservationsFor(f, draft);
+    expect(reservedRows).toHaveLength(2);
+    expect(reservedRows.every((r) => r.status === "active")).toBe(true);
+    // Two DISTINCT per-card references. One reservation of 2 credits would satisfy the totals above
+    // while defeating uq_partner_credit_reserve_card_live, which is the per-card double-spend guard.
+    const refs = reservedRows.map((r) => r.card_reference).sort();
+    expect(new Set(refs).size).toBe(2);
+
+    // Replay the submit: idempotent, no second reservation set.
+    await submissions
+      .submitSubmission(principalFor(f), draft, "pilot-two-card-submit")
+      .catch(() => undefined);
+    expect(await triple()).toEqual({ available: 8, reserved: 2, consumed: 0 });
+    expect(await reservationsFor(f, draft)).toHaveLength(2);
+
+    // --- 8 / 0 / 2 : settlement consumes both, writing exactly two -1 ledger rows.
+    const destinationId = await mapImportedSubmission(f, draft);
+    const settled = await lifecycle.settlePartnerCreditForDestinationStatus(destinationId, "ready_to_return", {
+      creditActorEmail: "admin@example.test",
+    });
+    expect(settled).not.toBeNull();
+    expect(await triple()).toEqual({ available: 8, reserved: 0, consumed: 2 });
+
+    const consumedRows = await reservationsFor(f, draft);
+    expect(consumedRows).toHaveLength(2);
+    expect(consumedRows.every((r) => r.status === "consumed")).toBe(true);
+    // available must be the LEDGER total, not a coincidence of the arithmetic above.
+    expect(await ledgerTotal(f)).toBe(8);
+
+    // Replay settlement: idempotent, no third debit, no state churn.
+    await lifecycle.settlePartnerCreditForDestinationStatus(destinationId, "completed", {});
+    expect(await triple()).toEqual({ available: 8, reserved: 0, consumed: 2 });
+
+    // A cancellation AFTER consumption must be refused outright — releasing here would refund
+    // credits already billed. Proven not to leave a partial state.
+    await submissions.cancelSubmission(principalFor(f), draft, "too late").catch(() => undefined);
+    expect(await triple()).toEqual({ available: 8, reserved: 0, consumed: 2 });
+    expect((await reservationsFor(f, draft)).every((r) => r.status === "consumed")).toBe(true);
+  });
+
+  it("PILOT: cancelling two reserved cards returns the wallet to 10/0/0 with no consumption", async () => {
+    const f = await createTenantFixture("pilot-two-card-cancel");
+    await addCredits(f, 10, "pilot-two-card-cancel-credits");
+
+    const triple = async () => {
+      const position = await creditReservations.getCreditPosition(f.tenantId);
+      const debits = await admin.query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0",
+        [f.tenantId]
+      );
+      return {
+        available: position.availableBalance,
+        reserved: position.activeReserved,
+        consumed: Number(debits.rows[0].n),
+      };
+    };
+
+    const draft = await makeDraft(f, nCards(2, "pilotcan"));
+    await submissions.submitSubmission(principalFor(f), draft, "pilot-cancel-submit");
+    expect(await triple()).toEqual({ available: 10 - 2, reserved: 2, consumed: 0 });
+
+    await submissions.cancelSubmission(principalFor(f), draft, "customer withdrew");
+
+    // Back to the starting triple: released is NOT consumed, so nothing may appear as a debit.
+    expect(await triple()).toEqual({ available: 10, reserved: 0, consumed: 0 });
+    const rows = await reservationsFor(f, draft);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === "released")).toBe(true);
+    // A release must never write a ledger movement — the hold simply ends.
+    expect(await ledgerTotal(f)).toBe(10);
+
+    // Replay: idempotent, exactly two released rows, wallet unchanged.
+    await submissions.cancelSubmission(principalFor(f), draft, "again").catch(() => undefined);
+    expect(await triple()).toEqual({ available: 10, reserved: 0, consumed: 0 });
+    expect((await reservationsFor(f, draft)).filter((r) => r.status === "released")).toHaveLength(2);
   });
 
   it("C: repeated settlement is idempotent — no second debit", async () => {

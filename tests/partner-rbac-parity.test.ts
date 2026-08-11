@@ -31,6 +31,39 @@ import {
 const MIGRATION = "0034_partner_rbac_seed.sql";
 const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
 
+/**
+ * The catalogue is seeded by 0034 and EXTENDED additively by later files — 0034 is applied on
+ * staging, so it can never be edited to add a permission. Parity is therefore against the UNION of
+ * the seed migrations, not against 0034 alone. Add a file here when it seeds RBAC rows.
+ */
+const EXTENSION_MIGRATIONS = ["0057_partner_credits_purchase_permission.sql"] as const;
+const extensionSql = EXTENSION_MIGRATIONS.map((f) => ({
+  file: f,
+  sql: readFileSync(join(process.cwd(), "migrations", f), "utf8"),
+}));
+
+/** Permissions added by an extension file's own `_rbac_perms_NNNN` VALUES block. */
+function parseExtensionPermissions(): string[] {
+  const out: string[] = [];
+  for (const { file, sql: s } of extensionSql) {
+    const block = s.match(/INSERT INTO _rbac_perms_\d+ \(code\) VALUES([\s\S]*?);/);
+    if (!block) throw new Error(`${file}: could not locate its _rbac_perms_NNNN VALUES block`);
+    for (const m of block[1].matchAll(/\('([^']+)'\)/g)) out.push(m[1]);
+  }
+  return out;
+}
+
+/** Role→permission mappings added by an extension file's own `_rbac_map_NNNN` VALUES block. */
+function parseExtensionMappings(): Set<string> {
+  const out = new Set<string>();
+  for (const { file, sql: s } of extensionSql) {
+    const block = s.match(/INSERT INTO _rbac_map_\d+ \(role_code, permission_code\) VALUES([\s\S]*?);/);
+    if (!block) throw new Error(`${file}: could not locate its _rbac_map_NNNN VALUES block`);
+    for (const m of block[1].matchAll(/\('([^']+)',\s*'([^']+)'\)/g)) out.add(`${m[1]}|${m[2]}`);
+  }
+  return out;
+}
+
 /** Body of the `INSERT INTO _rbac_roles ... VALUES (...);` block. */
 function parseMigrationRoles(): Array<{ code: string; label: string }> {
   const block = sql.match(/INSERT INTO _rbac_roles \(code, label\) VALUES([\s\S]*?);/);
@@ -42,10 +75,16 @@ function parseMigrationRoles(): Array<{ code: string; label: string }> {
   return out;
 }
 
-function parseMigrationPermissions(): string[] {
+/** 0034's own permission list — the cross join below grants exactly THIS set to OWNER/MANAGER. */
+function parseSeedPermissions(): string[] {
   const block = sql.match(/INSERT INTO _rbac_perms \(code\) VALUES([\s\S]*?);/);
   if (!block) throw new Error(`${MIGRATION}: could not locate the _rbac_perms VALUES block`);
   return [...block[1].matchAll(/\('([^']+)'\)/g)].map((m) => m[1]);
+}
+
+/** Everything the migration estate seeds: 0034 plus every additive extension file. */
+function parseMigrationPermissions(): string[] {
+  return [...parseSeedPermissions(), ...parseExtensionPermissions()];
 }
 
 /**
@@ -54,14 +93,23 @@ function parseMigrationPermissions(): string[] {
  * Parsing it this way (rather than pattern-matching 70 literal pairs) keeps the test honest about
  * what the migration really does — a change to either half is detected.
  */
-function parseMigrationMappings(allPermissions: string[]): Set<string> {
+function parseMigrationMappings(_allPermissions: string[]): Set<string> {
   const out = new Set<string>();
 
+  // The cross join is over 0034's OWN _rbac_perms temp table, so it grants the roles named here
+  // exactly 0034's permission set — NOT any permission a later file adds. Later files carry their
+  // own explicit mappings, which is why partner.credits.purchase reaching OWNER/MANAGER has to be
+  // stated in 0057 rather than inherited silently. Using the seed list here keeps that honest: if
+  // 0057 ever dropped its mapping rows, this test would catch it instead of the cross join
+  // papering over the gap.
+  const seedPermissions = parseSeedPermissions();
   const crossJoin = sql.match(/WHERE r\.code IN \(([^)]*)\)\s*\nUNION ALL/);
   if (!crossJoin) throw new Error(`${MIGRATION}: could not locate the full-permission-set cross join`);
   for (const m of crossJoin[1].matchAll(/'([^']+)'/g)) {
-    for (const perm of allPermissions) out.add(`${m[1]}|${perm}`);
+    for (const perm of seedPermissions) out.add(`${m[1]}|${perm}`);
   }
+
+  for (const pair of parseExtensionMappings()) out.add(pair);
 
   const explicit = sql.match(/UNION ALL\s*\nSELECT \* FROM \(VALUES([\s\S]*?)\) AS v\(role_code, permission_code\)/);
   if (!explicit) throw new Error(`${MIGRATION}: could not locate the explicit mapping VALUES block`);

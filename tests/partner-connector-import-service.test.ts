@@ -10,14 +10,19 @@
  *   PARTNER_CONNECTOR_IMPORT_RT_URL=postgresql://partner_connector_import_test:synthetic@127.0.0.1:5593/dispo \
  *   npx vitest run tests/partner-connector-import-service.test.ts
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G3F,
+  PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE,
   pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
+
+vi.mock("../server/r2", async () => {
+  const actual = await vi.importActual<typeof import("../server/r2")>("../server/r2");
+  return { ...actual, headR2: vi.fn(async () => ({ lastModified: new Date("2026-08-04T00:00:00Z") })) };
+});
 
 const ADMIN = process.env.PARTNER_CONNECTOR_IMPORT_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_IMPORT_RT_URL;
@@ -33,6 +38,10 @@ const UB = "22222222-4000-0000-0000-0000000000b1";
 let admin: Client;
 let seq = 0;
 const uuid = (n: number) => `40000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
+const frontKey = (tenantId: string, submissionId: string, cardId: string) =>
+  `partner-submissions/${tenantId}/${submissionId}/${cardId}/front-seed.jpg`;
+const backKey = (tenantId: string, submissionId: string, cardId: string) =>
+  `partner-submissions/${tenantId}/${submissionId}/${cardId}/back-seed.jpg`;
 
 async function seedMintVaultTables(): Promise<void> {
   await admin.query(`CREATE TABLE IF NOT EXISTS users (
@@ -55,6 +64,58 @@ async function seedMintVaultTables(): Promise<void> {
     declared_value integer DEFAULT 0, declared_new boolean DEFAULT false, notes text,
     created_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS certificates (
+    id serial PRIMARY KEY,
+    cert_id text,
+    certificate_number text UNIQUE,
+    card_id integer,
+    submission_item_id integer,
+    status varchar(10) NOT NULL DEFAULT 'active',
+    label_type text NOT NULL DEFAULT 'Standard',
+    grade_type text NOT NULL DEFAULT 'numeric',
+    language text DEFAULT 'English',
+    card_game text,
+    set_name text,
+    card_name text,
+    card_number_display text,
+    year_text text,
+    variant text,
+    front_image_path text,
+    back_image_path text,
+    grading_front_original text,
+    grading_back_original text,
+    created_by text,
+    issued_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    reference_number text UNIQUE,
+    logbook_version integer NOT NULL DEFAULT 1,
+    logbook_last_issued_at timestamptz,
+    integrity_hash text,
+    print_state varchar(24) NOT NULL DEFAULT 'awaiting_approval',
+    grader_status varchar(20) NOT NULL DEFAULT 'unassigned',
+    origin_type text,
+    origin_partner_id uuid,
+    origin_partner_public_ref text,
+    origin_partner_legal_name text,
+    origin_partner_trading_name text,
+    origin_location_id uuid,
+    origin_location_public_ref text,
+    origin_location_name text,
+    origin_location_address text,
+    origin_captured_at timestamptz,
+    origin_snapshot_version integer,
+    deleted_at timestamptz,
+    grade_approved_at timestamptz
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+    id integer PRIMARY KEY,
+    last_issued integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+    id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+    admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now()
+  )`);
   // Dead table — G3 must never write here (DESTINATION-BOUNDARY.md).
   await admin.query(`CREATE TABLE IF NOT EXISTS cards (
     id serial PRIMARY KEY, submission_id integer, card_name text
@@ -70,6 +131,9 @@ async function seedMintVaultTables(): Promise<void> {
   await admin.query("ALTER TABLE users OWNER TO pn_migrator");
   await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
   await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE certificates OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE cert_counter OWNER TO pn_migrator");
+  await admin.query("ALTER TABLE audit_log OWNER TO pn_migrator");
   await admin.query("ALTER TABLE cards OWNER TO pn_migrator");
 }
 
@@ -77,6 +141,10 @@ async function seedTenant(tenantId: string, locationId: string, userId: string, 
   await admin.query(
     "INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,$2,$2,'ACTIVE') ON CONFLICT DO NOTHING",
     [tenantId, ref]
+  );
+  await admin.query(
+    "INSERT INTO partner_profiles (tenant_id, trading_name) VALUES ($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET trading_name=EXCLUDED.trading_name",
+    [tenantId, `${ref} Trading`]
   );
   await admin.query(
     "INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, status) VALUES ($1,$2,$3,$3,'HQ','ACTIVE') ON CONFLICT DO NOTHING",
@@ -125,11 +193,12 @@ async function seedReadyForImport(
     [subId, tenantId, locationId, partnerUserId, custId, opts.cardCount ?? 2]
   );
   for (let i = 1; i <= (opts.cardCount ?? 2); i++) {
+    const cardId = uuid(400_000 + seq * 100 + i);
     await admin.query(
       `INSERT INTO partner_submission_cards
-         (tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity)
-       VALUES ($1,$2,$3,$4,'pokemon','Base Set','4/102',1999,50000,1)`,
-      [tenantId, subId, i, `Card ${i}`]
+         (id, tenant_id, submission_id, sequence_number, card_name, game, card_set, card_number, year, declared_value_pence, quantity, front_image_key, back_image_key)
+       VALUES ($1,$2,$3,$4,$5,'pokemon','Base Set','4/102',1999,50000,1,$6,$7)`,
+      [cardId, tenantId, subId, i, `Card ${i}`, frontKey(tenantId, subId, cardId), backKey(tenantId, subId, cardId)]
     );
   }
   const h = await admin.query(
@@ -174,13 +243,13 @@ async function seedReadyForImport(
     beforeAll(async () => {
       admin = new Client({ connectionString: ADMIN });
       await admin.connect();
+      await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+      await admin.query("CREATE SCHEMA public");
       await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
       await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
       // pn_migrator must exist BEFORE seedMintVaultTables' ALTER TABLE ... OWNER TO pn_migrator runs.
       await provisionRealisticRoles(admin);
       await seedMintVaultTables();
-      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3F);
-
       await admin.query("DROP ROLE IF EXISTS partner_connector_import_test").catch(() => {});
       await admin.query("CREATE ROLE partner_connector_import_test LOGIN PASSWORD 'synthetic'");
       await admin.query("GRANT partner_connector_runtime TO partner_connector_import_test");
@@ -188,6 +257,7 @@ async function seedReadyForImport(
       await admin.query("DROP ROLE IF EXISTS partner_import_test_conn").catch(() => {});
       await admin.query("CREATE ROLE partner_import_test_conn LOGIN PASSWORD 'synthetic'");
       await admin.query("GRANT partner_runtime TO partner_import_test_conn");
+      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_GRADING_BRIDGE);
 
       process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
       // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
@@ -281,10 +351,12 @@ async function seedReadyForImport(
          VALUES ($1,$2,$3,$4,$5,'standard',4500,3,'submitted_to_mintvault')`,
           [subId, A, L1, U1, custId]
         );
+        const cardId = uuid(seq + 500_000);
         await admin.query(
-          `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity)
-         VALUES ($1,$2,1,'Triple Card',10000,3)`,
-          [A, subId]
+          `INSERT INTO partner_submission_cards
+             (id, tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity, front_image_key, back_image_key)
+           VALUES ($1,$2,$3,1,'Triple Card',10000,3,$4,$5)`,
+          [cardId, A, subId, frontKey(A, subId, cardId), backKey(A, subId, cardId)]
         );
         const h = await admin.query(
           "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
@@ -329,6 +401,172 @@ async function seedReadyForImport(
         );
         expect(subRows[0].card_count).toBe(3);
         expect(subRows[0].total_declared_value).toBe(30000); // 10000 * 3
+        const workItems = await admin.query(
+          `SELECT partner_submission_card_id::text AS card_id, card_ordinal::int AS ordinal,
+                  front_image_key, back_image_key, status
+             FROM partner_grading_work_items
+            WHERE connector_record_id = $1
+            ORDER BY card_ordinal`,
+          [rec.id]
+        );
+        expect(workItems.rows).toEqual([
+          {
+            card_id: cardId,
+            ordinal: 1,
+            front_image_key: frontKey(A, subId, cardId),
+            back_image_key: backKey(A, subId, cardId),
+            status: "ready_for_assignment",
+          },
+          {
+            card_id: cardId,
+            ordinal: 2,
+            front_image_key: frontKey(A, subId, cardId),
+            back_image_key: backKey(A, subId, cardId),
+            status: "ready_for_assignment",
+          },
+          {
+            card_id: cardId,
+            ordinal: 3,
+            front_image_key: frontKey(A, subId, cardId),
+            back_image_key: backKey(A, subId, cardId),
+            status: "ready_for_assignment",
+          },
+        ]);
+      });
+    });
+
+    /**
+     * ORIGIN-TRADING1 — the importer is the ONLY code path that stamps a PARTNER certificate
+     * origin, and migration 0035 makes that stamp immutable (ENABLE ALWAYS trigger). Before the
+     * repair the query selected `NULL::text AS partner_trading_name`, so every partner-graded
+     * certificate froze a NULL trading name — the value server/labels.ts certificateOrigin()
+     * renders FIRST as "Graded by <X>" — and no test noticed, because no test had ever read the
+     * origin columns off a certificate the importer actually created.
+     *
+     * These tests read the real rows the real importer wrote, through the real connector role
+     * (partner_connector_import_test inherits partner_connector_runtime), so a missing GRANT is a
+     * failure here rather than a 42501 discovered in production.
+     */
+    describe("certificate origin snapshot", () => {
+      it("records the APPROVED partner trading name from partner_profiles, not NULL", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        const seeded = await seedReadyForImport(A, L1, U1, { cardCount: 2, claimant: "worker-origin-trading" });
+        const result = await importer.importValidatedConnector({
+          connectorId: seeded.connectorId,
+          claimant: "worker-origin-trading",
+          expectedVersion: seeded.version,
+          tenantId: A,
+        });
+        expect(result.outcome).toBe("imported");
+
+        const { rows } = await admin.query(
+          `SELECT c.origin_type, c.origin_partner_id, c.origin_partner_trading_name,
+                  c.origin_partner_legal_name, c.origin_location_name
+             FROM certificates c
+             JOIN partner_grading_work_items w ON w.certificate_id = c.id
+            WHERE w.destination_submission_id = $1
+            ORDER BY w.card_ordinal`,
+          [result.destinationSubmissionId]
+        );
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+          expect(row.origin_type).toBe("PARTNER");
+          expect(row.origin_partner_id).toBe(A);
+          // seedTenant(A, ..., "impA") writes partner_profiles.trading_name = 'impA Trading'
+          // while partner_organisations.legal_name is 'impA'. The two differ ON PURPOSE: if the
+          // snapshot ever falls back to the legal name the assertion below fails loudly instead
+          // of passing on a coincidentally-equal string.
+          expect(row.origin_partner_trading_name).toBe("impA Trading");
+          expect(row.origin_partner_legal_name).toBe("impA");
+        }
+      });
+
+      it("never reads another tenant's trading name (the location join re-qualifies by tenant)", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        const seeded = await seedReadyForImport(B, LB, UB, { cardCount: 2, claimant: "worker-origin-trading-b" });
+        const result = await importer.importValidatedConnector({
+          connectorId: seeded.connectorId,
+          claimant: "worker-origin-trading-b",
+          expectedVersion: seeded.version,
+          tenantId: B,
+        });
+        expect(result.outcome).toBe("imported");
+
+        const { rows } = await admin.query(
+          `SELECT c.origin_partner_trading_name
+             FROM certificates c
+             JOIN partner_grading_work_items w ON w.certificate_id = c.id
+            WHERE w.destination_submission_id = $1`,
+          [result.destinationSubmissionId]
+        );
+        expect(rows).toHaveLength(2);
+        for (const row of rows) {
+          expect(row.origin_partner_trading_name).toBe("impB Trading");
+          expect(row.origin_partner_trading_name).not.toBe("impA Trading");
+        }
+      });
+
+      it("normalises a whitespace-only trading name to NULL instead of freezing blank display text", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        // Blanked AFTER validation: the validator has its own separate opinion about a partner
+        // being presentable, and this test is about the IMPORTER's snapshot normalisation, not
+        // about re-testing the validator.
+        const seeded = await seedReadyForImport(A, L1, U1, { cardCount: 2, claimant: "worker-origin-blank" });
+        await admin.query("UPDATE partner_profiles SET trading_name = '   ' WHERE tenant_id = $1", [A]);
+        try {
+          const result = await importer.importValidatedConnector({
+            connectorId: seeded.connectorId,
+            claimant: "worker-origin-blank",
+            expectedVersion: seeded.version,
+            tenantId: A,
+          });
+          expect(result.outcome).toBe("imported");
+          const { rows } = await admin.query(
+            `SELECT c.origin_partner_trading_name, c.origin_partner_legal_name
+               FROM certificates c
+               JOIN partner_grading_work_items w ON w.certificate_id = c.id
+              WHERE w.destination_submission_id = $1`,
+            [result.destinationSubmissionId]
+          );
+          // NULL, not '   '. 0035's snapshot is immutable, and certificateOrigin() would render a
+          // whitespace-only name as an empty "Graded by " line forever.
+          expect(rows).toHaveLength(2);
+          for (const row of rows) {
+            expect(row.origin_partner_trading_name).toBeNull();
+            expect(row.origin_partner_legal_name).toBe("impA");
+          }
+        } finally {
+          await admin.query("UPDATE partner_profiles SET trading_name = 'impA Trading' WHERE tenant_id = $1", [A]);
+        }
+      });
+
+      it("fails closed when BOTH the trading name and the legal name are blank", async () => {
+        const importer = await import("../server/partner/connector-import-service");
+        // Blanked AFTER validation — same reason as the test above.
+        const seeded = await seedReadyForImport(A, L1, U1, { cardCount: 2, claimant: "worker-origin-unnamed" });
+        await admin.query("UPDATE partner_profiles SET trading_name = '' WHERE tenant_id = $1", [A]);
+        await admin.query("UPDATE partner_organisations SET legal_name = '   ' WHERE id = $1", [A]);
+        try {
+          await expect(
+            importer.importValidatedConnector({
+              connectorId: seeded.connectorId,
+              claimant: "worker-origin-unnamed",
+              expectedVersion: seeded.version,
+              tenantId: A,
+            })
+          ).rejects.toThrow(/origin snapshot is incomplete/i);
+
+          // The whole import transaction must have rolled back — no orphan certificate, no
+          // half-imported destination submission.
+          const certs = await admin.query(
+            "SELECT count(*)::int AS n FROM certificates WHERE origin_partner_id = $1 AND origin_partner_legal_name IS NULL",
+            [A]
+          );
+          expect(certs.rows[0].n).toBe(0);
+        } finally {
+          await admin.query("UPDATE partner_organisations SET legal_name = 'impA' WHERE id = $1", [A]);
+          await admin.query("UPDATE partner_profiles SET trading_name = 'impA Trading' WHERE tenant_id = $1", [A]);
+        }
       });
     });
 
@@ -350,9 +588,12 @@ async function seedReadyForImport(
            VALUES ($1,$2,$3,$4,$5,'standard',1500,1,'submitted_to_mintvault')`,
             [subId, A, L1, U1, custId]
           );
+          const cardId = uuid(seq + 510_000);
           await admin.query(
-            `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity) VALUES ($1,$2,1,'C',1000,1)`,
-            [A, subId]
+            `INSERT INTO partner_submission_cards
+               (id, tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity, front_image_key, back_image_key)
+             VALUES ($1,$2,$3,1,'C',1000,1,$4,$5)`,
+            [cardId, A, subId, frontKey(A, subId, cardId), backKey(A, subId, cardId)]
           );
           const h = await admin.query(
             "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
@@ -552,9 +793,12 @@ async function seedReadyForImport(
          VALUES ($1,$2,$3,$4,$5,'standard',1500,1,'submitted_to_mintvault')`,
           [subId, A, L1, U1, custId]
         );
+        const cardId = uuid(seq + 520_000);
         await admin.query(
-          `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity) VALUES ($1,$2,1,'C',1000,1)`,
-          [A, subId]
+          `INSERT INTO partner_submission_cards
+             (id, tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity, front_image_key, back_image_key)
+           VALUES ($1,$2,$3,1,'C',1000,1,$4,$5)`,
+          [cardId, A, subId, frontKey(A, subId, cardId), backKey(A, subId, cardId)]
         );
         const h = await admin.query(
           "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
@@ -650,6 +894,9 @@ async function seedReadyForImport(
           expectedVersion: seeded.version,
           tenantId: A,
         });
+        await admin.query("DELETE FROM partner_grading_work_items WHERE destination_submission_id = $1", [
+          result.destinationSubmissionId,
+        ]);
         await admin.query("DELETE FROM submission_items WHERE submission_id = $1", [result.destinationSubmissionId]);
         await admin.query("DELETE FROM submissions WHERE id = $1", [result.destinationSubmissionId]);
         const status = await importer.inspectConnectorImportConsistency(seeded.connectorId);
@@ -669,9 +916,12 @@ async function seedReadyForImport(
          VALUES ($1,$2,$3,$4,$5,'standard',1500,1,'submitted_to_mintvault')`,
           [subId, A, L1, U1, custId]
         );
+        const cardId = uuid(seq + 530_000);
         await admin.query(
-          `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity) VALUES ($1,$2,1,'C',1000,1)`,
-          [A, subId]
+          `INSERT INTO partner_submission_cards
+             (id, tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity, front_image_key, back_image_key)
+           VALUES ($1,$2,$3,1,'C',1000,1,$4,$5)`,
+          [cardId, A, subId, frontKey(A, subId, cardId), backKey(A, subId, cardId)]
         );
         const h = await admin.query(
           "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",

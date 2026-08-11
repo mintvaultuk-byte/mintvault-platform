@@ -1,0 +1,1928 @@
+{
+  "matrix": "A",
+  "environment": {
+    "label": "A",
+    "capturedFor": "independent matrix A",
+    "containers": {
+      "pg16": {
+        "container": "mvmx-a-pg16",
+        "id": "603592f6942cdb073ace7a5534e9583fea7bb88fd25dab8f197322a5804ad88d",
+        "image": "pgvector/pgvector:pg16",
+        "imageId": "sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b",
+        "created": "2026-08-07T10:18:45.55495254Z",
+        "volumes": "915bb7de5a11e37290e3e894a3e67b5cc789de92128696a56b7f4f247c198431 "
+      },
+      "pg17": {
+        "container": "mvmx-a-pg17",
+        "id": "66eec1ac783b356a35dc3be1456e627716ca8ac90fec0ac87d0c042b29502f7f",
+        "image": "postgres:17.10",
+        "imageId": "sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317",
+        "created": "2026-08-07T10:18:45.801437716Z",
+        "volumes": "5a4d0e702dab9854dc73684808be930ad5d68cf085f40d981809c46ccfbf820f "
+      },
+      "minio": {
+        "container": "mvmx-a-minio",
+        "id": "ceca1fa3bbf33bda7836431aca32923d5ae72c36b624d555461de103523fa2ad",
+        "image": "quay.io/minio/minio:latest",
+        "imageId": "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+        "created": "2026-08-07T10:18:45.985291965Z",
+        "volumes": "781f378d7c9a422703bfe6cef0fcb4ee1706b8c42429c2fca1afb96f9a019820 "
+      }
+    },
+    "pg16": {
+      "port": 55432,
+      "systemIdentifier": "7671232179304022053",
+      "version": "16.14 (Debian 16.14-1.pgdg12+1)"
+    },
+    "pg17": {
+      "port": 55443,
+      "systemIdentifier": "7671232179959001125",
+      "version": "17.10 (Debian 17.10-1.pgdg13+1)"
+    },
+    "adminRole": "mxadmin_a",
+    "databasePrefix": "mxa_",
+    "minioPort": 9020
+  },
+  "pass1_perSuiteMatrix": {
+    "exitCode": 0,
+    "suites": [
+      {
+        "suite": "tests/partner-0042-state-semantics.test.ts",
+        "files": 1,
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-completion-cascade.test.ts",
+        "files": 1,
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-credit-admin-service.test.ts",
+        "files": 1,
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-credit-reservation-service.test.ts",
+        "files": 1,
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-dashboard-integration.test.ts",
+        "files": 1,
+        "passed": 37,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-db-topology.test.ts",
+        "files": 1,
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-definer-ownership.test.ts",
+        "files": 1,
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-definer-transitive-reachability.test.ts",
+        "files": 1,
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-full-pilot-workflow.test.ts",
+        "files": 1,
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-management-integration.test.ts",
+        "files": 1,
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-management-migration.test.ts",
+        "files": 1,
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-per-card-credit-lifecycle.test.ts",
+        "files": 1,
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-rbac-bootstrap.test.ts",
+        "files": 1,
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-rbac-migration.test.ts",
+        "files": 1,
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-recovery-cardinality.test.ts",
+        "files": 1,
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-rls-isolation.test.ts",
+        "files": 1,
+        "passed": 75,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-rollback.test.ts",
+        "files": 1,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-submission-lifecycle-migration.test.ts",
+        "files": 1,
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-user-management-migration.test.ts",
+        "files": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-wallet-provisioning.test.ts",
+        "files": 1,
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      },
+      {
+        "suite": "tests/partner-wallet-service.test.ts",
+        "files": 1,
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "environmentAborts": 0
+      }
+    ],
+    "totals": {
+      "passed": 423,
+      "failed": 0,
+      "skipped": 0
+    },
+    "suiteCount": 21
+  },
+  "pass2_fullRepositorySuite": {
+    "exitCode": 1,
+    "suiteCount": 281,
+    "passed": 5110,
+    "failed": 0,
+    "skipped": 39,
+    "environmentAborts": 3,
+    "perFile": {
+      "tests/admin-auth-reliability.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/admin-set-editor-actions.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/admin-staff-legacy-shell-guard.test.ts": {
+        "passed": 55,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/approval-grade-preservation.test.ts": {
+        "passed": 45,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/auth-security-helpers.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/auth-security-migration.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/b2-archival-partner-coverage.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/canonical-grading-workstation-architecture.test.ts": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-identification-adversarial.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-identification-image-gates.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-identification-routes.test.ts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-identification.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-parse.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-preview-and-ready-to-print.test.ts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/card-tool-geometry.test.ts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/catalogue-abbreviation-unique-migration.test.ts": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/catalogue.test.ts": {
+        "passed": 67,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/centering-from-rects.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/centering.test.ts": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/certificate-image-upload-audit.test.ts": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/certificate-update-atomicity.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/certificate-update-route.test.ts": {
+        "passed": 179,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/correction-audit-index-migration.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/crop-geometry.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/db-migration-safety.test.ts": {
+        "passed": 49,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/db-push-bypass-policy.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/dev-vite-fs-allow.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/dockerignore-build-context.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/edit-conflict.test.ts": {
+        "passed": 40,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/estimate-credit-consumption-owner-binding.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/estimate-credit-idempotency.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grade-kind-rule.test.ts": {
+        "passed": 24,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grader-certificate-read-rate-limit.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grader-edit-submission-rate-limit.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grader-group3-auth-permission.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grader-noop-audit.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-compact-header-review-layout.test.ts": {
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-compactness-pass.test.ts": {
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-credit-owner-binding.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-density-pass.test.ts": {
+        "passed": 20,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-final-polish.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-grade-stage-layout.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-identify-lookup.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-identity-verification.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-persistence-lifecycle.test.ts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-rarity-picker-hotfix.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-rarity-single-select.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-release-scope.test.ts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-retire-duplicate-tab.test.ts": {
+        "passed": 19,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-review-summary.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-shortcut-lifecycle.test.ts": {
+        "passed": 76,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-stage1-rarity-usability.test.ts": {
+        "passed": 41,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-stages.test.ts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-stale-grade-race.test.ts": {
+        "passed": 123,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-unified-admin-shell.test.ts": {
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workflow-compact.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workflow-header-overlap.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workflow-runtime.test.ts": {
+        "passed": 38,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workflow.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workstation-layout-fix.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workstation-shell.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workstation-ux-redesign.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/grading-workstation-ux.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/label-font-integrity.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/last-card-context-storage.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/measurement-math.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/migrate-advisory-lock.test.ts": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/migration-checksum-drift.test.ts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/mv700-tcgdex-identification.test.ts": {
+        "passed": 31,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/mvgs-calibration-validation.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/mvgs-guard-strip.test.ts": {
+        "passed": 34,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/mvgs-input-builder.test.ts": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/mvgs-scoring.test.ts": {
+        "passed": 124,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/node-runtime-floor.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/normalize-cert-id.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-0042-state-semantics.test.ts": {
+        "passed": 29,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-0045-application-parity.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-admin-capability.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-admin-control-shell-integration.test.ts": {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 11,
+        "status": "passed"
+      },
+      "tests/partner-certificate-origin.test.ts": {
+        "passed": 54,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-completion-cascade.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-admin-integration.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-admin-migration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-fault-injection.test.ts": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-fingerprint.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-g3f-blockers.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-import-migration.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-import-service.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-migration.test.ts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-query-plan.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-reconciliation-concurrency.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-reconciliation-service.test.ts": {
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-runtime.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-scale.test.ts": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-service.test.ts": {
+        "passed": 49,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-validation-migration.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-connector-validation-service.test.ts": {
+        "passed": 32,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-credit-admin-service.test.ts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-credit-reservation-service.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-credit-schema-classification.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-dashboard-admin-ui.test.ts": {
+        "passed": 46,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-dashboard-auth.test.ts": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-dashboard-integration.test.ts": {
+        "passed": 37,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-dashboard-risk-equivalence.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-dashboard-service.test.ts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-dashboard-ui-render.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-db-topology.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-definer-ownership.test.ts": {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 15,
+        "status": "failed"
+      },
+      "tests/partner-definer-transitive-reachability.test.ts": {
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-final-owner-invariant.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-full-pilot-workflow.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-g6d-migration-upgrade.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-grading-bridge-migration.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-integration-seams.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-invitation-redaction.test.ts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-lockout-decay.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-lockout-recovery.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-login-invite-ui.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-login-rate-limit-integration.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-main-reconciliation-merge-loss.test.ts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-management-admin-ui.test.ts": {
+        "passed": 20,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-management-integration.test.ts": {
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-management-migration.test.ts": {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 10,
+        "status": "failed"
+      },
+      "tests/partner-management-test-hooks.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-management-ux-runtime.test.ts": {
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-management-ux.test.ts": {
+        "passed": 105,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-mfa-enrolment-mandatory.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-mfa-factor-hardening.test.ts": {
+        "passed": 19,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-network-admin-ui.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-onboarding-controls-source.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-onboarding-matrix.test.ts": {
+        "passed": 20,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-onboarding-ux.test.ts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-origin-approval-gate.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-per-card-credit-lifecycle.test.ts": {
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-pilot-flag-controls-ui.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-portal-credit-ui.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-portal-credit-view.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-portal-mount-integration.test.ts": {
+        "passed": 28,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-public-routes-integration.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-rbac-bootstrap.test.ts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-rbac-migration.test.ts": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-rbac-parity.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-real-r2-storage.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-realistic-migrator-proof.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-recovery-cardinality.test.ts": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-reset-delivery-integration.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-reset-delivery.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-rls-isolation.test.ts": {
+        "passed": 75,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-role-allowlist.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-rollback.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-runtime-integration.test.ts": {
+        "passed": 38,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-schema-parity.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-shop-workflow-source.test.ts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-submission-credit-lifecycle.test.ts": {
+        "passed": 31,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-submission-lifecycle-migration.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-submission-wizard-ui.test.ts": {
+        "passed": 49,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-submission-workflow.test.ts": {
+        "passed": 46,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-team-management-ui.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-user-management-migration.test.ts": {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 1,
+        "status": "failed"
+      },
+      "tests/partner-user-management-ui-render.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-wallet-backfill-route.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-wallet-migration.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-wallet-provisioning.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-wallet-service.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/partner-workflow-apis.test.ts": {
+        "passed": 49,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/pokemon-handbook.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/pokemon-knowledge-migration.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/pokemon-knowledge-routes.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/pokemon-knowledge.test.ts": {
+        "passed": 24,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/pokemon-rarity-catalogue.test.ts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/preflight-read-only-session.test.ts": {
+        "passed": 26,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/print-approval-gate.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/print-lifecycle.test.ts": {
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/print-workflow-migration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/print-workflow-routes.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/print-workflow-service.test.ts": {
+        "passed": 19,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/printable-grade-safety.test.ts": {
+        "passed": 46,
+        "failed": 0,
+        "skipped": 2,
+        "status": "passed"
+      },
+      "tests/pristine.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/production-regression-correction-2026-07-19.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-concurrency.integration.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-engines.test.ts": {
+        "passed": 84,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-event-identity.integration.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-evidence-scope.test.ts": {
+        "passed": 49,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-hardening.test.ts": {
+        "passed": 53,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-migration.integration.test.ts": {
+        "passed": 38,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-redaction.test.ts": {
+        "passed": 67,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-refresh-limit.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-routes.integration.test.ts": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-seed.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-surface.test.ts": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/project-control-verification-and-identity.test.ts": {
+        "passed": 50,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/promo-suffix-redos.test.ts": {
+        "passed": 43,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/rarity-ai-stub.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/rarity-legacy-audit.test.ts": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/rarity-mapping-routes.integration.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/rarity-picker-dom.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/rarity-structured-compat.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/rarity-structured-migration.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/reference-number.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/release-rollback-packaging.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/set-library-postgres.integration.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/set-library.test.ts": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/social-studio-phase1.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/staff-auth-hardening.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/staff-login-group3-5-auth.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/staff-print-capability-route.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/structured-variant-apply.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/structured-variant-persistence.test.ts": {
+        "passed": 61,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/structured-variant-validate.test.ts": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/super-admin-correction-mode-behaviour.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/super-admin-correction-mode-repair.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/super-admin-correction-mode-route.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/super-admin-ip-allowlist.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/variant-derive.test.ts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/variant-line-consolidation.test.ts": {
+        "passed": 39,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-action-categories.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-action-novelty.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-action-reference-background-gate.integration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-action-replacement-gate.integration.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-ai-provider-architecture.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-artwork-revisions-route.integration.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-artwork-revisions-store.integration.test.ts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-artwork-versioning.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-b2-backup.integration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-backend.test.ts": {
+        "passed": 34,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-card-factory.test.ts": {
+        "passed": 20,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-client-zero-provider-actions.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-creature-concept.test.ts": {
+        "passed": 14,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-creature-designer-plan.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-creature-designer.integration.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-double-pay-route-spy.integration.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-evolution-diversity.test.ts": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-evolution-gate.integration.test.ts": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-export-concurrency.integration.test.ts": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-export-facade.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-export-jobs.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-export-store.integration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-feature-flags-route-spy.integration.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-feature-flags-store.integration.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-feature-flags.test.ts": {
+        "passed": 17,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-feature-state-generation-types.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-fetch-art-stored-pointer.test.ts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-founder-spend-control-client.test.ts": {
+        "passed": 31,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-generation-guard.integration.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-generation-idempotency-store.integration.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-generation-idempotency-store.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-generation-idempotency.test.ts": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-generation-lifecycle.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-guardrails.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-higgsfield-401-disconnect.test.ts": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-higgsfield-observability.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-idempotency-client.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-identity-action-novelty-scoring.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-identity-drift-gate.integration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-identity-evolution-scoring.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-identity-gate.test.ts": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-identity-pose-scoring.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-image-count.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-image-integrity.test.ts": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-legacy-first-generation-route-proof.integration.test.ts": {
+        "passed": 8,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-locked-character-replace.integration.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-model-policy.test.ts": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-ops-route-spy.integration.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-ops-status.integration.test.ts": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-phase10-prereqs.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-pose-diversity-gate.integration.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-pose-diversity.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-provider-connection.test.ts": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-provider-job-id.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-provider-status.test.ts": {
+        "passed": 15,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-provider.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-quality.test.ts": {
+        "passed": 22,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-reconcile.test.ts": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-spend-gate-route-spy.integration.test.ts": {
+        "passed": 5,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-spend-guard-phase2.integration.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-spend-guard-phase3a.integration.test.ts": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-spend-guard-phase3b-model-policy.integration.test.ts": {
+        "passed": 18,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-stored-image-client.test.ts": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-studio-background-validator.test.ts": {
+        "passed": 9,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-studio-finish.test.ts": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      },
+      "tests/vq-verification-fixes.test.ts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "status": "passed"
+      }
+    }
+  },
+  "executionFloors": {
+    "exitCode": 1
+  },
+  "storageAfter": {
+    "exitCode": 2
+  },
+  "green": false
+}

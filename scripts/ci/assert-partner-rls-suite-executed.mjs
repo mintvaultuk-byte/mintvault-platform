@@ -20,8 +20,8 @@
  * So CI asserts EXECUTION, not merely configuration: the file must appear in the report, must run
  * at least its floor of tests, and must report ZERO skipped.
  *
- * The floor is set just below the current count so adding tests never breaks the build, while
- * deleting or gating-out a block does.
+ * The floor is the MEASURED count, not a margin below it. `>= min` still lets the suite grow
+ * freely; a margin only ever buys silent room to delete evidence.
  *
  * Usage: node scripts/ci/assert-partner-rls-suite-executed.mjs <vitest-json-report>
  */
@@ -34,10 +34,14 @@ const EXPECTED = [
   // missing / empty / malformed context, no leak through the reporting views, no self-topup of the
   // credit ledger, and the RLS+FORCE+policy coverage sweep that catches a new tenant table added
   // without protection.
-  // Currently 69 executed / 0 skipped (the merge split this file into TWO suites on separate
-  // databases); floor set just below so adding tests never breaks the
-  // build while deleting or gating-out a block does.
-  { file: "tests/partner-rls-isolation.test.ts", min: 68 },
+  // 68 -> 85 (2026-08-07). The comment here claimed "currently 69 executed" and the floor sat at
+  // 68 — but nobody re-measured after the merge split this file into two suites on separate
+  // databases. The real count is 85 (32 + 1 + 52), so the floor was stale by SEVENTEEN and any
+  // seventeen of these isolation proofs could have been deleted with CI still green.
+  // MEASURED: `run-partner-suite.mjs --all` reports passed=85 failed=0 skipped=0, and the full
+  // vitest report agrees. The floor is now the true count: adding tests still never breaks the
+  // build, deleting even one does.
+  { file: "tests/partner-rls-isolation.test.ts", min: 85 },
 ];
 
 const reportPath = process.argv[2];

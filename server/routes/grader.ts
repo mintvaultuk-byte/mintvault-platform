@@ -16,7 +16,7 @@
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { sendServerError } from "../lib/error-response";
-import { requireAdmin } from "../auth";
+import { requireAdmin, requireSuperAdmin } from "../auth";
 import { getR2SignedUrl } from "../r2";
 import { storage } from "../storage";
 import { requireCapability, authenticateStaff } from "../staff";
@@ -48,6 +48,9 @@ import {
   isPartnerOriginatedCert,
   checkGradePublishGates,
 } from "../grader";
+// Partner assignment lives in partner-owned code so the protected grader module stays untouched.
+import { assignPartnerCerts } from "../partner/grading-assignment";
+import { mirrorPartnerApproval, mirrorPartnerRejection } from "../partner/grading-review-mirror";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -1039,6 +1042,18 @@ export function registerGraderRoutes(app: Express): void {
     return res.json({ ok: true, count: r.count });
   });
 
+  app.post("/api/admin/graders/assign-partner", requireAdmin, async (req: Request, res: Response) => {
+    const { partner_user_id, cert_ids } = req.body || {};
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await assignPartnerCerts(
+      String(partner_user_id),
+      Array.isArray(cert_ids) ? cert_ids.map(Number) : [],
+      adminUser
+    );
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, count: r.count });
+  });
+
   app.post("/api/admin/graders/reassign", requireAdmin, async (req: Request, res: Response) => {
     const { grader_id, cert_ids } = req.body || {};
     const adminUser = (req.session as any).adminEmail || "admin";
@@ -1056,47 +1071,104 @@ export function registerGraderRoutes(app: Express): void {
   });
 
   // ── Admin: approve / reject a grader-submitted (pending_review) cert ────────
-  app.post("/api/admin/certificates/:id/approve-grader-grade", requireAdmin, async (req: Request, res: Response) => {
-    const certId = parseInt(String(req.params.id), 10);
-    const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await approveGraderCert(certId, adminUser);
-    if (!r.ok) return res.status(r.status).json({ error: r.error });
-    return res.json({ ok: true, gradingStatus: "approved" });
-  });
+  app.post(
+    "/api/admin/certificates/:id/approve-grader-grade",
+    requireSuperAdmin,
+    async (req: Request, res: Response) => {
+      const certId = parseInt(String(req.params.id), 10);
+      const adminUser = (req.session as any).adminEmail || "admin";
+      const r = await approveGraderCert(certId, adminUser);
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      // Partner workflow state is mirrored AFTER the engine has gated and committed the approval,
+      // so partner cards pass exactly the same publish gates as HQ cards through the same code.
+      // A conflict is surfaced, never swallowed: reporting a clean approval over a work item that
+      // did not move is the silent-failure shape this codebase guards against elsewhere.
+      /**
+       * F1. Every non-success mirror outcome is now surfaced with the condition NAMED.
+       *
+       * Previously only `conflict` was checked and everything else fell through to
+       * `{ ok: true }` — including `not_partner`, which the old pending_review-keyed gate returned
+       * for a partner card whose settlement had failed. An operator retrying after fixing the cause
+       * got HTTP 200 over a destination that was still stuck in_grading with every credit reserved
+       * and zero debits. A retry now either completes settlement (`settled_on_retry`) or reports the
+       * fail-closed reason code.
+       *
+       * The first attempt can still THROW out of the mirror when settlement refuses; that is caught
+       * here rather than becoming an unhandled rejection, and reported with the same shape.
+       */
+      let mirror;
+      try {
+        mirror = await mirrorPartnerApproval(certId, adminUser);
+      } catch (err) {
+        const reasonCode =
+          typeof (err as { code?: unknown } | null)?.code === "string"
+            ? String((err as { code: string }).code)
+            : "settlement_unknown_failure";
+        return res.status(409).json({
+          error: "Partner credit settlement did not complete; the certificate is approved but unsettled.",
+          code: "partner_settlement_failed",
+          reason: reasonCode,
+          gradingStatus: "approved",
+        });
+      }
+      if (mirror.kind === "conflict") {
+        return res.status(409).json({ error: "Partner work item changed; refresh and try again" });
+      }
+      if (mirror.kind === "settlement_failed") {
+        return res.status(409).json({
+          error: "Partner credit settlement did not complete; the certificate is approved but unsettled.",
+          code: "partner_settlement_failed",
+          reason: mirror.reasonCode,
+          detail: mirror.message,
+          destinationSubmissionId: mirror.destinationSubmissionId,
+          gradingStatus: "approved",
+        });
+      }
+      return res.json({ ok: true, gradingStatus: "approved", partnerMirror: mirror.kind });
+    }
+  );
 
-  app.post("/api/admin/certificates/:id/reject-grade", requireAdmin, async (req: Request, res: Response) => {
+  app.post("/api/admin/certificates/:id/reject-grade", requireSuperAdmin, async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
     const adminUser = (req.session as any).adminEmail || "admin";
     const reason = typeof (req.body || {}).reason === "string" ? (req.body.reason as string).slice(0, 1000) : null;
     const r = await rejectCertGrade(certId, reason, adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
+    const mirror = await mirrorPartnerRejection(certId);
+    if (mirror.kind === "conflict") {
+      return res.status(409).json({ error: "Partner work item changed; refresh and try again" });
+    }
     return res.json({ ok: true, gradingStatus: "assigned" });
   });
 
   // ── Admin grade-review namespace ────────────────────────────────────────────
   // Drives the SAME grading panel (mounted with apiBase="/api/admin/grade-review"
   // + adminReview) to review a grader-submitted (pending_review) cert with the
-  // full inspection tools. requireAdmin, PII-free (reuses the grader builders),
+  // full inspection tools. requireSuperAdmin, PII-free (reuses the grader builders),
   // NOT grader-locked, pending_review-gated, NON-publishing. Approve/Reject stay
   // the existing approve-grader-grade / reject-grade endpoints below.
-  app.get("/api/admin/grade-review/certificates/:id/grading", requireAdmin, async (req: Request, res: Response) => {
-    const certId = parseInt(String(req.params.id), 10);
-    const a = await getCertAssignment(certId);
-    if (!a) return res.status(404).json({ error: "Certificate not found" });
-    if (a.gradingStatus !== "pending_review")
-      return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
-    let grading = await buildCertGradingPayload(certId);
-    if (!grading) return res.status(404).json({ error: "Certificate not found" });
-    // Self-heal an empty card_name from the confirmed snapshot (see grader GET).
-    if (!(grading as any).cardName || String((grading as any).cardName).trim() === "") {
-      const { repairEmptyIdentityFromSnapshot } = await import("../scan-ingest-service");
-      if (await repairEmptyIdentityFromSnapshot(certId)) {
-        grading = (await buildCertGradingPayload(certId)) ?? grading;
+  app.get(
+    "/api/admin/grade-review/certificates/:id/grading",
+    requireSuperAdmin,
+    async (req: Request, res: Response) => {
+      const certId = parseInt(String(req.params.id), 10);
+      const a = await getCertAssignment(certId);
+      if (!a) return res.status(404).json({ error: "Certificate not found" });
+      if (a.gradingStatus !== "pending_review")
+        return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+      let grading = await buildCertGradingPayload(certId);
+      if (!grading) return res.status(404).json({ error: "Certificate not found" });
+      // Self-heal an empty card_name from the confirmed snapshot (see grader GET).
+      if (!(grading as any).cardName || String((grading as any).cardName).trim() === "") {
+        const { repairEmptyIdentityFromSnapshot } = await import("../scan-ingest-service");
+        if (await repairEmptyIdentityFromSnapshot(certId)) {
+          grading = (await buildCertGradingPayload(certId)) ?? grading;
+        }
       }
+      return res.json(grading);
     }
-    return res.json(grading);
-  });
-  app.get("/api/admin/grade-review/certificates/:id/images", requireAdmin, async (req: Request, res: Response) => {
+  );
+  app.get("/api/admin/grade-review/certificates/:id/images", requireSuperAdmin, async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
     const a = await getCertAssignment(certId);
     if (!a) return res.status(404).json({ error: "Certificate not found" });
@@ -1106,7 +1178,7 @@ export function registerGraderRoutes(app: Express): void {
     if (!images) return res.status(404).json({ error: "Certificate not found" });
     return res.json(images);
   });
-  app.put("/api/admin/grade-review/certificates/:id/grade", requireAdmin, async (req: Request, res: Response) => {
+  app.put("/api/admin/grade-review/certificates/:id/grade", requireSuperAdmin, async (req: Request, res: Response) => {
     try {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
@@ -1122,21 +1194,25 @@ export function registerGraderRoutes(app: Express): void {
   // Card-tool / AI panel actions (recrop, manual-centering, detect-card-bounds,
   // identify, analyze, …). The review panel reuses the same inspection tools, so
   // proxy these to the unchanged admin handlers — exactly like the grader proxy,
-  // but gated on requireAdmin + pending_review (no grader-ownership check). Without
+  // but gated on requireSuperAdmin + pending_review (no grader-ownership check). Without
   // this, the card tool's saves 404'd to the SPA in review mode ("Unexpected token
   // '<'" / Centering save failed). PII-stripped to match this namespace.
-  app.post("/api/admin/grade-review/certificates/:id/:action", requireAdmin, async (req: Request, res: Response) => {
-    const action = String(req.params.action);
-    if (!GRADER_PROXY_ACTIONS.has(action)) return res.status(404).json({ error: "Unknown action" });
-    const certId = parseInt(String(req.params.id), 10);
-    const a = await getCertAssignment(certId);
-    if (!a) return res.status(404).json({ error: "Certificate not found" });
-    if (a.gradingStatus !== "pending_review")
-      return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
-    const origJson = res.json.bind(res);
-    (res as any).json = (body: any) => origJson(stripGraderPii(body));
-    const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-    req.url = `/api/admin/certificates/${certId}/${action}${qs}`;
-    return (req.app as any).handle(req, res);
-  });
+  app.post(
+    "/api/admin/grade-review/certificates/:id/:action",
+    requireSuperAdmin,
+    async (req: Request, res: Response) => {
+      const action = String(req.params.action);
+      if (!GRADER_PROXY_ACTIONS.has(action)) return res.status(404).json({ error: "Unknown action" });
+      const certId = parseInt(String(req.params.id), 10);
+      const a = await getCertAssignment(certId);
+      if (!a) return res.status(404).json({ error: "Certificate not found" });
+      if (a.gradingStatus !== "pending_review")
+        return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+      const origJson = res.json.bind(res);
+      (res as any).json = (body: any) => origJson(stripGraderPii(body));
+      const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+      req.url = `/api/admin/certificates/${certId}/${action}${qs}`;
+      return (req.app as any).handle(req, res);
+    }
+  );
 }

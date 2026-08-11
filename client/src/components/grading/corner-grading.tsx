@@ -1,16 +1,13 @@
 import { useState } from "react";
 import { Square } from "lucide-react";
 
-export interface CornerValues {
-  frontTL: number;
-  frontTR: number;
-  frontBL: number;
-  frontBR: number;
-  backTL: number;
-  backTR: number;
-  backBL: number;
-  backBR: number;
-}
+// MOVED to shared/legacy-grade-fallback.ts so the SERVER can run the identical
+// fallback maths for the partner grading adapter. Re-exported here unchanged, so every
+// existing import path in this component tree keeps working. One implementation, no fork.
+export type { CornerValues } from "@shared/legacy-grade-fallback";
+export { calcCornerSubgrade } from "@shared/legacy-grade-fallback";
+import type { CornerValues } from "@shared/legacy-grade-fallback";
+import { calcCornerSubgrade } from "@shared/legacy-grade-fallback";
 
 interface Props {
   values: CornerValues;
@@ -88,29 +85,6 @@ export function CornerSelect({
       ))}
     </select>
   );
-}
-
-export function calcCornerSubgrade(v: CornerValues): { grade: number; worstKey: string } {
-  const entries: [string, number][] = [
-    ["Front Top-Left", v.frontTL],
-    ["Front Top-Right", v.frontTR],
-    ["Front Bottom-Left", v.frontBL],
-    ["Front Bottom-Right", v.frontBR],
-    ["Back Top-Left", v.backTL],
-    ["Back Top-Right", v.backTR],
-    ["Back Bottom-Left", v.backBL],
-    ["Back Bottom-Right", v.backBR],
-  ];
-  // 0 is the "unset" sentinel (dropdown shows "—"; the minimum real grade is 1).
-  // Option A — full marks by default: a card with NO zone marked carries no
-  // recorded deduction, so it scores a perfect 10 and a flawless Pristine 10
-  // finalizes without forcing the grader to type 10 into all eight zones.
-  // Grading is deduction-driven: mark a specific zone LOWER and the subgrade
-  // follows the worst MARKED zone (partial input still scores that zone, not 0).
-  const set = entries.filter(([, g]) => g > 0);
-  if (set.length === 0) return { grade: 10, worstKey: "" };
-  const worst = set.reduce((a, b) => (a[1] <= b[1] ? a : b));
-  return { grade: worst[1], worstKey: worst[0] };
 }
 
 export default function CornerGrading({ values, subgrade, onChange, overrideGrade, onOverride }: Props) {

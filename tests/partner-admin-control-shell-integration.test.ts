@@ -63,6 +63,30 @@ let adminBase: string;
 let partnerBase: string;
 let ADMIN_EMAIL: string;
 
+/**
+ * CI WIRING GUARD — deliberately OUTSIDE the gate below.
+ *
+ * Found by an independent Matrix A/B assurance run, not by CI: `PARTNER_ADMIN_TEST` and
+ * `PARTNER_ADMIN_TEST_RUNTIME` had NEVER appeared in .github/workflows/ci.yml. The similarly
+ * spelled `PARTNER_CONNECTOR_ADMIN_TEST` pair belongs to a different suite, which is what made the
+ * omission survive review. The consequence was the exact silent-green failure mode this repository
+ * has now hit four times: vitest reported this FILE as passed while all 11 tests — requireAdmin
+ * rejection, partner/location/user suspend, session revoke, the feature-flag write path, emergency
+ * stop, MFA reset, read-endpoint authorisation and the suspend concurrency proof — executed nothing.
+ *
+ * An env-var check cannot catch an edited `describe.skip`, so this guard is paired with an
+ * execution floor in scripts/ci/assert-partner-pilot-suites-executed.mjs, which asserts EXECUTION.
+ */
+describe("Super Admin control shell coverage is wired up", () => {
+  it("is not silently skipped in CI", () => {
+    if (!process.env.CI && !process.env.GITHUB_ACTIONS) return;
+    expect(
+      isLocal,
+      "PARTNER_ADMIN_TEST and PARTNER_ADMIN_TEST_RUNTIME must be disposable loopback PostgreSQL URLs in CI"
+    ).toBe(true);
+  });
+});
+
 (isLocal ? describe : describe.skip)("Super Admin control shell (main app, real requireAdmin, disposable DB)", () => {
   beforeAll(async () => {
     // env BEFORE importing storage/auth (server/db.ts reads MINTVAULT_DATABASE_URL at module load)
@@ -317,8 +341,26 @@ let ADMIN_EMAIL: string;
     expect(await partnerLogin("tech@a.com")).toBe("");
     // owner@a unaffected
     expect((await partnerLogin("owner@a.com")) !== "").toBe(true);
+    /**
+     * AUDIT LIVES IN partner_management_audit, not partner_audit_events — corrected 2026-08-07.
+     *
+     * This assertion originally read partner_audit_events, matching the route's ORIGINAL inline
+     * implementation. `POST /:partnerId/users/:userId/suspend` was later consolidated onto the
+     * canonical `setPartnerUserStatus`, whose `withAudit` wrapper writes to partner_management_audit
+     * (server/partner/partner-management-service.ts) — the same consolidation the sibling MFA-reset
+     * route documents. The location-suspend route above still uses `adminAudit`, which is why its
+     * partner_audit_events assertion is correct and this one was not.
+     *
+     * It went unnoticed because PARTNER_ADMIN_TEST was never set in ci.yml, so this file has been
+     * `describe.skip` in CI since it was written. Found by an independent Matrix A/B assurance run.
+     *
+     * The assertion is NOT weakened: it still requires exactly one audit row, for the right action,
+     * the right entity and a SUCCEEDED result — it just reads the table the code actually writes.
+     */
     const au = await admin.query(
-      "SELECT 1 FROM partner_audit_events WHERE action='partner_user_suspended' AND record_id=$1",
+      `SELECT 1 FROM partner_management_audit
+        WHERE action_type='partner_user_suspended' AND entity_type='partner_user'
+          AND entity_id=$1 AND result='succeeded'`,
       [UA_TECH]
     );
     expect(au.rowCount).toBe(1);

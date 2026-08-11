@@ -61,7 +61,7 @@ async function seedMintVaultTables(): Promise<void> {
     status_history jsonb not null default '[]'::jsonb, updated_at timestamptz not null default now()
   )`);
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
-  await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text, submission_id integer)");
+  await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text)");
   await admin.query("CREATE TABLE label_prints (id serial primary key, certificate_id integer)");
   await admin.query(`CREATE TABLE audit_log (
     id serial primary key, entity_type text not null, entity_id text not null, action text not null,

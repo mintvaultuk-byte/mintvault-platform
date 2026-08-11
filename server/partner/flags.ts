@@ -60,7 +60,12 @@ export async function resolveGlobalFlag(flag: string): Promise<boolean> {
       [flag]
     );
     return rows.length === 1 && rows[0].enabled === true;
-  } catch {
+  } catch (err) {
+    // Log the reason: a bare swallow here made a bounded DB failure (lock_timeout, acquire
+    // timeout, query_timeout) indistinguishable from "flag is off", leaving an operator with a
+    // closed portal and no signal pointing at lock contention. The `return false` below is the
+    // fail-closed contract and MUST stay.
+    console.error("[partner] global flag read failed — failing closed:", flag, (err as Error).message);
     return false; // fail closed
   }
 }

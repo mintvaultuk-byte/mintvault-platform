@@ -7,9 +7,18 @@
  *   PARTNER_CONNECTOR_VALIDATION_RT_URL=postgresql://partner_connector_val_app_test:synthetic@127.0.0.1:5592/dispo \
  *   npx vitest run tests/partner-connector-validation-service.test.ts
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Client } from "pg";
 import { applyMigrationsRealistic, pinAccountingTopologyTo } from "./helpers/partner-realistic-db";
+
+vi.mock("../server/r2", () => ({
+  headR2: vi.fn(async () => ({
+    lastModified: new Date("2026-08-05T00:00:00.000Z"),
+    contentLength: 1024,
+    contentType: "image/jpeg",
+    eTag: '"validation-fixture"',
+  })),
+}));
 
 const ADMIN = process.env.PARTNER_CONNECTOR_VALIDATION_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_VALIDATION_RT_URL;
@@ -92,16 +101,21 @@ async function seedFullSubmission(tenantId: string, locationId: string, userId: 
 
   for (let i = 0; i < cards.length; i++) {
     const c = cards[i];
+    const cardId = `50000000-0000-0000-0000-${String(subCounter * 100 + i + 1).padStart(12, "0")}`;
     await admin.query(
-      `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, quantity, declared_value_pence)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+      `INSERT INTO partner_submission_cards
+         (id, tenant_id, submission_id, sequence_number, card_name, quantity, declared_value_pence, front_image_key, back_image_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
+        cardId,
         tenantId,
         subId,
         i + 1,
         c.cardName === undefined ? "Test Card" : c.cardName,
         c.quantity ?? 1,
         c.declaredValuePence === undefined ? 1000 : c.declaredValuePence,
+        `partner-submissions/${tenantId}/${subId}/${cardId}/front-seed.jpg`,
+        `partner-submissions/${tenantId}/${subId}/${cardId}/back-seed.jpg`,
       ]
     );
   }
@@ -135,6 +149,9 @@ async function claimAndStartValidating(
     beforeAll(async () => {
       admin = new Client({ connectionString: ADMIN });
       await admin.connect();
+      await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+      await admin.query("CREATE SCHEMA public");
+      await admin.query("GRANT ALL ON SCHEMA public TO public");
       await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
       await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
       await applyMigrationsRealistic(admin, ADMIN!);
@@ -510,9 +527,18 @@ async function claimAndStartValidating(
         // Mutate the source directly: addCard() itself does NOT bump partner_submissions.version (only
         // editSubmissionDraft does) — this manual UPDATE tests the version-mismatch detection path
         // deliberately, independent of whether any real draft-mutation function happens to trigger it.
+        const extraCardId = "50000000-0000-0000-0000-000000009999";
         await admin.query(
-          "INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, quantity) VALUES ($1,$2,2,'Extra Card',1)",
-          [A, submissionId]
+          `INSERT INTO partner_submission_cards
+             (id, tenant_id, submission_id, sequence_number, card_name, quantity, front_image_key, back_image_key)
+           VALUES ($1,$2,$3,2,'Extra Card',1,$4,$5)`,
+          [
+            extraCardId,
+            A,
+            submissionId,
+            `partner-submissions/${A}/${submissionId}/${extraCardId}/front-seed.jpg`,
+            `partner-submissions/${A}/${submissionId}/${extraCardId}/back-seed.jpg`,
+          ]
         );
         await admin.query(
           "UPDATE partner_submissions SET card_count = card_count + 1, version = version + 1 WHERE id=$1",

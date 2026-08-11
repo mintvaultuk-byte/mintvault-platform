@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, createMintvaultCertificatesTable, createMintvaultLabelPrintsTable } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 
@@ -119,7 +119,7 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
      */
     await provisionRealisticRoles(admin);
     // synthetic PRE-EXISTING MintVault data that must survive the rollback
-    await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial primary key, cert_id text, secret text)");
+    await createMintvaultCertificatesTable(admin);
     await admin.query("INSERT INTO certificates (cert_id, secret) VALUES ('MV1','KEEP-A'),('MV2','KEEP-B')");
     await admin.query("ALTER TABLE certificates OWNER TO pn_migrator").catch(() => {}); // owned by migrator too (after roles exist)
     /**
@@ -150,9 +150,7 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
     await admin.query(
       "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
     );
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS label_prints (id serial primary key, certificate_id integer, created_at timestamptz not null default now())"
-    );
+    await createMintvaultLabelPrintsTable(admin);
     // 0018 builds a correction index on the MintVault audit log.
     await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
       id serial primary key, entity_type text not null, entity_id text not null, action text not null,

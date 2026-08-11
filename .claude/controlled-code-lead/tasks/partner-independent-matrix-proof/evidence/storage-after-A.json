@@ -1,0 +1,38 @@
+{
+  "matrix": "A",
+  "phase": "after",
+  "endpoint": "http://127.0.0.1:9020",
+  "buckets": [
+    {
+      "name": "partner-real-r2-proof",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-conn",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-fpilot",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-gradhttp",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-mount",
+      "objects": 0,
+      "sample": []
+    },
+    {
+      "name": "partner-real-r2-proof-wf",
+      "objects": 0,
+      "sample": []
+    }
+  ],
+  "totalObjects": 0
+}

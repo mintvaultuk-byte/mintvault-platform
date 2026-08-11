@@ -1,0 +1,26 @@
+Two Super Admins approve the two DIFFERENT cards of ONE two-card submission.
+
+  T1 UPDATE cert 101 -> 1 row(s) locked (no block: different row)
+  T2 UPDATE cert 102 -> 1 row(s) locked (no block: different row)
+  T1 completeness read -> all_approved = false
+  T2 completeness read -> all_approved = false
+
+  committed state: [{"certificate_id":101,"status":"approved"},{"certificate_id":102,"status":"approved"}]
+
+================ VERDICT ================
+  transactions that would call settlePartnerCreditForDestinationStatus: 0
+  A4-F1 REPRODUCED — BOTH cards approved, NEITHER settles.
+  both work items approved? true
+=========================================
+
+CONTROL (sequential, no overlap): settles = 1 (expected 1)
+
+================ CANDIDATE FIX ================
+  T1 locked the destination set
+  T2 attempted the same lock -> blocked? true  (must be true)
+  T1 completeness -> all_approved = false
+  T2 unblocked after T1 committed
+  T2 completeness -> all_approved = true
+
+  settles = 1 -- FIX WORKS (exactly one)
+===============================================

@@ -8,6 +8,7 @@
  */
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
+import type { PoolClient } from "pg";
 import { partnerRuntimeQuery, withTenant } from "./db";
 import { writePartnerAudit, writePartnerSecurity } from "./audit";
 import { readEmergencyState } from "./emergency";
@@ -201,6 +202,126 @@ async function recordFailure(
   });
 }
 
+// ---------------- second-factor failure tracking + lockout (0053) ----------------
+//
+// The password step has had a lockout since Phase 1 (recordFailure above). The SECOND factor — the
+// control whose entire purpose is to survive a stolen password — had none: a failed
+// POST /auth/mfa returned 401 and left no trace anywhere. Combined with an IP-only rate limit,
+// that made the challenge grindable from rotating addresses, so the password was effectively the
+// only factor. These three functions are the account-side ceiling.
+//
+// SEPARATE COLUMNS, NOT failed_login_count / locked_until. See migration 0053's header for the
+// full argument; the short version is that partnerLogin() zeroes the password counters on every
+// SUCCESSFUL login, so an attacker holding the password owns a reset primitive and a shared
+// counter would never have armed.
+
+/**
+ * True if this account is currently barred from attempting a second-factor verification.
+ *
+ * Read INSIDE the caller's tenant transaction so it is subject to the same RLS as everything else
+ * and cannot be asked about another tenant's user.
+ */
+export async function isPartnerMfaLocked(c: PoolClient, userId: string): Promise<boolean> {
+  const { rows } = await c.query<{ locked: boolean }>(
+    "SELECT (mfa_locked_until IS NOT NULL AND mfa_locked_until > now()) AS locked FROM partner_users WHERE id=$1",
+    [userId],
+  );
+  return rows[0]?.locked === true;
+}
+
+/**
+ * Record a failed second-factor verification and arm the lockout at the threshold.
+ *
+ * Mirrors recordFailure() deliberately, including the details that were bug fixes there:
+ *
+ *   * The increment is ATOMIC in SQL (`failed_mfa_count + 1`), so concurrent guesses — the exact
+ *     shape of the attack this defends against — cannot lost-update the counter and evade the lock.
+ *   * The lock is armed in the SAME statement, at the same threshold and interval as the password
+ *     path (LOCKOUT_THRESHOLD / LOCKOUT_MINUTES), so there is one lockout policy to reason about
+ *     and not two.
+ *   * Arming is guarded by `mfa_locked_until IS NULL OR mfa_locked_until <= now()`. Without that,
+ *     an attempt made while a lock is LIVE would re-evaluate `now() + 15 minutes` on every request
+ *     (failed_mfa_count is already past the threshold), letting a caller hold an account's second
+ *     factor offline indefinitely — the denial-of-service already fixed on the login path via
+ *     countTowardsLockout:false. Here the caller cannot even reach a live lock, because the route
+ *     refuses first; the guard exists so that ordering is not the only thing preventing it.
+ *
+ * The failure is ALWAYS audited, whether or not it arms the lock — the finding was as much about
+ * invisibility as about the missing ceiling.
+ */
+export async function recordPartnerMfaFailure(
+  c: PoolClient,
+  e: { tenantId: string; userId: string; sessionId?: string | null; ip?: string | null; reason: string },
+): Promise<{ locked: boolean; count: number }> {
+  const { rows } = await c.query<{ failed_mfa_count: number; armed: boolean }>(
+    `UPDATE partner_users
+        SET failed_mfa_count = failed_mfa_count + 1,
+            mfa_locked_until = CASE
+              WHEN failed_mfa_count + 1 >= $2
+               AND (mfa_locked_until IS NULL OR mfa_locked_until <= now())
+              THEN now() + ($3 || ' minutes')::interval
+              ELSE mfa_locked_until END
+      WHERE id = $1
+      RETURNING failed_mfa_count, (mfa_locked_until IS NOT NULL AND mfa_locked_until > now()) AS armed`,
+    [e.userId, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)],
+  );
+  const count = rows[0]?.failed_mfa_count ?? 0;
+  const locked = rows[0]?.armed === true;
+  await writePartnerAudit(c, {
+    tenantId: e.tenantId,
+    actorUserId: e.userId,
+    sessionId: e.sessionId ?? null,
+    action: "partner_mfa_failure",
+    ip: e.ip ?? null,
+    reason: e.reason,
+  });
+  if (locked && count === LOCKOUT_THRESHOLD) {
+    // Only on the transition, so a security event means "this account just locked" rather than
+    // "someone tried again while locked", which is a different and much noisier signal.
+    await writePartnerSecurity(c, {
+      tenantId: e.tenantId,
+      severity: "high", // higher than the password lock: reaching this needs a VALID password first
+      kind: "partner_mfa_locked",
+      detail: { userId: e.userId, failures: count },
+    });
+  }
+  return { locked, count };
+}
+
+/**
+ * Retire the failure counter after a SUCCESSFUL second-factor verification.
+ *
+ * This is the only routine clearing path, and it is why a legitimate user who mistypes one code is
+ * not affected: four wrong codes leave the counter at 4, the fifth correct one resets it to 0.
+ * (A completed password reset also clears it — see consumePasswordResetToken — because that path
+ * revokes every session and re-arms the whole login sequence anyway.)
+ *
+ * Note what is NOT here: a successful password login does not clear it. That omission is the whole
+ * point of using separate columns.
+ */
+export async function clearPartnerMfaFailures(c: PoolClient, userId: string): Promise<void> {
+  await c.query("UPDATE partner_users SET failed_mfa_count=0, mfa_locked_until=NULL WHERE id=$1", [userId]);
+}
+
+/**
+ * Retire a SPENT lock before a fresh attempt is judged.
+ *
+ * Same reasoning as the login path's equivalent reset, and the same defect if omitted: once
+ * failed_mfa_count sits at the threshold, the arming expression `failed_mfa_count + 1 >= threshold`
+ * is satisfied by the FIRST failure after every expiry, so one request per interval would hold an
+ * account's second factor offline forever. Re-locking must cost a full fresh THRESHOLD of failures.
+ *
+ * `mfa_locked_until <= now()` is re-checked inside the UPDATE so a concurrent request that has just
+ * armed a live lock cannot have it cleared here.
+ */
+export async function retireExpiredPartnerMfaLock(c: PoolClient, userId: string): Promise<void> {
+  await c.query(
+    `UPDATE partner_users SET failed_mfa_count = 0, mfa_locked_until = NULL
+      WHERE id = $1 AND mfa_locked_until IS NOT NULL AND mfa_locked_until <= now()`,
+    [userId],
+  );
+}
+
 /** Mark the MFA challenge passed for the current session (after verifyTotp/recovery succeeds). */
 export async function markSessionMfaPassed(tenantId: string, sessionId: string): Promise<void> {
   await withTenant({ tenantId }, (c) => c.query("UPDATE partner_sessions SET mfa_passed=true WHERE id=$1", [sessionId]));
@@ -276,9 +397,15 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
     // password. This is the recovery path; nothing else weakens. Note the ORDER of guarantees:
     // credential_version still increments and every live session is still revoked below.
     await c.query(
+      // 0053: the SECOND-factor lock is cleared here too. A password reset is proof of mailbox
+      // control and revokes every session below, so leaving an MFA lock armed across it would
+      // strand a legitimate user for no security gain — the attacker's mfa-pending session is
+      // already dead. This is the ONLY clearing path besides a successful verification; a
+      // successful password LOGIN deliberately does not clear it (see recordPartnerMfaFailure).
       `UPDATE partner_users
           SET password_hash=$2, credential_version=credential_version+1,
-              failed_login_count=0, locked_until=NULL
+              failed_login_count=0, locked_until=NULL,
+              failed_mfa_count=0, mfa_locked_until=NULL
         WHERE id=$1`,
       [user_id, newHash],
     );

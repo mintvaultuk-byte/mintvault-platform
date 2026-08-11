@@ -33,6 +33,8 @@ function baseSource(): FingerprintSource {
         language: "en",
         declaredValuePence: 100000,
         quantity: 1,
+        frontImageKey: "partner-submissions/tenant/submission/card-1/front-a.jpg",
+        backImageKey: "partner-submissions/tenant/submission/card-1/back-a.jpg",
       },
       {
         sequenceNumber: 2,
@@ -45,6 +47,8 @@ function baseSource(): FingerprintSource {
         language: "en",
         declaredValuePence: 80000,
         quantity: 1,
+        frontImageKey: "partner-submissions/tenant/submission/card-2/front-a.jpg",
+        backImageKey: "partner-submissions/tenant/submission/card-2/back-a.jpg",
       },
     ],
   };
@@ -94,6 +98,8 @@ describe("source fingerprint determinism", () => {
           language: "en",
           declaredValuePence: 60000,
           quantity: 1,
+          frontImageKey: "partner-submissions/tenant/submission/card-3/front-a.jpg",
+          backImageKey: "partner-submissions/tenant/submission/card-3/back-a.jpg",
         },
       ],
     };
@@ -109,6 +115,18 @@ describe("source fingerprint determinism", () => {
   it("a quantity change changes the hash", () => {
     const source = baseSource();
     const changed: FingerprintSource = { ...source, cards: [{ ...source.cards[0], quantity: 2 }, source.cards[1]] };
+    expect(calculateSourceFingerprint(source)).not.toBe(calculateSourceFingerprint(changed));
+  });
+
+  it("an image key change changes the hash", () => {
+    const source = baseSource();
+    const changed: FingerprintSource = {
+      ...source,
+      cards: [
+        { ...source.cards[0], frontImageKey: "partner-submissions/tenant/submission/card-1/front-replaced.jpg" },
+        source.cards[1],
+      ],
+    };
     expect(calculateSourceFingerprint(source)).not.toBe(calculateSourceFingerprint(changed));
   });
 

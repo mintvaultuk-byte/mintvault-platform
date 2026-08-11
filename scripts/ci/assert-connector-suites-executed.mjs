@@ -28,19 +28,24 @@
  * adding tests to a suite is fine, silently losing them is not.
  *
  * Usage: node scripts/ci/assert-connector-suites-executed.mjs <vitest-json-report>
+ *
+ * Floors re-measured 2026-08-07 against a full vitest JSON report: fingerprint 14 -> 15,
+ * import-service 17 -> 21. Every other entry already matched its measured count exactly.
+ * A floor is the MEASURED count, never a margin below it — a margin is silent room to delete
+ * evidence, which is how the pilot floor came to permit deleting seven server-authority proofs.
  */
 import { readFileSync } from "node:fs";
 
 /** @type {Array<{file: string, min: number}>} */
 const EXPECTED = [
   // Pure (no database gate) — included so an accidental exclusion is still caught.
-  { file: "tests/partner-connector-fingerprint.test.ts", min: 14 },
+  { file: "tests/partner-connector-fingerprint.test.ts", min: 15 },
   // Gated on PARTNER_CONNECTOR_RT_ADMIN / _RT_URL
   { file: "tests/partner-connector-service.test.ts", min: 49 },
   // PARTNER_CONNECTOR_VALIDATION_RT_ADMIN / _RT_URL
   { file: "tests/partner-connector-validation-service.test.ts", min: 32 },
   // PARTNER_CONNECTOR_IMPORT_RT_ADMIN / _RT_URL
-  { file: "tests/partner-connector-import-service.test.ts", min: 17 },
+  { file: "tests/partner-connector-import-service.test.ts", min: 21 },
   // PARTNER_CONNECTOR_RECON_RT_ADMIN / _RT_URL
   { file: "tests/partner-connector-reconciliation-service.test.ts", min: 23 },
   // PARTNER_CONNECTOR_RECON_LOAD_RT_ADMIN / _RT_URL
@@ -118,6 +123,15 @@ for (const { file, min } of EXPECTED) {
     );
   } else if (r.executed < min) {
     problems.push(`${file}: only ${r.executed} tests executed, expected at least ${min} — coverage was lost`);
+  } else if (r.skipped !== 0) {
+    // BACKPORTED 2026-08-09. The other five assert scripts have carried this check for months, and
+    // assert-partner-pilot-suites-executed.mjs documents its absence here in writing: a suite in
+    // THIS manifest could add two tests, skip three, stay above its floor and stay green. A floor
+    // that only counts what ran cannot see what stopped running.
+    problems.push(
+      `${file}: ${r.skipped} test(s) SKIPPED. A skip is invisible in an exit code — either an ` +
+        `it.skip was committed or a runtime gate turned coverage off silently`
+    );
   }
 }
 

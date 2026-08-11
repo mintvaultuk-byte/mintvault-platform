@@ -532,6 +532,32 @@ export const certificates = pgTable("certificates", {
     .default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
+  /**
+   * The durable quality-review clock (migration 0063). Latest moment this physical unit entered
+   * or re-entered MintVault HQ review — written by server/grader.ts's rejection CAS, and read by
+   * the partner rating engine's rolling 180-day window.
+   *
+   * DECLARED HERE BECAUSE `certificates` IS A DRIZZLE-MANAGED TABLE. It is created by migration
+   * 0063, not by drizzle — but scripts/db/schema-registry.ts derives its managed-table allowlist
+   * live from this file, and the drift guard in scripts/db/preflight-schema.ts is TABLE-granular
+   * with no column-level check. So a column that exists in the database and not in this file is
+   * one `drizzle-kit push` away from being proposed for DROP. That is not hypothetical: it is
+   * exactly how `status_updated_at` below spent its whole life, and a hostile-review agent
+   * reproduced the diff on a locally rebuilt estate on 2026-08-09.
+   *
+   * NOT grading data. It participates in no score, weight, threshold, bracket or gate.
+   */
+  reviewEnteredAt: timestamp("review_entered_at", { withTimezone: true }),
+  /**
+   * Written by the certificate shipping-status route. Created by migration 0063; before that it
+   * existed ONLY because server/routes.ts ran `ADD COLUMN IF NOT EXISTS` at boot, which is why it
+   * was missing from this file. Same drift hazard as the column above — see that note.
+   *
+   * `timestamp` without a timezone, matching the boot-time DDL exactly: a declaration that
+   * disagreed with the live column would produce a different type depending on how the database
+   * was built.
+   */
+  statusUpdatedAt: timestamp("status_updated_at"),
   // ── Restricted-grader assignment, CERT-LEVEL (migrateGraderCertSchema) ─────
   // Grader v2 re-grains assignment from submissions → certificates so each card
   // in a multi-card submission is graded/locked independently. The v1

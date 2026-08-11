@@ -292,16 +292,41 @@ describe("P0-F lockout recovery coverage is wired up", () => {
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(Buffer.from(token, "base64url")).toHaveLength(32);
 
-    const { rows } = await admin.query<{ token_hash: string; expires_at: string; used_at: string | null }>(
-      "SELECT token_hash, expires_at, used_at FROM partner_password_reset_tokens WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1",
+    /**
+     * TTL IS MEASURED ON ONE CLOCK, DELIBERATELY.
+     *
+     * `expires_at` is computed by POSTGRES (`now() + '30 minutes'::interval` in
+     * server/partner/auth.ts). This assertion previously compared it against Node's `Date.now()` —
+     * two independent clocks — against the exact boundary `<= 30`. That passes only while the
+     * database clock is not ahead of the application clock.
+     *
+     * An independent Matrix A/B assurance run caught it: the suite was 16/16 in both matrices, then
+     * failed deterministically a few hours later on the same machine with `expected 30.00025 to be
+     * less than or equal to 30`, once the Docker VM clock had drifted ~111 ms ahead of the host.
+     * The same skew exists on any CI runner whose database container clock leads the job clock.
+     *
+     * Asking the database for the interval removes the second clock entirely. This is STRICTER than
+     * before, not looser: the window narrows from "28 to 30 minutes" to "within one second of 30".
+     */
+    const { rows } = await admin.query<{
+      token_hash: string;
+      ttl_seconds: string;
+      used_at: string | null;
+    }>(
+      `SELECT token_hash,
+              EXTRACT(EPOCH FROM (expires_at - now()))::text AS ttl_seconds,
+              used_at
+         FROM partner_password_reset_tokens
+        WHERE user_id=$1
+        ORDER BY created_at DESC LIMIT 1`,
       [VICTIM]
     );
     expect(rows[0].token_hash).toBe(crypto.createHash("sha256").update(token).digest("hex"));
     // The raw token is nowhere at rest.
     expect(rows[0].token_hash).not.toBe(token);
-    const ttlMinutes = (new Date(rows[0].expires_at).getTime() - Date.now()) / 60_000;
-    expect(ttlMinutes).toBeGreaterThan(28);
-    expect(ttlMinutes).toBeLessThanOrEqual(30);
+    const ttlSeconds = Number(rows[0].ttl_seconds);
+    expect(ttlSeconds).toBeGreaterThan(30 * 60 - 60);
+    expect(ttlSeconds).toBeLessThanOrEqual(30 * 60);
     expect(rows[0].used_at).toBeNull();
   });
 
