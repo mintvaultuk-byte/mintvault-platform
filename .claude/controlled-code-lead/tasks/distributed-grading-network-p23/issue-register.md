@@ -135,3 +135,58 @@ Baseline `origin/main` **be8a501e**. Candidate **f6713a91** on
 | REC-12 | MEDIUM | The allocator ladder drives `createCertForScan`, whose only route returns 410 unconditionally; the live admin path (`storage.createCertificate`) has no gapless coverage. | Not repaired. | Reviewer grep-proven. | FOLLOW_UP |
 | REC-13 | MEDIUM | Scanner app signs EVERY request once it holds a station session, so REC-05's allowlist makes its orphan-picker, cert preview and scan-status 403. Not on the capture path. | Accepted for this release; needs per-route tenant scoping. | — | FOLLOW_UP |
 | REC-14 | LOW | Grading protected-file guards gained a 4th founder-authorised signature (D) for the scanner evidence-revision read, citing no approval reference. | Added as a union, not a widening of the calculation-token block. | `mvgs` estate 287/287. | **OWNER_DECISION** |
+
+## Production release — EXECUTED 2026-08-11
+
+Deployed **v1069 / commit `7d20196c`** via `scripts/safe-deploy.sh prod` (GUARD 1
+passed on its own merits — `origin/main` be8a501e is an ancestor; not bypassed).
+GUARD 2 verified the live server reports `7d20196c`. Both Fly machines healthy.
+Rollback target preserved: **v1068 / 6f182624 / image
+`mintvault:deployment-01KYN8J3JPPTKWZ281B99X2345`**.
+
+Intentional production mutations, in order:
+
+1. **`0035_partner_certificate_origin.sql` applied** — owner-authorised, single
+   file, checksum `f2f0ab27…3115f`… (`f2f0ab27cf0eeb129a98d22a3fb91b3a4da0db6e1a3889f2caf2c30a5f2ec609`),
+   DDL + journal row in ONE transaction. Rehearsed first on a disposable PG17
+   cluster built to production's exact 169-column shape with 836 rows.
+   Before → after: certs 836→836, counter 836→836, journal 31→32, origin columns
+   0→11, stamped 0 (no backfill), 5 CHECKs all `convalidated`, trigger
+   `tgenabled='A'`, partial index present, 0 rows violating the new constraints.
+   `UNAUTHORISED_APPLIED=[]` — 0030/0041/0042/0043/0074 were not read, planned or
+   applied.
+2. **Application deploy** to v1069.
+
+`cert_counter.last_issued` = **836**, unchanged. No certificate mutated.
+
+### DGN-12 — EXTERNAL BLOCKER: the Partner runtime credential is wrong on production
+
+`/api/partner/me` and `/api/partner/stations/enrolment-locations` return **503**.
+Read-only diagnosis from inside the machine:
+
+| Fact | Measured |
+| --- | --- |
+| `PARTNER_DATABASE_URL` present | yes |
+| …authenticates as | **`neondb_owner`** |
+| …`rolbypassrls` | **true** |
+| `PARTNER_MFA_ENC_KEY` | **absent from `fly secrets list` entirely** |
+
+This **contradicts the DGN-11 record above**, which stated both secrets were set
+at v1067→v1068 using the restricted `partner_runtime_app` LOGIN. That record is
+incorrect: only `PARTNER_DATABASE_URL` is deployed, and its value is the
+owner/BYPASSRLS credential the runbook explicitly forbids.
+
+The surface is nevertheless **safe**: two independent gates are closed. Gate 1
+fails on the incoherent PARTNER_* env set (URL present, MFA key absent), and the
+Gate 2 capability check added in this release would independently refuse a
+`rolbypassrls=true` runtime credential (`PARTNER_RUNTIME_BYPASSRLS_FORBIDDEN`).
+No tenant data is reachable. This is the PART 9 guard doing real work on live
+production on its first day.
+
+**Consequence:** station enrolment, the HQ MFA operator and the physical LiDE
+canary are all unreachable until the credential is corrected. Requires the Neon
+console (`CREATE ROLE`) and `fly secrets set` — owner-physical actions this
+session cannot and must not work around. Reusing `neondb_owner` is exactly what
+must not happen.
+
+Status: **EXTERNAL_BLOCKER — owner action required.**
