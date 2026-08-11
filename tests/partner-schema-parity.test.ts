@@ -136,9 +136,22 @@ describe("partner schema ↔ migration parity", () => {
       // policy 0041 omitted on partner_submission_credit_holds. It contains an INTENTIONAL
       // DROP INDEX, so the runner requires --allow-destructive for it.
       "0043_partner_credit_hold_per_card.sql",
-      // 0044 widens partner submission lifecycle states after handover and stores an immutable
+      "0044_partner_mfa_pending_lifecycle.sql",
+      // Distributed Grading Network foundation: station identity/calibration,
+      // durable derivative jobs, and server-owned opaque evidence staging.
+      // These are deliberately migration-authoritative raw-SQL surfaces.
+      "0045_partner_stations.sql",
+      "0046_scanner_processing_jobs.sql",
+      "0047_scanner_evidence_staging.sql",
+      // 0048 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
-      "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+      //
+      // RENUMBERED from 0044 during the 2026-08-11 mainline reconciliation. Production had
+      // already applied a DIFFERENT 0044 (the MFA pending lifecycle above), and the runner
+      // rejects duplicate NUMBERS before it runs anything — so the two could not coexist. The
+      // MFA file could not move (renaming an applied migration makes it pending again and
+      // re-runs it); this one was unapplied everywhere the release targets, so it moved instead.
+      "0048_partner_submission_lifecycle_and_location_snapshot.sql",
     ]);
   });
 

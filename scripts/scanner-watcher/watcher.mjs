@@ -110,13 +110,19 @@ function ingestOrigin() {
 }
 
 function nextCertGuess() {
-  // Best-effort prediction so the guide can show "MV<n>". Server actually
-  // allocates the id, so this is just UI hint — fall back to "—" if we can't
-  // parse a sensible integer out of the last cert.
-  if (!lastUploadedCert) return null;
-  const m = /^MV(\d+)$/i.exec(lastUploadedCert);
-  if (!m) return null;
-  return `MV${parseInt(m[1], 10) + 1}`;
+  // REMOVED: this used to compute `MV${parseInt(lastUploadedCert) + 1}` locally.
+  //
+  // A scanner must NEVER derive an MV number by adding one to the last number it
+  // happened to see. The MV number is the physical card's permanent identity and
+  // is issued solely by the server's transactional allocator. A local `last + 1`
+  // is wrong the moment any other station, or the admin UI, issues in between —
+  // and `lastUploadedCert` is rehydrated from a state file across restarts, so
+  // the guess could be seeded from an arbitrarily stale number.
+  //
+  // The guide window renders "—" for null, which is the correct display: the
+  // number is unknown until the server returns it. Kept as a function returning
+  // null so the state-file shape is unchanged for any already-installed guide.
+  return null;
 }
 
 function writeState() {

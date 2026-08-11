@@ -1,5 +1,37 @@
 # CLAUDE.md — MintVault Project Guardrails
 
+## MANDATORY COMPLETION CONTROLLER
+
+Before every build, audit, repair, security, migration or release task, read and obey:
+
+[`docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md`](docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md)
+
+This controller is permanent project governance.
+
+It applies to every future prompt unless the owner explicitly overrides it.
+
+Its core rule is:
+
+Fix all actionable in-scope BLOCKER/HIGH defects in the current pass.
+
+Do not stop merely to report another problem.
+
+Once the release bar passes, stop auditing and declare COMPLETE.
+
+## MANDATORY GRAPH OF LOOPS CONTROLLER
+
+For every substantial engineering, build, audit, repair, security, migration, or release task, read and obey:
+
+[`docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md`](docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md)
+
+Use it together with [`docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md`](docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md).
+
+The Graph controller prevents false-green optimisation. The No-Bullshit controller prevents endless non-completion. Both are permanent project governance unless explicitly overridden by the owner.
+
+Both controllers supplement this file. Where rules conflict, the protected grading,
+security, payment, production-data, deployment and destructive-action guardrails in
+this file remain authoritative.
+
 > **Owner:** Non-technical founder
 > **Project:** MintVault — Collectibles grading & certification platform (PSA-style)
 > **Stage:** MVP in progress
@@ -25,6 +57,7 @@
 ## 🧭 How to Work With Me
 
 ### Communication style
+
 - Explain what you're doing **before** you do it — like narrating your work
 - When I ask a question, give me the short answer first, then the detail if I ask for it
 - If you're unsure about something, **ask me** rather than guessing
@@ -32,11 +65,13 @@
 - Flag risks clearly: use words like "⚠️ WARNING" or "🚨 RISKY" so I don't miss them
 
 ### Decision-making
+
 - If a task has multiple approaches, give me 2–3 options with trade-offs in plain English
 - For anything that touches **money, user data, security, or core grading logic** — always pause and confirm with me
 - For small UI tweaks, copy fixes, or non-breaking improvements — go ahead and just do it, then show me the result
 
 ### When you encounter errors
+
 - Don't silently retry 10 times. If something fails twice, explain the problem to me
 - If a fix requires changing something outside the scope of what I asked for, flag it
 - Never "fix" a problem by removing a feature
@@ -46,20 +81,23 @@
 ## 📋 Project Overview
 
 ### What is MintVault?
+
 MintVault is a **collectibles grading and certification service** — similar to PSA or BGS but for a broader range of collectibles. Customers submit items, we grade them on a standardised scale, and issue tamper-evident certificates with labels, QR codes, and NFC verification. We accept **online payments via Stripe**.
 
 ### Business-critical features (do not break)
-| Feature | Why it matters |
-|---|---|
-| Grading system (1–10 + special grades) | Core product — this IS our service |
-| Label generation (PNG + PDF) | Physical product shipped to customers |
-| Certificate lookup (by cert ID) | Public trust & verification — customers scan QR codes |
-| Stripe payments | Revenue — we can't operate without this |
-| Admin authentication (2-step) | Only I should have access to the admin panel |
-| Image storage (R2 presigned URLs) | Customer item photos — privacy matters |
-| Email notifications (Resend) | Customer communication |
+
+| Feature                                | Why it matters                                        |
+| -------------------------------------- | ----------------------------------------------------- |
+| Grading system (1–10 + special grades) | Core product — this IS our service                    |
+| Label generation (PNG + PDF)           | Physical product shipped to customers                 |
+| Certificate lookup (by cert ID)        | Public trust & verification — customers scan QR codes |
+| Stripe payments                        | Revenue — we can't operate without this               |
+| Admin authentication (2-step)          | Only I should have access to the admin panel          |
+| Image storage (R2 presigned URLs)      | Customer item photos — privacy matters                |
+| Email notifications (Resend)           | Customer communication                                |
 
 ### Things that are NOT yet built (potential future work)
+
 - Public customer accounts / login
 - Customer-facing submission portal
 - Tracking / shipping integration
@@ -158,28 +196,30 @@ TanStack Query v5 for all server state. No global client state store. API calls 
 
 ### Environment variables
 
-| Variable | Purpose |
-|---|---|
-| `MINTVAULT_DATABASE_URL` | PostgreSQL connection string |
-| `ADMIN_PASSWORD` | Admin login password |
-| `ADMIN_PIN` | Admin 2-step PIN (6 digits) |
-| `SESSION_SECRET` | Express-session signing secret |
-| `SIGNED_URL_SECRET` | HMAC key for presigned image URLs |
-| `RESEND_API_KEY` | Transactional email (Resend) |
-| `R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | Cloudflare R2 |
-| `REPLIT_DOMAINS` / `REPLIT_DEV_DOMAIN` | Used for email callback URLs and Stripe webhook registration |
+| Variable                                                                       | Purpose                                                      |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `MINTVAULT_DATABASE_URL`                                                       | PostgreSQL connection string                                 |
+| `ADMIN_PASSWORD`                                                               | Admin login password                                         |
+| `ADMIN_PIN`                                                                    | Admin 2-step PIN (6 digits)                                  |
+| `SESSION_SECRET`                                                               | Express-session signing secret                               |
+| `SIGNED_URL_SECRET`                                                            | HMAC key for presigned image URLs                            |
+| `RESEND_API_KEY`                                                               | Transactional email (Resend)                                 |
+| `R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | Cloudflare R2                                                |
+| `REPLIT_DOMAINS` / `REPLIT_DEV_DOMAIN`                                         | Used for email callback URLs and Stripe webhook registration |
 
 ---
 
 ## 🛡️ Code Quality Rules
 
 ### Before making any change, Claude Code must:
+
 1. Confirm which file(s) will be modified
 2. Explain the change in plain English
 3. Check that `npm run check` (TypeScript) still passes after changes
 4. Verify the dev server still starts with `npm run dev`
 
 ### Coding standards
+
 - All types and schemas go in `shared/schema.ts` — never duplicate type definitions
 - All database queries go through `server/storage.ts` via the `IStorage` interface
 - All API routes live in `server/routes.ts`
@@ -189,6 +229,7 @@ TanStack Query v5 for all server state. No global client state store. API calls 
 - Never commit `.env` files or log secrets to the console
 
 ### When adding a new feature:
+
 1. Add types/schema to `shared/schema.ts`
 2. Add storage methods to `server/storage.ts`
 3. Add API routes to `server/routes.ts`
@@ -227,25 +268,29 @@ Copy this into your vault as your main project hub:
 # MintVault Dashboard
 
 ## Current Sprint
+
 - [ ] Task 1
 - [ ] Task 2
 - [ ] Task 3
 
 ## Status
-| Area | Status | Last Updated |
-|---|---|---|
-| Grading system | ✅ Working | |
-| Label generation | ✅ Working | |
-| Stripe payments | ✅ Working | |
-| Admin panel | ✅ Working | |
-| Certificate lookup | ✅ Working | |
-| Customer portal | 🔲 Not started | |
-| Marketing site | 🔲 Not started | |
+
+| Area               | Status         | Last Updated |
+| ------------------ | -------------- | ------------ |
+| Grading system     | ✅ Working     |              |
+| Label generation   | ✅ Working     |              |
+| Stripe payments    | ✅ Working     |              |
+| Admin panel        | ✅ Working     |              |
+| Certificate lookup | ✅ Working     |              |
+| Customer portal    | 🔲 Not started |              |
+| Marketing site     | 🔲 Not started |              |
 
 ## Recent Decisions
+
 - [[Decisions/YYYY-MM-DD — Decision title]]
 
 ## Links
+
 - Replit project: [link]
 - Stripe dashboard: [link]
 - Cloudflare R2: [link]
@@ -258,20 +303,25 @@ Every time you (or Claude Code) make a significant decision, create a note:
 
 ```markdown
 # Decision: [Short title]
+
 **Date:** YYYY-MM-DD
 **Status:** Decided / Revisiting / Reversed
 
 ## Context
+
 What situation led to this decision?
 
 ## Options considered
+
 1. Option A — pros / cons
 2. Option B — pros / cons
 
 ## Decision
+
 What we chose and why.
 
 ## Consequences
+
 What changed as a result. Any follow-up actions.
 ```
 
@@ -279,39 +329,48 @@ What changed as a result. Any follow-up actions.
 
 ```markdown
 # Feature: [Name]
+
 **Status:** 🔲 Not started / 🟡 In progress / ✅ Done / ❌ Blocked
 **Priority:** High / Medium / Low
 **Date added:** YYYY-MM-DD
 
 ## What it does
+
 Plain English description of the feature from a user's perspective.
 
 ## Why it matters
+
 Business reason for building this.
 
 ## Requirements
+
 - [ ] Requirement 1
 - [ ] Requirement 2
 
 ## Technical notes
+
 Any relevant details from Claude Code sessions.
 
 ## Related
+
 - [[other notes]]
 ```
 
 ### How to use Obsidian with Claude Code sessions
 
 **Before a Claude Code session:**
+
 1. Open your Dashboard.md — check what's in the current sprint
 2. Open the relevant Feature or Bug note
 3. Copy any requirements or context you want to give Claude Code
 
 **During a Claude Code session:**
+
 - Paste context from your Obsidian notes when starting a task
 - Copy this CLAUDE.md into your project repo root so Claude Code reads it automatically
 
 **After a Claude Code session:**
+
 1. Update your Dashboard.md with task status
 2. Create a Decision note if any significant choices were made
 3. Add a Daily Note summarising what was done
@@ -330,11 +389,7 @@ To make Claude Desktop aware of your Obsidian vault, you can set up an MCP serve
   "mcpServers": {
     "obsidian-vault": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/path/to/your/obsidian/vault/MintVault"
-      ]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/your/obsidian/vault/MintVault"]
     }
   }
 }
@@ -354,14 +409,14 @@ To make Claude Desktop aware of your Obsidian vault, you can set up an MCP serve
 
 ## 🚨 Risk Register
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Stripe webhook breaks | Payments fail, revenue lost | Never touch webhook code without explicit approval. Test in Stripe test mode first. |
-| Database schema change breaks data | Existing records lost or corrupted | Always back up before migrations. Explain every schema change in plain English. |
-| Auth bypass | Unauthorised access to admin panel | Never weaken auth. Never add public endpoints that expose admin data. |
-| R2 images become public | Customer photos exposed | Always use presigned URLs. Never change URL signing logic. |
-| Label rendering breaks | Wrong info on physical product | Test label changes visually before approving. Never change dimensions or DPI. |
-| Dependency vulnerability | Security risk | Only add well-known, maintained packages. Check npm audit. |
+| Risk                               | Impact                             | Mitigation                                                                          |
+| ---------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- |
+| Stripe webhook breaks              | Payments fail, revenue lost        | Never touch webhook code without explicit approval. Test in Stripe test mode first. |
+| Database schema change breaks data | Existing records lost or corrupted | Always back up before migrations. Explain every schema change in plain English.     |
+| Auth bypass                        | Unauthorised access to admin panel | Never weaken auth. Never add public endpoints that expose admin data.               |
+| R2 images become public            | Customer photos exposed            | Always use presigned URLs. Never change URL signing logic.                          |
+| Label rendering breaks             | Wrong info on physical product     | Test label changes visually before approving. Never change dimensions or DPI.       |
+| Dependency vulnerability           | Security risk                      | Only add well-known, maintained packages. Check npm audit.                          |
 
 ---
 
@@ -369,10 +424,10 @@ To make Claude Desktop aware of your Obsidian vault, you can set up an MCP serve
 
 Use this section to keep a running record of significant changes made during Claude Code sessions.
 
-| Date | What changed | Files affected | Who approved |
-|---|---|---|---|
-| 2026-03-27 | Created CLAUDE.md guardrails | `CLAUDE.md` | Founder |
-| | | | |
+| Date       | What changed                 | Files affected | Who approved |
+| ---------- | ---------------------------- | -------------- | ------------ |
+| 2026-03-27 | Created CLAUDE.md guardrails | `CLAUDE.md`    | Founder      |
+|            |                              |                |              |
 
 ---
 
@@ -443,7 +498,7 @@ commit, active task, and next authorised action before continuing); a
 self-test suite at `.claude/governance-tests/` (run:
 `bash .claude/governance-tests/run-all.sh`) that checks the reviewers are
 read-only and the warning hook still detects dangerous commands; a
-"Definition of Proof" so nothing is called *fixed* unless it was actually
+"Definition of Proof" so nothing is called _fixed_ unless it was actually
 verified beyond Claude's own machine; ten specialist read-only reviewers
 (frontend, backend, database, security, storage, infrastructure,
 deployment, provider, performance, UI); and before/after architecture

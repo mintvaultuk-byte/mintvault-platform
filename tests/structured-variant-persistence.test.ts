@@ -1006,9 +1006,16 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
+        // D) Scanner evidence revision selection. Restricted to the immutable-master query and
+        //    the explicit current pointer so the grade workflow cannot be widened under this
+        //    exception. Both tokens are SQL identifiers, so they are matched against addedCode.
+        //    Kept identical in both guards.
+        const signatureD =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC || signatureD,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
         expect(addedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
@@ -1029,7 +1036,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bcertificateOrigin\s*\(/.test(addedJs),
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
         ).toBe(true);
-        expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
+        expect(addedJs).not.toMatch(
+          /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i
+        );
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

@@ -25,9 +25,13 @@ import { partnerSessionMiddleware } from "./session";
 import { partnerApiRouter } from "./routes";
 import { partnerSubmissionRouter } from "./submission-routes";
 import { partnerCustomerRouter } from "./customer-routes";
+import { partnerCatalogueRouter } from "./catalogue-routes";
+import { partnerGradingRouter } from "./grading-routes";
+import { partnerStationRouter } from "./station-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { definerModelViolations } from "./definer-guard";
+import { getPartnerRuntimeCapability } from "./admin-capability";
 import { partnerPortalEnvStatus } from "../config";
 
 /** The single path prefix the authenticated partner surface is served from. */
@@ -47,6 +51,25 @@ let definerHealthy = false;
 async function checkDefinerModelOnce(): Promise<boolean> {
   if (definerHealthy) return true;
   try {
+    // The CONNECTED CREDENTIAL must not bypass RLS.
+    //
+    // definerModelViolations below inspects the `partner_runtime` GROUP role's attributes. It does
+    // NOT look at current_user, so it cannot see the one misconfiguration that silently defeats
+    // every tenant boundary at once: PARTNER_DATABASE_URL pointed at an owner/BYPASSRLS login
+    // (e.g. neondb_owner) instead of the restricted `partner_runtime_app` member. Under that URL
+    // the group role is still NOBYPASSRLS, so every check below passes while RLS is off for the
+    // actual connection, and each tenant's queries return every tenant's rows.
+    //
+    // getPartnerRuntimeCapability() is exactly this check — it reads current_user's rolbypassrls
+    // over the runtime pool — but until now nothing in production called it. Wiring it here, on
+    // the gate that already fails closed and already runs on the runtime pool, is what makes the
+    // "restricted runtime credential" requirement enforced rather than merely documented.
+    const capability = await getPartnerRuntimeCapability();
+    if (!capability.ok) {
+      // eslint-disable-next-line no-console
+      console.error(`[partner] runtime DB credential rejected: ${capability.code}`);
+      return false; // fail closed; do not cache — re-check next request
+    }
     const violations = await definerModelViolations((sql, params) => partnerRuntimeQuery(sql, params));
     if (violations.length > 0) {
       // eslint-disable-next-line no-console
@@ -152,6 +175,9 @@ export function partnerPortalRouter(): Router {
 
   r.use(partnerSessionMiddleware);
   r.use(partnerApiRouter());
+  r.use(partnerCatalogueRouter()); // read-only HQ catalogue snapshot
+  r.use(partnerGradingRouter()); // partner-scoped MVGS grading adapter
+  r.use(partnerStationRouter()); // approved-station enrolment, health and calibration
   r.use(partnerSubmissionRouter()); // Phase 2 submission workflow
   r.use(partnerCustomerRouter()); // Phase 2 customer records
 

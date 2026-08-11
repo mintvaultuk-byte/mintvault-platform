@@ -239,11 +239,14 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     // permitted only if the added lines match one of the explicitly founder-authorised
     // signatures below AND contain no calculation logic. Anything else fails.
     //
-    // Two authorised signatures, kept as a UNION rather than replacing one with the other:
+    // Three authorised signatures, kept as a UNION rather than replacing one with the other:
     //   A) the identity/variant draft validation already on main;
     //   B) PR #254's print-safety work (2026-07-25 approval) — approveGraderCert validating
     //      against the shared printability rule, and applyCertGradeDraft normalising
     //      grade_type and refusing malformed kinds via a typed GradeDraftRejected.
+    //   C) the signed-station scanner release selecting only the explicit current
+    //      immutable-evidence revision for a browser working derivative. This is
+    //      evidence-pointer safety, not grade calculation.
     // A single-signature whitelist rejects the other authorised change, which is why this is
     // a union and not an overwrite.
     const calcEngine =
@@ -282,8 +285,15 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
+        // D) Scanner evidence revision selection — narrow, and BOTH tokens are required: the
+        //    immutable-master evidence class and the explicit current-revision pointer. They are
+        //    SQL identifiers, so they are matched against addedCode. This only lets the grading
+        //    read select WHICH stored master image it reads; it touches no scoring input. The
+        //    calculation-token assertion below still applies to it unchanged.
+        const signatureD =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
         expect(
-          signatureA || signatureB || signatureC,
+          signatureA || signatureB || signatureC || signatureD,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from

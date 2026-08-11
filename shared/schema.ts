@@ -1424,7 +1424,7 @@ export const cardIdentificationCorrections = pgTable(
     idxField: index("idx_card_id_corrections_field").on(t.field),
     idxCreated: index("idx_card_id_corrections_created").on(t.createdAt),
     idxRequest: index("idx_card_id_corrections_request").on(t.requestId),
-  }),
+  })
 );
 
 export const cardIdentificationRequests = pgTable(
@@ -1443,7 +1443,7 @@ export const cardIdentificationRequests = pgTable(
   (t) => ({
     uqKey: uniqueIndex("uq_card_id_requests_key").on(t.idempotencyKey),
     idxCreated: index("idx_card_id_requests_created").on(t.createdAt),
-  }),
+  })
 );
 
 export type CardIdentificationCorrection = typeof cardIdentificationCorrections.$inferSelect;
@@ -2746,3 +2746,46 @@ export const insertPcEvidenceSchema = createInsertSchema(pcEvidence).omit({ id: 
 export const insertPcBlockerSchema = createInsertSchema(pcBlockers).omit({ id: true, openedAt: true });
 export const insertPcDeploymentSchema = createInsertSchema(pcDeployments).omit({ id: true, deployedAt: true });
 export const insertPcTestRunSchema = createInsertSchema(pcTestRuns).omit({ id: true, ranAt: true });
+
+/**
+ * Append-only scanner-evidence ledger. Legacy JPEGs are recorded honestly as
+ * derived-only; only TIFF objects may be NEW_IMMUTABLE_MASTER. A recapture
+ * appends a revision and atomically switches the explicit `is_current` pointer;
+ * historical source hashes and objects are never overwritten or deleted.
+ */
+export const certificateImageEvidence = pgTable(
+  "certificate_image_evidence",
+  {
+    id: serial("id").primaryKey(),
+    certificateId: integer("certificate_id").notNull(),
+    side: varchar("side", { length: 5 }).notNull(),
+    evidenceClass: varchar("evidence_class", { length: 32 }).notNull(),
+    evidenceVersion: varchar("evidence_version", { length: 32 }).notNull().default("v1"),
+    objectKey: text("object_key").notNull(),
+    sha256: varchar("sha256", { length: 64 }).notNull(),
+    byteLength: bigint("byte_length", { mode: "number" }).notNull(),
+    pixelWidth: integer("pixel_width").notNull(),
+    pixelHeight: integer("pixel_height").notNull(),
+    bitDepth: integer("bit_depth"),
+    dpi: integer("dpi"),
+    format: varchar("format", { length: 16 }).notNull(),
+    captureMetadata: jsonb("capture_metadata").notNull().default({}),
+    workingObjectKey: text("working_object_key"),
+    workingSha256: varchar("working_sha256", { length: 64 }),
+    workingWidth: integer("working_width"),
+    workingHeight: integer("working_height"),
+    workingFormat: varchar("working_format", { length: 16 }),
+    workingSettings: jsonb("working_settings"),
+    isCurrent: boolean("is_current").notNull().default(true),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    supersededById: integer("superseded_by_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Migration 0047 creates the authoritative partial unique current-side
+    // index; Drizzle's schema DSL has no portable partial-index expression.
+    idxCurrentSide: index("idx_certificate_image_evidence_current_side").on(t.certificateId, t.side, t.isCurrent),
+    uqObjectKey: uniqueIndex("uq_certificate_image_evidence_object_key").on(t.objectKey),
+    idxSha: index("idx_certificate_image_evidence_sha").on(t.sha256),
+  })
+);

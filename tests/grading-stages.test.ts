@@ -35,7 +35,11 @@ const VARIANT_BLOCK = between("VARIANT (formerly the separate", "Card Details na
 const STAGE_CARD_DETAILS = between("STAGE 1 · CARD DETAILS", "Grading workstation — card tool");
 const STAGE_REVIEW = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
 /** Code with comments stripped (comments deliberately describe what is NOT done). */
-const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const stripComments = (s: string) =>
+  s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
 describe("stage separation (spec 1-4)", () => {
   it("the identity half of Card Details holds identification fields, not the picker or notes", () => {
@@ -64,8 +68,11 @@ describe("stage separation (spec 1-4)", () => {
   });
   it("Variant is presented as OPTIONAL and is not part of any gate", () => {
     expect(VARIANT_BLOCK).toContain("optional");
-    // The only Continue gate on Card Details is card name + number.
-    expect(FORM).toMatch(/disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\)\}/);
+    // Variant remains optional. A target-bound Canon capture is an independent
+    // evidence-safety gate and must never be bypassed by variant selection.
+    expect(FORM).toMatch(
+      /disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\) \|\| scannerCaptureRequired\}/
+    );
   });
   it("Card Details shows the permanent variant/classification summary below the picker (item 2)", () => {
     expect(VARIANT_BLOCK).toContain("<VariantSummary");
@@ -117,10 +124,18 @@ describe("stage navigation is UI-state only (spec: no save/grade/issue)", () => 
   });
   it("all nav buttons are type=button (cannot submit the form)", () => {
     // 3-stage flow: Card Details → Grade → Review, and back again.
-    for (const id of ["button-continue-to-grade", "button-back-to-card-details", "button-review-card", "button-back-to-grade"]) {
+    for (const id of [
+      "button-continue-to-grade",
+      "button-back-to-card-details",
+      "button-review-card",
+      "button-back-to-grade",
+    ]) {
       const i = FORM.indexOf(id);
       expect(i, id).toBeGreaterThan(-1);
-      expect(FORM.slice(i - 600, i)).toContain('type="button"');
+      // Find this button's opening tag rather than assuming a fixed maximum
+      // attribute length. The target-bound capture reason legitimately makes
+      // the Card Details button's attributes longer than the former 600 chars.
+      expect(FORM.slice(FORM.lastIndexOf("<button", i), i), id).toContain('type="button"');
     }
   });
   it("the retired Rarity-stage nav testids are gone", () => {
@@ -128,9 +143,12 @@ describe("stage navigation is UI-state only (spec: no save/grade/issue)", () => 
       expect(FORM).not.toContain(id);
     }
   });
-  it("Continue to Grade gates only on genuinely mandatory fields with a plain reason", () => {
+  it("Continue to Grade gates on mandatory identity and required immutable capture with plain reasons", () => {
     expect(FORM).toContain("Enter the card name and number first.");
-    expect(FORM).toMatch(/disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\)\}/);
+    expect(FORM).toContain("Complete both target-bound Canon captures first");
+    expect(FORM).toMatch(
+      /disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\) \|\| scannerCaptureRequired\}/
+    );
   });
 });
 

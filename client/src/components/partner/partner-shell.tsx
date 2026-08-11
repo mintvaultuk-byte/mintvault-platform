@@ -20,11 +20,17 @@ import {
   Users,
   MapPin,
   CreditCard,
+  ClipboardCheck,
+  Contact,
   HelpCircle,
   ShieldCheck,
   LogOut,
   PlusCircle,
   Bell,
+  PackageCheck,
+  ShoppingCart,
+  Printer,
+  Store,
 } from "lucide-react";
 import { useState } from "react";
 import "@/styles/partner-portal.css";
@@ -40,9 +46,21 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: "/partner/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
+  { href: "/partner/submissions/new", label: "New Submission", icon: PlusCircle, permission: "partner.orders.view" },
+  { href: "/partner/customers", label: "Customers", icon: Contact, permission: "partner.orders.view" },
+  { href: "/partner/grading", label: "Grading", icon: ClipboardCheck, permission: "partner.cards.assess" },
+  {
+    href: "/partner/certificates",
+    label: "Certificates / Completed",
+    icon: PackageCheck,
+    permission: "partner.orders.view",
+  },
   { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
   { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
   { href: "/partner/billing", label: "Credits & Billing", icon: CreditCard, permission: "partner.credits.view" },
+  { href: "/partner/supplies", label: "Supplies", icon: ShoppingCart },
+  { href: "/partner/orders", label: "Orders", icon: Printer, permission: "partner.orders.view" },
+  { href: "/partner/public-profile", label: "Public Profile", icon: Store, permission: "partner.location.view" },
   { href: "/partner/help", label: "Help", icon: HelpCircle },
   { href: "/partner/security", label: "Security & Account", icon: ShieldCheck },
 ];

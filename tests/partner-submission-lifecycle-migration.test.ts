@@ -1,7 +1,7 @@
 /**
- * MIGRATION 0044 — post-handover submission lifecycle + immutable location snapshot.
+ * MIGRATION 0048 — post-handover submission lifecycle + immutable location snapshot.
  *
- * WHAT 0044 FIXES: 0007 bounded partner_submissions.status to exactly three values, so a shop
+ * WHAT 0048 FIXES: 0007 bounded partner_submissions.status to exactly three values, so a shop
  * could create a submission and hand it over and then the workflow simply STOPPED. There was no
  * value representing "MintVault has it", "being graded", "graded", "settling credits" or
  * "finished". The Partner dashboard could not derive ready-to-grade / grading-in-progress /
@@ -36,7 +36,7 @@ const TENANT = "cccccccc-4400-0000-0000-000000000001";
 const LOCATION = "dddddddd-4400-0000-0000-000000000001";
 const USER = "eeeeeeee-4400-0000-0000-000000000001";
 
-/** The five states 0044 introduces, in workflow order. */
+/** The five states 0048 introduces, in workflow order. */
 const NEW_STATES = ["received", "grading", "graded", "awaiting_settlement", "completed"] as const;
 /** The three 0007 permitted; all must survive. */
 const ORIGINAL_STATES = ["draft", "submitted_to_mintvault", "cancelled"] as const;
@@ -77,7 +77,7 @@ async function insertSubmission(status: string): Promise<string> {
   return r.rows[0].id;
 }
 
-describe("Migration 0044 — submission lifecycle + location snapshot (PostgreSQL 17)", () => {
+describe("Migration 0048 — submission lifecycle + location snapshot (PostgreSQL 17)", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("submission-lifecycle");
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
@@ -161,7 +161,7 @@ describe("Migration 0044 — submission lifecycle + location snapshot (PostgreSQ
       [id]
     );
     expect(r.rows[0].current_name).toBe("Renamed Later");
-    // Before 0044 there was no second value here at all — the join WAS the answer, so this row
+    // Before 0048 there was no second value here at all — the join WAS the answer, so this row
     // would now claim it originated at "Renamed Later".
     expect(r.rows[0].snapshot).toBe("Snapshot At Insert");
 
@@ -228,7 +228,7 @@ describe("Migration 0044 — submission lifecycle + location snapshot (PostgreSQ
     ).rejects.toThrow(/foreign key|violates/i);
   });
 
-  it("0044 adds NO partner-to-certificate column, because 0035 already provides one", async () => {
+  it("0048 adds NO partner-to-certificate column, because 0035 already provides one", async () => {
     // Guards against a future well-meaning duplicate link. The link is certificates.origin_partner_id.
     const dup = await admin.query(
       `SELECT column_name FROM information_schema.columns

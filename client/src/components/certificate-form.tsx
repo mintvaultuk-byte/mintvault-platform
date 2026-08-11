@@ -1,4 +1,14 @@
-import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, type ReactNode, type ReactElement } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+  cloneElement,
+  isValidElement,
+  type ReactNode,
+  type ReactElement,
+} from "react";
 import { classifyLookupError } from "@/lib/lookup-errors";
 import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,6 +17,7 @@ import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
 import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
+import CaptureWizard from "@/components/grading/capture-wizard";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { certificateFormEntriesToSend } from "@shared/certificate-field-ownership";
@@ -198,9 +209,7 @@ type ProtectedField = AutofillField | "designations";
  * previously edited certificate. Exported so the isolation contract is
  * unit-testable without a DOM (this repo has no jsdom/RTL).
  */
-export function buildFormStateFromCert(
-  certInput: (CertificateRecord & Record<string, any>) | null | undefined
-) {
+export function buildFormStateFromCert(certInput: (CertificateRecord & Record<string, any>) | null | undefined) {
   const cert = certInput as (CertificateRecord & Record<string, any>) | null | undefined;
   const initRarity = cert?.rarity || "";
   const initVariant = cert?.variant || "";
@@ -1470,6 +1479,7 @@ export default function CertificateForm({
     setError("");
     setWfStage(0);
     setWfMaxStage(0);
+    setScannerCaptureComplete(false);
 
     // Per-certificate refs: the conflict snapshot and the consolidated-scheme
     // flag describe the OLD cert; re-derive them for the new one.
@@ -1926,6 +1936,13 @@ export default function CertificateForm({
   // (manual-card-tool.tsx), never caching mount-time sizes.
   const [wfStage, setWfStage] = useState(0);
   const [wfMaxStage, setWfMaxStage] = useState(0);
+  // Targeted scanner capture is a Card Details concern. This local completion
+  // flag only removes the arming panel after the server accepts both immutable
+  // masters; image consumers are separately refetched below.
+  const [scannerCaptureComplete, setScannerCaptureComplete] = useState(false);
+  const scannerCaptureRequired = Boolean(
+    certificate?.id && !certificate.frontImagePath && !certificate.backImagePath && !scannerCaptureComplete
+  );
 
   /**
    * PR A · tell the grading workstation whether the Grade stage is ACTIVE.
@@ -1972,7 +1989,7 @@ export default function CertificateForm({
             approvalStageActive: wfStage === GRADE_STAGE,
           })
         : rawWorkstationSlot,
-    [rawWorkstationSlot, wfStage],
+    [rawWorkstationSlot, wfStage]
   );
   const goToStage = (i: number) => {
     // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
@@ -2056,1472 +2073,1506 @@ export default function CertificateForm({
     // Bounded viewport-height wrapper for /admin (unchanged 4.5rem admin-header
     // offset). The canonical shell fills this exactly (h-full) — no black band.
     <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace-bound">
-    <CanonicalGradingWorkstationShell
-      previewAside={
-        showsPreviewAside(wfStage) ? (
-          <WorkstationPreviewAside
-            certificateId={certificate?.id ?? null}
-            frontFile={frontImage}
-            backFile={backImage}
-            // Live front-certificate preview on Card Details (0) and Review (2)
-            // — the SAME component, the SAME canonical server renderer, in the SAME
-            // left-column position directly under the card image. Grade (1) is the
-            // only stage without it, because that stage renders the grading
-            // workstationSlot in this column instead.
-            //
-            // CONSOLIDATION NOTE: current main gated this on stages 0, 1 and 3 —
-            // Card, Rarity and Review under the old FOUR-stage numbering. Card and
-            // Rarity are now the single "Card Details" stage 0 and Review is 2, so
-            // `0 || 2` is the exact same coverage, not a narrowing. The founder spec
-            // additionally requires the preview to stay visible for the WHOLE of
-            // Card Details, which this satisfies.
-            //
-            // The panel is fed from CURRENT in-memory `form` state — never from the
-            // saved `certificate` prop — so it tracks typing immediately and never
-            // waits for autosave, an explicit save, a server round-trip or stage
-            // navigation. Rollback protection comes from the surrounding machinery,
-            // not from this mount: the auto-save replay posts the newest state, the
-            // cert→form resync only fills EMPTY fields, and the per-certificate
-            // isolation effect re-seeds everything on a card switch so cert A's values
-            // can never appear under cert B.
-            //
-            // KNOWN LIMIT (pre-existing, not introduced here): that resync treats ""
-            // as fillable, so a DELIBERATELY CLEARED cardName/setName/cardNumber/year
-            // can be re-filled from the refetched row if the `certificate` prop is
-            // refreshed mid-edit (e.g. AI Identify) before the clear is persisted —
-            // the same class PR #245 fixed for rarity/finish. Tracked separately; do
-            // not read the line above as a guarantee for cleared fields.
-            //
-            // Which Card-stage fields visibly move the preview is decided by the
-            // canonical renderer, NOT by this list: the front label prints card name,
-            // year + set name, the set suffix, the consolidated variant line, the
-            // grade panel and the card number. `language` and `collectionCode` are
-            // sent for cert-shape fidelity but are NOT printed on the front label
-            // today (buildCollectionLine is dead code), so they are deliberately not
-            // claimed as live-updating — and no dead label field is activated here.
-            below={
-              showsPreviewAside(wfStage) ? (
-                <CertificatePreviewPanel
-                  // Truthful caption: unsaved while editing, saved once the
-                  // auto-save lands, and explicitly NOT-authoritative after a
-                  // rejected concurrent edit.
-                  persistence={editConflict ? "conflict" : autoSaveStatus === "saved" ? "saved" : "unsaved"}
-                  // Keyed per certificate: the panel holds the rendered blob in
-                  // component state, so without a remount a "Next Card" switch left
-                  // card A's label visible under card B's image until the new render
-                  // arrived — on a surface captioned "exactly what will print".
-                  key={certificate?.id ?? "new"}
-                  fields={{
-                    // Editing an existing cert → the server starts from the SAVED
-                    // grade/subgrade columns so the black-label (Pristine) preview
-                    // matches print; absent (create flow) it renders from fields.
-                    certificateId: certificate?.id ?? null,
-                    // Send the REAL certificate number. buildPreviewFields defaults
-                    // certId to "MV-PREVIEW" and the posted object wins over the saved
-                    // row, so omitting it made the preview's cert-number strip read
-                    // "-PREVIEW" while the printed label carries the real number —
-                    // contradicting this panel's own "exactly what will print" caption.
-                    // Absent (create flow) it still falls back to the placeholder.
-                    certId: (certificate as { certId?: string } | null)?.certId ?? undefined,
-                    cardName: form.cardName,
-                    setName: form.setName,
-                    year: form.year,
-                    cardNumber: form.cardNumber,
-                    gradeType: form.gradeType,
-                    gradeOverall: form.gradeOverall,
-                    variant: form.variant,
-                    variantOther: form.variantOther,
-                    rarity: form.rarity,
-                    rarityOther: form.rarityOther,
-                    // Structured-variant codes → server derives the ONE consolidated
-                    // variant line (parity with print), same as the save routes.
-                    rarityCode: form.rarityCode,
-                    finishVariant: form.finishVariant,
-                    promoType: form.promoType,
-                    subsetName: form.subsetName,
-                    era: form.era,
-                    labelType: form.labelType,
-                    language: form.language,
-                  }}
-                />
-              ) : undefined
-            }
-          />
-        ) : null
-      }
-    >
-          <div className="shrink-0 space-y-1">
-            {/* Shared workstation header strip (WorkstationHeaderStrip) — 3-stage
+      <CanonicalGradingWorkstationShell
+        previewAside={
+          showsPreviewAside(wfStage) ? (
+            <WorkstationPreviewAside
+              certificateId={certificate?.id ?? null}
+              frontFile={frontImage}
+              backFile={backImage}
+              // Live front-certificate preview on Card Details (0) and Review (2)
+              // — the SAME component, the SAME canonical server renderer, in the SAME
+              // left-column position directly under the card image. Grade (1) is the
+              // only stage without it, because that stage renders the grading
+              // workstationSlot in this column instead.
+              //
+              // CONSOLIDATION NOTE: current main gated this on stages 0, 1 and 3 —
+              // Card, Rarity and Review under the old FOUR-stage numbering. Card and
+              // Rarity are now the single "Card Details" stage 0 and Review is 2, so
+              // `0 || 2` is the exact same coverage, not a narrowing. The founder spec
+              // additionally requires the preview to stay visible for the WHOLE of
+              // Card Details, which this satisfies.
+              //
+              // The panel is fed from CURRENT in-memory `form` state — never from the
+              // saved `certificate` prop — so it tracks typing immediately and never
+              // waits for autosave, an explicit save, a server round-trip or stage
+              // navigation. Rollback protection comes from the surrounding machinery,
+              // not from this mount: the auto-save replay posts the newest state, the
+              // cert→form resync only fills EMPTY fields, and the per-certificate
+              // isolation effect re-seeds everything on a card switch so cert A's values
+              // can never appear under cert B.
+              //
+              // KNOWN LIMIT (pre-existing, not introduced here): that resync treats ""
+              // as fillable, so a DELIBERATELY CLEARED cardName/setName/cardNumber/year
+              // can be re-filled from the refetched row if the `certificate` prop is
+              // refreshed mid-edit (e.g. AI Identify) before the clear is persisted —
+              // the same class PR #245 fixed for rarity/finish. Tracked separately; do
+              // not read the line above as a guarantee for cleared fields.
+              //
+              // Which Card-stage fields visibly move the preview is decided by the
+              // canonical renderer, NOT by this list: the front label prints card name,
+              // year + set name, the set suffix, the consolidated variant line, the
+              // grade panel and the card number. `language` and `collectionCode` are
+              // sent for cert-shape fidelity but are NOT printed on the front label
+              // today (buildCollectionLine is dead code), so they are deliberately not
+              // claimed as live-updating — and no dead label field is activated here.
+              below={
+                showsPreviewAside(wfStage) ? (
+                  <CertificatePreviewPanel
+                    // Truthful caption: unsaved while editing, saved once the
+                    // auto-save lands, and explicitly NOT-authoritative after a
+                    // rejected concurrent edit.
+                    persistence={editConflict ? "conflict" : autoSaveStatus === "saved" ? "saved" : "unsaved"}
+                    // Keyed per certificate: the panel holds the rendered blob in
+                    // component state, so without a remount a "Next Card" switch left
+                    // card A's label visible under card B's image until the new render
+                    // arrived — on a surface captioned "exactly what will print".
+                    key={certificate?.id ?? "new"}
+                    fields={{
+                      // Editing an existing cert → the server starts from the SAVED
+                      // grade/subgrade columns so the black-label (Pristine) preview
+                      // matches print; absent (create flow) it renders from fields.
+                      certificateId: certificate?.id ?? null,
+                      // Send the REAL certificate number. buildPreviewFields defaults
+                      // certId to "MV-PREVIEW" and the posted object wins over the saved
+                      // row, so omitting it made the preview's cert-number strip read
+                      // "-PREVIEW" while the printed label carries the real number —
+                      // contradicting this panel's own "exactly what will print" caption.
+                      // Absent (create flow) it still falls back to the placeholder.
+                      certId: (certificate as { certId?: string } | null)?.certId ?? undefined,
+                      cardName: form.cardName,
+                      setName: form.setName,
+                      year: form.year,
+                      cardNumber: form.cardNumber,
+                      gradeType: form.gradeType,
+                      gradeOverall: form.gradeOverall,
+                      variant: form.variant,
+                      variantOther: form.variantOther,
+                      rarity: form.rarity,
+                      rarityOther: form.rarityOther,
+                      // Structured-variant codes → server derives the ONE consolidated
+                      // variant line (parity with print), same as the save routes.
+                      rarityCode: form.rarityCode,
+                      finishVariant: form.finishVariant,
+                      promoType: form.promoType,
+                      subsetName: form.subsetName,
+                      era: form.era,
+                      labelType: form.labelType,
+                      language: form.language,
+                    }}
+                  />
+                ) : undefined
+              }
+            />
+          ) : null
+        }
+      >
+        <div className="shrink-0 space-y-1">
+          {/* Shared workstation header strip (WorkstationHeaderStrip) — 3-stage
                 workflow navigation + queue/session stats. ONE render site for
                 all three stages (outside the per-stage sections below), so
                 every stage sees byte-identical header geometry. Moved out of
                 the <form> into the fixed control-panel header so it stays put
                 while the form scrolls. Display-only: no queue-order or
                 session-calc change. */}
-            <WorkstationHeaderStrip
-              workflowCurrent={workflowCurrent}
-              workflowMax={workflowMax}
-              onStageClick={(i) => goToStage(i)}
-              batch={batch}
-              queue={queue}
-              sessionCompleted={sessionCompleted}
-            />
+          <WorkstationHeaderStrip
+            workflowCurrent={workflowCurrent}
+            workflowMax={workflowMax}
+            onStageClick={(i) => goToStage(i)}
+            batch={batch}
+            queue={queue}
+            sessionCompleted={sessionCompleted}
+          />
 
-                  {/* One-time conversion warning — shown ONLY at the boundary where
+          {/* One-time conversion warning — shown ONLY at the boundary where
                 this certificate first moves onto the consolidated scheme while
                 it still carries legacy free text the new line will not print.
                 The wording stays in the database either way. */}
-            {legacyLossWarning && legacyLossWarning.length > 0 && legacyLossPanelOpen && (
-              <div
-                className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5"
-                data-testid="legacy-freetext-warning"
-              >
-                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
-                  Legacy wording will stop printing
-                </p>
-                <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
-                  This save converts the certificate to the structured classification. The typed wording{" "}
-                  <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
-                  will <span className="font-semibold">no longer appear on the printed label</span>, because a
-                  converted certificate prints only its explicit structured selections.
-                </p>
-                <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
-                  If that wording is still required, cancel and select the matching structured values instead.
-                </p>
-                <div className="mt-2 flex gap-2">
+          {legacyLossWarning && legacyLossWarning.length > 0 && legacyLossPanelOpen && (
+            <div
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5"
+              data-testid="legacy-freetext-warning"
+            >
+              <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                Legacy wording will stop printing
+              </p>
+              <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
+                This save converts the certificate to the structured classification. The typed wording{" "}
+                <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
+                will <span className="font-semibold">no longer appear on the printed label</span>, because a converted
+                certificate prints only its explicit structured selections.
+              </p>
+              <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
+                If that wording is still required, cancel and select the matching structured values instead.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  data-testid="legacy-freetext-warning-confirm"
+                  onClick={() => {
+                    legacyLossAckRef.current = true;
+                    setLegacyLossWarning(null);
+                    setLegacyLossPanelOpen(false);
+                    // Cancel any pending debounced auto-save first, exactly as the
+                    // "Save Now" button does — otherwise a timer armed by the edit
+                    // that triggered this warning fires after this save and costs a
+                    // redundant second PUT.
+                    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+                    // Dispatch to whichever save path this certificate uses:
+                    // auto-save for an unapproved cert, the explicit form submit
+                    // for a published cert or the create flow.
+                    if (legacyLossPathRef.current === "autosave") autoSaveNow();
+                    else formElRef.current?.requestSubmit();
+                  }}
+                  className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
+                >
+                  Convert and save
+                </button>
+                <button
+                  type="button"
+                  data-testid="legacy-freetext-warning-cancel"
+                  onClick={() => {
+                    // Hide the panel but KEEP the save held: the edits stay in the
+                    // form, the status line keeps showing "Save paused", and
+                    // certificate navigation stays guarded. Nothing is discarded.
+                    setLegacyLossPanelOpen(false);
+                    setPendingNav(null);
+                  }}
+                  className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                >
+                  Cancel
+                </button>
+              </div>
+              {pendingNav && (
+                <div
+                  className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 p-2"
+                  data-testid="legacy-freetext-discard-gate"
+                >
+                  <p className="text-[11px] font-semibold text-red-200">
+                    Leaving this certificate now would discard the unsaved change.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      data-testid="legacy-freetext-discard-confirm"
+                      onClick={() => {
+                        // Deliberate, certificate-scoped discard: release the hold and
+                        // run the navigation the operator asked for, WITHOUT saving.
+                        const go = pendingNav.run;
+                        setPendingNav(null);
+                        setLegacyLossWarning(null);
+                        setLegacyLossPanelOpen(false);
+                        go();
+                      }}
+                      className="rounded-md border border-red-400/60 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-500/15"
+                    >
+                      Discard change and continue
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="legacy-freetext-discard-cancel"
+                      onClick={() => setPendingNav(null)}
+                      className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                    >
+                      Stay on this card
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {isEdit && certificate?.id && (
+            <details
+              className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1"
+              data-testid="identification-tools"
+            >
+              <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
+                <Cpu size={12} /> Identification tools
+                <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">
+                  AI Identify · AI Grade
+                </span>
+              </summary>
+              <div className="px-3 pb-3 pt-1 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Identify */}
                   <button
                     type="button"
-                    data-testid="legacy-freetext-warning-confirm"
-                    onClick={() => {
-                      legacyLossAckRef.current = true;
-                      setLegacyLossWarning(null);
-                      setLegacyLossPanelOpen(false);
-                      // Cancel any pending debounced auto-save first, exactly as the
-                      // "Save Now" button does — otherwise a timer armed by the edit
-                      // that triggered this warning fires after this save and costs a
-                      // redundant second PUT.
-                      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-                      // Dispatch to whichever save path this certificate uses:
-                      // auto-save for an unapproved cert, the explicit form submit
-                      // for a published cert or the create flow.
-                      if (legacyLossPathRef.current === "autosave") autoSaveNow();
-                      else formElRef.current?.requestSubmit();
-                    }}
-                    className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
+                    onClick={runIdentify}
+                    disabled={!identifyEnabled || identifyLoading}
+                    title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
                   >
-                    Convert and save
+                    <span className="flex items-center gap-2">
+                      {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                      <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
+                    </span>
+                    <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
                   </button>
+
+                  {/* Grade */}
                   <button
                     type="button"
-                    data-testid="legacy-freetext-warning-cancel"
-                    onClick={() => {
-                      // Hide the panel but KEEP the save held: the edits stay in the
-                      // form, the status line keeps showing "Save paused", and
-                      // certificate navigation stays guarded. Nothing is discarded.
-                      setLegacyLossPanelOpen(false);
-                      setPendingNav(null);
-                    }}
-                    className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                    onClick={runGrade}
+                    disabled={!fullGradeEnabled || gradeLoading}
+                    title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
                   >
-                    Cancel
+                    <span className="flex items-center gap-2">
+                      {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
+                      <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
+                    </span>
+                    <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
                   </button>
                 </div>
-                {pendingNav && (
-                  <div
-                    className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 p-2"
-                    data-testid="legacy-freetext-discard-gate"
-                  >
-                    <p className="text-[11px] font-semibold text-red-200">
-                      Leaving this certificate now would discard the unsaved change.
-                    </p>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
-                        data-testid="legacy-freetext-discard-confirm"
-                        onClick={() => {
-                          // Deliberate, certificate-scoped discard: release the hold and
-                          // run the navigation the operator asked for, WITHOUT saving.
-                          const go = pendingNav.run;
-                          setPendingNav(null);
-                          setLegacyLossWarning(null);
-                          setLegacyLossPanelOpen(false);
-                          go();
-                        }}
-                        className="rounded-md border border-red-400/60 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-500/15"
-                      >
-                        Discard change and continue
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="legacy-freetext-discard-cancel"
-                        onClick={() => setPendingNav(null)}
-                        className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
-                      >
-                        Stay on this card
-                      </button>
-                    </div>
-                  </div>
+
+                {(!identifyEnabled || !fullGradeEnabled) && (
+                  <p className="text-[10px] text-[var(--admin-ink-faint)]">
+                    {!identifyEnabled && !fullGradeEnabled
+                      ? "Both AI actions disabled — toggle in /admin → AI Learning."
+                      : !identifyEnabled
+                        ? "AI Identify disabled — toggle in /admin → AI Learning."
+                        : "AI Grade disabled — toggle in /admin → AI Learning."}
+                  </p>
                 )}
-              </div>
-            )}
-            {isEdit && certificate?.id && (
-              <details
-                className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1"
-                data-testid="identification-tools"
-              >
-                <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
-                  <Cpu size={12} /> Identification tools
-                  <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">
-                    AI Identify · AI Grade
-                  </span>
-                </summary>
-                <div className="px-3 pb-3 pt-1 space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Identify */}
-                    <button
-                      type="button"
-                      onClick={runIdentify}
-                      disabled={!identifyEnabled || identifyLoading}
-                      title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
-                      className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+
+                {identifyConfidence && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span
+                      className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+                    />
+                    <span
+                      className={
+                        identifyConfidence === "high"
+                          ? "text-[var(--admin-green)]"
+                          : identifyConfidence === "medium"
+                            ? "text-[var(--admin-amber)]"
+                            : "text-[var(--admin-red)]"
+                      }
                     >
-                      <span className="flex items-center gap-2">
-                        {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                        <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
-                      </span>
-                      <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
-                    </button>
-
-                    {/* Grade */}
-                    <button
-                      type="button"
-                      onClick={runGrade}
-                      disabled={!fullGradeEnabled || gradeLoading}
-                      title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
-                      className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
-                    >
-                      <span className="flex items-center gap-2">
-                        {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
-                        <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
-                      </span>
-                      <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
-                    </button>
-                  </div>
-
-                  {(!identifyEnabled || !fullGradeEnabled) && (
-                    <p className="text-[10px] text-[var(--admin-ink-faint)]">
-                      {!identifyEnabled && !fullGradeEnabled
-                        ? "Both AI actions disabled — toggle in /admin → AI Learning."
-                        : !identifyEnabled
-                          ? "AI Identify disabled — toggle in /admin → AI Learning."
-                          : "AI Grade disabled — toggle in /admin → AI Learning."}
-                    </p>
-                  )}
-
-                  {identifyConfidence && (
-                    <div className="flex items-center gap-2 text-xs">
-                      <span
-                        className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
-                      />
-                      <span
-                        className={
-                          identifyConfidence === "high"
-                            ? "text-[var(--admin-green)]"
-                            : identifyConfidence === "medium"
-                              ? "text-[var(--admin-amber)]"
-                              : "text-[var(--admin-red)]"
-                        }
-                      >
-                        {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-                      </span>
-                      {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
-                        <button
-                          type="button"
-                          onClick={runIdentify}
-                          disabled={identifyLoading}
-                          className="text-[var(--admin-gold)] text-[10px] hover:underline"
-                        >
-                          Retry
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </details>
-            )}
-          </div>
-          <form
-            ref={formElRef}
-            onSubmit={handleSubmit}
-            onKeyDown={(e) => {
-              // Enter advances Card Details → Grade when the grader isn't in a
-              // textarea and the name/number validation already passes — and never
-              // lets Enter submit/save the form. Textareas keep newlines.
-              //
-              // Only Card Details (stage 0) is handled. Stage 1 is now the
-              // PROTECTED grading workstation: an Enter there must not navigate
-              // away mid-measurement, so it is deliberately left alone.
-              if (e.key !== "Enter") return;
-              const tag = (e.target as HTMLElement).tagName;
-              if (tag === "TEXTAREA") return;
-              if (wfStage === CARD_DETAILS_STAGE) {
-                e.preventDefault();
-                if (form.cardName.trim() && form.cardNumber.trim()) {
-                  captureLastCardContext();
-                  goToStage(nextStageIndex(CARD_DETAILS_STAGE));
-                }
-              }
-            }}
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
-          >
-            {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
-            {savedToast && (
-              <div
-                className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-panel)] px-3 py-2 text-[12px] text-[var(--admin-green)] shadow-lg"
-                style={{ animation: "fadeIn 0.15s ease-out" }}
-                role="status"
-                data-testid="save-toast"
-              >
-                <CheckCircle2 size={14} /> Saved
-              </div>
-            )}
-
-            {/* Post-save panel (only when a grading queue is provided) — Next Card is
-            the primary action; the grader confirms before the next draft opens. */}
-            {showSavedPanel && queue && (
-              <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Card saved"
-                data-testid="saved-panel"
-              >
-                <div className="w-full max-w-sm rounded-xl border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] p-5 text-center">
-                  <div className="mb-3 flex items-center justify-center gap-2 text-[var(--admin-green)]">
-                    <CheckCircle2 size={20} />{" "}
-                    <span className="text-sm font-bold uppercase tracking-wider">Card Saved</span>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      type="button"
-                      data-testid="button-next-card"
-                      disabled={!queue.hasNext}
-                      title={queue.hasNext ? "Open the next queued draft" : "No more cards in the queue"}
-                      onClick={() => {
-                        setShowSavedPanel(false);
-                        guardedNav(queue.onNext);
-                      }}
-                      className="w-full rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-4 py-2.5 text-xs font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {queue.hasNext ? "Next Card →" : "No more cards"}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="button-back-to-queue"
-                      onClick={() => {
-                        setShowSavedPanel(false);
-                        guardedNav(queue.onBackToQueue ?? (() => onSuccess(undefined)));
-                      }}
-                      className="w-full rounded-lg border border-[var(--admin-gold)]/30 px-4 py-2 text-xs font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10"
-                    >
-                      Back to Queue
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Existing auto-save status, kept visible on every stage (reuses the
-            pre-existing autoSaveStatus state — no new save system). */}
-            {autoSaveEligible && wfStage !== 3 && (
-              <div
-                className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]"
-                data-testid="text-autosave-status-mini"
-              >
-                {legacyLossWarning
-                  ? "Save paused — confirm the conversion"
-                  : autoSaveStatus === "saving"
-                    ? "Saving…"
-                    : autoSaveStatus === "error"
-                      ? "Save failed — retrying on next change"
-                      : autoSaveStatus === "saved"
-                        ? "Saved"
-                        : "Unsaved changes save automatically"}
-              </div>
-            )}
-            {!isEdit && (
-              <SubmissionItemLink
-                value={form.submissionItemId}
-                onChange={(itemId, item) => {
-                  setForm((f) => ({
-                    ...f,
-                    submissionItemId: itemId,
-                    ...(item
-                      ? {
-                          cardGame: slugifyCardGame(item.game) || f.cardGame,
-                          setName: item.card_set || f.setName,
-                          cardName: (item.card_name || "").toUpperCase() || f.cardName,
-                          cardNumber: item.card_number || f.cardNumber,
-                          year: item.year || f.year,
-                        }
-                      : {}),
-                  }));
-                }}
-              />
-            )}
-            {/* Identify controls (stages 0 + 1). The card preview now lives in the
-            fixed workspace aside; this panel is just the stage controls. */}
-            <div data-workflow-stage="card-details" className={`space-y-2.5 ${stageClass(CARD_DETAILS_STAGE)}`}>
-              {/* ── STAGE 1 · CARD DETAILS — identity fields ── */}
-              <div className="space-y-3">
-                {/* AI-first card identification — the primary Card-stage experience.
-              The grader runs AI Identify (the EXISTING runIdentify — logic
-              unchanged), then VERIFIES the auto-filled result via read-only
-              chips. The tall manual field grid below stays hidden until they
-              choose Manual (or identify comes back low-confidence). */}
-                {aiIdentifyAvailable && (
-                  <div
-                    className={`rounded-lg border p-3 space-y-2.5 transition-colors ${
-                      identifyConfidence === "high"
-                        ? "border-[var(--admin-green)]/40 bg-[var(--admin-green)]/[0.05]"
-                        : identifyConfidence === "medium"
-                          ? "border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/[0.05]"
-                          : identifyConfidence === "low"
-                            ? "border-[var(--admin-red)]/40 bg-[var(--admin-red)]/[0.05]"
-                            : "border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03]"
-                    }`}
-                    data-testid="ai-identify-panel"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
-                        <Cpu size={12} /> Card Identification
-                      </span>
-                      {identifyConfidence && (
-                        <span
-                          className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                            identifyConfidence === "high"
-                              ? "bg-[var(--admin-green)]/15 text-[var(--admin-green)]"
-                              : identifyConfidence === "medium"
-                                ? "bg-[var(--admin-amber)]/15 text-[var(--admin-amber)]"
-                                : "bg-[var(--admin-red)]/15 text-[var(--admin-red)]"
-                          }`}
-                          data-testid="ai-identify-confidence"
-                        >
-                          <span
-                            className={`h-2 w-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
-                          />
-                          {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Result summary. Three distinct states so stale certificate data is
-                  NEVER shown as if it were a fresh identification:
-                    • identifyResult set  → the PROPOSED result (from AI/TCGdex), verify chips.
-                    • no result, cert has existing data → clearly labelled EXISTING data.
-                    • otherwise → prompt to identify or enter manually. */}
-                    {identifyResult ? (
-                      <div className="space-y-1" data-testid="ai-identify-summary">
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/60">
-                          Proposed — verify
-                        </span>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {[
-                            identifyResult.name,
-                            identifyResult.setName,
-                            displayCollectorNumber(identifyResult.number),
-                            identifyResult.year,
-                            identifyResult.language,
-                            identifyResult.rarity,
-                          ]
-                            .filter(Boolean)
-                            .map((chip, i) => (
-                              <span
-                                key={i}
-                                className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
-                              >
-                                {chip}
-                              </span>
-                            ))}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-                            }
-                            data-testid="button-verify-edit"
-                            title="The fields are always editable below — jump to them"
-                            className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
-                          >
-                            <Pencil size={10} /> Edit
-                          </button>
-                        </div>
-                      </div>
-                    ) : hasCardMeta ? (
-                      <div className="space-y-1" data-testid="ai-existing-details">
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-faint)]">
-                          Existing certificate details
-                        </span>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {[form.cardName, displayCollectorNumber(form.cardNumber), form.setName, form.year]
-                            .filter(Boolean)
-                            .map((chip, i) => (
-                              <span
-                                key={i}
-                                className="rounded border border-[var(--admin-line)] bg-transparent px-2 py-1 text-[11px] text-[var(--admin-ink-dim)]"
-                              >
-                                {chip}
-                              </span>
-                            ))}
-                        </div>
-                        <p className="text-[10px] text-[var(--admin-ink-faint)]">
-                          Run AI Identify to propose an update, or edit manually — these are not a new result.
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-[var(--admin-ink-faint)]">
-                        {identifyLoading
-                          ? "Identifying…"
-                          : "Run AI Identify to auto-fill the card details, or switch to Manual entry."}
-                      </p>
-                    )}
-
-                    {/* Primary actions. Once a card is identified, Accept is the
-                  strongest action (confirm in place, then Variant below); Search Again is
-                  the secondary outline; Manual stays visually quiet. Before any
-                  match exists, AI Identify is the strong primary. */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {(identifyResult || hasCardMeta) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // Accepting a proposed result is the ONLY point where it
-                            // overwrites populated certificate fields (req: don't clobber
-                            // until the grader confirms). Manual-only flow just advances.
-                            if (identifyResult) {
-                              setForm((prev) => ({
-                                ...prev,
-                                cardName: identifyResult.name || prev.cardName,
-                                setName: identifyResult.setName || prev.setName,
-                                cardNumber: identifyResult.number || prev.cardNumber,
-                                year: identifyResult.year || prev.year,
-                                language: identifyResult.language || prev.language,
-                                rarity: identifyResult.rarity || prev.rarity,
-                                variant: identifyResult.variant || prev.variant,
-                              }));
-                            }
-                            captureLastCardContext();
-                            // Variant now lives on THIS screen, so Accept no longer
-                            // navigates to a separate stage — it accepts in place and
-                            // brings the Variant section into view.
-                            if (typeof document !== "undefined") {
-                              document
-                                .querySelector('[data-variant-section="variant"]')
-                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                            }
-                          }}
-                          disabled={
-                            identifyResult
-                              ? !(identifyResult.name || form.cardName.trim()) ||
-                                !(identifyResult.number || form.cardNumber.trim())
-                              : !form.cardName.trim() || !form.cardNumber.trim()
-                          }
-                          title={
-                            identifyResult ? "Accept the proposed identification and continue" : "Confirm and continue"
-                          }
-                          data-testid="button-accept-identify"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)] bg-[var(--admin-green)] px-4 py-2 text-[12px] font-bold uppercase text-[#07130b] shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                        >
-                          <Check size={14} /> Accept
-                        </button>
-                      )}
+                      {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                    </span>
+                    {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
                       <button
                         type="button"
                         onClick={runIdentify}
                         disabled={identifyLoading}
-                        data-testid="button-ai-identify"
-                        className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[11px] font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                          hasCardMeta
-                            ? "border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
-                            : "border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] hover:opacity-90"
-                        }`}
+                        className="text-[var(--admin-gold)] text-[10px] hover:underline"
                       >
-                        {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                        {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
-                      </button>
-                      {/* The manual fields are always visible below (not a hidden
-                    panel) — this just scrolls to them; there is nothing to
-                    "reveal". Kept as button-manual-entry for compatibility. */}
-                      <button
-                        type="button"
-                        onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                        data-testid="button-manual-entry"
-                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
-                      >
-                        Card fields ↓
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Same as last card — one-click quick-fill of the shared set/year/
-              language context (never overwrites a field that already has a value). */}
-                {lastCardContext && (lastCardContext.setName || lastCardContext.year) && (
-                  <div className="flex flex-wrap items-center gap-1.5" data-testid="last-card-quick-fill">
-                    {!form.setName && (
-                      <button
-                        type="button"
-                        onClick={applyLastCardContext}
-                        data-testid="button-same-as-last-card"
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2.5 py-1.5 text-[11px] text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
-                        title="Fill game, set, year and language from the last card you processed"
-                      >
-                        <Copy size={12} /> Same as last card
-                        {lastCardContext.setName ? `: ${lastCardContext.setName}` : ""}
-                      </button>
-                    )}
-                    {lastCardContext.setName && (
-                      <button
-                        type="button"
-                        onClick={() => copyLastCardField("setName")}
-                        data-testid="button-copy-set"
-                        className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
-                        title={`Copy set: ${lastCardContext.setName}`}
-                      >
-                        Copy Set
-                      </button>
-                    )}
-                    {lastCardContext.year && (
-                      <button
-                        type="button"
-                        onClick={() => copyLastCardField("year")}
-                        data-testid="button-copy-year"
-                        className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
-                        title={`Copy year: ${lastCardContext.year}`}
-                      >
-                        Copy Year
-                      </button>
-                    )}
-                    {lastCardContext.language && (
-                      <button
-                        type="button"
-                        onClick={() => copyLastCardField("language")}
-                        data-testid="button-copy-language"
-                        className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
-                        title={`Copy language: ${lastCardContext.language}`}
-                      >
-                        Copy Language
+                        Retry
                       </button>
                     )}
                   </div>
                 )}
+              </div>
+            </details>
+          )}
+        </div>
+        <form
+          ref={formElRef}
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            // Enter advances Card Details → Grade when the grader isn't in a
+            // textarea and the name/number validation already passes — and never
+            // lets Enter submit/save the form. Textareas keep newlines.
+            //
+            // Only Card Details (stage 0) is handled. Stage 1 is now the
+            // PROTECTED grading workstation: an Enter there must not navigate
+            // away mid-measurement, so it is deliberately left alone.
+            if (e.key !== "Enter") return;
+            const tag = (e.target as HTMLElement).tagName;
+            if (tag === "TEXTAREA") return;
+            if (wfStage === CARD_DETAILS_STAGE) {
+              e.preventDefault();
+              if (form.cardName.trim() && form.cardNumber.trim()) {
+                captureLastCardContext();
+                goToStage(nextStageIndex(CARD_DETAILS_STAGE));
+              }
+            }
+          }}
+          className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
+        >
+          {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
+          {savedToast && (
+            <div
+              className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-panel)] px-3 py-2 text-[12px] text-[var(--admin-green)] shadow-lg"
+              style={{ animation: "fadeIn 0.15s ease-out" }}
+              role="status"
+              data-testid="save-toast"
+            >
+              <CheckCircle2 size={14} /> Saved
+            </div>
+          )}
 
-                {/* TCG search + manual entry helpers — Search TCG is a compact outlined
-              utility button (TCGdex behaviour unchanged). */}
-                <div className="flex flex-wrap items-center gap-2 text-[10px]">
+          {/* Post-save panel (only when a grading queue is provided) — Next Card is
+            the primary action; the grader confirms before the next draft opens. */}
+          {showSavedPanel && queue && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Card saved"
+              data-testid="saved-panel"
+            >
+              <div className="w-full max-w-sm rounded-xl border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] p-5 text-center">
+                <div className="mb-3 flex items-center justify-center gap-2 text-[var(--admin-green)]">
+                  <CheckCircle2 size={20} />{" "}
+                  <span className="text-sm font-bold uppercase tracking-wider">Card Saved</span>
+                </div>
+                <div className="flex flex-col gap-2">
                   <button
                     type="button"
+                    data-testid="button-next-card"
+                    disabled={!queue.hasNext}
+                    title={queue.hasNext ? "Open the next queued draft" : "No more cards in the queue"}
                     onClick={() => {
-                      setTcgSearchOpen(true);
-                      setTcgQuery("");
-                      setTcgResults([]);
+                      setShowSavedPanel(false);
+                      guardedNav(queue.onNext);
                     }}
-                    disabled={!form.cardGame}
-                    title="Search the TCGdex card database"
-                    className="inline-flex items-center gap-1.5 rounded-md border border-[var(--admin-gold)]/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    className="w-full rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-4 py-2.5 text-xs font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Database size={11} />
-                    Search TCG
+                    {queue.hasNext ? "Next Card →" : "No more cards"}
                   </button>
-                  {!form.cardGame && (
-                    <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>
-                  )}
-                  {manuallyVerified && (
-                    <span className="flex items-center gap-1 text-[var(--admin-green)]">
-                      <CheckCircle2 size={10} />
-                      Manually verified
+                  <button
+                    type="button"
+                    data-testid="button-back-to-queue"
+                    onClick={() => {
+                      setShowSavedPanel(false);
+                      guardedNav(queue.onBackToQueue ?? (() => onSuccess(undefined)));
+                    }}
+                    className="w-full rounded-lg border border-[var(--admin-gold)]/30 px-4 py-2 text-xs font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10"
+                  >
+                    Back to Queue
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Existing auto-save status, kept visible on every stage (reuses the
+            pre-existing autoSaveStatus state — no new save system). */}
+          {autoSaveEligible && wfStage !== 3 && (
+            <div
+              className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]"
+              data-testid="text-autosave-status-mini"
+            >
+              {legacyLossWarning
+                ? "Save paused — confirm the conversion"
+                : autoSaveStatus === "saving"
+                  ? "Saving…"
+                  : autoSaveStatus === "error"
+                    ? "Save failed — retrying on next change"
+                    : autoSaveStatus === "saved"
+                      ? "Saved"
+                      : "Unsaved changes save automatically"}
+            </div>
+          )}
+          {!isEdit && (
+            <SubmissionItemLink
+              value={form.submissionItemId}
+              onChange={(itemId, item) => {
+                setForm((f) => ({
+                  ...f,
+                  submissionItemId: itemId,
+                  ...(item
+                    ? {
+                        cardGame: slugifyCardGame(item.game) || f.cardGame,
+                        setName: item.card_set || f.setName,
+                        cardName: (item.card_name || "").toUpperCase() || f.cardName,
+                        cardNumber: item.card_number || f.cardNumber,
+                        year: item.year || f.year,
+                      }
+                    : {}),
+                }));
+              }}
+            />
+          )}
+          {/* Identify controls (stages 0 + 1). The card preview now lives in the
+            fixed workspace aside; this panel is just the stage controls. */}
+          <div data-workflow-stage="card-details" className={`space-y-2.5 ${stageClass(CARD_DETAILS_STAGE)}`}>
+            {scannerCaptureRequired && (
+              <CaptureWizard
+                certId={certificate!.id}
+                onComplete={() => {
+                  setScannerCaptureComplete(true);
+                  void queryClient.invalidateQueries({
+                    queryKey: ["/api/admin/certificates", certificate!.id, "images"],
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: [`/api/admin/certificates/${certificate!.id}/images`],
+                  });
+                }}
+              />
+            )}
+            {isEdit && certificate?.id && !scannerCaptureRequired && (
+              <details className="rounded-lg border border-[var(--admin-gold)]/20 p-3">
+                <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-[var(--admin-gold)]/80">
+                  Controlled Canon recapture
+                </summary>
+                <p className="mt-2 text-xs text-[var(--admin-ink-dim)]">
+                  Use only when correcting image evidence. This appends a revision and never replaces or deletes the
+                  earlier TIFF master.
+                </p>
+                <div className="mt-3">
+                  <CaptureWizard
+                    certId={certificate.id}
+                    recapture
+                    onComplete={() => {
+                      void queryClient.invalidateQueries({
+                        queryKey: ["/api/admin/certificates", certificate.id, "images"],
+                      });
+                      void queryClient.invalidateQueries({
+                        queryKey: [`/api/admin/certificates/${certificate.id}/images`],
+                      });
+                    }}
+                  />
+                </div>
+              </details>
+            )}
+            {/* ── STAGE 1 · CARD DETAILS — identity fields ── */}
+            <div className="space-y-3">
+              {/* AI-first card identification — the primary Card-stage experience.
+              The grader runs AI Identify (the EXISTING runIdentify — logic
+              unchanged), then VERIFIES the auto-filled result via read-only
+              chips. The tall manual field grid below stays hidden until they
+              choose Manual (or identify comes back low-confidence). */}
+              {aiIdentifyAvailable && (
+                <div
+                  className={`rounded-lg border p-3 space-y-2.5 transition-colors ${
+                    identifyConfidence === "high"
+                      ? "border-[var(--admin-green)]/40 bg-[var(--admin-green)]/[0.05]"
+                      : identifyConfidence === "medium"
+                        ? "border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/[0.05]"
+                        : identifyConfidence === "low"
+                          ? "border-[var(--admin-red)]/40 bg-[var(--admin-red)]/[0.05]"
+                          : "border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03]"
+                  }`}
+                  data-testid="ai-identify-panel"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                      <Cpu size={12} /> Card Identification
                     </span>
+                    {identifyConfidence && (
+                      <span
+                        className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          identifyConfidence === "high"
+                            ? "bg-[var(--admin-green)]/15 text-[var(--admin-green)]"
+                            : identifyConfidence === "medium"
+                              ? "bg-[var(--admin-amber)]/15 text-[var(--admin-amber)]"
+                              : "bg-[var(--admin-red)]/15 text-[var(--admin-red)]"
+                        }`}
+                        data-testid="ai-identify-confidence"
+                      >
+                        <span
+                          className={`h-2 w-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+                        />
+                        {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Result summary. Three distinct states so stale certificate data is
+                  NEVER shown as if it were a fresh identification:
+                    • identifyResult set  → the PROPOSED result (from AI/TCGdex), verify chips.
+                    • no result, cert has existing data → clearly labelled EXISTING data.
+                    • otherwise → prompt to identify or enter manually. */}
+                  {identifyResult ? (
+                    <div className="space-y-1" data-testid="ai-identify-summary">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/60">
+                        Proposed — verify
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          identifyResult.name,
+                          identifyResult.setName,
+                          displayCollectorNumber(identifyResult.number),
+                          identifyResult.year,
+                          identifyResult.language,
+                          identifyResult.rarity,
+                        ]
+                          .filter(Boolean)
+                          .map((chip, i) => (
+                            <span
+                              key={i}
+                              className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
+                            >
+                              {chip}
+                            </span>
+                          ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+                          }
+                          data-testid="button-verify-edit"
+                          title="The fields are always editable below — jump to them"
+                          className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
+                        >
+                          <Pencil size={10} /> Edit
+                        </button>
+                      </div>
+                    </div>
+                  ) : hasCardMeta ? (
+                    <div className="space-y-1" data-testid="ai-existing-details">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-faint)]">
+                        Existing certificate details
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[form.cardName, displayCollectorNumber(form.cardNumber), form.setName, form.year]
+                          .filter(Boolean)
+                          .map((chip, i) => (
+                            <span
+                              key={i}
+                              className="rounded border border-[var(--admin-line)] bg-transparent px-2 py-1 text-[11px] text-[var(--admin-ink-dim)]"
+                            >
+                              {chip}
+                            </span>
+                          ))}
+                      </div>
+                      <p className="text-[10px] text-[var(--admin-ink-faint)]">
+                        Run AI Identify to propose an update, or edit manually — these are not a new result.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[var(--admin-ink-faint)]">
+                      {identifyLoading
+                        ? "Identifying…"
+                        : "Run AI Identify to auto-fill the card details, or switch to Manual entry."}
+                    </p>
+                  )}
+
+                  {/* Primary actions. Once a card is identified, Accept is the
+                  strongest action (confirm in place, then Variant below); Search Again is
+                  the secondary outline; Manual stays visually quiet. Before any
+                  match exists, AI Identify is the strong primary. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(identifyResult || hasCardMeta) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Accepting a proposed result is the ONLY point where it
+                          // overwrites populated certificate fields (req: don't clobber
+                          // until the grader confirms). Manual-only flow just advances.
+                          if (identifyResult) {
+                            setForm((prev) => ({
+                              ...prev,
+                              cardName: identifyResult.name || prev.cardName,
+                              setName: identifyResult.setName || prev.setName,
+                              cardNumber: identifyResult.number || prev.cardNumber,
+                              year: identifyResult.year || prev.year,
+                              language: identifyResult.language || prev.language,
+                              rarity: identifyResult.rarity || prev.rarity,
+                              variant: identifyResult.variant || prev.variant,
+                            }));
+                          }
+                          captureLastCardContext();
+                          // Variant now lives on THIS screen, so Accept no longer
+                          // navigates to a separate stage — it accepts in place and
+                          // brings the Variant section into view.
+                          if (typeof document !== "undefined") {
+                            document
+                              .querySelector('[data-variant-section="variant"]')
+                              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }
+                        }}
+                        disabled={
+                          identifyResult
+                            ? !(identifyResult.name || form.cardName.trim()) ||
+                              !(identifyResult.number || form.cardNumber.trim())
+                            : !form.cardName.trim() || !form.cardNumber.trim()
+                        }
+                        title={
+                          identifyResult ? "Accept the proposed identification and continue" : "Confirm and continue"
+                        }
+                        data-testid="button-accept-identify"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)] bg-[var(--admin-green)] px-4 py-2 text-[12px] font-bold uppercase text-[#07130b] shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                      >
+                        <Check size={14} /> Accept
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={runIdentify}
+                      disabled={identifyLoading}
+                      data-testid="button-ai-identify"
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[11px] font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                        hasCardMeta
+                          ? "border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
+                          : "border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] hover:opacity-90"
+                      }`}
+                    >
+                      {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                      {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
+                    </button>
+                    {/* The manual fields are always visible below (not a hidden
+                    panel) — this just scrolls to them; there is nothing to
+                    "reveal". Kept as button-manual-entry for compatibility. */}
+                    <button
+                      type="button"
+                      onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      data-testid="button-manual-entry"
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
+                    >
+                      Card fields ↓
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Same as last card — one-click quick-fill of the shared set/year/
+              language context (never overwrites a field that already has a value). */}
+              {lastCardContext && (lastCardContext.setName || lastCardContext.year) && (
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="last-card-quick-fill">
+                  {!form.setName && (
+                    <button
+                      type="button"
+                      onClick={applyLastCardContext}
+                      data-testid="button-same-as-last-card"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2.5 py-1.5 text-[11px] text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                      title="Fill game, set, year and language from the last card you processed"
+                    >
+                      <Copy size={12} /> Same as last card
+                      {lastCardContext.setName ? `: ${lastCardContext.setName}` : ""}
+                    </button>
+                  )}
+                  {lastCardContext.setName && (
+                    <button
+                      type="button"
+                      onClick={() => copyLastCardField("setName")}
+                      data-testid="button-copy-set"
+                      className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
+                      title={`Copy set: ${lastCardContext.setName}`}
+                    >
+                      Copy Set
+                    </button>
+                  )}
+                  {lastCardContext.year && (
+                    <button
+                      type="button"
+                      onClick={() => copyLastCardField("year")}
+                      data-testid="button-copy-year"
+                      className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
+                      title={`Copy year: ${lastCardContext.year}`}
+                    >
+                      Copy Year
+                    </button>
+                  )}
+                  {lastCardContext.language && (
+                    <button
+                      type="button"
+                      onClick={() => copyLastCardField("language")}
+                      data-testid="button-copy-language"
+                      className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
+                      title={`Copy language: ${lastCardContext.language}`}
+                    >
+                      Copy Language
+                    </button>
                   )}
                 </div>
+              )}
 
-                {/* TCG Search Dialog */}
-                <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
-                  <DialogContent className="max-w-lg p-0 overflow-hidden">
-                    <div className="p-4 pb-2 border-b border-[var(--admin-line)]">
-                      <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest mb-2">
-                        Search TCG Database
-                      </p>
-                      <div className="flex items-center gap-2 border border-[var(--admin-gold)]/30 rounded-lg px-3 py-2 focus-within:border-[var(--admin-gold)] transition-colors">
-                        <Search size={14} className="text-[var(--admin-gold)]/50 shrink-0" />
-                        <input
-                          type="text"
-                          value={tcgQuery}
-                          onChange={(e) => handleTcgSearch(e.target.value)}
-                          placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
-                          className="flex-1 bg-transparent text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] outline-none"
-                          autoFocus
-                        />
-                        {tcgLoading && <Loader2 size={14} className="animate-spin text-[var(--admin-gold)]" />}
-                      </div>
-                      <p className="text-[var(--admin-ink-faint)] text-[9px] mt-1">
-                        Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters
-                      </p>
+              {/* TCG search + manual entry helpers — Search TCG is a compact outlined
+              utility button (TCGdex behaviour unchanged). */}
+              <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTcgSearchOpen(true);
+                    setTcgQuery("");
+                    setTcgResults([]);
+                  }}
+                  disabled={!form.cardGame}
+                  title="Search the TCGdex card database"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[var(--admin-gold)]/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Database size={11} />
+                  Search TCG
+                </button>
+                {!form.cardGame && <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>}
+                {manuallyVerified && (
+                  <span className="flex items-center gap-1 text-[var(--admin-green)]">
+                    <CheckCircle2 size={10} />
+                    Manually verified
+                  </span>
+                )}
+              </div>
+
+              {/* TCG Search Dialog */}
+              <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
+                <DialogContent className="max-w-lg p-0 overflow-hidden">
+                  <div className="p-4 pb-2 border-b border-[var(--admin-line)]">
+                    <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest mb-2">
+                      Search TCG Database
+                    </p>
+                    <div className="flex items-center gap-2 border border-[var(--admin-gold)]/30 rounded-lg px-3 py-2 focus-within:border-[var(--admin-gold)] transition-colors">
+                      <Search size={14} className="text-[var(--admin-gold)]/50 shrink-0" />
+                      <input
+                        type="text"
+                        value={tcgQuery}
+                        onChange={(e) => handleTcgSearch(e.target.value)}
+                        placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
+                        className="flex-1 bg-transparent text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] outline-none"
+                        autoFocus
+                      />
+                      {tcgLoading && <Loader2 size={14} className="animate-spin text-[var(--admin-gold)]" />}
                     </div>
-                    <div className="max-h-[320px] overflow-y-auto">
-                      {/* Transport/provider failure — distinct from a legitimate no-result. */}
-                      {tcgError && !tcgLoading && (
-                        <div className="py-8 text-center" data-testid="tcg-search-error">
-                          <p className="text-[var(--admin-red)] text-sm font-semibold">Search unavailable</p>
-                          <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1 px-6">{tcgError}</p>
-                        </div>
-                      )}
-                      {!tcgError && tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
-                        <div className="py-8 text-center">
-                          <p className="text-[var(--admin-ink-faint)] text-sm">No cards found</p>
-                          <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
-                            Check spelling or enter details manually
+                    <p className="text-[var(--admin-ink-faint)] text-[9px] mt-1">
+                      Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters
+                    </p>
+                  </div>
+                  <div className="max-h-[320px] overflow-y-auto">
+                    {/* Transport/provider failure — distinct from a legitimate no-result. */}
+                    {tcgError && !tcgLoading && (
+                      <div className="py-8 text-center" data-testid="tcg-search-error">
+                        <p className="text-[var(--admin-red)] text-sm font-semibold">Search unavailable</p>
+                        <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1 px-6">{tcgError}</p>
+                      </div>
+                    )}
+                    {!tcgError && tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
+                      <div className="py-8 text-center">
+                        <p className="text-[var(--admin-ink-faint)] text-sm">No cards found</p>
+                        <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
+                          Check spelling or enter details manually
+                        </p>
+                      </div>
+                    )}
+                    {tcgResults.map((card) => (
+                      <button
+                        key={card.id}
+                        type="button"
+                        onClick={() => selectTcgCard(card)}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--admin-gold)]/5 transition-colors border-b border-[var(--admin-line)] last:border-0"
+                      >
+                        {card.imageUrl ? (
+                          <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
+                        ) : (
+                          <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
+                            <Search size={12} className="text-[var(--admin-ink-faint)]" />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
+                          <p className="text-[var(--admin-ink-dim)] text-xs truncate">
+                            {card.setName}
+                            {card.number ? ` · ${displayCollectorNumber(card.number)}` : ""}
+                          </p>
+                          <p className="text-[var(--admin-ink-faint)] text-[10px]">
+                            {[card.rarity, card.year].filter(Boolean).join(" · ")}
                           </p>
                         </div>
-                      )}
-                      {tcgResults.map((card) => (
-                        <button
-                          key={card.id}
-                          type="button"
-                          onClick={() => selectTcgCard(card)}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--admin-gold)]/5 transition-colors border-b border-[var(--admin-line)] last:border-0"
-                        >
-                          {card.imageUrl ? (
-                            <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
-                          ) : (
-                            <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
-                              <Search size={12} className="text-[var(--admin-ink-faint)]" />
-                            </div>
-                          )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
-                            <p className="text-[var(--admin-ink-dim)] text-xs truncate">
-                              {card.setName}
-                              {card.number ? ` · ${displayCollectorNumber(card.number)}` : ""}
-                            </p>
-                            <p className="text-[var(--admin-ink-faint)] text-[10px]">
-                              {[card.rarity, card.year].filter(Boolean).join(" · ")}
-                            </p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                      </button>
+                    ))}
+                  </div>
+                </DialogContent>
+              </Dialog>
 
-                {/* Manual card-detail fields — ALWAYS visible (this is the normal
+              {/* Manual card-detail fields — ALWAYS visible (this is the normal
               verification process, not an exceptional fallback). AI Identify /
               Search TCG above are helper tools that propose values into these
               same fields; the grader can always read and edit them directly. */}
-                <div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">
-                  {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
+              <div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">
+                {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
               Set Code is its own full field (not a nested sub-input) to match the
               workstation reference density at 1280px. Set Name gets a wider share
               of the row (it holds a searchable dropdown with long collection
               names — "Chaos Rising", "Perfect Origins", etc — and was cramped to
               an equal 1/3 column in production). */}
-                  <div className="grid grid-cols-1 sm:grid-cols-[0.8fr_2fr_0.9fr] gap-4">
-                    <FormSelect
-                      label="Card Game *"
-                      value={form.cardGame}
-                      onChange={(v) => updateField("cardGame", v)}
-                      options={cardGames}
-                      testId="select-card-game"
+                <div className="grid grid-cols-1 sm:grid-cols-[0.8fr_2fr_0.9fr] gap-4">
+                  <FormSelect
+                    label="Card Game *"
+                    value={form.cardGame}
+                    onChange={(v) => updateField("cardGame", v)}
+                    options={cardGames}
+                    testId="select-card-game"
+                  />
+                  <div>
+                    <PokemonSetPicker
+                      value={form.setName}
+                      onChange={(name, id) => {
+                        updateField("setName", name);
+                        if (id) setSetId(id);
+                      }}
+                      allowEditSet
+                      testId="input-set-name"
                     />
-                    <div>
-                      <PokemonSetPicker
-                        value={form.setName}
-                        onChange={(name, id) => {
-                          updateField("setName", name);
-                          if (id) setSetId(id);
-                        }}
-                        allowEditSet
-                        testId="input-set-name"
-                      />
-                      <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">
-                        The collection name printed on the card.
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
-                        Set Code
-                      </label>
-                      <input
-                        type="text"
-                        value={setId}
-                        onChange={(e) => setSetId(e.target.value)}
-                        placeholder="e.g. MEW or SV8"
-                        className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-                        data-testid="input-set-id"
-                      />
-                      <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">
-                        Usually a short code such as MEW or SV8.
-                      </p>
-                    </div>
+                    <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">
+                      The collection name printed on the card.
+                    </p>
                   </div>
+                  <div>
+                    <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
+                      Set Code
+                    </label>
+                    <input
+                      type="text"
+                      value={setId}
+                      onChange={(e) => setSetId(e.target.value)}
+                      placeholder="e.g. MEW or SV8"
+                      className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                      data-testid="input-set-id"
+                    />
+                    <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">
+                      Usually a short code such as MEW or SV8.
+                    </p>
+                  </div>
+                </div>
 
-                  {/* Row 2 — 4-column (Name · Card Number+Auto-fill · Year · Language) so
+                {/* Row 2 — 4-column (Name · Card Number+Auto-fill · Year · Language) so
               Language shares this row instead of a near-empty row of its own. The
               tuned template keeps the Card Number cell (widest, 1.3fr) readable at
               1280px. */}
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
-                    <FormInput
-                      label="Card Name *"
-                      value={form.cardName}
-                      onChange={(v) => updateField("cardName", v)}
-                      onBlur={() => setForm((f) => ({ ...f, cardName: f.cardName.toUpperCase() }))}
-                      testId="input-card-name"
-                      highlight={autofillRan && manuallyEdited.has("cardName")}
-                    />
-                    <div>
-                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
-                        Card Number *
-                      </label>
-                      <div className="flex gap-2">
-                        <div className="flex-1 flex items-center bg-transparent border border-[var(--admin-gold)]/30 rounded overflow-hidden focus-within:border-[var(--admin-gold)] transition-colors">
-                          <span className="pl-3 text-[var(--admin-gold)]/50 text-sm select-none">#</span>
-                          <input
-                            type="text"
-                            value={form.cardNumber}
-                            onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
-                            placeholder="e.g. 125/198"
-                            className="flex-1 bg-transparent px-2 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none"
-                            data-testid="input-card-number"
-                          />
-                        </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
+                  <FormInput
+                    label="Card Name *"
+                    value={form.cardName}
+                    onChange={(v) => updateField("cardName", v)}
+                    onBlur={() => setForm((f) => ({ ...f, cardName: f.cardName.toUpperCase() }))}
+                    testId="input-card-name"
+                    highlight={autofillRan && manuallyEdited.has("cardName")}
+                  />
+                  <div>
+                    <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
+                      Card Number *
+                    </label>
+                    <div className="flex gap-2">
+                      <div className="flex-1 flex items-center bg-transparent border border-[var(--admin-gold)]/30 rounded overflow-hidden focus-within:border-[var(--admin-gold)] transition-colors">
+                        <span className="pl-3 text-[var(--admin-gold)]/50 text-sm select-none">#</span>
+                        <input
+                          type="text"
+                          value={form.cardNumber}
+                          onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
+                          placeholder="e.g. 125/198"
+                          className="flex-1 bg-transparent px-2 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none"
+                          data-testid="input-card-number"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!canAutofill || autofillLoading}
+                        onClick={() => handleAutofill(false)}
+                        className="px-3 py-2 border border-[var(--admin-gold)]/30 rounded text-[var(--admin-gold)] text-sm hover:bg-[var(--admin-gold)]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                        data-testid="button-autofill"
+                        title="Auto-fill card details"
+                      >
+                        <Search size={14} />
+                        {autofillLoading ? "..." : "Auto-fill"}
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-card-number">
+                      The number at the bottom of the card, for example 063/165.
+                    </p>
+
+                    {suggestions.length > 0 && (
+                      <div
+                        className="mt-2 border border-[var(--admin-gold)]/20 rounded bg-[var(--admin-panel)] max-h-40 border border-[var(--admin-line)] overflow-y-auto"
+                        data-testid="autofill-suggestions"
+                      >
+                        <p className="text-[var(--admin-gold)]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">
+                          Suggestions
+                        </p>
+                        {suggestions.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              setForm((f) => ({ ...f, cardNumber: s.cardNumber }));
+                              applyCardData(s, null);
+                              toast({ title: "Card details auto-filled" });
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-sm text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)] transition-colors"
+                            data-testid={`suggestion-${s.id}`}
+                          >
+                            <span className="text-[var(--admin-gold)]">{s.cardNumber}</span>
+                            {" – "}
+                            {s.cardName}
+                            {s.rarity && <span className="text-[var(--admin-ink-faint)]"> ({s.rarity})</span>}
+                          </button>
+                        ))}
                         <button
                           type="button"
-                          disabled={!canAutofill || autofillLoading}
-                          onClick={() => handleAutofill(false)}
-                          className="px-3 py-2 border border-[var(--admin-gold)]/30 rounded text-[var(--admin-gold)] text-sm hover:bg-[var(--admin-gold)]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-                          data-testid="button-autofill"
-                          title="Auto-fill card details"
+                          onClick={() => setSuggestions([])}
+                          className="w-full text-center text-[10px] text-[var(--admin-ink-faint)] py-1 hover:text-[var(--admin-ink-dim)]"
+                          data-testid="button-dismiss-suggestions"
                         >
-                          <Search size={14} />
-                          {autofillLoading ? "..." : "Auto-fill"}
+                          Dismiss
                         </button>
                       </div>
-                      <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-card-number">
-                        The number at the bottom of the card, for example 063/165.
-                      </p>
+                    )}
 
-                      {suggestions.length > 0 && (
-                        <div
-                          className="mt-2 border border-[var(--admin-gold)]/20 rounded bg-[var(--admin-panel)] max-h-40 border border-[var(--admin-line)] overflow-y-auto"
-                          data-testid="autofill-suggestions"
-                        >
-                          <p className="text-[var(--admin-gold)]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">
-                            Suggestions
-                          </p>
-                          {suggestions.map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => {
-                                setForm((f) => ({ ...f, cardNumber: s.cardNumber }));
-                                applyCardData(s, null);
-                                toast({ title: "Card details auto-filled" });
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-sm text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)] transition-colors"
-                              data-testid={`suggestion-${s.id}`}
-                            >
-                              <span className="text-[var(--admin-gold)]">{s.cardNumber}</span>
-                              {" – "}
-                              {s.cardName}
-                              {s.rarity && <span className="text-[var(--admin-ink-faint)]"> ({s.rarity})</span>}
-                            </button>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() => setSuggestions([])}
-                            className="w-full text-center text-[10px] text-[var(--admin-ink-faint)] py-1 hover:text-[var(--admin-ink-dim)]"
-                            data-testid="button-dismiss-suggestions"
-                          >
-                            Dismiss
-                          </button>
-                        </div>
-                      )}
-
-                      {fallbackMatch && (
-                        <div
-                          className="mt-2 border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
-                          data-testid="fallback-banner"
-                        >
-                          <div className="flex items-start gap-2">
-                            <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
-                            <div className="flex-1">
-                              <p className="text-[var(--admin-amber)] text-sm font-medium">
-                                Match found in different language
-                              </p>
-                              <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                                Found: <span className="text-[var(--admin-ink)]">{fallbackMatch.cardName}</span> (
-                                {fallbackMatch.language})
-                              </p>
-                              <div className="flex gap-2 mt-2">
-                                <button
-                                  type="button"
-                                  onClick={applyFallback}
-                                  className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors flex items-center gap-1"
-                                  data-testid="button-apply-fallback"
-                                >
-                                  <Check size={12} /> Apply Anyway
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setFallbackMatch(null)}
-                                  className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors flex items-center gap-1"
-                                  data-testid="button-dismiss-fallback"
-                                >
-                                  <X size={12} /> Dismiss
-                                </button>
-                              </div>
+                    {fallbackMatch && (
+                      <div
+                        className="mt-2 border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
+                        data-testid="fallback-banner"
+                      >
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
+                          <div className="flex-1">
+                            <p className="text-[var(--admin-amber)] text-sm font-medium">
+                              Match found in different language
+                            </p>
+                            <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                              Found: <span className="text-[var(--admin-ink)]">{fallbackMatch.cardName}</span> (
+                              {fallbackMatch.language})
+                            </p>
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                type="button"
+                                onClick={applyFallback}
+                                className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors flex items-center gap-1"
+                                data-testid="button-apply-fallback"
+                              >
+                                <Check size={12} /> Apply Anyway
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setFallbackMatch(null)}
+                                className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors flex items-center gap-1"
+                                data-testid="button-dismiss-fallback"
+                              >
+                                <X size={12} /> Dismiss
+                              </button>
                             </div>
                           </div>
                         </div>
-                      )}
-                    </div>
-                    <FormInput
-                      label="Year *"
-                      value={form.year}
-                      onChange={(v) => updateField("year", v)}
-                      placeholder="e.g. 1999"
-                      testId="input-year"
-                      highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
-                    />
-                    <div>
-                      <FormInput
-                        label="Language"
-                        value={form.language}
-                        onChange={(v) => {
-                          updateField("language", v);
-                          setLanguageChangedByFallback(false);
-                        }}
-                        testId="input-language"
-                        highlight={languageChangedByFallback || flashFields.has("language")}
-                      />
-                      {languageChangedByFallback && (
-                        <p
-                          className="text-[var(--admin-amber)] text-[10px] mt-1"
-                          data-testid="text-language-fallback-notice"
-                        >
-                          Changed by fallback match
-                        </p>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
+                  <FormInput
+                    label="Year *"
+                    value={form.year}
+                    onChange={(v) => updateField("year", v)}
+                    placeholder="e.g. 1999"
+                    testId="input-year"
+                    highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
+                  />
+                  <div>
+                    <FormInput
+                      label="Language"
+                      value={form.language}
+                      onChange={(v) => {
+                        updateField("language", v);
+                        setLanguageChangedByFallback(false);
+                      }}
+                      testId="input-language"
+                      highlight={languageChangedByFallback || flashFields.has("language")}
+                    />
+                    {languageChangedByFallback && (
+                      <p
+                        className="text-[var(--admin-amber)] text-[10px] mt-1"
+                        data-testid="text-language-fallback-notice"
+                      >
+                        Changed by fallback match
+                      </p>
+                    )}
+                  </div>
+                </div>
 
-                  {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={() => handleAutofill(true)}
-                      className="text-[10px] text-[var(--admin-gold)]/40 hover:text-[var(--admin-gold)]/70 transition-colors underline"
-                      data-testid="button-search-other-languages"
-                    >
-                      Search other languages
-                    </button>
-                  )}
+                {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleAutofill(true)}
+                    className="text-[10px] text-[var(--admin-gold)]/40 hover:text-[var(--admin-gold)]/70 transition-colors underline"
+                    data-testid="button-search-other-languages"
+                  >
+                    Search other languages
+                  </button>
+                )}
 
-                  {overwriteConfirm && (
-                    <div
-                      className="border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
-                      data-testid="overwrite-confirm"
-                    >
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
-                        <div className="flex-1">
-                          <p className="text-[var(--admin-amber)] text-sm font-medium">
-                            Overwrite manually edited fields?
-                          </p>
-                          <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                            You edited: {overwriteConfirm.fields.join(", ")}
-                          </p>
-                          <div className="flex gap-2 mt-2">
-                            <button
-                              type="button"
-                              onClick={confirmOverwrite}
-                              className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors"
-                              data-testid="button-confirm-overwrite"
-                            >
-                              Yes, overwrite
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setOverwriteConfirm(null)}
-                              className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors"
-                              data-testid="button-cancel-overwrite"
-                            >
-                              Cancel
-                            </button>
-                          </div>
+                {overwriteConfirm && (
+                  <div
+                    className="border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
+                    data-testid="overwrite-confirm"
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-[var(--admin-amber)] text-sm font-medium">
+                          Overwrite manually edited fields?
+                        </p>
+                        <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                          You edited: {overwriteConfirm.fields.join(", ")}
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={confirmOverwrite}
+                            className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors"
+                            data-testid="button-confirm-overwrite"
+                          >
+                            Yes, overwrite
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOverwriteConfirm(null)}
+                            className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors"
+                            data-testid="button-cancel-overwrite"
+                          >
+                            Cancel
+                          </button>
                         </div>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-              {/* ── VARIANT (formerly the separate "Rarity" stage) — structured
+            </div>
+            {/* ── VARIANT (formerly the separate "Rarity" stage) — structured
               picker + finish + promo + designations (+ legacy/advanced). Now
               rendered INLINE beneath the identity fields on Card Details, not on
               a page of its own. ── */}
-              <div className="space-y-3">
-                {/* Legacy flat Variant control — superseded for daily grading by the
+            <div className="space-y-3">
+              {/* Legacy flat Variant control — superseded for daily grading by the
               structured picker below. Kept fully functional (historical values,
               save compatibility) but collapsed under Legacy / advanced. */}
-                <details
-                  className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2"
-                  data-testid="legacy-variant-details"
-                >
-                  <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
-                    Legacy / advanced variant
-                  </summary>
-                  <div className="pt-2">
-                    {(() => {
-                      // Build merged option list: static (minus OTHER) + DB variants + localStorage custom + OTHER
-                      // seenLabels uses BOTH labels ("reverse holo") AND codes ("reverse_holo") to prevent
-                      // built-in DB-stored codes appearing as duplicate custom entries.
-                      const builtInLabels = new Set(UNIFIED_OPTIONS.map((o) => o.label.toLowerCase()));
-                      const builtInCodes = new Set(UNIFIED_OPTIONS.map((o) => o.code.toLowerCase()));
-                      const seenLabels = new Set<string>([...builtInLabels, ...builtInCodes]);
-                      const extraVariants: UnifiedOption[] = [];
-                      // DB variants first (shared across all admins/devices)
-                      for (const v of dbVariants) {
-                        const key = v.toLowerCase();
-                        if (!seenLabels.has(key)) {
-                          seenLabels.add(key);
-                          extraVariants.push({
-                            value: `VARIANT:${v}`,
-                            label: v,
-                            category: "VARIANT" as const,
-                            code: v,
-                          });
-                        }
+              <details
+                className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2"
+                data-testid="legacy-variant-details"
+              >
+                <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+                  Legacy / advanced variant
+                </summary>
+                <div className="pt-2">
+                  {(() => {
+                    // Build merged option list: static (minus OTHER) + DB variants + localStorage custom + OTHER
+                    // seenLabels uses BOTH labels ("reverse holo") AND codes ("reverse_holo") to prevent
+                    // built-in DB-stored codes appearing as duplicate custom entries.
+                    const builtInLabels = new Set(UNIFIED_OPTIONS.map((o) => o.label.toLowerCase()));
+                    const builtInCodes = new Set(UNIFIED_OPTIONS.map((o) => o.code.toLowerCase()));
+                    const seenLabels = new Set<string>([...builtInLabels, ...builtInCodes]);
+                    const extraVariants: UnifiedOption[] = [];
+                    // DB variants first (shared across all admins/devices)
+                    for (const v of dbVariants) {
+                      const key = v.toLowerCase();
+                      if (!seenLabels.has(key)) {
+                        seenLabels.add(key);
+                        extraVariants.push({
+                          value: `VARIANT:${v}`,
+                          label: v,
+                          category: "VARIANT" as const,
+                          code: v,
+                        });
                       }
-                      // localStorage custom variants (optimistic, same-device additions)
-                      for (const v of customVariants) {
-                        const key = v.toLowerCase();
-                        if (!seenLabels.has(key)) {
-                          seenLabels.add(key);
-                          extraVariants.push({
-                            value: `VARIANT:${v}`,
-                            label: v,
-                            category: "VARIANT" as const,
-                            code: v,
-                          });
-                        }
+                    }
+                    // localStorage custom variants (optimistic, same-device additions)
+                    for (const v of customVariants) {
+                      const key = v.toLowerCase();
+                      if (!seenLabels.has(key)) {
+                        seenLabels.add(key);
+                        extraVariants.push({
+                          value: `VARIANT:${v}`,
+                          label: v,
+                          category: "VARIANT" as const,
+                          code: v,
+                        });
                       }
-                      const otherOpt = UNIFIED_OPTIONS.find((o) => o.value === "OTHER")!;
-                      const allOptions: UnifiedOption[] = [
-                        ...UNIFIED_OPTIONS.filter((o) => o.value !== "OTHER"),
-                        ...extraVariants,
-                        otherOpt,
-                      ];
-                      const q = unifiedSearch.toLowerCase().trim();
-                      const filteredOpts = allOptions.filter(
-                        (o) => !q || o.label.toLowerCase().includes(q) || o.code.toLowerCase().includes(q)
-                      );
-                      const hasExactMatch =
-                        !q || allOptions.some((o) => o.label.toLowerCase() === q || o.code.toLowerCase() === q);
-                      const showAddButton = q.length > 1 && !hasExactMatch;
+                    }
+                    const otherOpt = UNIFIED_OPTIONS.find((o) => o.value === "OTHER")!;
+                    const allOptions: UnifiedOption[] = [
+                      ...UNIFIED_OPTIONS.filter((o) => o.value !== "OTHER"),
+                      ...extraVariants,
+                      otherOpt,
+                    ];
+                    const q = unifiedSearch.toLowerCase().trim();
+                    const filteredOpts = allOptions.filter(
+                      (o) => !q || o.label.toLowerCase().includes(q) || o.code.toLowerCase().includes(q)
+                    );
+                    const hasExactMatch =
+                      !q || allOptions.some((o) => o.label.toLowerCase() === q || o.code.toLowerCase() === q);
+                    const showAddButton = q.length > 1 && !hasExactMatch;
 
-                      return (
-                        <div ref={unifiedRef} className="relative">
-                          <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
-                            Variant
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setUnifiedOpen(!unifiedOpen);
-                              setUnifiedSearch("");
-                            }}
-                            className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[var(--admin-gold)] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
-                            data-testid="select-unified"
+                    return (
+                      <div ref={unifiedRef} className="relative">
+                        <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
+                          Variant
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUnifiedOpen(!unifiedOpen);
+                            setUnifiedSearch("");
+                          }}
+                          className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[var(--admin-gold)] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
+                          data-testid="select-unified"
+                        >
+                          <span
+                            className={form.unifiedSelect ? "text-[var(--admin-ink)]" : "text-[var(--admin-gold)]/20"}
                           >
-                            <span
-                              className={form.unifiedSelect ? "text-[var(--admin-ink)]" : "text-[var(--admin-gold)]/20"}
-                            >
-                              {form.unifiedSelect
-                                ? form.unifiedSelect === "OTHER"
-                                  ? "OTHER (manual)"
-                                  : getUnifiedDisplayLabel(form.unifiedSelect)
-                                : "Select or type a variant..."}
-                            </span>
-                            <ChevronDown size={14} className="text-[var(--admin-gold)]/50" />
-                          </button>
-                          {unifiedOpen && (
-                            <div
-                              className="absolute z-50 left-0 right-0 mt-1 border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
-                              data-testid="unified-dropdown"
-                            >
-                              <div className="p-2 border-b border-[var(--admin-gold)]/10">
-                                <input
-                                  type="text"
-                                  value={unifiedSearch}
-                                  onChange={(e) => setUnifiedSearch(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      if (showAddButton) {
-                                        addCustomVariant(unifiedSearch);
-                                      } else if (filteredOpts.length === 1) {
-                                        applyUnifiedSelection(filteredOpts[0].value);
-                                        setUnifiedOpen(false);
-                                        setUnifiedSearch("");
-                                      }
-                                    }
-                                    if (e.key === "Escape") setUnifiedOpen(false);
-                                  }}
-                                  placeholder="Type to filter or add a new variant..."
-                                  className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50"
-                                  autoFocus
-                                  data-testid="input-unified-search"
-                                />
-                              </div>
-                              <div className="overflow-y-auto flex-1">
-                                {form.unifiedSelect && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      applyUnifiedSelection("");
-                                      setUnifiedOpen(false);
-                                    }}
-                                    className="w-full text-left px-3 py-2 text-xs text-[var(--admin-ink-faint)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink-dim)] transition-colors border-b border-[var(--admin-gold)]/10"
-                                    data-testid="unified-clear"
-                                  >
-                                    Clear selection
-                                  </button>
-                                )}
-                                {showAddButton && (
-                                  <button
-                                    type="button"
-                                    onClick={() => addCustomVariant(unifiedSearch)}
-                                    className="w-full text-left px-3 py-2 text-sm text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 transition-colors flex items-center gap-2 border-b border-[var(--admin-gold)]/10"
-                                    data-testid="unified-add-custom"
-                                  >
-                                    <Plus size={13} />
-                                    Add "{unifiedSearch}" as variant
-                                  </button>
-                                )}
-                                {filteredOpts.map((o) => (
-                                  <button
-                                    key={o.value}
-                                    type="button"
-                                    onClick={() => {
-                                      applyUnifiedSelection(o.value);
-                                      setUnifiedOpen(false);
-                                      setUnifiedSearch("");
-                                    }}
-                                    className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[var(--admin-gold)]/15 text-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)]"}`}
-                                    data-testid={`unified-option-${o.value}`}
-                                  >
-                                    <span className="block">{o.label}</span>
-                                    {o.help && (
-                                      <span className="block text-[10px] text-[var(--admin-ink-faint)] group-hover:text-[var(--admin-ink-dim)] mt-0.5">
-                                        {o.help}
-                                      </span>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {form.unifiedSelect &&
-                            (() => {
-                              const opt = allOptions.find((o) => o.value === form.unifiedSelect);
-                              return opt?.help ? (
-                                <p
-                                  className="text-[var(--admin-ink-faint)] text-[10px] mt-1 flex items-center gap-1"
-                                  data-testid="text-unified-help"
-                                >
-                                  <HelpCircle size={10} className="shrink-0" /> {opt.help}
-                                </p>
-                              ) : null;
-                            })()}
-                          {form.unifiedSelect === "OTHER" && (
-                            <div className="mt-2 space-y-2">
+                            {form.unifiedSelect
+                              ? form.unifiedSelect === "OTHER"
+                                ? "OTHER (manual)"
+                                : getUnifiedDisplayLabel(form.unifiedSelect)
+                              : "Select or type a variant..."}
+                          </span>
+                          <ChevronDown size={14} className="text-[var(--admin-gold)]/50" />
+                        </button>
+                        {unifiedOpen && (
+                          <div
+                            className="absolute z-50 left-0 right-0 mt-1 border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
+                            data-testid="unified-dropdown"
+                          >
+                            <div className="p-2 border-b border-[var(--admin-gold)]/10">
                               <input
                                 type="text"
-                                value={form.otherText}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
+                                value={unifiedSearch}
+                                onChange={(e) => setUnifiedSearch(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    if (showAddButton) {
+                                      addCustomVariant(unifiedSearch);
+                                    } else if (filteredOpts.length === 1) {
+                                      applyUnifiedSelection(filteredOpts[0].value);
+                                      setUnifiedOpen(false);
+                                      setUnifiedSearch("");
+                                    }
+                                  }
+                                  if (e.key === "Escape") setUnifiedOpen(false);
                                 }}
-                                placeholder="Enter custom rarity / variant / collection..."
-                                className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
-                                data-testid="input-other-text"
+                                placeholder="Type to filter or add a new variant..."
+                                className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50"
+                                autoFocus
+                                data-testid="input-unified-search"
                               />
-                              {dbRarityOthers.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5" data-testid="rarity-other-suggestions">
-                                  {dbRarityOthers
-                                    .filter(
-                                      (v) => !form.otherText || v.toLowerCase().includes(form.otherText.toLowerCase())
-                                    )
-                                    .map((v) => (
-                                      <button
-                                        key={v}
-                                        type="button"
-                                        onClick={() =>
-                                          setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))
-                                        }
-                                        className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40 hover:text-[var(--admin-ink)]"}`}
-                                        data-testid={`rarity-other-chip-${v}`}
-                                      >
-                                        {v}
-                                      </button>
-                                    ))}
-                                </div>
-                              )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </details>
+                            <div className="overflow-y-auto flex-1">
+                              {form.unifiedSelect && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    applyUnifiedSelection("");
+                                    setUnifiedOpen(false);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs text-[var(--admin-ink-faint)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink-dim)] transition-colors border-b border-[var(--admin-gold)]/10"
+                                  data-testid="unified-clear"
+                                >
+                                  Clear selection
+                                </button>
+                              )}
+                              {showAddButton && (
+                                <button
+                                  type="button"
+                                  onClick={() => addCustomVariant(unifiedSearch)}
+                                  className="w-full text-left px-3 py-2 text-sm text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 transition-colors flex items-center gap-2 border-b border-[var(--admin-gold)]/10"
+                                  data-testid="unified-add-custom"
+                                >
+                                  <Plus size={13} />
+                                  Add "{unifiedSearch}" as variant
+                                </button>
+                              )}
+                              {filteredOpts.map((o) => (
+                                <button
+                                  key={o.value}
+                                  type="button"
+                                  onClick={() => {
+                                    applyUnifiedSelection(o.value);
+                                    setUnifiedOpen(false);
+                                    setUnifiedSearch("");
+                                  }}
+                                  className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[var(--admin-gold)]/15 text-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)]"}`}
+                                  data-testid={`unified-option-${o.value}`}
+                                >
+                                  <span className="block">{o.label}</span>
+                                  {o.help && (
+                                    <span className="block text-[10px] text-[var(--admin-ink-faint)] group-hover:text-[var(--admin-ink-dim)] mt-0.5">
+                                      {o.help}
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {form.unifiedSelect &&
+                          (() => {
+                            const opt = allOptions.find((o) => o.value === form.unifiedSelect);
+                            return opt?.help ? (
+                              <p
+                                className="text-[var(--admin-ink-faint)] text-[10px] mt-1 flex items-center gap-1"
+                                data-testid="text-unified-help"
+                              >
+                                <HelpCircle size={10} className="shrink-0" /> {opt.help}
+                              </p>
+                            ) : null;
+                          })()}
+                        {form.unifiedSelect === "OTHER" && (
+                          <div className="mt-2 space-y-2">
+                            <input
+                              type="text"
+                              value={form.otherText}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
+                              }}
+                              placeholder="Enter custom rarity / variant / collection..."
+                              className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
+                              data-testid="input-other-text"
+                            />
+                            {dbRarityOthers.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5" data-testid="rarity-other-suggestions">
+                                {dbRarityOthers
+                                  .filter(
+                                    (v) => !form.otherText || v.toLowerCase().includes(form.otherText.toLowerCase())
+                                  )
+                                  .map((v) => (
+                                    <button
+                                      key={v}
+                                      type="button"
+                                      onClick={() =>
+                                        setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))
+                                      }
+                                      className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40 hover:text-[var(--admin-ink)]"}`}
+                                      data-testid={`rarity-other-chip-${v}`}
+                                    >
+                                      {v}
+                                    </button>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </details>
 
-                {/* AI Card Identification removed from the daily grading UI (founder
+              {/* AI Card Identification removed from the daily grading UI (founder
               decision 2026-07-16): graders identify cards manually with TCGdex
               lookup + the visual picker. The feature stays flag-OFF and dormant
               server-side; nothing here calls a provider. */}
 
-                {/* Structured Pokémon rarity/variant picker (visual). Writes the new
+              {/* Structured Pokémon rarity/variant picker (visual). Writes the new
               nullable columns only; the legacy Variant control above is unchanged. */}
-                <div data-variant-section="variant">
-                  <label className="text-[var(--admin-gold)]/70 text-[11px] uppercase tracking-wider block mb-1">
-                    Variant
-                    <span className="ml-1.5 normal-case tracking-normal text-[10px] text-[var(--admin-ink-faint)]">
-                      optional
-                    </span>
-                    <a
-                      href="/admin/pokemon-knowledge"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-2 normal-case tracking-normal text-[10px] text-slate-400 underline hover:text-slate-200"
-                      title="Open the Pokémon Knowledge Hub — set codes, rarity symbols, comparisons and the printable handbook"
-                    >
-                      Knowledge Hub ↗
-                    </a>
-                  </label>
-                  <RarityVariantPicker
-                    // Keyed by certificate so switching cards REMOUNTS the picker
-                    // and re-seeds its internal rarity/finish/promo from the new
-                    // cert. Without this the picker keeps card A's selection
-                    // (its state is seeded once at mount) — the same protection
-                    // grading-panel.tsx already applies to this component.
-                    key={certificate?.id ?? "new"}
-                    legacyVariant={(certificate?.variant ?? form.variant) || null}
-                    value={{
-                      // Seed STRICTLY from the certificate (server truth), never from
-                      // `form`. `key` and `value` are both evaluated in the RENDER of
-                      // the commit where certificate.id changes, while `form` still
-                      // holds the PREVIOUS card — the re-seed happens in a passive
-                      // effect afterwards. Seeding from `form` would therefore mount
-                      // the new picker with card A's selection and, on the first
-                      // interaction, emit A's values into card B. Same rule (and same
-                      // reason) as grading-panel.tsx's picker.
-                      language:
-                        languageByValueOrLabel(certificate?.language ?? form.language)?.value ?? "en",
-                      era: ((certificate?.era ?? form.era) || null) as StructuredCardVariant["era"],
-                      rarity: (certificate?.rarityCode ?? form.rarityCode) || null,
-                      finish: (certificate?.finishVariant ?? form.finishVariant) || null,
-                      promo: (certificate?.promoType ?? form.promoType) || null,
-                      subset: (certificate?.subsetName ?? form.subsetName) || null,
-                    }}
-                    onChange={handleStructuredChange}
-                    favourites={rarityFavourites}
-                    recent={rarityRecent}
-                    onFavouritesChange={onFavouritesChange}
-                    onRecentChange={onRecentChange}
-                    onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
-                  />
+              <div data-variant-section="variant">
+                <label className="text-[var(--admin-gold)]/70 text-[11px] uppercase tracking-wider block mb-1">
+                  Variant
+                  <span className="ml-1.5 normal-case tracking-normal text-[10px] text-[var(--admin-ink-faint)]">
+                    optional
+                  </span>
+                  <a
+                    href="/admin/pokemon-knowledge"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-2 normal-case tracking-normal text-[10px] text-slate-400 underline hover:text-slate-200"
+                    title="Open the Pokémon Knowledge Hub — set codes, rarity symbols, comparisons and the printable handbook"
+                  >
+                    Knowledge Hub ↗
+                  </a>
+                </label>
+                <RarityVariantPicker
+                  // Keyed by certificate so switching cards REMOUNTS the picker
+                  // and re-seeds its internal rarity/finish/promo from the new
+                  // cert. Without this the picker keeps card A's selection
+                  // (its state is seeded once at mount) — the same protection
+                  // grading-panel.tsx already applies to this component.
+                  key={certificate?.id ?? "new"}
+                  legacyVariant={(certificate?.variant ?? form.variant) || null}
+                  value={{
+                    // Seed STRICTLY from the certificate (server truth), never from
+                    // `form`. `key` and `value` are both evaluated in the RENDER of
+                    // the commit where certificate.id changes, while `form` still
+                    // holds the PREVIOUS card — the re-seed happens in a passive
+                    // effect afterwards. Seeding from `form` would therefore mount
+                    // the new picker with card A's selection and, on the first
+                    // interaction, emit A's values into card B. Same rule (and same
+                    // reason) as grading-panel.tsx's picker.
+                    language: languageByValueOrLabel(certificate?.language ?? form.language)?.value ?? "en",
+                    era: ((certificate?.era ?? form.era) || null) as StructuredCardVariant["era"],
+                    rarity: (certificate?.rarityCode ?? form.rarityCode) || null,
+                    finish: (certificate?.finishVariant ?? form.finishVariant) || null,
+                    promo: (certificate?.promoType ?? form.promoType) || null,
+                    subset: (certificate?.subsetName ?? form.subsetName) || null,
+                  }}
+                  onChange={handleStructuredChange}
+                  favourites={rarityFavourites}
+                  recent={rarityRecent}
+                  onFavouritesChange={onFavouritesChange}
+                  onRecentChange={onRecentChange}
+                  onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
+                />
 
-                  {/* Permanent classification summary (item 2) — always visible below
+                {/* Permanent classification summary (item 2) — always visible below
                 the picker so the grader sees the exact language / rarity / finish /
                 promo they have selected, in the same wording used on Review. */}
-                  <VariantSummary
-                    values={{
-                      language: form.language,
-                      rarityCode: form.rarityCode,
-                      finishVariant: form.finishVariant,
-                      promoType: form.promoType,
-                      subsetName: form.subsetName,
-                      variant: form.variant,
-                      rarity: form.rarity,
-                      variantOther: form.variantOther,
-                      rarityOther: form.rarityOther,
-                      // Stored scheme version — an already-consolidated cert prints
-                      // structured-only even when everything is cleared, so this
-                      // line must not fold legacy wording back in.
-                      // Fresh saved-state (see savedConsolidated) — NOT the prop,
-                      // which auto-save never refreshes.
-                      storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
-                    }}
-                  />
-                </div>
+                <VariantSummary
+                  values={{
+                    language: form.language,
+                    rarityCode: form.rarityCode,
+                    finishVariant: form.finishVariant,
+                    promoType: form.promoType,
+                    subsetName: form.subsetName,
+                    variant: form.variant,
+                    rarity: form.rarity,
+                    variantOther: form.variantOther,
+                    rarityOther: form.rarityOther,
+                    // Stored scheme version — an already-consolidated cert prints
+                    // structured-only even when everything is cleared, so this
+                    // line must not fold legacy wording back in.
+                    // Fresh saved-state (see savedConsolidated) — NOT the prop,
+                    // which auto-save never refreshes.
+                    storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
+                  }}
+                />
+              </div>
 
-                {/* Designation — chips come from the DB-backed Catalogue Manager
+              {/* Designation — chips come from the DB-backed Catalogue Manager
               (`designation` category) via useCatalogue(); the seed list is only
               the offline fallback. Collapsed by default so daily grading stays
               compact; auto-opens when the cert already carries designations. */}
+              <details
+                className="rounded-lg border border-[var(--admin-gold)]/10 px-2.5 py-1.5"
+                open={designations.length > 0}
+                data-testid="designations-details"
+              >
+                <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+                  Designation{designations.length > 0 ? ` (${designations.length})` : ""}
+                  <span className="ml-1.5 normal-case tracking-normal text-[var(--admin-ink-faint)]">optional</span>
+                </summary>
+                <div className="pt-1.5 flex flex-wrap gap-1.5" data-testid="designations-chips">
+                  {catalogueDesignations.map((d) => {
+                    const active = designations.includes(d.code);
+                    return (
+                      <button
+                        key={d.code}
+                        type="button"
+                        onClick={() => toggleDesignation(d.code)}
+                        className={`px-2 py-0.5 rounded-full text-[11px] border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
+                        data-testid={`designation-${d.code}`}
+                        title={d.help}
+                      >
+                        {active && <Check size={10} className="inline mr-1" />}
+                        {d.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {designations.length > 0 && (
+                  <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1" data-testid="text-designations-summary">
+                    Selected: {designations.map((c) => getDesignationLabel(c, catalogueDesignations)).join(", ")}
+                  </p>
+                )}
+              </details>
+
+              {/* Optional attributes — same chip mechanism, `attribute` catalogue
+              category. Rendered ONLY when the owner has added attributes, so an
+              unseeded catalogue shows nothing rather than an empty box. */}
+              {catalogueAttributes.length > 0 && (
                 <details
                   className="rounded-lg border border-[var(--admin-gold)]/10 px-2.5 py-1.5"
-                  open={designations.length > 0}
-                  data-testid="designations-details"
+                  open={designations.some((c) => catalogueAttributes.some((a) => a.code === c))}
+                  data-testid="attributes-details"
                 >
                   <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
-                    Designation{designations.length > 0 ? ` (${designations.length})` : ""}
+                    Optional attributes
                     <span className="ml-1.5 normal-case tracking-normal text-[var(--admin-ink-faint)]">optional</span>
                   </summary>
-                  <div className="pt-1.5 flex flex-wrap gap-1.5" data-testid="designations-chips">
-                    {catalogueDesignations.map((d) => {
-                      const active = designations.includes(d.code);
+                  <div className="pt-1.5 flex flex-wrap gap-1.5" data-testid="attributes-chips">
+                    {catalogueAttributes.map((a) => {
+                      const active = designations.includes(a.code);
                       return (
                         <button
-                          key={d.code}
+                          key={a.code}
                           type="button"
-                          onClick={() => toggleDesignation(d.code)}
+                          onClick={() => toggleDesignation(a.code)}
                           className={`px-2 py-0.5 rounded-full text-[11px] border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
-                          data-testid={`designation-${d.code}`}
-                          title={d.help}
+                          data-testid={`attribute-${a.code}`}
+                          title={a.help}
                         >
                           {active && <Check size={10} className="inline mr-1" />}
-                          {d.label}
+                          {a.label}
                         </button>
                       );
                     })}
                   </div>
-                  {designations.length > 0 && (
-                    <p
-                      className="text-[var(--admin-ink-faint)] text-[10px] mt-1"
-                      data-testid="text-designations-summary"
-                    >
-                      Selected: {designations.map((c) => getDesignationLabel(c, catalogueDesignations)).join(", ")}
-                    </p>
-                  )}
                 </details>
+              )}
+            </div>
 
-                {/* Optional attributes — same chip mechanism, `attribute` catalogue
-              category. Rendered ONLY when the owner has added attributes, so an
-              unseeded catalogue shows nothing rather than an empty box. */}
-                {catalogueAttributes.length > 0 && (
-                  <details
-                    className="rounded-lg border border-[var(--admin-gold)]/10 px-2.5 py-1.5"
-                    open={designations.some((c) => catalogueAttributes.some((a) => a.code === c))}
-                    data-testid="attributes-details"
-                  >
-                    <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
-                      Optional attributes
-                      <span className="ml-1.5 normal-case tracking-normal text-[var(--admin-ink-faint)]">optional</span>
-                    </summary>
-                    <div className="pt-1.5 flex flex-wrap gap-1.5" data-testid="attributes-chips">
-                      {catalogueAttributes.map((a) => {
-                        const active = designations.includes(a.code);
-                        return (
-                          <button
-                            key={a.code}
-                            type="button"
-                            onClick={() => toggleDesignation(a.code)}
-                            className={`px-2 py-0.5 rounded-full text-[11px] border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
-                            data-testid={`attribute-${a.code}`}
-                            title={a.help}
-                          >
-                            {active && <Check size={10} className="inline mr-1" />}
-                            {a.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </details>
-                )}
-
-              </div>
-
-              {/* ── Card Details nav — ONE continue, straight to Grade. The old
+            {/* ── Card Details nav — ONE continue, straight to Grade. The old
               "Continue to Rarity" / "Back to Card" pair is gone: Variant now
               lives on this same screen, so there is nothing to navigate to. The
               card name + number precondition is preserved verbatim from the old
               Card-stage button (Variant is NOT required — it is optional). ── */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      captureLastCardContext();
-                      goToStage(nextStageIndex(CARD_DETAILS_STAGE));
-                    }}
-                    disabled={!form.cardName.trim() || !form.cardNumber.trim()}
-                    title={
-                      !form.cardName.trim() || !form.cardNumber.trim()
+            <div className="space-y-2">
+              <div className="flex items-center justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    captureLastCardContext();
+                    goToStage(nextStageIndex(CARD_DETAILS_STAGE));
+                  }}
+                  disabled={!form.cardName.trim() || !form.cardNumber.trim() || scannerCaptureRequired}
+                  title={
+                    scannerCaptureRequired
+                      ? "Complete both target-bound Canon captures first"
+                      : !form.cardName.trim() || !form.cardNumber.trim()
                         ? "Enter the card name and number first."
                         : undefined
-                    }
-                    data-testid="button-continue-to-grade"
-                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Continue to Grade →
-                  </button>
-                </div>
-                {(!form.cardName.trim() || !form.cardNumber.trim()) && (
-                  <p className="text-[10px] text-[var(--admin-ink-faint)] text-right">
-                    Enter the card name and number first.
-                  </p>
-                )}
+                  }
+                  data-testid="button-continue-to-grade"
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Continue to Grade →
+                </button>
               </div>
+              {(!form.cardName.trim() || !form.cardNumber.trim()) && (
+                <p className="text-[10px] text-[var(--admin-ink-faint)] text-right">
+                  Enter the card name and number first.
+                </p>
+              )}
             </div>
+          </div>
 
-            {/* Grading workstation — card tool front/back + defect marking. Placed
+          {/* Grading workstation — card tool front/back + defect marking. Placed
             right after Card Details (owner directive, Option A 2026-07-02):
             AI Identify → Card Details → grade the card → Grade section. Rendered
             inside the <form> but every workstation button is type="button" and
             handleSubmit no-ops pre-approval, so it can never submit the form. */}
-            {/* Stage 3 · GRADE — the protected workstation renders UNCHANGED inside
+          {/* Stage 3 · GRADE — the protected workstation renders UNCHANGED inside
             this wrapper. Hidden with CSS only (never unmounted, never scaled or
             transformed): the card tool reads getBoundingClientRect live per
             event, so visibility toggling cannot alter its coordinate system. */}
-            <div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>
-              {workstationSlot && (
-                // Plain in-flow wrapper — exists ONLY for the Enter-key guard below.
-                // It must not size or scroll: a height cap here becomes a second
-                // scrollport that clips the protected workstation. Full rationale +
-                // measurements in tests/grading-grade-stage-layout.test.ts.
-                <div
-                  onKeyDown={(e) => {
-                    // Workstation now lives inside the <form>. On an already-approved
-                    // cert the explicit "Save Changes to Published Certificate" submit
-                    // button exists, so Enter in a workstation text/number input would
-                    // otherwise submit the form (save + close the editor, discarding
-                    // the in-progress workstation edit). Swallow Enter's default for
-                    // INPUT elements only — textareas keep newlines, selects/buttons
-                    // are unaffected, and no grading input relies on Enter.
-                    if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
-                      e.preventDefault();
-                    }
-                  }}
-                >
-                  {workstationSlot}
-                </div>
-              )}
+          <div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>
+            {workstationSlot && (
+              // Plain in-flow wrapper — exists ONLY for the Enter-key guard below.
+              // It must not size or scroll: a height cap here becomes a second
+              // scrollport that clips the protected workstation. Full rationale +
+              // measurements in tests/grading-grade-stage-layout.test.ts.
+              <div
+                onKeyDown={(e) => {
+                  // Workstation now lives inside the <form>. On an already-approved
+                  // cert the explicit "Save Changes to Published Certificate" submit
+                  // button exists, so Enter in a workstation text/number input would
+                  // otherwise submit the form (save + close the editor, discarding
+                  // the in-progress workstation edit). Swallow Enter's default for
+                  // INPUT elements only — textareas keep newlines, selects/buttons
+                  // are unaffected, and no grading input relies on Enter.
+                  if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+                    e.preventDefault();
+                  }
+                }}
+              >
+                {workstationSlot}
+              </div>
+            )}
 
-              <div className="space-y-4">
-                <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
+            <div className="space-y-4">
+              <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
 
-                <div>
-                  {/* A11y: the label is bound to whichever control is rendered
+              <div>
+                {/* A11y: the label is bound to whichever control is rendered
                       below, so a screen reader announces "Grade Type" together
                       with the current value in BOTH modes. Before this it was a
                       bare <label> with no htmlFor sitting above a plain <div>,
                       which announced the value as unlabelled prose. */}
-                  <label
-                    htmlFor={isEdit ? "cert-grade-type-readonly" : "cert-grade-type"}
-                    id="cert-grade-type-label"
-                    className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1"
-                  >
-                    Grade Type *
-                  </label>
-                  {/* PR A · OWNERSHIP. On an EXISTING certificate the kind
+                <label
+                  htmlFor={isEdit ? "cert-grade-type-readonly" : "cert-grade-type"}
+                  id="cert-grade-type-label"
+                  className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1"
+                >
+                  Grade Type *
+                </label>
+                {/* PR A · OWNERSHIP. On an EXISTING certificate the kind
                       (numeric vs authentication-only) is owned by the grading
                       workstation's authentication control, which persists it
                       through the dedicated grading route as
@@ -3533,8 +3584,8 @@ export default function CertificateForm({
                       workstation is not mounted and the initial kind must be set.
                       Overall Grade below has been read-only since 2026-07-01 for
                       the same reason, so this makes the panel consistent. */}
-                  {isEdit ? (
-                    /* A11y (hostile review): a READ-ONLY form control, not a
+                {isEdit ? (
+                  /* A11y (hostile review): a READ-ONLY form control, not a
                        styled <div>. `readOnly` (never `disabled`) keeps it in the
                        tab order and makes assistive tech announce the label, the
                        value AND "read only", so a keyboard user is told plainly
@@ -3542,31 +3593,28 @@ export default function CertificateForm({
                        trying. It carries no `name`, and the payload is built from
                        form state via certificateFormEntriesToSend, so this adds
                        no second grading writer of any kind. */
-                    <>
-                      <input
-                        id="cert-grade-type-readonly"
-                        type="text"
-                        readOnly
-                        aria-readonly="true"
-                        aria-describedby="cert-grade-type-hint"
-                        tabIndex={0}
-                        value={
-                          form.gradeType === "numeric"
-                            ? "Numeric (1–10)"
-                            : (NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ??
-                              String(form.gradeType ?? ""))
-                        }
-                        className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm cursor-default focus:outline-none focus:border-[var(--admin-gold)]"
-                        data-testid="display-grade-type"
-                      />
-                      <span
-                        id="cert-grade-type-hint"
-                        className="text-[var(--admin-ink-dim)] text-xs mt-1 block"
-                      >
-                        Set in the Grade stage (Authentication)
-                      </span>
-                    </>
-                  ) : (
+                  <>
+                    <input
+                      id="cert-grade-type-readonly"
+                      type="text"
+                      readOnly
+                      aria-readonly="true"
+                      aria-describedby="cert-grade-type-hint"
+                      tabIndex={0}
+                      value={
+                        form.gradeType === "numeric"
+                          ? "Numeric (1–10)"
+                          : (NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ??
+                            String(form.gradeType ?? ""))
+                      }
+                      className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm cursor-default focus:outline-none focus:border-[var(--admin-gold)]"
+                      data-testid="display-grade-type"
+                    />
+                    <span id="cert-grade-type-hint" className="text-[var(--admin-ink-dim)] text-xs mt-1 block">
+                      Set in the Grade stage (Authentication)
+                    </span>
+                  </>
+                ) : (
                   <select
                     id="cert-grade-type"
                     value={form.gradeType}
@@ -3600,748 +3648,748 @@ export default function CertificateForm({
                       </option>
                     ))}
                   </select>
-                  )}
-                </div>
-
-                {isNonNum && (
-                  <div className="bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
-                    <p className="text-[var(--admin-gold)] text-sm font-semibold">
-                      {form.gradeType === "NO" || form.gradeType === "not_original"
-                        ? "AUTHENTIC – No Numerical Grade"
-                        : "AUTHENTIC ALTERED – No Numerical Grade"}
-                    </p>
-                    <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                      {form.gradeType === "NO" || form.gradeType === "not_original"
-                        ? "Card verified as authentic. No numerical grade or subgrades assigned."
-                        : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
-                    </p>
-                  </div>
                 )}
+              </div>
 
-                {!isNonNum && (
-                  <>
-                    <div>
-                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
-                        Overall Grade
-                      </label>
-                      {/* Read-only (owner directive 2026-07-01): the grade is set 100%
+              {isNonNum && (
+                <div className="bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
+                  <p className="text-[var(--admin-gold)] text-sm font-semibold">
+                    {form.gradeType === "NO" || form.gradeType === "not_original"
+                      ? "AUTHENTIC – No Numerical Grade"
+                      : "AUTHENTIC ALTERED – No Numerical Grade"}
+                  </p>
+                  <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                    {form.gradeType === "NO" || form.gradeType === "not_original"
+                      ? "Card verified as authentic. No numerical grade or subgrades assigned."
+                      : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
+                  </p>
+                </div>
+              )}
+
+              {!isNonNum && (
+                <>
+                  <div>
+                    <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
+                      Overall Grade
+                    </label>
+                    {/* Read-only (owner directive 2026-07-01): the grade is set 100%
                     automatically by the MVGS grading workstation (card tool +
                     defect pins). No manual grade entry on the certificate form. */}
-                      <div
-                        className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
-                        data-testid="display-grade-overall"
-                      >
-                        {form.gradeOverall
-                          ? form.gradeOverall === "10" && form.labelType === "black"
-                            ? "★ 10 — Black Label (Gem Mint)"
-                            : form.gradeOverall
-                          : "Not yet graded"}
-                        <span className="text-[var(--admin-ink-dim)] text-xs ml-2">
-                          — set automatically by MVGS grading
-                        </span>
-                      </div>
+                    <div
+                      className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
+                      data-testid="display-grade-overall"
+                    >
+                      {form.gradeOverall
+                        ? form.gradeOverall === "10" && form.labelType === "black"
+                          ? "★ 10 — Black Label (Gem Mint)"
+                          : form.gradeOverall
+                        : "Not yet graded"}
+                      <span className="text-[var(--admin-ink-dim)] text-xs ml-2">
+                        — set automatically by MVGS grading
+                      </span>
                     </div>
+                  </div>
 
-                    <div>
-                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
-                        Service Tier
-                      </label>
-                      <select
-                        value={form.serviceTier}
-                        onChange={(e) => updateField("serviceTier", e.target.value)}
-                        className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-                        data-testid="select-service-tier"
+                  <div>
+                    <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
+                      Service Tier
+                    </label>
+                    <select
+                      value={form.serviceTier}
+                      onChange={(e) => updateField("serviceTier", e.target.value)}
+                      className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                      data-testid="select-service-tier"
+                    >
+                      <option value="" className="bg-[var(--admin-panel)]">
+                        Standard (default)
+                      </option>
+                      <option value="vault-queue" className="bg-[var(--admin-panel)]">
+                        Vault Queue — £19
+                      </option>
+                      <option value="standard" className="bg-[var(--admin-panel)]">
+                        Standard — £25
+                      </option>
+                      <option value="express" className="bg-[var(--admin-panel)]">
+                        Express — £45
+                      </option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Grade-stage nav — Back now returns to Card Details (the single
+              identity screen), per the consolidated 3-stage flow. */}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => goToStage(prevStageIndex(GRADE_STAGE))}
+                data-testid="button-back-to-card-details"
+                className="px-3.5 py-1.5 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-[11px] font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+              >
+                ← Back to Card Details
+              </button>
+              <button
+                type="button"
+                onClick={() => goToStage(nextStageIndex(GRADE_STAGE))}
+                data-testid="button-review-card"
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all"
+              >
+                Continue to Review →
+              </button>
+            </div>
+          </div>
+
+          {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
+
+          {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
+          {false && isEdit && (
+            <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
+              <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+                <Upload size={12} />
+                Grading Images
+              </legend>
+
+              <p className="text-[var(--admin-ink-dim)] text-xs">
+                Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and
+                processed into analysis variants.
+              </p>
+
+              {/* 2×2 upload grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {(["front", "back", "angled", "closeup"] as const).map((angle) => {
+                  const isRequired = angle === "front" || angle === "back";
+                  const label =
+                    angle === "front"
+                      ? "Front (required)"
+                      : angle === "back"
+                        ? "Back (required)"
+                        : angle === "angled"
+                          ? "Angled (optional)"
+                          : "Closeup (optional)";
+                  const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
+                  const previewUrl = gradingPreviewUrls[angle] || null;
+                  const displayUrl = previewUrl || existingUrl;
+                  return (
+                    <label
+                      key={angle}
+                      className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
+                      ${gradingImages[angle] ? "border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) setGradingImages((prev) => ({ ...prev, [angle]: f }));
+                        }}
+                      />
+                      {displayUrl ? (
+                        <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
+                      ) : (
+                        <Upload
+                          size={20}
+                          className={isRequired ? "text-[var(--admin-gold)]/60" : "text-[var(--admin-ink-dim)]"}
+                        />
+                      )}
+                      <span
+                        className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[var(--admin-ink-dim)] font-semibold" : "text-[var(--admin-ink-faint)]"}`}
                       >
-                        <option value="" className="bg-[var(--admin-panel)]">
-                          Standard (default)
-                        </option>
-                        <option value="vault-queue" className="bg-[var(--admin-panel)]">
-                          Vault Queue — £19
-                        </option>
-                        <option value="standard" className="bg-[var(--admin-panel)]">
-                          Standard — £25
-                        </option>
-                        <option value="express" className="bg-[var(--admin-panel)]">
-                          Express — £45
-                        </option>
-                      </select>
-                    </div>
-                  </>
+                        {label}
+                      </span>
+                      {gradingImages[angle] && (
+                        <span className="text-[9px] text-[var(--admin-gold)] truncate w-full">
+                          {gradingImages[angle]!.name}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* Upload button */}
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={uploadGradingImages}
+                  disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
+                  className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-40"
+                >
+                  {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {gradingUploading ? "Uploading…" : "Upload & Process"}
+                </button>
+                {gradingUploadDone && (
+                  <span className="text-[var(--admin-green)] text-xs flex items-center gap-1">
+                    <CheckCircle2 size={12} /> Uploaded — variants generating in background
+                  </span>
                 )}
               </div>
 
-              {/* Grade-stage nav — Back now returns to Card Details (the single
-              identity screen), per the consolidated 3-stage flow. */}
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => goToStage(prevStageIndex(GRADE_STAGE))}
-                  data-testid="button-back-to-card-details"
-                  className="px-3.5 py-1.5 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-[11px] font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
-                >
-                  ← Back to Card Details
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goToStage(nextStageIndex(GRADE_STAGE))}
-                  data-testid="button-review-card"
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all"
-                >
-                  Continue to Review →
-                </button>
-              </div>
-            </div>
-
-            {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
-
-            {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
-            {false && isEdit && (
-              <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
-                <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
-                  <Upload size={12} />
-                  Grading Images
-                </legend>
-
-                <p className="text-[var(--admin-ink-dim)] text-xs">
-                  Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and
-                  processed into analysis variants.
-                </p>
-
-                {/* 2×2 upload grid */}
-                <div className="grid grid-cols-2 gap-3">
-                  {(["front", "back", "angled", "closeup"] as const).map((angle) => {
-                    const isRequired = angle === "front" || angle === "back";
-                    const label =
-                      angle === "front"
-                        ? "Front (required)"
-                        : angle === "back"
-                          ? "Back (required)"
-                          : angle === "angled"
-                            ? "Angled (optional)"
-                            : "Closeup (optional)";
-                    const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
-                    const previewUrl = gradingPreviewUrls[angle] || null;
-                    const displayUrl = previewUrl || existingUrl;
-                    return (
-                      <label
-                        key={angle}
-                        className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
-                      ${gradingImages[angle] ? "border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}
-                      >
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="sr-only"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) setGradingImages((prev) => ({ ...prev, [angle]: f }));
-                          }}
-                        />
-                        {displayUrl ? (
-                          <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
+              {/* Quality check results */}
+              {Object.keys(gradingQuality).length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
+                    Image Quality Checks
+                  </p>
+                  {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
+                    <div
+                      key={angle}
+                      className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3"
+                    >
+                      <p className="text-[var(--admin-ink)] text-[10px] font-bold uppercase mb-1">
+                        {angle} —{" "}
+                        {q.overall === "pass" ? (
+                          <span className="text-[var(--admin-green)]">PASS</span>
+                        ) : q.overall === "warn" ? (
+                          <span className="text-[var(--admin-amber)]">WARN</span>
                         ) : (
-                          <Upload
-                            size={20}
-                            className={isRequired ? "text-[var(--admin-gold)]/60" : "text-[var(--admin-ink-dim)]"}
-                          />
+                          <span className="text-[var(--admin-red)]">FAIL</span>
                         )}
-                        <span
-                          className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[var(--admin-ink-dim)] font-semibold" : "text-[var(--admin-ink-faint)]"}`}
-                        >
-                          {label}
-                        </span>
-                        {gradingImages[angle] && (
-                          <span className="text-[9px] text-[var(--admin-gold)] truncate w-full">
-                            {gradingImages[angle]!.name}
-                          </span>
-                        )}
-                      </label>
-                    );
-                  })}
+                      </p>
+                      <div className="space-y-0.5">
+                        {(q.checks || []).map((c: any, i: number) => (
+                          <p
+                            key={i}
+                            className={`text-[10px] ${c.status === "pass" ? "text-[var(--admin-ink-faint)]" : c.status === "warn" ? "text-[var(--admin-amber)]" : "text-[var(--admin-red)]"}`}
+                          >
+                            {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
+              )}
 
-                {/* Upload button */}
-                <div className="flex items-center gap-3">
+              {/* Card database lookup */}
+              <div className="space-y-2 pt-2 border-t border-[var(--admin-line)]">
+                <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
+                  Verify Card Identity
+                </p>
+                <div className="flex gap-2">
+                  <select
+                    value={cardLookupGame}
+                    onChange={(e) => setCardLookupGame(e.target.value)}
+                    className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[var(--admin-gold)]"
+                  >
+                    <option value="pokemon">Pokémon</option>
+                    <option value="mtg">MTG</option>
+                    <option value="yugioh">Yu-Gi-Oh!</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={cardLookupQuery}
+                    onChange={(e) => setCardLookupQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
+                    placeholder="Card name…"
+                    className="flex-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-3 py-1.5 placeholder-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
+                  />
                   <button
                     type="button"
-                    onClick={uploadGradingImages}
-                    disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
-                    className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-40"
+                    onClick={runCardLookup}
+                    disabled={cardLookupLoading || !cardLookupQuery.trim()}
+                    className="flex items-center gap-1 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[var(--admin-gold)]/20"
                   >
-                    {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                    {gradingUploading ? "Uploading…" : "Upload & Process"}
+                    {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
                   </button>
-                  {gradingUploadDone && (
-                    <span className="text-[var(--admin-green)] text-xs flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Uploaded — variants generating in background
-                    </span>
-                  )}
                 </div>
-
-                {/* Quality check results */}
-                {Object.keys(gradingQuality).length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
-                      Image Quality Checks
-                    </p>
-                    {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
-                      <div
-                        key={angle}
-                        className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3"
+                {cardLookupResults.length > 0 && (
+                  <div className="bg-[var(--admin-panel)] rounded-lg border border-[var(--admin-line)] max-h-48 overflow-y-auto">
+                    {cardLookupResults.map((r, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          updateField("cardName", r.name);
+                          if (r.setName) updateField("setName", r.setName);
+                          if (r.year) updateField("year", r.year);
+                          if (r.number) updateField("cardNumber", r.number);
+                          if (r.rarity) updateField("rarity", r.rarity);
+                          setCardLookupResults([]);
+                          toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0 flex items-start gap-3"
                       >
-                        <p className="text-[var(--admin-ink)] text-[10px] font-bold uppercase mb-1">
-                          {angle} —{" "}
-                          {q.overall === "pass" ? (
-                            <span className="text-[var(--admin-green)]">PASS</span>
-                          ) : q.overall === "warn" ? (
-                            <span className="text-[var(--admin-amber)]">WARN</span>
-                          ) : (
-                            <span className="text-[var(--admin-red)]">FAIL</span>
-                          )}
-                        </p>
-                        <div className="space-y-0.5">
-                          {(q.checks || []).map((c: any, i: number) => (
-                            <p
-                              key={i}
-                              className={`text-[10px] ${c.status === "pass" ? "text-[var(--admin-ink-faint)]" : c.status === "warn" ? "text-[var(--admin-amber)]" : "text-[var(--admin-red)]"}`}
-                            >
-                              {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
-                            </p>
-                          ))}
+                        {r.imageUrl && (
+                          <img
+                            src={r.imageUrl}
+                            alt={r.name}
+                            className="w-8 h-10 object-contain rounded flex-shrink-0"
+                          />
+                        )}
+                        <div>
+                          <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
+                          <p className="text-[var(--admin-ink-dim)] text-[10px]">
+                            {r.setName}
+                            {r.number ? ` · ${displayCollectorNumber(r.number)}` : ""}
+                            {r.rarity ? ` · ${r.rarity}` : ""}
+                          </p>
+                          <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
-
-                {/* Card database lookup */}
-                <div className="space-y-2 pt-2 border-t border-[var(--admin-line)]">
-                  <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
-                    Verify Card Identity
+                {cardLookupResults.length === 0 && cardLookupQuery && !cardLookupLoading && (
+                  <p className="text-[var(--admin-ink-faint)] text-[10px]">
+                    No results — check spelling or try a shorter name.
                   </p>
-                  <div className="flex gap-2">
-                    <select
-                      value={cardLookupGame}
-                      onChange={(e) => setCardLookupGame(e.target.value)}
-                      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[var(--admin-gold)]"
-                    >
-                      <option value="pokemon">Pokémon</option>
-                      <option value="mtg">MTG</option>
-                      <option value="yugioh">Yu-Gi-Oh!</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={cardLookupQuery}
-                      onChange={(e) => setCardLookupQuery(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
-                      placeholder="Card name…"
-                      className="flex-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-3 py-1.5 placeholder-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={runCardLookup}
-                      disabled={cardLookupLoading || !cardLookupQuery.trim()}
-                      className="flex items-center gap-1 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[var(--admin-gold)]/20"
-                    >
-                      {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                    </button>
-                  </div>
-                  {cardLookupResults.length > 0 && (
-                    <div className="bg-[var(--admin-panel)] rounded-lg border border-[var(--admin-line)] max-h-48 overflow-y-auto">
-                      {cardLookupResults.map((r, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => {
-                            updateField("cardName", r.name);
-                            if (r.setName) updateField("setName", r.setName);
-                            if (r.year) updateField("year", r.year);
-                            if (r.number) updateField("cardNumber", r.number);
-                            if (r.rarity) updateField("rarity", r.rarity);
-                            setCardLookupResults([]);
-                            toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
-                          }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0 flex items-start gap-3"
-                        >
-                          {r.imageUrl && (
-                            <img
-                              src={r.imageUrl}
-                              alt={r.name}
-                              className="w-8 h-10 object-contain rounded flex-shrink-0"
-                            />
-                          )}
-                          <div>
-                            <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
-                            <p className="text-[var(--admin-ink-dim)] text-[10px]">
-                              {r.setName}
-                              {r.number ? ` · ${displayCollectorNumber(r.number)}` : ""}
-                              {r.rarity ? ` · ${r.rarity}` : ""}
-                            </p>
-                            <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {cardLookupResults.length === 0 && cardLookupQuery && !cardLookupLoading && (
-                    <p className="text-[var(--admin-ink-faint)] text-[10px]">
-                      No results — check spelling or try a shorter name.
-                    </p>
-                  )}
-                </div>
-              </fieldset>
-            )}
-
-            {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
-            {false && isEdit && (
-              <fieldset className="border border-[var(--admin-gold)]/30 rounded-lg p-4 space-y-4">
-                <legend className="text-[var(--admin-gold)] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
-                  <Cpu size={12} />
-                  AI-Assisted Grading
-                </legend>
-
-                <div className="flex items-center justify-between">
-                  <p className="text-[var(--admin-ink-dim)] text-xs">
-                    Analyze card photos with Claude Vision to generate a draft grade.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={runAiAnalysis}
-                    disabled={aiLoading}
-                    className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-50"
-                    data-testid="button-analyze-ai"
-                  >
-                    {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
-                    {aiLoading ? "Analyzing…" : "Analyze with AI"}
-                  </button>
-                </div>
-
-                {aiLoading && (
-                  <div className="flex items-center gap-3 text-[var(--admin-gold)] text-xs bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
-                    <Loader2 size={14} className="animate-spin shrink-0" />
-                    Sending images to Claude Vision. This takes 15–30 seconds…
-                  </div>
                 )}
+              </div>
+            </fieldset>
+          )}
 
-                {aiError && (
-                  <div className="flex items-center gap-2 text-[var(--admin-red)] text-xs bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded-lg p-3">
-                    <AlertTriangle size={14} className="shrink-0" />
-                    {aiError}
+          {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
+          {false && isEdit && (
+            <fieldset className="border border-[var(--admin-gold)]/30 rounded-lg p-4 space-y-4">
+              <legend className="text-[var(--admin-gold)] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+                <Cpu size={12} />
+                AI-Assisted Grading
+              </legend>
+
+              <div className="flex items-center justify-between">
+                <p className="text-[var(--admin-ink-dim)] text-xs">
+                  Analyze card photos with Claude Vision to generate a draft grade.
+                </p>
+                <button
+                  type="button"
+                  onClick={runAiAnalysis}
+                  disabled={aiLoading}
+                  className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-50"
+                  data-testid="button-analyze-ai"
+                >
+                  {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
+                  {aiLoading ? "Analyzing…" : "Analyze with AI"}
+                </button>
+              </div>
+
+              {aiLoading && (
+                <div className="flex items-center gap-3 text-[var(--admin-gold)] text-xs bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
+                  <Loader2 size={14} className="animate-spin shrink-0" />
+                  Sending images to Claude Vision. This takes 15–30 seconds…
+                </div>
+              )}
+
+              {aiError && (
+                <div className="flex items-center gap-2 text-[var(--admin-red)] text-xs bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded-lg p-3">
+                  <AlertTriangle size={14} className="shrink-0" />
+                  {aiError}
+                </div>
+              )}
+
+              {aiAnalysis && !aiLoading && (
+                <div className="space-y-4">
+                  {/* Subgrade cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
+                      <div
+                        key={cat}
+                        className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-center"
+                      >
+                        <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
+                          {cat}
+                        </p>
+                        <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
+                          {aiDraft[cat] || "—"}
+                        </p>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          step="0.5"
+                          value={aiDraft[cat]}
+                          onChange={(e) => setAiDraft((d) => ({ ...d, [cat]: e.target.value }))}
+                          className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-xs text-center focus:outline-none focus:border-[var(--admin-gold)]"
+                        />
+                        <p className="text-[var(--admin-ink-faint)] text-[9px] leading-tight mt-1.5 line-clamp-2">
+                          {aiAnalysis[cat]?.notes || ""}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                )}
 
-                {aiAnalysis && !aiLoading && (
-                  <div className="space-y-4">
-                    {/* Subgrade cards */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
-                        <div
-                          key={cat}
-                          className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-center"
-                        >
-                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
-                            {cat}
-                          </p>
-                          <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
-                            {aiDraft[cat] || "—"}
-                          </p>
-                          <input
-                            type="number"
-                            min="1"
-                            max="10"
-                            step="0.5"
-                            value={aiDraft[cat]}
-                            onChange={(e) => setAiDraft((d) => ({ ...d, [cat]: e.target.value }))}
-                            className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-xs text-center focus:outline-none focus:border-[var(--admin-gold)]"
-                          />
-                          <p className="text-[var(--admin-ink-faint)] text-[9px] leading-tight mt-1.5 line-clamp-2">
-                            {aiAnalysis[cat]?.notes || ""}
-                          </p>
+                  {/* Centering ratios */}
+                  {aiAnalysis.centering && (
+                    <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        ["Front L/R", aiAnalysis.centering.front_left_right],
+                        ["Front T/B", aiAnalysis.centering.front_top_bottom],
+                        ["Back L/R", aiAnalysis.centering.back_left_right],
+                        ["Back T/B", aiAnalysis.centering.back_top_bottom],
+                      ].map(([label, val]) => (
+                        <div key={label}>
+                          <p className="text-[var(--admin-ink-faint)] text-[9px] uppercase">{label}</p>
+                          <p className="text-[var(--admin-ink)] font-mono font-bold">{val || "—"}</p>
                         </div>
                       ))}
                     </div>
+                  )}
 
-                    {/* Centering ratios */}
-                    {aiAnalysis.centering && (
-                      <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {[
-                          ["Front L/R", aiAnalysis.centering.front_left_right],
-                          ["Front T/B", aiAnalysis.centering.front_top_bottom],
-                          ["Back L/R", aiAnalysis.centering.back_left_right],
-                          ["Back T/B", aiAnalysis.centering.back_top_bottom],
-                        ].map(([label, val]) => (
-                          <div key={label}>
-                            <p className="text-[var(--admin-ink-faint)] text-[9px] uppercase">{label}</p>
-                            <p className="text-[var(--admin-ink)] font-mono font-bold">{val || "—"}</p>
+                  {/* Defects */}
+                  {aiDefects.length > 0 && (
+                    <div>
+                      <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest mb-2">
+                        Identified Defects
+                      </p>
+                      <div className="space-y-1.5">
+                        {aiDefects.map((d, i) => (
+                          <div
+                            key={i}
+                            className="flex items-start gap-2 bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-3 py-2"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className="text-[var(--admin-gold)] text-xs font-semibold uppercase">
+                                {d.type?.replace(/_/g, " ")}
+                              </span>
+                              <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
+                              <span className="text-[var(--admin-ink-dim)] text-xs">{d.location}</span>
+                              <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
+                              <span className="text-[var(--admin-ink-faint)] text-xs italic">{d.severity}</span>
+                              <p className="text-[var(--admin-ink-dim)] text-[11px] mt-0.5">{d.description}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAiDefects((prev) => prev.filter((_, j) => j !== i))}
+                              className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] transition-colors shrink-0 mt-0.5"
+                            >
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         ))}
                       </div>
-                    )}
-
-                    {/* Defects */}
-                    {aiDefects.length > 0 && (
-                      <div>
-                        <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest mb-2">
-                          Identified Defects
-                        </p>
-                        <div className="space-y-1.5">
-                          {aiDefects.map((d, i) => (
-                            <div
-                              key={i}
-                              className="flex items-start gap-2 bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-3 py-2"
-                            >
-                              <div className="flex-1 min-w-0">
-                                <span className="text-[var(--admin-gold)] text-xs font-semibold uppercase">
-                                  {d.type?.replace(/_/g, " ")}
-                                </span>
-                                <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
-                                <span className="text-[var(--admin-ink-dim)] text-xs">{d.location}</span>
-                                <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
-                                <span className="text-[var(--admin-ink-faint)] text-xs italic">{d.severity}</span>
-                                <p className="text-[var(--admin-ink-dim)] text-[11px] mt-0.5">{d.description}</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setAiDefects((prev) => prev.filter((_, j) => j !== i))}
-                                className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] transition-colors shrink-0 mt-0.5"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Overall grade + explanation */}
-                    <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest">
-                            AI Draft Overall
-                          </p>
-                          <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>
-                            {aiDraft.overall || "—"}
-                          </p>
-                          <p className="text-[var(--admin-gold)] text-xs">{aiAnalysis.grade_label || ""}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
-                            Override Overall
-                          </p>
-                          <input
-                            type="number"
-                            min="1"
-                            max="10"
-                            step="0.5"
-                            value={aiDraft.overall}
-                            onChange={(e) => setAiDraft((d) => ({ ...d, overall: e.target.value }))}
-                            className="w-24 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-sm text-center focus:outline-none focus:border-[var(--admin-gold)]"
-                          />
-                        </div>
-                      </div>
-                      {aiAnalysis.grade_explanation && (
-                        <p className="text-[var(--admin-ink-dim)] text-xs leading-relaxed border-t border-[var(--admin-line)] pt-3">
-                          {aiAnalysis.grade_explanation}
-                        </p>
-                      )}
-                      {aiAnalysis.authentication_notes && (
-                        <p className="text-[var(--admin-ink-faint)] text-[11px] leading-relaxed mt-2 italic">
-                          {aiAnalysis.authentication_notes}
-                        </p>
-                      )}
                     </div>
+                  )}
 
-                    {/* Approve button */}
-                    {!approved ? (
-                      <button
-                        type="button"
-                        onClick={approveGrade}
-                        disabled={approveLoading || !aiDraft.overall}
-                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
-                        data-testid="button-approve-grade"
-                      >
-                        {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                        {approveLoading ? "Approving…" : "Approve Grade"}
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2 text-[var(--admin-green)] text-sm font-semibold bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg p-3">
-                        <CheckCircle2 size={16} />
-                        Grade approved
+                  {/* Overall grade + explanation */}
+                  <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest">
+                          AI Draft Overall
+                        </p>
+                        <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>
+                          {aiDraft.overall || "—"}
+                        </p>
+                        <p className="text-[var(--admin-gold)] text-xs">{aiAnalysis.grade_label || ""}</p>
                       </div>
+                      <div className="text-right">
+                        <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
+                          Override Overall
+                        </p>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          step="0.5"
+                          value={aiDraft.overall}
+                          onChange={(e) => setAiDraft((d) => ({ ...d, overall: e.target.value }))}
+                          className="w-24 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-sm text-center focus:outline-none focus:border-[var(--admin-gold)]"
+                        />
+                      </div>
+                    </div>
+                    {aiAnalysis.grade_explanation && (
+                      <p className="text-[var(--admin-ink-dim)] text-xs leading-relaxed border-t border-[var(--admin-line)] pt-3">
+                        {aiAnalysis.grade_explanation}
+                      </p>
+                    )}
+                    {aiAnalysis.authentication_notes && (
+                      <p className="text-[var(--admin-ink-faint)] text-[11px] leading-relaxed mt-2 italic">
+                        {aiAnalysis.authentication_notes}
+                      </p>
                     )}
                   </div>
-                )}
 
-                <p className="text-[var(--admin-ink-faint)] text-[10px] leading-relaxed">
-                  Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
-                  lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface
-                  scratches.
-                </p>
-              </fieldset>
-            )}
-
-            {error && (
-              <p className="text-[var(--admin-red)] text-sm" data-testid="text-form-error">
-                {error}
-              </p>
-            )}
-
-            {/* Stage 3 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
-            explicit save action. Note content, templates and persistence are the
-            EXACT pre-existing implementation, only relocated. */}
-            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(REVIEW_STAGE)}`}>
-              {/* Compact approval header — frames Review as a final dashboard and keeps
-            Back to Grade as a quiet inline control instead of a chunky button row. */}
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
-                  Final review &amp; approval
-                </span>
-                <button
-                  type="button"
-                  onClick={() => goToStage(prevStageIndex(REVIEW_STAGE))}
-                  data-testid="button-back-to-grade"
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
-                >
-                  ← Back to Grade
-                </button>
-              </div>
-              {/* Read-only confirmation summary — every value comes from existing form
-            state; Edit links only switch the local stage (no save/mutation). */}
-              <ReviewSummary
-                values={{
-                  certificateId: certificate?.id ?? null,
-                  frontFile: frontImage,
-                  backFile: backImage,
-                  cardGame: form.cardGame,
-                  cardName: form.cardName,
-                  setName: form.setName,
-                  cardNumber: form.cardNumber,
-                  year: form.year,
-                  language: form.language,
-                  rarityCode: form.rarityCode,
-                  finishVariant: form.finishVariant,
-                  promoType: form.promoType,
-                  subsetName: form.subsetName,
-                  era: form.era,
-                  variant: form.variant,
-                  rarity: form.rarity,
-                  variantOther: form.variantOther,
-                  rarityOther: form.rarityOther,
-                  storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
-                  designations,
-                  gradeOverall: form.gradeOverall,
-                  labelType: form.labelType,
-                  status: form.status,
-                }}
-                // Card and Variant are the SAME stage now — both Edit links land on
-                // Card Details; the Variant link additionally scrolls to its section.
-                onEditCard={() => goToStage(CARD_DETAILS_STAGE)}
-                onEditRarity={() => {
-                  goToStage(CARD_DETAILS_STAGE);
-                  if (typeof document !== "undefined") {
-                    window.setTimeout(() => {
-                      document
-                        .querySelector('[data-variant-section="variant"]')
-                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }, 60);
-                  }
-                }}
-                onEditGrade={() => goToStage(GRADE_STAGE)}
-              />
-              {/* Authentication summary — shown only for non-numeric (Authentic /
-            Authentic Altered) grade types, derived from the EXISTING form
-            gradeType. No value is invented; numeric grades render nothing here. */}
-              {isNonNum && (
-                <div
-                  className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/15 bg-[var(--admin-gold)]/[0.02] px-2.5 py-1.5"
-                  data-testid="review-authentication"
-                >
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
-                    Authentication
-                  </span>
-                  <span className="text-[12px] font-bold text-[var(--admin-ink)]">
-                    {NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ?? form.gradeType}
-                  </span>
+                  {/* Approve button */}
+                  {!approved ? (
+                    <button
+                      type="button"
+                      onClick={approveGrade}
+                      disabled={approveLoading || !aiDraft.overall}
+                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
+                      data-testid="button-approve-grade"
+                    >
+                      {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                      {approveLoading ? "Approving…" : "Approve Grade"}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 text-[var(--admin-green)] text-sm font-semibold bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg p-3">
+                      <CheckCircle2 size={16} />
+                      Grade approved
+                    </div>
+                  )}
                 </div>
               )}
-              {/* The Review-stage live FRONT-label preview is now the single
+
+              <p className="text-[var(--admin-ink-faint)] text-[10px] leading-relaxed">
+                Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
+                lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
+              </p>
+            </fieldset>
+          )}
+
+          {error && (
+            <p className="text-[var(--admin-red)] text-sm" data-testid="text-form-error">
+              {error}
+            </p>
+          )}
+
+          {/* Stage 3 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
+            explicit save action. Note content, templates and persistence are the
+            EXACT pre-existing implementation, only relocated. */}
+          <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(REVIEW_STAGE)}`}>
+            {/* Compact approval header — frames Review as a final dashboard and keeps
+            Back to Grade as a quiet inline control instead of a chunky button row. */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                Final review &amp; approval
+              </span>
+              <button
+                type="button"
+                onClick={() => goToStage(prevStageIndex(REVIEW_STAGE))}
+                data-testid="button-back-to-grade"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
+              >
+                ← Back to Grade
+              </button>
+            </div>
+            {/* Read-only confirmation summary — every value comes from existing form
+            state; Edit links only switch the local stage (no save/mutation). */}
+            <ReviewSummary
+              values={{
+                certificateId: certificate?.id ?? null,
+                frontFile: frontImage,
+                backFile: backImage,
+                cardGame: form.cardGame,
+                cardName: form.cardName,
+                setName: form.setName,
+                cardNumber: form.cardNumber,
+                year: form.year,
+                language: form.language,
+                rarityCode: form.rarityCode,
+                finishVariant: form.finishVariant,
+                promoType: form.promoType,
+                subsetName: form.subsetName,
+                era: form.era,
+                variant: form.variant,
+                rarity: form.rarity,
+                variantOther: form.variantOther,
+                rarityOther: form.rarityOther,
+                storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
+                designations,
+                gradeOverall: form.gradeOverall,
+                labelType: form.labelType,
+                status: form.status,
+              }}
+              // Card and Variant are the SAME stage now — both Edit links land on
+              // Card Details; the Variant link additionally scrolls to its section.
+              onEditCard={() => goToStage(CARD_DETAILS_STAGE)}
+              onEditRarity={() => {
+                goToStage(CARD_DETAILS_STAGE);
+                if (typeof document !== "undefined") {
+                  window.setTimeout(() => {
+                    document
+                      .querySelector('[data-variant-section="variant"]')
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }, 60);
+                }
+              }}
+              onEditGrade={() => goToStage(GRADE_STAGE)}
+            />
+            {/* Authentication summary — shown only for non-numeric (Authentic /
+            Authentic Altered) grade types, derived from the EXISTING form
+            gradeType. No value is invented; numeric grades render nothing here. */}
+            {isNonNum && (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/15 bg-[var(--admin-gold)]/[0.02] px-2.5 py-1.5"
+                data-testid="review-authentication"
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                  Authentication
+                </span>
+                <span className="text-[12px] font-bold text-[var(--admin-ink)]">
+                  {NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ?? form.gradeType}
+                </span>
+              </div>
+            )}
+            {/* The Review-stage live FRONT-label preview is now the single
                   canonical CertificatePreviewPanel (mounted once, above, for the
                   Rarity + Review stages via WorkstationPreviewAside `below`). The
                   former second LabelPreview here was a duplicate of the same
                   renderer and endpoint and has been consolidated away. */}
-              {/* Public Notes with preset helper — moved from Card Details, unchanged. */}
-              {notesOpen ? (
-                <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
-                  <div className="flex items-center gap-2">
-                    <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
-                    <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">
-                      Public Notes <span className="text-[var(--admin-ink-faint)] normal-case tracking-normal">· shown on the certificate</span>
-                    </label>
-                  </div>
+            {/* Public Notes with preset helper — moved from Card Details, unchanged. */}
+            {notesOpen ? (
+              <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
+                <div className="flex items-center gap-2">
+                  <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
+                  <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">
+                    Public Notes{" "}
+                    <span className="text-[var(--admin-ink-faint)] normal-case tracking-normal">
+                      · shown on the certificate
+                    </span>
+                  </label>
+                </div>
 
-                  {/* Template buttons */}
-                  <div>
-                    <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
-                      Insert template
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {NOTE_TEMPLATES.map((t) => (
-                        <button
-                          key={t.label}
-                          type="button"
-                          onClick={() => updateField("notes", t.text)}
-                          className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
-                          data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
-                        >
-                          {t.label} Notes
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Notes textarea */}
-                  <textarea
-                    value={form.notes}
-                    onChange={(e) => updateField("notes", e.target.value)}
-                    rows={4}
-                    placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-                    className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
-                    data-testid="input-cert-notes"
-                  />
-
-                  {/* Preset chips */}
-                  <div>
-                    <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
-                      Quick add
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {PRESET_NOTES.map((preset) => {
-                        const lines = form.notes
-                          .split("\n")
-                          .map((l) => l.trim())
-                          .filter(Boolean);
-                        const alreadyAdded = lines.includes(preset);
-                        return (
-                          <button
-                            key={preset}
-                            type="button"
-                            disabled={alreadyAdded}
-                            onClick={() => {
-                              const current = form.notes.trimEnd();
-                              updateField("notes", current ? `${current}\n${preset}` : preset);
-                            }}
-                            className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
-                              alreadyAdded
-                                ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
-                                : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
-                            }`}
-                            data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
-                          >
-                            {!alreadyAdded && <Plus size={10} className="shrink-0" />}
-                            {preset}
-                          </button>
-                        );
-                      })}
-                    </div>
+                {/* Template buttons */}
+                <div>
+                  <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
+                    Insert template
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {NOTE_TEMPLATES.map((t) => (
+                      <button
+                        key={t.label}
+                        type="button"
+                        onClick={() => updateField("notes", t.text)}
+                        className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
+                        data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
+                      >
+                        {t.label} Notes
+                      </button>
+                    ))}
                   </div>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setNotesOpen(true)}
-                  data-testid="button-add-grader-notes"
-                  className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
-                >
-                  + Add Public Notes
-                </button>
-              )}
 
-              {/* Owner directive (2026-07-01): an existing, not-yet-approved
+                {/* Notes textarea */}
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => updateField("notes", e.target.value)}
+                  rows={4}
+                  placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
+                  className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
+                  data-testid="input-cert-notes"
+                />
+
+                {/* Preset chips */}
+                <div>
+                  <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRESET_NOTES.map((preset) => {
+                      const lines = form.notes
+                        .split("\n")
+                        .map((l) => l.trim())
+                        .filter(Boolean);
+                      const alreadyAdded = lines.includes(preset);
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          disabled={alreadyAdded}
+                          onClick={() => {
+                            const current = form.notes.trimEnd();
+                            updateField("notes", current ? `${current}\n${preset}` : preset);
+                          }}
+                          className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
+                            alreadyAdded
+                              ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
+                              : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
+                          }`}
+                          data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
+                        >
+                          {!alreadyAdded && <Plus size={10} className="shrink-0" />}
+                          {preset}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setNotesOpen(true)}
+                data-testid="button-add-grader-notes"
+                className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
+              >
+                + Add Public Notes
+              </button>
+            )}
+
+            {/* Owner directive (2026-07-01): an existing, not-yet-approved
             certificate auto-saves silently (see autoSaveNow above) — no
             manual button, matching the grading workstation below it. Create
             flow (no certificate yet) and an already-approved/published
             certificate (server has no approval lock of its own — see
             autoSaveEligible) both keep an explicit save action. */}
-              {correctionMode ? (
-                <div
-                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
-                  data-testid="text-correction-save-owned-by-parent"
-                >
-                  Correction Mode uses the Save Correction button.
-                </div>
-              ) : autoSaveEligible ? (
-                /* Item 7 — a large explicit Save button on Review. Auto-save is
+            {correctionMode ? (
+              <div
+                className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
+                data-testid="text-correction-save-owned-by-parent"
+              >
+                Correction Mode uses the Save Correction button.
+              </div>
+            ) : autoSaveEligible ? (
+              /* Item 7 — a large explicit Save button on Review. Auto-save is
                    preserved (owner directive 2026-07-01): this button FORCES an
                    immediate save via the same autoSaveNow() path rather than the
                    navigating mutation, so it never leaves the workstation. The
                    status line below still reflects auto-save + this save. */
-                <div className="space-y-1.5">
-                  <GradientButton
-                    as="button"
-                    type="button"
-                    onClick={() => {
-                      // Cancel any pending debounced auto-save so this explicit
-                      // save doesn't get followed by a redundant second PUT.
-                      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-                      autoSaveNow();
-                    }}
-                    disabled={autoSaveStatus === "saving"}
-                    height="48px"
-                    className="w-full"
-                    data-testid="button-save-now"
-                  >
-                    <Save size={16} />
-                    {autoSaveStatus === "saving" ? "Saving…" : "Save Now"}
-                  </GradientButton>
-                  <div
-                    className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-5"
-                    data-testid="text-autosave-status"
-                  >
-                    {autoSaveStatus === "saving" && (
-                      <span className="flex items-center gap-1.5">
-                        <Loader2 size={10} className="animate-spin" /> Saving…
-                      </span>
-                    )}
-                    {autoSaveStatus === "saved" && (
-                      <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
-                        <CheckCircle2 size={10} /> Saved · auto-saves as you edit
-                      </span>
-                    )}
-                    {legacyLossWarning ? (
-                      <span className="text-amber-300" data-testid="text-save-paused">
-                        Save paused — confirm the conversion
-                      </span>
-                    ) : (
-                      autoSaveStatus === "idle" && (
-                        <span className="text-[var(--admin-ink-faint)]">Auto-saves as you edit</span>
-                      )
-                    )}
-                    {autoSaveStatus === "error" && (
-                      <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
+              <div className="space-y-1.5">
                 <GradientButton
                   as="button"
-                  type="submit"
-                  disabled={mutation.isPending}
+                  type="button"
+                  onClick={() => {
+                    // Cancel any pending debounced auto-save so this explicit
+                    // save doesn't get followed by a redundant second PUT.
+                    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+                    autoSaveNow();
+                  }}
+                  disabled={autoSaveStatus === "saving"}
                   height="48px"
                   className="w-full"
-                  data-testid="button-save-cert"
+                  data-testid="button-save-now"
                 >
                   <Save size={16} />
-                  {mutation.isPending
-                    ? "Saving..."
-                    : isEdit
-                      ? "Save changes to this certificate only"
-                      : "Save Certificate"}
+                  {autoSaveStatus === "saving" ? "Saving…" : "Save Now"}
                 </GradientButton>
-              )}
-            </div>
-          </form>
-        </CanonicalGradingWorkstationShell>
+                <div
+                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-5"
+                  data-testid="text-autosave-status"
+                >
+                  {autoSaveStatus === "saving" && (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 size={10} className="animate-spin" /> Saving…
+                    </span>
+                  )}
+                  {autoSaveStatus === "saved" && (
+                    <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
+                      <CheckCircle2 size={10} /> Saved · auto-saves as you edit
+                    </span>
+                  )}
+                  {legacyLossWarning ? (
+                    <span className="text-amber-300" data-testid="text-save-paused">
+                      Save paused — confirm the conversion
+                    </span>
+                  ) : (
+                    autoSaveStatus === "idle" && (
+                      <span className="text-[var(--admin-ink-faint)]">Auto-saves as you edit</span>
+                    )
+                  )}
+                  {autoSaveStatus === "error" && (
+                    <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <GradientButton
+                as="button"
+                type="submit"
+                disabled={mutation.isPending}
+                height="48px"
+                className="w-full"
+                data-testid="button-save-cert"
+              >
+                <Save size={16} />
+                {mutation.isPending
+                  ? "Saving..."
+                  : isEdit
+                    ? "Save changes to this certificate only"
+                    : "Save Certificate"}
+              </GradientButton>
+            )}
+          </div>
+        </form>
+      </CanonicalGradingWorkstationShell>
     </div>
   );
 }
@@ -4626,7 +4674,8 @@ export function PokemonSetPicker({
   const [editSaving, setEditSaving] = useState(false);
   const [canEditCatalogue, setCanEditCatalogue] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const setLibraryBase = editEndpoint || (createEndpoint.startsWith("/api/staff") ? "/api/staff/sets" : "/api/admin/sets");
+  const setLibraryBase =
+    editEndpoint || (createEndpoint.startsWith("/api/staff") ? "/api/staff/sets" : "/api/admin/sets");
 
   // Recently-used sets (last 8, per-device) so a grader working through a box of
   // the same set fills it in one click. Display-only convenience — never changes
@@ -4676,7 +4725,9 @@ export function PokemonSetPicker({
     fetch(sessionEndpoint, { credentials: "include" })
       .then(async (response) => {
         const session = await response.json();
-        return createEndpoint.startsWith("/api/staff") ? response.ok && session.caps?.editSets === true : response.ok && session.authenticated === true;
+        return createEndpoint.startsWith("/api/staff")
+          ? response.ok && session.caps?.editSets === true
+          : response.ok && session.authenticated === true;
       })
       .then(setCanEditCatalogue)
       .catch(() => setCanEditCatalogue(false));
@@ -4734,7 +4785,10 @@ export function PokemonSetPicker({
       });
       const data = await response.json();
       const row = Array.isArray(data?.sets)
-        ? data.sets.find((candidate: { source?: string; setId?: string }) => candidate.source === set.source && candidate.setId === set.id)
+        ? data.sets.find(
+            (candidate: { source?: string; setId?: string }) =>
+              candidate.source === set.source && candidate.setId === set.id
+          )
         : undefined;
       const authoritative: PokemonSet | undefined = row
         ? {
@@ -4753,17 +4807,17 @@ export function PokemonSetPicker({
         : undefined;
       if (!response.ok || !authoritative?.version) throw new Error(data?.error || "Could not load set for editing");
       setEditingSet(authoritative);
-    setEditForm({
-      setId: authoritative.id,
-      setName: authoritative.name,
-      tcg: authoritative.tcg || "pokemon",
-      series: authoritative.series || "",
-      releaseYear: authoritative.releaseDate ? authoritative.releaseDate.split("-")[0] : "",
-      totalCards: authoritative.total ? String(authoritative.total) : "",
-      subset: authoritative.subset || "",
-      archived: !!authoritative.archived,
-      reason: "",
-    });
+      setEditForm({
+        setId: authoritative.id,
+        setName: authoritative.name,
+        tcg: authoritative.tcg || "pokemon",
+        series: authoritative.series || "",
+        releaseYear: authoritative.releaseDate ? authoritative.releaseDate.split("-")[0] : "",
+        totalCards: authoritative.total ? String(authoritative.total) : "",
+        subset: authoritative.subset || "",
+        archived: !!authoritative.archived,
+        reason: "",
+      });
       setOpen(false);
       setShowAddForm(false);
     } catch (error: unknown) {
@@ -4897,7 +4951,9 @@ export function PokemonSetPicker({
       />
       {canEditSelectedSet && (
         <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
-          <span className="text-[var(--admin-ink-faint)]">Use this set for the certificate, or edit the catalogue record:</span>
+          <span className="text-[var(--admin-ink-faint)]">
+            Use this set for the certificate, or edit the catalogue record:
+          </span>
           <button
             type="button"
             onClick={() => openEditSet(selectedSet)}
@@ -5101,11 +5157,13 @@ export function PokemonSetPicker({
             <div>
               <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Edit catalogue set</p>
               <p className="mt-1 rounded border border-[color-mix(in_srgb,var(--admin-amber)_45%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--admin-amber)]">
-                This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed automatically.
+                This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed
+                automatically.
               </p>
               {(editingSet.linkedCertificates ?? 0) > 0 && (
                 <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
-                  {editingSet.linkedCertificates} certificate{editingSet.linkedCertificates === 1 ? "" : "s"} currently reference this set name.
+                  {editingSet.linkedCertificates} certificate{editingSet.linkedCertificates === 1 ? "" : "s"} currently
+                  reference this set name.
                 </p>
               )}
             </div>

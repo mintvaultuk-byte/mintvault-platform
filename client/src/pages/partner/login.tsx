@@ -38,6 +38,7 @@ export default function PartnerLoginPage() {
 
   async function handleCredentials(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -69,10 +70,13 @@ export default function PartnerLoginPage() {
 
   async function handleMfa(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
+    const normalizedCode = code.replace(/\s/g, "");
+    const normalizedRecoveryCode = recoveryCode.trim();
     setError(null);
     setSubmitting(true);
     try {
-      await partnerAuth.mfa(useRecovery ? { recoveryCode } : { code });
+      await partnerAuth.mfa(useRecovery ? { recoveryCode: normalizedRecoveryCode } : { code: normalizedCode });
       await refresh();
       navigate("/partner/dashboard");
     } catch (err) {
@@ -161,7 +165,7 @@ export default function PartnerLoginPage() {
                     autoComplete="one-time-code"
                     required
                     value={code}
-                    onChange={(e) => setCode(e.target.value)}
+                    onChange={(e) => setCode(e.target.value.replace(/[^\d\s]/g, "").slice(0, 12))}
                     data-testid="input-mfa-code"
                   />
                 </div>

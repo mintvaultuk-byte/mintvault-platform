@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# setup-new-mac.sh — bring up a NEW scanning station (e.g. a second Mac) to run
-# the MintVault menu-bar scanner against PROD, watching its own local inbox.
+# setup-new-mac.sh — install the common Scanner application on a new Mac.
+# The app itself performs operator sign-in, server-assigned station enrolment
+# and approval; this script never asks for an API token or human-made ID.
 #
 # WHY THIS EXISTS (and not install.sh):
 #   install.sh + com.mintvault.scanner-app.plist install a LaunchAgent labelled
@@ -33,37 +34,25 @@ TARGET="$DOMAIN/$LABEL"
 echo "[setup] MintVault scanner — new-station setup"
 echo "[setup]   App dir:  $SCRIPT_DIR"
 echo "[setup]   Service:  $LABEL  (the label the app self-manages)"
-echo "[setup]   Target:   PROD (https://mintvaultuk.com — server-client.js default)"
+echo "[setup]   Target:   configured by first-run MintVault sign-in"
 
 # 1) Scan folders (matches watcher.js convention)
-for sub in inbox processed failed discarded; do
+for sub in inbox processed failed rejected discarded capture-staging; do
   mkdir -p "$BASE/$sub"
 done
 mkdir -p "$HOME/Library/Application Support/MintVaultScanner"
-echo "[setup] ✓ Ensured $BASE/{inbox,processed,failed,discarded} + App Support dir"
+echo "[setup] ✓ Ensured $BASE/{inbox,processed,failed,rejected,discarded,capture-staging} + App Support dir"
 
-# 2) Env file + token. Never clobber an existing token. Prompt history-safely if
-#    the file is missing OR the token line is empty.
-need_token() {
-  [ ! -f "$ENV_FILE" ] || ! grep -qE '^SCANNER_API_TOKEN=.+' "$ENV_FILE"
-}
-if need_token; then
-  echo "[setup] SCANNER_API_TOKEN not set yet — paste it (input hidden)."
-  echo "[setup]   (bring this value from the existing station; it matches the server Fly secret)"
+# 2) Non-secret local calibration path. Credentials and station identity are
+# created after sign-in and protected by the app's Keychain storage.
+if [ ! -f "$ENV_FILE" ]; then
   umask 077
-  printf '[setup]   Token: '
-  read -rs MV_TOK; echo
-  if [ -z "${MV_TOK:-}" ]; then
-    echo "[setup] FATAL: empty token — re-run and paste the value." >&2
-    exit 1
-  fi
-  # Leave API base unset → server-client.js defaults to PROD (https://mintvaultuk.com).
-  printf 'SCANNER_API_TOKEN=%s\n' "$MV_TOK" > "$ENV_FILE"
+  printf '# MintVault Scanner non-secret local configuration\n' > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  unset MV_TOK
-  echo "[setup] ✓ Wrote $ENV_FILE (chmod 600)"
-else
-  echo "[setup] ✓ $ENV_FILE already has a token — leaving as-is"
+fi
+if ! grep -qE '^MINTVAULT_STATION_CONFIG_PATH=.+' "$ENV_FILE"; then
+  printf 'MINTVAULT_STATION_CONFIG_PATH=%s\n' "$ENV_FILE" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
 fi
 
 # 3) Deps. The app runs under its OWN bundled Electron; npm install also fetches
@@ -112,6 +101,6 @@ echo "Setup complete. Verify:"
 echo "  launchctl print $TARGET | grep -E 'state|program ='"
 echo "  tail -n 30 $BASE/scanner-app.log | grep -Ei 'watching|electron|FATAL'"
 echo ""
-echo "Expect 'state = running' and a 'watching $BASE/inbox' log line."
-echo "Tray icon appears in the menu bar. Point your scanner's output at $BASE/inbox/."
+echo "Expect 'state = running' and a LiDE device/profile health line."
+echo "Tray icon appears in the menu bar. Sign in with your MintVault account, register this Mac and wait for approval. Then use PREVIEW with a disposable card; it visibly detects and saves the jig origin. Do not configure a hot-folder export."
 echo "──────────────────────────────────────────────────────────────"

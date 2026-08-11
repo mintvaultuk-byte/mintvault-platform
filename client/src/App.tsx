@@ -147,11 +147,14 @@ const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
 const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
+const PartnerGradingPage = lazy(() => import("@/pages/partner/grading"));
+const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
+const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -288,6 +291,16 @@ function PartnerPortalRoutes() {
             <PartnerSubmissionsPage />
           </PartnerRouteGuard>
         </Route>
+        <Route path="/partner/customers">
+          <PartnerRouteGuard>
+            <PartnerCustomersPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/grading">
+          <PartnerRouteGuard requiredPermission="partner.cards.assess">
+            <PartnerGradingPage />
+          </PartnerRouteGuard>
+        </Route>
         <Route path="/partner/users">
           <PartnerRouteGuard>
             <PartnerUsersPage />
@@ -301,6 +314,26 @@ function PartnerPortalRoutes() {
         <Route path="/partner/billing">
           <PartnerRouteGuard>
             <PartnerBillingPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/certificates">
+          <PartnerRouteGuard requiredPermission="partner.orders.view">
+            <PartnerWorkflowPlaceholderPage kind="certificates" />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/supplies">
+          <PartnerRouteGuard>
+            <PartnerWorkflowPlaceholderPage kind="supplies" />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/orders">
+          <PartnerRouteGuard requiredPermission="partner.orders.view">
+            <PartnerWorkflowPlaceholderPage kind="orders" />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/public-profile">
+          <PartnerRouteGuard requiredPermission="partner.location.view">
+            <PartnerWorkflowPlaceholderPage kind="public-profile" />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/help">
