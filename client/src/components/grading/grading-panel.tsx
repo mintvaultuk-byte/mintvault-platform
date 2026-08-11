@@ -1426,12 +1426,17 @@ export default function GradingPanel({
     const operation = (async (): Promise<boolean> => {
       const seq = ++autoSaveSeqRef.current;
       setAutoSaveStatus("saving");
+      // Captured ONCE so the bytes that were sent are exactly the bytes recorded as
+      // the new clean baseline below. Rebuilding the payload after the await would
+      // read a later render and could baseline something that was never persisted.
+      const autoSaveCertId = certId;
+      const autoSaveFingerprint = JSON.stringify(buildPayload());
       try {
         const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
+          body: autoSaveFingerprint,
         });
         if (seq !== autoSaveSeqRef.current) return true;
         if (!res.ok) {
@@ -1441,7 +1446,31 @@ export default function GradingPanel({
         setRarityOverrideTransition(null);
         setAutoSaveStatus("saved");
         const data = await res.json().catch(() => ({}));
-        onPreviewSaved?.(readReviewRevision(data));
+        const autoSavedRevision = readReviewRevision(data);
+        onPreviewSaved?.(autoSavedRevision);
+        /**
+         * HOSTILE-REVIEW REPAIR (2026-08-11): the auto-save MUST move the clean
+         * baseline too, or the read-only-open optimisation hands the Review barrier
+         * a DEAD revision.
+         *
+         * Sequence that broke: hydrate at R (baseline = {F0, R}) → operator edits
+         * (F1) → debounced auto-save persists F1 and the server advances to R+1,
+         * but the baseline still said R → operator undoes the edit back to F0 →
+         * decideReviewPersist sees the fingerprint match the baseline and returns
+         * {reuse, R} → the preview posts expectedRevision R against a server at
+         * R+1 → 409 → "Review is locked because save or preview failed", and
+         * retrying re-derives the same stale R, so the card stays stuck until it is
+         * reloaded. Recording the revision this save actually produced keeps the
+         * baseline and the server in step, so a genuine revert is correctly clean
+         * AT THE CURRENT REVISION rather than at a superseded one.
+         */
+        if (autoSavedRevision != null) {
+          cleanBaselineRef.current = {
+            certId: autoSaveCertId,
+            fingerprint: autoSaveFingerprint,
+            revision: autoSavedRevision,
+          };
+        }
         if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
         autoSavedClearTimerRef.current = setTimeout(() => {
           if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");

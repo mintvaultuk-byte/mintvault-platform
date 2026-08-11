@@ -99,6 +99,25 @@ describe("the panel is actually wired to the no-write decision", () => {
     expect(reuse).toBeLessThan(put);
   });
 
+  it("auto-save moves the baseline too, so a revert cannot reuse a DEAD revision", () => {
+    // Hostile-review finding: the debounced auto-save advances the SERVER revision.
+    // If the baseline kept the hydration revision, then edit -> auto-save -> undo
+    // left the fingerprint matching the baseline while the server had moved on, so
+    // decideReviewPersist returned {reuse, R_stale}, the preview 409'd on
+    // expectedRevision, and Review locked with a retry that re-derived the same
+    // stale revision — stuck until the card was reloaded.
+    const at = PANEL.indexOf("async function autoSaveNow()");
+    expect(at).toBeGreaterThan(0);
+    const body = PANEL.slice(at, at + 3200);
+    // The bytes sent and the bytes baselined must be the SAME captured value.
+    expect(body).toContain("const autoSaveFingerprint = JSON.stringify(buildPayload());");
+    expect(body).toContain("body: autoSaveFingerprint,");
+    expect(body).toContain("cleanBaselineRef.current = {");
+    expect(body).toContain("revision: autoSavedRevision,");
+    // Guarded: a response without an authoritative revision must not baseline.
+    expect(body).toContain("if (autoSavedRevision != null)");
+  });
+
   it("the clean baseline is captured only once hydrated, and only for the current cert", () => {
     expect(PANEL).toContain("gradingHydratedForRef.current === certId && cleanBaselineRef.current?.certId !== certId");
     // It is refreshed after this panel's own save, so a second Review entry with no
