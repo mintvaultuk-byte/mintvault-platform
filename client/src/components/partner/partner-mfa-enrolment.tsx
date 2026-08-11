@@ -195,7 +195,7 @@ export function PartnerMfaEnrolment({
     setError(null);
     setRestarting(true);
     try {
-      const out = await partnerMfa.restart();
+      const out = await partnerMfa.restart(password);
       setEnrolmentId(out.enrolmentId);
       setSecret(out.secret);
       setOtpauthUri(out.otpauthUri);

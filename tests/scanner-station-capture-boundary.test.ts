@@ -5,6 +5,7 @@
  * subsequent candidate/side lifecycle.
  */
 import { describe, expect, it, vi } from "vitest";
+import { stationPathAllowed } from "../server/lib/station-request-scope";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -92,5 +93,59 @@ describe("signed-station capture boundary", () => {
     expect(stations).toContain("const calibrationInvalidated = hardwareChanged || profileChanged");
     expect(stations).toContain("current_calibration_id=CASE WHEN $11 THEN NULL ELSE current_calibration_id END");
     expect(stations).toContain('"scanner_profile_changed"');
+  });
+});
+
+/**
+ * A signed station principal is NOT an admin credential.
+ *
+ * requireScannerOrAdmin is shared with six pre-existing GLOBAL admin certificate routes that
+ * address `certificates` by certificate_number with no tenant predicate — they were written when
+ * the only principals were an admin cookie or the HQ scanner token. Admitting a partner station to
+ * that shared middleware handed every approved partner cross-tenant read, evidence overwrite,
+ * presigned-URL disclosure and soft-delete over the entire certificate estate.
+ */
+describe("signed-station principal is confined to capture work", () => {
+  it("admits the station's own capture routes", () => {
+    for (const p of [
+      "/api/admin/scanner/capture-sessions/next?workstation_id=W1&device_id=D1",
+      "/api/admin/scanner/capture-sessions/abc",
+      "/api/admin/scanner/capture-sessions/abc/keepalive",
+      "/api/admin/scanner/capture-sessions/abc/staged-upload",
+      "/api/admin/scanner/capture-sessions/abc/staged-upload/s1/finalise",
+      "/api/admin/scanner/capture-sessions/abc/evidence",
+      "/api/admin/scanner/capture-sessions/abc/failed",
+    ]) {
+      expect(stationPathAllowed(p), `${p} must remain reachable by a signed station`).toBe(true);
+    }
+  });
+
+  it("REFUSES every global certificate route that carries no tenant predicate", () => {
+    for (const p of [
+      "/api/admin/orphan-certs",
+      "/api/admin/certs/MV837/preview",
+      "/api/admin/certs/MV837/image",
+      "/api/admin/certs/MV837",
+      "/api/admin/scan-status/MV837",
+      "/api/admin/certificates/new",
+      "/api/admin/certificates",
+    ]) {
+      expect(stationPathAllowed(p), `${p} must NOT be reachable by a signed station`).toBe(false);
+    }
+  });
+
+  it("allows only the advisory number hint, which exposes no certificate data", () => {
+    expect(stationPathAllowed("/api/admin/next-cert-id")).toBe(true);
+    // …and the allowlist is prefix-anchored, so a lookalike path cannot ride in on it.
+    expect(stationPathAllowed("/api/admin/next-cert-id-evil")).toBe(false);
+    expect(stationPathAllowed("/evil/api/admin/scanner/capture-sessions/next")).toBe(false);
+  });
+
+  it("the middleware refuses rather than falling through to the admin cookie check", () => {
+    const src = read("server/lib/scanner-auth.ts");
+    const branch = src.slice(src.indexOf('if (req.header("x-mintvault-station-id"))'));
+    const guard = branch.slice(0, branch.indexOf("try {"));
+    expect(guard).toMatch(/if \(!stationPathAllowed\(/);
+    expect(guard).toMatch(/return res\.status\(403\)/);
   });
 });

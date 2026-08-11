@@ -106,10 +106,16 @@ export const partnerMfa = {
         ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
       }
     ),
-  restart: () =>
+  /**
+   * Re-issue the pending enrolment secret (expired QR / lost screen). Requires the account
+   * password — server-enforced. Without it, anyone reaching a bootstrap-state user's browser could
+   * mint themselves a fresh authenticator from the QR screen. Never persisted.
+   */
+  restart: (password: string) =>
     req<{ ok: boolean; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }>(
       "POST",
-      "/api/partner/mfa/restart"
+      "/api/partner/mfa/restart",
+      { password }
     ),
   cancel: () => req<{ ok: boolean }>("POST", "/api/partner/mfa/cancel"),
   confirm: (input: { enrolmentId: string; code: string }) =>

@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import { stationPathAllowed } from "./station-request-scope";
 import { timingSafeEqual } from "node:crypto";
 import { requireAdmin } from "../auth";
 import { resolvePartnerSession } from "../partner/session";
@@ -37,11 +38,18 @@ function tokensMatch(provided: string, expected: string): boolean {
  * static token, while preserving interactive admin access via the cookie
  * session. Scoped to one endpoint — do NOT apply broadly.
  */
+export { stationPathAllowed };
+
 export async function requireScannerOrAdmin(req: Request, res: Response, next: NextFunction) {
   // Production stations use a per-Mac Ed25519 request signature AND a current
   // MFA-complete partner operator session. The station code/device id from a
   // query/body is deliberately ignored later in favour of these principals.
   if (req.header("x-mintvault-station-id")) {
+    if (!stationPathAllowed(req.originalUrl)) {
+      // A station key is not an admin credential. Refuse rather than fall through to the cookie
+      // check, so a station presenting a signature can never be evaluated as anything else.
+      return res.status(403).json({ error: "This endpoint is not available to a scanner station" });
+    }
     try {
       const station = await authenticateStationRequest(req.headers, req.method, req.originalUrl, req.rawBody);
       const operator = await resolvePartnerSession(req.header("x-mintvault-operator-session") || "");

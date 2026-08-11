@@ -262,8 +262,14 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     // A PENDING secret is NOT yet a factor: access is still refused.
     expect((await call("GET", "/api/partner/dashboard")).status).toBe(401);
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secret, Date.now()) });
-    expect(confirm.status).toBe(200);
+    // Confirm is BY ENROLMENT ID since migration 0044 (applied in production): the pending secret
+    // is bound to the issuing session and expires, so it is confirmed explicitly rather than by
+    // "whichever pending row is newest".
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: enrol.json.enrolmentId as string,
+      code: currentTotp(secret, Date.now()),
+    });
+    expect(confirm.status, confirm.text).toBe(200);
     const codes = confirm.json.recoveryCodes as string[];
     expect(codes).toHaveLength(10);
 
@@ -326,8 +332,15 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     expect(enrol.status).toBe(403);
     expect(enrol.json.error).toBe("requires_current_factor");
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: "000000" });
-    expect(confirm.status).toBe(403);
+    // A well-formed but unknown enrolment id, deliberately: the route validates the id's SHAPE
+    // before calling the service, so omitting it would 400 on the body and never reach the control
+    // under test. mfaEnrolConfirm checks `replacing` BEFORE it looks the pending row up, so an
+    // unknown id still yields requires_current_factor — which is the assertion that matters.
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: "00000000-0000-4000-8000-000000000000",
+      code: "000000",
+    });
+    expect(confirm.status, confirm.text).toBe(403);
     expect(confirm.json.error).toBe("requires_current_factor");
   });
 

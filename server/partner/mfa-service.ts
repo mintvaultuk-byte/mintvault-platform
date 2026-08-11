@@ -329,13 +329,33 @@ export async function mfaEnrolConfirm(
   });
 }
 
-export async function mfaEnrolRestart(ctx: {
-  tenantId: string;
-  userId: string;
-  sessionId: string;
-  sessionMfaPassed?: boolean;
-}): Promise<EnrolResult> {
-  const out = await createPendingEnrolment(ctx, undefined, { allowActiveReplacement: false });
+/**
+ * Re-issue a fresh PENDING secret for an enrolment already in progress (the "my QR expired / I lost
+ * the screen" affordance). NOT a replacement primitive — `allowActiveReplacement: false` means an
+ * account that already holds an ACTIVE authenticator is refused outright.
+ *
+ * The PASSWORD IS REQUIRED, exactly as it is for `mfaEnrolStart`. It was optional when this landed,
+ * and hostile review showed why that is not survivable: a partner user in the bootstrap state
+ * (mfa_required, no ACTIVE method — i.e. every freshly-invited operator and every account after a
+ * Super Admin MFA reset) sits on the QR screen with a valid, mfa-PENDING cookie. Anyone reaching
+ * that browser could POST an empty body here, receive a brand-new otpauth secret, confirm it into
+ * their own authenticator, and take the account — turning "possession of a half-authenticated
+ * session" into full takeover plus permanent lockout of the legitimate user, who can no longer
+ * self-enrol because enrolment then demands a factor they do not hold.
+ *
+ * `createPendingEnrolment` treats a null password as "skip verification", so passing it through is
+ * what makes the check real — do not reintroduce `undefined` here.
+ */
+export async function mfaEnrolRestart(
+  ctx: {
+    tenantId: string;
+    userId: string;
+    sessionId: string;
+    sessionMfaPassed?: boolean;
+  },
+  password: string
+): Promise<EnrolResult> {
+  const out = await createPendingEnrolment(ctx, password, { allowActiveReplacement: false });
   if (out.ok) {
     await withTenant({ tenantId: ctx.tenantId }, (c) =>
       writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_enrol_restarted" })
@@ -429,7 +449,30 @@ export async function mfaRegenerateRecovery(
 
 export type DisableResult = { ok: true } | { ok: false; reason: "unauthorised" | "second_factor_required" };
 
-/** Disable MFA: requires password + a valid current TOTP or recovery code, then revokes all sessions. */
+/**
+ * Disable the user's MFA **METHOD** — never the MFA **REQUIREMENT**.
+ *
+ * F2: this used to clear `mfa_required` as well as `mfa_enabled`. `mfa_required` is the only flag the
+ * session layer reads (auth.ts sets `mfa_passed = !mfa_required` at login; session.ts gates every
+ * authenticated surface on `mfa_passed`), so clearing it let a partner user self-revoke the mandate
+ * P0-E establishes and sign in with a password forever after. The requirement is an ACCOUNT POLICY —
+ * only an admin reset (partner-management-service.resetPartnerUserMfa) or a policy change may move
+ * it, and that path deliberately keeps `mfa_required=true` too. Mirrored here.
+ *
+ * The account is therefore left in exactly the bootstrap state a freshly-accepted owner is in:
+ * required, not enrolled, no ACTIVE method. That state is reachable — `mfaEnrolStart` only demands a
+ * current factor when one still EXISTS — so this cannot strand the user. Proven by
+ * tests/partner-mfa-enrolment-mandatory.test.ts ("re-enrolment ... is reachable with the password
+ * alone").
+ *
+ * DO NOT "simplify" this back to mfa_required=false. The 2026-08-11 mainline reconciliation did
+ * exactly that by taking the pre-fix side of a merge, and hostile review caught it: with the ACTIVE
+ * method disabled in the same transaction, auth.ts's `mfa_required || has_active_mfa` is then false
+ * on both operands, so the next password-only login mints a session with mfa_passed=true and every
+ * MFA-gated partner surface is reachable with no second factor, permanently.
+ *
+ * Requires password + a valid current TOTP or recovery code, then revokes all sessions.
+ */
 export async function mfaDisable(
   ctx: { tenantId: string; userId: string },
   password: string,
@@ -443,7 +486,8 @@ export async function mfaDisable(
     await c.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp'", [ctx.userId]);
     await c.query("DELETE FROM partner_recovery_codes WHERE user_id=$1", [ctx.userId]);
     await c.query(
-      "UPDATE partner_users SET mfa_enabled=false, mfa_required=false, credential_version=credential_version+1 WHERE id=$1",
+      // F2: mfa_required stays TRUE. Only the METHOD is removed. See the docblock above.
+      "UPDATE partner_users SET mfa_enabled=false, mfa_required=true, credential_version=credential_version+1 WHERE id=$1",
       [ctx.userId]
     );
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [ctx.userId]);

@@ -165,7 +165,7 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   // RENUMBERED 0044 -> 0048 (2026-08-11): production had already applied a different 0044
   // (0044_partner_mfa_pending_lifecycle), and the migration runner rejects duplicate NUMBERS
   // before it runs anything. The applied file could not move, so this unapplied one did.
-  "0048_partner_submission_lifecycle_and_location_snapshot",
+  "0074_partner_submission_lifecycle_and_location_snapshot",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only

@@ -557,12 +557,22 @@ export function partnerApiRouter(): Router {
       res.status(401).json({ error: "authentication required" });
       return;
     }
-    const out = await mfaEnrolRestart({
-      tenantId: req.partner.tenantId,
-      userId: req.partner.userId,
-      sessionId: req.partner.sessionId,
-      sessionMfaPassed: req.partner.mfaPassed,
-    });
+    // Elevated verification, same as /mfa/enrol. Without it, anyone reaching a bootstrap-state
+    // user's browser could mint themselves a fresh authenticator from the QR screen.
+    const { password } = req.body ?? {};
+    if (typeof password !== "string" || password.length === 0) {
+      res.status(401).json({ error: "unauthorised" });
+      return;
+    }
+    const out = await mfaEnrolRestart(
+      {
+        tenantId: req.partner.tenantId,
+        userId: req.partner.userId,
+        sessionId: req.partner.sessionId,
+        sessionMfaPassed: req.partner.mfaPassed,
+      },
+      password
+    );
     if (!out.ok) {
       const status =
         out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;

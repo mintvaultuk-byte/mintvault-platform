@@ -827,7 +827,10 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect(pending.rows[0].n).toBe(0);
     const session = await (await get("/api/partner/session", cookie)).json();
     expect(session.mfaPassed).toBe(true);
-    expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(403);
+    // Restart now demands the password (an empty body is 401 before the state check is reached),
+    // and an already-ENROLLED user is still refused outright — restart is never a replacement path.
+    expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(401);
+    expect((await post("/api/partner/mfa/restart", { password: "correct-horse-battery" }, cookie)).status).toBe(403);
     const replaySession = await login("enrol@a.com");
     expect(
       (await post("/api/partner/auth/mfa", { code: currentTotp(secret, Date.now()) }, replaySession.cookie)).status
@@ -844,7 +847,11 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     const first = await post("/api/partner/mfa/enrol", { password: "correct-horse-battery" }, cookie);
     expect(first.status).toBe(200);
     const firstBody = await first.json();
-    const restart = await post("/api/partner/mfa/restart", {}, cookie);
+    // A password-free restart is refused: otherwise anyone reaching this user's browser while the
+    // QR is on screen could mint themselves a fresh authenticator and take the account.
+    expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(401);
+    expect((await post("/api/partner/mfa/restart", { password: "wrong-password" }, cookie)).status).toBe(401);
+    const restart = await post("/api/partner/mfa/restart", { password: "correct-horse-battery" }, cookie);
     expect(restart.status).toBe(200);
     const secondBody = await restart.json();
     expect(secondBody.enrolmentId).not.toBe(firstBody.enrolmentId);

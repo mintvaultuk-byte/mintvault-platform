@@ -143,15 +143,15 @@ describe("partner schema ↔ migration parity", () => {
       "0045_partner_stations.sql",
       "0046_scanner_processing_jobs.sql",
       "0047_scanner_evidence_staging.sql",
-      // 0048 widens partner submission lifecycle states after handover and stores an immutable
+      // 0074 widens partner submission lifecycle states after handover and stores an immutable
       // location-name snapshot. It also permits the audited wallet-only staging backfill action.
       //
-      // RENUMBERED from 0044 during the 2026-08-11 mainline reconciliation. Production had
+      // RENUMBERED from 0044 to 0074 during the 2026-08-11 mainline reconciliation. Production had
       // already applied a DIFFERENT 0044 (the MFA pending lifecycle above), and the runner
       // rejects duplicate NUMBERS before it runs anything — so the two could not coexist. The
       // MFA file could not move (renaming an applied migration makes it pending again and
       // re-runs it); this one was unapplied everywhere the release targets, so it moved instead.
-      "0048_partner_submission_lifecycle_and_location_snapshot.sql",
+      "0074_partner_submission_lifecycle_and_location_snapshot.sql",
     ]);
   });
 
