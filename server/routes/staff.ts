@@ -341,6 +341,21 @@ export function registerStaffRoutes(app: Express): void {
           ));
         }
         if (files?.back?.[0]) {
+          // FRONT ALWAYS FIRST. A BACK upload is admitted only when this same
+          // request also carries the front, or the card already has one. This
+          // legacy route writes the display image columns directly rather than
+          // going through the evidence path, so the FRONT-before-BACK guard at
+          // the immutable-master boundary does not cover it — without this check
+          // an operator could put a card's back on record with no front.
+          if (!files?.front?.[0]) {
+            const existingFront = await db.execute(sql`
+              SELECT 1 FROM certificates
+              WHERE id = ${certId} AND front_image_path IS NOT NULL AND front_image_path <> ''
+              LIMIT 1`);
+            if (!existingFront.rows.length) {
+              return res.status(409).json({ error: "Scan the front of this card before the back" });
+            }
+          }
           ({ submissionScanned: scanned } = await recordScanUpload(
             certId,
             certIdStr,

@@ -34,6 +34,21 @@ export async function finaliseScannerEvidence(input: {
   const { parseLide400CaptureProvenance, assertLide400Evidence } = await import("./lib/lide400-profile");
   const { assessLide400CardFrame } = await import("./lib/lide400-card-frame");
 
+  // FRONT-before-BACK, checked FIRST. This is one indexed SELECT, whereas the
+  // checks below decode a TIFF of up to 128 MiB and run card-boundary analysis
+  // on it. Refusing a BACK-first capture before that work is done costs nothing
+  // and avoids doing the most expensive work in the function only to discard it.
+  //
+  // It also fails before writing an immutable back master, which preserves a
+  // previously accepted front if back capture/validation/retry fails (§33).
+  if (input.session.side === "back") {
+    const front = await db.execute(sql`
+      SELECT 1 FROM certificate_image_evidence
+      WHERE certificate_id = ${input.session.certificateId} AND side = 'front' AND is_current = true
+      LIMIT 1`);
+    if (!front.rows.length) throw new Error("Back capture refused until an immutable front master exists");
+  }
+
   const inspection = await inspectScannerEvidence(input.buffer);
   const provenance = parseLide400CaptureProvenance(input.provenanceInput);
   assertLide400Evidence(inspection, provenance);
@@ -49,15 +64,6 @@ export async function finaliseScannerEvidence(input: {
   }
   if (input.trusted.stationId && input.session.stationId !== input.trusted.stationId) {
     throw new Error("Capture session is not bound to this authenticated station");
-  }
-  // Fail before writing an immutable back master. This preserves a previously
-  // accepted front if back capture/validation/retry fails.
-  if (input.session.side === "back") {
-    const front = await db.execute(sql`
-      SELECT 1 FROM certificate_image_evidence
-      WHERE certificate_id = ${input.session.certificateId} AND side = 'front' AND is_current = true
-      LIMIT 1`);
-    if (!front.rows.length) throw new Error("Back capture refused until an immutable front master exists");
   }
   await uploadRawScannerSide(
     input.session.certificateId,
