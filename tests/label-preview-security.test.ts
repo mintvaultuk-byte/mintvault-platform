@@ -150,6 +150,13 @@ describe("server-authorised certificate label preview", () => {
     expect(previewRoute).toContain("generateLabelPreviewPNG(cert)");
   });
 
+  it("blocks a Partner label preview while Super Admin QA is pending", () => {
+    expect(
+      authorizePartnerLabelPreview(partnerPrincipal(), partnerCandidate({ gradingStatus: "pending_review" }))
+    ).toMatchObject({ ok: false, status: 403, error: "This card is awaiting Super Admin QA" });
+    expect(ACCESS).toContain('candidate.gradingStatus === "pending_review"');
+  });
+
   it("preserves the authorised saved certificate number and omitted metadata", async () => {
     const base = saved();
     const cert = await buildLabelPreviewCertificate(base, {

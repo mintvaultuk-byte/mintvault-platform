@@ -11,7 +11,7 @@
  *   - not already approved or deleted.
  */
 import { Router } from "express";
-import type { Response } from "express";
+import type { NextFunction, Response } from "express";
 import type { PoolClient } from "pg";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
@@ -30,7 +30,8 @@ import {
 } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { auditInOwnTxn } from "./audit";
-import { withPartnerAdminTransaction } from "./db";
+import { withPartnerAdminTransaction, withTenant } from "./db";
+import { resolveFlag } from "./flags";
 import {
   requireNotSensitiveFrozen,
   requireNotViewOnly,
@@ -90,6 +91,41 @@ function sendPartnerGradingError(res: Response, err: unknown): void {
   // eslint-disable-next-line no-console
   console.error("[partner grading] error:", err instanceof Error ? err.message : err);
   res.status(500).json({ error: "Partner grading is unavailable." });
+}
+
+/**
+ * Grading is deliberately a tenant/location-scoped pilot capability, not a
+ * global UI affordance. Resolve it on the restricted Partner runtime
+ * connection and fail closed: an unavailable flag store must never open the
+ * grading and label-preview surface by accident.
+ */
+async function requirePartnerGradingEnabled(
+  req: Parameters<typeof requirePartnerAuth>[0],
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const principal = req.partner;
+  if (!principal) {
+    res.status(401).json({ error: "authentication required" });
+    return;
+  }
+  try {
+    const enabled = await withTenant(
+      { tenantId: principal.tenantId, locationId: principal.locationId },
+      (client) => resolveFlag(client, "partner_grading_enabled", principal)
+    );
+    if (!enabled) {
+      res.status(503).json({ error: "Partner grading is unavailable." });
+      return;
+    }
+    next();
+  } catch (err) {
+    // Do not reveal runtime/database detail to a Partner caller. The server log
+    // is sufficient for operations, while the route stays closed.
+    // eslint-disable-next-line no-console
+    console.error("[partner grading] flag resolution failed:", err instanceof Error ? err.message : err);
+    res.status(503).json({ error: "Partner grading is unavailable." });
+  }
 }
 
 async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Promise<PartnerCertAuth | null> {
@@ -326,6 +362,7 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
 export function partnerGradingRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
+  r.use(requirePartnerGradingEnabled);
 
   r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
     res.json({ authenticated: true, userId: req.partner!.userId });

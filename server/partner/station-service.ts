@@ -26,6 +26,15 @@ export type StationPrincipal = {
   currentCalibrationId: string | null;
 };
 
+/** Credential-free station summary used only to let an authorised Partner
+ * operator choose a real, ready capture destination. The browser never sees a
+ * public key, nonce, device identifier or session target. */
+export type PartnerCaptureStation = {
+  stationCode: string;
+  locationId: string;
+  locationName: string;
+};
+
 export class StationServiceError extends Error {
   constructor(
     readonly code:
@@ -291,6 +300,43 @@ export async function getStationEnrollmentStatus(
     locationId: station.location_id,
     calibrationStatus: station.calibration_status,
   };
+}
+
+/** List capture-ready stations in the authenticated Partner's own scope. */
+export async function listPartnerCaptureStations(principal: PartnerPrincipal): Promise<PartnerCaptureStation[]> {
+  const { rows } = await partnerAdminQuery<{
+    station_code: string;
+    location_id: string;
+    location_name: string;
+    app_version: string | null;
+    minimum_supported_version: string | null;
+    calibration_status: CalibrationStatus;
+    current_calibration_id: string | null;
+  }>(
+    `SELECT s.station_code, s.location_id, l.name AS location_name,
+            s.app_version, s.minimum_supported_version,
+            s.calibration_status, s.current_calibration_id
+       FROM partner_stations s
+       JOIN partner_organisations o ON o.id=s.tenant_id AND o.status='ACTIVE'
+       JOIN partner_locations l ON l.id=s.location_id AND l.status='ACTIVE'
+      WHERE s.tenant_id=$1
+        AND s.status='ACTIVE'
+        AND ($2::boolean OR s.location_id=$3::uuid)
+      ORDER BY l.name ASC, s.station_code ASC`,
+    [principal.tenantId, principal.orgWide, principal.locationId]
+  );
+  return rows
+    .filter(
+      (station) =>
+        station.calibration_status === "VALID" &&
+        !!station.current_calibration_id &&
+        appVersionSatisfies(station.app_version, station.minimum_supported_version)
+    )
+    .map((station) => ({
+      stationCode: station.station_code,
+      locationId: station.location_id,
+      locationName: station.location_name,
+    }));
 }
 
 /** Resolve an approved station for a trusted browser/admin target arm. */

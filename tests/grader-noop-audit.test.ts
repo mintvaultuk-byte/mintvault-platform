@@ -53,7 +53,12 @@ describe("role write paths suppress no-op audit rows", () => {
       .mockResolvedValueOnce({
         rows: [{ id: 700, assigned_grader_id: "grader-1", grader_status: "pending_review" }],
       })
-      .mockResolvedValueOnce({ rows: [{ grading_revision: 1 }] });
+      // Server-owned grade authority consults calibration before the draft
+      // write, then buildCertGradingPayload repeats that read for its returned
+      // authoritative result.
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ grading_revision: 1 }] })
+      .mockResolvedValueOnce({ rows: [] });
     runtime.getCertificate.mockResolvedValue({ ...certSnapshot });
 
     const result = await adminReviewSaveDraft(
@@ -71,7 +76,7 @@ describe("role write paths suppress no-op audit rows", () => {
       "admin@example.test",
     );
 
-    expect(result).toEqual({ ok: true, revision: 1 });
+    expect(result).toMatchObject({ ok: true, revision: 1, authoritativeGrade: expect.any(Object) });
     expect(runtime.writeAuditLog).not.toHaveBeenCalled();
   });
 

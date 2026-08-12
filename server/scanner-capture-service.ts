@@ -122,6 +122,27 @@ export async function createScannerCaptureSession(input: {
   const workstationId = cleanStationId(input.workstationId);
   const client = await pool.connect();
   try {
+    await client.query("BEGIN");
+    // A station-target expiry must be made terminal in the SAME transaction as
+    // the next arm. Otherwise an expired `armed` row can indefinitely occupy
+    // the station's partial-unique slot until a background sweeper happens to
+    // visit it.
+    if (input.stationId) {
+      const invariant = await client.query<{ index_name: string | null }>(
+        "SELECT to_regclass('public.uq_scanner_capture_one_active_station')::text AS index_name"
+      );
+      if (!invariant.rows[0]?.index_name) {
+        throw new Error("Partner station capture is unavailable until its one-active-target invariant is installed");
+      }
+      await client.query(
+        `UPDATE scanner_capture_sessions
+            SET state='expired'
+          WHERE station_id=$1
+            AND state IN ('armed','claimed')
+            AND expires_at <= NOW()`,
+        [input.stationId]
+      );
+    }
     const cert = await client.query(
       `
       SELECT c.id, c.certificate_number, c.card_id, c.submission_item_id,
@@ -194,9 +215,14 @@ export async function createScannerCaptureSession(input: {
         expires,
       ]
     );
+    await client.query("COMMIT");
     return mapRow(inserted.rows[0] as Record<string, unknown>);
   } catch (error: any) {
+    await client.query("ROLLBACK").catch(() => {});
     if (error?.code === "23505" || error?.cause?.code === "23505") {
+      if (error?.constraint === "uq_scanner_capture_one_active_station") {
+        throw new Error("This station already has an active capture target");
+      }
       throw new Error(`A ${side} capture is already active for this certificate`);
     }
     throw error;

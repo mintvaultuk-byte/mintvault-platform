@@ -57,6 +57,12 @@ export function authorizePartnerLabelPreview(
   if (candidate.assignedGraderId !== principal.userId) {
     return { ok: false, status: 403, error: "This card is not assigned to you" };
   }
+  // A Partner's draft remains private to its assigned grader until a Super
+  // Admin clears the mandatory QA hold. Rendering a label at this state would
+  // create a print-like artefact before the one required review has happened.
+  if (candidate.gradingStatus === "pending_review") {
+    return { ok: false, status: 403, error: "This card is awaiting Super Admin QA" };
+  }
   if (candidate.gradingStatus === "approved") {
     return { ok: false, status: 403, error: "This card is already approved" };
   }
