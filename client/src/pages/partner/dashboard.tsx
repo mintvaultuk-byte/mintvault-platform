@@ -268,6 +268,19 @@ export default function PartnerDashboardPage() {
             </div>
           </section>
 
+          <section aria-labelledby="scanner-station-title" className="space-y-3">
+            <h2 id="scanner-station-title" className="text-base font-semibold">
+              Scanner station
+            </h2>
+            <Card className="rounded-md" data-testid="card-dashboard-scanner-station">
+              <CardContent className="pt-6 text-sm text-muted-foreground">
+                Set up the assigned Mac in the MintVault Scanner: sign in with your Partner account, choose an
+                authorised location, register the Mac, then wait for Super Admin approval. The Scanner shows the
+                authoritative station and calibration status; this dashboard does not guess at device approval.
+              </CardContent>
+            </Card>
+          </section>
+
           {/*
             The "Operations" section (Cards in progress / Turnaround / Quality rating) was removed.
             All three were client-side literal "Not available" strings with no server field behind

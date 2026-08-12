@@ -274,7 +274,7 @@ export function partnerApiRouter(): Router {
   });
 
   // ---- session ----
-  r.get("/session", async (req, res) => {
+  const sessionIdentity = async (req: import("express").Request, res: import("express").Response) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -313,7 +313,10 @@ export function partnerApiRouter(): Router {
     } catch {
       res.status(503).json({ error: { code: "portal_context_unavailable", message: "Shop details are unavailable." } });
     }
-  });
+  };
+  // `/me` is the stable identity contract; `/session` remains the backwards-compatible alias.
+  r.get("/me", sessionIdentity);
+  r.get("/session", sessionIdentity);
 
   r.get("/credits", requirePartnerCapability("partner.credits.view"), async (req, res) => {
     try {

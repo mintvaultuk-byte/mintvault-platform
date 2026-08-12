@@ -28,6 +28,7 @@ export const PARTNER_MIGRATIONS = [
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
   "0009_partner_connector_validation",
+  "0077_partner_credential_lifecycle_hardening",
 ] as const;
 
 /**
@@ -211,6 +212,7 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0046_scanner_processing_jobs",
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
+  "0077_partner_credential_lifecycle_hardening",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

@@ -30,8 +30,11 @@ describe("partner login and invitation UI source assertions", () => {
     const src = read("client/src/pages/admin/partner-management-detail.tsx");
     expect(src).toContain("/onboarding-readiness");
     expect(src).toContain("pm-onboarding-section");
-    expect(src).toContain("READY TO LOG IN");
-    expect(src).toContain("LOGIN BLOCKED");
+    expect(src).toContain("onboardingState.replaceAll");
+    expect(src).toContain("Password configured");
+    expect(src).toContain("MFA configured");
+    expect(src).toContain("Send password setup");
+    expect(src).toContain("Reset MFA");
     expect(src).toContain("copy-invitation-link");
     expect(src).toContain("Staging/internal only.");
   });
@@ -40,5 +43,12 @@ describe("partner login and invitation UI source assertions", () => {
     const app = read("client/src/App.tsx");
     expect(app.indexOf('path="/partner/invite"')).toBeGreaterThan(app.indexOf('path="/partner/login"'));
     expect(app.indexOf('path="/partner/invite"')).toBeLessThan(app.indexOf('path="/partner/dashboard"'));
+  });
+
+  it("partner dashboard gives a truthful station-setup handoff", () => {
+    const src = read("client/src/pages/partner/dashboard.tsx");
+    expect(src).toContain("card-dashboard-scanner-station");
+    expect(src).toContain("wait for Super Admin approval");
+    expect(src).toContain("does not guess at device approval");
   });
 });

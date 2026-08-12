@@ -11,7 +11,7 @@
  */
 import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
-import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
+import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { ensureWallet } from "./partner-wallet-service";
 import { APP_BASE_URL } from "../app-url";
@@ -1363,7 +1363,13 @@ export async function listPartnerUsers(partnerId: string) {
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status, u.last_login_at, u.created_at,
             u.mfa_enabled, u.mfa_required,
-            (u.password_hash IS NOT NULL) AS password_configured,
+            (u.password_hash IS NOT NULL AND u.password_set_at IS NOT NULL) AS password_configured,
+            u.password_set_at AS password_configured_at,
+            EXISTS (
+              SELECT 1 FROM partner_mfa_methods m
+               WHERE m.tenant_id=u.tenant_id AND m.user_id=u.id AND m.method='totp'
+                 AND m.status='ACTIVE' AND m.secret_ref IS NOT NULL
+            ) AS mfa_configured,
             (SELECT count(*)::int FROM partner_sessions s
               WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
                 AND s.absolute_expires_at > now()) AS active_sessions,
@@ -1399,8 +1405,20 @@ export interface PartnerLoginReadiness {
   userActive: boolean;
   invitationValid: boolean;
   passwordConfigured: boolean;
+  passwordConfiguredAt: string | null;
+  mfaRequired: boolean;
+  mfaConfigured: boolean;
+  locationEligible: boolean;
   loginEnabled: boolean;
+  loginFlagEnabled: boolean;
   portalEnabled: boolean;
+  onboardingState:
+    | "INVITED"
+    | "AWAITING_PASSWORD_SETUP"
+    | "AWAITING_MFA_SETUP"
+    | "READY_TO_LOG_IN"
+    | "SUSPENDED"
+    | "LOGIN_BLOCKED";
   blockedReasons: string[];
 }
 
@@ -1409,14 +1427,22 @@ function buildLoginReadiness(
     org_status: string;
     user_status: string;
     password_configured: boolean;
+    password_configured_at: string | null;
+    mfa_required: boolean;
+    mfa_configured: boolean;
+    location_eligible: boolean;
     invitation_status: string | null;
     invitation_expires_at: string | null;
   },
-  portalEnabled: boolean
+  portalEnabled: boolean,
+  loginFlagEnabled: boolean
 ): PartnerLoginReadiness {
   const organisationActive = row.org_status === "ACTIVE";
   const userActive = row.user_status === "ACTIVE";
   const passwordConfigured = row.password_configured === true;
+  const mfaRequired = row.mfa_required === true;
+  const mfaConfigured = row.mfa_configured === true;
+  const locationEligible = row.location_eligible === true;
   const invitationValid =
     !!row.invitation_status &&
     ["PENDING", "SENT", "DELIVERY_FAILED"].includes(row.invitation_status) &&
@@ -1424,6 +1450,7 @@ function buildLoginReadiness(
     new Date(row.invitation_expires_at).getTime() > Date.now();
   const blockedReasons: string[] = [];
   if (!portalEnabled) blockedReasons.push("Partner portal is disabled.");
+  if (!loginFlagEnabled) blockedReasons.push("Partner login is disabled.");
   if (!organisationActive) blockedReasons.push(`Organisation is ${row.org_status}.`);
   if (!userActive) blockedReasons.push(`Partner user is ${row.user_status}.`);
   if (!passwordConfigured) {
@@ -1433,13 +1460,37 @@ function buildLoginReadiness(
         : "No valid invitation is available for the partner to create a password."
     );
   }
+  if (passwordConfigured && mfaRequired && !mfaConfigured) {
+    blockedReasons.push("Partner must enrol an MFA authenticator before the portal is available.");
+  }
+  if (!locationEligible) blockedReasons.push("Partner user has no active eligible location.");
+  const onboardingState: PartnerLoginReadiness["onboardingState"] =
+    row.user_status === "SUSPENDED" || row.org_status === "SUSPENDED" || row.user_status === "REVOKED" || row.org_status === "REVOKED"
+      ? "SUSPENDED"
+      : row.user_status === "INVITED"
+        ? "INVITED"
+        : !passwordConfigured
+          ? "AWAITING_PASSWORD_SETUP"
+          : mfaRequired && !mfaConfigured
+            ? "AWAITING_MFA_SETUP"
+            : portalEnabled && loginFlagEnabled && organisationActive && userActive && locationEligible
+              ? "READY_TO_LOG_IN"
+              : "LOGIN_BLOCKED";
   return {
     organisationActive,
     userActive,
     invitationValid,
     passwordConfigured,
-    loginEnabled: portalEnabled && organisationActive && userActive && passwordConfigured,
+    passwordConfiguredAt: row.password_configured_at,
+    mfaRequired,
+    mfaConfigured,
+    locationEligible,
+    loginEnabled:
+      portalEnabled && loginFlagEnabled && organisationActive && userActive && passwordConfigured &&
+      (!mfaRequired || mfaConfigured) && locationEligible,
+    loginFlagEnabled,
     portalEnabled,
+    onboardingState,
     blockedReasons,
   };
 }
@@ -1447,15 +1498,37 @@ function buildLoginReadiness(
 export async function getPartnerOnboardingReadiness(partnerId: string) {
   const org = await loadPartner(partnerId);
   let portalEnabled = false;
+  let loginFlagEnabled = false;
   try {
     const { resolveGlobalFlag } = await import("./flags");
-    portalEnabled = await resolveGlobalFlag("partner_portal_enabled");
+    [portalEnabled, loginFlagEnabled] = await Promise.all([
+      resolveGlobalFlag("partner_portal_enabled"),
+      resolveGlobalFlag("partner_login_enabled"),
+    ]);
   } catch {
     portalEnabled = false;
   }
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status AS user_status,
-            o.status AS org_status, u.last_login_at, (u.password_hash IS NOT NULL) AS password_configured,
+            o.status AS org_status, u.last_login_at,
+            (u.password_hash IS NOT NULL AND u.password_set_at IS NOT NULL) AS password_configured,
+            u.password_set_at AS password_configured_at, u.mfa_required,
+            EXISTS (
+              SELECT 1 FROM partner_mfa_methods m
+               WHERE m.tenant_id=u.tenant_id AND m.user_id=u.id AND m.method='totp'
+                 AND m.status='ACTIVE' AND m.secret_ref IS NOT NULL
+            ) AS mfa_configured,
+            EXISTS (
+              SELECT 1 FROM partner_locations l
+               LEFT JOIN partner_user_locations ul ON ul.tenant_id=l.tenant_id AND ul.location_id=l.id AND ul.user_id=u.id
+               WHERE l.tenant_id=u.tenant_id AND l.status='ACTIVE'
+                 AND (ul.user_id IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM partner_user_roles our
+                   JOIN partner_roles orole ON orole.id=our.role_id
+                   WHERE our.tenant_id=u.tenant_id AND our.user_id=u.id
+                     AND orole.code IN ('PARTNER_OWNER','PARTNER_MANAGER','PARTNER_FINANCE_VIEWER')
+                 ))
+            ) AS location_eligible,
             COALESCE(json_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS role_codes,
             (SELECT count(*)::int FROM partner_sessions s
               WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
@@ -1495,7 +1568,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       acceptedAt: u.invitation_consumed_at,
       lastLoginAt: u.last_login_at,
       activeSessions: u.active_sessions ?? 0,
-      readiness: buildLoginReadiness(u, portalEnabled),
+      readiness: buildLoginReadiness(u, portalEnabled, loginFlagEnabled),
     })),
   };
 }
@@ -1876,9 +1949,7 @@ export async function acceptPartnerInvitation(token: string, password: string) {
   if (
     typeof token !== "string" ||
     token.length < 20 ||
-    typeof password !== "string" ||
-    password.length < MIN_PASSWORD_LEN ||
-    password.length > MAX_PASSWORD_LEN
+    !isValidPartnerPassword(password)
   ) {
     return { ok: false as const, reason: "invalid" as const };
   }
@@ -1946,7 +2017,7 @@ export async function acceptPartnerInvitation(token: string, password: string) {
      */
     await client.query(
       `UPDATE partner_users
-          SET password_hash=$2, status='ACTIVE', failed_login_count=0, locked_until=NULL,
+          SET password_hash=$2, password_set_at=now(), status='ACTIVE', failed_login_count=0, locked_until=NULL,
               mfa_required=true, credential_version=credential_version+1, updated_at=now()
         WHERE id=$1 AND tenant_id=$3`,
       [inv.user_id, pwHash, inv.tenant_id]

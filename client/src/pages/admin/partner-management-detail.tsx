@@ -88,6 +88,11 @@ interface PartnerUserRow {
   invitation_consumed_at?: string | null;
   last_login_at: string | null;
   active_sessions?: number;
+  password_configured?: boolean;
+  password_configured_at?: string | null;
+  mfa_enabled?: boolean;
+  mfa_required?: boolean;
+  mfa_configured?: boolean;
   created_at: string;
 }
 
@@ -108,8 +113,14 @@ interface OnboardingUser {
     userActive: boolean;
     invitationValid: boolean;
     passwordConfigured: boolean;
+    passwordConfiguredAt: string | null;
+    mfaRequired: boolean;
+    mfaConfigured: boolean;
+    locationEligible: boolean;
     loginEnabled: boolean;
+    loginFlagEnabled: boolean;
     portalEnabled: boolean;
+    onboardingState: string;
     blockedReasons: string[];
   };
 }
@@ -125,6 +136,7 @@ export default function PartnerManagementDetailPage() {
   const [modal, setModal] = useState<{
     kind: string;
     title: string;
+    successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
     /**
@@ -243,8 +255,12 @@ export default function PartnerManagementDetailPage() {
 
   const mutation = useMutation({
     mutationFn: async (run: (reason: string, value: string) => Promise<unknown>) => run(reason, modalValue),
-    onSuccess: () => {
-      setBanner("Action completed.");
+    onSuccess: (data: any) => {
+      setBanner(
+        modal?.successMessage
+          ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage)
+          : "Action completed."
+      );
       closeModal();
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
@@ -694,6 +710,7 @@ export default function PartnerManagementDetailPage() {
                       <th>Email</th>
                       <th>Role</th>
                       <th>Status</th>
+                      <th>Onboarding</th>
                       <th>Last login</th>
                       <th>Invitation</th>
                       <th>Created</th>
@@ -707,6 +724,11 @@ export default function PartnerManagementDetailPage() {
                         <td>{u.email}</td>
                         <td>{u.role}</td>
                         <td>{u.status}</td>
+                        <td>
+                          {u.password_configured ? "Password set" : "Password setup needed"}
+                          <br />
+                          {u.mfa_required ? (u.mfa_configured ? "MFA enabled" : "MFA setup needed") : "MFA not required"}
+                        </td>
                         <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "—"}</td>
                         <td>{u.invitation_status ?? (u.status === "ACTIVE" ? "ACCEPTED" : "—")}</td>
                         <td>{new Date(u.created_at).toLocaleString()}</td>
@@ -1719,7 +1741,7 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
           color: ready ? "var(--admin-green, #7fbf7f)" : "var(--admin-red, #cd8073)",
         }}
       >
-        {ready ? "READY TO LOG IN" : "LOGIN BLOCKED"}
+        {primary.readiness.onboardingState.replaceAll("_", " ")}
       </div>
       <div style={{ display: "grid", gap: 4, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
         <Field label="Organisation status" v={primary.readiness.organisationActive ? "ACTIVE" : "Not active"} />
@@ -1733,6 +1755,11 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
         <Field label="Last login" v={primary.lastLoginAt} />
         <Field label="Active sessions" v={String(primary.activeSessions ?? 0)} />
         <Field label="Portal enabled" v={primary.readiness.portalEnabled ? "yes" : "no"} />
+        <Field label="Login enabled" v={primary.readiness.loginFlagEnabled ? "yes" : "no"} />
+        <Field label="Password configured" v={primary.readiness.passwordConfigured ? "yes" : "no"} />
+        <Field label="MFA required" v={primary.readiness.mfaRequired ? "yes" : "no"} />
+        <Field label="MFA configured" v={primary.readiness.mfaConfigured ? "yes" : "no"} />
+        <Field label="Eligible location" v={primary.readiness.locationEligible ? "yes" : "no"} />
       </div>
       <div data-testid="pm-login-readiness-reasons" style={{ marginTop: 8, fontSize: 13 }}>
         {ready ? (
@@ -1812,6 +1839,7 @@ function UserActions({
   openModal: (m: {
     kind: string;
     title: string;
+    successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
     run: (reason: string) => Promise<unknown>;
@@ -2054,6 +2082,41 @@ function UserActions({
         data-testid={`pm-user-revoke-${user.id}`}
       >
         Revoke sessions
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || user.status !== "ACTIVE"}
+        onClick={() =>
+          openModal({
+            kind: "user-password-reset",
+            title: `Send a password-setup link to ${user.email}?`,
+            successMessage: "Password setup link issued.",
+            highRisk: true,
+            body: <p style={{ fontSize: 12 }}>This sends a fresh single-use link. The password and link are never shown to MintVault staff.</p>,
+            run: post(`/partners/${partnerId}/users/${user.id}/password-reset`, {}),
+          })
+        }
+        data-testid={`pm-user-password-reset-${user.id}`}
+      >
+        Send password setup
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || user.status !== "ACTIVE"}
+        onClick={() =>
+          openModal({
+            kind: "user-reset-mfa",
+            title: `Reset MFA for ${user.email}?`,
+            highRisk: true,
+            body: <p style={{ fontSize: 12 }}>All MFA methods and recovery codes are disabled and every active session is revoked. The user must enrol a new authenticator.</p>,
+            run: post(`/partners/${partnerId}/users/${user.id}/reset-mfa`, {}),
+          })
+        }
+        data-testid={`pm-user-reset-mfa-${user.id}`}
+      >
+        Reset MFA
       </AdminButton>
     </div>
   );

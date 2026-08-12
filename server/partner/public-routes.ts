@@ -3,8 +3,7 @@ import {
   partnerLogin,
   createPasswordResetToken,
   consumePasswordResetToken,
-  MIN_PASSWORD_LEN,
-  MAX_PASSWORD_LEN,
+  isValidPartnerPassword,
 } from "./auth";
 import { setPartnerCookie } from "./session";
 import {
@@ -141,8 +140,7 @@ export function partnerPublicRouter(): Router {
     if (
       typeof token !== "string" ||
       typeof newPassword !== "string" ||
-      newPassword.length < MIN_PASSWORD_LEN ||
-      newPassword.length > MAX_PASSWORD_LEN
+      !isValidPartnerPassword(newPassword)
     ) {
       res.status(400).json({ error: "invalid request" });
       return;

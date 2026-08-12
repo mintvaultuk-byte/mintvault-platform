@@ -256,15 +256,11 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
   it("fails Super Admin routes closed with a non-BYPASSRLS admin role and writes no success audit", async () => {
     const c = await cookie();
     const ready = await fetch(`${base}/api/super-admin/partner-management/readiness`, { headers: { cookie: c } });
-    expect(ready.status).toBe(503);
-    expect(await ready.json()).toMatchObject({
-      checked: true,
-      ready: false,
-      failureCode: "PARTNER_ADMIN_BYPASSRLS_REQUIRED",
-    });
+    expect(ready.status).toBe(403);
+    expect(await ready.json()).toMatchObject({ error: "Forbidden: Super Admin required" });
 
     const list = await fetch(`${base}/api/super-admin/partner-management/partners`, { headers: { cookie: c } });
-    expect(list.status).toBe(503);
+    expect(list.status).toBe(403);
     const invite = await fetch(`${base}/api/super-admin/partner-management/partners/p/users`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie: c },
@@ -276,7 +272,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
         reason: "blocked by capability",
       }),
     });
-    expect(invite.status).toBe(503);
+    expect(invite.status).toBe(403);
     const audit = await admin.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM partner_management_audit WHERE result='succeeded'"
     );

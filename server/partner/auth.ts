@@ -15,6 +15,17 @@ import { readEmergencyState } from "./emergency";
 export const LOCKOUT_THRESHOLD = 5;
 export const LOCKOUT_MINUTES = 15;
 export const SESSION_ABSOLUTE_HOURS = 12;
+export const MIN_PASSWORD_LEN = 10;
+/** bcrypt considers only the first 72 UTF-8 bytes. */
+export const MAX_PASSWORD_BYTES = 72;
+
+export function isValidPartnerPassword(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= MIN_PASSWORD_LEN &&
+    Buffer.byteLength(value, "utf8") <= MAX_PASSWORD_BYTES
+  );
+}
 
 export async function hashPassword(pw: string): Promise<string> {
   return bcrypt.hash(pw, 12);
@@ -49,6 +60,8 @@ interface AuthRow {
   failed_login_count: number;
   locked_until: string | null;
   mfa_required: boolean;
+  /** Present after credential-lifecycle migration 0077; absence fails closed. */
+  password_set_at?: string | null;
   /**
    * OPTIONAL BY TYPE, ON PURPOSE. `SELECT * FROM partner_auth_lookup($1)` returns
    * exactly the columns the DEPLOYED function declares, and this one exists only
@@ -116,7 +129,7 @@ export async function partnerLogin(email: string, password: string, ip?: string 
     return { ok: false, reason: "mfa_state_unavailable" };
   }
 
-  if (u.org_status !== "ACTIVE" || u.user_status !== "ACTIVE") {
+  if (u.org_status !== "ACTIVE" || u.user_status !== "ACTIVE" || !u.password_set_at) {
     // P0-F: a suspended/invited/revoked account is refused REGARDLESS of the password, so counting
     // these attempts towards the lockout threshold protects nothing — it only accumulates a counter
     // that has no reset path while suspended, so the account is locked the instant it is
@@ -320,6 +333,14 @@ export const RESET_TOKEN_MINUTES = 30;
 export async function createPasswordResetToken(tenantId: string, userId: string): Promise<string> {
   const token = crypto.randomBytes(32).toString("base64url");
   await withTenant({ tenantId }, async (c) => {
+    // Keep issuance and consumption serialised on the user row. A replacement
+    // link invalidates every earlier link before the new hash is inserted.
+    const user = await c.query("SELECT id FROM partner_users WHERE id=$1 FOR UPDATE", [userId]);
+    if (user.rowCount !== 1) throw new Error("Partner user is unavailable for password reset.");
+    await c.query(
+      "UPDATE partner_password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL",
+      [userId]
+    );
     await c.query(
       `INSERT INTO partner_password_reset_tokens (tenant_id, user_id, token_hash, expires_at)
        VALUES ($1,$2,$3, now() + ($4 || ' minutes')::interval)`,
@@ -335,21 +356,9 @@ export async function createPasswordResetToken(tenantId: string, userId: string)
  * L6: the tenant is derived FROM the token via a SECURITY DEFINER lookup — never from a request
  * body — so no attacker-controlled tenant id reaches RLS.
  */
-export const MIN_PASSWORD_LEN = 10;
-// Upper bound to reject absurdly long inputs (DoS guard). NOTE: bcrypt only hashes the first 72
-// bytes, so bytes beyond 72 do not add entropy — this cap does NOT prevent that truncation; it is
-// only an input-size limit. (Behaviour unchanged.)
-export const MAX_PASSWORD_LEN = 200;
-
 export async function consumePasswordResetToken(token: string, newPassword: string): Promise<boolean> {
   // F5: enforce the password policy in the SERVICE layer so every caller shares it, not just the route.
-  if (
-    typeof newPassword !== "string" ||
-    newPassword.length < MIN_PASSWORD_LEN ||
-    newPassword.length > MAX_PASSWORD_LEN
-  ) {
-    return false;
-  }
+  if (!isValidPartnerPassword(newPassword)) return false;
   const { rows: tRows } = await partnerRuntimeQuery<{ tenant: string | null }>(
     "SELECT partner_reset_token_tenant($1) AS tenant",
     [sha256(token)]
@@ -358,6 +367,16 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
   if (!tenantId) return false; // unknown/expired/used token
   const newHash = await hashPassword(newPassword);
   return withTenant({ tenantId }, async (c) => {
+    const candidate = await c.query<{ user_id: string }>(
+      `SELECT user_id FROM partner_password_reset_tokens
+        WHERE token_hash=$1 AND used_at IS NULL AND expires_at > now()`,
+      [sha256(token)]
+    );
+    if (candidate.rows.length !== 1) return false;
+    // Same lock order as creation (user first, token second) prevents an
+    // issue-versus-consume deadlock and makes the one-live-token rule atomic.
+    const user = await c.query("SELECT id FROM partner_users WHERE id=$1 FOR UPDATE", [candidate.rows[0].user_id]);
+    if (user.rowCount !== 1) return false;
     const { rows } = await c.query<{ id: string; user_id: string }>(
       `SELECT id, user_id FROM partner_password_reset_tokens
         WHERE token_hash=$1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`,
@@ -375,7 +394,7 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
     await c.query(
       `UPDATE partner_users
           SET password_hash=$2, credential_version=credential_version+1,
-              failed_login_count=0, locked_until=NULL
+              password_set_at=now(), failed_login_count=0, locked_until=NULL
         WHERE id=$1`,
       [user_id, newHash]
     );

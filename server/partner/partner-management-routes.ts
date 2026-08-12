@@ -13,7 +13,7 @@
  */
 import { Router, type Express, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
-import { requireAdmin, requireSuperAdmin } from "../auth";
+import { requireSuperAdmin } from "../auth";
 import {
   toG5Error,
   g5StatusFor,
@@ -102,7 +102,7 @@ function requirePartnerUserRole(raw: unknown): svc.AdminPartnerRole {
 
 export function partnerManagementRouter(): Router {
   const r = Router();
-  r.use(requireAdmin);
+  r.use(requireSuperAdmin);
 
   /**
    * Partner-management readiness.

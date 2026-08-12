@@ -435,8 +435,9 @@ export interface ChecklistItemView {
  * not "owner login created" (an INVITED user cannot log in), and "Invitation sent" must not tick for
  * a DELIVERY_FAILED invitation. The caller is responsible for feeding those distinctions in.
  *
- * HONESTY RULE 2: "Device" and "Credits" have NO data source in the product today — device enrolment is
- * unbuilt and the credit ledger is Gate 4, deliberately not wired. The previous UI rendered them as a
+ * HONESTY RULE 2: this checklist does not receive a per-partner station projection. Scanner
+ * enrolment is available in the MintVault Scanner, but this view cannot honestly claim that a
+ * particular Mac is configured. The previous UI rendered it as a
  * permanently unticked circle, which reads as "you still have to do this" when in fact it cannot be
  * done. They are reported as `unavailable` instead, and are EXCLUDED from the percentage so the bar
  * can actually reach 100%. A progress bar that can never complete is a bug, not a motivator.
@@ -450,7 +451,7 @@ export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
     { key: "location", label: "Grading location", state: b(input.locationCount > 0) },
     { key: "profile", label: "Company profile completed", state: b(input.hasProfileDetail) },
     { key: "branding", label: "Branding configured", state: b(input.hasBranding) },
-    { key: "device", label: "Device configured", state: "unavailable", hint: "Device enrolment is not built yet." },
+    { key: "device", label: "Scanner station", state: "unavailable", hint: "Set up in MintVault Scanner: sign in, register this Mac, then wait for Super Admin approval." },
     { key: "credits", label: "Credits configured", state: "unavailable", hint: "Credit accounting is not enabled yet." },
   ];
 }
