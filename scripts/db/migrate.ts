@@ -351,6 +351,13 @@ export interface MigratePlan {
   checksumMismatches: { filename: string; storedChecksum: string; currentChecksum: string }[];
   inconsistent: { filename: string; status: string }[]; // rows left in a non-'applied' state
   destructive: { filename: string; findings: ReturnType<typeof lintSql> }[];
+  /**
+   * EVERY filename the journal already holds, not just the ones this release ships.
+   * The migration identity guard needs the full set: a colliding historical
+   * migration is by definition one this release does NOT contain, so it can only be
+   * seen by reading the journal itself.
+   */
+  journalFilenames: string[];
 }
 
 /** Read-only planning: never mutates the database (does not create the journal table). */
@@ -362,6 +369,7 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
     checksumMismatches: [],
     inconsistent: [],
     destructive: [],
+    journalFilenames: [...journal.keys()],
   };
   for (const f of files) {
     const row = journal.get(f.filename);
@@ -451,6 +459,53 @@ export async function applyMigrations(
           .join(", ")}. A migration was edited after being applied. Refusing to proceed.`
       );
     }
+    /**
+     * MIGRATION IDENTITY GUARD (owner-authorised, 2026-08-11).
+     *
+     * The duplicate-number check in listMigrationFiles() only compares files WITHIN
+     * one release. It cannot see that this database already applied a DIFFERENT
+     * migration at the same numeric slot, because the journal's key is `filename`
+     * and numbers are used only for sort order. So a release whose 0046 is
+     * `partner_mfa_pending_lifecycle` applied cleanly to a database whose 0046 is
+     * `scanner_processing_jobs`: the filename was simply absent from the journal,
+     * the runner treated it as new, and the database ended up holding two different
+     * migrations at 0046 — permanently ambiguous, and silently, because nothing
+     * errored.
+     *
+     * That is exactly how MintVault ended up with three incompatible lineages
+     * forking at 0045-0048 across production, staging and main.
+     *
+     * This guard fails closed BEFORE anything is applied: if a pending migration's
+     * number is already occupied in the journal by a different filename, stop and
+     * name both identities. It never rewrites, renames or deletes a journal row —
+     * applied history stays immutable, which is the whole point. The forward-only
+     * fix is to converge with a NEW migration at the next globally free number,
+     * never to replay a colliding historical one.
+     */
+    const journalByNumber = new Map<number, string>();
+    for (const journalledName of plan.journalFilenames) {
+      const m = journalledName.match(FILE_RE);
+      if (m) journalByNumber.set(Number(m[1]), journalledName);
+    }
+    const identityConflicts = plan.pending
+      .map((filename) => {
+        const m = filename.match(FILE_RE);
+        if (!m) return null;
+        const occupant = journalByNumber.get(Number(m[1]));
+        return occupant && occupant !== filename ? { number: m[1], incoming: filename, applied: occupant } : null;
+      })
+      .filter((x): x is { number: string; incoming: string; applied: string } => x !== null);
+    if (identityConflicts.length > 0) {
+      throw new Error(
+        "Migration identity conflict — this database already applied a DIFFERENT migration at the same number:\n" +
+          identityConflicts
+            .map((c) => `  ${c.number}: applied '${c.applied}' vs release '${c.incoming}'`)
+            .join("\n") +
+          "\nApplying would leave two different migrations sharing one numeric slot. Applied history is immutable: " +
+          "do NOT renumber or delete the applied row. Converge with a NEW forward migration at the next globally " +
+          "free number instead, and exclude the colliding file from this environment."
+      );
+    }
     if (!opts.allowDestructive) {
       const blocking = plan.destructive.filter((d) => hasBlocking(d.findings));
       if (blocking.length > 0) {
@@ -518,6 +573,185 @@ export function redactMigrationErrorMessage(message: string): string {
     .replace(/MINTVAULT_DATABASE_URL=([^\s"'<>]+)/g, "MINTVAULT_DATABASE_URL=[redacted]");
 }
 
+/**
+ * SCOPED CONVERGENCE MODE — apply EXACTLY ONE named migration.
+ *
+ * WHY THIS EXISTS. MintVault's migration history forked: production, staging and
+ * main each applied different migrations into the same numeric slots, and the same
+ * MFA lifecycle migration exists under TWO immutable identities (0044 on production,
+ * 0046 on staging). The ordinary runner is all-or-nothing by design — against
+ * production it plans SEVEN historical files nobody may replay before it ever
+ * reaches the forward convergence migration, and the identity guard then correctly
+ * refuses the whole run. So there is no safe way to deliver 0073 with the default
+ * mode, and the two wrong ways out are both forbidden: renumbering applied
+ * migrations, or forging journal rows to make the runner believe history it did not
+ * execute.
+ *
+ * This mode is the third way: run the ONE forward migration, record it honestly,
+ * and leave every historical identity exactly as it is.
+ *
+ * IT IS NOT A SHORTCUT, AND IT MUST NOT BECOME ONE. It keeps every safety property
+ * of the normal path — advisory lock, dedicated backend, checksum verification,
+ * destructive-SQL lint, atomic journal write — and adds two the normal path does not
+ * need: an exact-filename requirement (no wildcard, no number-only, no "and
+ * everything before it"), and a journal-fingerprint re-check immediately before
+ * execution, because production's journal demonstrably moved twice in one day while
+ * another operator worked. It requires an explicit acknowledgement flag so it can
+ * never be reached by habit.
+ */
+export interface ScopedMigrationResult {
+  applied: boolean;
+  reason?: string;
+  filename: string;
+  checksum: string;
+  journalBefore: number;
+  journalAfter: number;
+}
+
+/** Stable fingerprint of the journal, used to detect a concurrent operator. */
+async function journalFingerprint(client: PgClientLike): Promise<{ count: number; fingerprint: string }> {
+  const { rows } = await client.query(
+    `SELECT count(*)::int AS count,
+            coalesce(md5(string_agg(filename || ':' || checksum, '|' ORDER BY filename)), 'empty') AS fingerprint
+       FROM schema_migrations`
+  );
+  const r = rows[0] as { count: number; fingerprint: string };
+  return { count: Number(r.count), fingerprint: r.fingerprint };
+}
+
+export async function applyScopedMigration(
+  client: PgClientLike,
+  targetFilename: string,
+  opts: { files?: MigrationFile[]; allowDestructive?: boolean; log?: (m: string) => void } = {}
+): Promise<ScopedMigrationResult> {
+  const log = opts.log ?? (() => {});
+  const files = opts.files ?? listMigrationFiles();
+
+  // (1) EXACT filename. No wildcard, no number-only, no prefix matching — an
+  // ambiguous target is exactly how a convergence tool becomes a footgun.
+  if (!FILE_RE.test(targetFilename)) {
+    throw new Error(`Scoped migration target must be an exact NNNN_name.sql filename, got '${targetFilename}'.`);
+  }
+  const target = files.find((f) => f.filename === targetFilename);
+  if (!target) {
+    throw new Error(`Scoped migration target '${targetFilename}' does not exist in the migrations directory.`);
+  }
+
+  if (!(await journalExists(client))) {
+    throw new Error(
+      "Scoped migration refuses to run: this database has no schema_migrations journal. " +
+        "Scoped mode converges an EXISTING lineage; it is not a bootstrap path."
+    );
+  }
+
+  const before = await journalFingerprint(client);
+  const journal = await journalMap(client);
+
+  // (3) Already applied under this exact identity → no-op, never a second execution.
+  const existing = journal.get(target.filename);
+  if (existing) {
+    if (existing.status !== "applied") {
+      throw new Error(
+        `Scoped migration refuses to run: '${target.filename}' is in the journal with status '${existing.status}' ` +
+          "(a crashed run). Resolve it manually before proceeding."
+      );
+    }
+    // (2) Checksum must match the release artifact even on the no-op path, so a
+    // silently edited migration is caught rather than reported as "already done".
+    if (existing.checksum !== target.checksum) {
+      throw new Error(
+        `Scoped migration refuses to run: '${target.filename}' is already applied with a DIFFERENT checksum. ` +
+          "The file was edited after being applied. Refusing to proceed."
+      );
+    }
+    log(`[scoped] '${target.filename}' is already applied with a matching checksum — nothing to do.`);
+    return {
+      applied: false,
+      reason: "already_applied",
+      filename: target.filename,
+      checksum: target.checksum,
+      journalBefore: before.count,
+      journalAfter: before.count,
+    };
+  }
+
+  // (4) Numeric identity: the target's own number must not already be occupied by a
+  // DIFFERENT migration. Historical collisions elsewhere in the journal are
+  // deliberately IGNORED here — they are precisely why this mode exists, and they
+  // are not this migration's problem. Only a collision on the TARGET is unsafe.
+  const targetNumber = Number(target.filename.match(FILE_RE)![1]);
+  for (const journalledName of journal.keys()) {
+    const m = journalledName.match(FILE_RE);
+    if (!m) continue;
+    if (Number(m[1]) === targetNumber && journalledName !== target.filename) {
+      throw new Error(
+        `Scoped migration refuses to run: number ${String(targetNumber).padStart(4, "0")} is already occupied by a ` +
+          `DIFFERENT migration in this database ('${journalledName}'). Applying '${target.filename}' would put two ` +
+          "migrations in one numeric slot. Choose the next globally free number instead — applied history is immutable."
+      );
+    }
+  }
+
+  // (5)/(2) Destructive-SQL lint, same gate and same opt-in as the normal path.
+  const findings = lintSql(target.sql);
+  for (const f of findings) log(`${f.severity === "block" ? "🚫" : "⚠️ "} ${target.filename}:${f.line} [${f.kind}] ${f.match}`);
+  if (!opts.allowDestructive && hasBlocking(findings)) {
+    throw new Error(
+      `Destructive SQL detected in '${target.filename}'. Re-run with --allow-destructive only with owner approval.`
+    );
+  }
+
+  // (7)/(8) Serialise against any other migration operator. Production's journal
+  // moved twice in one day while another operator worked the backlog, so this is a
+  // real condition, not a theoretical one.
+  const lock = await client.query("SELECT pg_try_advisory_lock($1) AS ok", [ADVISORY_LOCK_KEY]);
+  if ((lock.rows[0] as { ok: boolean } | undefined)?.ok !== true) {
+    throw new Error(
+      "Scoped migration refuses to run: another migration runner holds the advisory lock. Do not race it."
+    );
+  }
+
+  try {
+    // (9) THE RACE CHECK. Re-read the journal under the lock and require it to be
+    // byte-identical to the pre-flight read. If another operator applied anything
+    // between planning and execution, the plan is stale — abort rather than act on it.
+    const underLock = await journalFingerprint(client);
+    if (underLock.fingerprint !== before.fingerprint || underLock.count !== before.count) {
+      throw new Error(
+        `Scoped migration refuses to run: the journal changed between pre-flight and execution ` +
+          `(${before.count} -> ${underLock.count} entries). Another operator is migrating this database. Re-run pre-flight.`
+      );
+    }
+
+    log(`[scoped] applying ONLY ${target.filename} (checksum ${target.checksum.slice(0, 12)}…)`);
+    // (10) Exactly one file, atomically, with its journal row.
+    await client.query("BEGIN");
+    try {
+      await client.query(target.sql);
+      await client.query(
+        "INSERT INTO schema_migrations (filename, checksum, completed_at, status) VALUES ($1,$2,now(),'applied')",
+        [target.filename, target.checksum]
+      );
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw new Error(`Scoped migration '${target.filename}' failed and was rolled back: ${(e as Error).message}`);
+    }
+
+    const after = await journalFingerprint(client);
+    log(`[scoped] journal ${before.count} -> ${after.count} entries`);
+    return {
+      applied: true,
+      filename: target.filename,
+      checksum: target.checksum,
+      journalBefore: before.count,
+      journalAfter: after.count,
+    };
+  } finally {
+    await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => {});
+  }
+}
+
 async function main(): Promise<void> {
   const url = process.env.MINTVAULT_DATABASE_URL;
   if (!url) {
@@ -565,6 +799,72 @@ async function main(): Promise<void> {
     console.log(`[migrate] lock-owning endpoint: ${h}`);
   }
   try {
+    // ── SCOPED CONVERGENCE MODE ────────────────────────────────────────────────
+    // Deliberately verbose to invoke and impossible to reach by habit: it needs an
+    // exact filename AND an explicit acknowledgement that this is a convergence /
+    // recovery action, not routine migration.
+    const onlyIdx = process.argv.indexOf("--only");
+    if (onlyIdx !== -1) {
+      const targetFilename = process.argv[onlyIdx + 1];
+      if (!targetFilename || targetFilename.startsWith("--")) {
+        console.error("🚫 --only requires an exact migration filename, e.g. --only 0073_lineage_convergence.sql");
+        process.exit(2);
+        return;
+      }
+      if (!process.argv.includes("--convergence-mode")) {
+        console.error(
+          "🚫 --only also requires --convergence-mode.\n" +
+            "   Scoped mode applies ONE migration and SKIPS the historical backlog. That is correct only when the\n" +
+            "   lineage fork is already understood and documented. Acknowledge it explicitly."
+        );
+        process.exit(2);
+        return;
+      }
+      const dbFingerprint = await (async () => {
+        try {
+          const r = await client.query("SELECT current_database() AS db, inet_server_addr()::text AS addr");
+          const row = r.rows[0] as { db: string; addr: string | null };
+          // Host comes from the endpoint we already resolved; never log credentials.
+          const host = (() => {
+            try {
+              return new URL(endpoint.url).hostname;
+            } catch {
+              return "unknown";
+            }
+          })();
+          return `${host}/${row.db}`;
+        } catch {
+          return "unknown";
+        }
+      })();
+      console.log(`[scoped] target database : ${dbFingerprint}`);
+      console.log(`[scoped] target migration: ${targetFilename}`);
+      if (!apply) {
+        const files = listMigrationFiles();
+        const t = files.find((f) => f.filename === targetFilename);
+        if (!t) {
+          console.error(`🚫 '${targetFilename}' does not exist in the migrations directory.`);
+          process.exit(2);
+          return;
+        }
+        const before = await journalFingerprint(client as unknown as PgClientLike);
+        console.log(`[scoped] checksum        : ${t.checksum}`);
+        console.log(`[scoped] journal entries : ${before.count}`);
+        console.log(`(dry-run) would apply ONLY ${targetFilename}. Re-run with --apply to execute.`);
+        process.exit(0);
+      }
+      const result = await applyScopedMigration(client as unknown as PgClientLike, targetFilename, {
+        allowDestructive,
+        log: (m) => console.log(m),
+      });
+      console.log(
+        result.applied
+          ? `✓ Applied ONLY ${result.filename} (journal ${result.journalBefore} -> ${result.journalAfter})`
+          : `= No change: ${result.filename} (${result.reason})`
+      );
+      process.exit(0);
+    }
+
     const files = listMigrationFiles();
     const plan = await planMigrations(client as unknown as PgClientLike, files);
     console.log(

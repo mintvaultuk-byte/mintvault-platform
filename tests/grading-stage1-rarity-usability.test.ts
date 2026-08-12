@@ -27,6 +27,7 @@ import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const SYMBOL = read("client/src/components/rarity-picker/RaritySymbol.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
 
@@ -257,10 +258,15 @@ describe("4. Stage 1 manual card-detail fields are visible by default", () => {
   it("preview stays on the left / identification tools on the right (unchanged two-column shell)", () => {
     // unified-shell pass: the preview aside is now the shared
     // WorkstationPreviewAside component.
-    expect(FORM).toContain("<WorkstationPreviewAside");
-    // The control-panel column is owned by the canonical shell CertificateForm mounts.
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
-    expect(readFileSync(join(process.cwd(), "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx"), "utf8")).toContain('data-testid="grading-control-panel"');
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
+    // The control-panel column is owned by the sole canonical workstation shell.
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
+    expect(
+      readFileSync(
+        join(process.cwd(), "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx"),
+        "utf8"
+      )
+    ).toContain('data-testid="grading-control-panel"');
     const asideSrc = readFileSync(
       join(process.cwd(), "client/src/components/grading-workflow/WorkstationPreviewAside.tsx"),
       "utf8"

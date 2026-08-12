@@ -36,11 +36,13 @@ export interface GradingIdentityVerificationProps {
   setCode: string;
   number: string;
   year: string;
+  language: string;
   variant: string;
   onName: (v: string) => void;
   onSet: (name: string, id?: string) => void;
   onNumber: (v: string) => void;
   onYear: (v: string) => void;
+  onLanguage: (v: string) => void;
   onVariant: (v: string) => void;
   onAutofill: () => void;
   autofilling?: boolean;
@@ -49,6 +51,8 @@ export interface GradingIdentityVerificationProps {
   searchBusy?: boolean;
   onCardPick: (c: TcgCardPick) => void;
   onAccept?: () => void;
+  allowCustomSetMutations?: boolean;
+  allowIdentify?: boolean;
   /** e.g. "TCGdex confirmed" / "AI suggested" / "Not identified". */
   statusLabel?: string | null;
   statusTone?: "confirmed" | "suggested" | "none";
@@ -123,6 +127,7 @@ export function GradingIdentityVerification(props: GradingIdentityVerificationPr
         <SummaryCell k="Set" v={props.set} />
         <SummaryCell k="Number" v={props.number} />
         <SummaryCell k="Year" v={props.year} />
+        <SummaryCell k="Language" v={props.language} />
         <SummaryCell k="Variant" v={props.variant} />
         <SummaryCell k="Game" v={props.game || ""} />
       </div>
@@ -144,7 +149,7 @@ export function GradingIdentityVerification(props: GradingIdentityVerificationPr
             >
               {accepted ? "Identity confirmed" : "Accept identity"}
             </button>
-            <button
+            {props.allowIdentify !== false && <button
               type="button"
               onClick={props.onSearchAgain}
               disabled={props.searchBusy}
@@ -153,7 +158,7 @@ export function GradingIdentityVerification(props: GradingIdentityVerificationPr
               className="border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider px-3 py-2 rounded hover:bg-[var(--admin-gold)]/10 disabled:opacity-40"
             >
               {props.searchBusy ? "Searching..." : "Search again"}
-            </button>
+            </button>}
             <button
               type="button"
               onClick={() => setManualOpen((v) => !v)}
@@ -172,8 +177,8 @@ export function GradingIdentityVerification(props: GradingIdentityVerificationPr
               <PokemonSetPicker
                 value={props.set}
                 onChange={(name, id) => props.onSet(name, id || "")}
-                allowAddSet
-                allowEditSet
+                allowAddSet={props.allowCustomSetMutations !== false}
+                allowEditSet={props.allowCustomSetMutations !== false}
                 createEndpoint="/api/staff/custom-sets"
                 prefill={{ setName: props.set, setCode: props.setCode }}
                 testId="input-identity-set"
@@ -187,6 +192,16 @@ export function GradingIdentityVerification(props: GradingIdentityVerificationPr
                     placeholder="Charizard"
                     onChange={(e) => props.onName(e.target.value)}
                     data-testid="input-identity-card-name"
+                    className={inputCls}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className={lbl}>Language</span>
+                  <input
+                    type="text"
+                    value={props.language}
+                    onChange={(e) => props.onLanguage(e.target.value)}
+                    data-testid="input-identity-language"
                     className={inputCls}
                   />
                 </label>
@@ -234,7 +249,9 @@ export function GradingIdentityVerification(props: GradingIdentityVerificationPr
                   />
                 </label>
               </div>
-              <TcgCardSearch onPick={props.onCardPick} initialQuery={props.name} testId="input-card-search" />
+              {props.allowIdentify !== false && (
+                <TcgCardSearch onPick={props.onCardPick} initialQuery={props.name} testId="input-card-search" />
+              )}
             </div>
           )}
         </>

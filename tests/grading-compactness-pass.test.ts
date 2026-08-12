@@ -17,6 +17,7 @@ const PREVIEW = read("client/src/components/grading-workflow/CardPreviewPanel.ts
 const HUD = read("client/src/components/grading-workflow/SessionHud.tsx");
 const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 
 /** Slice of a source string between two anchors (asserts both exist, in order). */
 function slice(src: string, start: string, end: string): string {
@@ -48,7 +49,7 @@ describe("1. read-only preview fills the panel (spec 1)", () => {
     // the workstation aside opts in to fill — now via the shared
     // WorkstationPreviewAside primitive (extracted from certificate-form.tsx).
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("<CardPreviewPanel fill");
+    expect(asideSrc).toMatch(/<CardPreviewPanel\s+fill/);
   });
   it("keeps front/back, button zoom, fit/reset, fullscreen controls", () => {
     expect(PREVIEW).toContain('(["front", "back"] as const)');
@@ -72,11 +73,14 @@ describe("0. read-only viewer: button-only zoom + drag-pan (wheel scrolls normal
     expect(PREVIEW).toContain("onMouseMove={onDrag}");
     expect(PREVIEW).toContain("onMouseUp={endDrag}");
     expect(PREVIEW).toContain("onMouseLeave={endDrag}");
-    expect(PREVIEW).toMatch(/const \[pan, setPan\]/);
+    expect(PREVIEW).toContain("dragRef.current = { sx: e.clientX, sy: e.clientY, focusX: view.focusX");
+    expect(PREVIEW).toContain("focusX: d.focusX - (e.clientX - d.sx)");
+    expect(PREVIEW).toContain("updateCardInspectionView(currentInspection, side, patch)");
     expect(PREVIEW).toMatch(/if \(zoom <= 1\) return;/); // no pan until zoomed
   });
   it("smooth transform (translate+scale), no transition while dragging", () => {
-    expect(PREVIEW).toMatch(/transform:\s*`translate\([^`]*scale\(/);
+    expect(PREVIEW).toContain("`scale(${zoom}) translate(");
+    expect(PREVIEW).toContain("0.5 - view.focusX");
     expect(PREVIEW).toContain('transition: dragging ? "none" : "transform 0.1s ease-out"');
   });
   it("fit/reset re-centres (zoom 1 + pan 0); grab/grabbing cursor while zoomed", () => {
@@ -116,8 +120,8 @@ describe("4. one combined workflow/session/queue strip (spec 3)", () => {
   // component, rendered from exactly ONE call site in certificate-form.tsx.
   const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
   it("a single WorkstationHeaderStrip wraps the workflow bar + queue + session HUD", () => {
-    expect(FORM).toContain("<WorkstationHeaderStrip");
-    expect((FORM.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
+    expect(WORKSTATION).toContain("<WorkstationHeaderStrip");
+    expect((WORKSTATION.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
     expect(STRIP_SRC).toContain('data-testid="workstation-strip"');
     expect(STRIP_SRC).toContain("<GradingWorkflowBar embedded");
     expect(STRIP_SRC).toContain('data-testid="queue-progress"');
@@ -198,14 +202,16 @@ describe("12/13/14. save payload + navigation + Next Card unchanged", () => {
       .split("\n")
       .filter((l) => /^[+-]/.test(l) && !/^[+-]{3}/.test(l))
       .filter((l) => /apiRequest\(|\/api\/admin\/certificates|method:\s*"(POST|PUT|PATCH)"|buildCertFormData/.test(l));
-      // The AI identify / grade / TCGdex-lookup endpoints are NOT the save path;
-      // this pass legitimately restructured the identify fetch. Guard the SAVE only.
-      const saveTouched = touched.filter((l) => !/\/identify|\/grade|\/analyze|\/approve-grade|\/upload-images|\/images|tcgdex|card-lookup/.test(l));
+    // The AI identify / grade / TCGdex-lookup endpoints are NOT the save path;
+    // this pass legitimately restructured the identify fetch. Guard the SAVE only.
+    const saveTouched = touched.filter(
+      (l) => !/\/identify|\/grade|\/analyze|\/approve-grade|\/upload-images|\/images|tcgdex|card-lookup/.test(l)
+    );
     expect(saveTouched).toEqual([]);
   });
   it("stage navigation stays pure and Next Card still advances the queue", () => {
-    const fn = FORM.slice(FORM.indexOf("const goToStage"), FORM.indexOf("const stageClass"));
-    expect(fn).toContain("setWfStage");
+    const fn = slice(WORKSTATION, "const goToStage", "const certId = panelProps.certId");
+    expect(fn).toContain("setStage(index)");
     expect(fn).not.toMatch(/mutate|handleSubmit|fetch\(|setForm/);
     expect(FORM).toContain('data-testid="button-next-card"');
     expect(FORM).toContain("queue.onNext");
@@ -248,7 +254,7 @@ describe("15-20. protected surfaces, providers, credits", () => {
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be a protected/server/schema file`).not.toMatch(
-        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts|vite\.ts)|^migrations\//,
+        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts|vite\.ts)|^migrations\//
       );
       if (!f.startsWith("tests/")) {
         expect(allowedNonTest.has(f), `unexpected non-test file changed: ${f}`).toBe(true);

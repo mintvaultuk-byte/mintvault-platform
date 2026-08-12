@@ -33,6 +33,7 @@ type QueueRow = {
   cardNumber: string | null;
   year: string | null;
   language: string | null;
+  serviceTier: string | null;
   variant: string | null;
   graderStatus: string;
   assignedGraderId: string | null;
@@ -1289,6 +1290,7 @@ export default function AdminStaffPage() {
                   cardNumber={reviewCert.cardNumber}
                   cardYear={reviewCert.year}
                   cardLanguage={reviewCert.language}
+                  serviceTier={reviewCert.serviceTier}
                   cardVariant={reviewCert.variant}
                   onGradeApproved={() => {
                     setMsg(`Approved ${reviewCert.certIdStr} — grade is now live on the public cert page.`);

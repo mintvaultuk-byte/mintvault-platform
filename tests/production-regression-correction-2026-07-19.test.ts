@@ -16,6 +16,8 @@ import { join } from "path";
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const STAFF = read("client/src/pages/staff.tsx");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+const SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 
 describe("Staff shell — no duplicate legacy header in the active-card grading view", () => {
   it("GradeTab's active-card breadcrumb uses the shared AdminHeaderRow primitive, not raw markup", () => {
@@ -78,29 +80,23 @@ describe("Grade stage — containment lives on the outer shell, not the workstat
   // root and the <form> already provided it, and both predate dfc5b946.
   // The assertion is inverted here so the regression can never be reintroduced;
   // the sibling geometry/Enter-guard assertions below are unchanged and still valid.
-  it("the workstationSlot wrapper does NOT introduce a competing scrollport", () => {
-    const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
-    const jsx = wrapper.slice(wrapper.indexOf("<div"));
-    expect(jsx).not.toContain("max-h-[calc(100dvh-12rem)]");
-    expect(jsx).not.toMatch(/className="[^"]*overflow-y-auto/);
+  it("there is no CertificateForm workstation slot or competing grading scrollport", () => {
+    expect(FORM).not.toContain("workstationSlot");
+    expect(WORKSTATION).not.toContain("max-h-[calc(100dvh-12rem)]");
   });
   it("containment still lives on the outer shell (root fixed height + the form as the single scrollport)", () => {
-    // The fixed-height root is now the ONE canonical shell CertificateForm mounts;
-    // the <form> body still carries the single canonical scrollport class.
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
-    const shellSrc = readFileSync(join(process.cwd(), "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx"), "utf8");
-    expect(shellSrc).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
-    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]"); // the one bounded viewport wrapper
-    expect(FORM).toContain("min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1");
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
+    expect(SHELL).toContain("flex min-h-0 flex-col h-full");
+    expect(SHELL).toContain("overflow-y-auto");
+    expect(WORKSTATION).toContain("WORKSTATION_BODY_SCROLL_CLASS");
+    expect(FORM).not.toContain("CanonicalGradingWorkstationShell");
   });
   it("no transform/scale/zoom was introduced (the protected card tool reads live getBoundingClientRect)", () => {
-    const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
-    expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
+    expect(WORKSTATION).not.toMatch(/scale\(|zoom:/);
   });
-  it("the Enter-key form-submit guard for workstation text inputs is preserved", () => {
-    const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
-    expect(wrapper).toContain('e.key === "Enter"');
-    expect(wrapper).toContain("e.preventDefault()");
+  it("CertificateForm cannot intercept Enter to navigate the canonical stages", () => {
+    expect(FORM).not.toMatch(/goToStage|nextStageIndex|data-workflow-stage/);
+    expect(WORKSTATION).toContain("onStageClick={(i) => goToStage(i)}");
   });
 });
 

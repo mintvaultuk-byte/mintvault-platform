@@ -6,14 +6,35 @@
 #   GUARD 1 (pre):  refuse to deploy unless this checkout is up to date with
 #                   origin/main — i.e. you can't ship code older than what's
 #                   already on the branch.
+#   GUARD 1L (pre): refuse to deploy unless the commit the LIVE server is serving
+#                   RIGHT NOW is an ancestor of the candidate. See below.
+#   GUARD 1M (pre): re-read the live commit immediately before firing the deploy
+#                   and abort if production moved during preflight.
 #   GUARD 2 (post): after the rolling deploy, poll /api/version until the LIVE
 #                   server reports the exact commit we just built. If it never
 #                   does, exit non-zero and print the rollback command.
+#
+# WHY GUARD 1L EXISTS (2026-08-11 sibling clobber):
+#   GUARD 1 only ever compared the checkout against origin/main. On 2026-08-11
+#   two SIBLING releases went live 4 minutes apart — v1069 (7d20196c, scanner /
+#   station) then v1070 (c788fa68, canonical grading). Neither contained the
+#   other and NEITHER was on origin/main, so GUARD 1 was satisfied both times and
+#   the second deploy silently removed every scanner route from production.
+#   "Current with the branch" is not the same question as "contains what is
+#   running". GUARD 1L asks the second question, against the live artifact.
 #
 # Usage:
 #   scripts/safe-deploy.sh staging     # → mintvault-v2 (fly.v2.toml)
 #   scripts/safe-deploy.sh prod        # → mintvault    (fly.toml)
 #   scripts/safe-deploy.sh prod --allow-behind   # skip GUARD 1 (rarely needed)
+#   scripts/safe-deploy.sh prod --reconciled-from <LIVE_SHA>
+#         Acknowledge that the candidate deliberately supersedes a DIVERGENT live
+#         release whose semantics it already carries. It must name the commit the
+#         server is actually serving, so it goes stale the moment prod moves and
+#         cannot be pre-baked into a runbook. This is NOT a general --force.
+#   scripts/safe-deploy.sh staging --allow-unknown-live
+#         Staging only. Proceed when a parked staging box cannot report a commit.
+#         Never honoured for prod — prod fails closed.
 #
 # It NEVER auto-deploys prod without you running it; it just makes the deploy
 # you run safe. Requires: git, fly, curl.
@@ -24,9 +45,15 @@ TARGET="${1:-}"
 shift || true
 ALLOW_BEHIND=0
 ASSUME_YES=0
+ALLOW_UNKNOWN_LIVE=0
+RECONCILED_FROM=""
+_next_is_reconciled=0
 for arg in "$@"; do
+  if [ "$_next_is_reconciled" = "1" ]; then RECONCILED_FROM="$arg"; _next_is_reconciled=0; continue; fi
   [ "$arg" = "--allow-behind" ] && ALLOW_BEHIND=1
   [ "$arg" = "--yes" ] && ASSUME_YES=1
+  [ "$arg" = "--allow-unknown-live" ] && ALLOW_UNKNOWN_LIVE=1
+  [ "$arg" = "--reconciled-from" ] && _next_is_reconciled=1
 done
 
 case "$TARGET" in
@@ -74,12 +101,51 @@ if [ -n "$DIRTY_TRACKED" ]; then
 fi
 echo "✔ GUARD 1: checkout is current with origin/main"
 
+# ── GUARD 1L: the candidate must CONTAIN what is live right now ──────────────
+# Read the live commit from the running server, not from git, not from `fly
+# releases`, and not from what we believe we deployed last time. The release
+# counter moves for reasons unrelated to code (config, secrets, restarts), so the
+# artifact is the only honest source.
+read_live_sha() {
+  curl -fsS --max-time 10 "$1/api/version" 2>/dev/null \
+    | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' || true
+}
+LIVE_PREFLIGHT="$(read_live_sha "$HOST")"
+echo "   live now: ${LIVE_PREFLIGHT:-<unreachable>}   candidate: $SHA"
+
+ANCESTRY_ARGS=(--live "${LIVE_PREFLIGHT:--}" --candidate "$SHA" --target "$TARGET")
+[ -n "$RECONCILED_FROM" ] && ANCESTRY_ARGS+=(--reconciled-from "$RECONCILED_FROM")
+[ "$ALLOW_UNKNOWN_LIVE" -eq 1 ] && ANCESTRY_ARGS+=(--allow-unknown-live)
+
+# No bypass flag is consulted here on purpose: --allow-behind exists for the
+# origin/main check and must not silently disarm the live-ancestry check too.
+npx tsx scripts/deploy/check-live-ancestry.ts "${ANCESTRY_ARGS[@]}" || {
+  echo "   (this is the guard that would have stopped the v1069 → v1070 clobber)"
+  exit 1
+}
+
 # Capture the current live image as the rollback target BEFORE we change anything.
 # Extract the image ref directly (delimiter-independent — fly's table format
 # has varied between CLI versions), e.g. mintvault:deployment-01ABC or
 # mintvault-v2:deployment-01ABC.
 ROLLBACK_IMG="$(fly status --app "$APP" 2>/dev/null | grep -i Image | grep -oE '[A-Za-z0-9._-]+:deployment-[A-Za-z0-9]+' | head -1)"
 [ -n "$ROLLBACK_IMG" ] && echo "   rollback image (current live): registry.fly.io/$ROLLBACK_IMG"
+
+# ── GUARD 1M: MOVING TARGET ──────────────────────────────────────────────────
+# Everything above (including the rollback-image capture and any confirmation
+# prompt) takes time, and a concurrent session can ship inside that window —
+# v1069 and v1070 were four minutes apart. Re-read the live commit and abort if
+# it moved, because every ancestry conclusion drawn above is now about a
+# production that no longer exists.
+LIVE_AT_DEPLOY="$(read_live_sha "$HOST")"
+if [ "${LIVE_AT_DEPLOY:-}" != "${LIVE_PREFLIGHT:-}" ]; then
+  echo "🚫 BLOCKED [LIVE_MOVED_DURING_PREFLIGHT]"
+  echo "   $APP was serving '${LIVE_PREFLIGHT:-<unknown>}' at preflight and is serving"
+  echo "   '${LIVE_AT_DEPLOY:-<unknown>}' now. Another session deployed while this one was"
+  echo "   preparing. Re-run from the start — do NOT re-run with a bypass flag."
+  exit 1
+fi
+echo "✔ GUARD 1M: live commit unchanged during preflight (${LIVE_AT_DEPLOY:-<unknown>})"
 
 # ── Deploy, embedding the SHA so the live server can prove itself ────────────
 echo "── deploying (embedding GIT_SHA=$SHA) ──"

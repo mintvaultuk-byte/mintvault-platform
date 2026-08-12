@@ -95,6 +95,12 @@ async function createSchema(p: pg.Pool): Promise<void> {
   );
   await p.query(`ALTER TABLE "audit_log" ALTER COLUMN "details" SET DEFAULT '{}'::jsonb`);
   await p.query(`ALTER TABLE "certificates" ALTER COLUMN "language" SET DEFAULT 'English'`);
+  // The lightweight Drizzle-derived DDL intentionally omits column defaults.
+  // Production migration 0048 makes this a non-null server revision, and the
+  // dedicated grade route returns it after every save.
+  await p.query(`ALTER TABLE "certificates" ALTER COLUMN "grading_revision" SET DEFAULT 1`);
+  await p.query(`UPDATE "certificates" SET "grading_revision" = 1 WHERE "grading_revision" IS NULL`);
+  await p.query(`ALTER TABLE "certificates" ALTER COLUMN "grading_revision" SET NOT NULL`);
   // Three columns the DEDICATED grading route writes by raw SQL that
   // shared/schema.ts does not declare, so the Drizzle-derived DDL above misses
   // them. They exist in the real database; without them the grading UPDATE would
@@ -536,7 +542,7 @@ describe("MV700 identity/variant validation on the admin metadata route", () => 
         rarity_override_from: "holo_rare_v",
         rarity_override_to: "",
       }),
-    ).resolves.toBe(true);
+    ).resolves.toBe(1);
     expect((await readCert()).rarityCode).toBeNull();
   });
 

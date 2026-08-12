@@ -36,6 +36,7 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 // canonical-consolidation: the ONE viewport-height cap now lives in the shared shell.
 const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const PANEL = read("client/src/components/grading/grading-panel.tsx");
@@ -54,28 +55,26 @@ const stripComments = (s: string) =>
 
 const FORM_CODE = stripComments(FORM);
 
-/** The stage-2 subtree: from the Grade stage wrapper to the Review stage. */
+/** The canonical Grade workspace subtree inside the sole GradingPanel. */
 const GRADE_STAGE = (() => {
-  const start = FORM.indexOf('<div data-workflow-stage="grade"');
-  expect(start, "grade stage wrapper must exist").toBeGreaterThan(-1);
-  const end = FORM.indexOf('data-workflow-stage="review"', start);
-  return FORM.slice(start, end > start ? end : start + 20000);
+  const start = PANEL.indexOf('data-testid="section-grading-workstation-grid"');
+  expect(start, "canonical Grade workspace must exist").toBeGreaterThan(-1);
+  const end = PANEL.indexOf('data-canonical-section="mvgs-score"', start);
+  expect(end, "canonical Grade result section must follow the workspace").toBeGreaterThan(start);
+  return PANEL.slice(start, end);
 })();
 
 /**
- * The workstationSlot wrapper element ONLY — bounded by the element itself, not
- * by a magic character count. A fixed-width window (the old style) overshoots the
- * wrapper's closing tag into the Grade form's own JSX, so an unrelated scrolling
- * dropdown added to the Grade form would false-fail a "wrapper" assertion.
- * Bounded here from the `&&` guard to the `{workstationSlot}` render site.
+ * The one GradingPanel mount owned by GradingWorkstation. CertificateForm no
+ * longer receives a role-specific workstation slot.
  */
 const SLOT_WRAPPER = (() => {
-  const i = FORM.indexOf("{workstationSlot && (");
-  expect(i, "workstationSlot wrapper must exist").toBeGreaterThan(-1);
-  const render = FORM.indexOf("{workstationSlot}", i);
-  expect(render, "workstationSlot must be rendered").toBeGreaterThan(i);
-  const block = FORM.slice(i, render);
-  return stripComments(block.slice(block.indexOf("<div")));
+  const match = /\{gradingEnabled\s*&&\s*\(\s*<GradingPanel/.exec(WORKSTATION);
+  const i = match?.index ?? -1;
+  expect(i, "canonical GradingPanel mount must exist").toBeGreaterThan(-1);
+  const end = WORKSTATION.indexOf("/>", i);
+  expect(end, "canonical GradingPanel mount must close").toBeGreaterThan(i);
+  return stripComments(WORKSTATION.slice(i, end));
 })();
 
 describe("A1. the Grade section is not fixed, absolutely positioned, or overlaid", () => {
@@ -92,7 +91,7 @@ describe("A1. the Grade section is not fixed, absolutely positioned, or overlaid
     expect(SLOT_WRAPPER).not.toMatch(/\boverflow(-[xy])?-(auto|scroll|hidden)\b/);
     expect(SLOT_WRAPPER).not.toMatch(/maxHeight|overflowY|overflowX|\boverflow\s*:/);
     expect(SLOT_WRAPPER).not.toMatch(/\b(fixed|absolute|sticky)\b/);
-    // The wrapper should carry no className at all — it is a behaviour-only div.
+    // There is no extra wrapper class at all.
     expect(SLOT_WRAPPER).not.toMatch(/className/);
   });
 
@@ -111,13 +110,11 @@ describe("A1. the Grade section is not fixed, absolutely positioned, or overlaid
 });
 
 describe("A2. the desktop viewport does not obscure the grading workspace", () => {
-  it("exactly ONE viewport-height cap governs the workspace — the outer shell root", () => {
-    // The defect was two competing caps. The root keeps its fixed height; the
-    // inner one must never come back as live code.
-    // The single fixed-height cap is owned by the canonical shell CertificateForm mounts.
-    expect(FORM_CODE).toContain("<CanonicalGradingWorkstationShell");
+  it("the one canonical shell fills its route-owned bounded flex slot", () => {
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
+    expect(FORM_CODE).not.toContain("<CanonicalGradingWorkstationShell");
     expect(CANON_SHELL).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
-    expect(FORM_CODE).toContain("md:h-[calc(100dvh-4.5rem)]"); // the one bounded viewport wrapper
+    expect(FORM_CODE).not.toContain("md:h-[calc(100dvh-4.5rem)]");
     expect(FORM_CODE).not.toContain("max-h-[calc(100dvh-12rem)]");
   });
 
@@ -136,20 +133,20 @@ describe("A2. the desktop viewport does not obscure the grading workspace", () =
 });
 
 describe("A3. normal scroll flow remains available", () => {
-  it("the <form> is still the single scrollport for stage content", () => {
-    expect(FORM).toContain("min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1");
+  it("GradingWorkstation owns the single scrollport for editor + grading content", () => {
+    expect(WORKSTATION).toContain("WORKSTATION_BODY_SCROLL_CLASS");
+    expect(FORM).toContain('className="space-y-2.5"');
   });
 
-  it("the Grade form renders after the workstation as a plain in-flow block", () => {
-    const slotEnd = GRADE_STAGE.indexOf("{workstationSlot}");
-    const gradeHeading = GRADE_STAGE.indexOf(">Grade<", slotEnd);
-    expect(slotEnd, "workstationSlot renders in the Grade stage").toBeGreaterThan(-1);
-    expect(gradeHeading, "the Grade form follows the workstation").toBeGreaterThan(slotEnd);
+  it("CertificateForm retains only metadata/create fields; GWS owns Grade", () => {
+    expect(FORM).not.toContain("data-workflow-stage");
+    expect(FORM).not.toContain("workstationSlot");
+    expect(WORKSTATION).toContain("<GradingPanel");
   });
 
-  it("the Enter-key form-submit guard survives the class removal (the wrapper's only purpose)", () => {
-    expect(SLOT_WRAPPER).toContain('e.key === "Enter"');
-    expect(SLOT_WRAPPER).toContain("e.preventDefault()");
+  it("stage activity is derived by the sole workstation owner", () => {
+    expect(SLOT_WRAPPER).toContain("active={stage === GRADE_STAGE}");
+    expect(SLOT_WRAPPER).toContain("approvalStageActive={stage === REVIEW_STAGE}");
   });
 });
 
@@ -176,19 +173,17 @@ describe("A4. bottom navigation does not cover form fields", () => {
 });
 
 describe("A5. blast radius — stages 0/2 and protected grading source are untouched", () => {
-  it("the workstation wrapper is doubly gated to stage 1 only, so other stages cannot regress", () => {
-    expect(FORM_CODE).toContain('<div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>');
-    // workstationSlot is RENDERED only inside the stage-2 block. Its prop-type
-    // declaration and destructure legitimately live at the top of the file, so
-    // count JSX usages (`{workstationSlot`) rather than every mention.
-    const jsxUses = (FORM_CODE.match(/\{workstationSlot[\s&}]/g) ?? []).length;
-    const inStage = (stripComments(GRADE_STAGE).match(/\{workstationSlot[\s&}]/g) ?? []).length;
-    expect(inStage).toBe(2); // the `&&` guard and the render
-    expect(jsxUses).toBe(inStage); // ...and nowhere else in the file
+  it("CertificateForm has no grading stages while GradingWorkstation solely owns panel activity", () => {
+    expect(FORM_CODE).not.toContain("data-workflow-stage");
+    expect(FORM_CODE).not.toContain("workstationSlot");
+    expect((WORKSTATION.match(/<GradingPanel/g) ?? []).length).toBe(1);
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(WORKSTATION).toContain("active={stage === GRADE_STAGE}");
   });
 
-  it("the deliberate preview-aside gate (stages 0/2, Grade excluded) is unchanged", () => {
-    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
+  it("the persistent preview rail hosts Grade's single interactive viewer", () => {
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
+    expect(WORKSTATION).toContain("previewHost={gradingEnabled ? interactiveCardHost : null}");
   });
 
   it("the protected GradingPanel's own internal geometry is untouched", () => {

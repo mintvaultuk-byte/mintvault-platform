@@ -30,6 +30,7 @@ export const PARTNER_PERMISSIONS = [
   "partner.cards.receive",
   "partner.cards.scan",
   "partner.cards.assess",
+  "partner.cards.preview",
   "partner.support.view",
   "partner.support.create",
 ] as const;
@@ -57,6 +58,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.cards.receive",
     "partner.cards.scan",
     "partner.cards.assess",
+    "partner.cards.preview",
     "partner.support.view",
     "partner.support.create",
   ],
@@ -69,6 +71,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.cards.receive",
     "partner.cards.scan",
     "partner.cards.assess",
+    "partner.cards.preview",
     "partner.support.view",
     "partner.support.create",
   ],
@@ -240,7 +243,8 @@ export function getPartnerRbacStatus(): PartnerRbacStatus {
   return { ...rbacState };
 }
 
-const REMEDY_NOT_SEEDED = "Apply the pending Partner RBAC migration (0034_partner_rbac_seed.sql).";
+const REMEDY_NOT_SEEDED =
+  "Apply the pending Partner RBAC migrations (0034_partner_rbac_seed.sql and later additive RBAC migrations).";
 const REMEDY_UNAVAILABLE = "Partner RBAC database is unreachable. Check the partner admin database configuration.";
 
 /**

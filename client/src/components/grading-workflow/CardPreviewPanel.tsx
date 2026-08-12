@@ -13,16 +13,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from "lucide-react";
+import {
+  createCardInspectionState,
+  normaliseCardInspectionState,
+  updateCardInspectionView,
+  type CardInspectionState,
+} from "./card-inspection-state";
 
 interface ImagesResponse {
   urls?: Record<string, string | null>;
 }
 
-// Button-only zoom levels: 100% → 175% → 250% → 325% → 400% (75 percentage
-// points per click), max 400%, min 100%. Zoom is ONLY driven by the +/− and
+// Button-only zoom levels: 100% → 175% → … → 550% → 600% (75 percentage
+// points per click, clamped on the final step), max 600%, min 100%. Zoom is ONLY driven by the +/− and
 // Reset buttons — never the mouse wheel (the wheel scrolls the page/panel).
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 4;
+const MAX_ZOOM = 6;
 const ZOOM_STEP = 0.75;
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
@@ -32,6 +38,8 @@ export function CardPreviewPanel({
   backFile,
   fill = false,
   apiBase = "/api/admin",
+  inspectionState,
+  onInspectionStateChange,
 }: {
   certificateId: number | null;
   frontFile?: File | null;
@@ -45,13 +53,25 @@ export function CardPreviewPanel({
       (/api/grader, /api/admin/grade-review) so the preview loads role-scoped
       signed URLs — and shares GradingPanel's images cache key. */
   apiBase?: string;
+  inspectionState?: CardInspectionState;
+  onInspectionStateChange?: (state: CardInspectionState) => void;
 }) {
-  const [side, setSide] = useState<"front" | "back">("front");
-  const [zoom, setZoom] = useState(1);
-  // Pan offset in CSS pixels (translate applied before scale). {0,0} = centred.
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [internalInspection, setInternalInspection] = useState(createCardInspectionState);
+  const currentInspection = normaliseCardInspectionState(inspectionState ?? internalInspection);
+  const side = currentInspection.side;
+  const view = currentInspection.views[side];
+  const zoom = view.zoom;
+  const commitInspection = (next: CardInspectionState) => {
+    const normalised = normaliseCardInspectionState(next);
+    if (inspectionState === undefined) setInternalInspection(normalised);
+    onInspectionStateChange?.(normalised);
+  };
+  const setSide = (nextSide: "front" | "back") => commitInspection({ ...currentInspection, side: nextSide });
+  const setView = (patch: Partial<typeof view>) =>
+    commitInspection(updateCardInspectionView(currentInspection, side, patch));
   const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
+  const dragRef = useRef<{ sx: number; sy: number; focusX: number; focusY: number } | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
 
   const { data } = useQuery<ImagesResponse>({
@@ -67,18 +87,22 @@ export function CardPreviewPanel({
       if (frontObjectUrl) URL.revokeObjectURL(frontObjectUrl);
       if (backObjectUrl) URL.revokeObjectURL(backObjectUrl);
     },
-    [frontObjectUrl, backObjectUrl],
+    [frontObjectUrl, backObjectUrl]
   );
 
   const frontUrl = frontObjectUrl ?? data?.urls?.front_display ?? null;
   const backUrl = backObjectUrl ?? data?.urls?.back_display ?? null;
   const url = side === "front" ? frontUrl : backUrl;
 
-  // Reset zoom + pan whenever the shown image changes or fullscreen toggles.
+  // Reset only when an already-loaded image is actually replaced. Initial load,
+  // side switches and fullscreen preserve workstation-owned inspection state.
+  const previousUrlsRef = useRef({ front: frontUrl, back: backUrl });
   useEffect(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, [side, url, fullscreen]);
+    const previous = previousUrlsRef.current[side];
+    previousUrlsRef.current[side] = url;
+    if (previous && url && previous !== url) setView({ zoom: 1, focusX: 0.5, focusY: 0.5 });
+    // setView is intentionally excluded: image identity alone owns this reset.
+  }, [side, url]);
 
   // Close fullscreen on Escape.
   useEffect(() => {
@@ -96,13 +120,18 @@ export function CardPreviewPanel({
   const startDrag = (e: React.MouseEvent) => {
     if (zoom <= 1) return;
     e.preventDefault();
-    dragRef.current = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+    dragRef.current = { sx: e.clientX, sy: e.clientY, focusX: view.focusX, focusY: view.focusY };
     setDragging(true);
   };
   const onDrag = (e: React.MouseEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    setPan({ x: d.px + (e.clientX - d.sx), y: d.py + (e.clientY - d.sy) });
+    const image = imageRef.current;
+    if (!image) return;
+    setView({
+      focusX: d.focusX - (e.clientX - d.sx) / Math.max(1, image.offsetWidth),
+      focusY: d.focusY - (e.clientY - d.sy) / Math.max(1, image.offsetHeight),
+    });
   };
   const endDrag = () => {
     dragRef.current = null;
@@ -113,18 +142,26 @@ export function CardPreviewPanel({
   const stepZoom = (delta: number) => {
     const nextZoom = clampZoom(zoom + delta);
     if (nextZoom <= 1) {
-      setZoom(1);
-      setPan({ x: 0, y: 0 });
+      setView({ zoom: 1, focusX: 0.5, focusY: 0.5 });
       return;
     }
-    setZoom(nextZoom);
+    setView({ zoom: nextZoom });
   };
   const resetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setView({ zoom: 1, focusX: 0.5, focusY: 0.5 });
   };
 
-  const ControlButton = ({ onClick, label, children, disabled }: { onClick: () => void; label: string; children: React.ReactNode; disabled?: boolean }) => (
+  const ControlButton = ({
+    onClick,
+    label,
+    children,
+    disabled,
+  }: {
+    onClick: () => void;
+    label: string;
+    children: React.ReactNode;
+    disabled?: boolean;
+  }) => (
     <button
       type="button"
       onClick={onClick}
@@ -150,20 +187,28 @@ export function CardPreviewPanel({
         // Space toggles front/back — only while focus is inside the preview.
         if (e.key === " " || e.code === "Space") {
           e.preventDefault();
-          setSide((s) => (s === "front" ? "back" : "front"));
+          setSide(side === "front" ? "back" : "front");
         }
       }}
       className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${
         zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : ""
       } ${big ? "flex h-[80vh] w-full items-center justify-center bg-black/60" : fill ? "flex min-h-0 flex-1 items-center justify-center" : "max-h-[40vh]"}`}
       data-testid="card-preview-viewport"
+      data-inspection-side={side}
+      data-inspection-zoom={zoom}
+      data-inspection-focus-x={view.focusX}
+      data-inspection-focus-y={view.focusY}
     >
       {url ? (
         <img
+          ref={imageRef}
           src={url}
           alt={`Card ${side}`}
           style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transform:
+              zoom > 1
+                ? `scale(${zoom}) translate(${((0.5 - view.focusX) * 100) / zoom}%, ${((0.5 - view.focusY) * 100) / zoom}%)`
+                : "none",
             transition: dragging ? "none" : "transform 0.1s ease-out",
           }}
           className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : fill ? "max-h-full" : "max-h-[40vh]"}`}
@@ -188,7 +233,9 @@ export function CardPreviewPanel({
             onClick={() => setSide(s)}
             data-testid={`card-preview-${s}`}
             className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              side === s ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] border border-[var(--admin-gold)]/20"
+              side === s
+                ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                : "text-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] border border-[var(--admin-gold)]/20"
             }`}
           >
             {s}
@@ -199,7 +246,10 @@ export function CardPreviewPanel({
         <ControlButton onClick={() => stepZoom(-ZOOM_STEP)} label="Zoom out" disabled={!url || zoom <= MIN_ZOOM}>
           <ZoomOut size={14} />
         </ControlButton>
-        <span className="w-8 text-center text-[10px] tabular-nums text-[var(--admin-ink-faint)]" data-testid="card-preview-zoom">
+        <span
+          className="w-8 text-center text-[10px] tabular-nums text-[var(--admin-ink-faint)]"
+          data-testid="card-preview-zoom"
+        >
           {Math.round(zoom * 100)}%
         </span>
         <ControlButton onClick={() => stepZoom(ZOOM_STEP)} label="Zoom in" disabled={!url || zoom >= MAX_ZOOM}>
@@ -216,10 +266,15 @@ export function CardPreviewPanel({
   );
 
   return (
-    <div className={`${fill ? "flex h-full min-h-0 flex-col " : ""}rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2`} data-testid="card-preview-panel">
+    <div
+      className={`${fill ? "flex h-full min-h-0 flex-col " : ""}rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2`}
+      data-testid="card-preview-panel"
+    >
       {toolbar}
       {imageArea(false)}
-      <p className="mt-1 shrink-0 text-center text-[9px] text-[var(--admin-ink-faint)]">Zoom with the buttons · drag to pan when zoomed · read-only reference</p>
+      <p className="mt-1 shrink-0 text-center text-[9px] text-[var(--admin-ink-faint)]">
+        Zoom with the buttons · drag to pan when zoomed · read-only reference
+      </p>
 
       {fullscreen && (
         <div

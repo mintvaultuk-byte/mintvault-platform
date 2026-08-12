@@ -44,6 +44,7 @@ const STRIP = read("client/src/components/grading-workflow/WorkstationHeaderStri
 const ASIDE = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
 const CERT_TOOLS = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
 const GRADING_PANEL = read("client/src/components/grading/grading-panel.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const REVIEW_SUMMARY = read("client/src/components/grading-workflow/ReviewSummary.tsx");
 // canonical-consolidation pass: the two-panel outer geometry + control-panel
 // column now live in the ONE shared shell (CertificateForm mounts it).
@@ -91,11 +92,9 @@ describe("2. role permissions remain distinct (Staff vs Super Admin)", () => {
 });
 
 describe("3. all three grading stages use the SAME WorkstationHeaderStrip component", () => {
-  it("certificate-form.tsx renders WorkstationHeaderStrip exactly once, outside the per-stage sections", () => {
-    expect((FORM.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
-    const stripCallIdx = FORM.indexOf("<WorkstationHeaderStrip");
-    const firstStageIdx = FORM.indexOf('data-workflow-stage="card-details"');
-    expect(stripCallIdx).toBeLessThan(firstStageIdx);
+  it("GradingWorkstation renders WorkstationHeaderStrip exactly once; the editor renders none", () => {
+    expect((WORKSTATION.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
+    expect(FORM).not.toContain("<WorkstationHeaderStrip");
   });
   it("the strip component itself is the single source of truth for stage-nav + session-stats geometry", () => {
     expect(STRIP).toContain('data-testid="workstation-strip"');
@@ -106,8 +105,7 @@ describe("3. all three grading stages use the SAME WorkstationHeaderStrip compon
 
 describe("4. all three stages use the same desktop breakpoint (md) for the two-column shell", () => {
   it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
-    // CertificateForm mounts the shell; the two-column row lives in the shell.
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     expect(ASIDE).toContain("md:w-[40%] md:shrink-0");
     // no competing/second breakpoint (e.g. lg:, 2xl:) governs the aside's own width.
@@ -115,24 +113,16 @@ describe("4. all three stages use the same desktop breakpoint (md) for the two-c
   });
 });
 
-describe("5. the preview zone exists in Card Details AND Review (Grade is a documented exception)", () => {
-  it("the aside gate covers wfStage 0 (Card Details) and 2 (Review)", () => {
-    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
+describe("5. the preview zone persists through Card Details, Grade and Review", () => {
+  it("the canonical shell always receives the shared aside", () => {
+    expect(WORKSTATION).toMatch(/previewAside=\{[\s\S]*<WorkstationPreviewAside/);
   });
-  it("Grade (wfStage 1) is excluded from the shared aside — documented, not accidental", () => {
-    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
-    expect(gateIdx).toBeGreaterThan(-1);
-    const gateLine = FORM.slice(gateIdx, gateIdx + 40);
-    expect(gateLine).not.toContain("wfStage === 1");
-    // the architecture rationale is captured in source, not just tribal knowledge.
-    const context = FORM.slice(Math.max(0, gateIdx - 1400), gateIdx);
-    expect(context).toMatch(/protected.*grading-panel|grading-panel.*protected/is);
+  it("Grade portals the protected interactive surface into the persistent rail", () => {
+    expect(WORKSTATION).toContain("interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}");
+    expect(WORKSTATION).toContain("previewHost={gradingEnabled ? interactiveCardHost : null}");
   });
-  it("GradingPanel (the protected Stage 3 component) already implements its OWN left-image/right-controls split", () => {
-    // Evidence for the exception: grading-panel.tsx has its own internal
-    // two-column grid — this is what makes forcing the generic aside on top
-    // both redundant (duplicate image) and harmful (squeezes this grid).
-    expect(GRADING_PANEL).toMatch(/grid-cols-1\s+lg:grid-cols-\[60%_40%\]/);
+  it("GradingPanel suppresses its internal split when a preview host is supplied", () => {
+    expect(GRADING_PANEL).toContain('previewHost ? "block" : "grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5"');
   });
 });
 
@@ -161,36 +151,26 @@ describe("6. Stage 3 (protected) component source remains byte-for-byte untouche
       /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
-  it("the workstationSlot render site passes the protected component through UNCHANGED (no wrapper transform/scale)", () => {
-    // Window widened from 900: the production-regression correction pass
-    // (2026-07-19) added an outer containment wrapper (max-h + overflow-y-auto,
-    // an explanatory comment, and its onKeyDown handler) around the slot — the
-    // slot itself is still passed through unchanged, just further from the
-    // "data-workflow-stage" anchor. See production-regression-correction-2026-07-19.test.ts.
-    const wrapper = FORM.slice(
-      FORM.indexOf('data-workflow-stage="grade"'),
-      FORM.indexOf('data-workflow-stage="grade"') + 1700
-    );
-    expect(wrapper).toContain("{workstationSlot}");
-    expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
+  it("GradingWorkstation is the single protected-panel mount", () => {
+    expect((WORKSTATION.match(/<GradingPanel/g) ?? []).length).toBe(1);
+    expect(FORM).not.toContain("<GradingPanel");
+    expect(FORM).not.toContain("workstationSlot");
   });
 });
 
 describe("7. no duplicate preview in Grade or Review", () => {
-  it("certificate-form.tsx has exactly ONE render site for the preview aside (WorkstationPreviewAside)", () => {
+  it("the workstation has exactly one aside and CertificateForm has no preview mount", () => {
     expect(FORM).not.toContain("<CardPreviewPanel");
+    expect(FORM).not.toContain("<WorkstationPreviewAside");
+    expect((WORKSTATION.match(/<WorkstationPreviewAside/g) ?? []).length).toBe(1);
     expect((ASIDE.match(/<CardPreviewPanel/g) ?? []).length).toBe(1);
   });
   it("ReviewSummary does not render its own copy of the card image", () => {
     expect(REVIEW_SUMMARY).not.toContain("CardPreviewPanel");
   });
-  it("GradingPanel's own internal image tool is a SEPARATE, protected concern — this pass adds no second copy beside it", () => {
-    // The outer shell never mounts WorkstationPreviewAside for Grade (see
-    // suite 5), so GradingPanel's own ImageViewer remains the only image
-    // rendered for that stage.
-    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
-    const gateLine = FORM.slice(gateIdx, gateIdx + 40);
-    expect(gateLine).not.toContain("wfStage === 1");
+  it("GradingPanel portals its single interactive viewer into the persistent aside", () => {
+    expect(WORKSTATION).toContain("previewHost={gradingEnabled ? interactiveCardHost : null}");
+    expect(WORKSTATION).toContain("interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}");
   });
 });
 
@@ -238,39 +218,25 @@ describe("11. no horizontal overflow risk at 1440x900 (structural check)", () =>
 });
 
 describe("12. right panel scrolls independently where required", () => {
-  it("the control panel form has its own overflow-y-auto + min-h-0 flex-1", () => {
-    // The control-panel column is the shell's; its scroll body (the <form>) is
-    // still composed inside certificate-form.tsx with the canonical scroll class.
-    const i = FORM.indexOf("onSubmit={handleSubmit}");
-    const j = FORM.indexOf("</form>", i);
-    const controlPanel = FORM.slice(i, j);
-    expect(controlPanel).toContain("overflow-y-auto");
-    expect(controlPanel).toContain("min-h-0 flex-1");
+  it("GradingWorkstation owns the one overflow-y-auto + min-h-0 flex-1 body", () => {
+    const i = WORKSTATION.indexOf("className={`${WORKSTATION_BODY_SCROLL_CLASS}");
+    const j = WORKSTATION.indexOf("<GradingPanel", i);
+    const controlPanel = WORKSTATION.slice(i, j);
+    expect(controlPanel).toContain("WORKSTATION_BODY_SCROLL_CLASS");
+    expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
+    expect(FORM.slice(FORM.indexOf("onSubmit={handleSubmit}"), FORM.indexOf('className="space-y-2.5"') + 30)).toContain(
+      'className="space-y-2.5"'
+    );
   });
 });
 
-describe("13. save payload remains unchanged", () => {
-  it("the save button, its submit type, and every ReviewSummary field are all present", () => {
+describe("13. save + review ownership remains explicit", () => {
+  it("CertificateForm keeps metadata save while GradingPanel owns canonical Review", () => {
     expect(FORM).toContain('data-testid="button-save-cert"');
     expect(FORM).toContain('type="submit"');
-    const block = FORM.slice(FORM.indexOf("<ReviewSummary"), FORM.indexOf("onEditGrade"));
-    for (const f of [
-      "form.cardName",
-      "form.setName",
-      "form.cardNumber",
-      "form.year",
-      "form.language",
-      "form.rarityCode",
-      "form.finishVariant",
-      "form.promoType",
-      "form.subsetName",
-      "form.gradeOverall",
-      "form.labelType",
-      "form.status",
-      "designations",
-    ]) {
-      expect(block, f).toContain(f);
-    }
+    expect(FORM).not.toContain("<ReviewSummary");
+    expect(FORM).not.toContain("legacy-review");
+    expect(GRADING_PANEL).toContain("<RoleReviewSummary");
   });
 });
 

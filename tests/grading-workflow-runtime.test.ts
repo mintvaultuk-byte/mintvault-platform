@@ -129,7 +129,7 @@ describe("3/5/6. the real GradingWorkflowBar renders exactly three stages", () =
   it("marks the current stage accessibly, and only one at a time", () => {
     for (const i of [0, 1, 2]) {
       const h = render(createElement(GradingWorkflowBar, { currentIndex: i, maxReached: i }));
-      expect((h.match(/aria-current="step"/g) ?? [])).toHaveLength(1);
+      expect(h.match(/aria-current="step"/g) ?? []).toHaveLength(1);
       const statuses = [...h.matchAll(/data-status="([a-z]+)"/g)].map((m) => m[1]);
       expect(statuses).toHaveLength(3);
       expect(statuses[i]).toBe("current");
@@ -188,16 +188,14 @@ describe("7. Continue and Back transitions (production functions)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("10-11. live preview appears only where intended, exactly once", () => {
-  it("the preview aside covers Card Details and Review, and excludes Grade", () => {
+  it("the preview aside persists across Card Details, Grade and Review", () => {
     expect(showsPreviewAside(CARD_DETAILS_STAGE)).toBe(true);
     expect(showsPreviewAside(REVIEW_STAGE)).toBe(true);
-    expect(showsPreviewAside(GRADE_STAGE)).toBe(false);
+    expect(showsPreviewAside(GRADE_STAGE)).toBe(true);
   });
 
   it("the duplicate Review LabelPreview component no longer exists in the tree", async () => {
-    await expect(
-      import("../client/src/components/grading-workflow/LabelPreview"),
-    ).rejects.toThrow();
+    await expect(import("../client/src/components/grading-workflow/LabelPreview")).rejects.toThrow();
   });
 
   it("ReviewSummary renders NO certificate-preview image of its own", () => {
@@ -224,7 +222,7 @@ describe("10-11. live preview appears only where intended, exactly once", () => 
         onEditCard: () => {},
         onEditRarity: () => {},
         onEditGrade: () => {},
-      }),
+      })
     );
     // The card image + label preview live in the shared aside, never duplicated here.
     expect(html).not.toContain("<img");
@@ -261,7 +259,7 @@ describe("12. an existing certificate's values populate the rendered Review", ()
       onEditCard: () => {},
       onEditRarity: () => {},
       onEditGrade: () => {},
-    }),
+    })
   );
 
   it("renders the stored identity values", () => {
@@ -300,7 +298,7 @@ describe("13. catalogue-backed options render (real snapshot -> real component)"
           variantOther: "",
           rarityOther: "",
         },
-      }),
+      })
     );
     const text = textOf(html);
     expect(text).toContain(SEED_CATALOGUE.rarities[0].label);
@@ -323,7 +321,7 @@ describe("13. catalogue-backed options render (real snapshot -> real component)"
           variantOther: "",
           rarityOther: "",
         },
-      }),
+      })
     );
     // Variant is OPTIONAL: an empty classification is a valid, non-error state.
     expect(textOf(html)).toMatch(/optional/i);
@@ -336,15 +334,13 @@ describe("13. catalogue-backed options render (real snapshot -> real component)"
         { category: "finish", value: "custom_holo", label: "Custom Holo" },
         { category: "designation", value: "first_edition", label: "1st Edition", abbreviation: "FIRST_EDITION" },
       ],
-      new Set(["rarity", "finish", "designation"]),
+      new Set(["rarity", "finish", "designation"])
     );
     expect(snapshot.rarities.map((r) => r.label)).toContain("Custom Rare");
     expect(snapshot.finishes.map((f) => f.label)).toContain("Custom Holo");
     // The PERSISTED designation code is the abbreviation, so stored certificate
     // values keep resolving after the catalogue is edited.
-    expect(snapshot.designations).toEqual([
-      { code: "FIRST_EDITION", label: "1st Edition", help: "" },
-    ]);
+    expect(snapshot.designations).toEqual([{ code: "FIRST_EDITION", label: "1st Edition", help: "" }]);
   });
 
   it("every historical designation code is still resolvable from the seed", () => {
@@ -359,68 +355,56 @@ describe("13. catalogue-backed options render (real snapshot -> real component)"
 // M-4 — the shared helpers are WIRED INTO PRODUCTION, not merely tested
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("M-4: CertificateForm uses the shared workflow helpers", () => {
-  const FORM = readFileSync(join(process.cwd(), "client/src/components/certificate-form.tsx"), "utf8");
+describe("M-4: the canonical GradingWorkstation owns the wired workflow", () => {
+  const WORKSTATION = readFileSync(
+    join(process.cwd(), "client/src/components/grading-workflow/GradingWorkstation.tsx"),
+    "utf8"
+  );
+  const HEADER = readFileSync(
+    join(process.cwd(), "client/src/components/grading-workflow/WorkstationHeaderStrip.tsx"),
+    "utf8"
+  );
 
-  it("imports the shared constants and transitions from the ONE workflow module", () => {
-    const imports = FORM.slice(0, FORM.indexOf("export"));
-    for (const sym of [
-      "nextStageIndex",
-      "prevStageIndex",
-      "showsPreviewAside",
-      "clampStageIndex",
-      "CARD_DETAILS_STAGE",
-      "GRADE_STAGE",
-      "REVIEW_STAGE",
-    ]) {
-      expect(imports, `${sym} must be imported`).toContain(sym);
-    }
-    expect(imports).toContain('from "@shared/grading-workflow"');
+  it("uses one shared header/bar render site for the three-stage model", () => {
+    expect(WORKSTATION.match(/<WorkstationHeaderStrip/g)).toHaveLength(1);
+    expect(HEADER).toContain("<GradingWorkflowBar");
+    expect(HEADER).toContain("WorkflowStage");
+    expect(HEADER).toContain('from "@shared/grading-workflow"');
   });
 
-  it("preview visibility is decided by showsPreviewAside, not a hard-coded index test", () => {
-    expect(FORM).toContain("showsPreviewAside(wfStage)");
-    // The literal gate must not linger anywhere.
-    expect(FORM).not.toContain("wfStage === 0 || wfStage === 2");
-    expect(FORM).not.toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
+  it("the fixed preview aside is outside the stage-gated scroll body", () => {
+    const preview = WORKSTATION.indexOf("previewAside={");
+    const stageGate = WORKSTATION.indexOf("data-ws-stage={stage}");
+    expect(preview).toBeGreaterThan(-1);
+    expect(stageGate).toBeGreaterThan(preview);
+    expect(WORKSTATION.slice(preview, stageGate)).not.toMatch(/stage\s*===/);
   });
 
-  it("stage gating uses the shared constants", () => {
-    expect(FORM).toContain("stageClass(CARD_DETAILS_STAGE)");
-    expect(FORM).toContain("stageClass(GRADE_STAGE)");
-    expect(FORM).toContain("stageClass(REVIEW_STAGE)");
-    // No bare numeric stage gating remains.
-    expect(FORM).not.toMatch(/stageClass\(\s*[0-9]\s*\)/);
+  it("one stage value gates both visible sections and shortcut ownership", () => {
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(WORKSTATION).toContain("active={stage === GRADE_STAGE}");
+    expect(WORKSTATION).toContain("approvalStageActive={stage === REVIEW_STAGE}");
   });
 
-  it("navigation uses the shared transitions / constants, not bare indices", () => {
-    expect(FORM).toContain("goToStage(nextStageIndex(CARD_DETAILS_STAGE))"); // Card Details -> Grade
-    expect(FORM).toContain("goToStage(nextStageIndex(GRADE_STAGE))"); // Grade -> Review
-    expect(FORM).toContain("goToStage(prevStageIndex(GRADE_STAGE))"); // Grade -> Card Details
-    expect(FORM).toContain("goToStage(prevStageIndex(REVIEW_STAGE))"); // Review -> Grade
-    expect(FORM).not.toMatch(/goToStage\(\s*[0-9]\s*\)/);
+  it("navigation delegates only header stage indices to the workstation owner", () => {
+    expect(WORKSTATION).toContain("onStageClick={(i) => goToStage(i)}");
+    expect(HEADER).toContain("onStageClick={onStageClick}");
+    expect(WORKSTATION).not.toMatch(/goToStage\(\s*[0-9]\s*\)/);
   });
 
-  it("goToStage clamps through the shared clampStageIndex", () => {
-    const fn = FORM.slice(FORM.indexOf("const goToStage"), FORM.indexOf("const stageClass"));
-    expect(fn).toContain("clampStageIndex(i)");
+  it("Review cannot be entered until save and exact authoritative preview succeed", () => {
+    const fn = WORKSTATION.slice(WORKSTATION.indexOf("const establishReview"), WORKSTATION.indexOf("const certId"));
+    expect(fn).toContain("runReviewTransitionBarrier");
+    expect(fn).toContain("if (!result.ok)");
+    expect(fn).toContain("setReviewReady(result.snapshot)");
+    expect(fn).toContain("setStage(REVIEW_STAGE)");
+    expect(fn.indexOf("setReviewReady(result.snapshot)")).toBeLessThan(fn.indexOf("setStage(REVIEW_STAGE)"));
   });
 
   it("Enter inside the Grade stage cannot advance the workflow or submit the form", () => {
-    // The Grade stage wraps the protected workstation in a keydown guard. Source
-    // text is the only available proof here: asserting that a real Enter keypress
-    // is swallowed needs DOM event dispatch (see KNOWN LIMIT in this file's header).
-    const gradeStage = FORM.slice(
-      FORM.indexOf('<div data-workflow-stage="grade"'),
-      FORM.indexOf('<div data-workflow-stage="review"'),
-    );
-    expect(gradeStage).toContain("onKeyDown");
-    expect(gradeStage).toMatch(/e\.key === "Enter" &&[\s\S]*?tagName === "INPUT"/);
-    expect(gradeStage).toContain("e.preventDefault()");
-    // The guard must never itself navigate — Enter is swallowed, not forwarded.
-    const guard = gradeStage.slice(gradeStage.indexOf("onKeyDown"), gradeStage.indexOf("{workstationSlot}"));
-    expect(guard).not.toContain("goToStage");
-    expect(guard).not.toContain("nextStageIndex");
+    expect(WORKSTATION).not.toContain("onKeyDown");
+    expect(WORKSTATION).not.toContain("onSubmit=");
+    expect(WORKSTATION).toContain("approvalStageActive={stage === REVIEW_STAGE}");
   });
 });
 
@@ -447,18 +431,24 @@ describe("M-4: the wired transitions produce the approved production flow", () =
     expect(nextStageIndex(REVIEW_STAGE)).toBe(REVIEW_STAGE);
     expect(prevStageIndex(CARD_DETAILS_STAGE)).toBe(CARD_DETAILS_STAGE);
   });
-  it("preview is visible on Card Details and Review ONLY", () => {
+  it("preview is visible throughout Card Details, Grade and Review", () => {
     expect(showsPreviewAside(CARD_DETAILS_STAGE)).toBe(true);
-    expect(showsPreviewAside(GRADE_STAGE)).toBe(false);
+    expect(showsPreviewAside(GRADE_STAGE)).toBe(true);
     expect(showsPreviewAside(REVIEW_STAGE)).toBe(true);
   });
   it("there is no Rarity stage to navigate to at any point in the flow", () => {
     expect(stageIndexByKey("rarity")).toBe(-1);
     const visited = new Set<number>();
     let s = CARD_DETAILS_STAGE;
-    for (let i = 0; i < 6; i++) { visited.add(s); s = nextStageIndex(s); }
+    for (let i = 0; i < 6; i++) {
+      visited.add(s);
+      s = nextStageIndex(s);
+    }
     s = REVIEW_STAGE;
-    for (let i = 0; i < 6; i++) { visited.add(s); s = prevStageIndex(s); }
+    for (let i = 0; i < 6; i++) {
+      visited.add(s);
+      s = prevStageIndex(s);
+    }
     expect([...visited].sort()).toEqual([0, 1, 2]); // only the three approved stages are reachable
   });
 });

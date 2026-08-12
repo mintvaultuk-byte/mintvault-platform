@@ -23,6 +23,7 @@ import { Client } from "pg";
 import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
+import { CERTIFICATES_PROTECTED_COLUMNS_SQL } from "./helpers/certificates-protected-columns";
 
 /**
  * THIS SUITE MUST OWN ITS ENTIRE CLUSTER.
@@ -121,6 +122,33 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
     // synthetic PRE-EXISTING MintVault data that must survive the rollback
     await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial primary key, cert_id text, secret text)");
     await admin.query("INSERT INTO certificates (cert_id, secret) VALUES ('MV1','KEEP-A'),('MV2','KEEP-B')");
+    /**
+     * This suite drives the REAL migrate runner over the FULL migration set, which
+     * now includes 0048. That migration's presence guard is deliberately
+     * unconditional — it refuses to install partial review protection rather than
+     * silently leaving a protected field unguarded — so the synthetic certificates
+     * table above must carry the real protected-column shape or 0048 correctly
+     * aborts the whole run. `grade_approved_at` is needed too: it is the trigger's
+     * firing condition.
+     */
+    await admin.query("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_approved_at timestamptz");
+    /**
+     * 0022's print-state backfill is guarded on `grade_approved_at` EXISTING (plus a
+     * label_prints table, which this fixture also creates). Its header anticipates
+     * "a fixture that only stubs certificates (no grade columns)", in which case
+     * PL/pgSQL never plans the guarded statements. Adding grade_approved_at above
+     * for 0048 flips that guard ON, so the backfill is now planned here and needs
+     * the other columns it references. Stubbing them is the honest fix — the
+     * alternative would be withholding grade_approved_at and thereby NOT testing
+     * 0048 against the real runner at all.
+     */
+    await admin.query(
+      "ALTER TABLE certificates" +
+        " ADD COLUMN IF NOT EXISTS deleted_at timestamptz," +
+        " ADD COLUMN IF NOT EXISTS status text," +
+        " ADD COLUMN IF NOT EXISTS certificate_number text"
+    );
+    await admin.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
     await admin.query("ALTER TABLE certificates OWNER TO pn_migrator").catch(() => {}); // owned by migrator too (after roles exist)
     /**
      * MintVault base tables that the Partner migrations GRANT on and attach guard triggers to.
@@ -151,7 +179,9 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
       "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
     );
     await admin.query(
-      "CREATE TABLE IF NOT EXISTS label_prints (id serial primary key, certificate_id integer, created_at timestamptz not null default now())"
+      // cert_id/printed_at are referenced by 0022's print-state backfill, which this
+      // fixture now reaches (see the certificates stub above).
+      "CREATE TABLE IF NOT EXISTS label_prints (id serial primary key, certificate_id integer, cert_id text, printed_at timestamptz, created_at timestamptz not null default now())"
     );
     // 0018 builds a correction index on the MintVault audit log.
     await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (

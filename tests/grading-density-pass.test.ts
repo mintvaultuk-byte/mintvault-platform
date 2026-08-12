@@ -13,11 +13,16 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
 const DRAWER = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
-const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const stripComments = (s: string) =>
+  s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
 describe("AI banner collapsed into Identification tools drawer (spec 2, 6)", () => {
   it("the large AI block is now a collapsed <details> drawer, not an open banner", () => {
@@ -67,7 +72,10 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
     expect(code).not.toMatch(/mutate|handleSubmit|buildCertFormData|setForm|grade/i);
   });
   it("status helper reads existing cert fields only (no network)", () => {
-    const fn = DRAWER.slice(DRAWER.indexOf("export function certificateToolsStatus"), DRAWER.indexOf("export function CertificateToolsDrawer"));
+    const fn = DRAWER.slice(
+      DRAWER.indexOf("export function certificateToolsStatus"),
+      DRAWER.indexOf("export function CertificateToolsDrawer")
+    );
     expect(fn).toContain("ownershipStatus");
     expect(fn).toContain("nfcUid");
     expect(fn).not.toMatch(/fetch\(|apiRequest/);
@@ -76,14 +84,14 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 
 describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("Card Details renders the preview beside the controls (~40% left column)", () => {
-    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     // unified-shell pass: the column-ratio class now lives in ONE shared
     // constant inside WorkstationPreviewAside, not inline in certificate-form.
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
     expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
-    expect(FORM).toContain("<WorkstationPreviewAside");
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
   });
   it("the grading page uses a page-scrollable focus shell + compact header (not the tall Edit header)", () => {
     // Bounded-height workstation: AdminShell focus mode + min-h-[100dvh] flex
@@ -121,13 +129,16 @@ describe("beginner-friendly guidance (spec 6) + readable rarity names (spec 6, 8
 
 describe("three stages + protected surfaces unchanged (spec 16-24)", () => {
   it("the three grading stages still exist", () => {
-    for (const key of ["card-details", "grade", "review"]) {
-      expect(FORM).toContain(`data-workflow-stage="${key}"`);
-    }
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(WORKSTATION).toContain("stage === GRADE_STAGE");
+    expect(WORKSTATION).toContain("stage === REVIEW_STAGE");
+    expect(FORM).not.toContain("data-workflow-stage");
   });
-  it("workstationSlot renders with no transform/scale/zoom", () => {
-    const wrapper = stripComments(FORM.slice(FORM.indexOf('<div data-workflow-stage="grade"'), FORM.indexOf("Grade-stage nav")));
-    expect(wrapper).toContain("{workstationSlot}");
+  it("the sole GradingPanel mount has no transform/scale/zoom wrapper", () => {
+    const start = WORKSTATION.indexOf("{gradingEnabled && <GradingPanel");
+    const wrapper = stripComments(WORKSTATION.slice(start, WORKSTATION.indexOf("/>}", start)));
+    expect(FORM).not.toContain("workstationSlot");
+    expect((WORKSTATION.match(/<GradingPanel/g) ?? []).length).toBe(1);
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });
   it("save payload builder untouched — no density/drawer field added", () => {

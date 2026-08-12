@@ -1,12 +1,18 @@
-import React, { useCallback, useRef, useState, type ReactNode } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import GradingPanel from "@/components/grading/grading-panel";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import {
+  CertificatePreviewPanel,
+  type CertificatePreviewFields,
+} from "@/components/grading-workflow/CertificatePreviewPanel";
 import {
   CanonicalGradingWorkstationShell,
   WORKSTATION_BODY_SCROLL_CLASS,
   WORKSTATION_HEADER_REGION_CLASS,
 } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
+import { runReviewTransitionBarrier, type PersistedReviewRevision } from "@shared/grading-review-barrier";
+import { createCardInspectionState } from "@/components/grading-workflow/card-inspection-state";
 
 /**
  * GradingWorkstation — a THIN role adapter for /staff, /grader and /admin/staff.
@@ -28,7 +34,7 @@ import {
  * the top of the scroll body (right column), beside the card preview — never as
  * a detached full-width section above the shell.
  */
-export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader";
+export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader" | "partner";
 
 /** 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review. */
 const GRADE_STAGE = 1;
@@ -62,34 +68,232 @@ type Props = Omit<
   mode: GradingWorkstationMode;
   /** Optional queue position for the header strip (e.g. Staff "3 / 40"). */
   queue?: { position: number; total: number };
+  batch?: { customer?: string; submissionId?: string; remaining?: number };
   /** Admin Review identity editor, rendered inside the workstation body (top of
    *  the right column, beside the preview). When present, the preview aside is
    *  forced on so the card sits left / editor right. */
   identityEditor?: ReactNode;
+  /** Create mode has no certificate row to grade yet. */
+  gradingEnabled?: boolean;
+  previewCertificateId?: number | null;
 };
 
-export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps }: Props) {
+export function GradingWorkstation({
+  mode,
+  queue,
+  batch,
+  identityEditor,
+  gradingEnabled = true,
+  previewCertificateId,
+  ...panelProps
+}: Props) {
   const apiBase = panelProps.apiBase ?? "/api/admin";
   const rootRef = useRef<HTMLDivElement>(null);
-  // Grade is the working stage for these role surfaces; Card Details is already
-  // captured upstream. Start on Grade, keep every stage reachable.
-  // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
-  const [stage, setStage] = useState(GRADE_STAGE);
+  // Every grading role enters the same three-stage flow at Card Details. Pending
+  // Review is the one capability-driven exception: reviewers land directly on
+  // Review, with every stage still reachable from the shared strip.
+  const [stage, setStage] = useState(() => (mode === "admin-review" ? REVIEW_STAGE : 0));
+  const [interactiveCardHost, setInteractiveCardHost] = useState<HTMLDivElement | null>(null);
+  const [draftPreview, setDraftPreview] = useState<CertificatePreviewFields | null>(null);
+  const [authoritativePreview, setAuthoritativePreview] = useState<CertificatePreviewFields | null>(null);
+  const [inspectionState, setInspectionState] = useState(createCardInspectionState);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const [previewExpectedRevision, setPreviewExpectedRevision] = useState<number | null>(null);
+  const previewRequestSeqRef = useRef(0);
+  const transitionSeqRef = useRef(0);
+  const previewWaitersRef = useRef(
+    new Map<number, { expectedFingerprint: string; expectedRevision: number; resolve: (ok: boolean) => void }>()
+  );
+  const [reviewTransitionHandler, setReviewTransitionHandler] = useState<
+    (() => Promise<PersistedReviewRevision<CertificatePreviewFields>>) | null
+  >(null);
+  const [reviewReady, setReviewReady] = useState<PersistedReviewRevision<CertificatePreviewFields> | null>(null);
+  const [reviewBarrierStatus, setReviewBarrierStatus] = useState<"idle" | "saving" | "previewing" | "error">("idle");
+  const interactiveCardHostRef = useCallback((node: HTMLDivElement | null) => setInteractiveCardHost(node), []);
+  useEffect(
+    () => () => {
+      for (const waiter of previewWaitersRef.current.values()) waiter.resolve(false);
+      previewWaitersRef.current.clear();
+    },
+    []
+  );
 
   // The stage bar GATES content (hidden-not-unmounted via the .grading-stage-gate
   // CSS on the body wrapper below): selecting a stage shows only that stage's
   // GradingPanel sections. Scroll back to the top so the new stage starts at the
   // top of the scroll body.
-  const goToStage = useCallback((index: number) => {
-    setStage(index);
+  const scrollStageTop = useCallback(() => {
     rootRef.current?.querySelector<HTMLElement>('[data-testid="grading-workstation-slot"]')?.scrollTo({ top: 0 });
   }, []);
 
-  // Grade is stage 1; showing the preview aside beside GradingPanel would
-  // duplicate its own image tool. Show it on Card Details, and ALWAYS when the
-  // Admin Review identity editor is open (so the card is left / editor right).
-  const showPreviewAside = stage === 0 || (mode === "admin-review" && !!identityEditor);
+  const handlePreviewRevisionComplete = useCallback(
+    (revision: number, ok: boolean, fingerprint: string, authoritativeRevision?: number | null) => {
+    const waiter = previewWaitersRef.current.get(revision);
+    if (!waiter) return;
+    previewWaitersRef.current.delete(revision);
+    const exact =
+      ok &&
+      fingerprint === waiter.expectedFingerprint &&
+      authoritativeRevision === waiter.expectedRevision;
+    if (!exact) setAuthoritativePreview(null);
+    waiter.resolve(exact);
+    },
+    []
+  );
+  const registerReviewTransitionHandler = useCallback(
+    (handler: (() => Promise<PersistedReviewRevision<CertificatePreviewFields>>) | null) =>
+      setReviewTransitionHandler(() => handler),
+    []
+  );
+  const handleReviewValidityChange = useCallback((valid: boolean, revision: number) => {
+    if (valid) return;
+    setReviewReady((ready) => {
+      if (!ready || ready.revision !== revision) return ready;
+      setAuthoritativePreview(null);
+      setReviewBarrierStatus("idle");
+      return null;
+    });
+  }, []);
+
+  const requestAuthoritativePreview = useCallback(
+    (snapshot: PersistedReviewRevision<CertificatePreviewFields>): Promise<boolean> => {
+      const requestRevision = ++previewRequestSeqRef.current;
+      setAuthoritativePreview(snapshot.preview);
+      setPreviewExpectedRevision(snapshot.revision);
+      setPreviewRevision(requestRevision);
+      setReviewBarrierStatus("previewing");
+      const expectedFingerprint = JSON.stringify(snapshot.preview);
+      return new Promise<boolean>((resolve) =>
+        previewWaitersRef.current.set(requestRevision, {
+          expectedFingerprint,
+          expectedRevision: snapshot.revision,
+          resolve,
+        })
+      );
+    },
+    []
+  );
+
+  const establishReview = useCallback(async () => {
+    if (!reviewTransitionHandler) {
+      setReviewBarrierStatus("error");
+      return;
+    }
+    const attempt = ++transitionSeqRef.current;
+    setReviewReady(null);
+    setReviewBarrierStatus("saving");
+    const result = await runReviewTransitionBarrier({
+      persist: reviewTransitionHandler,
+      preview: requestAuthoritativePreview,
+      isCurrent: () => transitionSeqRef.current === attempt,
+    });
+    if (transitionSeqRef.current !== attempt) return;
+    if (!result.ok) {
+      setAuthoritativePreview(null);
+      setPreviewExpectedRevision(null);
+      setReviewBarrierStatus("error");
+      return;
+    }
+    setReviewReady(result.snapshot);
+    setReviewBarrierStatus("idle");
+    setStage(REVIEW_STAGE);
+    scrollStageTop();
+  }, [requestAuthoritativePreview, reviewTransitionHandler, scrollStageTop]);
+
+  const goToStage = useCallback(
+    (index: number) => {
+      if (gradingEnabled && index === REVIEW_STAGE && (stage !== REVIEW_STAGE || !reviewReady)) {
+        void establishReview();
+        return;
+      }
+      transitionSeqRef.current += 1;
+      for (const waiter of previewWaitersRef.current.values()) waiter.resolve(false);
+      previewWaitersRef.current.clear();
+      setAuthoritativePreview(null);
+      if (index !== REVIEW_STAGE) setReviewReady(null);
+      setReviewBarrierStatus("idle");
+      setStage(index);
+      scrollStageTop();
+    },
+    [establishReview, gradingEnabled, reviewReady, scrollStageTop, stage]
+  );
+
   const certId = panelProps.certId;
+  const resolvedPreviewCertificateId = previewCertificateId === undefined ? certId : previewCertificateId;
+  useEffect(() => {
+    transitionSeqRef.current += 1;
+    for (const waiter of previewWaitersRef.current.values()) waiter.resolve(false);
+    previewWaitersRef.current.clear();
+    setAuthoritativePreview(null);
+    setPreviewExpectedRevision(null);
+    setReviewReady(null);
+    setReviewBarrierStatus("idle");
+    setInspectionState(createCardInspectionState());
+    setStage(mode === "admin-review" ? REVIEW_STAGE : 0);
+  }, [certId, mode]);
+
+  // Pending Review opens on Review by design. Establish the same persisted +
+  // exact-preview barrier as soon as its panel has hydrated and registered.
+  useEffect(() => {
+    if (mode === "admin-review" && stage === REVIEW_STAGE && reviewTransitionHandler && !reviewReady) {
+      void establishReview();
+    }
+  }, [establishReview, mode, reviewReady, reviewTransitionHandler, stage]);
+  const panelPreviewFields = useMemo<CertificatePreviewFields>(
+    () =>
+      draftPreview?.certificateId === certId
+        ? draftPreview
+        : {
+            certificateId: certId,
+            certId: panelProps.certIdStr,
+            cardName: panelProps.cardName,
+            setName: panelProps.cardSet,
+            year: panelProps.cardYear ?? undefined,
+            cardNumber: panelProps.cardNumber ?? undefined,
+            language: panelProps.cardLanguage ?? undefined,
+            variant: panelProps.cardVariant ?? undefined,
+            gradeOverall: panelProps.existingGrade,
+          },
+    [
+      draftPreview,
+      certId,
+      panelProps.certIdStr,
+      panelProps.cardName,
+      panelProps.cardSet,
+      panelProps.cardYear,
+      panelProps.cardNumber,
+      panelProps.cardLanguage,
+      panelProps.cardVariant,
+      panelProps.existingGrade,
+    ]
+  );
+  const previewFields = authoritativePreview ?? panelPreviewFields;
+  const handleDraftPreviewChange = useCallback((preview: CertificatePreviewFields) => {
+    if (previewWaitersRef.current.size === 0) setDraftPreview(preview);
+  }, []);
+  const handlePreviewSaved = useCallback((revision: number | null) => {
+    // Existing certificate previews are server-authorised against the revision
+    // read from hydration or returned by a grade save. Create-mode previews
+    // intentionally have no persisted revision yet.
+    // A grading-query refetch can arrive while the Review barrier is rendering
+    // its exact saved revision. Do not let that secondary hydration effect
+    // supersede/cancel the prepared preview waiter; the waiter itself owns the
+    // only transition to Review-ready.
+    if (previewWaitersRef.current.size > 0) return;
+    setPreviewExpectedRevision(revision);
+    setPreviewRevision(++previewRequestSeqRef.current);
+  }, []);
+  const previewEndpoint = `${apiBase}/certificates/label/preview`;
+  const workstationCapabilities =
+    mode === "partner"
+      ? {
+    catalogueEndpoint: "/api/partner/catalogue/snapshot",
+    customSetMutations: false,
+    identify: false,
+    imageMutations: false,
+    generateDescription: false,
+        }
+      : undefined;
 
   return (
     <div
@@ -101,8 +305,26 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
       <CanonicalGradingWorkstationShell
         rootRef={rootRef}
         previewAside={
-          showPreviewAside && certId != null ? (
-            <WorkstationPreviewAside certificateId={certId} apiBase={apiBase} />
+          resolvedPreviewCertificateId != null ? (
+            <WorkstationPreviewAside
+              certificateId={resolvedPreviewCertificateId ?? null}
+              inspectionState={inspectionState}
+              onInspectionStateChange={setInspectionState}
+              apiBase={apiBase}
+              interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}
+              below={
+                <CertificatePreviewPanel
+                  key={certId}
+                  fields={previewFields}
+                  endpoint={previewEndpoint}
+                  persistence={reviewReady ? "saved" : "unsaved"}
+                  revision={previewRevision}
+                  expectedRevision={previewExpectedRevision}
+                  requireExpectedRevision={resolvedPreviewCertificateId != null}
+                  onRevisionComplete={handlePreviewRevisionComplete}
+                />
+              }
+            />
           ) : null
         }
       >
@@ -113,8 +335,21 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
             workflowMax={3}
             onStageClick={(i) => goToStage(i)}
             queue={queue}
+            batch={batch}
             sessionCompleted={0}
           />
+          {reviewBarrierStatus !== "idle" && (
+            <div
+              className={`px-3 py-1 text-xs ${reviewBarrierStatus === "error" ? "text-red-300" : "text-amber-300"}`}
+              data-testid="review-transition-status"
+            >
+              {reviewBarrierStatus === "saving"
+                ? "Saving the authoritative grade before Review…"
+                : reviewBarrierStatus === "previewing"
+                  ? "Refreshing the certificate preview for that saved revision…"
+                  : "Review is locked because save or preview failed. Retry Review."}
+            </div>
+          )}
         </div>
         {/* Canonical scroll body — same class as the /admin <form> body. The
             grading-stage-gate + data-ws-stage drive stage-content gating (CSS in
@@ -140,12 +375,23 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
               Grade (`active`), Ctrl+Enter to Review (`approvalStageActive`).
               Both derive from THIS adapter's own stage for the same reason —
               a page must not be able to contradict what is on screen. */}
+          {gradingEnabled && (
           <GradingPanel
             key={`${apiBase}:${certId}`}
             {...panelProps}
             active={stage === GRADE_STAGE}
             approvalStageActive={stage === REVIEW_STAGE}
+              previewHost={gradingEnabled ? interactiveCardHost : null}
+              inspectionState={inspectionState}
+              onInspectionStateChange={setInspectionState}
+              onPreviewChange={handleDraftPreviewChange}
+              onPreviewSaved={handlePreviewSaved}
+              onReviewTransitionReady={registerReviewTransitionHandler}
+              reviewBarrierReady={reviewReady}
+              onReviewValidityChange={handleReviewValidityChange}
+            workstationCapabilities={workstationCapabilities}
           />
+          )}
         </div>
       </CanonicalGradingWorkstationShell>
     </div>

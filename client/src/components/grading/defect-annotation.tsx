@@ -19,21 +19,7 @@ export interface Defect {
 }
 
 export type MvgsCode =
-  | "WH"
-  | "CH"
-  | "FR"
-  | "SC"
-  | "SP"
-  | "PI"
-  | "PL"
-  | "PS"
-  | "SV"
-  | "ST"
-  | "GL"
-  | "CR"
-  | "RD"
-  | "DG"
-  | "OC";
+  "WH" | "CH" | "FR" | "SC" | "SP" | "PI" | "PL" | "PS" | "SV" | "ST" | "GL" | "CR" | "RD" | "DG" | "OC";
 
 export type MvgsZone =
   | "FA"
@@ -156,6 +142,9 @@ interface Props {
   }>;
   onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
   onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
+  /** Preserve inspection/highlight behaviour while preventing grading-state
+   * mutations outside the active Grade stage. */
+  readOnly?: boolean;
 }
 
 /** Colour palette for line entries — display-only (engine never sees these).
@@ -211,19 +200,20 @@ export default function DefectAnnotation({
   creaseLines,
   onWhiteningLinesChange,
   onCreaseLinesChange,
+  readOnly = false,
 }: Props) {
   function cycleWhiteningColor(id: string | undefined, currentIdx: number) {
-    if (!onWhiteningLinesChange || !whiteningLines || !id) return;
+    if (readOnly || !onWhiteningLinesChange || !whiteningLines || !id) return;
     const nextColor = LINE_COLOUR_PALETTE[(currentIdx + 1) % LINE_COLOUR_PALETTE.length];
     onWhiteningLinesChange(whiteningLines.map((l) => (l.id === id ? { ...l, color: nextColor } : l)));
   }
   function cycleCreaseColor(id: string, currentIdx: number) {
-    if (!onCreaseLinesChange || !creaseLines) return;
+    if (readOnly || !onCreaseLinesChange || !creaseLines) return;
     const nextColor = LINE_COLOUR_PALETTE[(currentIdx + 1) % LINE_COLOUR_PALETTE.length];
     onCreaseLinesChange(creaseLines.map((l) => (l.id === id ? { ...l, color: nextColor } : l)));
   }
   function setWhiteningEdge(id: string | undefined, edge: (typeof EDGE_KEYS)[number]) {
-    if (!onWhiteningLinesChange || !whiteningLines || !id) return;
+    if (readOnly || !onWhiteningLinesChange || !whiteningLines || !id) return;
     onWhiteningLinesChange(
       whiteningLines.map((l) => {
         if (l.id !== id) return l;
@@ -238,19 +228,21 @@ export default function DefectAnnotation({
     );
   }
   function removeWhiteningLine(id: string | undefined) {
-    if (!onWhiteningLinesChange || !whiteningLines || !id) return;
+    if (readOnly || !onWhiteningLinesChange || !whiteningLines || !id) return;
     onWhiteningLinesChange(whiteningLines.filter((l) => l.id !== id));
   }
   function removeCreaseLine(id: string) {
-    if (!onCreaseLinesChange || !creaseLines) return;
+    if (readOnly || !onCreaseLinesChange || !creaseLines) return;
     onCreaseLinesChange(creaseLines.filter((l) => l.id !== id));
   }
   function removeDefect(id: number) {
+    if (readOnly) return;
     onChange(defects.filter((d) => d.id !== id));
     if (highlightId === id) onHighlight(null);
   }
 
   function cycleSeverity(id: number) {
+    if (readOnly) return;
     onChange(
       defects.map((d) => {
         if (d.id !== id) return d;
@@ -293,6 +285,7 @@ export default function DefectAnnotation({
               </div>
               <button
                 type="button"
+                disabled={readOnly}
                 onClick={(e) => {
                   e.stopPropagation();
                   removeDefect(d.id);
@@ -375,6 +368,7 @@ export default function DefectAnnotation({
                       <button
                         key={e}
                         type="button"
+                        disabled={readOnly}
                         onClick={() => setWhiteningEdge(l.id, e)}
                         className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
                           l.edge === e
@@ -388,6 +382,7 @@ export default function DefectAnnotation({
                     ))}
                     <button
                       type="button"
+                      disabled={readOnly}
                       onClick={() => cycleWhiteningColor(l.id, colorIdx)}
                       title="Cycle colour (display only — doesn't affect grade)"
                       className="ml-2 w-4 h-4 rounded-full border border-[var(--admin-line)]"
@@ -398,6 +393,7 @@ export default function DefectAnnotation({
                 </div>
                 <button
                   type="button"
+                  disabled={readOnly}
                   onClick={() => removeWhiteningLine(l.id)}
                   className="flex-shrink-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] transition-colors p-0.5"
                 >
@@ -439,6 +435,7 @@ export default function DefectAnnotation({
                   <div className="flex items-center gap-1 mt-1">
                     <button
                       type="button"
+                      disabled={readOnly}
                       onClick={() => cycleCreaseColor(l.id, colorIdx)}
                       title="Cycle colour (display only — doesn't affect grade)"
                       className="w-4 h-4 rounded-full border border-[var(--admin-line)]"
@@ -449,6 +446,7 @@ export default function DefectAnnotation({
                 </div>
                 <button
                   type="button"
+                  disabled={readOnly}
                   onClick={() => removeCreaseLine(l.id)}
                   className="flex-shrink-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] transition-colors p-0.5"
                 >

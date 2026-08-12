@@ -7,7 +7,7 @@
 import { Router } from "express";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly, requireNotSensitiveFrozen } from "./session";
 import { partnerSubmissionMutationLimiter } from "./rate-limit";
-import { CustomerError, listCustomers, createCustomer } from "./customer-service";
+import { CustomerError, listCustomers, createCustomer, updateCustomer } from "./customer-service";
 
 const MAX_STRING = 200;
 function tooLong(s: unknown): boolean {
@@ -15,6 +15,11 @@ function tooLong(s: unknown): boolean {
 }
 function asString(v: unknown): string | null {
   return typeof v === "string" && !tooLong(v) ? v : null;
+}
+function customerErrorStatus(err: CustomerError): number {
+  if (err.code === "not_found") return 404;
+  if (err.code === "duplicate") return 409;
+  return 400;
 }
 
 export function partnerCustomerRouter(): Router {
@@ -60,7 +65,46 @@ export function partnerCustomerRouter(): Router {
         res.status(201).json(created);
       } catch (err) {
         if (err instanceof CustomerError) {
-          res.status(400).json({ error: { code: err.code, message: err.message } });
+          res.status(customerErrorStatus(err)).json({ error: { code: err.code, message: err.message } });
+          return;
+        }
+        // eslint-disable-next-line no-console
+        console.error("[partner customers] unexpected error:", err);
+        res.status(500).json({ error: { code: "internal_error", message: "Something went wrong. Please try again." } });
+      }
+    }
+  );
+
+  r.patch(
+    "/customers/:id",
+    requirePartnerCapability("partner.orders.create"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerSubmissionMutationLimiter,
+    async (req, res) => {
+      try {
+        const body = req.body ?? {};
+        if (
+          typeof body.fullName !== "string" ||
+          tooLong(body.fullName) ||
+          tooLong(body.email) ||
+          tooLong(body.phone) ||
+          tooLong(body.reference)
+        ) {
+          res.status(400).json({ error: { code: "validation", message: "Invalid customer input." } });
+          return;
+        }
+        res.json(
+          await updateCustomer(req.partner!, String(req.params.id), {
+            fullName: body.fullName,
+            email: asString(body.email),
+            phone: asString(body.phone),
+            reference: asString(body.reference),
+          })
+        );
+      } catch (err) {
+        if (err instanceof CustomerError) {
+          res.status(customerErrorStatus(err)).json({ error: { code: err.code, message: err.message } });
           return;
         }
         // eslint-disable-next-line no-console

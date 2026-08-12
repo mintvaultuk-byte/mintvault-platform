@@ -137,7 +137,8 @@ async function mountEnrolment(onComplete = vi.fn(), onBack = vi.fn()) {
 describe("Partner MFA enrolment (real render)", () => {
   it("happy path: enrols with the password, shows the secret + QR, confirms a code, then shows recovery codes", async () => {
     apiRequest.mockImplementation((method: string, url: string) => {
-      if (url.endsWith("/mfa/enrol")) return ok({ ok: true, secret: "JBSWY3DPEB", otpauthUri: "otpauth://totp/x" });
+      if (url.endsWith("/mfa/enrol"))
+        return ok({ ok: true, enrolmentId: "11111111-1111-4111-8111-111111111111", secret: "JBSWY3DPEB", otpauthUri: "otpauth://totp/x", expiresAt: "2030-01-01T00:00:00Z" });
       if (url.endsWith("/mfa/confirm")) return ok({ ok: true, recoveryCodes: ["aaa-111", "bbb-222"] });
       return ok({ ok: true });
     });
@@ -157,7 +158,10 @@ describe("Partner MFA enrolment (real render)", () => {
     setValue(q("input-mfa-enrol-code")!, "123456");
     await submitForm("form-partner-mfa-enrol");
 
-    expect(calls("POST", "/mfa/confirm")[0][2], "the typed code is confirmed server-side").toEqual({ code: "123456" });
+    expect(calls("POST", "/mfa/confirm")[0][2], "the typed code is confirmed server-side").toEqual({
+      enrolmentId: "11111111-1111-4111-8111-111111111111",
+      code: "123456",
+    });
     const list = await waitForTestId("list-mfa-recovery-codes");
     expect(list.textContent).toContain("aaa-111");
     expect(list.textContent).toContain("bbb-222");
@@ -167,7 +171,8 @@ describe("Partner MFA enrolment (real render)", () => {
 
   it("a wrong code keeps the user on the setup step with a plain-English message and no completion", async () => {
     apiRequest.mockImplementation((method: string, url: string) => {
-      if (url.endsWith("/mfa/enrol")) return ok({ ok: true, secret: "JBSWY3DPEB", otpauthUri: "otpauth://totp/x" });
+      if (url.endsWith("/mfa/enrol"))
+        return ok({ ok: true, enrolmentId: "11111111-1111-4111-8111-111111111111", secret: "JBSWY3DPEB", otpauthUri: "otpauth://totp/x", expiresAt: "2030-01-01T00:00:00Z" });
       if (url.endsWith("/mfa/confirm")) return fail(400, "invalid_code");
       return ok({ ok: true });
     });
@@ -187,7 +192,8 @@ describe("Partner MFA enrolment (real render)", () => {
 
   it("recovery codes gate completion: Continue is disabled until the user acknowledges them", async () => {
     apiRequest.mockImplementation((method: string, url: string) => {
-      if (url.endsWith("/mfa/enrol")) return ok({ ok: true, secret: "S", otpauthUri: "otpauth://totp/x" });
+      if (url.endsWith("/mfa/enrol"))
+        return ok({ ok: true, enrolmentId: "11111111-1111-4111-8111-111111111111", secret: "S", otpauthUri: "otpauth://totp/x", expiresAt: "2030-01-01T00:00:00Z" });
       if (url.endsWith("/mfa/confirm")) return ok({ ok: true, recoveryCodes: ["aaa-111"] });
       return ok({ ok: true });
     });
@@ -229,6 +235,49 @@ describe("Partner MFA enrolment (real render)", () => {
     const err = await waitForTestId("text-mfa-enrol-error");
     expect(err.textContent).toContain("temporarily unavailable");
     expect(err.textContent).not.toContain("encryption_unavailable");
+  });
+
+  it("restart setup invalidates the displayed setup and fetches a fresh key", async () => {
+    apiRequest.mockImplementation((method: string, url: string) => {
+      if (url.endsWith("/mfa/enrol"))
+        return ok({ ok: true, enrolmentId: "11111111-1111-4111-8111-111111111111", secret: "OLDSECRET", otpauthUri: "otpauth://totp/old", expiresAt: "2030-01-01T00:00:00Z" });
+      if (url.endsWith("/mfa/restart"))
+        return ok({ ok: true, enrolmentId: "22222222-2222-4222-8222-222222222222", secret: "NEWSECRET", otpauthUri: "otpauth://totp/new", expiresAt: "2030-01-01T00:10:00Z" });
+      if (url.endsWith("/mfa/confirm")) return ok({ ok: true, recoveryCodes: ["aaa-111"] });
+      return ok({ ok: true });
+    });
+    await mountEnrolment();
+    await waitForTestId("text-mfa-secret");
+    expect(q("text-mfa-secret")!.textContent).toContain("OLDSECRET");
+
+    await clickTestId("button-mfa-enrol-restart");
+    await waitForTestId("text-mfa-secret");
+    expect(q("text-mfa-secret")!.textContent).toContain("NEWSECRET");
+    setValue(q("input-mfa-enrol-code")!, "123 456");
+    await submitForm("form-partner-mfa-enrol");
+    expect(calls("POST", "/mfa/confirm")[0][2]).toEqual({
+      enrolmentId: "22222222-2222-4222-8222-222222222222",
+      code: "123456",
+    });
+  });
+
+  it("cancel setup signs out and destroys the pending setup", async () => {
+    const oldLocation = window.location;
+    Object.defineProperty(window, "location", { value: { href: "" }, writable: true });
+    apiRequest.mockImplementation((method: string, url: string) => {
+      if (url.endsWith("/mfa/enrol"))
+        return ok({ ok: true, enrolmentId: "11111111-1111-4111-8111-111111111111", secret: "S", otpauthUri: "otpauth://totp/x", expiresAt: "2030-01-01T00:00:00Z" });
+      return ok({ ok: true });
+    });
+    try {
+      await mountEnrolment();
+      await waitForTestId("text-mfa-secret");
+      await clickTestId("button-mfa-enrol-sign-out");
+      expect(calls("POST", "/mfa/cancel")).toHaveLength(1);
+      expect(window.location.href).toBe("/partner/login");
+    } finally {
+      Object.defineProperty(window, "location", { value: oldLocation, writable: true });
+    }
   });
 });
 
@@ -358,7 +407,8 @@ describe("Partner sign in — enrolment is reachable (real render)", () => {
   it("a user arriving from an accepted invitation (?setup=1) lands on enrolment, not an impossible code box", async () => {
     apiRequest.mockImplementation((method: string, url: string) => {
       if (url.endsWith("/auth/login")) return ok({ ok: true, mfaRequired: true });
-      if (url.endsWith("/mfa/enrol")) return ok({ ok: true, secret: "S", otpauthUri: "otpauth://totp/x" });
+      if (url.endsWith("/mfa/enrol"))
+        return ok({ ok: true, enrolmentId: "11111111-1111-4111-8111-111111111111", secret: "S", otpauthUri: "otpauth://totp/x", expiresAt: "2030-01-01T00:00:00Z" });
       if (url.endsWith("/session")) return fail(401, "authentication required");
       return ok({ ok: true });
     });

@@ -47,6 +47,9 @@ import {
   getOperatorReviewRate,
   isPartnerOriginatedCert,
   checkGradePublishGates,
+  getAssignedGradeSubmitSnapshot,
+  submitAssignedGradeAtRevision,
+  autoApproveAssignedGradeAtRevision,
 } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { db } from "../db";
@@ -94,6 +97,12 @@ const GRADER_PROXY_ACTIONS = new Set([
   "grade-card",
   "generate-description",
 ]);
+
+/** Strictly parse the server CAS token; never coerce client input. */
+function expectedReviewRevision(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1) return null;
+  return raw;
+}
 
 /** Ownership gate (cert-level): the cert must be assigned to THIS grader and not
  *  yet approved. Returns the current grader_status for status-specific checks. */
@@ -420,7 +429,7 @@ export function registerGraderRoutes(app: Express): void {
       if (!saved) {
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
-      return res.json({ ok: true, gradingStatus: auth.gradingStatus });
+      return res.json({ ok: true, gradingStatus: auth.gradingStatus, reviewRevision: saved });
     } catch (e: any) {
       // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
       // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
@@ -443,22 +452,33 @@ export function registerGraderRoutes(app: Express): void {
       }
       const graderEmail = (req.session as any).graderEmail as string;
       const graderId = (req.session as any).graderId || null;
-      // Persist any final edits in the same action, then transition.
-      if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
-
-      // PHASE 3 — capture the OPERATOR's own submission as an immutable snapshot.
-      // applyCertGradeDraft (above) has just written the operator's overall grade
-      // and four subgrades onto the cert columns; we snapshot them here so a later
-      // admin override of `grade`/subgrades never overwrites what the operator
-      // actually submitted. graded_by records WHO graded (the operator), distinct
-      // from grade_approved_by (WHO approved). Re-submits (redo) re-snapshot the
-      // operator's latest attempt — the one that gets reviewed/approved.
-      const captureOperatorSubmission = sql`
-        graded_by = COALESCE(${graderId}, assigned_grader_id),
-        operator_grade = grade,
-        operator_subgrades = jsonb_build_object(
-          'centering', centering_score, 'corners', corners_score,
-          'edges', edges_score, 'surface', surface_score)`;
+      // Model A: establish the authoritative revision wholly on the server.
+      // A submit body may contain final draft fields, but it never supplies the
+      // CAS token. The write returns R; an empty-body submit reads R from the
+      // assigned row. Every terminal transition below requires that exact R.
+      let expectedRevision: number;
+      if (req.body && Object.keys(req.body).length) {
+        const saved = await applyCertGradeDraft(certId, req.body);
+        if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        expectedRevision = saved;
+      } else {
+        const row = (
+          await db.execute(sql`
+            SELECT grading_revision FROM certificates
+            WHERE id = ${certId} AND grader_status = 'assigned'
+            LIMIT 1
+          `)
+        ).rows[0] as { grading_revision?: unknown } | undefined;
+        const revision = Number(row?.grading_revision);
+        if (!Number.isSafeInteger(revision) || revision < 1) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+        expectedRevision = revision;
+      }
+      const submitSnapshot = await getAssignedGradeSubmitSnapshot(certId, expectedRevision);
+      if (!submitSnapshot) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+      const operatorGrade = submitSnapshot.operatorGrade;
+      const cardName = submitSnapshot.cardName;
 
       // P0-C — PARTNER-ORIGIN MANDATORY REVIEW.
       // A partner-originated card must NEVER reach a publish path without a
@@ -469,14 +489,8 @@ export function registerGraderRoutes(app: Express): void {
 
       if (GRADER_AUTO_PUBLISH && !partnerOriginated) {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
-        const pub = await db.execute(sql`
-          UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
-            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW(),
-            print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
-          WHERE id = ${certId} AND grader_status = 'assigned'
-          RETURNING id
-        `);
-        if (pub.rows.length === 0) {
+        const published = await autoApproveAssignedGradeAtRevision(certId, graderEmail, graderId, expectedRevision);
+        if (!published) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
@@ -486,22 +500,9 @@ export function registerGraderRoutes(app: Express): void {
       }
 
       // ── PHASE 4 — per-operator review gate (deterministic sampling) ──────────
-      // Move to pending_review + snapshot the operator's submission (Phase 3).
-      const toReview = await db.execute(sql`
-        UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(),
-          ${captureOperatorSubmission}, updated_at = NOW()
-        WHERE id = ${certId} AND grader_status = 'assigned'
-        RETURNING id
-      `);
-      if (toReview.rows.length === 0) {
-        return res.status(409).json({ error: "Card status changed; refresh and try again" });
-      }
-
-      // Read back exactly what we just snapshotted + the gate inputs.
-      const gateRow = (await db.execute(sql`SELECT operator_grade, card_name FROM certificates WHERE id = ${certId}`))
-        .rows[0] as any;
-      const operatorGrade = gateRow?.operator_grade;
-      const cardName = gateRow?.card_name;
+      // The gate is evaluated from the revision-bound persisted snapshot. The
+      // final transition below is a single assigned→pending/approved CAS, so
+      // no intermediate pending_review window can publish a newer grade.
       // Hard overrides — never auto-approve: no grade to promote to final, or an
       // unidentified card (never push an unnamed card live).
       const gradeMissing = operatorGrade == null || String(operatorGrade).trim() === "";
@@ -532,7 +533,8 @@ export function registerGraderRoutes(app: Express): void {
       const reviewRequired = forceReview || sampledReview || publishGateBlocked;
 
       if (reviewRequired) {
-        await db.execute(sql`UPDATE certificates SET review_required = true, updated_at = NOW() WHERE id = ${certId}`);
+        const submitted = await submitAssignedGradeAtRevision(certId, graderId, expectedRevision);
+        if (!submitted) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         const forcedReason = partnerOriginated
           ? "partner_origin"
           : gradeMissing
@@ -552,26 +554,10 @@ export function registerGraderRoutes(app: Express): void {
         return res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
       }
 
-      // AUTO-APPROVE — sampling cleared this card without manual review. Promote
-      // the operator's grade to final and publish. grade_approved_by = 'auto' is a
-      // deliberate system marker, distinguishable from any human approver.
-      // Phase 2 — CAS guard: only auto-approve while still pending_review (set just
-      // above). If a concurrent admin approve/reject changed it, this matches 0 rows
-      // and their action stands (no clobber).
-      const autoApp = await db.execute(sql`
-        UPDATE certificates SET
-          review_required = false,
-          grade = operator_grade,
-          grade_approved_at = NOW(),
-          grade_approved_by = 'auto',
-          grader_status = 'approved',
-          status = 'active',
-          print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
-          updated_at = NOW()
-        WHERE id = ${certId} AND grader_status = 'pending_review'
-        RETURNING id
-      `);
-      if (autoApp.rows.length === 0) {
+      // AUTO-APPROVE — sampling cleared this persisted revision. The helper
+      // atomically snapshots and publishes directly from assigned at R.
+      const autoApproved = await autoApproveAssignedGradeAtRevision(certId, "auto", graderId, expectedRevision);
+      if (!autoApproved) {
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
       await storage.writeAuditLog("certificate", String(certId), "auto_approve", "system", {
@@ -1058,9 +1044,13 @@ export function registerGraderRoutes(app: Express): void {
   // ── Admin: approve / reject a grader-submitted (pending_review) cert ────────
   app.post("/api/admin/certificates/:id/approve-grader-grade", requireAdmin, async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
+    const revision = expectedReviewRevision((req.body ?? {}).expectedRevision);
+    if (revision == null) {
+      return res.status(400).json({ error: "A valid expectedRevision is required to approve this card" });
+    }
     const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await approveGraderCert(certId, adminUser);
-    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    const r = await approveGraderCert(certId, adminUser, revision);
+    if (!r.ok) return res.status(r.status).json({ error: r.error, ...(r.code ? { code: r.code } : {}) });
     return res.json({ ok: true, gradingStatus: "approved" });
   });
 
@@ -1111,7 +1101,7 @@ export function registerGraderRoutes(app: Express): void {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
       if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ ok: true });
+      return res.json({ ok: true, reviewRevision: r.revision });
     } catch (e: any) {
       if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[admin grade-review save] error:", e.message);

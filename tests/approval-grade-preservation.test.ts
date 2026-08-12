@@ -157,39 +157,82 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve", () => {
     const h = approveHandler();
     // Anchor on the overall-grade gate specifically — the B3 sub-grade gate also
     // begins "if (!isNonNum &&" and appears earlier in the handler.
-    const at = h.indexOf("if (!isNonNum && (gradeNum == null");
+    //
+    // 2026-08-11: the gate now reads `storedGrade`, not the request-derived
+    // `gradeNum`. That rename is the whole point of the repair, not cosmetic —
+    // the approval UPDATE persists no certificate-facing field, so validating a
+    // request value while publishing the stored row let `{"overall_grade":9}`
+    // publish a certificate whose stored `grade` was NULL (printing "0/POOR").
+    const at = h.indexOf("if (!isNonNum && (storedGrade == null");
     expect(at).toBeGreaterThan(0);
     const gate = h.slice(at, at + 400);
-    expect(gate).toContain("gradeNum == null");
-    expect(gate).toContain("isValidNumericGrade(gradeNum)");
+    expect(gate).toContain("storedGrade == null");
+    expect(gate).toContain("isValidNumericGrade(storedGrade)");
     expect(gate).toContain("res.status(400)");
+  });
+
+  it("derives every publish gate from the STORED row, never from the request body", () => {
+    // The invariant the MV205-class defect violated: what is validated must be
+    // exactly what is published. The approval UPDATE writes no grade, so any gate
+    // reading req.body is validating a value this route will never persist.
+    const h = approveHandler();
+    const gateRegion = h.slice(0, h.indexOf("UPDATE certificates SET"));
+    // The four sub-grade gate inputs and the overall grade all read `cert`/`certRow`.
+    expect(gateRegion).toContain("const storedGrade = isNonNum ? null : strictGrade(certRow.gradeOverall)");
+    for (const f of ["gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"]) {
+      expect(gateRegion, `stored sub-grade ${f} must come from the row`).toContain(`num(certRow.${f})`);
+    }
+    // And the pre-UPDATE region must not reintroduce body-derived grade inputs.
+    expect(gateRegion).not.toMatch(/\bnum\(b\.grade_(centering|corners|edges|surface)\)/);
+    expect(gateRegion).not.toMatch(/strictGrade\(overallGrade\)/);
+  });
+
+  it("decides numeric-vs-authentication kind from the STORED grade_type, not the payload", () => {
+    // A one-key body ({"overall_grade":"NO"}) must not be able to steer the
+    // publish gates down the non-numeric branch and skip them entirely.
+    const h = approveHandler();
+    expect(h).toContain('const isNonNum = kindOfGradeType((cert as { gradeType?: string | null }).gradeType) !== "numeric"');
+    expect(h).not.toContain('const isNonNum = overallGrade === "AA" || overallGrade === "NO"');
   });
 
   it("places the gate BEFORE the UPDATE, so a rejected payload never reaches the write", () => {
     // Without this, a gate accidentally placed after the UPDATE would satisfy every
     // other assertion in this file while being completely useless.
     const h = approveHandler();
-    const gateAt = h.indexOf("isValidNumericGrade(gradeNum)");
+    const gateAt = h.indexOf("isValidNumericGrade(storedGrade)");
     const updateAt = h.indexOf("UPDATE certificates SET");
     expect(gateAt).toBeGreaterThan(0);
     expect(updateAt).toBeGreaterThan(0);
     expect(gateAt).toBeLessThan(updateAt);
   });
 
-  it("no longer writes `grade` from a bare parameter", () => {
+  it("is a state transition only, so approval cannot rewrite the reviewed grade", () => {
     const h = approveHandler();
     expect(h).not.toMatch(/^\s*grade\s+= \$\{gradeNum\},$/m);
-    expect(h).toMatch(/grade\s+= \$\{isNonNum \? sql`NULL` : sql`COALESCE\(\$\{gradeNum\}::numeric, grade\)`\}/);
+    expect(h).not.toMatch(/^\s*grade\s+=/m);
+    expect(h).toContain("Approval is a state transition only.");
+    expect(h).toContain("AND grading_revision = ${expectedRevision}");
   });
 
-  it("preserves auth_status on omission instead of resetting it to 'genuine'", () => {
+  it("cannot change authentication state during final approval", () => {
     const h = approveHandler();
     expect(h).not.toContain('auth_status         = ${b.auth_status || "genuine"}');
-    expect(h).toContain("auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine')");
+    expect(h).not.toMatch(/^\s*auth_status\s+=/m);
   });
 
   it("keeps the pre-existing B3 sub-grade completeness gate", () => {
-    expect(approveHandler()).toMatch(/finalCentering == null \|\| finalCorners == null/);
+    // The B3 four-sub-grade rule is PRESERVED but no longer duplicated here: it now
+    // comes from the shared checkGradePublishGates, which both approval paths use.
+    // Asserting the shared call (and that it precedes the write) is the stronger
+    // invariant — a re-derived local copy is exactly how this route drifted from its
+    // sibling and let an unprintable NO/AA state publish.
+    const h = approveHandler();
+    const gateAt = h.indexOf("const publishGate = await checkGradePublishGates(id);");
+    expect(gateAt, "approve must use the SHARED publish gate").toBeGreaterThan(0);
+    expect(h).toContain("if (!publishGate.ok) {");
+    expect(gateAt).toBeLessThan(h.indexOf("UPDATE certificates SET"));
+    // And it must not have grown a private copy of the rule back.
+    expect(h).not.toMatch(/storedCentering == null \|\| storedCorners == null/);
   });
 
   it("keeps the print-state promotion guarded so an in-flight print is never regressed", () => {
@@ -209,30 +252,24 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve-grade", ()
     return ROUTES.slice(start, end > start ? end : start + 20_000);
   };
 
-  it("rejects a numeric approval whose overall grade is NaN or off-ladder", () => {
+  it("is a terminal fail-closed retirement, never a second approval implementation", () => {
     const h = approveGradeHandler();
-    const gate = h.slice(h.indexOf("if (!isNonNum &&"), h.indexOf("if (!isNonNum &&") + 400);
-    expect(gate).toContain("isValidNumericGrade(finalOverall)");
-    expect(gate).toContain("res.status(400)");
+    expect(h).toContain("res.status(410)");
+    expect(h).toContain('code: "CANONICAL_REVIEW_REQUIRED"');
+    expect(h).toContain("canonical grading workstation");
+    expect(h).not.toContain("UPDATE certificates SET");
+    expect(h).not.toContain("certificate_number");
   });
 
-  it("places the gate BEFORE the UPDATE", () => {
-    const h = approveGradeHandler();
-    const gateAt = h.indexOf("isValidNumericGrade(finalOverall)");
-    const updateAt = h.indexOf("UPDATE certificates SET");
-    expect(gateAt).toBeGreaterThan(0);
-    expect(updateAt).toBeGreaterThan(0);
-    expect(gateAt).toBeLessThan(updateAt);
-  });
-
-  it("no longer writes `grade` from a bare parameter", () => {
-    const h = approveGradeHandler();
-    expect(h).not.toContain("grade             = ${isNonNum ? null : finalOverall}");
-    expect(h).toMatch(/grade\s+= \$\{isNonNum \? sql`NULL` : sql`COALESCE\(\$\{finalOverall\}::numeric, grade\)`\}/);
-  });
-
-  it("does not alter certificate numbering", () => {
-    expect(approveGradeHandler()).not.toMatch(/certificate_number\s*=/);
+  it("removes the retired CertificateForm caller so final approval only flows through GradingWorkstation", () => {
+    const form = readFileSync(join(process.cwd(), "client", "src", "components", "certificate-form.tsx"), "utf8");
+    const workstation = readFileSync(
+      join(process.cwd(), "client", "src", "components", "grading-workflow", "GradingWorkstation.tsx"),
+      "utf8"
+    );
+    expect(form).not.toContain("/approve-grade");
+    expect(workstation).toContain("<GradingPanel");
+    expect(workstation).toContain("onReviewTransitionReady={registerReviewTransitionHandler}");
   });
 });
 
@@ -242,7 +279,6 @@ describe("LOCKED RULE: normal approval cannot convert numeric <-> authentication
   // authentication-only cert (evidence recorded on the PR and in the task ledger).
   const handlers = [
     { name: "/approve", marker: 'app.put("/api/admin/certificates/:id/approve"' },
-    { name: "/approve-grade", marker: 'app.put("/api/admin/certificates/:id/approve-grade"' },
   ] as const;
 
   const slice = (marker: string): string => {
@@ -269,12 +305,13 @@ describe("LOCKED RULE: normal approval cannot convert numeric <-> authentication
       expect(s).toContain("allowChangeWhenUnapproved: false");
     });
 
-    it(`${h.name}: persists the STORED grade_type, so approval cannot rewrite the column`, () => {
+    it(`${h.name}: is a state transition only, so approval cannot rewrite grade_type or any reviewed grade field`, () => {
       const s = slice(h.marker);
-      expect(s).toMatch(/grade_type\s+= \$\{storedGradeType\}/);
-      // The old client-derived forms must be gone.
-      expect(s).not.toContain('const gradeType = isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric";');
-      expect(s).not.toMatch(/grade_type\s+= \$\{finalGradeType\}/);
+      const approvalUpdate = s.slice(s.indexOf("const approvalWrite"), s.indexOf("if (approvalWrite.rows.length === 0)"));
+      expect(approvalUpdate).toContain("grading_revision = ${expectedRevision}");
+      for (const field of ["grade_type =", "grade =", "centering_score =", "corners_score =", "edges_score =", "surface_score ="]) {
+        expect(approvalUpdate, `${h.name} must not mutate ${field}`).not.toContain(field);
+      }
     });
 
     it(`${h.name}: the kind gate runs BEFORE the UPDATE`, () => {
@@ -332,7 +369,7 @@ describe("write semantics: grade_type is never rewritten by approval (real Postg
 
 describe("the published overall grade is parsed strictly, not with parseFloat", () => {
   // parseFloat is a PREFIX parser, so "7.5abc" -> 7.5 and [8] -> 8 would publish a
-  // grade the operator never entered. Both approval routes now use a strict decimal
+  // grade the operator never entered. The remaining canonical approval route uses a strict decimal
   // parse. Verified over real HTTP against staging: "7.5abc", [8], {v:8}, true,
   // "0x0A", "1e2" and "Infinity" all 400; 8.5, "8.5" and " 8.5 " all 200.
   const STRICT_DECIMAL = /^-?\d+(\.\d+)?$/;
@@ -348,7 +385,7 @@ describe("the published overall grade is parsed strictly, not with parseFloat", 
   it("mirrors the shipped helper: the regex in this test matches the one in routes.ts", () => {
     // Guards against the test's copy drifting from the implementation.
     expect(ROUTES).toContain("/^-?\\d+(\\.\\d+)?$/.test(t)");
-    expect((ROUTES.match(/const strictGrade = \(v: unknown\): number \| null => \{/g) ?? []).length).toBe(2);
+    expect((ROUTES.match(/const strictGrade = \(v: unknown\): number \| null => \{/g) ?? []).length).toBe(1);
   });
 
   it("rejects prefix-parseable junk that parseFloat would have accepted", () => {
@@ -485,7 +522,7 @@ describe("grading engine and MVGS remain untouched by this fix", () => {
   it("the fix adds no scoring, weighting or formula logic", () => {
     // Slice ONLY the gate block that this fix introduced (not the surrounding handler,
     // which legitimately runs MVGS to derive label_type).
-    const at = ROUTES.indexOf("if (!isNonNum && (gradeNum == null");
+    const at = ROUTES.indexOf("if (!isNonNum && (storedGrade == null");
     expect(at).toBeGreaterThan(0);
     const gate = ROUTES.slice(at, ROUTES.indexOf("}", ROUTES.indexOf("});", at)) + 1);
     // The gate is a presence check only — it must not compute or adjust a grade.

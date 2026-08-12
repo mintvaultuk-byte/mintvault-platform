@@ -15,10 +15,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  decideGradingPersistence,
-  type GradingPersistenceState,
-} from "../shared/grading-persistence-lifecycle";
+import { decideGradingPersistence, type GradingPersistenceState } from "../shared/grading-persistence-lifecycle";
 
 /** A fully-hydrated, active, unapproved panel — the ONLY state that may save. */
 const ARMED: GradingPersistenceState = {
@@ -205,16 +202,24 @@ describe("M-1 · every GradingPanel mount site states its lifecycle", () => {
   });
 
   it("the three standalone surfaces mount through that adapter", () => {
-    for (const page of ["client/src/pages/grader.tsx", "client/src/pages/staff.tsx", "client/src/pages/admin-staff.tsx"]) {
+    for (const page of [
+      "client/src/pages/grader.tsx",
+      "client/src/pages/staff.tsx",
+      "client/src/pages/admin-staff.tsx",
+    ]) {
       const src = read(page);
       expect(src, `${page} must mount the workstation adapter`).toContain("<GradingWorkstation");
       expect(src, `${page} must not mount GradingPanel directly`).not.toContain("<GradingPanel");
     }
   });
 
-  it("CertificateForm injects the stage-derived flag into its workstation slot", () => {
+  it("CertificateForm no longer owns or injects grading lifecycle state", () => {
     const form = read("client/src/components/certificate-form.tsx");
-    expect(form).toContain("active: wfStage === GRADE_STAGE");
+    expect(form).not.toContain("<GradingPanel");
+    expect(form).not.toContain("workstationSlot");
+    const ws = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+    expect(ws).toContain("active={stage === GRADE_STAGE}");
+    expect(ws).toContain("approvalStageActive={stage === REVIEW_STAGE}");
   });
 
   it("every direct GradingPanel mount site in the repository is accounted for", () => {
@@ -223,23 +228,16 @@ describe("M-1 · every GradingPanel mount site states its lifecycle", () => {
       .split("\n")
       .filter(Boolean)
       .sort();
-    // GradingWorkstation (passes stage-derived active) plus the two
-    // CertificateForm workstation slots (fail-closed `active={false}`, then
-    // injected by the form). A NEW entry here must be reviewed for lifecycle.
-    expect(hits).toEqual([
-      "client/src/components/grading-workflow/GradingWorkstation.tsx",
-      "client/src/pages/admin-dashboard.tsx",
-      "client/src/pages/dev-card-details-harness.tsx",
-    ]);
+    // ONE canonical render site owns lifecycle for every role. A new direct
+    // mount would be a role-specific shell and must fail this guard.
+    expect(hits).toEqual(["client/src/components/grading-workflow/GradingWorkstation.tsx"]);
   });
 
-  it("the two slot mount sites default FAIL-CLOSED", () => {
+  it("admin and dev surfaces use the canonical adapter instead of a direct slot", () => {
     for (const page of ["client/src/pages/admin-dashboard.tsx", "client/src/pages/dev-card-details-harness.tsx"]) {
       const src = read(page);
-      const i = src.indexOf("<GradingPanel");
-      const block = src.slice(i, i + 900);
-      expect(block, `${page} must state a fail-closed initial lifecycle`).toContain("active={false}");
-      expect(block).not.toContain("active={true}");
+      expect(src).toContain("<GradingWorkstation");
+      expect(src).not.toContain("<GradingPanel");
     }
   });
 });

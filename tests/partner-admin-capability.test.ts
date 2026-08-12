@@ -291,4 +291,60 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(await ready.json()).toMatchObject({ checked: true, ready: true, failureCode: null });
     expect(await getPartnerRuntimeCapability()).toMatchObject({ ok: true });
   });
+  /**
+   * PART 9 — the RUNTIME credential must be restricted, and that must be ENFORCED, not documented.
+   *
+   * The failure this guards is a configuration slip, not an exploit: PARTNER_DATABASE_URL pointed at
+   * an owner/BYPASSRLS login (neondb_owner) instead of the restricted partner_runtime_app member.
+   * Under that URL every tenant boundary in the Partner runtime is silently off — RLS does not apply
+   * to a BYPASSRLS role — and each tenant's queries return every tenant's rows.
+   *
+   * definerModelViolations cannot see this: it inspects the `partner_runtime` GROUP role's
+   * attributes, which stay NOBYPASSRLS regardless of which login actually connected. Only a
+   * current_user check catches it, and until this was wired into mount.ts's Gate 2 nothing in
+   * production called one.
+   */
+  it("REJECTS a BYPASSRLS runtime credential (current_user, not the group role)", async () => {
+    const { closePartnerPools } = await import("../server/partner/db");
+    const restored = process.env.PARTNER_DATABASE_URL;
+    try {
+      // Point the RUNTIME pool at the BYPASSRLS login. The partner_runtime GROUP role is untouched
+      // and still NOBYPASSRLS, which is exactly why a group-role check would pass here.
+      process.env.PARTNER_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_admin_bypass_test", "synthetic-admin");
+      await closePartnerPools();
+      expect(await getPartnerRuntimeCapability()).toMatchObject({
+        ok: false,
+        code: "PARTNER_RUNTIME_BYPASSRLS_FORBIDDEN",
+      });
+    } finally {
+      process.env.PARTNER_DATABASE_URL = restored;
+      await closePartnerPools();
+    }
+  });
+
+  it("ACCEPTS the restricted runtime credential — the check is not simply always-false", async () => {
+    const { closePartnerPools } = await import("../server/partner/db");
+    process.env.PARTNER_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_app_test_cap", "synthetic");
+    await closePartnerPools();
+    expect(await getPartnerRuntimeCapability()).toMatchObject({ ok: true });
+  });
+
+  it("mount.ts Gate 2 consumes that probe and fails closed BEFORE the definer inspection", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const mount = readFileSync(join(process.cwd(), "server", "partner", "mount.ts"), "utf8");
+    const gate = mount.slice(mount.indexOf("async function checkDefinerModelOnce"));
+    const body = gate.slice(0, gate.indexOf("\n}"));
+    const capabilityAt = body.indexOf("getPartnerRuntimeCapability()");
+    const definerAt = body.indexOf("definerModelViolations(");
+    expect(capabilityAt, "Gate 2 no longer calls getPartnerRuntimeCapability").toBeGreaterThan(-1);
+    expect(definerAt, "Gate 2 no longer calls definerModelViolations").toBeGreaterThan(-1);
+    // Ordering matters: the credential check must short-circuit, so a BYPASSRLS runtime URL is
+    // rejected even on a database whose definer model happens to be intact.
+    expect(capabilityAt, "the credential check must run BEFORE the definer inspection").toBeLessThan(definerAt);
+    // …and its failure must close the surface rather than merely log.
+    const afterCapability = body.slice(capabilityAt, definerAt);
+    expect(afterCapability).toMatch(/if \(!capability\.ok\)/);
+    expect(afterCapability).toMatch(/return false/);
+  });
 });

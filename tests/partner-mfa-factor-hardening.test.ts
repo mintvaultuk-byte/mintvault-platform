@@ -122,7 +122,13 @@ describe("MFA current-factor hardening coverage is wired up", () => {
     const enrol = await call("POST", "/api/partner/mfa/enrol", { password: PASSWORD });
     expect(enrol.status, `enrol failed: ${enrol.text}`).toBe(200);
     const secret = enrol.json.secret as string;
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secret, Date.now()) });
+    // Confirm is BY ENROLMENT ID since migration 0044 (applied in production): the pending secret is
+    // bound to the session that issued it and expires, so "confirm whatever pending row is newest"
+    // is no longer the contract. Threading the id through is the stronger invariant, not a workaround.
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: enrol.json.enrolmentId as string,
+      code: currentTotp(secret, Date.now()),
+    });
     expect(confirm.status, `confirm failed: ${confirm.text}`).toBe(200);
     return { secret, codes: confirm.json.recoveryCodes as string[] };
   }
@@ -255,8 +261,11 @@ describe("MFA current-factor hardening coverage is wired up", () => {
     secretA = enrol.json.secret as string;
     expect(secretA).toBeTruthy();
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secretA, Date.now()) });
-    expect(confirm.status).toBe(200);
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: enrol.json.enrolmentId as string,
+      code: currentTotp(secretA, Date.now()),
+    });
+    expect(confirm.status, confirm.text).toBe(200);
     codesA = confirm.json.recoveryCodes as string[];
     expect(codesA).toHaveLength(10);
 
@@ -530,7 +539,10 @@ describe("MFA current-factor hardening coverage is wired up", () => {
     const newSecret = enrol.json.secret as string;
     expect(newSecret).not.toBe(oldSecret);
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(newSecret, Date.now()) });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: enrol.json.enrolmentId as string,
+      code: currentTotp(newSecret, Date.now()),
+    });
     expect(confirm.status, confirm.text).toBe(200);
     expect(confirm.json.recoveryCodes as string[]).toHaveLength(10);
     codesA = confirm.json.recoveryCodes as string[];
@@ -586,8 +598,11 @@ describe("MFA current-factor hardening coverage is wired up", () => {
     const enrol = await call("POST", "/api/partner/mfa/enrol", { password: PASSWORD, recoveryCode: usedFactor });
     expect(enrol.status, enrol.text).toBe(200);
     const newSecret = enrol.json.secret as string;
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(newSecret, Date.now()) });
-    expect(confirm.status).toBe(200);
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: enrol.json.enrolmentId as string,
+      code: currentTotp(newSecret, Date.now()),
+    });
+    expect(confirm.status, confirm.text).toBe(200);
     secretA = newSecret;
     codesA = confirm.json.recoveryCodes as string[];
 

@@ -6,10 +6,19 @@
  */
 
 import { db, pool } from "./db";
+import { createHash } from "node:crypto";
 import { hashLockKey } from "./lib/advisory-lock";
+import { orientLide400Presentation } from "./lib/lide400-presentation";
+import { CANON_LIDE_400_PROFILE } from "./lib/lide400-profile";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
-import { uploadToR2, getR2Buffer, listR2Keys } from "./r2";
+import { uploadToR2, uploadImmutableEvidenceToR2, getR2Buffer, listR2Keys } from "./r2";
+import {
+  assertCompatibleEvidencePair,
+  inspectScannerEvidence,
+  type ScannerEvidenceInspection,
+} from "./lib/image-evidence";
+export { assertCompatibleEvidencePair, inspectScannerEvidence } from "./lib/image-evidence";
 import {
   generateImageVariants,
   identifyCardFromBuffer,
@@ -19,7 +28,6 @@ import {
   type EnrichedCardData,
   type AiGrading,
 } from "./ai-grading-service";
-import { runScanJob } from "./lib/scan-job-queue";
 import { CERTIFICATE_ORIGIN_SNAPSHOT_VERSION } from "@shared/schema";
 
 /**
@@ -83,6 +91,71 @@ export async function ensureCertDurabilitySchema(): Promise<void> {
 }
 
 /**
+ * Phase 58A additive evidence ledger. This deliberately has no numbered
+ * migration: the active migration sequence is owned by the release lead and
+ * must be reconciled before a numbered file is allocated. It mirrors the
+ * project's existing idempotent boot-schema pattern and is safe on an empty or
+ * live database; it never mutates historical certificate rows.
+ */
+export async function ensureImageEvidenceSchema(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS certificate_image_evidence (
+      id SERIAL PRIMARY KEY,
+      certificate_id INTEGER NOT NULL REFERENCES certificates(id) ON DELETE RESTRICT,
+      side VARCHAR(5) NOT NULL CHECK (side IN ('front', 'back')),
+      evidence_class VARCHAR(32) NOT NULL CHECK (evidence_class IN ('NEW_IMMUTABLE_MASTER', 'LEGACY_DERIVED_ONLY')),
+      evidence_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+      object_key TEXT NOT NULL UNIQUE,
+      sha256 VARCHAR(64) NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+      byte_length BIGINT NOT NULL CHECK (byte_length > 0),
+      pixel_width INTEGER NOT NULL CHECK (pixel_width > 0),
+      pixel_height INTEGER NOT NULL CHECK (pixel_height > 0),
+      bit_depth INTEGER,
+      dpi INTEGER,
+      format VARCHAR(16) NOT NULL,
+      capture_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      working_object_key TEXT,
+      working_sha256 VARCHAR(64),
+      working_width INTEGER,
+      working_height INTEGER,
+      working_format VARCHAR(16),
+      working_settings JSONB,
+      is_current BOOLEAN NOT NULL DEFAULT true,
+      superseded_at TIMESTAMPTZ,
+      superseded_by_id INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT fk_certificate_image_evidence_superseded_by
+        FOREIGN KEY (superseded_by_id) REFERENCES certificate_image_evidence(id) ON DELETE RESTRICT
+    )
+  `);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_object_key TEXT`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_sha256 VARCHAR(64)`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_width INTEGER`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_height INTEGER`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_format VARCHAR(16)`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_settings JSONB`);
+  await db.execute(
+    sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS is_current BOOLEAN NOT NULL DEFAULT true`
+  );
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS superseded_by_id INTEGER`);
+  // v2 turns the prior single-master-side ledger into immutable revisions.
+  // No rows are removed: the old uniqueness rule is replaced by a partial
+  // uniqueness rule that permits history while retaining one current source.
+  await db.execute(
+    sql`ALTER TABLE certificate_image_evidence DROP CONSTRAINT IF EXISTS uq_certificate_image_evidence_side`
+  );
+  await db.execute(sql`DROP INDEX IF EXISTS uq_certificate_image_evidence_side`);
+  await db.execute(
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_certificate_image_evidence_current_side
+        ON certificate_image_evidence (certificate_id, side) WHERE is_current`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_certificate_image_evidence_sha ON certificate_image_evidence (sha256)`
+  );
+}
+
+/**
  * Idempotent, concurrency-safe cert creation for an admin scan.
  *
  * `idempotencyKey` is derived by the scanner from the scan CONTENT (front+back
@@ -90,12 +163,14 @@ export async function ensureCertDurabilitySchema(): Promise<void> {
  * (crash recovery, or a retry racing the original) resolves to the SAME cert,
  * never a duplicate:
  *   1. fast path — a committed cert for this key exists → return it (no alloc).
- *   2. else allocate a number + INSERT gated by the UNIQUE index
- *      (ON CONFLICT DO NOTHING). The index, not a check-then-insert, is the
- *      atomic primitive against concurrent same-key POSTs.
+ *   2. else, in ONE transaction, allocate a number + INSERT gated by the UNIQUE
+ *      index (ON CONFLICT DO NOTHING). The index, not a check-then-insert, is
+ *      the atomic primitive against concurrent same-key POSTs.
  *   3. lost the concurrent race (a sibling POST with the same key inserted
- *      first) → re-select the winner. The number from step 2's getNextCertId()
- *      becomes a harmless counter gap; NO second cert is created.
+ *      first) → roll the transaction back, which RETURNS the allocated number
+ *      to the sequence, then re-select the winner. NO second cert is created
+ *      and NO integer is consumed. (This step previously left the number behind
+ *      as a permanent gap in the MV sequence.)
  * A null key (interactive admin_ui ingest) skips the gate and always allocates —
  * NULLs don't collide in the unique index.
  */
@@ -130,6 +205,19 @@ export async function resolveScanOperatorId(operatorHeader?: string | null): Pro
   } catch (err: any) {
     console.warn(`[scan-ingest] operator resolution failed (${err?.message}) → scanned_by NULL`);
     return null;
+  }
+}
+
+/**
+ * Internal sentinel: a concurrent same-key ingest committed first, so this
+ * transaction must roll back — which returns its MV number to the sequence —
+ * and then resolve to the winning row. This is a normal, expected outcome of
+ * the idempotency race, not a failure; it never escapes createCertForScan().
+ */
+class IdempotencyRaceLost extends Error {
+  constructor() {
+    super("concurrent same-key ingest committed first");
+    this.name = "IdempotencyRaceLost";
   }
 }
 
@@ -191,9 +279,17 @@ export async function createCertForScan(
     }
   }
 
-  // 2. Allocate + insert, gated by the unique index on ingest_idempotency_key.
+  // 2. Allocate + insert ATOMICALLY, gated by the unique index on
+  //    ingest_idempotency_key. The counter increment and the INSERT share ONE
+  //    transaction. If a sibling POST with the same key committed first, the
+  //    ON CONFLICT returns no row and we roll the whole transaction back, which
+  //    RETURNS the MV integer to the sequence. Previously the allocation
+  //    autocommitted separately and the loser's number became a permanent gap in
+  //    the physical-card identity sequence. The unique index — not a
+  //    check-then-insert — remains the atomic primitive against concurrent
+  //    same-key POSTs. Nothing but these two statements is inside the
+  //    transaction: the cert_counter row lock is held until it commits.
   const { generateReferenceNumber } = await import("./reference-number");
-  const certNumber = await storage.getNextCertId();
   const refNum = generateReferenceNumber();
   // Stamp the grading-origin snapshot explicitly as HQ.
   //
@@ -212,28 +308,44 @@ export async function createCertForScan(
   // (chk_certificates_origin_capture_pairing); all partner fields stay NULL
   // (chk_certificates_origin_non_partner_clean). 0035's trigger is set-once, so this value is
   // frozen the moment it lands — which is exactly why it must not be guessed.
-  const ins = await db.execute(sql`
-    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key, origin_type, origin_captured_at, origin_snapshot_version)
-    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null}, 'HQ', NOW(), ${CERTIFICATE_ORIGIN_SNAPSHOT_VERSION})
-    ON CONFLICT (ingest_idempotency_key) DO NOTHING
-    RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
-  `);
-  if (ins.rows.length) {
-    const row = mapRow(ins.rows[0], false);
+  //
+  // The origin stamp is INSIDE the allocator transaction, deliberately: the origin snapshot and
+  // the identity it describes must commit or roll back together. A rolled-back insert must leave
+  // neither an MV integer consumed nor a half-recorded provenance claim.
+  let created: Record<string, unknown> | null = null;
+  try {
+    created = await db.transaction(async (tx) => {
+      const certNumber = await storage.getNextCertId(tx);
+      const ins = await tx.execute(sql`
+        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key, origin_type, origin_captured_at, origin_snapshot_version)
+        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null}, 'HQ', NOW(), ${CERTIFICATE_ORIGIN_SNAPSHOT_VERSION})
+        ON CONFLICT (ingest_idempotency_key) DO NOTHING
+        RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
+      `);
+      if (!ins.rows.length) throw new IdempotencyRaceLost();
+      return ins.rows[0] as Record<string, unknown>;
+    });
+  } catch (err) {
+    // Only the race sentinel is swallowed; a real failure still propagates (and
+    // its rollback has already returned the MV integer to the sequence).
+    if (!(err instanceof IdempotencyRaceLost)) throw err;
+    created = null;
+  }
+  if (created) {
+    const row = mapRow(created, false);
     console.log(`[scan-ingest] created cert ${row.certId} (id=${row.id}) ref=${refNum}`);
     return row;
   }
 
   // 3. Lost a concurrent same-key race — a sibling POST inserted first. Our
-  //    getNextCertId() number is a harmless counter gap; resolve to the winner.
+  //    allocation was rolled back with the transaction, so NO number was
+  //    consumed; resolve to the winner.
   const winner = await db.execute(sql`
     SELECT id, certificate_number, reference_number, raw_uploaded, scan_status
     FROM certificates WHERE ingest_idempotency_key = ${idempotencyKey} LIMIT 1`);
   if (!winner.rows.length) throw new Error(`idempotency conflict but no winning row for key`);
   const row = mapRow(winner.rows[0], true);
-  console.log(
-    `[scan-ingest] concurrent same-key race resolved → ${row.certId} (counter tick MV${certNumber.replace(/\D/g, "")} skipped)`
-  );
+  console.log(`[scan-ingest] concurrent same-key race resolved → ${row.certId} (no counter tick consumed)`);
   return row;
 }
 
@@ -254,7 +366,7 @@ export async function markRawUploaded(certId: number): Promise<void> {
  * and dedup-safe (deterministic R2 keys, no rescan).
  *
  *  (A) scan_status='failed' AND raw_uploaded=true: the raw scans ARE in R2, but
- *      the heavy pipeline failed. Re-drive processing from the retained raw.
+ *      the heavy pipeline failed. Re-enqueue processing from the retained raw.
  *  (B) raw_uploaded=false older than N min: the server has NO bytes (they live
  *      only in the scanner's retained inbox file) — it CANNOT fix this itself.
  *      Surface LOUD; recovery is the scanner re-driving the idempotent ingest.
@@ -264,8 +376,8 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
   const stale = opts.staleMinutes ?? 10;
   const limit = opts.limit ?? 20;
 
-  // (A) Re-drive interrupted pipelines from R2 raw — raw is durably in R2 but the
-  // heavy pipeline never finished. Two ways in:
+  // (A) Re-enqueue interrupted pipelines from retained immutable evidence — raw
+  // is durably in R2 but the heavy pipeline never finished. Two ways in:
   //   - scan_status='failed'         → the pipeline threw; re-drive immediately.
   //   - scan_status='processing' AND stale → the pipeline was INTERRUPTED after
   //     markRawUploaded but before completion. The commonest cause is a SERVER
@@ -274,8 +386,10 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
   //     failed-only query caught it, so it stranded forever (MV291-297). A staleness
   //     gate (>${stale}min, well beyond the ~10-30s a real pipeline takes) ensures we
   //     never yank a cert that's legitimately mid-processing right now.
-  // Re-drive is idempotent: same cert id, deterministic R2 keys overwrite, the
-  // content-keyed ingest resolves to the same cert — safe to run twice.
+  // Queue insertion is idempotent: one active durable job exists per certificate.
+  // This reconciler must not read TIFFs or run Sharp itself; otherwise it would
+  // bypass the lease/capacity boundary and race the durable worker on another
+  // replica.
   let failed: { rows: any[] };
   try {
     failed = (await db.execute(sql`
@@ -296,48 +410,11 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
     const certId = row.id as number;
     const certNum = String(row.certificate_number);
     try {
-      // Skip-if-running probe (multi-scanner safety): if this cert's image
-      // pipeline advisory lock is HELD, the pipeline is actively running on
-      // some machine right now — re-driving would only duplicate the work.
-      // Advisory locks are PER-CONNECTION, so probe + release MUST happen on
-      // one dedicated client (via the shared pool the unlock could land on a
-      // different connection and leak the lock into the pool).
-      const probeKey = hashLockKey(`img-pipeline:${certId}`);
-      const probeClient = await pool.connect();
-      let running = false;
-      try {
-        const r = await probeClient.query("SELECT pg_try_advisory_lock($1) AS locked", [probeKey]);
-        if (r.rows[0]?.locked === true) {
-          await probeClient.query("SELECT pg_advisory_unlock($1)", [probeKey]).catch(() => {});
-        } else {
-          running = true;
-        }
-      } finally {
-        probeClient.release();
-      }
-      if (running) {
-        console.log(`[reconciler] ${certNum}: pipeline actively running elsewhere — skipping re-drive`);
-        continue;
-      }
-      const frontKeys = await listR2Keys(`images/grading/${certId}/raw_front`);
-      const backKeys = await listR2Keys(`images/grading/${certId}/raw_back`);
-      const frontBuf = frontKeys.length ? await getR2Buffer(frontKeys[0]) : null;
-      const backBuf = backKeys.length ? await getR2Buffer(backKeys[0]) : null;
-      if (!frontBuf) {
-        console.warn(`[reconciler] ${certNum}: interrupted scan but no raw_front in R2 — cannot re-drive`);
-        continue;
-      }
-      console.log(`[reconciler] re-driving interrupted pipeline for ${certNum} from retained R2 raw`);
-      // Serialize re-drive through the SAME scan queue so a reconciler sweep can't
-      // pile heavy pipelines onto a concurrent foreground scan burst.
-      // skipAi: the AI pre-grade is deferred off the scan path (computed lazily
-      // on grader-open via ensureAiDraft); the re-drive does sharp+r2 only.
-      await runScanJob(
-        () => processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, { skipAi: true }),
-        certNum
-      );
+      const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
+      await enqueueScannerProcessing(certId, null);
+      console.log(`[reconciler] re-enqueued interrupted scanner pipeline for ${certNum}`);
     } catch (e: any) {
-      console.error(`[reconciler] re-drive failed ${certNum}: ${e?.message ?? e}${pgErrorDetail(e)}`);
+      console.error(`[reconciler] re-enqueue failed ${certNum}: ${e?.message ?? e}${pgErrorDetail(e)}`);
     }
   }
 
@@ -373,17 +450,134 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
  */
 export async function uploadRawScansToR2(
   certId: number,
-  front: { buffer: Buffer; mimeType: string; ext: string },
-  back: { buffer: Buffer; mimeType: string; ext: string } | null
+  front: { buffer: Buffer; mimeType: string; ext: string; inspection?: ScannerEvidenceInspection },
+  back: { buffer: Buffer; mimeType: string; ext: string; inspection?: ScannerEvidenceInspection } | null,
+  options: { allowRecapture?: boolean; captureMetadata?: Record<string, unknown>; primarySide?: "front" | "back" } = {}
 ): Promise<{ frontKey: string; backKey: string | null }> {
-  const safeExt = (ext: string) => (ext.replace(/[^a-z0-9]/gi, "") || "bin").toLowerCase();
-  const frontKey = `images/grading/${certId}/raw_front.${safeExt(front.ext)}`;
-  const backKey = back ? `images/grading/${certId}/raw_back.${safeExt(back.ext)}` : null;
-  await Promise.all([
-    uploadToR2(frontKey, front.buffer, front.mimeType || "application/octet-stream"),
-    back && backKey ? uploadToR2(backKey, back.buffer, back.mimeType || "application/octet-stream") : Promise.resolve(),
+  const frontInspection = front.inspection ?? (await inspectScannerEvidence(front.buffer));
+  const backInspection = back ? (back.inspection ?? (await inspectScannerEvidence(back.buffer))) : null;
+  assertCompatibleEvidencePair(frontInspection, backInspection);
+
+  const persist = async (
+    side: "front" | "back",
+    input: { buffer: Buffer },
+    inspection: ScannerEvidenceInspection
+  ): Promise<string> => {
+    // TIFF is content-addressed and immutable. A JPEG is retained only to keep
+    // existing scanner clients operational, under an explicit legacy prefix.
+    const key =
+      inspection.evidenceClass === "NEW_IMMUTABLE_MASTER"
+        ? `evidence/masters/${certId}/${side}/${inspection.sha256}.tif`
+        : `evidence/legacy/${certId}/${side}/${inspection.sha256}.jpg`;
+    if (inspection.evidenceClass === "NEW_IMMUTABLE_MASTER") {
+      await uploadImmutableEvidenceToR2(key, input.buffer, {
+        sha256: inspection.sha256,
+        evidenceclass: inspection.evidenceClass,
+        evidenceversion: "v1",
+        side,
+        certificateid: String(certId),
+      });
+    } else {
+      await uploadToR2(key, input.buffer, inspection.mimeType);
+    }
+
+    // Object storage is content-addressed and immutable.  The database pointer
+    // switch below is serialized separately, so a retry can never replace an
+    // earlier master and concurrent recaptures cannot both become current.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock($1)", [hashLockKey(`evidence:${certId}:${side}`)]);
+      const existing = await client.query(
+        `SELECT id, object_key, sha256, byte_length, evidence_class
+           FROM certificate_image_evidence
+          WHERE certificate_id = $1 AND side = $2 AND is_current = true
+          FOR UPDATE`,
+        [certId, side]
+      );
+      const current = existing.rows[0] as
+        | { id: number; object_key: string; sha256: string; byte_length: string | number; evidence_class: string }
+        | undefined;
+      if (
+        current?.sha256 === inspection.sha256 &&
+        Number(current.byte_length) === inspection.byteLength &&
+        current.evidence_class === inspection.evidenceClass
+      ) {
+        await client.query("COMMIT");
+        return String(current.object_key); // exact replay; no duplicate revision
+      }
+      if (current && !options.allowRecapture) {
+        throw new Error(`Refusing to replace existing ${side} scanner evidence for certificate ${certId}`);
+      }
+      if (current) {
+        await client.query(
+          `UPDATE certificate_image_evidence
+              SET is_current = false, superseded_at = NOW()
+            WHERE id = $1`,
+          [current.id]
+        );
+      }
+      const metadata = JSON.stringify({
+        channels: inspection.channels,
+        colourSpace: inspection.colourSpace,
+        hasIccProfile: inspection.hasIccProfile,
+        ...(options.captureMetadata ?? {}),
+      });
+      const inserted = await client.query(
+        `INSERT INTO certificate_image_evidence
+          (certificate_id, side, evidence_class, evidence_version, object_key, sha256, byte_length,
+           pixel_width, pixel_height, bit_depth, dpi, format, capture_metadata, is_current)
+         VALUES ($1, $2, $3, 'v2', $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, true)
+         RETURNING id, object_key`,
+        [
+          certId,
+          side,
+          inspection.evidenceClass,
+          key,
+          inspection.sha256,
+          inspection.byteLength,
+          inspection.width,
+          inspection.height,
+          inspection.bitDepth,
+          inspection.dpi,
+          inspection.format,
+          metadata,
+        ]
+      );
+      const next = inserted.rows[0] as { id: number; object_key: string };
+      if (current) {
+        await client.query("UPDATE certificate_image_evidence SET superseded_by_id = $1 WHERE id = $2", [
+          next.id,
+          current.id,
+        ]);
+      }
+      await client.query("COMMIT");
+      return next.object_key;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
+  const primarySide = options.primarySide ?? "front";
+  const [frontKey, backKey] = await Promise.all([
+    persist(primarySide, front, frontInspection),
+    back && backInspection ? persist("back", back, backInspection) : Promise.resolve(null),
   ]);
   return { frontKey, backKey };
+}
+
+/** Persist exactly one pre-bound scanner side without creating a second ingest path. */
+export async function uploadRawScannerSide(
+  certId: number,
+  side: "front" | "back",
+  input: { buffer: Buffer; mimeType: string; ext: string; inspection?: ScannerEvidenceInspection },
+  options: { allowRecapture: boolean; captureMetadata: Record<string, unknown> }
+): Promise<string> {
+  const persisted = await uploadRawScansToR2(certId, input, null, { ...options, primarySide: side });
+  return persisted.frontKey;
 }
 
 /**
@@ -412,7 +606,7 @@ export async function processScanInBackground(
   certInfo: { id: number; certId: string },
   frontBuf: Buffer,
   backBuf: Buffer | null,
-  opts: { skipAi?: boolean } = {}
+  opts: { skipAi?: boolean; throwOnFailure?: boolean } = {}
 ): Promise<void> {
   const t0 = process.hrtime.bigint();
   try {
@@ -420,9 +614,7 @@ export async function processScanInBackground(
     // Two-scanner safety: the other scanner may have deleted this cert between
     // ingest and this background job. Skip the whole pipeline — the UPDATE
     // guards downstream would no-op anyway, this just avoids the wasted work.
-    const live = await db.execute(
-      sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    const live = await db.execute(sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     if (live.rows.length === 0) {
       console.log(`[process-scan] cert=${certInfo.certId} soft-deleted mid-ingest — skipping pipeline`);
       return;
@@ -431,9 +623,7 @@ export async function processScanInBackground(
     // staleness marker. Bumping it when the job actually STARTS means
     // "stale processing" measures started-but-died pipelines, not certs
     // that merely sat in a busy queue behind 3-4 scanners' worth of cards.
-    await db.execute(
-      sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
@@ -483,7 +673,38 @@ export async function processScanInBackground(
     } catch {
       /* audit write best-effort */
     }
+    if (opts.throwOnFailure) throw err;
   }
+}
+
+/**
+ * Resolve the immutable evidence selection only when the bounded processing
+ * worker begins.  The receive/finalisation HTTP request must not download one
+ * or two 1200-DPI masters back into heap merely to enqueue derivative work.
+ *
+ * The evidence ledger is the authority here, not a request payload or an R2
+ * key supplied by a station. A later accepted recapture intentionally wins
+ * the current pointer before derivative work begins.
+ */
+export async function processCurrentScannerEvidenceInBackground(
+  certInfo: { id: number; certId: string },
+  opts: { skipAi?: boolean; throwOnFailure?: boolean } = {}
+): Promise<void> {
+  const current = await db.execute(sql`
+    SELECT side, object_key FROM certificate_image_evidence
+    WHERE certificate_id = ${certInfo.id} AND is_current = true`);
+  const rows = current.rows as Array<{ side: "front" | "back"; object_key: string }>;
+  const frontKey = rows.find((row) => row.side === "front")?.object_key;
+  const backKey = rows.find((row) => row.side === "back")?.object_key;
+  if (!frontKey) throw new Error("Current immutable front master is unavailable for scan processing");
+  const [frontBuffer, backBuffer] = await Promise.all([
+    getR2Buffer(frontKey),
+    backKey ? getR2Buffer(backKey) : Promise.resolve(null),
+  ]);
+  if (!frontBuffer || (backKey && !backBuffer)) {
+    throw new Error("Current immutable master could not be re-read from evidence storage");
+  }
+  return processScanInBackground(certInfo, frontBuffer, backBuffer, opts);
 }
 
 /**
@@ -547,13 +768,90 @@ async function uploadImagesToCertUnlocked(
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
-  // certificate_number is already normalised ("MV145", not "MV-0000000145");
-  // fall back to synthesising from db id if somehow missing.
-  const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`))
-    .rows[0] as any;
-  const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
+  // certificate_number is already normalised ("MV145", not "MV-0000000145").
+  //
+  // There is deliberately NO fallback. This previously synthesised `MV${certId}`
+  // from the numeric PRIMARY KEY, which is not a certificate number at all: it
+  // would mint a plausible-looking but fake MV identity and write this card's
+  // images under a key belonging to a DIFFERENT real certificate. A missing row
+  // (the cert was hard-deleted mid-pipeline) must abort the image write, never
+  // invent an identity.
+  const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`)).rows[0] as
+    | { certificate_number?: string }
+    | undefined;
+  const certNumber = certRow?.certificate_number;
+  if (!certNumber) {
+    throw new Error(
+      `cannot resolve certificate_number for certificate id=${certId} — refusing to write images under a synthesised key`
+    );
+  }
 
-  // WORKING resolution for the variant pipeline. The raw scanner output is a
+  // A NEW_IMMUTABLE_MASTER working derivative may only be built from the exact
+  // master bytes bound in the evidence ledger. This deliberately makes legacy
+  // bulk-reprocess paths fail for new evidence rather than laundering a q85
+  // derivative back into an authoritative working pointer.
+  let masterRows: Array<{ side: string; sha256: string; scannerProfileVersion: string | null }> = [];
+  try {
+    masterRows = (
+      await db.execute(sql`
+        SELECT side, sha256,
+          COALESCE(
+            capture_metadata->>'scannerProfileVersion',
+            capture_metadata->>'profileVersion'
+          ) AS "scannerProfileVersion"
+          FROM certificate_image_evidence
+        WHERE certificate_id = ${certId} AND evidence_class = 'NEW_IMMUTABLE_MASTER' AND is_current = true
+      `)
+    ).rows as Array<{ side: string; sha256: string; scannerProfileVersion: string | null }>;
+  } catch {
+    // Table is additive during a rolling deployment; legacy processing remains
+    // available until it exists. New ingestion creates the ledger before this
+    // function is queued, so it never takes this fallback.
+  }
+  if (masterRows.length) {
+    const verify = async (side: "front" | "back", input: Buffer | null) => {
+      const row = masterRows.find((r) => r.side === side);
+      if (!row) return;
+      if (!input) throw new Error(`Missing ${side} master bytes for evidence-bound working derivative`);
+      const inspected = await inspectScannerEvidence(input);
+      if (inspected.evidenceClass !== "NEW_IMMUTABLE_MASTER" || inspected.sha256 !== row.sha256) {
+        throw new Error(`Refusing ${side} working derivative: source does not match immutable TIFF master`);
+      }
+    };
+    await verify("front", frontBuffer);
+    await verify("back", backBuffer);
+  }
+
+  // Phase 58A authoritative working asset. It is a browser-safe JPEG derived
+  // once from the master with deterministic orientation only: no crop, resize,
+  // denoise, sharpening, or perspective correction. The old 2000px output
+  // remains a non-authoritative analysis/display branch below.
+  const isLide400Master = (side: "front" | "back") =>
+    masterRows.find((row) => row.side === side)?.scannerProfileVersion === CANON_LIDE_400_PROFILE.version;
+
+  const makeNativeWorkingAsset = async (buf: Buffer, isLide400: boolean) => {
+    const source = sharp(buf, { limitInputPixels: 30_000_000, failOn: "error" });
+    // Scanner evidence preserves its source TIFF untouched. Its working and
+    // display derivatives, however, are always upright for the operator.
+    const oriented = isLide400 ? orientLide400Presentation(source) : source.rotate();
+    const result = await oriented
+      .jpeg({ quality: 95, chromaSubsampling: "4:4:4", progressive: false })
+      .toBuffer({ resolveWithObject: true });
+    return {
+      buffer: result.data,
+      width: result.info.width,
+      height: result.info.height,
+      sha256: createHash("sha256").update(result.data).digest("hex"),
+    };
+  };
+  const [frontWorking, backWorking] = await Promise.all([
+    makeNativeWorkingAsset(frontBuffer, isLide400Master("front")),
+    backBuffer ? makeNativeWorkingAsset(backBuffer, isLide400Master("back")) : Promise.resolve(null),
+  ]);
+
+  // WORKING resolution for the legacy variant pipeline. This is deliberately
+  // downstream of the authoritative native working asset, never the TIFF
+  // master. It must not be used for new manual measurements.
   // 900dpi TIFF (a card ≈ 2250×3150 px, the whole bed far more); the client
   // uploads it full-res. We downscale to this working size ONCE here, then EVERY
   // downstream step (deskew, card-detect, re-centre, the 5 analysis variants, the
@@ -583,8 +881,8 @@ async function uploadImagesToCertUnlocked(
       .toBuffer();
 
   const [frontResized, backResized] = await Promise.all([
-    resizeBuf(frontBuffer),
-    backBuffer ? resizeBuf(backBuffer) : Promise.resolve(null),
+    resizeBuf(frontWorking.buffer),
+    backWorking ? resizeBuf(backWorking.buffer) : Promise.resolve(null),
   ]);
 
   // Generate variants via the unified pipeline (deskew + autoCrop + reCentre).
@@ -664,6 +962,21 @@ async function uploadImagesToCertUnlocked(
   const uploadKeys: Record<string, string> = {};
   const uploads: Promise<void>[] = [];
 
+  // Persist native working assets under content-addressed keys. The ledger
+  // ties each output to its source master hash and settings before the
+  // workstation is allowed to consume it.
+  const evidenceRows = (
+    await db.execute(sql`
+    SELECT side, sha256 FROM certificate_image_evidence WHERE certificate_id = ${certId} AND is_current = true`)
+  ).rows as any[];
+  const frontSource = evidenceRows.find((r) => r.side === "front");
+  const backSource = evidenceRows.find((r) => r.side === "back");
+  const frontWorkingKey = `evidence/working/${certId}/front/${frontWorking.sha256}.v1.jpg`;
+  uploads.push(uploadToR2(frontWorkingKey, frontWorking.buffer, "image/jpeg").then(() => {}));
+  const backWorkingKey = backWorking ? `evidence/working/${certId}/back/${backWorking.sha256}.v1.jpg` : null;
+  if (backWorking && backWorkingKey)
+    uploads.push(uploadToR2(backWorkingKey, backWorking.buffer, "image/jpeg").then(() => {}));
+
   // Flat JPG variants. Phase 2 — "cropped" REMOVED from this loop: it wrote the
   // SAME R2 key (front_cropped.jpg / back_cropped.jpg) as the canonical display
   // JPEG below, racing it in Promise.all with a different buffer. The display JPEG
@@ -732,6 +1045,31 @@ async function uploadImagesToCertUnlocked(
   await Promise.all(uploads);
   const r2Ms = elapsedMs(tR2);
   console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
+
+  const workingSettings = JSON.stringify({
+    version: "v1",
+    format: "jpeg",
+    quality: 95,
+    chromaSubsampling: "4:4:4",
+    orientation: "rotate",
+    resize: null,
+  });
+  if (frontSource) {
+    await db.execute(sql`
+      UPDATE certificate_image_evidence SET
+        working_object_key = ${frontWorkingKey}, working_sha256 = ${frontWorking.sha256},
+        working_width = ${frontWorking.width}, working_height = ${frontWorking.height},
+        working_format = 'jpeg', working_settings = ${workingSettings}::jsonb
+      WHERE certificate_id = ${certId} AND side = 'front' AND is_current = true AND sha256 = ${frontSource.sha256}`);
+  }
+  if (backSource && backWorking && backWorkingKey) {
+    await db.execute(sql`
+      UPDATE certificate_image_evidence SET
+        working_object_key = ${backWorkingKey}, working_sha256 = ${backWorking.sha256},
+        working_width = ${backWorking.width}, working_height = ${backWorking.height},
+        working_format = 'jpeg', working_settings = ${workingSettings}::jsonb
+      WHERE certificate_id = ${certId} AND side = 'back' AND is_current = true AND sha256 = ${backSource.sha256}`);
+  }
 
   // Persist R2 keys + crop_geometry forensics
   const cropGeometry = {
@@ -1150,9 +1488,8 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
  */
 export async function repairEmptyIdentityFromSnapshot(certId: number): Promise<boolean> {
   try {
-    const row = (
-      await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`)
-    ).rows[0] as any;
+    const row = (await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`))
+      .rows[0] as any;
     if (!row) return false;
     const nameEmpty = row.card_name == null || String(row.card_name).trim() === "";
     if (!nameEmpty) return false; // only repair a genuinely missing name

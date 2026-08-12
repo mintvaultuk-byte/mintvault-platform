@@ -648,10 +648,10 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
   // ── F3: a held save must never be silently discarded ──────────────────────
   describe("deferred-save safety (F3)", () => {
     it("a deferred autosave shows a PAUSED state, not 'saves automatically'", () => {
-      // Both status renderers must report the pause; the held state (not the panel
-      // visibility) drives it, so Cancel cannot make the UI look resolved.
+      // The canonical compact status must report the hold (not the panel
+      // visibility), so Cancel cannot make the UI look resolved.
       expect(FORM).toContain('"Save paused — confirm the conversion"');
-      expect(FORM).toContain('data-testid="text-save-paused"');
+      expect(FORM).toContain('data-testid="text-autosave-status-mini"');
       // the mini status checks the hold FIRST, before the autoSaveStatus ladder
       const mini = FORM.slice(FORM.indexOf('data-testid="text-autosave-status-mini"'));
       expect(mini.slice(0, 700)).toMatch(/legacyLossWarning\s*\n?\s*\?\s*"Save paused/);
@@ -996,6 +996,14 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /promo_type\s*=\s*\$\{/.test(addedCode);
         // Signature B is purely JavaScript, so it is judged ONLY on the JS representation.
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+        // D) P0 review-revision binding: accept only the complete
+        // server-issued revision + atomic-CAS chain, never scoring changes.
+        const signatureD =
+          /\bapplyCertGradeDraft\s*\(/.test(addedJs) &&
+          /\bapproveCertGrade\s*\([^)]*expectedRevision/.test(addedJs) &&
+          /\bapproveGraderCert\s*\([^)]*expectedRevision/.test(addedJs) &&
+          /RETURNING grading_revision/.test(addedCode) &&
+          /AND grading_revision\s*=\s*\$\{expectedRevision\}/.test(addedCode);
         // C) Wave 1 Partner-origin integration — founder-approved 2026-07-31, narrowly.
         //    Same four required tokens as the sibling guard in variant-line-consolidation:
         //    the provenance column constant, the origin resolver, the fail-closed predicate,
@@ -1006,10 +1014,25 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bgetCertOrigin\s*\(/.test(addedJs) &&
           /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
           /\bcheckGradePublishGates\s*\(/.test(addedJs);
-        expect(signatureA || signatureB || signatureC, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
-        );
-        expect(addedCode).not.toMatch(
+        // E) Scanner evidence revision selection (v1069 lineage, admitted here as a SEPARATE
+        //    signature rather than replacing D). Both parents independently defined a
+        //    "signatureD"; they authorise DIFFERENT things — D is the canonical review-revision
+        //    CAS chain, E is the immutable-master evidence read that buildCertImagesPayload
+        //    performs. The merged server/grader.ts contains BOTH, so collapsing them would
+        //    let either change pass while claiming the other's authorisation. Restricted to the
+        //    immutable-master query and the explicit current pointer so the grade workflow
+        //    cannot be widened under this exception. Both tokens are SQL identifiers, so they
+        //    are matched against addedCode.
+        const signatureE =
+          /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        expect(
+          signatureA || signatureB || signatureC || signatureD || signatureE,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
+        const revisionBoundAddedCode = addedCode
+          .replace(/'(centering|corners|edges|surface)'/g, "")
+          .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");
+        expect(revisionBoundAddedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
         continue;
@@ -1029,7 +1052,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bcertificateOrigin\s*\(/.test(addedJs),
           "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
         ).toBe(true);
-        expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
+        expect(addedJs).not.toMatch(
+          /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i
+        );
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

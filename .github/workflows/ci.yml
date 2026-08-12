@@ -658,3 +658,136 @@ jobs:
               - dist/**
       - name: Analyze
         uses: github/codeql-action/analyze@v3
+
+  # ── linux/amd64 production-image release proof ────────────────────────────────
+  # WHY THIS JOB EXISTS. The Dockerfile pins both stages to node:20.20.2-slim
+  # because file-type@22 is ESM-only and the server bundles to CJS, so booting
+  # needs Node's require(esm) (>=20.19). That pin had no build-or-boot proof.
+  #
+  # It cannot be proven on an ARM dev machine: building linux/amd64 there needs
+  # QEMU, and esbuild (Go) reliably SIGSEGVs under user-mode emulation —
+  # "unexpected fault address / fatal error: fault" inside
+  # esbuild/internal/js_parser during the vite client build. That is an emulation
+  # defect, not a code or dependency fault (npm ci completed cleanly first).
+  #
+  # ubuntu-latest IS native amd64, so here the build is real rather than emulated.
+  # This job never pushes, never deploys, and uses no production secrets.
+  amd64-release-proof:
+    name: linux/amd64 image build & boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17.10
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amd64probe
+        ports: ["55440:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Build the production image (native amd64, no emulation)
+        run: |
+          set -euo pipefail
+          docker build --build-arg GIT_SHA="$(git rev-parse --short HEAD)" -t mv-amd64-proof:ci .
+
+      - name: Image really is linux/amd64 and carries the pinned Node
+        run: |
+          set -euo pipefail
+          arch="$(docker image inspect mv-amd64-proof:ci --format '{{.Architecture}}')"
+          os="$(docker image inspect mv-amd64-proof:ci --format '{{.Os}}')"
+          echo "image: $os/$arch"
+          [ "$arch" = "amd64" ] && [ "$os" = "linux" ] || { echo "not linux/amd64"; exit 1; }
+          # Do not trust image metadata alone — ask the running container.
+          uname_m="$(docker run --rm --entrypoint sh mv-amd64-proof:ci -c 'uname -m')"
+          node_v="$(docker run --rm --entrypoint node mv-amd64-proof:ci -p 'process.versions.node')"
+          node_arch="$(docker run --rm --entrypoint node mv-amd64-proof:ci -p 'process.arch')"
+          echo "uname=$uname_m node=$node_v arch=$node_arch"
+          [ "$uname_m" = "x86_64" ] || { echo "container is not x86_64"; exit 1; }
+          [ "$node_arch" = "x64" ] || { echo "node arch is not x64"; exit 1; }
+          [ "$node_v" = "20.20.2" ] || { echo "expected Node 20.20.2, got $node_v"; exit 1; }
+
+      - name: Native and ESM dependencies load under Node 20.20.2
+        run: |
+          set -euo pipefail
+          # file-type is the ESM-only dependency the >=20.19 floor exists for: this is
+          # require(esm) actually working inside the shipped image, not a version check.
+          docker run --rm --entrypoint node mv-amd64-proof:ci -e '
+            const { fileTypeFromBuffer } = require("file-type");
+            const sharp = require("sharp");
+            const { createCanvas } = require("canvas");
+            const PDFDocument = require("pdfkit");
+            (async () => {
+              const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+              const t = await fileTypeFromBuffer(png);
+              if (!t || t.mime !== "image/png") throw new Error("magic-byte validation failed: " + JSON.stringify(t));
+              const meta = await sharp(png).metadata();
+              if (meta.format !== "png") throw new Error("sharp did not decode png");
+              const c = createCanvas(80, 40); const ctx = c.getContext("2d");
+              ctx.fillStyle = "#D4AF37"; ctx.fillRect(0, 0, 80, 40);
+              const bytes = c.toBuffer("image/png");
+              if (!bytes || bytes.length < 100) throw new Error("canvas rendered no bytes");
+              const doc = new PDFDocument(); doc.text("amd64 proof"); doc.end();
+              console.log("OK file-type=" + t.mime + " sharp=" + meta.format + " canvas=" + bytes.length + "B pdfkit=loaded");
+            })().catch((e) => { console.error(e); process.exit(1); });
+          '
+
+      - name: Readiness fails CLOSED before the schema exists
+        run: |
+          set -euo pipefail
+          docker run -d --name mv-amd64-boot --network host \
+            -e NODE_ENV=production -e PORT=5055 \
+            -e MINTVAULT_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55440/amd64probe" \
+            -e SESSION_SECRET=amd64-proof-not-a-real-secret \
+            -e SIGNED_URL_SECRET=amd64-proof-not-a-real-secret \
+            -e ADMIN_PASSWORD=amd64-proof -e ADMIN_PIN=000000 \
+            mv-amd64-proof:ci
+          for i in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:5055/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          echo "--- /health ---"; curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5055/health
+          curl -fsS http://127.0.0.1:5055/health | grep -q '"status":"ok"'
+          echo "--- /ready with NO certificates table (must be 503) ---"
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5055/ready)"
+          echo "ready=$code"
+          [ "$code" = "503" ] || { echo "readiness did not fail closed"; docker logs mv-amd64-boot | tail -40; exit 1; }
+
+      - name: Readiness succeeds once the schema is present; version reports this SHA
+        run: |
+          set -euo pipefail
+          docker exec -e PGPASSWORD=postgres mv-amd64-boot true 2>/dev/null || true
+          # Create the one relation /ready probes for, in the disposable database.
+          docker run --rm --network host -e PGPASSWORD=postgres postgres:17.10 \
+            psql -h 127.0.0.1 -p 55440 -U postgres -d amd64probe \
+            -c "CREATE TABLE IF NOT EXISTS certificates (id serial primary key)"
+          for i in $(seq 1 20); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5055/ready)"
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          echo "ready=$code"; [ "$code" = "200" ] || { docker logs mv-amd64-boot | tail -40; exit 1; }
+          echo "--- /api/version must report the built SHA ---"
+          expected="$(git rev-parse --short HEAD)"
+          body="$(curl -fsS http://127.0.0.1:5055/api/version)"; echo "$body"
+          echo "$body" | grep -q "$expected" || { echo "expected commit $expected"; exit 1; }
+          echo "--- Partner router mounted (401/403/503, never 404) ---"
+          pcode="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5055/api/partner/me)"
+          echo "partner/me=$pcode"
+          [ "$pcode" != "404" ] || { echo "Partner router is NOT mounted"; exit 1; }
+
+      - name: Clean SIGTERM shutdown
+        run: |
+          set -euo pipefail
+          docker stop --time 30 mv-amd64-boot >/dev/null
+          code="$(docker inspect mv-amd64-boot --format '{{.State.ExitCode}}')"
+          echo "exit code after SIGTERM: $code"
+          [ "$code" = "0" ] || [ "$code" = "143" ] || { docker logs mv-amd64-boot | tail -40; exit 1; }
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f mv-amd64-boot >/dev/null 2>&1 || true

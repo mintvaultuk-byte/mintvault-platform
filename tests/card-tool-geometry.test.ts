@@ -10,6 +10,7 @@ import {
   routePlacement,
   nextPass,
   axisLockInner,
+  screenPointToSourcePct,
   TOP,
   RIGHT,
   BOTTOM,
@@ -55,6 +56,76 @@ describe("manual centering guide visuals", () => {
     expect(measured.lr).toBe("67/33");
     expect(measured.tb).toBe("50/50");
     expect(measured.subgrade).toBe(7);
+  });
+});
+
+describe("workstation display → source coordinate normalization", () => {
+  it("preserves the same source coordinate across fit, zoom, viewport, and DPR presentations", () => {
+    // Each rectangle is the actual rendered IMAGE content box, not a containing
+    // viewport. This is the important contain/letterbox distinction: margins
+    // are deliberately excluded from the coordinate system.
+    const presentations = [
+      { bounds: { left: 210, top: 80, width: 252, height: 342 }, w: 252, h: 342, x: 310.8, y: 254.42 },
+      { bounds: { left: 24, top: 36, width: 756, height: 1026 }, w: 756, h: 1026, x: 326.4, y: 559.26 },
+      // Retina uses the same CSS event coordinates; device pixels never enter
+      // persisted geometry.
+      { bounds: { left: 100, top: 60, width: 504, height: 684 }, w: 504, h: 684, x: 301.6, y: 408.84 },
+    ];
+    for (const p of presentations) {
+      const result = screenPointToSourcePct({
+        clientX: p.x,
+        clientY: p.y,
+        bounds: p.bounds,
+        sourceDisplayWidth: p.w,
+        sourceDisplayHeight: p.h,
+      });
+      expect(result?.x).toBeCloseTo(40, 10);
+      expect(result?.y).toBeCloseTo(51, 10);
+    }
+  });
+
+  it("inverse-rotates to the same source coordinate and rejects a rotated-AABB empty corner", () => {
+    const w = 600;
+    const h = 900;
+    const deg = 30;
+    const rad = (deg * Math.PI) / 180;
+    const cx = 800;
+    const cy = 700;
+    // Source coordinate 25%, 70%, forward-rotated around the source centre.
+    const ux = (0.25 - 0.5) * w;
+    const uy = (0.7 - 0.5) * h;
+    const clientX = cx + ux * Math.cos(rad) - uy * Math.sin(rad);
+    const clientY = cy + ux * Math.sin(rad) + uy * Math.cos(rad);
+    const aabbW = Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad));
+    const aabbH = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad));
+    const bounds = { left: cx - aabbW / 2, top: cy - aabbH / 2, width: aabbW, height: aabbH };
+    expect(
+      screenPointToSourcePct({
+        clientX,
+        clientY,
+        bounds,
+        sourceDisplayWidth: w,
+        sourceDisplayHeight: h,
+        rotationDeg: deg,
+      })
+    ).toMatchObject({ x: expect.closeTo(25, 10), y: expect.closeTo(70, 10) });
+    expect(
+      screenPointToSourcePct({
+        clientX: bounds.left,
+        clientY: bounds.top,
+        bounds,
+        sourceDisplayWidth: w,
+        sourceDisplayHeight: h,
+        rotationDeg: deg,
+      })
+    ).toBeNull();
+  });
+
+  it("does not clamp a pointer outside the actual image content into a false edge", () => {
+    const bounds = { left: 200, top: 100, width: 252, height: 342 };
+    expect(
+      screenPointToSourcePct({ clientX: 199, clientY: 200, bounds, sourceDisplayWidth: 252, sourceDisplayHeight: 342 })
+    ).toBeNull();
   });
 });
 

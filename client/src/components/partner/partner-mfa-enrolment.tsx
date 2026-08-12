@@ -6,8 +6,8 @@
  * satisfy — there was no way to register a device. This component is that missing step.
  *
  * It maps exactly onto the existing server contract (server/partner/routes.ts):
- *   POST /api/partner/mfa/enrol   { password }  -> { ok, secret, otpauthUri }
- *   POST /api/partner/mfa/confirm { code }      -> { ok, recoveryCodes }
+ *   POST /api/partner/mfa/enrol   { password, current factor? } -> session-bound pending setup
+ *   POST /api/partner/mfa/confirm { enrolmentId, code }         -> { ok, recoveryCodes }
  * Both accept an mfa-pending session, which is the state the user is in immediately after the
  * password step. No auth decision is made here — every outcome is the server's.
  *
@@ -38,7 +38,8 @@ function enrolStartMessage(err: unknown): string {
 function confirmMessage(err: unknown): string {
   const reason = err instanceof PartnerApiError ? err.message : "";
   if (reason === "invalid_code") return "That code was not right. Check your authenticator app and try again.";
-  if (reason === "no_pending") return "This setup has expired. Start again to get a fresh QR code.";
+  if (reason === "no_pending" || reason === "expired")
+    return "This setup has expired. Restart setup to get a fresh QR code.";
   if (reason === "requires_current_factor")
     return "You already have an authenticator app set up for this account. Enter a code from it, or use a recovery code.";
   return "We could not confirm that code. Please try again.";
@@ -129,11 +130,15 @@ export function PartnerMfaEnrolment({
   const [phase, setPhase] = useState<Phase>("starting");
   const [secret, setSecret] = useState("");
   const [otpauthUri, setOtpauthUri] = useState("");
+  const [enrolmentId, setEnrolmentId] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [completing, setCompleting] = useState(false);
   /** Enrolment replaces any pending secret server-side, so it must fire exactly once per attempt —
    *  React 18 StrictMode double-invokes effects, which would otherwise invalidate the first QR. */
   const started = useRef(false);
@@ -143,8 +148,10 @@ export function PartnerMfaEnrolment({
     setPhase("starting");
     try {
       const out = await partnerMfa.enrol(password, secondFactor);
+      setEnrolmentId(out.enrolmentId);
       setSecret(out.secret);
       setOtpauthUri(out.otpauthUri);
+      setCode("");
       setPhase("scan");
     } catch (err) {
       setError(enrolStartMessage(err));
@@ -160,19 +167,54 @@ export function PartnerMfaEnrolment({
 
   async function handleConfirm(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
+    const normalizedCode = code.replace(/\s/g, "");
+    if (!enrolmentId || !/^\d{6}$/.test(normalizedCode)) {
+      setError("Enter the 6-digit code from your authenticator app.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
-      const out = await partnerMfa.confirm(code);
+      const out = await partnerMfa.confirm({ enrolmentId, code: normalizedCode });
       setRecoveryCodes(out.recoveryCodes ?? []);
       setSecret(""); // no longer needed — do not keep it on screen or in memory
       setOtpauthUri("");
+      setEnrolmentId("");
       setCode("");
       setPhase("codes");
     } catch (err) {
       setError(confirmMessage(err));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleRestart() {
+    if (restarting) return;
+    setError(null);
+    setRestarting(true);
+    try {
+      const out = await partnerMfa.restart(password);
+      setEnrolmentId(out.enrolmentId);
+      setSecret(out.secret);
+      setOtpauthUri(out.otpauthUri);
+      setCode("");
+      setPhase("scan");
+    } catch (err) {
+      setError(enrolStartMessage(err));
+    } finally {
+      setRestarting(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await partnerMfa.cancel();
+    } finally {
+      window.location.href = "/partner/login";
     }
   }
 
@@ -236,8 +278,12 @@ export function PartnerMfaEnrolment({
         <Button
           type="button"
           className="w-full"
-          disabled={!acknowledged}
-          onClick={() => void onComplete()}
+          disabled={!acknowledged || completing}
+          onClick={async () => {
+            if (completing) return;
+            setCompleting(true);
+            await onComplete();
+          }}
           data-testid="button-mfa-enrol-finish"
         >
           Continue
@@ -274,7 +320,7 @@ export function PartnerMfaEnrolment({
           autoComplete="one-time-code"
           required
           value={code}
-          onChange={(e) => setCode(e.target.value)}
+          onChange={(e) => setCode(e.target.value.replace(/[^\d\s]/g, "").slice(0, 12))}
           data-testid="input-mfa-enrol-code"
         />
       </div>
@@ -285,8 +331,33 @@ export function PartnerMfaEnrolment({
         </p>
       )}
 
-      <Button type="submit" className="w-full" disabled={submitting} data-testid="button-mfa-enrol-confirm">
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={submitting || restarting || cancelling}
+        data-testid="button-mfa-enrol-confirm"
+      >
         {submitting ? "Confirming…" : "Confirm and finish"}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        disabled={submitting || restarting || cancelling}
+        onClick={() => void handleRestart()}
+        data-testid="button-mfa-enrol-restart"
+      >
+        {restarting ? "Restarting…" : "Restart setup"}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        className="w-full"
+        disabled={submitting || restarting || cancelling}
+        onClick={() => void handleCancel()}
+        data-testid="button-mfa-enrol-sign-out"
+      >
+        {cancelling ? "Signing out…" : "Cancel and sign out"}
       </Button>
       <button
         type="button"

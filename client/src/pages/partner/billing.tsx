@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { partnerCredits, partnerErrorMessage, type PartnerCreditLedgerEntry } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
+import { ArrowRight, Lock } from "lucide-react";
 
 function credit(value: number | null, configured: boolean) {
   return value == null ? (configured ? "Unknown" : "Not available") : value.toLocaleString("en-GB");
@@ -13,6 +16,7 @@ function entryLabel(entry: PartnerCreditLedgerEntry) {
 
 export default function PartnerBillingPage() {
   const query = useQuery({ queryKey: ["/api/partner/credits"], queryFn: () => partnerCredits.view() });
+  const returnTo = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("returnTo") : null;
 
   return (
     <div className="space-y-8">
@@ -21,6 +25,9 @@ export default function PartnerBillingPage() {
         <h1 className="text-2xl font-semibold" data-testid="text-billing-title">
           Credits & Billing
         </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          1 credit = 1 grading slot/card unit according to backend rules.
+        </p>
       </div>
 
       {query.isLoading && <PartnerLoadingState label="Loading credits…" />}
@@ -46,6 +53,39 @@ export default function PartnerBillingPage() {
                 </CardContent>
               </Card>
             ))}
+          </section>
+
+          <section aria-labelledby="packages-title" className="space-y-3">
+            <div>
+              <h2 id="packages-title" className="text-base font-semibold">
+                Buy credits
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Package pricing must come from the partner credit package API. This environment does not expose that API
+                yet, so checkout is unavailable here and no client-side package prices are shown.
+              </p>
+            </div>
+            <Card className="rounded-md border-primary/30" data-testid="billing-checkout-unavailable">
+              <CardContent className="p-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <Lock className="h-5 w-5 text-primary mt-0.5" aria-hidden="true" />
+                  <div>
+                    <p className="font-medium">Checkout waiting for server package catalogue</p>
+                    <p className="text-sm text-muted-foreground">
+                      Stripe fulfilment remains webhook-authoritative. Credits are never added from a success URL.
+                    </p>
+                  </div>
+                </div>
+                {returnTo && (
+                  <Button asChild variant="outline" data-testid="button-return-to-draft">
+                    <Link href={returnTo}>
+                      Return to draft
+                      <ArrowRight className="h-4 w-4 ml-1.5" aria-hidden="true" />
+                    </Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
           </section>
 
           <section aria-labelledby="ledger-title" className="space-y-3">

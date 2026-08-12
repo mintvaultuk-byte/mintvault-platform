@@ -22,7 +22,7 @@ import {
 } from "./lib/grade-kind";
 import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
@@ -649,6 +649,36 @@ export async function buildCertImagesPayload(
       }
     })
   );
+
+  // Phase 58A: the immutable-evidence ledger owns native-geometry browser
+  // working assets. Keep this additive and fail closed to the established
+  // legacy URL map while a rolling deployment is creating the new table.
+  // A TIFF master is deliberately never handed to the browser workstation.
+  try {
+    const rows = (
+      await db.execute(sql`
+        SELECT side, working_object_key
+        FROM certificate_image_evidence
+        WHERE certificate_id = ${certId}
+          AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+          AND is_current = true
+      `)
+    ).rows as Array<{ side: string; working_object_key: string | null }>;
+    await Promise.all(
+      rows.map(async (row) => {
+        if ((row.side !== "front" && row.side !== "back") || !row.working_object_key) return;
+        try {
+          urls[`${row.side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
+        } catch {
+          urls[`${row.side}_working`] = null;
+        }
+      })
+    );
+  } catch {
+    // The evidence table is additive and may not exist during a rolling
+    // deployment. Legacy image URLs remain available; new evidence does not
+    // silently fall back until its working derivative has been recorded.
+  }
   return { urls, quality: c.imageQualityChecks || {} };
 }
 
@@ -697,6 +727,9 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     // Cert-level workflow state — drives the grader panel's "rejected, redo"
     // banner and the queue chips.
     gradingStatus: (c as any).graderStatus || "unassigned",
+    // Hydrates the initial persistent preview with the same server-issued token
+    // used by save, preview acknowledgement and approval CAS.
+    reviewRevision: c.gradingRevision ?? 1,
     rejectionReason: (c as any).rejectionReason || null,
     redoCount: (c as any).redoCount ?? 0,
     gradeApprovedBy: c.gradeApprovedBy || null,
@@ -753,10 +786,19 @@ export class GradeDraftRejected extends Error {
   }
 }
 
-export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
+/**
+ * Persist one logical grading draft mutation and return the server-issued
+ * revision representing the saved certificate state.  The database trigger in
+ * migration 0048 advances it once only when certificate/review-authoritative
+ * fields actually changed; request sequence numbers are never authority.
+ */
+export async function applyCertGradeDraft(certId: number, body: any, extraWhere: SQL = sql``): Promise<number | null> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
-  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
+  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(
+    cert,
+    body
+  );
 
   const overall = body.overall_grade;
   // grade_type used to be written VERBATIM from the request body, and the column is plain
@@ -837,14 +879,19 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
       updated_at = NOW()
-    WHERE id = ${certId} AND grade_approved_at IS NULL
-    RETURNING id
+    WHERE id = ${certId} AND grade_approved_at IS NULL ${extraWhere}
+    RETURNING grading_revision
   `);
-  return r.rows.length > 0;
+  if (r.rows.length === 0) return null;
+  const revision = Number((r.rows[0] as { grading_revision?: unknown }).grading_revision);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error("Saved certificate has an invalid grading revision");
+  }
+  return revision;
 }
 
 /** Publish a certificate's grade (admin approval): set approved_at + live status. */
-export async function approveCertGrade(certId: number, adminUser: string): Promise<boolean> {
+export async function approveCertGrade(certId: number, adminUser: string, expectedRevision: number): Promise<boolean> {
   // Phase 2 — atomic CAS publish: only publishes while still pending_review (its
   // sole caller, approveGraderCert, requires that). 0 rows ⇒ state changed
   // concurrently (e.g. a racing reject) → caller returns 409 instead of double-publishing.
@@ -853,10 +900,90 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
         grader_status = 'approved', graded_at = NOW(), updated_at = NOW(),
         print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
-    WHERE id = ${certId} AND grader_status = 'pending_review'
+    WHERE id = ${certId}
+      AND grader_status = 'pending_review'
+      AND grading_revision = ${expectedRevision}
     RETURNING id
   `);
   return r.rows.length > 0;
+}
+
+/** Server-owned snapshot used to make a grader submit decision at one saved revision. */
+export async function getAssignedGradeSubmitSnapshot(certId: number, expectedRevision: number) {
+  const r = await db.execute(sql`
+    SELECT grade::text AS operator_grade, card_name
+    FROM certificates
+    WHERE id = ${certId}
+      AND grader_status = 'assigned'
+      AND grading_revision = ${expectedRevision}
+    LIMIT 1
+  `);
+  const row = r.rows[0] as { operator_grade?: string | null; card_name?: string | null } | undefined;
+  return row ? { operatorGrade: row.operator_grade ?? null, cardName: row.card_name ?? null } : null;
+}
+
+/**
+ * Atomically submit an assigned grade for human review at the exact server
+ * revision the route just saved/observed. This is intentionally the only
+ * assignment→pending_review transition used by the sampled submit flow.
+ */
+export async function submitAssignedGradeAtRevision(
+  certId: number,
+  graderId: string | null,
+  expectedRevision: number
+): Promise<boolean> {
+  const r = await db.execute(sql`
+    UPDATE certificates SET
+      grader_status = 'pending_review',
+      review_required = true,
+      graded_at = NOW(),
+      graded_by = COALESCE(${graderId}, assigned_grader_id),
+      operator_grade = grade,
+      operator_subgrades = jsonb_build_object(
+        'centering', centering_score, 'corners', corners_score,
+        'edges', edges_score, 'surface', surface_score),
+      updated_at = NOW()
+    WHERE id = ${certId}
+      AND grader_status = 'assigned'
+      AND grading_revision = ${expectedRevision}
+    RETURNING id
+  `);
+  return r.rows.length === 1;
+}
+
+/**
+ * Atomically publish an assigned card that sampling cleared at the exact
+ * revision previously saved by the grader. Approval is a persisted-row state
+ * transition: it snapshots `operator_grade = grade` but never promotes a
+ * separate stale `operator_grade` value into `grade`.
+ */
+export async function autoApproveAssignedGradeAtRevision(
+  certId: number,
+  graderEmail: string,
+  graderId: string | null,
+  expectedRevision: number
+): Promise<boolean> {
+  const r = await db.execute(sql`
+    UPDATE certificates SET
+      review_required = false,
+      graded_at = NOW(),
+      graded_by = COALESCE(${graderId}, assigned_grader_id),
+      operator_grade = grade,
+      operator_subgrades = jsonb_build_object(
+        'centering', centering_score, 'corners', corners_score,
+        'edges', edges_score, 'surface', surface_score),
+      grade_approved_at = NOW(),
+      grade_approved_by = ${graderEmail},
+      grader_status = 'approved',
+      status = 'active',
+      print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
+      updated_at = NOW()
+    WHERE id = ${certId}
+      AND grader_status = 'assigned'
+      AND grading_revision = ${expectedRevision}
+    RETURNING id
+  `);
+  return r.rows.length === 1;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1144,11 +1271,16 @@ export async function checkGradePublishGates(
  * status='active') and marks it 'approved' + graded_at — never touches sibling
  * certs of the same submission.
  */
-export async function approveGraderCert(certId: number, adminUser: string) {
+export async function approveGraderCert(certId: number, adminUser: string, expectedRevision: number) {
   const a = await getCertAssignment(certId);
   if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
   if (a.gradingStatus !== "pending_review") {
-    return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+    return {
+      ok: false as const,
+      status: 409,
+      code: "STALE_REVIEW",
+      error: "This card changed after your review was prepared. Refresh the saved review before approving.",
+    };
   }
   // Both pre-publish gates (B3 sub-grade completeness + printable-grade), shared
   // verbatim with the auto-approve path. Runs BEFORE any approval write.
@@ -1161,9 +1293,14 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   // rather than flip grader_status on an unpublished grade.
   // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
   // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
-  const published = await approveCertGrade(certId, adminUser);
+  const published = await approveCertGrade(certId, adminUser, expectedRevision);
   if (!published) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+    return {
+      ok: false as const,
+      status: 409,
+      code: "STALE_REVIEW",
+      error: "This card changed after your review was prepared. Refresh the saved review before approving.",
+    };
   }
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
@@ -1198,7 +1335,10 @@ async function gradeSnapshot(certId: number) {
   };
 }
 
-function sameGradeSnapshot(a: Awaited<ReturnType<typeof gradeSnapshot>>, b: Awaited<ReturnType<typeof gradeSnapshot>>): boolean {
+function sameGradeSnapshot(
+  a: Awaited<ReturnType<typeof gradeSnapshot>>,
+  b: Awaited<ReturnType<typeof gradeSnapshot>>
+): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -1215,7 +1355,7 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
-  let saved = false;
+  let saved: number | null;
   try {
     saved = await applyCertGradeDraft(certId, body);
   } catch (e) {
@@ -1231,7 +1371,7 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (!sameGradeSnapshot(before, after)) {
     await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
   }
-  return { ok: true as const };
+  return { ok: true as const, revision: saved };
 }
 
 // ── Earnings (display-only; NO deduction logic) ───────────────────────────────

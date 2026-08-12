@@ -9,7 +9,9 @@ set -u
 UID_VAL="$(id -u)"
 LAUNCHAGENTS="$HOME/Library/LaunchAgents"
 
-NEW_LABEL="com.mintvault.scanner-app"
+# Must match lib/agent-plist.js, install.sh and setup-new-mac.sh.  The former
+# scanner-app suffix left the live unified agent running through cutover.
+NEW_LABEL="com.mintvault.scanner"
 OLD_WATCHER_LABEL="com.mintvault.scanner-watcher"
 OLD_GUIDE_LABEL="com.mintvault.scanner-guide"
 SWIFTBAR_PLUGIN="$HOME/Library/Application Support/SwiftBar/Plugins/mintvault-scanner.5s.sh"

@@ -16,7 +16,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, partnerScopeOnly } from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -69,7 +69,7 @@ async function applyAllRealistic(): Promise<void> {
      * correctly refuses destructive SQL unless the operator opts in; that is safe on this suite's
      * own disposable database, and still requires owner approval anywhere real.
      */
-    const all = listMigrationFiles();
+    const all = partnerScopeOnly(listMigrationFiles());
     await applyMigrations(migrator, all.filter((f) => Number(f.number) <= 41), { allowDestructive: true });
     await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
     await applyMigrations(migrator, all, { allowDestructive: true });
@@ -145,11 +145,11 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
     await migrator.connect();
     try {
-      const plan = await planMigrations(migrator, listMigrationFiles());
+      const plan = await planMigrations(migrator, partnerScopeOnly(listMigrationFiles()));
       expect(plan.pending).toHaveLength(0);
       expect(plan.checksumMismatches).toHaveLength(0);
       await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE").catch(() => {});
-      const { applied } = await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
+      const { applied } = await applyMigrations(migrator, partnerScopeOnly(listMigrationFiles()), { allowDestructive: true });
       expect(applied).toHaveLength(0);
     } finally {
       await migrator.end();

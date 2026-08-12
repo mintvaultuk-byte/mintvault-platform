@@ -262,8 +262,14 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     // A PENDING secret is NOT yet a factor: access is still refused.
     expect((await call("GET", "/api/partner/dashboard")).status).toBe(401);
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secret, Date.now()) });
-    expect(confirm.status).toBe(200);
+    // Confirm is BY ENROLMENT ID since migration 0044 (applied in production): the pending secret
+    // is bound to the issuing session and expires, so it is confirmed explicitly rather than by
+    // "whichever pending row is newest".
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: enrol.json.enrolmentId as string,
+      code: currentTotp(secret, Date.now()),
+    });
+    expect(confirm.status, confirm.text).toBe(200);
     const codes = confirm.json.recoveryCodes as string[];
     expect(codes).toHaveLength(10);
 
@@ -326,8 +332,15 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     expect(enrol.status).toBe(403);
     expect(enrol.json.error).toBe("requires_current_factor");
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: "000000" });
-    expect(confirm.status).toBe(403);
+    // A well-formed but unknown enrolment id, deliberately: the route validates the id's SHAPE
+    // before calling the service, so omitting it would 400 on the body and never reach the control
+    // under test. mfaEnrolConfirm checks `replacing` BEFORE it looks the pending row up, so an
+    // unknown id still yields requires_current_factor — which is the assertion that matters.
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId: "00000000-0000-4000-8000-000000000000",
+      code: "000000",
+    });
+    expect(confirm.status, confirm.text).toBe(403);
     expect(confirm.json.error).toBe("requires_current_factor");
   });
 
@@ -356,6 +369,17 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
 
   it("refuses a TOTP replay within the same step (F3 preserved)", async () => {
     const secret = process.env.__MFA_TEST_SECRET!;
+    // Start from a KNOWN-CLEAN counter. mfaEnrolConfirm now records the counter it consumed
+    // (last_totp_counter), and earlier tests in this file authenticate with their own codes, so
+    // whatever window this test picked could already be at or below the stored counter — the first
+    // use would then be rejected as a replay and the test would prove nothing. Clearing the counter
+    // makes the FIRST use genuinely valid, so the SECOND use is the only thing under test.
+    //
+    // This does not weaken the assertion: the subject is "the same code cannot be used twice", and
+    // the guard being exercised (counter <= last) is untouched — mutation-checked by reverting it.
+    await admin.query("UPDATE partner_mfa_methods SET last_totp_counter=NULL WHERE user_id=$1 AND status='ACTIVE'", [
+      OWNER,
+    ]);
     const code = currentTotp(secret, Date.now());
 
     await call("POST", "/api/partner/auth/login", { email: OWNER_EMAIL, password: OWNER_PASSWORD });
@@ -369,7 +393,8 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
   it("does not leak the enrolment secret through any other authenticated route", async () => {
     const secret = process.env.__MFA_TEST_SECRET!;
     await call("POST", "/api/partner/auth/login", { email: OWNER_EMAIL, password: OWNER_PASSWORD });
-    await call("POST", "/api/partner/auth/mfa", { code: currentTotp(secret, Date.now() + 30_000) });
+    // A later window than the replay test consumed above — the counter only moves forward.
+    await call("POST", "/api/partner/auth/mfa", { code: currentTotp(secret, Date.now() + 60_000) });
 
     for (const path of [
       "/api/partner/session",

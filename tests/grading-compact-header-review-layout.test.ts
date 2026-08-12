@@ -23,12 +23,15 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 // canonical-consolidation: the two-column row geometry now lives in the ONE
 // shared shell CertificateForm mounts; the aside gate is a ternary prop value.
 const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
 const HUD = read("client/src/components/grading-workflow/SessionHud.tsx");
 const SUMMARY = read("client/src/components/grading-workflow/ReviewSummary.tsx");
+const PANEL = read("client/src/components/grading/grading-panel.tsx");
+const ROLE_SUMMARY = read("client/src/components/grading-workflow/RoleReviewSummary.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
 // unified-shell pass: the strip, the preview aside, and the Certificate Tools
 // button/breadcrumb row all moved into shared components. These constants
@@ -83,7 +86,9 @@ describe("2. session statistics render as a slim utility row", () => {
   it("statistics render in their own container, separate from the stage-nav container (spec)", () => {
     expect(STRIP_SRC).toContain('data-testid="workflow-nav-zone"');
     expect(STRIP_SRC).toContain('data-testid="batch-header"');
-    expect(STRIP_SRC.indexOf('data-testid="workflow-nav-zone"')).toBeLessThan(STRIP_SRC.indexOf('data-testid="batch-header"'));
+    expect(STRIP_SRC.indexOf('data-testid="workflow-nav-zone"')).toBeLessThan(
+      STRIP_SRC.indexOf('data-testid="batch-header"')
+    );
   });
 });
 
@@ -114,12 +119,12 @@ describe("3. Certificate Tools is a compact utility control, not a large isolate
 });
 
 describe("4. Review restores the two-column workstation (card left, details right)", () => {
-  it("the preview aside renders for Review as well as Card Details (via showsPreviewAside)", () => {
-    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
+  it("the preview aside persists for Review as well as Card Details", () => {
+    expect(WORKSTATION).toContain("<WorkstationPreviewAside");
+    expect(WORKSTATION).toContain("previewHost={gradingEnabled ? interactiveCardHost : null}");
   });
-  it("Grade (wfStage 1) is deliberately excluded — its own protected card/defect tool is untouched", () => {
-    const cond = FORM.slice(FORM.indexOf("showsPreviewAside(wfStage)"), FORM.indexOf("showsPreviewAside(wfStage)") + 60);
-    expect(cond).not.toContain("wfStage === 1");
+  it("Grade uses the same rail by portalling its one protected viewer into it", () => {
+    expect(WORKSTATION).toContain("interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}");
   });
   it("preview and review-details are separate zones — no duplicated image", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at all —
@@ -159,36 +164,61 @@ describe("5. no absolute-position overlap mechanism was introduced by this pass"
   });
 });
 
-describe("6. save payload and Review field content are unchanged", () => {
-  it("ReviewSummary still receives every existing field — nothing added or removed from the save-adjacent values", () => {
-    const block = FORM.slice(FORM.indexOf("<ReviewSummary"), FORM.indexOf("onEditGrade"));
+describe("6. save payload and canonical Review field content are preserved", () => {
+  it("RoleReviewSummary receives identity, classification, grade, auth, defects and both note fields", () => {
+    const block = PANEL.slice(
+      PANEL.indexOf("<RoleReviewSummary"),
+      PANEL.indexOf("/>\n      )}", PANEL.indexOf("<RoleReviewSummary"))
+    );
     for (const f of [
-      "form.cardName",
-      "form.setName",
-      "form.cardNumber",
-      "form.year",
-      "form.language",
-      "form.rarityCode",
-      "form.finishVariant",
-      "form.promoType",
-      "form.subsetName",
-      "form.gradeOverall",
-      "form.labelType",
-      "form.status",
-      "designations",
-    ]) {
+      "identity={{",
+      "classification={{",
+      "grade={{",
+      "authentication={{",
+      "defects={defects}",
+      "publicNotes={gradeExplanation}",
+      "privateNotes={privateNotes}",
+    ])
       expect(block, f).toContain(f);
-    }
+    for (const label of [
+      "Certificate",
+      "Card",
+      "Set",
+      "Number",
+      "Year",
+      "Language",
+      "Game",
+      "Service",
+      "Variant",
+      "Rarity",
+      "Finish",
+      "Promo",
+      "Overall",
+      "Centering",
+      "Corners",
+      "Edges",
+      "Surface",
+      "Authentication",
+      "Defects",
+      "Public grade explanation",
+      "Private notes",
+    ])
+      expect(ROLE_SUMMARY, label).toContain(label);
   });
   it("the save button and its handler are untouched", () => {
     expect(FORM).toContain('data-testid="button-save-cert"');
-    expect(FORM).toContain("type=\"submit\"");
+    expect(FORM).toContain('type="submit"');
   });
   it("ReviewSummary itself still holds no state, triggers no save on entry", () => {
     const stripComments = (s: string) =>
-      s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      s
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
     const code = stripComments(SUMMARY);
-    expect(code).not.toMatch(/useState|useEffect|useQuery|useMutation|fetch\(|apiRequest|mutate|handleSubmit|autoSaveNow|setForm/);
+    expect(code).not.toMatch(
+      /useState|useEffect|useQuery|useMutation|fetch\(|apiRequest|mutate|handleSubmit|autoSaveNow|setForm/
+    );
   });
 });
 
@@ -203,7 +233,10 @@ describe("7. protected boundary: Stage 3 internals and the rarity picker are unt
   try {
     execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
     execSync(`git rev-parse --verify ${head}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}..${head}`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    changed = execSync(`git diff --name-only ${base}..${head}`, { encoding: "utf8" })
+      .trim()
+      .split("\n")
+      .filter(Boolean);
   } catch {
     changed = [];
   }

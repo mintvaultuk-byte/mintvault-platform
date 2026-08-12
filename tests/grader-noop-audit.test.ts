@@ -53,7 +53,7 @@ describe("role write paths suppress no-op audit rows", () => {
       .mockResolvedValueOnce({
         rows: [{ id: 700, assigned_grader_id: "grader-1", grader_status: "pending_review" }],
       })
-      .mockResolvedValueOnce({ rows: [{ id: 700 }] });
+      .mockResolvedValueOnce({ rows: [{ grading_revision: 1 }] });
     runtime.getCertificate.mockResolvedValue({ ...certSnapshot });
 
     const result = await adminReviewSaveDraft(
@@ -71,7 +71,7 @@ describe("role write paths suppress no-op audit rows", () => {
       "admin@example.test",
     );
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ ok: true, revision: 1 });
     expect(runtime.writeAuditLog).not.toHaveBeenCalled();
   });
 

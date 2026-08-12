@@ -10,66 +10,109 @@
     <span class="hdr-title">MintVault Scanner</span>
     <div class="hdr-spacer"></div>
     <span class="hdr-version" id="appVersion" data-tip="Installed app version"></span>
-    <button class="hdr-btn hdr-btn--update" id="updateBtn" data-tip="Pull the latest version and restart (~1 min)">
-      <span class="hdr-btn-ico">⤓</span><span class="hdr-btn-label">Update</span>
-    </button>
-    <button class="hdr-btn" id="restartBtn" data-tip="Restart the folder watcher">
-      <span class="hdr-btn-ico">↻</span><span class="hdr-btn-label">Restart</span>
-    </button>
     <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
   </header>
 
-  <section class="row" id="modeRow">
-    <span class="row-label">Mode</span>
-    <div class="seg">
-      <button class="seg-btn" data-mode="AUTO">AUTO</button>
-      <button class="seg-btn" data-mode="MANUAL">MANUAL</button>
+  <section class="row device" id="deviceRow">
+    <span class="row-label">Canon LiDE 400</span>
+    <span class="row-value" id="scannerHealth">Checking device…</span>
+  </section>
+
+  <section class="row station-identity" id="stationIdentityRow" hidden>
+    <div class="station-identity-cell">
+      <span class="identity-key">LOCATION</span>
+      <span class="identity-value" id="stationOrganisation">—</span>
+    </div>
+    <div class="station-identity-cell">
+      <span class="identity-key">STATION</span>
+      <span class="identity-value" id="stationIdentity">—</span>
+    </div>
+    <div class="station-identity-cell">
+      <span class="identity-key">SIGNED IN</span>
+      <span class="identity-value" id="stationUser">—</span>
     </div>
   </section>
 
-  <section class="row stat" id="statRow">
-    <div class="stat-line"><span class="stat-key">Next cert</span><span class="stat-val" id="nextCert">—</span></div>
-    <div class="stat-line"><span class="stat-key">Last scan</span><span class="stat-val" id="lastScan">—</span></div>
-    <div class="stat-line"><span class="stat-key">Session</span><span class="stat-val" id="session">0 scans</span></div>
+  <section class="row capture-target" id="captureTargetRow">
+    <div class="row-header">CURRENT CARD</div>
+    <div class="capture-target-grid">
+      <div>
+        <span class="capture-key">CARD</span>
+        <span class="capture-value" id="targetCert">No target armed</span>
+      </div>
+      <div>
+        <span class="capture-key">REQUIRED SIDE</span>
+        <span class="capture-value" id="targetSide">—</span>
+      </div>
+    </div>
+    <p class="hint capture-hint" id="targetHint">Arm a card side in MintVault. This station will only scan that server-owned target.</p>
+  </section>
+
+  <section class="row workflow-guide" id="workflowGuide" data-guide-state="setup">
+    <div class="placement-visual" id="placementVisual" data-asset-slot="scanner-placement-guide" aria-hidden="true">
+      <div class="placement-zone"><div class="guide-card"></div></div>
+      <div class="flip-mark">↻</div>
+    </div>
+    <div class="workflow-guide-copy">
+      <span class="row-header" id="workflowGuideStep">SETUP — CHECK PLACEMENT</span>
+      <strong id="workflowGuideTitle">Place a card, then Preview</strong>
+      <p class="hint" id="workflowGuideHint">Preview checks that the complete card is visible before a final scan.</p>
+    </div>
   </section>
 
   <section class="row" id="statusRow">
     <div class="status-text">
       <span class="dot" id="dot"></span>
       <span id="statusText">Idle — waiting for scan</span>
-      <button class="pause-btn" id="pauseBtn" title="Pause / resume scan detection">Pause</button>
     </div>
     <div class="status-sub" id="statusSub"></div>
   </section>
 
-  <section class="row" id="recentRow">
-    <div class="row-header">RECENT</div>
-    <ul class="recent" id="recentList"></ul>
-  </section>
-
-  <section class="row actions">
-    <button class="btn" id="orphansBtn">Fix orphan…</button>
-    <button class="btn" id="forwardBtn">Forward to cert…</button>
-    <button class="btn ghost" id="inboxBtn">Open inbox</button>
-    <button class="btn ghost" id="lastCertBtn" disabled>Open last cert</button>
-    <button class="btn ghost" id="logsBtn">Show logs</button>
-  </section>
-
-  <!-- SilverFast export path — the absolute inbox the watcher is watching.
-       Copy it into SilverFast's Path field so scans land where the app looks
-       (not ~/Pictures etc.). Pure display + clipboard — no behaviour change. -->
-  <section class="row sfpath" id="sfPathRow">
-    <div class="row-header">SilverFast export path — point SilverFast here</div>
-    <div class="sfpath-box">
-      <code class="sfpath-val" id="sfPathVal">—</code>
-      <button class="btn ghost sfpath-copy" id="sfPathCopyBtn">Copy</button>
+  <section class="row capture-actions" id="captureActionsRow">
+    <div class="action-grid" aria-label="Scanner actions">
+      <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
+      <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
     </div>
+    <p class="hint action-hint" id="captureActionHint">Open or arm a card in MintVault to enable final scanning.</p>
+    <div class="positioning-panel" id="positioningPanel" hidden>
+      <div class="positioning-card-preview-viewport" id="positioningCardPreviewViewport">
+        <img class="positioning-card-preview" id="positioningCardPreview" alt="Detected card with surrounding scanner background" />
+      </div>
+      <p class="positioning-result" id="positioningResult"></p>
+      <p class="hint" id="positioningHint">Preview is a local placement check only. It never becomes card evidence.</p>
+      <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
+    </div>
+    <div class="preview-card" id="previewPanel" hidden>
+      <img class="capture-preview" id="capturePreview" alt="Non-authoritative scan preview" />
+      <p class="preview-note">CHECK THE WHOLE CARD, ALL EDGES AND ALL CORNERS</p>
+      <div class="preview-actions">
+        <button class="btn primary" id="acceptPreviewBtn">ACCEPT</button>
+        <button class="btn danger" id="rescanPreviewBtn">RESCAN</button>
+      </div>
+    </div>
+    <button class="btn danger capture-rescan-only" id="rescanErrorBtn" hidden>RESCAN CARD</button>
   </section>
 
-  <!-- Settings — collapsible, footer-style. Local prefs only, no server sync. -->
-  <section class="row settings" id="settingsRow">
-    <button class="settings-toggle" id="settingsToggle">Settings ⌄</button>
+  <details class="row secondary" id="recentRow">
+    <summary>Recent captures</summary>
+    <ul class="recent" id="recentList"></ul>
+  </details>
+
+  <!-- Service controls are intentionally separate from the one production
+       target-bound capture flow. -->
+  <details class="row settings secondary" id="diagnosticsRow">
+    <summary id="settingsToggle">Service &amp; diagnostics</summary>
     <div class="settings-body" id="settingsBody" hidden>
+      <div class="settings-test full-platen-diagnostics" id="fullPlatenDiagnostics" hidden>
+        <span class="row-header">Full-platen placement diagnostic</span>
+        <div class="positioning-preview-viewport">
+          <img class="positioning-preview" id="positioningFullPreview" alt="Full platen placement diagnostic" />
+          <div class="card-boundary-overlay" id="cardBoundaryOverlay" hidden aria-hidden="true"><span>DETECTED CARD</span></div>
+          <div class="acquisition-boundary-overlay" id="acquisitionBoundaryOverlay" hidden aria-hidden="true"><span>FINAL 1200 DPI AREA</span></div>
+        </div>
+        <p class="hint positioning-geometry" id="positioningGeometry"></p>
+        <button class="btn primary" id="savePlacementBtn" hidden>SAVE PLACEMENT ZONE</button>
+      </div>
       <label class="checkbox">
         <input type="checkbox" id="autoOpenOnError" />
         <span>Auto-open this window on error <span class="hint inline">(default on)</span></span>
@@ -79,65 +122,45 @@
         <span>Sound on scan events <span class="hint inline">(success / error chimes)</span></span>
       </label>
       <div class="settings-test">
-        <button class="btn" id="testScanBtn">Test scan</button>
+        <button class="btn" id="signOutBtn" hidden>SIGN OUT / SWITCH USER</button>
+        <p class="hint">Signs out the current person. This Mac stays registered as the same MintVault station.</p>
+      </div>
+      <div class="settings-test">
+        <button class="btn" id="updateBtn">Update scanner app</button>
+        <p class="hint">Downloads the current approved station build and restarts this app.</p>
+      </div>
+      <div class="settings-test">
+        <button class="btn" id="logsBtn">Show service logs</button>
         <p class="hint">
-          Drops a 1×1 px placeholder into the inbox. Creates a real cert.
-          Use sparingly — soft-delete via Fix orphan after testing.
+          Technical details for hardware, network, validation, and capture-session failures.
         </p>
       </div>
       <div class="settings-test">
-        <button class="btn danger" id="clearBufferedBtn">Reset scanner</button>
+        <button class="btn" id="lastCertBtn" disabled>Open latest certificate</button>
         <p class="hint">
-          Recover the scanner if it stops processing scans. Restarts the
-          in-process watcher; if that isn't enough it reloads, and if needed
-          repairs + reinstalls, the com.mintvault.scanner agent. Safe anytime.
+          Opens the most recently accepted card from this station for a quick visual check.
         </p>
       </div>
-    </div>
-  </section>
-
-  <!-- Manual mode prompt — shown when a scan arrives in MANUAL mode -->
-  <div class="modal" id="manualModal">
-    <div class="modal-card">
-      <div class="modal-title">New scan detected</div>
-      <div class="modal-meta" id="manualMeta">—</div>
-      <label class="field">
-        <span>Attach to cert</span>
-        <!-- Static MV prefix + digits-only input. Same pattern as the
-             override-next-cert modal (4ab00fd) — saves two keystrokes per
-             scan during high-volume grading sessions. Pasting "MV58" /
-             "mv 58" / "58" all still works — the JS handler strips
-             non-digits before validating. -->
-        <div class="prefixed-input">
-          <span class="prefix">MV</span>
-          <input
-            type="text"
-            id="manualCert"
-            placeholder="___"
-            inputmode="numeric"
-            pattern="[0-9]*"
-            autocomplete="off"
-            maxlength="6"
-          />
-        </div>
-      </label>
-      <div class="field-row">
-        <span>Side</span>
-        <label class="radio"><input type="radio" name="manualSide" value="front" checked /> Front</label>
-        <label class="radio"><input type="radio" name="manualSide" value="back" /> Back</label>
+      <div class="settings-test">
+        <button class="btn danger" id="clearBufferedBtn">Restart scanner service</button>
+        <p class="hint">
+          Use only if the scanner service is unresponsive. It restarts this station service and may briefly interrupt a capture.
+        </p>
       </div>
-      <label class="checkbox"><input type="checkbox" id="manualReplace" /> Replace existing image</label>
-      <div class="modal-actions">
-        <button class="btn ghost" id="manualCancel">Cancel — keep file</button>
-        <button class="btn primary" id="manualSubmit">Attach</button>
+      <div class="settings-test">
+        <button class="btn" id="orphansBtn">Fix missing images</button>
+        <p class="hint">Recovery only. It opens the selected card in MintVault so an authenticated operator can arm its exact missing side.</p>
       </div>
     </div>
-  </div>
+  </details>
 
-  <!-- Orphan picker -->
+  <!-- Exceptional recovery. The app never attaches an arbitrary TIFF: it
+       opens the selected certificate in MintVault, where an authenticated
+       operator arms the exact missing side as a server-owned session. -->
   <div class="modal" id="orphanModal">
     <div class="modal-card wide">
-      <div class="modal-title">Orphan certificates</div>
+      <div class="modal-title">Fix missing images</div>
+      <p class="modal-meta">Choose a certificate to open in MintVault. Arm the missing side there; this station will capture only that exact target.</p>
       <div class="orphan-list" id="orphanList">Loading…</div>
       <div class="modal-actions">
         <button class="btn ghost" id="orphanClose">Close</button>
@@ -145,87 +168,32 @@
     </div>
   </div>
 
-  <!-- Forward-to-cert -->
-  <div class="modal" id="forwardModal">
-    <div class="modal-card">
-      <div class="modal-title">Override next cert</div>
-      <div class="modal-meta" id="forwardServerNext">Server says next is: —</div>
-      <label class="field">
-        <span>Override to</span>
-        <!-- Static MV prefix + digits-only input. Saves the operator
-             two keystrokes per override during high-volume sessions.
-             Pasting "MV57" / "mv 57" / "57" all still works — the JS
-             handler strips non-digits before validating. -->
-        <div class="prefixed-input">
-          <span class="prefix">MV</span>
-          <input
-            type="text"
-            id="forwardCert"
-            placeholder="___"
-            inputmode="numeric"
-            pattern="[0-9]*"
-            autocomplete="off"
-            maxlength="6"
-          />
-        </div>
-      </label>
-      <p class="hint">Affects only the displayed "Next cert". Server still allocates via /api/admin/next-cert-id when you scan.</p>
-      <div class="modal-actions">
-        <button class="btn ghost" id="forwardCancel">Cancel</button>
-        <button class="btn primary" id="forwardApply">Apply</button>
+  <!-- First-run access is deliberately an in-app, operator-specific flow.
+       Only sanitised identity/status crosses IPC; the Keychain session and
+       Ed25519 private key never enter this renderer. -->
+  <div class="modal station-setup-modal" id="stationSetupModal" aria-live="polite">
+    <div class="modal-card wide">
+      <div class="modal-title" id="stationSetupTitle">Sign in to MintVault</div>
+      <p class="modal-meta" id="stationSetupText">Use your authorised MintVault account to set up this Mac.</p>
+      <form id="stationSignInForm" class="station-setup-form">
+        <label class="field"><span>Email</span><input type="email" id="stationEmail" autocomplete="username" required /></label>
+        <label class="field"><span>Password</span><input type="password" id="stationPassword" autocomplete="current-password" required /></label>
+        <button class="btn primary" type="submit" id="stationSignInBtn">SIGN IN</button>
+      </form>
+      <form id="stationMfaForm" class="station-setup-form" hidden>
+        <label class="field"><span>Authentication code</span><input type="text" id="stationMfaCode" autocomplete="one-time-code" inputmode="numeric" /></label>
+        <label class="field"><span>Or recovery code</span><input type="text" id="stationRecoveryCode" autocomplete="off" /></label>
+        <button class="btn primary" type="submit" id="stationMfaBtn">VERIFY</button>
+      </form>
+      <div id="stationRegisterPanel" class="station-setup-form" hidden>
+        <label class="field" id="stationLocationField"><span>Location</span><select id="stationLocation"></select></label>
+        <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
       </div>
+      <p class="hint station-setup-error" id="stationSetupError"></p>
     </div>
   </div>
 
-  <!-- Soft-delete confirm -->
-  <div class="modal" id="deleteModal">
-    <div class="modal-card">
-      <div class="modal-title">Soft-delete <span id="deleteCertId">—</span></div>
-      <label class="field">
-        <span>Reason (≥10 chars)</span>
-        <input type="text" id="deleteReason" placeholder="why this cert is being removed" />
-      </label>
-      <div class="modal-actions">
-        <button class="btn ghost" id="deleteCancel">Cancel</button>
-        <button class="btn danger" id="deleteConfirm">Soft-delete</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Scan confirmation — BLOCKING. Shown when a card finishes scanning; the
-       operator must click OK before the next scan is processed (scan-one-write-
-       one). The number is THIS Mac's assigned cert from its own ingest response
-       — never the global "Next cert" forecast. -->
-  <div class="modal confirm-modal" id="confirmModal">
-    <div class="modal-card confirm-card">
-      <div class="confirm-imgs">
-        <figure class="confirm-side">
-          <img id="confirmImg" class="confirm-img" alt="captured front" />
-          <div class="confirm-img-ph" id="confirmImgPlaceholder" style="display:none">front unavailable</div>
-          <figcaption class="confirm-side-label">Front</figcaption>
-        </figure>
-        <figure class="confirm-side">
-          <img id="confirmImgBack" class="confirm-img" alt="captured back" />
-          <div class="confirm-img-ph" id="confirmImgBackPlaceholder" style="display:none">back unavailable</div>
-          <figcaption class="confirm-side-label">Back</figcaption>
-        </figure>
-      </div>
-      <div class="confirm-label" id="confirmLabel">This card is</div>
-      <div class="confirm-cert" id="confirmCert">—</div>
-      <div class="confirm-note" id="confirmNote"></div>
-      <div class="modal-actions">
-        <button class="btn danger" id="confirmReject">Reject &amp; rescan</button>
-        <button class="btn" id="confirmGrade">Grade ↗</button>
-        <button class="btn primary confirm-ok" id="confirmOk">OK — number written, next card</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Click-to-enlarge overlay for the confirm front/back thumbnails. -->
-  <div class="confirm-zoom" id="confirmZoom" style="display:none">
-    <img id="confirmZoomImg" alt="enlarged scan" />
-  </div>
-
+  <script src="../lib/lide400-preview-transform.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

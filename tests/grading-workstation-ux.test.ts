@@ -13,6 +13,7 @@ import { join } from "path";
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const VIEWER = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
 const FORM = read("client/src/components/certificate-form.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
 const stripComments = (s: string) =>
   s
@@ -31,8 +32,10 @@ describe("floating card viewer is read-only with zoom controls (spec 1)", () => 
     expect(VIEWER).toContain("Full-screen preview");
   });
   it("zoom + pan are a pure CSS transform on a preview image — never touches grading geometry", () => {
-    // translate (pan) + scale (zoom) CSS transform, no grading coordinate math.
-    expect(VIEWER).toMatch(/transform:\s*`translate\([^`]*scale\(/);
+    // Controlled image-relative focus + zoom CSS transform, no grading coordinates.
+    expect(VIEWER).toContain("`scale(${zoom}) translate(");
+    expect(VIEWER).toContain("0.5 - view.focusX");
+    expect(VIEWER).toContain("updateCardInspectionView(currentInspection, side, patch)");
     const code = stripComments(VIEWER);
     expect(code).not.toMatch(/centering|crop|defect|x_percent|y_percent|imagePctFromEvent/i);
     const imports = (code.match(/from\s+"[^"]+"/g) ?? []).join("\n");
@@ -45,18 +48,15 @@ describe("floating card viewer is read-only with zoom controls (spec 1)", () => 
   });
 });
 
-describe("auto-focus first field on stage open (spec 7)", () => {
-  it("focuses Card Name when the Card stage opens, guarded against stealing focus", () => {
-    // Window widened from 900: a prettier pass (2026-07-19) reflowed this
-    // effect's condition onto more lines, pushing .focus() further from the
-    // anchor — assertion logic below is unchanged.
-    const eff = FORM.slice(
-      FORM.indexOf("Auto-focus the first logical field"),
-      FORM.indexOf("Auto-focus the first logical field") + 1100
-    );
-    expect(eff).toContain("input-card-name");
-    expect(eff).toContain("alreadyTyping"); // won't steal focus mid-typing
-    expect(eff).toContain(".focus()");
+describe("keyboard-safe canonical Card Details stage (spec 7)", () => {
+  it("keeps Card Name addressable without imperative focus stealing and retains keyboard card-side switching", () => {
+    expect(FORM).toContain('testId="input-card-name"');
+    expect(FORM).not.toContain("alreadyTyping");
+    expect(WORKSTATION).toContain("setStage(index)");
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    expect(VIEWER).toContain("tabIndex={0}");
+    expect(VIEWER).toContain('e.key === " " || e.code === "Space"');
+    expect(VIEWER).toContain('setSide(side === "front" ? "back" : "front")');
   });
 });
 

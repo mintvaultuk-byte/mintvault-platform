@@ -24,9 +24,12 @@ function sha256(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
 }
 
+/** Logged once per process, not per request — same shape as mount.ts's incoherent-env report. */
+let loggedMissingMfaProjection = false;
+
 export interface LoginResult {
   ok: boolean;
-  reason?: "invalid" | "locked" | "suspended" | "mfa_required";
+  reason?: "invalid" | "locked" | "suspended" | "mfa_required" | "mfa_state_unavailable";
   // present only on ok:
   sessionToken?: string;
   userId?: string;
@@ -46,6 +49,18 @@ interface AuthRow {
   failed_login_count: number;
   locked_until: string | null;
   mfa_required: boolean;
+  /**
+   * OPTIONAL BY TYPE, ON PURPOSE. `SELECT * FROM partner_auth_lookup($1)` returns
+   * exactly the columns the DEPLOYED function declares, and this one exists only
+   * from migration 0046 — 0002's original signature stops at `mfa_required`.
+   * Declaring it non-optional was a claim the compiler could not check: on a
+   * database without 0046 the value is `undefined`, `mfa_required || has_active_mfa`
+   * evaluated to `undefined` for an account with `mfa_required = false` and an
+   * ACTIVE authenticator, and the session was minted with `mfa_passed = !undefined
+   * = true` — the second factor silently disabled. Optional so the fail-closed
+   * check below is a real narrowing rather than a cast.
+   */
+  has_active_mfa?: boolean;
 }
 
 /**
@@ -65,6 +80,41 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   // L3 (timing oracle): ALWAYS run the bcrypt compare first — before the suspended/locked branches —
   // so locked/suspended accounts incur the same cost as an active wrong-password attempt.
   const good = u.password_hash ? await bcrypt.compare(password, u.password_hash) : false;
+
+  // ── OWNER-AUTHORISED REPAIR (2026-08-11) — FAIL CLOSED ON A MISSING MFA PROJECTION ──
+  //
+  // `has_active_mfa` is the only thing stopping an account that HAS an authenticator
+  // but does not carry `mfa_required` from being handed a fully-authenticated
+  // session. It exists only in migration 0046's partner_auth_lookup signature.
+  // Against a database still on 0002's ten-column form the column is simply absent
+  // from the result row, `mfaPending` below evaluates to `undefined`, and every such
+  // login is minted with `mfa_passed = true`. That is a silent MFA bypass caused by
+  // schema drift, with no error, no log line and no failing request to notice it by.
+  // Refusing is the only safe reading of "we cannot tell whether this account has a
+  // second factor".
+  //
+  // POSITION IS DELIBERATE. It sits AFTER the constant-cost bcrypt compare above, so
+  // the L3 timing property is untouched, and BEFORE every branch that mutates state
+  // or mints a session — no lockout counter is armed, no session row is written. A
+  // missing projection is a property of the DEPLOYMENT, identical for every caller,
+  // so this adds no per-account oracle.
+  //
+  // BOUNDARY, NOT STARTUP GATE. The served login route (server/partner/public-routes.ts)
+  // is mounted OUTSIDE partnerPortalRouter's four gates, so a gate in mount.ts would
+  // not cover the one route that decides mfa_passed. Logged once per process — an
+  // operator must be able to see WHY every partner login is suddenly refused.
+  if (typeof u.has_active_mfa !== "boolean") {
+    if (!loggedMissingMfaProjection) {
+      loggedMissingMfaProjection = true;
+      console.error(
+        "[partner] refusing ALL partner logins: partner_auth_lookup() does not project has_active_mfa. " +
+          "Apply migrations/0044_partner_mfa_pending_lifecycle.sql, then restart. " +
+          "(Hosts whose journal already holds this migration as 0046 from the pre-2026-08-11 " +
+          "canonical lineage are unaffected — the two files were byte-identical.)"
+      );
+    }
+    return { ok: false, reason: "mfa_state_unavailable" };
+  }
 
   if (u.org_status !== "ACTIVE" || u.user_status !== "ACTIVE") {
     // P0-F: a suspended/invited/revoked account is refused REGARDLESS of the password, so counting
@@ -133,8 +183,8 @@ export async function partnerLogin(email: string, password: string, ip?: string 
       c.query(
         `UPDATE partner_users SET failed_login_count = 0, locked_until = NULL
           WHERE id = $1 AND locked_until IS NOT NULL AND locked_until <= now()`,
-        [u.user_id],
-      ),
+        [u.user_id]
+      )
     );
   }
 
@@ -151,33 +201,49 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   if (emergencyBlocked) return { ok: false, reason: "suspended" };
 
   // success — reset lockout state, rotate a new session
-  const mfaPending = u.mfa_required;
+  const mfaPending = u.mfa_required || u.has_active_mfa;
   const token = crypto.randomBytes(32).toString("base64url");
   await withTenant({ tenantId: u.tenant_id }, async (c) => {
-    await c.query(
-      "UPDATE partner_users SET failed_login_count=0, locked_until=NULL, last_login_at=now() WHERE id=$1",
-      [u.user_id],
-    );
+    await c.query("UPDATE partner_users SET failed_login_count=0, locked_until=NULL, last_login_at=now() WHERE id=$1", [
+      u.user_id,
+    ]);
     // rotation: any prior live session for this user is revoked before minting a new one.
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [u.user_id]);
     await c.query(
       `INSERT INTO partner_sessions (tenant_id, user_id, token_hash, credential_version, mfa_passed, ip, absolute_expires_at)
        VALUES ($1,$2,$3,$4,$5,$6, now() + ($7 || ' hours')::interval)`,
-      [u.tenant_id, u.user_id, sha256(token), u.credential_version, !mfaPending, ip ?? null, String(SESSION_ABSOLUTE_HOURS)],
+      [
+        u.tenant_id,
+        u.user_id,
+        sha256(token),
+        u.credential_version,
+        !mfaPending,
+        ip ?? null,
+        String(SESSION_ABSOLUTE_HOURS),
+      ]
     );
     await writePartnerAudit(c, {
-      tenantId: u.tenant_id, actorUserId: u.user_id, action: mfaPending ? "partner_login_mfa_pending" : "partner_login",
+      tenantId: u.tenant_id,
+      actorUserId: u.user_id,
+      action: mfaPending ? "partner_login_mfa_pending" : "partner_login",
       ip: ip ?? null,
     });
   });
-  return { ok: true, sessionToken: token, userId: u.user_id, tenantId: u.tenant_id, partnerId: u.partner_id, mfaPending };
+  return {
+    ok: true,
+    sessionToken: token,
+    userId: u.user_id,
+    tenantId: u.tenant_id,
+    partnerId: u.partner_id,
+    mfaPending,
+  };
 }
 
 async function recordFailure(
   u: AuthRow,
   ip: string | null | undefined,
   kind: string,
-  opts: { countTowardsLockout?: boolean } = {},
+  opts: { countTowardsLockout?: boolean } = {}
 ): Promise<void> {
   const countTowardsLockout = opts.countTowardsLockout !== false; // default UNCHANGED: count it
   await withTenant({ tenantId: u.tenant_id }, async (c) => {
@@ -191,19 +257,44 @@ async function recordFailure(
                                     THEN now() + ($3 || ' minutes')::interval ELSE locked_until END
           WHERE id = $1
           RETURNING failed_login_count, (failed_login_count >= $2) AS locked`,
-        [u.user_id, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)],
+        [u.user_id, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)]
       );
       if (rows[0]?.locked) {
-        await writePartnerSecurity(c, { tenantId: u.tenant_id, severity: "medium", kind: "partner_account_locked", detail: { userId: u.user_id } });
+        await writePartnerSecurity(c, {
+          tenantId: u.tenant_id,
+          severity: "medium",
+          kind: "partner_account_locked",
+          detail: { userId: u.user_id },
+        });
       }
     }
-    await writePartnerAudit(c, { tenantId: u.tenant_id, actorUserId: u.user_id, action: "partner_login_failure", ip: ip ?? null, reason: kind });
+    await writePartnerAudit(c, {
+      tenantId: u.tenant_id,
+      actorUserId: u.user_id,
+      action: "partner_login_failure",
+      ip: ip ?? null,
+      reason: kind,
+    });
   });
 }
 
 /** Mark the MFA challenge passed for the current session (after verifyTotp/recovery succeeds). */
-export async function markSessionMfaPassed(tenantId: string, sessionId: string): Promise<void> {
-  await withTenant({ tenantId }, (c) => c.query("UPDATE partner_sessions SET mfa_passed=true WHERE id=$1", [sessionId]));
+export async function markSessionMfaPassed(tenantId: string, sessionId: string, userId: string): Promise<boolean> {
+  return withTenant({ tenantId }, async (c) => {
+    const updated = await c.query(
+      `UPDATE partner_sessions s
+          SET mfa_passed=true
+         FROM partner_users u
+        WHERE s.id=$1
+          AND s.user_id=$2
+          AND s.tenant_id=$3
+          AND s.revoked_at IS NULL
+          AND u.id=s.user_id
+          AND u.credential_version=s.credential_version`,
+      [sessionId, userId, tenantId],
+    );
+    return updated.rowCount === 1;
+  });
 }
 
 export async function partnerLogout(tenantId: string, sessionId: string): Promise<void> {
@@ -215,7 +306,9 @@ export async function partnerLogout(tenantId: string, sessionId: string): Promis
 
 export async function revokeAllSessions(tenantId: string, userId: string, reason = "revoke_all"): Promise<number> {
   return withTenant({ tenantId }, async (c) => {
-    const r = await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [userId]);
+    const r = await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [
+      userId,
+    ]);
     await writePartnerAudit(c, { tenantId, actorUserId: userId, action: "partner_sessions_revoked", reason });
     return r.rowCount ?? 0;
   });
@@ -230,7 +323,7 @@ export async function createPasswordResetToken(tenantId: string, userId: string)
     await c.query(
       `INSERT INTO partner_password_reset_tokens (tenant_id, user_id, token_hash, expires_at)
        VALUES ($1,$2,$3, now() + ($4 || ' minutes')::interval)`,
-      [tenantId, userId, sha256(token), String(RESET_TOKEN_MINUTES)],
+      [tenantId, userId, sha256(token), String(RESET_TOKEN_MINUTES)]
     );
     await writePartnerAudit(c, { tenantId, actorUserId: userId, action: "partner_password_reset_requested" });
   });
@@ -250,12 +343,16 @@ export const MAX_PASSWORD_LEN = 200;
 
 export async function consumePasswordResetToken(token: string, newPassword: string): Promise<boolean> {
   // F5: enforce the password policy in the SERVICE layer so every caller shares it, not just the route.
-  if (typeof newPassword !== "string" || newPassword.length < MIN_PASSWORD_LEN || newPassword.length > MAX_PASSWORD_LEN) {
+  if (
+    typeof newPassword !== "string" ||
+    newPassword.length < MIN_PASSWORD_LEN ||
+    newPassword.length > MAX_PASSWORD_LEN
+  ) {
     return false;
   }
   const { rows: tRows } = await partnerRuntimeQuery<{ tenant: string | null }>(
     "SELECT partner_reset_token_tenant($1) AS tenant",
-    [sha256(token)],
+    [sha256(token)]
   );
   const tenantId = tRows[0]?.tenant;
   if (!tenantId) return false; // unknown/expired/used token
@@ -264,7 +361,7 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
     const { rows } = await c.query<{ id: string; user_id: string }>(
       `SELECT id, user_id FROM partner_password_reset_tokens
         WHERE token_hash=$1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`,
-      [sha256(token)],
+      [sha256(token)]
     );
     if (rows.length !== 1) return false;
     const { id, user_id } = rows[0];
@@ -280,7 +377,7 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
           SET password_hash=$2, credential_version=credential_version+1,
               failed_login_count=0, locked_until=NULL
         WHERE id=$1`,
-      [user_id, newHash],
+      [user_id, newHash]
     );
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [user_id]);
     await writePartnerAudit(c, { tenantId, actorUserId: user_id, action: "partner_password_reset_completed" });

@@ -568,6 +568,101 @@ async function runTransferV2Sweep() {
   trackTimeout(guardedScanReconciler, 90_000);
   trackInterval(guardedScanReconciler, 5 * 60 * 1000);
 
+  // Durable scanner derivative worker. Unlike the legacy in-process FIFO, the
+  // PostgreSQL job row survives a Fly restart and is claimed with SKIP LOCKED,
+  // so each replica can safely run one bounded worker without sharing Node
+  // memory or starting a herd. A short compatibility backoff avoids log churn
+  // during a rolling release that has not applied migration 0046 yet.
+  let durableScannerWorkerInFlight = false;
+  let durableScannerQueueUnavailableUntil = 0;
+  const durableScannerWorkerId = `${process.env.FLY_ALLOC_ID || process.env.HOSTNAME || "server"}:${process.pid}`;
+  const runDurableScannerWorker = async () => {
+    if (isShuttingDown() || durableScannerWorkerInFlight || Date.now() < durableScannerQueueUnavailableUntil) return;
+    durableScannerWorkerInFlight = true;
+    beginJob();
+    try {
+      const { runOneScannerProcessingJob } = await import("./scanner-processing-queue");
+      await runOneScannerProcessingJob(durableScannerWorkerId);
+    } catch (err: any) {
+      const code = err?.code ?? err?.cause?.code;
+      if (code === "42P01") {
+        durableScannerQueueUnavailableUntil = Date.now() + 60_000;
+        log("migration 0046 is not yet available; retrying worker in 60s", "scanner-processing-worker");
+      } else {
+        log(`worker error: ${err?.message || err}`, "scanner-processing-worker");
+      }
+    } finally {
+      durableScannerWorkerInFlight = false;
+      endJob();
+    }
+  };
+  void runDurableScannerWorker();
+  trackInterval(() => {
+    void runDurableScannerWorker();
+  }, 2_000);
+
+  // Direct scanner uploads use an opaque, non-authoritative R2 staging key.
+  // Keep staging retention bounded without ever touching immutable masters: a
+  // small SKIP LOCKED batch deletes only rows the finaliser marked accepted or
+  // whose unused upload grant has expired.
+  let stagingCleanupUnavailableUntil = 0;
+  const runScannerStagingCleanup = async () => {
+    if (isShuttingDown() || Date.now() < stagingCleanupUnavailableUntil) return;
+    try {
+      const { claimScannerEvidenceStagingCleanup, markScannerEvidenceStagingDeleted } =
+        await import("./scanner-evidence-staging-service");
+      const { deleteFromR2 } = await import("./r2");
+      const candidates = await claimScannerEvidenceStagingCleanup(20);
+      for (const candidate of candidates) {
+        await deleteFromR2(candidate.objectKey);
+        await markScannerEvidenceStagingDeleted(candidate.id);
+      }
+      if (candidates.length)
+        log(`removed ${candidates.length} non-authoritative staging object(s)`, "scanner-staging-cleanup");
+    } catch (err: any) {
+      const code = err?.code ?? err?.cause?.code;
+      if (code === "42P01") {
+        stagingCleanupUnavailableUntil = Date.now() + 60_000;
+        log("migration 0047 is not yet available; retrying cleanup in 60s", "scanner-staging-cleanup");
+      } else {
+        log(`cleanup error: ${err?.message || err}`, "scanner-staging-cleanup");
+      }
+    }
+  };
+  trackTimeout(() => {
+    void runScannerStagingCleanup();
+  }, 2 * 60_000);
+  trackInterval(() => {
+    void runScannerStagingCleanup();
+  }, 5 * 60_000);
+
+  // Session expiry is batch-owned by the service, not by each 3–35 second
+  // station poll. The query has a partial expiry index and SKIP LOCKED, so two
+  // replicas can make bounded cleanup progress without a global UPDATE storm.
+  let scannerExpiryUnavailableUntil = 0;
+  const sweepExpiredScannerCaptures = async () => {
+    if (isShuttingDown() || Date.now() < scannerExpiryUnavailableUntil) return;
+    try {
+      const { expireScannerCaptureSessions } = await import("./scanner-capture-service");
+      const expired = await expireScannerCaptureSessions(100);
+      if (expired) log(`expired ${expired} scanner capture session(s)`, "scanner-capture-expiry");
+    } catch (err: any) {
+      const code = err?.code ?? err?.cause?.code;
+      if (code === "42P01") {
+        scannerExpiryUnavailableUntil = Date.now() + 60_000;
+        log("scanner capture schema is not yet available; retrying expiry sweep in 60s", "scanner-capture-expiry");
+      } else {
+        log(`expiry sweep error: ${err?.message || err}`, "scanner-capture-expiry");
+      }
+    }
+  };
+  trackTimeout(() => {
+    void sweepExpiredScannerCaptures();
+  }, 60_000);
+  trackInterval(() => {
+    void sweepExpiredScannerCaptures();
+  }, 60_000);
+
   // A05 — unmatched /api/* returns a clean 404 JSON instead of falling through
   // to the SPA index.html. Sits AFTER all real API routes (registerRoutes above)
   // and BEFORE the SPA catch-all (serveStatic/setupVite below), so no real

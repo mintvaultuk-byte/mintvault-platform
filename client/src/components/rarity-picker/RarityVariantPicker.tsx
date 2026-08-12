@@ -227,6 +227,7 @@ export function RarityVariantPicker({
   onFavouritesChange,
   onRecentChange,
   onCustomRarityNote,
+  catalogueEndpoint,
 }: {
   value?: Partial<StructuredCardVariant> | null;
   onChange?: (v: StructuredCardVariant) => void;
@@ -241,6 +242,8 @@ export function RarityVariantPicker({
    *  this into the certificate's EXISTING `rarityOther` field — no schema
    *  change (see the CUSTOM_RARITY_VALUE comment above). */
   onCustomRarityNote?: (note: string | null) => void;
+  /** Role-authorised catalogue snapshot endpoint. */
+  catalogueEndpoint?: string;
 }) {
   const initialLang = languageByValueOrLabel(value?.language)?.value ?? "en";
   const [language, setLanguage] = useState<string>(initialLang);
@@ -284,7 +287,7 @@ export function RarityVariantPicker({
   // via a custom chip (below) or the "Add missing rarity" form, never as a bare
   // unlabelled catalogue entry mixed in with real printed rarities.
   // Live catalogue (DB-backed, seed fallback) — every list below reads from it.
-  const cat = useCatalogue();
+  const cat = useCatalogue(catalogueEndpoint);
   const base = useMemo(
     () =>
       filterRarities({ language, era: showAll ? null : era || null }, cat).filter(

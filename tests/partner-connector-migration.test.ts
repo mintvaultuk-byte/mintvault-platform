@@ -22,7 +22,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom, applyEveryMigrationRealistic } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, applyEveryMigrationRealistic, partnerScopeOnly } from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -133,11 +133,11 @@ async function applyAllRealistic(): Promise<void> {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
-        const plan = await planMigrations(migrator, listMigrationFiles());
+        const plan = await planMigrations(migrator, partnerScopeOnly(listMigrationFiles()));
         expect(plan.pending).toHaveLength(0);
         expect(plan.checksumMismatches).toHaveLength(0);
         expect(plan.inconsistent).toHaveLength(0);
-        const { applied } = await applyMigrations(migrator, listMigrationFiles());
+        const { applied } = await applyMigrations(migrator, partnerScopeOnly(listMigrationFiles()));
         expect(applied).toHaveLength(0);
       } finally {
         await migrator.end();
@@ -303,7 +303,7 @@ async function applyAllRealistic(): Promise<void> {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
-        const { applied } = await applyMigrations(migrator, listMigrationFiles());
+        const { applied } = await applyMigrations(migrator, partnerScopeOnly(listMigrationFiles()));
         // 0008 was never rolled back (G1 fails closed above), so it is correctly NOT reapplied.
         expect(applied).not.toContain("0008_partner_connector_foundation.sql");
         expect(applied).toContain("0009_partner_connector_validation.sql");
