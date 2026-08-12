@@ -157,6 +157,41 @@ export function appVersionSatisfies(installed: string | null, minimum: string | 
   return a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2])));
 }
 
+/**
+ * A station can only attest a newly installed Scanner version on its signed
+ * heartbeat.  The exact JSON bytes are already part of the station signature,
+ * so a proxy or another browser session cannot advance this value.  Keeping
+ * this parser separate also makes it impossible for an arbitrary capture body
+ * to become a version-update channel.
+ */
+export function signedHeartbeatAppVersion(method: string, requestPath: string, rawBody: unknown): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(requestPath, "https://mintvault.invalid").pathname;
+  } catch {
+    return null;
+  }
+  if (method.toUpperCase() !== "POST" || pathname !== "/api/partner/stations/heartbeat" || !Buffer.isBuffer(rawBody)) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8")) as { appVersion?: unknown };
+    const value = typeof payload.appVersion === "string" ? payload.appVersion.trim() : "";
+    return versionTuple(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldPersistAttestedVersion(current: string | null, attested: string | null): boolean {
+  if (!attested) return false;
+  const next = versionTuple(attested);
+  if (!next) return false;
+  const existing = current ? versionTuple(current) : null;
+  if (!existing) return true;
+  return next[0] > existing[0] || (next[0] === existing[0] && (next[1] > existing[1] || (next[1] === existing[1] && next[2] >= existing[2])));
+}
+
 async function resolvePermittedLocation(
   client: PoolClient,
   principal: PartnerPrincipal,
@@ -407,20 +442,31 @@ export async function authenticateStationRequest(
   if (station.status !== "ACTIVE" || station.organisation_status !== "ACTIVE" || station.location_status !== "ACTIVE") {
     throw new StationServiceError("station_not_active", "Station, partner or location is not active");
   }
-  if (!appVersionSatisfies(station.app_version, station.minimum_supported_version)) {
+  // A correctly signed newly installed app used to deadlock here: the server
+  // compared the old stored version before the heartbeat route was allowed to
+  // store the new body version.  Only this body-bound heartbeat attestation can
+  // break that cycle; capture/calibration routes still require the persisted
+  // version after this transaction commits.
+  const attestedVersion = signedHeartbeatAppVersion(method, path, rawBody);
+  const effectiveVersion = shouldPersistAttestedVersion(station.app_version, attestedVersion)
+    ? attestedVersion
+    : station.app_version;
+  if (!appVersionSatisfies(effectiveVersion, station.minimum_supported_version)) {
     throw new StationServiceError("version_blocked", "Station version is below the minimum supported version");
   }
   // A monotonic signed nonce gives replay resistance without a high-churn
   // nonce table at 5,000 online stations. The conditional update is the
   // global, database-backed acceptance point across every app replica.
-  const advanced = await partnerAdminQuery<{ id: string }>(
+  const advanced = await partnerAdminQuery<{ id: string; app_version: string | null }>(
     `UPDATE partner_stations s
-        SET last_request_nonce=$2, updated_at=now()
+        SET last_request_nonce=$2,
+            app_version=COALESCE($3, s.app_version),
+            updated_at=now()
       WHERE s.id=$1 AND s.status='ACTIVE' AND s.last_request_nonce < $2
         AND EXISTS (SELECT 1 FROM partner_organisations o WHERE o.id=s.tenant_id AND o.status='ACTIVE')
         AND EXISTS (SELECT 1 FROM partner_locations l WHERE l.id=s.location_id AND l.status='ACTIVE')
-      RETURNING s.id`,
-    [station.id, parsed.envelope.nonce.toString()]
+      RETURNING s.id, s.app_version`,
+    [station.id, parsed.envelope.nonce.toString(), shouldPersistAttestedVersion(station.app_version, attestedVersion) ? attestedVersion : null]
   );
   if (advanced.rows.length !== 1)
     throw new StationServiceError("station_replay", "Station request was replayed or the station was suspended");
@@ -429,7 +475,7 @@ export async function authenticateStationRequest(
     code: station.station_code,
     tenantId: station.tenant_id,
     locationId: station.location_id,
-    appVersion: station.app_version,
+    appVersion: advanced.rows[0].app_version,
     scannerProfileVersion: station.scanner_profile_version,
     calibrationStatus: station.calibration_status,
     currentCalibrationId: station.current_calibration_id,

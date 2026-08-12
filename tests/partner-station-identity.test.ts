@@ -9,7 +9,7 @@ import {
   stationPublicKeyFingerprint,
   verifyStationSignature,
 } from "../server/partner/station-identity";
-import { appVersionSatisfies } from "../server/partner/station-service";
+import { appVersionSatisfies, signedHeartbeatAppVersion } from "../server/partner/station-service";
 
 describe("partner station cryptographic identity", () => {
   const keyPair = crypto.generateKeyPairSync("ed25519");
@@ -102,5 +102,13 @@ describe("partner station cryptographic identity", () => {
     expect(appVersionSatisfies("1.2.1", "1.2.2")).toBe(false);
     expect(appVersionSatisfies("scanner-vNext", "1.2.1")).toBe(false);
     expect(appVersionSatisfies(null, "1.2.1")).toBe(false);
+  });
+
+  it("accepts an upgrade attestation only from the exact signed heartbeat body", () => {
+    const body = Buffer.from(JSON.stringify({ appVersion: "1.2.1", scannerConnected: true }));
+    expect(signedHeartbeatAppVersion("POST", "/api/partner/stations/heartbeat", body)).toBe("1.2.1");
+    expect(signedHeartbeatAppVersion("POST", "/api/partner/stations/calibrations", body)).toBeNull();
+    expect(signedHeartbeatAppVersion("GET", "/api/partner/stations/heartbeat", body)).toBeNull();
+    expect(signedHeartbeatAppVersion("POST", "/api/partner/stations/heartbeat", Buffer.from('{"appVersion":"next"}'))).toBeNull();
   });
 });
