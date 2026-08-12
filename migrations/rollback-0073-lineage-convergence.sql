@@ -1,6 +1,6 @@
--- rollback-0048-grading-review-revision.sql
+-- rollback-0073-lineage-convergence.sql
 --
--- Reverses 0048. NOT a forward migration (no NNNN_ prefix -> the numbered runner
+-- Reverses 0073. NOT a forward migration (no NNNN_ prefix -> the numbered runner
 -- ignores it). Owner-approved protected action only; rehearse on a disposable
 -- database first.
 --
@@ -14,7 +14,7 @@
 --   * shared/schema.ts declares gradingRevision, so every Drizzle SELECT of
 --     `certificates` names the column explicitly.
 -- Dropping the column under a running deployment therefore turns every
--- certificate read and every grading save into a 500. Deploy the pre-0048
+-- certificate read and every grading save into a 500. Deploy the pre-0073
 -- application image, confirm it is serving, and only then run this file.
 --
 -- WHY IT REFUSES WHILE REVIEWS ARE IN FLIGHT
@@ -32,18 +32,18 @@
 -- ===========================================================================
 -- The revision numbers are a concurrency token, not history: nothing is
 -- reconstructed from them and no customer-facing fact depends on them. Losing
--- them is recoverable — re-applying 0048 restarts every row at 1.
+-- them is recoverable — re-applying 0073 restarts every row at 1.
 --
--- IT DOES NOT DROP auth_status. 0048 adds `auth_status` idempotently, but on
--- every real MintVault database that column PREDATES 0048 (created by boot DDL
+-- IT DOES NOT DROP auth_status. 0073 adds `auth_status` idempotently, but on
+-- every real MintVault database that column PREDATES 0073 (created by boot DDL
 -- in server/routes.ts) and holds live authenticity outcomes that decide NO/AA.
--- Dropping it would destroy grading data 0048 never created. Do not "complete"
+-- Dropping it would destroy grading data 0073 never created. Do not "complete"
 -- this rollback by adding a drop for it.
 --
 -- IF YOU ONLY NEED TO STOP THE TRIGGER IN A HURRY: run just the two DROP
 -- statements in section 2 and STOP. The column is additive and inert; leaving it
--- keeps every existing reader and writer working, and re-applying 0048
--- afterwards converges it correctly (0048 section 3 is self-repairing).
+-- keeps every existing reader and writer working, and re-applying 0073
+-- afterwards converges it correctly (0073 section 3 is self-repairing).
 --
 -- Every step is IF EXISTS so a partial rollback can be re-run safely.
 
@@ -59,7 +59,7 @@ DECLARE
   blocking bigint;
 BEGIN
   IF to_regclass('public.certificates') IS NULL THEN
-    RAISE NOTICE 'rollback-0048: certificates table absent; nothing to do.';
+    RAISE NOTICE 'rollback-0073: certificates table absent; nothing to do.';
     RETURN;
   END IF;
 
@@ -68,7 +68,7 @@ BEGIN
      WHERE table_schema = 'public' AND table_name = 'certificates'
        AND column_name = 'grading_revision')
   THEN
-    RAISE NOTICE 'rollback-0048: grading_revision absent; nothing to do.';
+    RAISE NOTICE 'rollback-0073: grading_revision absent; nothing to do.';
     RETURN;
   END IF;
 
@@ -85,7 +85,7 @@ BEGIN
 
     IF blocking > 0 THEN
       RAISE EXCEPTION
-        'rollback-0048 refuses to run: % certificate(s) are in pending_review. Removing the revision trigger removes the only protection against a stale reviewer approving a grade they never inspected. Approve or reject those reviews first, then re-run.',
+        'rollback-0073 refuses to run: % certificate(s) are in pending_review. Removing the revision trigger removes the only protection against a stale reviewer approving a grade they never inspected. Approve or reject those reviews first, then re-run.',
         blocking;
     END IF;
   END IF;
@@ -104,13 +104,38 @@ DROP FUNCTION IF EXISTS certificates_advance_grading_revision();
 ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS grading_revision;
 
 -- ---------------------------------------------------------------------------
--- 4) The journal row must go too, otherwise the runner considers 0048 applied
+-- 4) The journal row must go too, otherwise the runner considers 0073 applied
 --    and will never re-apply it.
+--
+--    This file was renamed rollback-0048-grading-review-revision.sql ->
+--    rollback-0073-lineage-convergence.sql in commit c788fa68 (R100, content
+--    unchanged) when the forward migration was renumbered 0048 -> 0073. The
+--    DELETE below was NOT updated with it and still named
+--    '0048_grading_review_revision.sql' — a filename that was withdrawn and
+--    never applied on any host, so the statement matched ZERO rows.
+--
+--    The consequence was silent and one-way: this rollback reversed the DDL
+--    (trigger dropped, function dropped, grading_revision dropped) while
+--    leaving the '0073_lineage_convergence.sql' journal row in place with a
+--    matching checksum. planMigrations() files a journalled+checksum-matching
+--    file under alreadyApplied (scripts/db/migrate.ts:385), so the runner
+--    would never re-apply 0073 — and recovering would require hand-editing
+--    the journal, which this project's whole migration design forbids.
+--
+--    The journal is keyed on FILENAME (scripts/db/migrate.ts:304-316), so the
+--    name here must match the forward migration EXACTLY.
 -- ---------------------------------------------------------------------------
 DO $$
+DECLARE
+  removed integer;
 BEGIN
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
-    DELETE FROM schema_migrations WHERE filename = '0048_grading_review_revision.sql';
+    DELETE FROM schema_migrations WHERE filename = '0073_lineage_convergence.sql';
+    GET DIAGNOSTICS removed = ROW_COUNT;
+    -- Report what actually happened rather than trusting the statement ran.
+    -- 0 is legitimate (0073 was never applied on this host); it must not be
+    -- silent, because 0 was ALSO the symptom of the stale-filename defect.
+    RAISE NOTICE 'rollback-0073: removed % journal row(s) for 0073_lineage_convergence.sql', removed;
   END IF;
 END$$;
 
@@ -123,18 +148,18 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_trigger
               WHERE tgname = 'trg_certificates_advance_grading_revision'
                 AND tgrelid = 'public.certificates'::regclass) THEN
-    RAISE EXCEPTION 'rollback-0048 assertion failed: the revision trigger is still present.';
+    RAISE EXCEPTION 'rollback-0073 assertion failed: the revision trigger is still present.';
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
               WHERE p.proname = 'certificates_advance_grading_revision' AND n.nspname = 'public') THEN
-    RAISE EXCEPTION 'rollback-0048 assertion failed: certificates_advance_grading_revision() is still present.';
+    RAISE EXCEPTION 'rollback-0073 assertion failed: certificates_advance_grading_revision() is still present.';
   END IF;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns
               WHERE table_schema = 'public' AND table_name = 'certificates'
                 AND column_name = 'grading_revision') THEN
-    RAISE EXCEPTION 'rollback-0048 assertion failed: certificates.grading_revision is still present.';
+    RAISE EXCEPTION 'rollback-0073 assertion failed: certificates.grading_revision is still present.';
   END IF;
 
   -- 0048 also adds auth_status idempotently and this rollback deliberately
@@ -145,10 +170,10 @@ BEGIN
                       WHERE table_schema = 'public' AND table_name = 'certificates'
                         AND column_name = 'auth_status') THEN
     RAISE EXCEPTION
-      'rollback-0048 assertion failed: certificates.auth_status was removed. This rollback must NEVER drop it — it predates 0048 and holds live authenticity outcomes.';
+      'rollback-0073 assertion failed: certificates.auth_status was removed. This rollback must NEVER drop it — it predates 0048 and holds live authenticity outcomes.';
   END IF;
 
-  RAISE NOTICE 'rollback-0048: review-revision token removed. auth_status deliberately retained.';
+  RAISE NOTICE 'rollback-0073: review-revision token removed. auth_status deliberately retained.';
 END$$;
 
 COMMIT;

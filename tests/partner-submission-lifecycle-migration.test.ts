@@ -228,6 +228,75 @@ describe("Migration 0074 — submission lifecycle + location snapshot (PostgreSQ
     ).rejects.toThrow(/foreign key|violates/i);
   });
 
+  // ── A8-F2 (HIGH) — pg_temp shadowing of the location snapshot ────────────────────────────
+  //
+  // partner_submissions_capture_location_snapshot() is SECURITY INVOKER, so the CALLER's
+  // search_path applies, and pg_temp is searched ahead of public by default. Without a pinned
+  // search_path AND a schema-qualified read, any role that can CREATE TEMP TABLE — a default
+  // PUBLIC privilege every partner runtime role holds — shadows the lookup and forges the
+  // snapshot. `AND l.tenant_id = NEW.tenant_id` does not help; it is evaluated against the temp
+  // table. This defeats the provenance the whole snapshot exists to guarantee.
+  //
+  // The hardening was authored as 0048_partner_location_snapshot_search_path.sql (commit
+  // 098345f7) for the lineage where this migration had already been applied as 0044. On THIS
+  // lineage it was still unapplied and renumbered to 0074 — which sorts AFTER 0048 — so the
+  // repair is folded into 0074 at source instead. These assertions exist because nothing else
+  // pins it: no CI step reads the function body, and a future edit to the migration would
+  // silently reopen the hole.
+  it("A8-F2: the location-snapshot trigger pins search_path and reads public.partner_locations", async () => {
+    const fn = await admin.query(
+      `SELECT p.proconfig, p.prosrc, p.prosecdef
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.proname = 'partner_submissions_capture_location_snapshot'`
+    );
+    expect(fn.rowCount, "the snapshot trigger function must exist").toBe(1);
+
+    const { proconfig, prosrc } = fn.rows[0] as { proconfig: string[] | null; prosrc: string };
+
+    // pg_temp must be present (legitimate temp objects stay reachable) but LAST, so it can
+    // never shadow a public table. This is the house convention set by 0006.
+    expect(proconfig, "search_path is not pinned at all").not.toBeNull();
+    expect(proconfig).toContain("search_path=public, pg_temp");
+
+    // Belt and braces: the read is schema-qualified, so the reference stays correct even if a
+    // future edit drops the SET clause.
+    expect(prosrc, "an unqualified partner_locations read survives").not.toMatch(
+      /from\s+partner_locations/i
+    );
+    expect(prosrc, "the schema-qualified read is missing").toMatch(/from\s+public\.partner_locations/i);
+  });
+
+  it("A8-F2: a pg_temp table named partner_locations cannot forge the snapshot", async () => {
+    // The actual attack, executed. Without the hardening this inserts 'FORGED ORIGIN' as the
+    // immutable provenance of a submission; with it, the real location name wins.
+    const attacker = new Client({ connectionString: cluster.url });
+    await attacker.connect();
+    try {
+      await attacker.query(
+        "CREATE TEMP TABLE partner_locations (id uuid, tenant_id uuid, partner_id uuid, name text, status text)"
+      );
+      await attacker.query(
+        "INSERT INTO partner_locations (id, tenant_id, partner_id, name, status) VALUES ($1,$2,$2,'FORGED ORIGIN','ACTIVE')",
+        [LOCATION, TENANT]
+      );
+      await attacker.query(
+        `INSERT INTO partner_submissions
+           (tenant_id, location_id, created_by, public_ref, card_count, status, version)
+         VALUES ($1,$2,$3,'REF-FORGE',0,'draft',1)`,
+        [TENANT, LOCATION, USER]
+      );
+      const row = await attacker.query(
+        "SELECT location_name_snapshot FROM partner_submissions WHERE public_ref = 'REF-FORGE'"
+      );
+      expect(row.rows[0].location_name_snapshot).toBe("Original Name");
+      expect(row.rows[0].location_name_snapshot).not.toBe("FORGED ORIGIN");
+    } finally {
+      await attacker.end();
+    }
+  });
+
   it("0074 adds NO partner-to-certificate column, because 0035 already provides one", async () => {
     // Guards against a future well-meaning duplicate link. The link is certificates.origin_partner_id.
     const dup = await admin.query(
