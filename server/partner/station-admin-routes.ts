@@ -1,6 +1,6 @@
 import { Router, type Express } from "express";
 import { requireSuperAdmin } from "../auth";
-import { listFleetStations, transitionStationStatus } from "./station-service";
+import { listFleetStations, rejectPendingStation, transitionStationStatus } from "./station-service";
 
 function actorId(req: import("express").Request): string | null {
   const value = (req.session as any)?.authUserId;
@@ -43,6 +43,19 @@ export function partnerStationAdminRouter(): Router {
       }
     });
   }
+
+  r.post("/stations/:stationCode/reject", async (req, res) => {
+    try {
+      const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
+      await rejectPendingStation(String(req.params.stationCode), actorId(req), reason);
+      res.json({ ok: true, status: "REVOKED", action: "rejected" });
+    } catch (error: any) {
+      const code = error?.code || "station_change_failed";
+      res
+        .status(code === "station_not_found" ? 404 : 409)
+        .json({ error: { code, message: error?.message || "Station could not be rejected" } });
+    }
+  });
   return r;
 }
 

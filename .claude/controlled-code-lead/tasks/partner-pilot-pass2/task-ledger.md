@@ -30,18 +30,18 @@
 | 1 — Review plan | complete | 2026-08-12 | Three non-overlapping, read-only reviewer scopes completed. |
 | 2 — Investigation | complete | 2026-08-12 | Reports recorded as `reviewer-*.md`; no reviewer made a change. |
 | 3 — Lead verification | complete | 2026-08-12 | Findings PP2-F1 through PP2-F13 consolidated; source and live evidence rechecked. |
-| 4 — Implementation authorisation | complete for packages A–C | 2026-08-12 | `change-manifest.md` records bounded local-source authority, QA/flag and station packages. |
-| 5 — Implementation | complete for packages A–C | 2026-08-12 | All changes are local source/tests; 0074 and new 0075 are unapplied migration files. |
-| 6 — Regression | in progress | 2026-08-12 | Focused authority, QA and scanner suites, typecheck, lint and build pass; full suite has known environment/native-render limits recorded in definition of proof. |
-| 7 — Final report | pending | | External production/runtime/physical acceptance gates remain. |
+| 4 — Implementation authorisation | complete for packages A–G | 2026-08-12 | `change-manifest.md` records bounded local-source authority, QA/flag, station, scanner, allocation/output/history and scanner-release packages. |
+| 5 — Implementation | complete for packages A–G | 2026-08-12 | All changes are local source/tests; 0074, 0075 and 0076 are unapplied migration files. |
+| 6 — Regression | complete locally | 2026-08-12 | 49 focused Package F tests; 107 print/credit tests; 120 Pass 1 authority tests; 61 migration/station tests (one optional skip); scanner 35; TypeScript and production build pass. Full suite limits remain recorded in definition of proof. |
+| 7 — Final report | pending owner gates | | Production runtime topology, migration journal/application, signed package distribution and physical card/print acceptance remain external protected actions. |
 
 ## Reviewer assignments
 
 | Reviewer | Scope | Status |
 |---|---|---|
-| `runtime_reconciliation` | live/lineage, Partner mount/runtime, role/RLS/config and migrations | in progress; read-only |
-| `credits_qa_audit` | credit lifecycle, QA, print gates, tenancy/security proofs | in progress; read-only |
-| `scanner_product_audit` | native scanner/product flow and canonical workstation surfaces | in progress; read-only |
+| `runtime_reconciliation` | live/lineage, Partner mount/runtime, role/RLS/config and migrations | complete; read-only |
+| `credits_qa_audit` | credit lifecycle, QA, print gates, tenancy/security proofs | complete; read-only |
+| `scanner_product_audit` | native scanner/product flow and canonical workstation surfaces | complete; read-only |
 
 ## Links
 

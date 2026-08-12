@@ -25,6 +25,7 @@ import {
   listAvailableServiceTiers,
   uploadCardImage,
 } from "./submission-service";
+import { listPartnerCertificateHistory } from "./certificate-history-service";
 
 function sendError(res: import("express").Response, err: unknown): void {
   if (err instanceof SubmissionError) {
@@ -110,6 +111,17 @@ export function partnerSubmissionRouter(): Router {
   r.get("/service-tiers", requirePartnerCapability("partner.orders.view"), async (req, res) => {
     try {
       res.json(await listAvailableServiceTiers(req.partner!));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // Certificate history is a separate, immutable-origin projection rather
+  // than a renamed submission list. It appears only after the connector has
+  // created a Partner certificate and remains tenant/location scoped.
+  r.get("/certificates", requirePartnerCapability("partner.orders.view"), async (req, res) => {
+    try {
+      res.json({ certificates: await listPartnerCertificateHistory(req.partner!) });
     } catch (err) {
       sendError(res, err);
     }

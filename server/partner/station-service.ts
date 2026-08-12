@@ -274,7 +274,14 @@ export async function listPermittedStationLocations(
 export async function getStationEnrollmentStatus(
   principal: PartnerPrincipal,
   stationCode: unknown
-): Promise<{ stationCode: string; status: StationStatus; locationId: string; calibrationStatus: CalibrationStatus }> {
+): Promise<{
+  stationCode: string;
+  status: StationStatus;
+  locationId: string;
+  calibrationStatus: CalibrationStatus;
+  appVersion: string | null;
+  minimumSupportedVersion: string | null;
+}> {
   const code = typeof stationCode === "string" ? stationCode.trim().toUpperCase() : "";
   if (!/^MV-STN-[A-Z2-7]{10,24}$/.test(code)) throw new StationServiceError("validation", "stationCode is invalid");
   const { rows } = await partnerAdminQuery<{
@@ -282,8 +289,11 @@ export async function getStationEnrollmentStatus(
     status: StationStatus;
     location_id: string;
     calibration_status: CalibrationStatus;
+    app_version: string | null;
+    minimum_supported_version: string | null;
   }>(
-    `SELECT s.station_code, s.status, s.location_id, s.calibration_status
+    `SELECT s.station_code, s.status, s.location_id, s.calibration_status,
+            s.app_version, s.minimum_supported_version
        FROM partner_stations s
       WHERE s.station_code=$1 AND s.tenant_id=$2
         AND ($3::boolean OR EXISTS (
@@ -299,6 +309,8 @@ export async function getStationEnrollmentStatus(
     status: station.status,
     locationId: station.location_id,
     calibrationStatus: station.calibration_status,
+    appVersion: station.app_version,
+    minimumSupportedVersion: station.minimum_supported_version,
   };
 }
 
@@ -675,6 +687,46 @@ export async function transitionStationStatus(
         row.id,
         actorUserId,
         `station_${status.toLowerCase()}`,
+        JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true }),
+      ]
+    );
+  });
+}
+
+/** Reject is intentionally distinct from revocation: it applies only before a
+ * station was approved and leaves a durable operator-facing rejection event. */
+export async function rejectPendingStation(
+  stationCode: string,
+  actorUserId: string | null,
+  reason: string
+): Promise<void> {
+  const cleanCode = boundedText(stationCode, "stationCode", 40).toUpperCase();
+  const cleanReason = boundedText(reason, "reason", 1000);
+  await withPartnerAdminTransaction(async (client) => {
+    const current = await client.query<{ id: string; tenant_id: string; location_id: string; status: StationStatus }>(
+      `SELECT id,tenant_id,location_id,status FROM partner_stations WHERE station_code=$1 FOR UPDATE`,
+      [cleanCode]
+    );
+    const row = current.rows[0];
+    if (!row) throw new StationServiceError("station_not_found", "Station not found");
+    if (row.status !== "PENDING") {
+      throw new StationServiceError("validation", "Only a pending station can be rejected");
+    }
+    await client.query(
+      `UPDATE partner_stations
+          SET status='REVOKED', credential_epoch=credential_epoch+1,
+              revoked_at=now(), revoked_by=$2, updated_at=now()
+        WHERE id=$1`,
+      [row.id, actorUserId]
+    );
+    await client.query(
+      `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+       VALUES ($1,$2,$3,$4,'station_rejected',$5::jsonb)`,
+      [
+        row.tenant_id,
+        row.location_id,
+        row.id,
+        actorUserId,
         JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true }),
       ]
     );

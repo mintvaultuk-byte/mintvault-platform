@@ -76,6 +76,29 @@ export const partnerAuth = {
   revokeAll: () => req<{ ok: boolean; revoked: number }>("POST", "/api/partner/auth/revoke-all"),
 };
 
+export type PartnerCertificateHistoryRow = {
+  certificateId: number;
+  certificateNumber: string;
+  partnerSubmissionId: string;
+  locationName: string | null;
+  cardName: string | null;
+  setName: string | null;
+  cardNumber: string | null;
+  year: string | null;
+  grade: string | null;
+  gradingStatus: string;
+  qaClearedAt: string | null;
+  printState: string | null;
+  printedAt: string | null;
+  stations: string[];
+  evidenceComplete: boolean;
+  issuedAt: string | null;
+};
+
+export const partnerCertificates = {
+  list: () => req<{ certificates: PartnerCertificateHistoryRow[] }>("GET", "/api/partner/certificates"),
+};
+
 /**
  * Minimum password length the server enforces (server/partner/auth.ts MIN_PASSWORD_LEN). Mirrored
  * here ONLY to give the user an instant, plain-English hint before they submit — the server remains

@@ -428,6 +428,27 @@ export async function finishScannerCapture(
 }
 
 /**
+ * A card is scanner-registered only when the database has terminal,
+ * target-bound captures for both sides. This is presentation state for the
+ * station hand-off, not an authority to grade or print.
+ */
+export async function isScannerCaptureCardRegistered(certificateId: number): Promise<boolean> {
+  const result = await pool.query<{ card_registered: boolean }>(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM scanner_capture_sessions
+          WHERE certificate_id=$1 AND side='front' AND state='captured'
+       )
+       AND EXISTS (
+         SELECT 1 FROM scanner_capture_sessions
+          WHERE certificate_id=$1 AND side='back' AND state='captured'
+       ) AS card_registered`,
+    [certificateId]
+  );
+  return result.rows[0]?.card_registered === true;
+}
+
+/**
  * Read the terminal truth for a claimed station session.  Evidence carries the
  * session UUID in its immutable provenance, so this also heals the narrow
  * response-loss window where evidence was accepted but the client never
@@ -437,7 +458,7 @@ export async function finishScannerCapture(
 export async function getScannerCaptureStatus(
   sessionId: string,
   deviceIdInput: unknown
-): Promise<{ session: ScannerCaptureSession; accepted: boolean }> {
+): Promise<{ session: ScannerCaptureSession; accepted: boolean; cardRegistered: boolean }> {
   const deviceId = cleanStationId(deviceIdInput);
   const client = await pool.connect();
   try {
@@ -450,14 +471,26 @@ export async function getScannerCaptureStatus(
                  WHERE e.certificate_id = s.certificate_id
                    AND e.side = s.side
                    AND e.capture_metadata ->> 'captureSessionId' = s.id
-              ) AS evidence_accepted
+              ) AS evidence_accepted,
+              EXISTS (
+                SELECT 1 FROM scanner_capture_sessions paired
+                 WHERE paired.certificate_id=s.certificate_id
+                   AND paired.side='front'
+                   AND paired.state='captured'
+              )
+              AND EXISTS (
+                SELECT 1 FROM scanner_capture_sessions paired
+                 WHERE paired.certificate_id=s.certificate_id
+                   AND paired.side='back'
+                   AND paired.state='captured'
+              ) AS card_registered
          FROM scanner_capture_sessions s
          JOIN certificates c ON c.id = s.certificate_id
         WHERE s.id = $1 AND s.claimed_by_device_id = $2
         FOR UPDATE`,
       [sessionId, deviceId]
     );
-    const row = found.rows[0] as (Record<string, unknown> & { evidence_accepted?: boolean }) | undefined;
+    const row = found.rows[0] as (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean }) | undefined;
     if (!row) throw new Error("Capture session not found for this scanner");
     if (
       (row.state === "armed" || row.state === "claimed") &&
@@ -481,7 +514,8 @@ export async function getScannerCaptureStatus(
       row.failure_reason = null;
     }
     await client.query("COMMIT");
-    return { session: mapRow(row), accepted };
+    const cardRegistered = row.card_registered === true || (accepted && await isScannerCaptureCardRegistered(Number(row.certificate_id)));
+    return { session: mapRow(row), accepted, cardRegistered };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

@@ -5455,6 +5455,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           blocked: unapproved,
         });
       }
+      // The legacy print console predates the workflow service, but it still
+      // emits a physical artefact and mints claim codes. It therefore uses the
+      // exact Partner authority before any side effect, rather than treating a
+      // Partner-origin record as a generic approved certificate.
+      const { getPartnerPrintEligibilityBlocks } = await import("./partner/print-eligibility");
+      const partnerBlocks = await getPartnerPrintEligibilityBlocks(ids);
+      if (partnerBlocks.length) {
+        return res.status(422).json({
+          error: `Cannot print — ${partnerBlocks.map((block) => block.message).join(" ")}`,
+          code: "PARTNER_PRINT_INELIGIBLE",
+          blockedCertIds: partnerBlocks.map((block) => block.certId),
+          blocked: partnerBlocks,
+        });
+      }
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const claimed: string[] = [];
@@ -5803,6 +5817,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           blocked: unapprovedRe,
         });
       }
+      const { getPartnerPrintEligibilityBlocks } = await import("./partner/print-eligibility");
+      const partnerBlocks = await getPartnerPrintEligibilityBlocks(ids);
+      if (partnerBlocks.length) {
+        return res.status(422).json({
+          error: `Cannot reprint — ${partnerBlocks.map((block) => block.message).join(" ")}`,
+          code: "PARTNER_PRINT_INELIGIBLE",
+          blockedCertIds: partnerBlocks.map((block) => block.certId),
+          blocked: partnerBlocks,
+        });
+      }
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const mintedFor: string[] = [];
@@ -6005,6 +6029,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         message:
           `This print sheet contains ${blocked.length === 1 ? "a certificate" : "certificates"} without a valid grade ` +
           `(${blocked.join(", ")}), so it cannot be downloaded or printed. Grade ${blocked.length === 1 ? "it" : "them"} and create a fresh batch.`,
+      };
+    }
+    const { getPartnerPrintEligibilityBlocks } = await import("./partner/print-eligibility");
+    const partnerBlocks = await getPartnerPrintEligibilityBlocks(certIds);
+    if (partnerBlocks.length) {
+      return {
+        ok: false,
+        blocked: partnerBlocks.map((block) => block.certId),
+        message: `This print sheet contains Partner cards that are not eligible for output (${partnerBlocks
+          .map((block) => block.certId)
+          .join(", ")}). Create a fresh batch after the Partner QA, credit, and scanner checks pass.`,
       };
     }
     return { ok: true };
@@ -10238,7 +10273,7 @@ Defects (admin-confirmed): ${defectLines}`;
           String(req.params.sessionId),
           req.scannerStation?.code ?? req.query.device_id
         );
-        return res.json({ capture: result.session, accepted: result.accepted });
+        return res.json({ capture: result.session, accepted: result.accepted, card_registered: result.cardRegistered });
       } catch (error: any) {
         return res.status(400).json({ error: error?.message || "Unable to read scanner capture status" });
       }
@@ -10368,7 +10403,7 @@ Defects (admin-confirmed): ${defectLines}`;
         if (prepared.alreadyAccepted) {
           return res.json({ ok: true, already_accepted: true });
         }
-        const { beginScannerCapture, finishScannerCapture } = await import("./scanner-capture-service");
+        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } = await import("./scanner-capture-service");
         activeSession = await beginScannerCapture(sessionId, req.scannerStation?.code ?? req.body?.device_id);
         const { getR2Buffer } = await import("./r2");
         const stagedTiff = await getR2Buffer(prepared.staging.objectKey);
@@ -10398,6 +10433,7 @@ Defects (admin-confirmed): ${defectLines}`;
         const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
         await enqueueScannerProcessing(activeSession.certificateId, activeSession.stationId);
         await finishScannerCapture(sessionId, true);
+        const cardRegistered = await isScannerCaptureCardRegistered(activeSession.certificateId);
         await recordAcceptedScannerEvidence({
           session: activeSession,
           evidence,
@@ -10412,7 +10448,13 @@ Defects (admin-confirmed): ${defectLines}`;
         await completeScannerEvidenceFinalisation(stagingId);
         return res
           .status(201)
-          .json({ ok: true, certId: activeSession.certificateNumber, side: activeSession.side, raw_uploaded: true });
+          .json({
+            ok: true,
+            certId: activeSession.certificateNumber,
+            side: activeSession.side,
+            raw_uploaded: true,
+            card_registered: cardRegistered,
+          });
       } catch (error: any) {
         const reason = error?.message || "staged scanner capture rejected";
         if (!evidenceCommitted) {
@@ -10447,7 +10489,7 @@ Defects (admin-confirmed): ${defectLines}`;
     async (req, res) => {
       const sessionId = String(req.params.sessionId);
       try {
-        const { beginScannerCapture, finishScannerCapture } = await import("./scanner-capture-service");
+        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } = await import("./scanner-capture-service");
         const { parseLide400CaptureProvenance, assertLide400Evidence } = await import("./lib/lide400-profile");
         const { inspectScannerEvidence, uploadRawScannerSide, markRawUploaded, setScanStatus } =
           await import("./scan-ingest-service");
@@ -10510,6 +10552,7 @@ Defects (admin-confirmed): ${defectLines}`;
         const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
         await enqueueScannerProcessing(session.certificateId, session.stationId);
         await finishScannerCapture(sessionId, true);
+        const cardRegistered = await isScannerCaptureCardRegistered(session.certificateId);
         await storage.writeAuditLog(
           "certificate",
           String(session.certificateId),
@@ -10535,7 +10578,13 @@ Defects (admin-confirmed): ${defectLines}`;
         );
         return res
           .status(201)
-          .json({ ok: true, certId: session.certificateNumber, side: session.side, raw_uploaded: true });
+          .json({
+            ok: true,
+            certId: session.certificateNumber,
+            side: session.side,
+            raw_uploaded: true,
+            card_registered: cardRegistered,
+          });
       } catch (error: any) {
         const reason = error?.message || "scanner capture rejected";
         try {

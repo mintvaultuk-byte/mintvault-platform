@@ -38,8 +38,10 @@ function stationError(res: Response, error: unknown): void {
         ? 403
         : error.code === "station_not_found"
           ? 404
-          : error.code === "station_replay"
-            ? 409
+        : error.code === "station_replay"
+          ? 409
+          : error.code === "version_blocked"
+            ? 426
             : 400;
     res.status(status).json({ error: { code: error.code, message: error.message } });
     return;

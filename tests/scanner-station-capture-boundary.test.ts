@@ -116,6 +116,19 @@ describe("signed-station capture boundary", () => {
     expect(stationMigration).toContain("ON scanner_capture_sessions (station_id)");
     expect(stationMigration).toContain("state IN ('armed', 'claimed', 'capturing')");
   });
+
+  it("shows Next Card only from the server-persisted paired capture result", () => {
+    const scannerRoutes = routes;
+    const watcher = read("scripts/scanner-app/lib/watcher.js");
+    const renderer = read("scripts/scanner-app/renderer/app.js");
+    const scannerMain = read("scripts/scanner-app/main.js");
+    expect(sessions).toContain("isScannerCaptureCardRegistered");
+    expect(scannerRoutes).toContain("card_registered: cardRegistered");
+    expect(watcher).toContain("cardRegistered: uploaded.body?.card_registered === true");
+    expect(renderer).toContain("state.lastAcceptedCapture?.cardRegistered === true && !active");
+    expect(renderer).toContain("window.scanner.acknowledgeCardRegistered()");
+    expect(scannerMain).toContain('"acknowledge-card-registered"');
+  });
 });
 
 /**
