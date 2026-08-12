@@ -118,20 +118,126 @@ Baseline `origin/main` **be8a501e**. Candidate **f6713a91** on
 `release/scanner-mainline-reconcile-20260811`, worktree
 `/Users/cornelius/mintvault-scanner-mainline-reconcile`. NOT deployed.
 
-| ID | Sev | Reproduction | Repair | Proof | Status |
-| --- | --- | --- | --- | --- | --- |
-| DGN-11 | BLOCKER | Candidate 42 commits behind main; deploying it reverts f51beb10. | Real merge, 11 conflicts resolved semantically. All three certificate paths hold BOTH the transactional allocator and the HQ origin stamp, in one transaction. | allocator+origin suite 17/17 on real PG17; `npm run check` clean; build green. | PROVEN |
-| REC-01 | BLOCKER | `git rerere` silently replayed a stale resolution into `client/src/lib/partner-api.ts`, deleting MFA restart/cancel, enrolment-bound confirm, `partnerCustomers.edit`, card image upload and the catalogue snapshot type. | rerere disabled, file re-resolved by hand. | `partner-main-reconciliation-merge-loss` 27/27; feature-presence grep. | PROVEN |
-| REC-02 | BLOCKER | Two migrations numbered 0044; `listMigrationFiles()` hard-rejects duplicate NUMBERS before any DDL, so the merged tree could not migrate at all. | Mainline's (unapplied) file renumbered 0044 → **0074**; the production-applied MFA 0044 untouched. | Runner accepts the tree (37 files); production journal re-planned read-only: 31 applied, **0 checksum mismatches**, 0 orphan rows. | PROVEN |
-| REC-03 | BLOCKER | 0035 is NOT applied to production (`ORIGIN_COLUMNS=[]`), but f51beb10's INSERTs write `origin_type`. Reproduced: SQLSTATE **42703** on `createCertForScan`. | None — this is a production migration requiring owner authorisation. Fixture updated to model post-0035 production. | Red baseline captured, then 17/17 green against the real 0035 constraint + trigger surface. | **OWNER_DECISION — blocks deploy** |
-| REC-04 | CRITICAL | Hand-merge of `mfa-service.ts` took the branch `mfaDisable`, reverting mainline's F2 fix: `mfa_required=false` let a partner user permanently self-revoke the MFA mandate. Found independently by two reviewers. | `mfa_required=true` restored with rationale. | `partner-mfa-factor-hardening` **19/19** over real HTTP on PG17 (A1 + A2). | PROVEN |
-| REC-05 | BLOCKER | `requireScannerOrAdmin` admits a signed station; six global `/api/admin/certs*` routes use it with no tenant predicate → cross-tenant read/overwrite/presigned-URL leak/soft-delete for any approved partner. | Station paths allowlisted (`server/lib/station-request-scope.ts`); anything else refused, never falling through to the cookie check. | `scanner-station-capture-boundary` 9/9. | FIXED |
-| REC-06 | HIGH | `POST /api/partner/mfa/restart` skipped password verification entirely (`password != null` guard + `undefined`). Bootstrap-state accounts were takeover-able from the QR screen. | Password required at service, route and client. | Re-pinned runtime-integration assertions; 3 sibling tests still red (REC-08). | FIXED — proof incomplete |
-| REC-07 | HIGH | 0048 was NOT a safe destination: `0048_partner_location_snapshot_search_path.sql` (098345f7, applied on STAGING) is a security repair to the very function this migration creates. Reusing 48 would collide again and revert the fix on staging. | Renumbered to **0074**, above the global high-water mark (files reach 0073, staging journal 0071). Rollback file moved with it. | Cross-branch census. Production unaffected — unapplied there. | FIXED |
-| REC-08 | HIGH | 3 tests in `partner-runtime-integration` (F1 active-method count, F3 replay, MFA disable) are order-coupled and pin the OLD `mfa_required=false` disable semantics. They fail only with a provisioned cluster — and CI provisions it (`ci.yml:67`). | Not repaired. They must be re-pinned to the corrected invariant, not the code reverted to satisfy them. | — | **OPEN — blocks deploy** |
-| REC-09 | HIGH | `storage.createCertificate` audits AFTER commit inside the same `try`; a `writeAuditLog` failure turns a COMMITTED certificate into a 500 and records `rolledBack: true`. Operator re-saves → two MV numbers for one card. | Not repaired. | Reviewer-confirmed by code path; not reproduced. | OPEN |
-| REC-10 | MEDIUM | Gapless rollback removed the old self-healing walk past a colliding MV number; `getNextCertId`'s fallback seeds `0`, not `max(existing)`. Wedges issuance if `cert_counter` ever falls behind. | Not repaired. | Precondition measured absent on production (counter 836 > max numeric). | FOLLOW_UP |
-| REC-11 | MEDIUM | `SqlExecutor = Pick<typeof db,"execute">` — `db` satisfies it structurally, so `getNextCertId(db)` type-checks and reintroduces the autocommit burn. The docstring claims the compiler prevents this. | Not repaired. | All three call sites verified to pass `tx`. | FOLLOW_UP |
-| REC-12 | MEDIUM | The allocator ladder drives `createCertForScan`, whose only route returns 410 unconditionally; the live admin path (`storage.createCertificate`) has no gapless coverage. | Not repaired. | Reviewer grep-proven. | FOLLOW_UP |
-| REC-13 | MEDIUM | Scanner app signs EVERY request once it holds a station session, so REC-05's allowlist makes its orphan-picker, cert preview and scan-status 403. Not on the capture path. | Accepted for this release; needs per-route tenant scoping. | — | FOLLOW_UP |
-| REC-14 | LOW | Grading protected-file guards gained a 4th founder-authorised signature (D) for the scanner evidence-revision read, citing no approval reference. | Added as a union, not a widening of the calculation-token block. | `mvgs` estate 287/287. | **OWNER_DECISION** |
+| ID     | Sev      | Reproduction                                                                                                                                                                                                                                        | Repair                                                                                                                                                         | Proof                                                                                                                              | Status                             |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| DGN-11 | BLOCKER  | Candidate 42 commits behind main; deploying it reverts f51beb10.                                                                                                                                                                                    | Real merge, 11 conflicts resolved semantically. All three certificate paths hold BOTH the transactional allocator and the HQ origin stamp, in one transaction. | allocator+origin suite 17/17 on real PG17; `npm run check` clean; build green.                                                     | PROVEN                             |
+| REC-01 | BLOCKER  | `git rerere` silently replayed a stale resolution into `client/src/lib/partner-api.ts`, deleting MFA restart/cancel, enrolment-bound confirm, `partnerCustomers.edit`, card image upload and the catalogue snapshot type.                           | rerere disabled, file re-resolved by hand.                                                                                                                     | `partner-main-reconciliation-merge-loss` 27/27; feature-presence grep.                                                             | PROVEN                             |
+| REC-02 | BLOCKER  | Two migrations numbered 0044; `listMigrationFiles()` hard-rejects duplicate NUMBERS before any DDL, so the merged tree could not migrate at all.                                                                                                    | Mainline's (unapplied) file renumbered 0044 → **0074**; the production-applied MFA 0044 untouched.                                                             | Runner accepts the tree (37 files); production journal re-planned read-only: 31 applied, **0 checksum mismatches**, 0 orphan rows. | PROVEN                             |
+| REC-03 | BLOCKER  | 0035 is NOT applied to production (`ORIGIN_COLUMNS=[]`), but f51beb10's INSERTs write `origin_type`. Reproduced: SQLSTATE **42703** on `createCertForScan`.                                                                                         | None — this is a production migration requiring owner authorisation. Fixture updated to model post-0035 production.                                            | Red baseline captured, then 17/17 green against the real 0035 constraint + trigger surface.                                        | **OWNER_DECISION — blocks deploy** |
+| REC-04 | CRITICAL | Hand-merge of `mfa-service.ts` took the branch `mfaDisable`, reverting mainline's F2 fix: `mfa_required=false` let a partner user permanently self-revoke the MFA mandate. Found independently by two reviewers.                                    | `mfa_required=true` restored with rationale.                                                                                                                   | `partner-mfa-factor-hardening` **19/19** over real HTTP on PG17 (A1 + A2).                                                         | PROVEN                             |
+| REC-05 | BLOCKER  | `requireScannerOrAdmin` admits a signed station; six global `/api/admin/certs*` routes use it with no tenant predicate → cross-tenant read/overwrite/presigned-URL leak/soft-delete for any approved partner.                                       | Station paths allowlisted (`server/lib/station-request-scope.ts`); anything else refused, never falling through to the cookie check.                           | `scanner-station-capture-boundary` 9/9.                                                                                            | FIXED                              |
+| REC-06 | HIGH     | `POST /api/partner/mfa/restart` skipped password verification entirely (`password != null` guard + `undefined`). Bootstrap-state accounts were takeover-able from the QR screen.                                                                    | Password required at service, route and client.                                                                                                                | Re-pinned runtime-integration assertions; 3 sibling tests still red (REC-08).                                                      | FIXED — proof incomplete           |
+| REC-07 | HIGH     | 0048 was NOT a safe destination: `0048_partner_location_snapshot_search_path.sql` (098345f7, applied on STAGING) is a security repair to the very function this migration creates. Reusing 48 would collide again and revert the fix on staging.    | Renumbered to **0074**, above the global high-water mark (files reach 0073, staging journal 0071). Rollback file moved with it.                                | Cross-branch census. Production unaffected — unapplied there.                                                                      | FIXED                              |
+| REC-08 | HIGH     | 3 tests in `partner-runtime-integration` (F1 active-method count, F3 replay, MFA disable) are order-coupled and pin the OLD `mfa_required=false` disable semantics. They fail only with a provisioned cluster — and CI provisions it (`ci.yml:67`). | Not repaired. They must be re-pinned to the corrected invariant, not the code reverted to satisfy them.                                                        | —                                                                                                                                  | **OPEN — blocks deploy**           |
+| REC-09 | HIGH     | `storage.createCertificate` audits AFTER commit inside the same `try`; a `writeAuditLog` failure turns a COMMITTED certificate into a 500 and records `rolledBack: true`. Operator re-saves → two MV numbers for one card.                          | Not repaired.                                                                                                                                                  | Reviewer-confirmed by code path; not reproduced.                                                                                   | OPEN                               |
+| REC-10 | MEDIUM   | Gapless rollback removed the old self-healing walk past a colliding MV number; `getNextCertId`'s fallback seeds `0`, not `max(existing)`. Wedges issuance if `cert_counter` ever falls behind.                                                      | Not repaired.                                                                                                                                                  | Precondition measured absent on production (counter 836 > max numeric).                                                            | FOLLOW_UP                          |
+| REC-11 | MEDIUM   | `SqlExecutor = Pick<typeof db,"execute">` — `db` satisfies it structurally, so `getNextCertId(db)` type-checks and reintroduces the autocommit burn. The docstring claims the compiler prevents this.                                               | Not repaired.                                                                                                                                                  | All three call sites verified to pass `tx`.                                                                                        | FOLLOW_UP                          |
+| REC-12 | MEDIUM   | The allocator ladder drives `createCertForScan`, whose only route returns 410 unconditionally; the live admin path (`storage.createCertificate`) has no gapless coverage.                                                                           | Not repaired.                                                                                                                                                  | Reviewer grep-proven.                                                                                                              | FOLLOW_UP                          |
+| REC-13 | MEDIUM   | Scanner app signs EVERY request once it holds a station session, so REC-05's allowlist makes its orphan-picker, cert preview and scan-status 403. Not on the capture path.                                                                          | Accepted for this release; needs per-route tenant scoping.                                                                                                     | —                                                                                                                                  | FOLLOW_UP                          |
+| REC-14 | LOW      | Grading protected-file guards gained a 4th founder-authorised signature (D) for the scanner evidence-revision read, citing no approval reference.                                                                                                   | Added as a union, not a widening of the calculation-token block.                                                                                               | `mvgs` estate 287/287.                                                                                                             | **OWNER_DECISION**                 |
+
+## Production release — EXECUTED 2026-08-11
+
+Deployed **v1069 / commit `7d20196c`** via `scripts/safe-deploy.sh prod` (GUARD 1
+passed on its own merits — `origin/main` be8a501e is an ancestor; not bypassed).
+GUARD 2 verified the live server reports `7d20196c`. Both Fly machines healthy.
+Rollback target preserved: **v1068 / 6f182624 / image
+`mintvault:deployment-01KYN8J3JPPTKWZ281B99X2345`**.
+
+Intentional production mutations, in order:
+
+1. **`0035_partner_certificate_origin.sql` applied** — owner-authorised, single
+   file, checksum `f2f0ab27…3115f`… (`f2f0ab27cf0eeb129a98d22a3fb91b3a4da0db6e1a3889f2caf2c30a5f2ec609`),
+   DDL + journal row in ONE transaction. Rehearsed first on a disposable PG17
+   cluster built to production's exact 169-column shape with 836 rows.
+   Before → after: certs 836→836, counter 836→836, journal 31→32, origin columns
+   0→11, stamped 0 (no backfill), 5 CHECKs all `convalidated`, trigger
+   `tgenabled='A'`, partial index present, 0 rows violating the new constraints.
+   `UNAUTHORISED_APPLIED=[]` — 0030/0041/0042/0043/0074 were not read, planned or
+   applied.
+2. **Application deploy** to v1069.
+
+`cert_counter.last_issued` = **836**, unchanged. No certificate mutated.
+
+### DGN-12 — EXTERNAL BLOCKER: the Partner runtime credential is wrong on production
+
+`/api/partner/me` and `/api/partner/stations/enrolment-locations` return **503**.
+Read-only diagnosis from inside the machine:
+
+| Fact                           | Measured                                    |
+| ------------------------------ | ------------------------------------------- |
+| `PARTNER_DATABASE_URL` present | yes                                         |
+| …authenticates as              | **`neondb_owner`**                          |
+| …`rolbypassrls`                | **true**                                    |
+| `PARTNER_MFA_ENC_KEY`          | **absent from `fly secrets list` entirely** |
+
+This **contradicts the DGN-11 record above**, which stated both secrets were set
+at v1067→v1068 using the restricted `partner_runtime_app` LOGIN. That record is
+incorrect: only `PARTNER_DATABASE_URL` is deployed, and its value is the
+owner/BYPASSRLS credential the runbook explicitly forbids.
+
+The surface is nevertheless **safe**: two independent gates are closed. Gate 1
+fails on the incoherent PARTNER\_\* env set (URL present, MFA key absent), and the
+Gate 2 capability check added in this release would independently refuse a
+`rolbypassrls=true` runtime credential (`PARTNER_RUNTIME_BYPASSRLS_FORBIDDEN`).
+No tenant data is reachable. This is the PART 9 guard doing real work on live
+production on its first day.
+
+**Consequence:** station enrolment, the HQ MFA operator and the physical LiDE
+canary are all unreachable until the credential is corrected. Requires the Neon
+console (`CREATE ROLE`) and `fly secrets set` — owner-physical actions this
+session cannot and must not work around. Reusing `neondb_owner` is exactly what
+must not happen.
+
+Status: **EXTERNAL_BLOCKER — owner action required.**
+
+### DGN-13 — BLOCKER: a concurrent session clobbered the v1069 release
+
+Timeline, measured from the Fly release list and the production journal:
+
+| Time (UTC) | Event                                                                                                                                                  |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 20:25:05   | **This session** applied `0035_partner_certificate_origin.sql` (`applied_by=owner-authorised-single-file`)                                             |
+| ~20:41     | **This session** deployed **v1069 / `7d20196c`**, GUARD 2 verified live                                                                                |
+| 20:44:54   | **Another session** applied `0073_lineage_convergence.sql` (`applied_by=neondb_owner`)                                                                 |
+| 20:53:21   | Another session committed `c788fa68` "feat(migrations): forward-only lineage convergence at 0073" on `codex/canonical-grading-reconciliation-20260810` |
+| ~20:57     | **v1070 / v1071 deployed `c788fa68`**, replacing v1069                                                                                                 |
+
+`7d20196c` and `c788fa68` are DIVERGENT — neither is an ancestor of the other;
+their merge-base is `be8a501e`. The live commit is not on `origin/main`.
+
+What production lost by reverting to `c788fa68`:
+
+| Property                           | v1069 (`7d20196c`) | LIVE (`c788fa68`)                                                   |
+| ---------------------------------- | ------------------ | ------------------------------------------------------------------- |
+| Transactional gapless MV allocator | present            | **ABSENT** (`getNextCertId(executor)` ×0, `IdempotencyRaceLost` ×0) |
+| HQ grading-origin stamp            | present            | present (×2) — works only because 0035 is applied                   |
+| Station→admin route confinement    | present            | **ABSENT** (`station-request-scope.ts` missing)                     |
+| `mfaDisable` keeps `mfa_required`  | present            | **ABSENT**                                                          |
+| `/mfa/restart` password gate       | present            | **ABSENT**                                                          |
+
+**The burnable, gappable allocator is therefore live on production again.** No
+harm has occurred yet: `cert_counter.last_issued` = **836**, 836 certificates,
+0 stamped, health 200.
+
+Re-deploying v1069 would clobber the other session's work in exactly the way this
+project has already been bitten twice. That is an OWNER DECISION, not a
+lead-engineer call.
+
+Status: **OWNER_DECISION — blocks the physical canary.**
+
+### DGN-14 — EXTERNAL BLOCKER: PARTNER_DATABASE_URL carries an unsubstituted placeholder
+
+Both Partner secrets are now Deployed, and `PARTNER_MFA_ENC_KEY` is present. But
+the runtime cannot connect:
+
+```
+ERR getaddrinfo ENOTFOUND NEON_HOST_HERE
+```
+
+The URL's hostname is the literal template token `NEON_HOST_HERE`, so
+`/api/partner/me` and `/api/partner/stations/enrolment-locations` remain **503**
+(correctly fail-closed). Station enrolment, the HQ MFA operator and the canary
+are unreachable until the secret is re-set with the real Neon host.
+
+Status: **EXTERNAL_BLOCKER — owner action required.**

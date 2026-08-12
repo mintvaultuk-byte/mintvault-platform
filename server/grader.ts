@@ -919,9 +919,7 @@ export async function getAssignedGradeSubmitSnapshot(certId: number, expectedRev
     LIMIT 1
   `);
   const row = r.rows[0] as { operator_grade?: string | null; card_name?: string | null } | undefined;
-  return row
-    ? { operatorGrade: row.operator_grade ?? null, cardName: row.card_name ?? null }
-    : null;
+  return row ? { operatorGrade: row.operator_grade ?? null, cardName: row.card_name ?? null } : null;
 }
 
 /**
