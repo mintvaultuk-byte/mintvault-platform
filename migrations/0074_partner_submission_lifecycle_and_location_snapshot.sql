@@ -128,9 +128,36 @@ UPDATE partner_submissions s
  WHERE l.id = s.location_id
    AND s.location_name_snapshot IS NULL;
 
+-- SECURITY: `SET search_path = public, pg_temp` (pg_temp LAST) and the schema-qualified read are
+-- NOT optional and must never be removed. This function is SECURITY INVOKER, so the caller's
+-- search_path applies, and pg_temp is searched ahead of public by default. Without both, any role
+-- that can CREATE TEMP TABLE — a default PUBLIC privilege every partner runtime role holds — can
+-- shadow the lookup:
+--
+--     CREATE TEMP TABLE partner_locations (id uuid, tenant_id uuid, name text);
+--     INSERT INTO partner_locations VALUES (<victim location>, <own tenant>, 'FORGED ORIGIN');
+--     INSERT INTO partner_submissions (...);        -- ordinary insert, no special privilege
+--
+-- and the trigger resolves the name from the attacker's temp table. Reproduced on a disposable
+-- PostgreSQL 17 cluster: location_name_snapshot came back as 'FORGED ORIGIN — Tenant B Shop'. The
+-- `AND l.tenant_id = NEW.tenant_id` guard does NOT help — it is evaluated against the temp table.
+-- This is not privilege escalation; it is a provenance defeat of the exact snapshot this migration
+-- exists to make trustworthy, and nothing else detects it (server/partner/definer-guard.ts covers
+-- SECURITY DEFINER functions only).
+--
+-- Tracked as A8-F2 (HIGH). The hardening was originally authored as
+-- 0048_partner_location_snapshot_search_path.sql (commit 098345f7) as a follow-up repair, because
+-- this migration had already been applied under its old 0044 identity on that lineage. On THIS
+-- lineage the migration is still unapplied and was renumbered to 0074, which sorts AFTER 0048 —
+-- so shipping the pre-repair body here would have installed the vulnerable function on fresh and
+-- production-shaped hosts, and overwritten the hardened one on any host that had already applied
+-- 0048. The repair is therefore folded in at source and 0048 is not needed on this lineage.
+-- Either the SET clause or the qualified read closes the attack; both are kept so the reference
+-- stays correct even if a future edit drops the SET clause.
 CREATE OR REPLACE FUNCTION partner_submissions_capture_location_snapshot()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   location_name text;
@@ -138,7 +165,7 @@ BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.location_name_snapshot IS NULL THEN
       SELECT l.name INTO location_name
-        FROM partner_locations l
+        FROM public.partner_locations l
        WHERE l.id = NEW.location_id
          AND l.tenant_id = NEW.tenant_id;
       IF location_name IS NULL THEN
