@@ -18,6 +18,7 @@ import {
   PARTNER_MIGRATIONS_WITH_RBAC_SEED,
   applyMigrationsRealistic,
   provisionRealisticRoles,
+  seedCoreSchemaForApplicationMigrations,
 } from "./helpers/partner-realistic-db";
 import { PARTNER_ROLE_CODES } from "../shared/partner-schema";
 import { PARTNER_PERMISSIONS, ROLE_PERMISSIONS, ROLE_LABELS } from "../server/partner/permissions";
@@ -91,6 +92,15 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
+
+    // MIGRATION SCOPE CONTRACT. runRealRunnerFor0034() below deliberately drives
+    // 0073 through the REAL runner, because 0073 is what grants
+    // partner.cards.preview and the parity assertions compare against the canonical
+    // TypeScript map. 0073 is APPLICATION-scope: it fails closed unless the core
+    // `certificates` schema is present, and that fail-closed behaviour is
+    // load-bearing in production. So this suite must PROVIDE what it declares —
+    // exempting the migration is not an option.
+    await seedCoreSchemaForApplicationMigrations(admin);
 
     const upTo = PARTNER_MIGRATIONS_WITH_RBAC_SEED.filter(
       (m) => m !== "0034_partner_rbac_seed" && m !== "0073_lineage_convergence"

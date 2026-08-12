@@ -448,6 +448,54 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     futureDisposition: "keep runner-managed",
     evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
   },
+  // ---- Distributed Grading Network: signed-station scanner evidence ----------
+  //
+  // Created by migrations 0046/0047 and LIVE on production since v1069. They were
+  // never registered here, so `classifyLiveObjects` filed all three under
+  // `unknown` — and unknown is the fail-closed trigger. That is not only a test
+  // artefact: runPreflight() is a production tool, so preflight against the real
+  // database reports them too. Registering them is the fix for both.
+  //
+  // They are deliberately NOT named `partner_*`: isPartnerNetworkName() would then
+  // sweep them into the Partner Network bucket, which they are not — they are
+  // scanner/station evidence owned by the capture pipeline, not by the Partner
+  // Portal's tenant model.
+  {
+    schema: "public",
+    name: "scanner_processing_jobs",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "durable derivative-processing queue for Canon LiDE captures",
+    active: true,
+    owningSubsystem: "scanner-station",
+    reason: "migration-authoritative raw SQL (0046); deliberately not in shared/schema.ts",
+    futureDisposition: "keep migration-managed",
+    evidenceSource: "migrations/0046_scanner_processing_jobs.sql",
+  },
+  {
+    schema: "public",
+    name: "scanner_capture_sessions",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "target-bound capture sessions (arming, FRONT-before-BACK, expiry)",
+    active: true,
+    owningSubsystem: "scanner-station",
+    reason: "migration-authoritative raw SQL (0045/0047); deliberately not in shared/schema.ts",
+    futureDisposition: "keep migration-managed",
+    evidenceSource: "migrations/0047_scanner_evidence_staging.sql",
+  },
+  {
+    schema: "public",
+    name: "scanner_evidence_staging",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "server-owned opaque staging for immutable TIFF masters before finalisation",
+    active: true,
+    owningSubsystem: "scanner-station",
+    reason: "migration-authoritative raw SQL (0047); deliberately not in shared/schema.ts",
+    futureDisposition: "keep migration-managed",
+    evidenceSource: "migrations/0047_scanner_evidence_staging.sql",
+  },
 ] as const;
 
 /** Non-public schemas known and expected. Any other schema is an unknown that must fail preflight. */

@@ -120,8 +120,158 @@ export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
 export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   ...PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION,
   "0034_partner_rbac_seed",
-  "0073_lineage_convergence",
+  // 0073_lineage_convergence WAS listed here (added with the canonical lineage,
+  // c788fa68). It is APPLICATION-scope — see the MIGRATION SCOPE CONTRACT below —
+  // and putting it in a list consumed by four partner-only suites is what broke
+  // them: every one of those databases dies on
+  //   "0073 requires the certificates table, which does not exist in this database."
+  //
+  // Only ONE suite genuinely needs 0073 (partner-rbac-migration, because 0073 and
+  // not 0034 grants partner.cards.preview, which its TypeScript-map parity
+  // assertions compare against). That suite already excluded 0073 from THIS list
+  // and applies it explicitly through the real runner, so removing it here is a
+  // no-op for the suite that wants it and a repair for the four that never did.
 ] as const;
+
+/**
+ * ── MIGRATION SCOPE CONTRACT ───────────────────────────────────────────────
+ *
+ * A migration is either PARTNER-scope (it models the Partner subsystem and runs
+ * against a partner-only disposable database) or APPLICATION-scope (it also needs
+ * the CORE MintVault schema — `certificates` and friends).
+ *
+ * WHY THIS EXISTS. `applyEveryMigrationRealistic()` used to apply
+ * `listMigrationFiles()` — literally every numbered migration in the repository —
+ * to a partner-only database. That was fine only for as long as every migration
+ * happened to be partner-scoped. The moment 0073 landed (canonical lineage,
+ * c788fa68, shipped as v1070) eleven partner suites began failing on
+ *
+ *     0073 requires the certificates table, which does not exist in this database.
+ *
+ * and the whole lineage became un-mergeable to main. Nothing in CI had changed;
+ * an unrelated migration simply fell into an implicit glob.
+ *
+ * The rule is now an ALLOWLIST, not a filter: a new migration does NOT join the
+ * partner harness merely by being a numbered .sql file. It must be classified
+ * here, deliberately. tests/migration-scope-contract.test.ts fails until it is —
+ * so the next scanner / Vault Quest / grading / payment migration cannot silently
+ * break a partner-only harness the way 0073 did.
+ *
+ * Classification rule: does the migration read or write any table outside the
+ * `partner_*` namespace in a way that requires it to already exist?
+ */
+export const APPLICATION_SCOPE_MIGRATIONS = ["0073_lineage_convergence"] as const;
+
+/**
+ * Every migration a partner-only disposable database may apply, in order.
+ * Deliberately enumerated rather than globbed — see the contract above.
+ */
+export const PARTNER_SCHEMA_MIGRATIONS = [
+  "0001_partner_foundation",
+  "0002_partner_auth_support",
+  "0003_partner_auth_hardening",
+  "0004_partner_mfa_enrol",
+  "0005_partner_mfa_replay_and_grants",
+  "0006_partner_definer_role",
+  "0007_partner_submissions",
+  "0008_partner_connector_foundation",
+  "0009_partner_connector_validation",
+  "0010_partner_connector_import",
+  "0011_partner_connector_reconciliation",
+  "0012_partner_connector_import_attempts",
+  "0013_partner_connector_claim_index",
+  "0014_partner_connector_admin_actions",
+  "0015_partner_management",
+  "0016_partner_wallet_ledger",
+  "0017_partner_credit_reservations",
+  "0018_correction_audit_index",
+  "0019_catalogue_manager",
+  "0022_print_workflow_lifecycle",
+  "0023_set_library_schema",
+  "0024_set_library_base_tables",
+  "0026_catalogue_abbreviation_unique",
+  "0030_project_control",
+  "0031_partner_user_management",
+  "0032_partner_final_owner_invariant",
+  "0033_partner_audit_action_precision",
+  "0034_partner_rbac_seed",
+  "0035_partner_certificate_origin",
+  "0041_partner_submission_credit_lifecycle",
+  "0042_partner_per_card_credit_settlement",
+  "0043_partner_credit_hold_per_card",
+  "0044_partner_mfa_pending_lifecycle",
+  "0045_partner_stations",
+  "0046_scanner_processing_jobs",
+  "0047_scanner_evidence_staging",
+  "0074_partner_submission_lifecycle_and_location_snapshot",
+] as const;
+
+/** True when a declared list pulls in a migration that needs the core schema. */
+export function requiresCoreSchema(migrations: readonly string[]): boolean {
+  return migrations.some((m) => (APPLICATION_SCOPE_MIGRATIONS as readonly string[]).includes(m));
+}
+
+/**
+ * Narrow a discovered migration list to what a PARTNER-only disposable database
+ * may apply.
+ *
+ * Wrap `listMigrationFiles()` in this anywhere the target database contains only
+ * the Partner schema. The raw discovery function returns EVERY numbered migration
+ * in the repository, which is how 0073 — an application-scope migration needing
+ * `certificates` — silently entered eleven partner suites and blocked the
+ * mainline. Ordering, numbering and checksums still come from the runner's own
+ * file list; this is a scope filter over it, not a second source of truth.
+ *
+ * Deliberately synchronous and pure so it can be dropped into an existing
+ * expression without making the caller async.
+ */
+export function partnerScopeOnly<T extends { filename: string }>(files: readonly T[]): T[] {
+  const declared = new Set<string>(PARTNER_SCHEMA_MIGRATIONS);
+  return files.filter((f) => declared.has(f.filename.replace(/\.sql$/, "")));
+}
+
+/**
+ * Provision the CORE schema an application-scope migration requires.
+ *
+ * This is the established pattern in this repository — ~38 suites already stand up
+ * their own `certificates` fixture — reusing the SAME protected-column definition
+ * the dedicated 0073 lineage suite uses, so there is one definition of "real
+ * shape" rather than a second one that can drift.
+ *
+ * It deliberately does NOT weaken 0073: the migration still fails closed if this
+ * has not been run. Providing what a migration requires is the opposite of
+ * exempting it.
+ */
+export async function seedCoreSchemaForApplicationMigrations(client: pg.Client): Promise<void> {
+  const { CERTIFICATES_PROTECTED_COLUMNS_SQL } = await import("./certificates-protected-columns");
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS certificates (
+      id serial PRIMARY KEY,
+      certificate_number text,
+      cert_id text,
+      status text,
+      deleted_at timestamptz,
+      grade_approved_at timestamptz,
+      grade_approved_by text,
+      grader_status text,
+      print_state text,
+      updated_at timestamptz DEFAULT now()
+    );
+  `);
+  await client.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
+  /**
+   * OWNERSHIP MATTERS. Migrations execute as the NON-superuser migration login, and
+   * 0073 does `ALTER TABLE certificates …`, which PostgreSQL allows only for the
+   * owner. Seeding this as the admin/superuser and leaving it owned by them makes
+   * the migration fail with `must be owner of table certificates` — a harness
+   * artefact that says nothing about the migration.
+   *
+   * On the real hosts the migration login owns the schema it maintains, so hand the
+   * fixture over too. This keeps the non-superuser execution proof intact: the
+   * migrator still is not a superuser, it simply owns what it must.
+   */
+  await client.query(`ALTER TABLE certificates OWNER TO ${MIGRATOR_ROLE}`);
+}
 
 /** G6D — Partner submission credit reservation, consumption and release integration. */
 export const PARTNER_MIGRATIONS_WITH_G6D = [
@@ -269,6 +419,14 @@ export async function applyMigrationsRealistic(
       `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`
     );
   }
+  // MIGRATION SCOPE CONTRACT. A declared list may legitimately include an
+  // APPLICATION-scope migration (0073 grants partner.cards.preview, which the RBAC
+  // parity assertions need). Such a migration requires the core schema, and fails
+  // closed without it — by design. Provision what it requires rather than exempting
+  // it. Partner-only lists are untouched: this is a no-op for them.
+  if (requiresCoreSchema(migrations)) {
+    await seedCoreSchemaForApplicationMigrations(admin);
+  }
   const migrator = new pg.Client({ connectionString: migratorUrlFrom(adminUrl) });
   await migrator.connect();
   try {
@@ -393,7 +551,17 @@ export async function applyMigrationsRealistic(
  */
 export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise<void> {
   const { applyMigrations, listMigrationFiles } = await import("../../scripts/db/migrate");
-  const all = listMigrationFiles();
+  /**
+   * ALLOWLIST, NOT A GLOB. This used to be `listMigrationFiles()` in full, which
+   * meant any migration added anywhere in the repository was applied to a
+   * partner-only database. 0073 is what exposed it. Restricting to the declared
+   * PARTNER_SCHEMA_MIGRATIONS keeps "every migration this harness models" honest
+   * and stops the next unrelated migration from joining silently.
+   *
+   * Ordering still comes from the runner's own numeric sort, so this is a filter
+   * over the real file list rather than a second source of truth for order.
+   */
+  const all = partnerScopeOnly(listMigrationFiles());
   await applyMigrations(
     migrator,
     all.filter((f) => Number(f.number) <= 41),
