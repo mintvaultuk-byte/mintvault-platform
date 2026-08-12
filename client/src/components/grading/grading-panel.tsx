@@ -7,8 +7,8 @@ import { useToast } from "@/hooks/use-toast";
 import ImageViewer, { mapLegacyTypeToMvgsCode } from "./image-viewer";
 import DefectAnnotation, { type Defect, type DefectCandidate, deriveZone } from "./defect-annotation";
 import CenteringInput from "./centering-input";
-import { calcCornerSubgrade, type CornerValues } from "./corner-grading";
-import { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
+import type { CornerValues } from "./corner-grading";
+import type { EdgeValues } from "./edge-grading";
 import type { SurfaceValues } from "./surface-grading";
 import GradeDisplay from "./grade-display";
 import Authentication, { type AuthStatus } from "./authentication";
@@ -60,17 +60,38 @@ function readReviewRevision(data: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-// Shared calculation imports (client-side re-implementations)
-import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
-import { computeMvgsScore, gradeFromMvgsScore, DEFAULT_MVGS_CALIBRATION } from "@shared/mvgs-scoring";
-import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
-// Centering single source of truth (true PSA chart — front strict / back lenient).
-import {
-  centeringSubgrade,
-  centeringSubgradeStrict,
-  centeringAxisGradeOrNull,
-  type CenteringAxis,
-} from "@shared/centering";
+interface ServerGradeAuthority {
+  overall: string;
+  gradeType: "numeric" | "AA" | "NO";
+  label: string;
+  subgrades: { centering: number | null; corners: number | null; edges: number | null; surface: number | null };
+  pristine: boolean;
+  score: number | null;
+  deductions: Record<string, number>;
+}
+
+function readServerGradeAuthority(data: unknown): ServerGradeAuthority | null {
+  const value = (data as { authoritativeGrade?: unknown } | null)?.authoritativeGrade;
+  if (!value || typeof value !== "object") return null;
+  const grade = value as Partial<ServerGradeAuthority>;
+  if (typeof grade.overall !== "string" || !grade.subgrades || typeof grade.subgrades !== "object") return null;
+  const numericOrNull = (entry: unknown) => (typeof entry === "number" && Number.isFinite(entry) ? entry : null);
+  const subgrades = grade.subgrades as ServerGradeAuthority["subgrades"];
+  return {
+    overall: grade.overall,
+    gradeType: grade.gradeType === "AA" || grade.gradeType === "NO" ? grade.gradeType : "numeric",
+    label: typeof grade.label === "string" ? grade.label : "",
+    subgrades: {
+      centering: numericOrNull(subgrades.centering),
+      corners: numericOrNull(subgrades.corners),
+      edges: numericOrNull(subgrades.edges),
+      surface: numericOrNull(subgrades.surface),
+    },
+    pristine: grade.pristine === true,
+    score: numericOrNull(grade.score),
+    deductions: grade.deductions && typeof grade.deductions === "object" ? grade.deductions : {},
+  };
+}
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
   const { toast } = useToast();
@@ -123,32 +144,6 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
       )}
     </button>
   );
-}
-
-/**
- * Map MVGS remaining-points-in-category (0..25) to a 1-10 subgrade. Each
- * scoring category (centering / corners / edges / surface) has a 25-pt
- * budget; this helper buckets the leftover into the 10-step subgrade scale.
- *
- * Brackets per MVGS spec:
- *   23-25 → 10   17-19 → 8   11-13 → 6   5-7 → 4   1-2 → 2
- *   20-22 →  9   14-16 → 7    8-10 → 5   3-4 → 3   0   → 1
- *
- * Implemented with descending `>=` thresholds so non-integer remainders
- * (e.g. edges 2.5 from a 22.5-pt deduction) deterministically bucket
- * down: 2.5 ∈ [1, 3) → grade 2.
- */
-function mvgsRemainingToGrade(remaining: number): number {
-  if (remaining >= 23) return 10;
-  if (remaining >= 20) return 9;
-  if (remaining >= 17) return 8;
-  if (remaining >= 14) return 7;
-  if (remaining >= 11) return 6;
-  if (remaining >= 8) return 5;
-  if (remaining >= 5) return 4;
-  if (remaining >= 3) return 3;
-  if (remaining >= 1) return 2;
-  return 1;
 }
 
 interface Props {
@@ -296,12 +291,8 @@ const DEFAULT_SURFACE: SurfaceValues = {
   hasTear: false,
 };
 
-// Condition checkboxes shown alongside the MVGS-derived surface subgrade.
-// Mirrors the legacy SurfaceGrading component's ISSUES list — duplicated
-// here because we render the surface UI inline now (the manual front/back
-// dropdowns from the old component are gone, surface subgrade comes from
-// computeMvgsScore). hasCrease/hasTear still feed calculateOverallGrade
-// as caps on the headline grade.
+// Condition checkboxes are workstation observations. The server resolves their
+// effect on the final grade after they are saved.
 const SURFACE_ISSUES: { key: keyof SurfaceValues; label: string; warning?: string }[] = [
   { key: "hasPrintLines", label: "Print lines present" },
   { key: "hasHoloScratches", label: "Holo scratches present" },
@@ -456,6 +447,15 @@ export default function GradingPanel({
       return res.json();
     },
   });
+  const [authoritativeGrade, setAuthoritativeGrade] = useState<ServerGradeAuthority | null>(null);
+  useEffect(() => {
+    setAuthoritativeGrade(readServerGradeAuthority(gradingData));
+  }, [gradingData, certId]);
+  const acceptServerGradeAuthority = (data: unknown): ServerGradeAuthority | null => {
+    const next = readServerGradeAuthority(data);
+    if (next) setAuthoritativeGrade(next);
+    return next;
+  };
   // PR A · record WHICH certificate the panel has actually hydrated for. Until
   // the grading payload for the CURRENT certId has arrived, the panel holds UI
   // defaults, and the auto-save effect refuses to persist them.
@@ -1380,6 +1380,7 @@ export default function GradingPanel({
       if (!res.ok) {
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
+      acceptServerGradeAuthority(data);
       // Cache invalidation — everything that reads from certificates.grade or
       // its subgrades. RQ will refetch on next access; not forcing immediate
       // refetch so we don't thrash. Keys mirror the existing approveGrade()
@@ -1445,6 +1446,7 @@ export default function GradingPanel({
         setRarityOverrideTransition(null);
         setAutoSaveStatus("saved");
         const data = await res.json().catch(() => ({}));
+        acceptServerGradeAuthority(data);
         const autoSavedRevision = readReviewRevision(data);
         onPreviewSaved?.(autoSavedRevision);
         /**
@@ -1868,122 +1870,20 @@ export default function GradingPanel({
   // initialised defaults (DEFAULT_CORNERS / nulls) — safe to compute even
   // when no images are present yet.
 
-  // Calculated subgrades. centeringCalc uses the strict variant: null until
-  // all four ratios are present and valid, so CenteringInput shows no auto
-  // subgrade for a partially-filled card.
-  const centeringCalc = centeringSubgradeStrict(frontLR, frontTB, backLR, backTB)?.subgrade ?? null;
-  const centering = centeringOverride ?? centeringCalc ?? 10;
-  const cornersCalc = calcCornerSubgrade(corners);
-  const edgesCalc = calcEdgeSubgrade(edges);
-  const cornersGrade = cornersOverride ?? cornersCalc.grade;
-  const edgesGrade = edgesOverride ?? edgesCalc.grade;
-
-  // MVGS derivations — moved above surfaceGrade because the surface UI no
-  // longer has manual front/back selectors; surfaceGrade is now driven by
-  // mvgsSurfaceGrade (the surface deduction from the scoring engine). Once
-  // any defect is MVGS-classified the engine also drives the headline
-  // grade (admin's overallOverride still wins over MVGS, which wins over AI).
-  // MVGS v2 — scoreMvgsV2 routes through buildMvgsInput which enforces
-  // measurement-wins-over-checkbox precedence. Client uses
-  // DEFAULT_MVGS_CALIBRATION for the live preview; server's authoritative
-  // compute on approve loads the persisted calibration row.
-  // Memoised: scoreMvgsV2 loops over every defect multiple times, and this
-  // component re-renders on every keystroke (notes, centering inputs, etc.).
-  // Deps are exactly the inputs the engine reads — recompute only when one of
-  // them actually changes, not on every render.
-  const mvgsForOverall = useMemo(
-    () =>
-      scoreMvgsV2(
-        {
-          centeringFrontLr: frontLR || null,
-          centeringFrontTb: frontTB || null,
-          centeringBackLr: backLR || null,
-          centeringBackTb: backTB || null,
-          defects: (defects || [])
-            .filter((d) => d.mvgsCode && d.tier && d.zone)
-            .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-          darkBorderFront,
-          darkBorderBack,
-          eyeAppealModifier,
-          whiteningLines,
-          // v2.1 — multi-crease list. Engine derives max(spanPct) at the builder
-          // boundary. creaseSpanPct legacy field omitted; the builder prefers
-          // creaseLines when both are present anyway.
-          creaseLines,
-          wrinkleSeverity,
-          tearSeverity,
-          hasCrease: !!surface.hasCrease,
-          hasTear: !!surface.hasTear,
-        },
-        DEFAULT_MVGS_CALIBRATION
-      ),
-    [
-      frontLR,
-      frontTB,
-      backLR,
-      backTB,
-      defects,
-      darkBorderFront,
-      darkBorderBack,
-      eyeAppealModifier,
-      whiteningLines,
-      creaseLines,
-      wrinkleSeverity,
-      tearSeverity,
-      surface.hasCrease,
-      surface.hasTear,
-    ]
-  );
-  const hasMvgsPins = (defects || []).some((d) => d.mvgsCode);
-
-  // MVGS subgrades. Centering comes straight from the shared PSA chart
-  // (worst of the four axes) — the SAME number that scores the card and that
-  // the chip/toast display, so they can never diverge. Corners/edges/surface
-  // keep the 25-pt budget bucket (remaining points → 1-10).
-  const mvgsCenteringGrade = centeringSubgrade(
-    frontLR || null,
-    frontTB || null,
-    backLR || null,
-    backTB || null
-  ).subgrade;
-  const mvgsCornersGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.corners ?? 0));
-  const mvgsEdgesGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.edges ?? 0));
-  const mvgsSurfaceGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.surface ?? 0));
-
-  // Surface subgrade is now MVGS-derived (was Math.min(front, back) from
-  // the old manual SurfaceGrading dropdowns). Admin's explicit override
-  // still wins. When no surface pins exist the engine returns no
-  // deduction → grade 10, which matches "no surface defects observed".
-  const surfaceGrade = surfaceOverride ?? mvgsSurfaceGrade;
-
-  // Zone-set counts for the partial-zones indicator + worstKey for the
-  // "Limited by …" tooltip on the summary stepper. Surfaced post-PR-#45
-  // when admins can no longer rely on AI pre-fill across all 8 zones.
-  const cornersZonesSet = Object.values(corners).filter((v) => typeof v === "number" && v > 0).length;
-  const edgesZonesSet = Object.values(edges).filter((v) => typeof v === "number" && v > 0).length;
-
-  // AI / manual subgrades — produced from the steppers + AI baseline +
-  // per-zone arrays. Used as the displayed subs when NO MVGS pins are
-  // classified, and as the input to calculateOverallGrade in the same case.
-  const aiSub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
-
-  // Displayed + saved subs: MVGS when any pin is MVGS-classified, AI/manual
-  // otherwise. Feeds GradeDisplay's subgrade chips, isBlackLabel(), and
-  // (via sub.* in buildPayload below) the approve-payload's grade_centering/
-  // grade_corners/grade_edges/grade_surface fields.
-  const sub = hasMvgsPins
-    ? { centering: mvgsCenteringGrade, corners: mvgsCornersGrade, edges: mvgsEdgesGrade, surface: mvgsSurfaceGrade }
-    : aiSub;
-
-  // Auto-populate overrides from MVGS when locked — ensures buildPayload
-  // always ships non-null subgrades once defects are MVGS-classified, so
-  // grade description generation works without manual entry.
-  useEffect(() => {
-    if (!hasMvgsPins) return;
-    if (sub.corners > 0) setCornersOverride(sub.corners);
-    if (sub.edges > 0) setEdgesOverride(sub.edges);
-    if (sub.surface > 0) setSurfaceOverride(sub.surface);
-  }, [hasMvgsPins, sub.corners, sub.edges, sub.surface]);
+  // The UI displays only the last value issued by the server. Local state is
+  // observation data awaiting persistence; it is never a grading decision.
+  const serverSubgrades = authoritativeGrade?.subgrades;
+  const sub = {
+    centering: serverSubgrades?.centering ?? 0,
+    corners: serverSubgrades?.corners ?? 0,
+    edges: serverSubgrades?.edges ?? 0,
+    surface: serverSubgrades?.surface ?? 0,
+  };
+  const centering = sub.centering;
+  const centeringCalc = serverSubgrades?.centering ?? null;
+  const cornersGrade = sub.corners;
+  const edgesGrade = sub.edges;
+  const surfaceGrade = sub.surface;
 
   // Auto-derive the 5 mvgsCode-mappable surface flags from pin state — they
   // exist for the CUSTOMER-FACING surface report ("Staining present: yes")
@@ -2017,22 +1917,14 @@ export default function GradingPanel({
     );
   }, [defects]);
 
-  const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
-  // 100% MVGS auto (owner directive 2026-07-01): manual overallOverride removed
-  // from the precedence, so the overall is always the MVGS engine result
-  // (half-grades and all) or the weighted-formula fallback — never a hand-set value.
-  const overall = mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
-
-  // Generate Description gate: every subgrade must have a real value (>0).
-  // Mirrors the server-side 422 check so the button stays disabled until ready.
-  const subgradesIncomplete = !centering || !cornersGrade || !edgesGrade || !surfaceGrade;
-  const label = getGradeLabel(overall);
-  // Pass MVGS deductions so a card with sub-grade-10-but-non-zero defects
-  // (e.g. corners -1.5) does NOT flag as Pristine 10P.
-  const isBlack = checkBlackLabel(sub, overall, mvgsForOverall.deductions);
-
-  const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
-  const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
+  const overall = authoritativeGrade?.gradeType === "numeric" ? Number(authoritativeGrade.overall) || 0 : 0;
+  const subgradesIncomplete =
+    !authoritativeGrade ||
+    (authoritativeGrade.gradeType === "numeric" && (!centering || !cornersGrade || !edgesGrade || !surfaceGrade));
+  const label = authoritativeGrade?.label ?? "";
+  const isBlack = authoritativeGrade?.pristine === true;
+  const isNonNumeric = authoritativeGrade?.gradeType === "AA" || authoritativeGrade?.gradeType === "NO";
+  const finalGradeOverall = authoritativeGrade?.overall ?? "";
   const currentPreviewFields = useMemo<CertificatePreviewFields>(
     () => ({
       certificateId: certId,
@@ -2046,7 +1938,7 @@ export default function GradingPanel({
       rarityCode,
       finishVariant,
       promoType,
-      gradeType: authStatus === "authentic_altered" ? "AA" : authStatus === "not_original" ? "NO" : "numeric",
+      gradeType: authoritativeGrade?.gradeType ?? "numeric",
       gradeOverall: finalGradeOverall,
       gradeCentering: sub.centering || null,
       gradeCorners: sub.corners || null,
@@ -2065,7 +1957,7 @@ export default function GradingPanel({
       rarityCode,
       finishVariant,
       promoType,
-      authStatus,
+      authoritativeGrade?.gradeType,
       finalGradeOverall,
       sub.centering,
       sub.corners,
@@ -2108,14 +2000,9 @@ export default function GradingPanel({
       : "Approve & Publish";
 
   function buildPayload() {
-    // Companion to server-side COALESCE fix (PR #14): omit fields that don't
-    // carry information so the server preserves the existing DB value. Corner/
-    // edge subgrades now default to 10 (Option A — calcCornerSubgrade), so a
-    // flawless card ships grade_corners/grade_edges = 10 instead of being
-    // omitted; the raw zone arrays still omit when untouched (hasContent below),
-    // matching the historical NULL-array Pristines (e.g. MV151).
+    // This payload contains observations and operator notes only. The server
+    // derives and persists all grade outputs from these fields.
     const out: Record<string, unknown> = {
-      overall_grade: finalGradeOverall,
       auth_status: authStatus,
       auth_notes: authNotes,
       grade_explanation: gradeExplanation,
@@ -2164,18 +2051,6 @@ export default function GradingPanel({
         if (promoType.trim()) out.promo_type = promoType.trim();
       }
     }
-
-    // Subgrade scalars — omit if 0/null (zone state at empty default).
-    // Reads from `sub` so the MVGS-derived subgrades ship to the server when
-    // any defect is MVGS-classified; falls back to AI/manual subgrades
-    // otherwise (sub === aiSub when hasMvgsPins is false).
-    const sendNum = (key: string, val: number | null | undefined) => {
-      if (val != null && !isNaN(val) && val > 0) out[key] = val;
-    };
-    sendNum("grade_centering", sub.centering);
-    sendNum("grade_corners", sub.corners);
-    sendNum("grade_edges", sub.edges);
-    sendNum("grade_surface", sub.surface);
 
     // Centering ratios — omit if empty.
     const sendTxt = (key: string, val: string | null | undefined) => {
@@ -2342,6 +2217,8 @@ export default function GradingPanel({
       if (revision == null) {
         throw new Error("Review save did not return an authoritative revision.");
       }
+      const serverGrade = acceptServerGradeAuthority(data);
+      if (!serverGrade) throw new Error("Review save did not return an authoritative grade.");
       const latest = latestReviewDraftRef.current;
       if (
         !gradingPanelMountedRef.current ||
@@ -2358,7 +2235,20 @@ export default function GradingPanel({
       // authoritative again at the returned revision. Re-baselining here means a
       // later Review re-entry with no further edits performs no second write.
       cleanBaselineRef.current = { certId: transitionCertId, fingerprint: payloadFingerprint, revision };
-      return { revision, certId: transitionCertId, payloadFingerprint, preview: draft.preview };
+      return {
+        revision,
+        certId: transitionCertId,
+        payloadFingerprint,
+        preview: {
+          ...draft.preview,
+          gradeType: serverGrade.gradeType,
+          gradeOverall: serverGrade.overall,
+          gradeCentering: serverGrade.subgrades.centering,
+          gradeCorners: serverGrade.subgrades.corners,
+          gradeEdges: serverGrade.subgrades.edges,
+          gradeSurface: serverGrade.subgrades.surface,
+        },
+      };
     } catch (error) {
       if (gradingPanelMountedRef.current && reviewAbortRef.current === controller) setAutoSaveStatus("error");
       throw error;
@@ -2471,6 +2361,7 @@ export default function GradingPanel({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Save failed");
+        acceptServerGradeAuthority(data);
         toast({ title: "Draft saved" });
         queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
         queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${savingCertId}/grading`] });
@@ -2507,12 +2398,15 @@ export default function GradingPanel({
     try {
       // Persist current state first so the server's read of the cert reflects
       // the admin's just-set subgrades + confirmed defects.
-      await fetch(`${apiBase}/certificates/${certId}/grade`, {
+      const save = await fetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildPayload()),
       });
+      const saved = await save.json().catch(() => ({}));
+      if (!save.ok) throw new Error(saved.error || "Could not save observations before generating a description.");
+      acceptServerGradeAuthority(saved);
       const res = await fetch(`${apiBase}/certificates/${certId}/generate-description`, {
         method: "POST",
         credentials: "include",
@@ -3539,118 +3433,53 @@ export default function GradingPanel({
               </div>
             )}
 
-            {/* MVGS controls + live score — visible whenever the panel is in
-              numeric-grade mode. The score updates as defects, centering,
-              dark_border_front/back, and eye_appeal_modifier change locally
-              — same pure function (shared/mvgs-scoring.ts) the server runs
-              on approve. */}
-            {!isNonNumeric &&
-              (() => {
-                // Preview compute — same scoreMvgsV2 path as mvgsForOverall
-                // above. Client uses DEFAULT_MVGS_CALIBRATION; server's
-                // approve route is the authoritative compute and loads the
-                // persisted calibration row.
-                const mvgs = scoreMvgsV2(
-                  {
-                    centeringFrontLr: frontLR || null,
-                    centeringFrontTb: frontTB || null,
-                    centeringBackLr: backLR || null,
-                    centeringBackTb: backTB || null,
-                    defects: (defects || [])
-                      .filter((d) => d.mvgsCode && d.tier && d.zone)
-                      .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-                    darkBorderFront,
-                    darkBorderBack,
-                    eyeAppealModifier,
-                    whiteningLines,
-                    creaseLines,
-                    wrinkleSeverity,
-                    tearSeverity,
-                    hasCrease: !!surface.hasCrease,
-                    hasTear: !!surface.hasTear,
-                  },
-                  DEFAULT_MVGS_CALIBRATION
-                );
-                return (
-                  <div
-                    className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-3 space-y-3"
-                    data-testid="mvgs-controls"
-                    data-canonical-section="mvgs-score"
-                  >
-                    <div className="flex items-baseline justify-between">
-                      <span className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">
-                        MVGS
-                      </span>
-                      <span className="text-[var(--admin-ink)] text-sm font-bold" data-testid="text-mvgs-score">
-                        {mvgs.score}/100 · {mvgs.grade}
-                      </span>
+            {!isNonNumeric && (
+              <div
+                className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-3 space-y-3"
+                data-testid="mvgs-controls"
+                data-canonical-section="mvgs-score"
+              >
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">MVGS</span>
+                  <span className="text-[var(--admin-ink)] text-sm font-bold" data-testid="text-mvgs-score">
+                    {authoritativeGrade?.score ?? "—"}/100 · {authoritativeGrade?.label || "awaiting server"}
+                  </span>
+                </div>
+                <p className="text-[var(--admin-ink-faint)] text-[10px]">
+                  Save observations to receive the server-issued score and deductions.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)]">Dark border</span>
+                    <div className="flex gap-3">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={darkBorderFront} onChange={() => setDarkBorderFront((v) => !v)} className="accent-[var(--admin-gold)] h-4 w-4" data-testid="check-dark-border-front" />
+                        <span className="text-[10px] text-[var(--admin-ink-dim)]">Front</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={darkBorderBack} onChange={() => setDarkBorderBack((v) => !v)} className="accent-[var(--admin-gold)] h-4 w-4" data-testid="check-dark-border-back" />
+                        <span className="text-[10px] text-[var(--admin-ink-dim)]">Back</span>
+                      </label>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="flex flex-col gap-1.5">
-                        <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)]">
-                          Dark border
-                        </span>
-                        <div className="flex gap-3">
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={darkBorderFront}
-                              onChange={() => setDarkBorderFront((v) => !v)}
-                              className="accent-[var(--admin-gold)] h-4 w-4"
-                              data-testid="check-dark-border-front"
-                            />
-                            <span className="text-[10px] text-[var(--admin-ink-dim)]">Front</span>
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={darkBorderBack}
-                              onChange={() => setDarkBorderBack((v) => !v)}
-                              className="accent-[var(--admin-gold)] h-4 w-4"
-                              data-testid="check-dark-border-back"
-                            />
-                            <span className="text-[10px] text-[var(--admin-ink-dim)]">Back</span>
-                          </label>
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)] block mb-1">
-                          Eye appeal
-                        </span>
-                        <div className="flex gap-1">
-                          {[-2, -1, 0, 1, 2].map((n) => (
-                            <button
-                              key={n}
-                              type="button"
-                              onClick={() => setEyeAppealModifier(n)}
-                              className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${
-                                eyeAppealModifier === n
-                                  ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]"
-                                  : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"
-                              }`}
-                              data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}
-                            >
-                              {n > 0 ? `+${n}` : n}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {Object.keys(mvgs.deductions).length > 0 && (
-                      <div className="text-[10px] text-[var(--admin-ink-dim)] font-mono">
-                        {Object.entries(mvgs.deductions).map(([k, v]) => (
-                          <span key={k} className="inline-block mr-2 whitespace-nowrap">
-                            {k}:{" "}
-                            <span className={v > 0 ? "text-[var(--admin-green)]" : "text-[var(--admin-red)]"}>
-                              {v > 0 ? `+${v}` : v}
-                            </span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
-                );
-              })()}
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)] block mb-1">Eye appeal</span>
+                    <div className="flex gap-1">
+                      {[-2, -1, 0, 1, 2].map((n) => (
+                        <button key={n} type="button" onClick={() => setEyeAppealModifier(n)} className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${eyeAppealModifier === n ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]" : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"}`} data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}>
+                          {n > 0 ? `+${n}` : n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {authoritativeGrade && Object.keys(authoritativeGrade.deductions).length > 0 && (
+                  <div className="text-[10px] text-[var(--admin-ink-dim)] font-mono">
+                    {Object.entries(authoritativeGrade.deductions).map(([key, value]) => <span key={key} className="inline-block mr-2 whitespace-nowrap">{key}: {value}</span>)}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Grade summary — always visible at top */}
             {!isNonNumeric && (
@@ -3658,20 +3487,11 @@ export default function GradingPanel({
                 <GradeDisplay
                   overall={overall}
                   sub={sub}
-                  hasCrease={surface.hasCrease}
-                  hasTear={surface.hasTear}
-                  manualOverride={null}
-                  onOverride={() => {}}
-                  lockedByMvgs={true}
                   gradeLabel={label}
                   isBlack={isBlack}
                   strengthScore={
                     (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
                   }
-                  cornersZonesSet={0}
-                  edgesZonesSet={0}
-                  cornersWorstKey=""
-                  edgesWorstKey=""
                   aiSubgrades={aiSubgrades}
                   aiConfidence={aiConfidenceMap}
                 />
@@ -3792,27 +3612,14 @@ export default function GradingPanel({
                 backLR={backLR}
                 backTB={backTB}
                 subgrade={centeringCalc}
-                onChange={(field, val) => {
-                  if (field === "frontLR") setFrontLR(val);
-                  else if (field === "frontTB") setFrontTB(val);
-                  else if (field === "backLR") setBackLR(val);
-                  else setBackTB(val);
-                  clearOverallOverrideIfSet();
-                }}
-                overrideGrade={centeringOverride}
-                onOverride={(v) => {
-                  setCenteringOverride(v);
-                }}
               />
               {/* MVGS-standard centering threshold legend — two rows of chips
                 (front/back) showing the band each ratio falls into. Chips
                 matching the current input values are highlighted in gold.
                 Display only — no state changes, no saves. */}
               {(() => {
-                // Bands mirror shared/centering.ts exactly. A chip highlights
-                // when an entered axis grades into that band — matched via the
-                // shared centeringAxisGradeOrNull, so the legend can never drift
-                // from the engine.
+                // This is an instructional reference only. The server returns
+                // the actual centering outcome after saving observations.
                 const FRONT_CHIPS: { label: string; grade: number }[] = [
                   { label: "≤55/45", grade: 10 },
                   { label: "≤60/40", grade: 9 },
@@ -3832,16 +3639,8 @@ export default function GradingPanel({
                   { label: "≤95/5", grade: 6 },
                   { label: ">95", grade: 3 },
                 ];
-                const frontHits = new Set(
-                  [centeringAxisGradeOrNull(frontLR, "front"), centeringAxisGradeOrNull(frontTB, "front")].filter(
-                    (g): g is number => g !== null
-                  )
-                );
-                const backHits = new Set(
-                  [centeringAxisGradeOrNull(backLR, "back"), centeringAxisGradeOrNull(backTB, "back")].filter(
-                    (g): g is number => g !== null
-                  )
-                );
+                const frontHits = new Set<number>();
+                const backHits = new Set<number>();
 
                 const Chip = ({ label, grade, active }: { label: string; grade: number; active: boolean }) => (
                   <span
@@ -3877,10 +3676,6 @@ export default function GradingPanel({
                   </div>
                 );
               })()}
-              {/* MVGS centering calculator — applies the MVGS front/back tables
-                to the four ratios and writes the result into centeringOverride
-                (same state path as the manual subgrade stepper), which
-                buildPayload() ships via grade_centering. */}
               {(() => {
                 const allFilled = !!(frontLR.trim() && frontTB.trim() && backLR.trim() && backTB.trim());
                 const ratioRe = /^\s*\d+\s*\/\s*\d+\s*$/;
@@ -3895,36 +3690,21 @@ export default function GradingPanel({
                   <button
                     type="button"
                     onClick={() => {
-                      const result = centeringSubgradeStrict(frontLR, frontTB, backLR, backTB);
-                      if (!result) {
-                        toast({
-                          title: "MVGS calc unavailable",
-                          description: "MVGS calc needs all 4 ratios in X/Y format (e.g. 53/47)",
-                          variant: "destructive",
-                        });
-                        return;
-                      }
-                      setCenteringOverride(result.subgrade);
-                      const AXIS_NAMES: Record<CenteringAxis, string> = {
-                        frontLR: "Front L/R",
-                        frontTB: "Front T/B",
-                        backLR: "Back L/R",
-                        backTB: "Back T/B",
-                      };
                       toast({
-                        title: `Centering set to ${result.subgrade}/10 (MVGS — worst axis: ${AXIS_NAMES[result.worstAxis]} ${result.perAxis[result.worstAxis]}/10)`,
+                        title: "Centering will be calculated by the server",
+                        description: "Save these four measurements to receive the authoritative subgrade.",
                       });
                     }}
                     disabled={isDisabled}
                     title={
                       isDisabled
                         ? "Fill all 4 ratios in X/Y format to enable"
-                        : "Compute centering subgrade from the four ratios using MVGS standard"
+                        : "Save observations to receive the server-issued centering subgrade"
                     }
                     data-testid="btn-mvgs-calc"
                     className="text-[10px] font-bold uppercase tracking-widest border border-[var(--admin-gold)]/50 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
-                    MVGS Calc
+                    Server Calc
                   </button>
                 );
               })()}
@@ -4027,9 +3807,8 @@ export default function GradingPanel({
                 </div>
               )}
 
-              {/* Issue checkboxes — flow into the surface state, which then
-                  feeds the headline-grade caps (hasCrease → 5, hasTear → 3)
-                  via calculateOverallGrade. */}
+              {/* Issue checkboxes are saved as observations; the server applies
+                  the standard's resulting ceiling and grade. */}
               <div className="space-y-1.5">
                 {SURFACE_ISSUES.map((issue) => (
                   <label key={String(issue.key)} className="flex items-start gap-2 cursor-pointer group">
@@ -4075,7 +3854,6 @@ export default function GradingPanel({
                     {surfaceGrade}
                   </span>
                   <span className="text-[var(--admin-ink-dim)]"> (MVGS — from defect pins)</span>
-                  {surfaceOverride !== null && <span className="text-[var(--admin-ink-dim)]"> (manual)</span>}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   {/* Locked: surface is 100% MVGS auto (from defect pins) —

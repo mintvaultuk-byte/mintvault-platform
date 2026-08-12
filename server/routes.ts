@@ -124,6 +124,7 @@ import { isBlackLabel } from "@shared/pristine";
 import { languageLabel, normalizePokemonLanguage } from "@shared/pokemon-rarity-catalogue";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
 import { certIsPristine } from "./lib/cert-pristine";
+import { resolveDraftGradeAuthority } from "./lib/draft-grade-authority";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { scannerEvidenceAdmission } from "./lib/scanner-evidence-admission";
 import { isServiceValidForCarrier } from "@shared/carriers";
@@ -2242,7 +2243,19 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
     // Restricted-grader lock (cert-level). An admin must NOT grade-write a card
     // that is assigned to a grader and still in their workflow.
     if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
-    const b = req.body;
+    const rawBody = req.body || {};
+    const authoritativeGrade = await resolveDraftGradeAuthority(cert as any, rawBody);
+    // Only observation fields cross the browser boundary.  Replace every
+    // client-supplied grade output before the established write/audit path
+    // sees it, so forged totals or subgrades cannot reach the database.
+    const b = {
+      ...rawBody,
+      overall_grade: authoritativeGrade.overall,
+      grade_centering: authoritativeGrade.subgrades.centering,
+      grade_corners: authoritativeGrade.subgrades.corners,
+      grade_edges: authoritativeGrade.subgrades.edges,
+      grade_surface: authoritativeGrade.subgrades.surface,
+    };
     const overallGrade = b.overall_grade;
     const isNonNumRequested = overallGrade === "AA" || overallGrade === "NO";
     const parsedOverall = parseFloat(overallGrade);
@@ -2737,7 +2750,7 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       }
     });
 
-      res.json({ ok: true, wasApproved, reviewRevision: savedReviewRevision });
+      res.json({ ok: true, wasApproved, reviewRevision: savedReviewRevision, authoritativeGrade });
     } catch (error: any) {
       console.error("[grade] save error:", error.message);
       sendServerError(res, error);

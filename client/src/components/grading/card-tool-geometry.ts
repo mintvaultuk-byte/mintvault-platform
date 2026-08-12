@@ -17,8 +17,7 @@
  *     bottom = BOTTOM-outer y, grown by a thin mat margin) sent to POST /recrop,
  *   - a deskew angle (the TOP-outer → BOTTOM-outer centre line should be
  *     vertical; its tilt, in PIXEL space, is the skew) sent as rotation_deg,
- *   - L/R + T/B centering ratios + subgrade routed through the ONE canonical PSA
- *     chart (shared/centering.ts via computeCentering) — never a new chart.
+ *   - L/R + T/B centering ratios for the server-owned centering resolver.
  *
  * The border width of each side is the gap along the RELEVANT axis only:
  *   TOP / BOTTOM  → vertical (Y) gap between that side's inner and outer points
@@ -29,7 +28,6 @@
 
 import { resolveDeskew, type CropQuad, type Point } from "./crop-geometry";
 import { computeCentering, type Rect } from "./centering-from-rects";
-import type { CenteringSide } from "@shared/centering";
 
 /**
  * "full"        — 8 dots: crop + deskew + centering (front/back graded).
@@ -61,9 +59,9 @@ export interface CardToolComputed {
    * Centering result, or null in outer-only mode (no inner frame to measure).
    * `outer`/`inner` are the rects to PERSIST: normalized into the post-crop
    * frame (outer = full image, inner inset) so the saved overlay aligns with
-   * the re-cropped image. The ratios/subgrade are unchanged by that normalize.
+   * the re-cropped image.
    */
-  centering: { outer: Rect; inner: Rect; lr: string; tb: string; subgrade: number } | null;
+  centering: { outer: Rect; inner: Rect; lr: string; tb: string } | null;
 }
 
 function clampPct(v: number): number {
@@ -153,7 +151,7 @@ export function edgesToRect(pts: Point[]): Rect {
  * This is a NO-OP for every centering number: edgesToRect already reads only
  * left=LEFT.x, top=TOP.y, right=RIGHT.x, bottom=BOTTOM.y, so each point's
  * cross-axis was ALWAYS discarded. Locking merely snaps the placed dot onto the
- * coordinate the math already uses — same L/R, T/B and subgrade as a free click.
+ * coordinate the geometry already uses — same L/R and T/B as a free click.
  */
 export function axisLockInner(sideIndex: number, outer: Point, clicked: Point): Point {
   const sharesX = sideIndex % 2 === 0; // TOP/BOTTOM → vertical rail (share X)
@@ -259,7 +257,7 @@ export function computeCardTool(
   mode: CardToolMode,
   outerPts: Point[],
   innerPts: Point[] | null,
-  side: CenteringSide,
+  side: "front" | "back",
   sliderDeg: number,
   marginPct: number,
   naturalWidth = 0,
@@ -272,7 +270,7 @@ export function computeCardTool(
   if (mode === "full" && innerPts) {
     const rects = centeringRectsForEdges(outerPts, innerPts);
     const c = computeCentering(rects.outer, rects.inner, side);
-    centering = { outer: rects.outer, inner: rects.inner, lr: c.lr, tb: c.tb, subgrade: c.subgrade };
+    centering = { outer: rects.outer, inner: rects.inner, lr: c.lr, tb: c.tb };
   }
 
   return { crop, deskewDeg, centering };

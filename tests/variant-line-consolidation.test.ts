@@ -239,7 +239,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     // permitted only if the added lines match one of the explicitly founder-authorised
     // signatures below AND contain no calculation logic. Anything else fails.
     //
-    // Three authorised signatures, kept as a UNION rather than replacing one with the other:
+    // Authorised signatures, kept as a UNION rather than replacing one with the other:
     //   A) the identity/variant draft validation already on main;
     //   B) PR #254's print-safety work (2026-07-25 approval) — approveGraderCert validating
     //      against the shared printability rule, and applyCertGradeDraft normalising
@@ -247,6 +247,8 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     //   C) the signed-station scanner release selecting only the explicit current
     //      immutable-evidence revision for a browser working derivative. This is
     //      evidence-pointer safety, not grade calculation.
+    //   F) server-authority wiring that consumes a separately tested resolver
+    //      result and persists it without calculating in the route workflow.
     // A single-signature whitelist rejects the other authorised change, which is why this is
     // a union and not an overwrite.
     const calcEngine =
@@ -308,8 +310,16 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         //    neither can pass under the other's authorisation.
         const signatureE =
           /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        // F) Browser-grade removal (2026-08-12): the workflow may import and
+        // call the dedicated server authority resolver, then persist its sealed
+        // output. This does not permit the workflow itself to import an engine
+        // or perform arithmetic; both remain prohibited below.
+        const signatureF =
+          /\bresolveDraftGradeAuthority\s*\(/.test(addedJs) &&
+          /const\s+authority\s*=\s*await\s+resolveDraftGradeAuthority\s*\(/.test(addedJs) &&
+          /const\s+overall\s*=\s*authority\.overall\s*;/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
@@ -322,7 +332,13 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         // those exact identifiers. Bare `centering`, `mvgs`, `pristine`, `gradeNum`,
         // `calculateOverallGrade` and `scoreMvgs` all still fail, in this file and every other.
         const b3Columns = /\b(centering_score|corners_score|edges_score|surface_score)\b/g;
-        expect(addedCode.replace(b3Columns, "").replace(/'(centering|corners|edges|surface)'/g, "")).not.toMatch(
+        const authorityOutputFields = /\bauthority\.subgrades\.(centering|corners|edges|surface)\b/g;
+        expect(
+          addedCode
+            .replace(b3Columns, "")
+            .replace(authorityOutputFields, "")
+            .replace(/'(centering|corners|edges|surface)'/g, "")
+        ).not.toMatch(
           /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
         );
         continue;

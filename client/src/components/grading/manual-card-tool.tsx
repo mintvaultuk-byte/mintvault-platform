@@ -27,10 +27,19 @@ import {
   screenPointToSourcePct,
   type CardToolMode,
 } from "./card-tool-geometry";
-import { type CenteringResult } from "./manual-centering";
 import { deriveZone, LINE_COLOUR_PALETTE, type Defect, type MvgsCode } from "./defect-annotation";
 import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 import DefectTypePicker, { type DefectPickerAnchor, type DefectTier } from "./defect-type-picker";
+import type { Rect } from "./centering-from-rects";
+
+interface CenteringResult {
+  side: "front" | "back";
+  outer: Rect;
+  inner: Rect;
+  leftRight: string;
+  topBottom: string;
+  subgrade: number;
+}
 
 interface Props {
   side: "front" | "back";
@@ -1101,13 +1110,15 @@ export default function ManualCardTool({
         });
         const cenJson = await cenRes.json();
         if (!cenRes.ok) throw new Error(cenJson.error || "Centering save failed");
+        const subgrade = Number(cenJson.subgrade);
+        if (!Number.isFinite(subgrade)) throw new Error("Centering save returned no authoritative subgrade");
         onCentering?.({
           side,
           outer: centering.outer,
           inner: centering.inner,
           leftRight: centering.lr,
           topBottom: centering.tb,
-          subgrade: centering.subgrade,
+          subgrade,
         });
       };
 
@@ -1116,7 +1127,7 @@ export default function ManualCardTool({
         toast({
           title:
             mode === "full" && centering
-              ? `${side}: cropped + centered ${centering.lr} / ${centering.tb} → grade ${centering.subgrade}${deskewNote}`
+              ? `${side}: cropped + centered ${centering.lr} / ${centering.tb}${deskewNote}`
               : `${side}: cropped${deskewNote}`,
         });
 
@@ -2279,12 +2290,7 @@ export default function ManualCardTool({
               <div className="flex-1" />
               {previewCentering && (
                 <span className="text-xs font-mono text-[var(--admin-ink-dim)]">
-                  {previewCentering.lr} L/R &middot; {previewCentering.tb} T/B →{" "}
-                  <span
-                    className={`font-black ${previewCentering.subgrade >= 9 ? "text-[var(--admin-gold)]" : previewCentering.subgrade >= 7 ? "text-[var(--admin-green)]" : "text-[var(--admin-amber)]"}`}
-                  >
-                    {previewCentering.subgrade}
-                  </span>
+                  {previewCentering.lr} L/R &middot; {previewCentering.tb} T/B · server calculation on save
                 </span>
               )}
             </div>

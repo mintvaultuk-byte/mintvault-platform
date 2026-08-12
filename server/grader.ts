@@ -15,7 +15,6 @@
 import type { Request, Response, NextFunction } from "express";
 import {
   normaliseGradeType,
-  kindOfGradeType,
   kindOfOverallGrade,
   rejectKindChange,
   gradeTypeToPersist,
@@ -28,6 +27,7 @@ import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
+import { resolveDraftGradeAuthority } from "./lib/draft-grade-authority";
 
 /**
  * AUTO-PUBLISH FLIP. When false (default) a grader's submit moves the card to
@@ -687,6 +687,7 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
   const cert = await storage.getCertificate(certId);
   if (!cert) return null;
   const c = cert as any;
+  const authoritativeGrade = await resolveDraftGradeAuthority(c, {});
   return {
     // Resolved card identity — the grader panel re-syncs its editable idName/idSet
     // fields from these once the on-open identify has run (the panel mounts before
@@ -752,6 +753,9 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     aiDraftGrade: c.aiDraftGrade ?? null,
     aiAnalysis: c.aiAnalysis ?? null,
     aiDefectCandidates: c.aiDefectCandidates ?? [],
+    // Every displayed grade outcome is issued from the server-owned resolver.
+    // The browser receives observations and this result, never scoring code.
+    authoritativeGrade,
   };
 }
 
@@ -799,15 +803,15 @@ export async function applyCertGradeDraft(certId: number, body: any, extraWhere:
     cert,
     body
   );
+  const authority = await resolveDraftGradeAuthority(cert, body);
 
-  const overall = body.overall_grade;
+  const overall = authority.overall;
   // grade_type used to be written VERBATIM from the request body, and the column is plain
   // `text` with no CHECK constraint — so an arbitrary value ("banana") could be persisted
   // and would then be treated as numeric everywhere while leaking into the public
   // population labels, which emit the raw column. Normalise, and derive the kind through
   // the SAME shared decision the approval routes use so the paths cannot diverge.
   const storedGradeType = normaliseGradeType(cert.gradeType);
-  const requestedGradeTypeRaw = pick(body.grade_type, cert.gradeType) || "numeric";
   // Malformed grade_type is refused rather than silently coerced, so a typo can never
   // reclassify a certificate.
   if (
@@ -820,8 +824,7 @@ export async function applyCertGradeDraft(certId: number, body: any, extraWhere:
   // Kind follows either signal: an explicit NO/AA overall_grade, or a non-numeric
   // grade_type. (The previous condition omitted the SHORT NO/AA forms from the grade_type
   // side, so {"overall_grade":"NO"} nulled the grade while grade_type stayed 'numeric'.)
-  const requestedKind =
-    kindOfOverallGrade(overall) !== "numeric" ? kindOfOverallGrade(overall) : kindOfGradeType(requestedGradeTypeRaw);
+  const requestedKind = kindOfOverallGrade(overall);
   // A draft may set the kind on a never-approved certificate (ordinary grading work) but
   // may never convert a PUBLISHED one — that is Super Admin Correction Mode's job. This
   // helper's own UPDATE is scoped `grade_approved_at IS NULL`, so a published row cannot
@@ -855,10 +858,10 @@ export async function applyCertGradeDraft(certId: number, body: any, extraWhere:
       rarity_code         = ${nextRarityCode},
       finish_variant      = ${nextFinishVariant},
       promo_type          = ${nextPromoType},
-      centering_score = ${num(body.grade_centering, cert.gradeCentering)},
-      corners_score   = ${num(body.grade_corners, cert.gradeCorners)},
-      edges_score     = ${num(body.grade_edges, cert.gradeEdges)},
-      surface_score   = ${num(body.grade_surface, cert.gradeSurface)},
+      centering_score = ${isNonNum ? null : authority.subgrades.centering},
+      corners_score   = ${isNonNum ? null : authority.subgrades.corners},
+      edges_score     = ${isNonNum ? null : authority.subgrades.edges},
+      surface_score   = ${isNonNum ? null : authority.subgrades.surface},
       centering_front_lr = ${pick(body.centering_front_lr, cert.centeringFrontLr)},
       centering_front_tb = ${pick(body.centering_front_tb, cert.centeringFrontTb)},
       centering_back_lr  = ${pick(body.centering_back_lr, cert.centeringBackLr)},
@@ -869,6 +872,7 @@ export async function applyCertGradeDraft(certId: number, body: any, extraWhere:
       defects        = ${jb(body.defects, cert.defects)}::jsonb,
       whitening_lines = ${jb(body.whitening_lines, cert.whiteningLines)}::jsonb,
       crease_lines    = ${jb(body.crease_lines, cert.creaseLines)}::jsonb,
+      crease_span_pct = ${num(body.crease_span_pct, cert.creaseSpanPct)},
       auth_status = ${pick(body.auth_status, cert.authStatus)},
       auth_notes  = ${pick(body.auth_notes, cert.authNotes)},
       grade_explanation = ${pick(body.grade_explanation, cert.gradeExplanation)},
@@ -1371,7 +1375,8 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (!sameGradeSnapshot(before, after)) {
     await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
   }
-  return { ok: true as const, revision: saved };
+  const payload = await buildCertGradingPayload(certId);
+  return { ok: true as const, revision: saved, authoritativeGrade: payload?.authoritativeGrade ?? null };
 }
 
 // ── Earnings (display-only; NO deduction logic) ───────────────────────────────

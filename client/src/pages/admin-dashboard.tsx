@@ -4,7 +4,6 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { getVariantDisplayLabel } from "@/lib/variantOptions";
-import { mvgsTierName } from "@shared/mvgs-scoring";
 import {
   Plus,
   Edit,
@@ -1656,9 +1655,9 @@ function CertRow({
   const gradeType = (cert as any).gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
   const grade = isNonNum ? 0 : parseFloat(cert.gradeOverall || "0");
-  // Tier NAME from the MVGS table for numeric grades so half grades read true
-  // (8.5 → "NM-MINT+") instead of gradeLabelFull's rounded whole-grade name.
-  const label = isNonNum ? gradeLabelFull(gradeType, cert.gradeOverall || "0") : mvgsTierName(grade).toUpperCase();
+  // The dashboard receives a persisted grade value only. Tier wording is
+  // issued by server read models and must not be derived in the browser.
+  const label = isNonNum ? gradeLabelFull(gradeType, cert.gradeOverall || "0") : "NUMERIC GRADE";
 
   // Embedding freshness — embeddedAt is null until the hourly job picks
   // it up; stale when a cert mutation (image swap, grade edit, etc.) has

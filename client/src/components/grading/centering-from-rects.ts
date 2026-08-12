@@ -1,11 +1,8 @@
 /**
  * Pure centering math for the manual-centering tool (manual-centering.tsx).
- * Extracted from the component so the subgrade can be unit tested without
- * React, and — critically — so it routes through the ONE canonical centering
- * chart (shared/centering.ts) instead of a private ladder.
+ * This client helper derives only observable ratios from drag geometry. The
+ * server resolves every centering subgrade after the measurement is saved.
  */
-
-import { centeringAxisGrade, type CenteringSide } from "@shared/centering";
 
 export interface Rect {
   left: number;
@@ -19,20 +16,14 @@ export interface CenteringFromRects {
   lr: string;
   /** Bigger-side-first T/B ratio string, e.g. "55/45". */
   tb: string;
-  /** Centering subgrade 1–10 = worst of the two axes on the PSA chart. */
-  subgrade: number;
 }
 
 /**
- * Convert dragged outer/inner rects into L/R + T/B ratios and a centering
- * subgrade. The subgrade is the WORST (minimum) of the two axes scored on the
- * canonical PSA chart for this side — front strict, back lenient — the same
- * source of truth as the 100-pt score, the locked chip, and the public
- * /standard tables. The ratios are rounded the same way they are saved, and
- * the subgrade is computed FROM those rounded ratios, so the tool's displayed
- * grade always equals what the rest of the app derives from the saved values.
+ * Convert dragged outer/inner rects into L/R + T/B ratios. `side` remains in
+ * the signature for capture-call compatibility but is intentionally not used
+ * by the browser: the server owns the chart and returned subgrade.
  */
-export function computeCentering(outer: Rect, inner: Rect, side: CenteringSide): CenteringFromRects {
+export function computeCentering(outer: Rect, inner: Rect, _side: "front" | "back"): CenteringFromRects {
   const leftB = inner.left - outer.left;
   const rightB = outer.right - inner.right;
   const topB = inner.top - outer.top;
@@ -53,7 +44,5 @@ export function computeCentering(outer: Rect, inner: Rect, side: CenteringSide):
   const lr = lRound >= rRound ? `${lRound}/${rRound}` : `${rRound}/${lRound}`;
   const tb = tRound >= bRound ? `${tRound}/${bRound}` : `${bRound}/${tRound}`;
 
-  const subgrade = Math.min(centeringAxisGrade(lr, side), centeringAxisGrade(tb, side));
-
-  return { lr, tb, subgrade };
+  return { lr, tb };
 }

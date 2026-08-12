@@ -429,7 +429,13 @@ export function registerGraderRoutes(app: Express): void {
       if (!saved) {
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
-      return res.json({ ok: true, gradingStatus: auth.gradingStatus, reviewRevision: saved });
+      const payload = await buildCertGradingPayload(certId);
+      return res.json({
+        ok: true,
+        gradingStatus: auth.gradingStatus,
+        reviewRevision: saved,
+        authoritativeGrade: payload?.authoritativeGrade ?? null,
+      });
     } catch (e: any) {
       // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
       // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
@@ -1101,7 +1107,7 @@ export function registerGraderRoutes(app: Express): void {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
       if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ ok: true, reviewRevision: r.revision });
+      return res.json({ ok: true, reviewRevision: r.revision, authoritativeGrade: r.authoritativeGrade });
     } catch (e: any) {
       if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[admin grade-review save] error:", e.message);

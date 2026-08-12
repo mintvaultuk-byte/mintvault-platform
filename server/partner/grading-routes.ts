@@ -542,7 +542,13 @@ export function partnerGradingRouter(): Router {
           sessionId: req.partner!.sessionId,
           correlationId: auth.auth.partnerSubmissionId,
         });
-        res.json({ ok: true, gradingStatus: auth.auth.gradingStatus, reviewRevision: saved });
+        const payload = await buildCertGradingPayload(certId);
+        res.json({
+          ok: true,
+          gradingStatus: auth.auth.gradingStatus,
+          reviewRevision: saved,
+          authoritativeGrade: payload?.authoritativeGrade ?? null,
+        });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }
@@ -736,7 +742,13 @@ export function partnerGradingRouter(): Router {
           correlationId: auth.auth.partnerSubmissionId,
           after: { gradingStatus: "pending_review", reviewRequired: true },
         });
-        res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(req.body || {}) });
+        const payload = await buildCertGradingPayload(certId);
+        res.json({
+          ok: true,
+          gradingStatus: "pending_review",
+          changed: Object.keys(req.body || {}),
+          authoritativeGrade: payload?.authoritativeGrade ?? null,
+        });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }
