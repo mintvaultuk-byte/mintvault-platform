@@ -95,8 +95,25 @@ export type PartnerCertificateHistoryRow = {
   issuedAt: string | null;
 };
 
+export type PartnerCertificateDetail = PartnerCertificateHistoryRow & {
+  gradeCentering: string | null;
+  gradeCorners: string | null;
+  gradeEdges: string | null;
+  gradeSurface: string | null;
+  operatorName: string | null;
+  rejectionReason: string | null;
+  redoCount: number;
+  frontImageUrl: string | null;
+  backImageUrl: string | null;
+};
+
 export const partnerCertificates = {
   list: () => req<{ certificates: PartnerCertificateHistoryRow[] }>("GET", "/api/partner/certificates"),
+  detail: (certificateNumber: string) =>
+    req<{ certificate: PartnerCertificateDetail }>(
+      "GET",
+      `/api/partner/certificates/${encodeURIComponent(certificateNumber)}`
+    ),
 };
 
 /**

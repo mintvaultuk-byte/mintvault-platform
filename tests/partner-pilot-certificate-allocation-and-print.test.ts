@@ -41,6 +41,9 @@ describe("Partner Pilot physical evidence and output gate", () => {
   const preview = read("server/routes/admin/label-preview.ts");
   const qaRoutes = read("server/routes/grader.ts");
   const qaUi = read("client/src/pages/admin-staff.tsx");
+  const historyService = read("server/partner/certificate-history-service.ts");
+  const historyRoutes = read("server/partner/submission-routes.ts");
+  const historyUi = read("client/src/pages/partner/certificates.tsx");
 
   it("requires current, station-bound TIFF evidence and immutable origin before Partner submission", () => {
     expect(grading).toContain("cert.origin_type = 'PARTNER'");
@@ -91,6 +94,18 @@ describe("Partner Pilot physical evidence and output gate", () => {
     expect(qaRoutes).toContain("station_codes");
     expect(qaRoutes).toContain("evidence_complete");
     expect(qaUi).toContain("partner-qa-provenance");
+  });
+
+  it("allows a Partner to open only their immutable-origin card detail", () => {
+    expect(historyService).toContain("getPartnerCertificateDetail");
+    expect(historyService).toContain("cert.certificate_number = $2::text");
+    expect(historyService).toContain("cert.origin_partner_id = pci.partner_organisation_id");
+    expect(historyService).toContain("cert.origin_location_id = pci.partner_location_id");
+    expect(historyService).toContain("getR2SignedUrl");
+    expect(historyRoutes).toContain('"/certificates/:certificateNumber"');
+    expect(historyUi).toContain("partner-certificate-detail");
+    expect(historyUi).toContain("Open FRONT master");
+    expect(historyUi).toContain("Server-authoritative subgrades");
   });
 
   it("keeps unsupported scanner releases fail-closed and retires mutable Git/npm updates", () => {

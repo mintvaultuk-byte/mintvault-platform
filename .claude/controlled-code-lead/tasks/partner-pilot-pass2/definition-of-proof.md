@@ -10,7 +10,7 @@
 - Package D paired completion/Next Card: **35 scanner-app tests** plus the
   **22-test** focused scanner boundary/schema suite.
 - Package E fleet approval/rejection boundary: **3 tests**.
-- Package F allocation/physical-evidence/QA/print/history boundary: **49
+- Package F allocation/physical-evidence/QA/print/history boundary: **50
   focused tests**; print workflow + credit lifecycle: **107 tests**; Pass 1
   authority/preview bundle boundary: **120 tests**.
 - Migration/station convergence: **61 passed, 1 intentionally skipped** (no

@@ -32,7 +32,7 @@
 | 3 — Lead verification | complete | 2026-08-12 | Findings PP2-F1 through PP2-F13 consolidated; source and live evidence rechecked. |
 | 4 — Implementation authorisation | complete for packages A–G | 2026-08-12 | `change-manifest.md` records bounded local-source authority, QA/flag, station, scanner, allocation/output/history and scanner-release packages. |
 | 5 — Implementation | complete for packages A–G | 2026-08-12 | All changes are local source/tests; 0074, 0075 and 0076 are unapplied migration files. |
-| 6 — Regression | complete locally | 2026-08-12 | 49 focused Package F tests; 107 print/credit tests; 120 Pass 1 authority tests; 61 migration/station tests (one optional skip); scanner 35; TypeScript and production build pass. Full suite limits remain recorded in definition of proof. |
+| 6 — Regression | complete locally | 2026-08-12 | 50 focused Package F tests; 107 print/credit tests; 120 Pass 1 authority tests; 61 migration/station tests (one optional skip); scanner 35; TypeScript and production build pass. Full suite limits remain recorded in definition of proof. |
 | 7 — Final report | pending owner gates | | Production runtime topology, migration journal/application, signed package distribution and physical card/print acceptance remain external protected actions. |
 
 ## Reviewer assignments
