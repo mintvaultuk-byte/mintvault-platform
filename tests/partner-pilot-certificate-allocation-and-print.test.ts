@@ -57,6 +57,18 @@ describe("Partner Pilot physical evidence and output gate", () => {
     expect(grading).toContain("station.status = 'ACTIVE'");
   });
 
+  it("does not expose an imported assignment as Ready to Grade before both captured TIFF sides exist", () => {
+    const queue = grading.slice(grading.indexOf('r.get("/grading/queue"'), grading.indexOf('r.get("/grading/certificates/:id/images"'));
+    expect(queue).toContain("evidence.side = 'front'");
+    expect(queue).toContain("evidence.side = 'back'");
+    expect(queue).toContain("session.state = 'captured'");
+    expect(queue).toContain("evidence.is_current = true");
+    expect(queue).toContain("evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'");
+    expect(queue).toContain("evidence.format = 'tiff'");
+    expect(queue).toContain("station.tenant_id = pci.partner_organisation_id");
+    expect(queue).toContain("station.location_id = pci.partner_location_id");
+  });
+
   it("uses one Partner-specific authority for QA, settlement, mapping, and capture proof", () => {
     for (const token of [
       "partner_mapping_invalid",

@@ -20,7 +20,7 @@
 | 2 — Investigation | complete | 2026-08-12 | All three read-only reports received; no reviewer mutated a system. |
 | 3 — Lead verification | complete | 2026-08-12 | F1–F6 accepted from current source/live proof; duplicate reports consolidated. |
 | 4 — Implementation authorisation | complete for local packages A–D | 2026-08-12 | Bounded manifest, architecture snapshot, budget and rollback are recorded. |
-| 5 — Implementation | in progress | 2026-08-12 | Package A (signed monotonic Scanner version recovery) implemented and locally checked. |
+| 5 — Implementation | in progress | 2026-08-12 | Packages A (signed version recovery) and B (evidence-derived Ready queue) implemented and locally checked. |
 | 6 — Regression | pending | | |
 | 7 — Final report | pending | | |
 

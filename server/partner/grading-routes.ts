@@ -462,6 +462,51 @@ export function partnerGradingRouter(): Router {
               AND cert.origin_type = 'PARTNER'
               AND cert.origin_partner_id = pci.partner_organisation_id
               AND cert.origin_location_id = pci.partner_location_id
+              -- Ready to Grade is a physical-capture state, not merely a
+              -- connector-import/assignment state.  Each side must be the
+              -- current immutable TIFF accepted by a terminal session on an
+              -- active station in this exact Partner location.  Keep this
+              -- predicate here (rather than trusting a browser transition) so
+              -- a guessed certificate ID can never make an uncaptured card
+              -- appear in the operational queue.
+              AND EXISTS (
+                SELECT 1
+                  FROM certificate_image_evidence evidence
+                  JOIN scanner_capture_sessions session
+                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+                   AND session.certificate_id = evidence.certificate_id
+                   AND session.side = evidence.side
+                   AND session.state = 'captured'
+                  JOIN partner_stations station
+                    ON station.id = session.station_id
+                   AND station.status = 'ACTIVE'
+                   AND station.tenant_id = pci.partner_organisation_id
+                   AND station.location_id = pci.partner_location_id
+                 WHERE evidence.certificate_id = cert.id
+                   AND evidence.side = 'front'
+                   AND evidence.is_current = true
+                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+                   AND evidence.format = 'tiff'
+              )
+              AND EXISTS (
+                SELECT 1
+                  FROM certificate_image_evidence evidence
+                  JOIN scanner_capture_sessions session
+                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+                   AND session.certificate_id = evidence.certificate_id
+                   AND session.side = evidence.side
+                   AND session.state = 'captured'
+                  JOIN partner_stations station
+                    ON station.id = session.station_id
+                   AND station.status = 'ACTIVE'
+                   AND station.tenant_id = pci.partner_organisation_id
+                   AND station.location_id = pci.partner_location_id
+                 WHERE evidence.certificate_id = cert.id
+                   AND evidence.side = 'back'
+                   AND evidence.is_current = true
+                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+                   AND evidence.format = 'tiff'
+              )
               ${locationWhere}
             ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC`,
           params
