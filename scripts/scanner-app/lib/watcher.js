@@ -1296,6 +1296,7 @@ class Watcher extends EventEmitter {
     // Pause check — runs before stable-write detection so a paused watcher
     // doesn't even open the file. Clears expired pause as a side effect so
     // the watcher self-heals without a click.
+    // eslint-disable-next-line no-unreachable -- deliberate: the legacy path above was RETIRED with an early return and this body is retained as historical recovery context (see the c8-ignore note). Comment only; no runtime change.
     const cur = stateMod.get();
     if (cur.pausedUntil) {
       if (cur.pausedUntil > Date.now()) {
@@ -1467,6 +1468,7 @@ class Watcher extends EventEmitter {
     void frontPath; void backPath; void retryCount; void hashes; void idempotencyKey; void orientationUnconfirmed;
     return { ok: false, error: "Legacy unbound pair ingestion is retired; arm a target-bound capture session." };
     /* c8 ignore next -- retained below only as historical recovery context; unreachable. */
+    // eslint-disable-next-line no-unreachable -- deliberate: the legacy path above was RETIRED with an early return and this body is retained as historical recovery context (see the c8-ignore note). Comment only; no runtime change.
     if (this.uploading && retryCount === 0) return;
     this.uploading = true;
     this.lastPair = { frontPath, backPath };
@@ -1759,6 +1761,7 @@ class Watcher extends EventEmitter {
     void filePath; void certId; void side; void replaceExisting; void source; void retryCount; void srcHash;
     return { ok: false, error: "Legacy TIFF attachment is retired; arm a target-bound capture session." };
     /* c8 ignore next -- retained below only as historical recovery context; unreachable. */
+    // eslint-disable-next-line no-unreachable -- deliberate: the legacy path above was RETIRED with an early return and this body is retained as historical recovery context (see the c8-ignore note). Comment only; no runtime change.
     if (this.uploading && retryCount === 0) {
       this.log(`manual upload requested while uploading — deferring`, "warn");
       return { ok: false, error: "upload in flight" };
@@ -1778,9 +1781,11 @@ class Watcher extends EventEmitter {
           const s = stateMod.get();
           if (s.state === "success") { stateMod.set({ state: "idle" }); this.emitState(); }
         }, 1_500);
+        // eslint-disable-next-line no-unreachable -- deliberate: the legacy path above was RETIRED with an early return and this body is retained as historical recovery context (see the c8-ignore note). Comment only; no runtime change.
         return { ok: true, certId, side, deduped: true };
       }
     }
+    // eslint-disable-next-line no-unreachable -- deliberate: the legacy path above was RETIRED with an early return and this body is retained as historical recovery context (see the c8-ignore note). Comment only; no runtime change.
     this.uploading = true;
     if (retryCount === 0) {
       this.addPending({ key: filePath, type: "manual", filePath, certId, side, replaceExisting: !!replaceExisting, source });
@@ -1853,6 +1858,7 @@ class Watcher extends EventEmitter {
         this.emitState();
       }
     }, 1_500);
+    // eslint-disable-next-line no-unreachable -- deliberate: the legacy path above was RETIRED with an early return and this body is retained as historical recovery context (see the c8-ignore note). Comment only; no runtime change.
     return { ok: true, certId, side };
   }
 
