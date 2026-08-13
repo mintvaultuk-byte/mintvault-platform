@@ -611,7 +611,7 @@ export default function PartnerManagementPage() {
               <div role="alert" data-testid="pm-fleet-error" style={{ color: "var(--admin-red)" }}>
                 Station fleet is unavailable. No station action can be submitted.
               </div>
-            ) : (fleet.data?.stations.length ?? 0) === 0 ? (
+            ) : (fleet.data?.stations?.length ?? 0) === 0 ? (
               <div data-testid="pm-fleet-empty">No stations match this state.</div>
             ) : (
               <table className="min-w-full text-left text-sm" data-testid="pm-fleet-table">
