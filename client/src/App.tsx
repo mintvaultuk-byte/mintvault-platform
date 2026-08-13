@@ -155,6 +155,7 @@ const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
+const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
 const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
 
 function GoldBurstEffect() {
@@ -319,7 +320,7 @@ function PartnerPortalRoutes() {
         </Route>
         <Route path="/partner/certificates">
           <PartnerRouteGuard requiredPermission="partner.orders.view">
-            <PartnerWorkflowPlaceholderPage kind="certificates" />
+            <PartnerCertificatesPage />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/supplies">

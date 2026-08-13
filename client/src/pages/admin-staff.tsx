@@ -44,6 +44,17 @@ type QueueRow = {
   submissionRef: string | null;
   submissionId: number | null;
 };
+type PartnerReviewContext = {
+  publicRef: string | null;
+  legalName: string | null;
+  locationRef: string | null;
+  locationName: string | null;
+  operator: string | null;
+  stationCodes: string[];
+  evidenceComplete: boolean;
+  redoCount: number;
+  correctionReason: string | null;
+};
 
 const QUEUE_FILTERS = [
   { key: "needs_grading", label: "Needs grading" },
@@ -406,6 +417,7 @@ export default function AdminStaffPage() {
   const [reviewBusy, setReviewBusy] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [partnerReviewContext, setPartnerReviewContext] = useState<PartnerReviewContext | null>(null);
 
   // Open the FULL grading panel (adminReview mode) for a pending_review cert. The
   // panel self-hydrates from /api/admin/grade-review/* and handles inspection +
@@ -415,12 +427,20 @@ export default function AdminStaffPage() {
     setErr(null);
     setShowReject(false);
     setRejectNote("");
+    setPartnerReviewContext(null);
     setReviewCert(q);
+    void fetch(`/api/admin/grade-review/certificates/${q.certId}/partner-context`, { credentials: "include" })
+      .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (ok && data?.partner) setPartnerReviewContext(data.partner as PartnerReviewContext);
+      })
+      .catch(() => {});
   }
   function closeReview() {
     setReviewCert(null);
     setShowReject(false);
     setRejectNote("");
+    setPartnerReviewContext(null);
   }
   async function rejectReview() {
     if (!reviewCert) return;
@@ -1241,6 +1261,25 @@ export default function AdminStaffPage() {
                   </div>
                 )}
               </div>
+              {partnerReviewContext && (
+                <div
+                  className="shrink-0 border-b border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/5 px-4 py-2 text-xs text-[var(--admin-ink)]"
+                  data-testid="partner-qa-provenance"
+                >
+                  <span className="font-semibold text-[var(--admin-gold)]">Partner QA</span>
+                  {" · "}
+                  {partnerReviewContext.legalName || partnerReviewContext.publicRef || "Partner"}
+                  {partnerReviewContext.locationName ? ` · ${partnerReviewContext.locationName}` : ""}
+                  {partnerReviewContext.operator ? ` · Operator: ${partnerReviewContext.operator}` : ""}
+                  {" · "}Station: {partnerReviewContext.stationCodes.join(", ") || "not proven"}
+                  {" · "}
+                  {partnerReviewContext.evidenceComplete ? "Front + back evidence saved" : "Evidence incomplete"}
+                  {partnerReviewContext.redoCount > 0 ? ` · Corrections: ${partnerReviewContext.redoCount}` : ""}
+                  {partnerReviewContext.correctionReason
+                    ? ` · Last return: ${partnerReviewContext.correctionReason}`
+                    : ""}
+                </div>
+              )}
               {/* Manual card-identity override moved INTO the workstation body
                   (GradingWorkstation identityEditor slot) — beside the card
                   preview, never a detached full-width section above the shell. */}

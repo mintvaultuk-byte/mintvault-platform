@@ -25,6 +25,7 @@ import {
   listAvailableServiceTiers,
   uploadCardImage,
 } from "./submission-service";
+import { getPartnerCertificateDetail, listPartnerCertificateHistory } from "./certificate-history-service";
 
 function sendError(res: import("express").Response, err: unknown): void {
   if (err instanceof SubmissionError) {
@@ -110,6 +111,35 @@ export function partnerSubmissionRouter(): Router {
   r.get("/service-tiers", requirePartnerCapability("partner.orders.view"), async (req, res) => {
     try {
       res.json(await listAvailableServiceTiers(req.partner!));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // Certificate history is a separate, immutable-origin projection rather
+  // than a renamed submission list. It appears only after the connector has
+  // created a Partner certificate and remains tenant/location scoped.
+  r.get("/certificates", requirePartnerCapability("partner.orders.view"), async (req, res) => {
+    try {
+      res.json({ certificates: await listPartnerCertificateHistory(req.partner!) });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.get("/certificates/:certificateNumber", requirePartnerCapability("partner.orders.view"), async (req, res) => {
+    const certificateNumber = String(req.params.certificateNumber ?? "").trim();
+    if (!certificateNumber || certificateNumber.length > 128) {
+      res.status(404).json({ error: { code: "not_found", message: "Certificate not found." } });
+      return;
+    }
+    try {
+      const certificate = await getPartnerCertificateDetail(req.partner!, certificateNumber);
+      if (!certificate) {
+        res.status(404).json({ error: { code: "not_found", message: "Certificate not found." } });
+        return;
+      }
+      res.json({ certificate });
     } catch (err) {
       sendError(res, err);
     }

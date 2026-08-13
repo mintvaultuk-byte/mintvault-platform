@@ -75,6 +75,13 @@ describe("every migration is deliberately classified", () => {
     expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0073_lineage_convergence");
     expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0073_lineage_convergence");
   });
+
+  it("keeps Partner pilot certificate allocation application-scoped", () => {
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0075_partner_station_single_active_capture");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0075_partner_station_single_active_capture");
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0076_partner_pilot_certificate_allocation");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0076_partner_pilot_certificate_allocation");
+  });
 });
 
 describe("the partner harness applies a declared allowlist, not a glob", () => {

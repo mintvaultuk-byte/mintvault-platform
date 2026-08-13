@@ -18,7 +18,7 @@
  */
 import type pg from "pg";
 import { withConnectorTx, connectorQuery } from "./connector-db";
-import { resolveGlobalFlag } from "./flags";
+import { resolveFlag, resolveGlobalFlag } from "./flags";
 import { ConnectorError, toConnectorError } from "./connector-errors";
 import { calculateSourceFingerprint, SOURCE_FINGERPRINT_VERSION } from "./connector-fingerprint";
 import { loadValidationRows, toFingerprintSource, type ConnectorRow } from "./connector-validation-service";
@@ -472,6 +472,47 @@ export async function importValidatedConnector(params: {
           destinationSubmissionId: created.id,
           itemIndex: cardIndex - 1,
         });
+      }
+
+      // The generic connector path deliberately remains a plain MintVault
+      // intake while the Pilot is OFF.  When the scoped Partner grading flag is
+      // ON, however, the imported item must immediately receive the exact
+      // server-owned certificate that the station and canonical workstation
+      // target.  The SECURITY DEFINER routine derives the assignment, immutable
+      // Partner/location snapshot and MV identity from this locked mapping; the
+      // connector receives no broad certificate or allocator privilege.
+      //
+      // This happens before mapping completion and inside this same connector
+      // transaction.  A missing/misconfigured 0076 routine, a bad allocator,
+      // or a failed certificate INSERT rolls back submission, items, mapping and
+      // any allocator increment together.  It can never leave an imported
+      // Partner handoff that looks generic or has no targetable card.
+      const partnerGradingEnabled = await resolveFlag(client, "partner_grading_enabled", {
+        tenantId: connector.tenant_id,
+        locationId: rows.location?.id ?? null,
+      });
+      if (partnerGradingEnabled) {
+        let allocated: number;
+        try {
+          const allocation = await client.query<{ allocated: number }>(
+            `SELECT public.partner_allocate_import_certificates($1::uuid, $2::integer)::integer AS allocated`,
+            [connectorId, created.id]
+          );
+          allocated = Number(allocation.rows[0]?.allocated ?? 0);
+        } catch (error) {
+          throw new ConnectorError(
+            "import_submission_creation_failed",
+            "Partner pilot certificate allocation failed; the import was rolled back.",
+            true
+          );
+        }
+        if (allocated !== cardCount) {
+          throw new ConnectorError(
+            "import_submission_creation_failed",
+            "Partner pilot certificate allocation was incomplete; the import was rolled back.",
+            false
+          );
+        }
       }
 
       await hook("after_items", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });

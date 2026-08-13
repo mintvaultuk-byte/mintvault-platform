@@ -160,7 +160,14 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
  * Classification rule: does the migration read or write any table outside the
  * `partner_*` namespace in a way that requires it to already exist?
  */
-export const APPLICATION_SCOPE_MIGRATIONS = ["0073_lineage_convergence"] as const;
+export const APPLICATION_SCOPE_MIGRATIONS = [
+  "0073_lineage_convergence",
+  // Extends scanner_capture_sessions, which is a core-certificate dependency.
+  "0075_partner_station_single_active_capture",
+  // Allocates into core certificates/cert_counter while deriving the immutable
+  // Partner mapping. It must never be pulled into the Partner-only harness.
+  "0076_partner_pilot_certificate_allocation",
+] as const;
 
 /**
  * Every migration a partner-only disposable database may apply, in order.

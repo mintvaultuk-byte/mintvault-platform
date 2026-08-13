@@ -19,7 +19,6 @@ import {
 import { CENTERING_GUIDE_VISUALS } from "@/components/grading/manual-card-tool";
 import { computeCentering } from "@/components/grading/centering-from-rects";
 import { quadRotation, type CropQuad, type Point } from "@/components/grading/crop-geometry";
-import { centeringAxisGrade } from "../shared/centering";
 
 // Build a clockwise edge-point array [TOP, RIGHT, BOTTOM, LEFT] from [x,y] pairs.
 // Each point is where the operator clicks on that SIDE; only the relevant axis
@@ -55,7 +54,7 @@ describe("manual centering guide visuals", () => {
     const measured = computeCardTool("full", OUTER_SQUARE, inner, "front", 0, 0, 600, 900).centering!;
     expect(measured.lr).toBe("67/33");
     expect(measured.tb).toBe("50/50");
-    expect(measured.subgrade).toBe(7);
+    expect("subgrade" in measured).toBe(false);
   });
 });
 
@@ -135,22 +134,18 @@ describe("border widths come from edge-pair gaps (relevant axis only)", () => {
   //   LEFT-inner x=30 (gap 30−10=20)     RIGHT-inner x=80 (gap 90−80=10)  → L/R 67/33
   const INNER = edges([50, 20], [80, 50], [50, 80], [30, 50]);
 
-  it("left gap 20 / right gap 10 → 67/33; top gap 10 / bottom gap 10 → 50/50 (front → subgrade 7)", () => {
+  it("left gap 20 / right gap 10 → 67/33; top gap 10 / bottom gap 10 → 50/50", () => {
     const r = computeCardTool("full", OUTER_SQUARE, INNER, "front", 0, 0, 600, 900);
     expect(r.centering).not.toBeNull();
     expect(r.centering!.lr).toBe("67/33");
     expect(r.centering!.tb).toBe("50/50");
-    // min(front 67/33 → 7, front 50/50 → 10) = 7, via the canonical chart.
-    expect(r.centering!.subgrade).toBe(
-      Math.min(centeringAxisGrade("67/33", "front"), centeringAxisGrade("50/50", "front"))
-    );
-    expect(r.centering!.subgrade).toBe(7);
+    expect("subgrade" in r.centering!).toBe(false);
   });
 
-  it("back is lenient — identical gaps grade 10 (front-strict/back-lenient routing)", () => {
+  it("does not choose a different grade for the back in the browser", () => {
     const r = computeCardTool("full", OUTER_SQUARE, INNER, "back", 0, 0, 600, 900);
     expect(r.centering!.lr).toBe("67/33");
-    expect(r.centering!.subgrade).toBe(10);
+    expect("subgrade" in r.centering!).toBe(false);
   });
 
   it("uses the gap along the RELEVANT axis only — sliding a point along its own edge changes nothing", () => {
@@ -164,7 +159,6 @@ describe("border widths come from edge-pair gaps (relevant axis only)", () => {
     const b = computeCardTool("full", skewedOuter, skewedInner, "front", 0, 0, 600, 900).centering!;
     expect(b.lr).toBe(a.lr);
     expect(b.tb).toBe(a.tb);
-    expect(b.subgrade).toBe(a.subgrade);
   });
 
   it("persisted rects are normalized into the post-crop frame (outer = full image)", () => {
@@ -382,7 +376,7 @@ describe("axis-lock: inner point constrained to its outer partner's measurement 
     expect(axisLockInner(LEFT, { x: 10, y: 50 }, { x: 30, y: 58 })).toEqual({ x: 30, y: 50 });
   });
 
-  it("snaps sloppy off-axis inner clicks onto the rail → left20/right10 = 67/33, top10/bottom10 = 50/50, front subgrade 7", () => {
+  it("snaps sloppy off-axis inner clicks onto the rail → left20/right10 = 67/33, top10/bottom10 = 50/50", () => {
     // The operator clicks the correct border DEPTH but is sloppy on the cross-
     // axis. The lock pins each inner to its outer partner's axis (OUTER_SQUARE).
     const lockedInner = [
@@ -394,17 +388,16 @@ describe("axis-lock: inner point constrained to its outer partner's measurement 
     const r = computeCardTool("full", OUTER_SQUARE, lockedInner, "front", 0, 0, 600, 900);
     expect(r.centering!.lr).toBe("67/33");
     expect(r.centering!.tb).toBe("50/50");
-    expect(r.centering!.subgrade).toBe(7);
+    expect("subgrade" in r.centering!).toBe(false);
 
     // The locked result is byte-for-byte the clean on-axis click (zero regression).
     const cleanInner = edges([50, 20], [80, 50], [50, 80], [30, 50]);
     const clean = computeCardTool("full", OUTER_SQUARE, cleanInner, "front", 0, 0, 600, 900);
     expect(r.centering!.lr).toBe(clean.centering!.lr);
     expect(r.centering!.tb).toBe(clean.centering!.tb);
-    expect(r.centering!.subgrade).toBe(clean.centering!.subgrade);
   });
 
-  it("interleaved capture WITH the lock (mirrors placePoint) builds [TOP,RIGHT,BOTTOM,LEFT] and grades identically to direct placement", () => {
+  it("interleaved capture WITH the lock (mirrors placePoint) builds [TOP,RIGHT,BOTTOM,LEFT] with identical observations", () => {
     // Mirror the component's placePoint: when the next pass is INNER, lock the
     // click to outer[inner.length] before routing. Inner clicks are off-axis.
     const O = { TOP: { x: 50, y: 10 }, RIGHT: { x: 90, y: 50 }, BOTTOM: { x: 50, y: 90 }, LEFT: { x: 10, y: 50 } };
@@ -449,6 +442,5 @@ describe("axis-lock: inner point constrained to its outer partner's measurement 
     const direct = computeCardTool("full", [O.TOP, O.RIGHT, O.BOTTOM, O.LEFT], expectedInner, "front", 0, 0, 600, 900);
     expect(locked.centering!.lr).toBe(direct.centering!.lr);
     expect(locked.centering!.tb).toBe(direct.centering!.tb);
-    expect(locked.centering!.subgrade).toBe(direct.centering!.subgrade);
   });
 });

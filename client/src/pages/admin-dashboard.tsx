@@ -4,7 +4,6 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { getVariantDisplayLabel } from "@/lib/variantOptions";
-import { mvgsTierName } from "@shared/mvgs-scoring";
 import {
   Plus,
   Edit,
@@ -512,7 +511,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                 mode="super-admin"
                 apiBase="/api/admin"
                 previewCertificateId={editingCert.id}
-                    certId={editingCert.id}
+                certId={editingCert.id}
                 certIdStr={editingCert?.certId}
                 cardName={editingCert?.cardName || ""}
                 cardSet={editingCert?.setName || ""}
@@ -526,33 +525,33 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                 batch={
                   editingCert?.submissionItemId ? { submissionId: String(editingCert.submissionItemId) } : undefined
                 }
-                    pendingAnalysis={pendingAnalysis}
-                    onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
+                pendingAnalysis={pendingAnalysis}
+                onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
                 onManualIdentification={(id) => setExternalIdentification(id)}
-                    onGradeApproved={() => {
-                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                      setShowForm(false);
-                      setEditingCert(null);
-                    }}
-                    onCertUpdated={async () => {
+                onGradeApproved={() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                  setShowForm(false);
+                  setEditingCert(null);
+                }}
+                onCertUpdated={async () => {
                   if (!editingCert?.id) return;
-                      try {
-                        const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
-                          credentials: "include",
-                        });
+                  try {
+                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
+                      credentials: "include",
+                    });
                     const rows = await r.json();
                     const updated = (Array.isArray(rows) ? rows : []).find((c: any) => c.id === editingCert.id);
-                        if (updated) setEditingCert(updated);
-                      } catch {
+                    if (updated) setEditingCert(updated);
+                  } catch {
                     /* best-effort refresh */
-                      }
-                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                    }}
-                    correctionMode={correctionMode}
-                    onCorrectionGradingReady={(getPayload) => {
-                      correctionGradingRef.current = getPayload;
-                    }}
-                  />
+                  }
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                }}
+                correctionMode={correctionMode}
+                onCorrectionGradingReady={(getPayload) => {
+                  correctionGradingRef.current = getPayload;
+                }}
+              />
             ) : (
               <div
                 className="h-full overflow-y-auto rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)] p-4"
@@ -592,8 +591,8 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                   setPendingAnalysis(result);
                   queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
                 }}
-            />
-          </div>
+              />
+            </div>
           )}
           {/* Ownership + NFC moved OUT of the grading scroll into the drawer above. */}
           {editingCert && editingCert.id && (
@@ -1656,9 +1655,9 @@ function CertRow({
   const gradeType = (cert as any).gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
   const grade = isNonNum ? 0 : parseFloat(cert.gradeOverall || "0");
-  // Tier NAME from the MVGS table for numeric grades so half grades read true
-  // (8.5 → "NM-MINT+") instead of gradeLabelFull's rounded whole-grade name.
-  const label = isNonNum ? gradeLabelFull(gradeType, cert.gradeOverall || "0") : mvgsTierName(grade).toUpperCase();
+  // The dashboard receives a persisted grade value only. Tier wording is
+  // issued by server read models and must not be derived in the browser.
+  const label = isNonNum ? gradeLabelFull(gradeType, cert.gradeOverall || "0") : "NUMERIC GRADE";
 
   // Embedding freshness — embeddedAt is null until the hourly job picks
   // it up; stale when a cert mutation (image swap, grade edit, etc.) has

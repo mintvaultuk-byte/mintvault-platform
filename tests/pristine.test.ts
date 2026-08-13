@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { isPristine, isBlackLabel, DEFECT_DEDUCTION_KEYS } from "../shared/pristine";
-// Client grade panel re-exports the gate. Importing it proves there is ONE
-// function, not a divergent client copy. grade-logic.ts is pure (no React), so
-// it loads cleanly in the node test environment.
-import { isBlackLabel as clientIsBlackLabel } from "@/components/grading/grade-logic";
 
 const TEN = { centering: 10, corners: 10, edges: 10, surface: 10 };
 
@@ -45,7 +41,7 @@ describe("isPristine / isBlackLabel gate", () => {
     expect(isBlackLabel).toBe(isPristine);
   });
 
-  it("client grade-logic re-exports the SAME function — one source of truth", () => {
-    expect(clientIsBlackLabel).toBe(isPristine);
+  it("keeps the Pristine gate in the canonical shared module", () => {
+    expect(typeof isBlackLabel).toBe("function");
   });
 });

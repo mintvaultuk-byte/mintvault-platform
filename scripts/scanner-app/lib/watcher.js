@@ -406,7 +406,9 @@ class Watcher extends EventEmitter {
     return {
       accepted: status.body?.accepted === true,
       state: status.body?.capture?.state || null,
-      capture: status.body?.capture || null,
+      capture: status.body?.capture
+        ? { ...status.body.capture, cardRegistered: status.body?.card_registered === true }
+        : null,
     };
   }
 
@@ -739,7 +741,12 @@ class Watcher extends EventEmitter {
       state: "success",
       activeCapture: null,
       lastUploadedCert: certId,
-      lastAcceptedCapture: { certId, side: entry.side, acceptedAt: new Date().toISOString() },
+      lastAcceptedCapture: {
+        certId,
+        side: entry.side,
+        cardRegistered: capture?.cardRegistered === true,
+        acceptedAt: new Date().toISOString(),
+      },
       lastError: null,
     });
     stateMod.pushRecent({ certId, side: entry.side, source: "targeted-lide" });
@@ -798,7 +805,12 @@ class Watcher extends EventEmitter {
       } catch (error) {
         uploaded = { ok: false, status: 0, body: { error: error.message || String(error) } };
       }
-      if (uploaded.ok) return this.completeTargetedCapture(entry, { certificateNumber: uploaded.body?.certId || entry.certId });
+      if (uploaded.ok) {
+        return this.completeTargetedCapture(entry, {
+          certificateNumber: uploaded.body?.certId || entry.certId,
+          cardRegistered: uploaded.body?.card_registered === true,
+        });
+      }
       this.logCaptureStage(entry, "upload_response_lost_or_rejected", { attempt: attempt + 1, status: uploaded.status, elapsedMs: Date.now() - uploadStartedAt });
       const reconciled = await this.reconcileTargetedCapture(entry);
       if (reconciled.accepted) return this.completeTargetedCapture(entry, reconciled.capture);

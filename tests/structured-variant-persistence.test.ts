@@ -1025,11 +1025,26 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         //    are matched against addedCode.
         const signatureE =
           /evidence_class\s*=\s*'NEW_IMMUTABLE_MASTER'/.test(addedCode) && /is_current\s*=\s*true/.test(addedCode);
+        // F) Server-owned draft-grade authority. This authorises moving the
+        // existing scoring engine behind the server boundary only: no scoring
+        // identifier may be changed in server/grader.ts itself (the prohibition
+        // below remains the enforcement point). The resolver import, invocation
+        // and persisted resolver output must all be present.
+        const signatureF =
+          // Module specifiers are string tokens and are intentionally stripped
+          // from addedJs; verify this exact import in the raw diff while the
+          // executable calls below still prove implementation rather than prose.
+          /import\s+\{\s*resolveDraftGradeAuthority\s*\}\s+from\s+["']\.\/lib\/draft-grade-authority["']/.test(diff) &&
+          /\bresolveDraftGradeAuthority\s*\(cert,\s*body\)/.test(addedJs) &&
+          /const\s+overall\s*=\s*authority\.overall/.test(addedJs) &&
+          /authority\.subgrades\.(centering|corners|edges|surface)/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
-        const revisionBoundAddedCode = addedCode
+        const revisionBoundAddedCode = (
+          signatureF ? addedCode.replace(/\bauthority\.subgrades\.(centering|corners|edges|surface)\b/g, "") : addedCode
+        )
           .replace(/'(centering|corners|edges|surface)'/g, "")
           .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");
         expect(revisionBoundAddedCode).not.toMatch(

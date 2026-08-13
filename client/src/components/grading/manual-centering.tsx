@@ -268,8 +268,11 @@ export default function ManualCentering({
         const d = await r.json();
         throw new Error(d.error);
       }
-      onSave({ side, outer, inner, leftRight: result.lr, topBottom: result.tb, subgrade: result.subgrade });
-      toast({ title: `${side} centering: ${result.lr} L/R, ${result.tb} T/B → grade ${result.subgrade}` });
+      const saved = await r.json();
+      const subgrade = Number(saved.subgrade);
+      if (!Number.isFinite(subgrade)) throw new Error("Server did not return a centering result");
+      onSave({ side, outer, inner, leftRight: String(saved.lr), topBottom: String(saved.tb), subgrade });
+      toast({ title: `${side} centering saved: ${saved.lr} L/R, ${saved.tb} T/B` });
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -326,11 +329,7 @@ export default function ManualCentering({
             </div>
             <div className="text-center">
               <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase">Grade</p>
-              <p
-                className={`text-lg font-black leading-none ${result.subgrade >= 9 ? "text-[var(--admin-gold)]" : result.subgrade >= 7 ? "text-[var(--admin-green)]" : "text-[var(--admin-amber)]"}`}
-              >
-                {result.subgrade}
-              </p>
+              <p className="text-[10px] font-bold leading-none text-[var(--admin-ink-faint)]">Server on save</p>
             </div>
           </div>
         </div>

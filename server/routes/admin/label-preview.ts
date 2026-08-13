@@ -22,6 +22,7 @@ import { requireCapability } from "../../staff";
 import { getCertAssignment } from "../../grader";
 import { buildLabelPreviewCertificate, generateLabelPreviewPNG } from "../../services/label-preview";
 import { authorizeStaffLabelPreview, previewCertificateId } from "../../services/label-preview-access";
+import { getPartnerPrintEligibilityBlocks } from "../../partner/print-eligibility";
 
 const previewLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -40,7 +41,8 @@ async function renderPreview(
   req: Request,
   res: Response,
   authorisedId: number | null,
-  requireRevision = false
+  requireRevision = false,
+  allowPartnerQaInspection = false
 ): Promise<void> {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -48,6 +50,16 @@ async function renderPreview(
     if (authorisedId != null && !saved) {
       res.status(404).json({ error: "Certificate not found" });
       return;
+    }
+    // A normal preview is print-like output and shares the Partner print
+    // authority. The dedicated grade-review route below is an inspection-only
+    // Super Admin surface and may render the pending-review record it must QA.
+    if (authorisedId != null && !allowPartnerQaInspection) {
+      const blocked = await getPartnerPrintEligibilityBlocks([(saved as CertificateRecord).certId]);
+      if (blocked.length > 0) {
+        res.status(409).json({ error: blocked[0].message, code: blocked[0].code });
+        return;
+      }
     }
     // Existing certificate previews used to be an image-only endpoint.  The
     // canonical review flow now binds that image to a server-issued revision.
@@ -108,7 +120,8 @@ async function renderPreview(
       if (currentRevision !== expectedReviewRevision(body.expectedRevision)) {
         res.status(409).json({
           code: "STALE_REVIEW",
-          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          error:
+            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
         });
         return;
       }
@@ -143,7 +156,7 @@ export function registerLabelPreviewRoutes(app: Express): void {
     if (assignment.gradingStatus !== "pending_review") {
       return res.status(409).json({ error: "Certificate is not pending review" });
     }
-    await renderPreview(req, res, id, true);
+    await renderPreview(req, res, id, true, true);
   });
 
   app.post("/api/grader/certificates/label/preview", previewLimit, requireCapability("grade"), async (req, res) => {

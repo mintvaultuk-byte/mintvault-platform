@@ -26,6 +26,15 @@ export type StationPrincipal = {
   currentCalibrationId: string | null;
 };
 
+/** Credential-free station summary used only to let an authorised Partner
+ * operator choose a real, ready capture destination. The browser never sees a
+ * public key, nonce, device identifier or session target. */
+export type PartnerCaptureStation = {
+  stationCode: string;
+  locationId: string;
+  locationName: string;
+};
+
 export class StationServiceError extends Error {
   constructor(
     readonly code:
@@ -148,6 +157,44 @@ export function appVersionSatisfies(installed: string | null, minimum: string | 
   return a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2])));
 }
 
+/**
+ * A station can only attest a newly installed Scanner version on its signed
+ * heartbeat.  The exact JSON bytes are already part of the station signature,
+ * so a proxy or another browser session cannot advance this value.  Keeping
+ * this parser separate also makes it impossible for an arbitrary capture body
+ * to become a version-update channel.
+ */
+export function signedHeartbeatAppVersion(method: string, requestPath: string, rawBody: unknown): string | null {
+  let pathname: string;
+  try {
+    pathname = new URL(requestPath, "https://mintvault.invalid").pathname;
+  } catch {
+    return null;
+  }
+  if (method.toUpperCase() !== "POST" || pathname !== "/api/partner/stations/heartbeat" || !Buffer.isBuffer(rawBody)) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8")) as { appVersion?: unknown };
+    const value = typeof payload.appVersion === "string" ? payload.appVersion.trim() : "";
+    return versionTuple(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldPersistAttestedVersion(current: string | null, attested: string | null): boolean {
+  if (!attested) return false;
+  const next = versionTuple(attested);
+  if (!next) return false;
+  const existing = current ? versionTuple(current) : null;
+  if (!existing) return true;
+  return (
+    next[0] > existing[0] ||
+    (next[0] === existing[0] && (next[1] > existing[1] || (next[1] === existing[1] && next[2] >= existing[2])))
+  );
+}
+
 async function resolvePermittedLocation(
   client: PoolClient,
   principal: PartnerPrincipal,
@@ -265,7 +312,14 @@ export async function listPermittedStationLocations(
 export async function getStationEnrollmentStatus(
   principal: PartnerPrincipal,
   stationCode: unknown
-): Promise<{ stationCode: string; status: StationStatus; locationId: string; calibrationStatus: CalibrationStatus }> {
+): Promise<{
+  stationCode: string;
+  status: StationStatus;
+  locationId: string;
+  calibrationStatus: CalibrationStatus;
+  appVersion: string | null;
+  minimumSupportedVersion: string | null;
+}> {
   const code = typeof stationCode === "string" ? stationCode.trim().toUpperCase() : "";
   if (!/^MV-STN-[A-Z2-7]{10,24}$/.test(code)) throw new StationServiceError("validation", "stationCode is invalid");
   const { rows } = await partnerAdminQuery<{
@@ -273,8 +327,11 @@ export async function getStationEnrollmentStatus(
     status: StationStatus;
     location_id: string;
     calibration_status: CalibrationStatus;
+    app_version: string | null;
+    minimum_supported_version: string | null;
   }>(
-    `SELECT s.station_code, s.status, s.location_id, s.calibration_status
+    `SELECT s.station_code, s.status, s.location_id, s.calibration_status,
+            s.app_version, s.minimum_supported_version
        FROM partner_stations s
       WHERE s.station_code=$1 AND s.tenant_id=$2
         AND ($3::boolean OR EXISTS (
@@ -290,7 +347,46 @@ export async function getStationEnrollmentStatus(
     status: station.status,
     locationId: station.location_id,
     calibrationStatus: station.calibration_status,
+    appVersion: station.app_version,
+    minimumSupportedVersion: station.minimum_supported_version,
   };
+}
+
+/** List capture-ready stations in the authenticated Partner's own scope. */
+export async function listPartnerCaptureStations(principal: PartnerPrincipal): Promise<PartnerCaptureStation[]> {
+  const { rows } = await partnerAdminQuery<{
+    station_code: string;
+    location_id: string;
+    location_name: string;
+    app_version: string | null;
+    minimum_supported_version: string | null;
+    calibration_status: CalibrationStatus;
+    current_calibration_id: string | null;
+  }>(
+    `SELECT s.station_code, s.location_id, l.name AS location_name,
+            s.app_version, s.minimum_supported_version,
+            s.calibration_status, s.current_calibration_id
+       FROM partner_stations s
+       JOIN partner_organisations o ON o.id=s.tenant_id AND o.status='ACTIVE'
+       JOIN partner_locations l ON l.id=s.location_id AND l.status='ACTIVE'
+      WHERE s.tenant_id=$1
+        AND s.status='ACTIVE'
+        AND ($2::boolean OR s.location_id=$3::uuid)
+      ORDER BY l.name ASC, s.station_code ASC`,
+    [principal.tenantId, principal.orgWide, principal.locationId]
+  );
+  return rows
+    .filter(
+      (station) =>
+        station.calibration_status === "VALID" &&
+        !!station.current_calibration_id &&
+        appVersionSatisfies(station.app_version, station.minimum_supported_version)
+    )
+    .map((station) => ({
+      stationCode: station.station_code,
+      locationId: station.location_id,
+      locationName: station.location_name,
+    }));
 }
 
 /** Resolve an approved station for a trusted browser/admin target arm. */
@@ -349,20 +445,35 @@ export async function authenticateStationRequest(
   if (station.status !== "ACTIVE" || station.organisation_status !== "ACTIVE" || station.location_status !== "ACTIVE") {
     throw new StationServiceError("station_not_active", "Station, partner or location is not active");
   }
-  if (!appVersionSatisfies(station.app_version, station.minimum_supported_version)) {
+  // A correctly signed newly installed app used to deadlock here: the server
+  // compared the old stored version before the heartbeat route was allowed to
+  // store the new body version.  Only this body-bound heartbeat attestation can
+  // break that cycle; capture/calibration routes still require the persisted
+  // version after this transaction commits.
+  const attestedVersion = signedHeartbeatAppVersion(method, path, rawBody);
+  const effectiveVersion = shouldPersistAttestedVersion(station.app_version, attestedVersion)
+    ? attestedVersion
+    : station.app_version;
+  if (!appVersionSatisfies(effectiveVersion, station.minimum_supported_version)) {
     throw new StationServiceError("version_blocked", "Station version is below the minimum supported version");
   }
   // A monotonic signed nonce gives replay resistance without a high-churn
   // nonce table at 5,000 online stations. The conditional update is the
   // global, database-backed acceptance point across every app replica.
-  const advanced = await partnerAdminQuery<{ id: string }>(
+  const advanced = await partnerAdminQuery<{ id: string; app_version: string | null }>(
     `UPDATE partner_stations s
-        SET last_request_nonce=$2, updated_at=now()
+        SET last_request_nonce=$2,
+            app_version=COALESCE($3, s.app_version),
+            updated_at=now()
       WHERE s.id=$1 AND s.status='ACTIVE' AND s.last_request_nonce < $2
         AND EXISTS (SELECT 1 FROM partner_organisations o WHERE o.id=s.tenant_id AND o.status='ACTIVE')
         AND EXISTS (SELECT 1 FROM partner_locations l WHERE l.id=s.location_id AND l.status='ACTIVE')
-      RETURNING s.id`,
-    [station.id, parsed.envelope.nonce.toString()]
+      RETURNING s.id, s.app_version`,
+    [
+      station.id,
+      parsed.envelope.nonce.toString(),
+      shouldPersistAttestedVersion(station.app_version, attestedVersion) ? attestedVersion : null,
+    ]
   );
   if (advanced.rows.length !== 1)
     throw new StationServiceError("station_replay", "Station request was replayed or the station was suspended");
@@ -371,7 +482,7 @@ export async function authenticateStationRequest(
     code: station.station_code,
     tenantId: station.tenant_id,
     locationId: station.location_id,
-    appVersion: station.app_version,
+    appVersion: advanced.rows[0].app_version,
     scannerProfileVersion: station.scanner_profile_version,
     calibrationStatus: station.calibration_status,
     currentCalibrationId: station.current_calibration_id,
@@ -629,6 +740,46 @@ export async function transitionStationStatus(
         row.id,
         actorUserId,
         `station_${status.toLowerCase()}`,
+        JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true }),
+      ]
+    );
+  });
+}
+
+/** Reject is intentionally distinct from revocation: it applies only before a
+ * station was approved and leaves a durable operator-facing rejection event. */
+export async function rejectPendingStation(
+  stationCode: string,
+  actorUserId: string | null,
+  reason: string
+): Promise<void> {
+  const cleanCode = boundedText(stationCode, "stationCode", 40).toUpperCase();
+  const cleanReason = boundedText(reason, "reason", 1000);
+  await withPartnerAdminTransaction(async (client) => {
+    const current = await client.query<{ id: string; tenant_id: string; location_id: string; status: StationStatus }>(
+      `SELECT id,tenant_id,location_id,status FROM partner_stations WHERE station_code=$1 FOR UPDATE`,
+      [cleanCode]
+    );
+    const row = current.rows[0];
+    if (!row) throw new StationServiceError("station_not_found", "Station not found");
+    if (row.status !== "PENDING") {
+      throw new StationServiceError("validation", "Only a pending station can be rejected");
+    }
+    await client.query(
+      `UPDATE partner_stations
+          SET status='REVOKED', credential_epoch=credential_epoch+1,
+              revoked_at=now(), revoked_by=$2, updated_at=now()
+        WHERE id=$1`,
+      [row.id, actorUserId]
+    );
+    await client.query(
+      `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+       VALUES ($1,$2,$3,$4,'station_rejected',$5::jsonb)`,
+      [
+        row.tenant_id,
+        row.location_id,
+        row.id,
+        actorUserId,
         JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true }),
       ]
     );

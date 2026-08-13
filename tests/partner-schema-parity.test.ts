@@ -163,6 +163,8 @@ describe("partner schema ↔ migration parity", () => {
       // hosts; per-environment delivery is what --only + --convergence-mode exists for.
       "0073_lineage_convergence.sql",
       "0074_partner_submission_lifecycle_and_location_snapshot.sql",
+      "0075_partner_station_single_active_capture.sql",
+      "0076_partner_pilot_certificate_allocation.sql",
     ]);
   });
 

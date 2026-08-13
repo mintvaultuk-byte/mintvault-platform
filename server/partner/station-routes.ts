@@ -7,6 +7,7 @@ import {
   assertStationCaptureReady,
   authenticateStationRequest,
   getStationEnrollmentStatus,
+  listPartnerCaptureStations,
   listPermittedStationLocations,
   recordStationHeartbeat,
   resolveActiveStationByCode,
@@ -71,7 +72,9 @@ function stationError(res: Response, error: unknown): void {
           ? 404
           : error.code === "station_replay"
             ? 409
-            : 400;
+            : error.code === "version_blocked"
+              ? 426
+              : 400;
     res.status(status).json({ error: { code: error.code, message: error.message } });
     return;
   }
@@ -149,6 +152,21 @@ export function partnerStationRouter(): Router {
     async (req, res) => {
       try {
         res.json({ locations: await listPermittedStationLocations(req.partner!) });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  // The browser chooses only from server-resolved stations in its own
+  // tenant/location. It never types or stores a workstation/device identity.
+  r.get(
+    "/stations/capture-ready",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.cards.scan"),
+    async (req, res) => {
+      try {
+        res.json({ stations: await listPartnerCaptureStations(req.partner!) });
       } catch (error) {
         stationError(res, error);
       }
@@ -245,6 +263,61 @@ export function partnerStationRouter(): Router {
           scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
         });
         res.status(201).json({ capture });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  /** The operator may read the state of only a capture session that is bound to
+   * their current Partner certificate assignment and station location. This is
+   * status-only; the signed station remains the sole capture/claim principal. */
+  r.get(
+    "/stations/capture-sessions/:sessionId",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.cards.scan"),
+    async (req, res) => {
+      try {
+        const sessionId = String(req.params.sessionId || "");
+        if (!/^[0-9a-f-]{36}$/i.test(sessionId)) {
+          throw new StationServiceError("validation", "capture session is invalid");
+        }
+        const { withPartnerAdminTransaction } = await import("./db");
+        const result = await withPartnerAdminTransaction((client) =>
+          client.query<{
+            id: string;
+            certificate_id: number;
+            side: "front" | "back";
+            state: string;
+            failure_reason: string | null;
+            expires_at: string;
+            workstation_id: string;
+          }>(
+            `SELECT s.id, s.certificate_id, s.side, s.state, s.failure_reason,
+                    s.expires_at, s.workstation_id
+               FROM scanner_capture_sessions s
+               JOIN partner_stations station ON station.id=s.station_id
+              WHERE s.id=$1
+                AND station.tenant_id=$2
+                AND ($3::boolean OR station.location_id=$4::uuid)
+              LIMIT 1`,
+            [sessionId, req.partner!.tenantId, req.partner!.orgWide, req.partner!.locationId]
+          )
+        );
+        const capture = result.rows[0];
+        if (!capture || !(await authorizePartnerScannerCertificate(req.partner!, capture.certificate_id))) {
+          throw new StationServiceError("forbidden", "Capture session is not available to this operator");
+        }
+        res.json({
+          capture: {
+            id: capture.id,
+            side: capture.side,
+            state: capture.state,
+            failureReason: capture.failure_reason,
+            expiresAt: capture.expires_at,
+            workstationId: capture.workstation_id,
+          },
+        });
       } catch (error) {
         stationError(res, error);
       }

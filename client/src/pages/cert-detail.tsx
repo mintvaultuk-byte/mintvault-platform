@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import type { PublicCertificate, PopulationData } from "@shared/schema";
 import { isNonNumericGrade } from "@shared/schema";
-import { mvgsGradeLabel, mvgsTierName } from "@shared/mvgs-scoring";
 import SeoHead, { SITE_URL } from "@/components/seo-head";
 
 const CERT_URL_BASE = "https://mintvaultuk.com/cert/";
@@ -417,16 +416,10 @@ export default function CertDetailPage() {
                 {displayedGrade != null
                   ? // Pristine 10P comes from the MVGS gate (cert.isBlackLabel),
                     // not the stored flag. Otherwise the tier
-                    // NAME comes from the grade itself via mvgsTierName \u2014 same
-                    // source the slab uses \u2014 so the name always agrees with the
-                    // number, including half grades (8.5 \u2192 "NM-MINT+"). Never
-                    // derive the name from the strength score: its band can
-                    // disagree with the half grade and read "MINT 8.5".
+                    // Tier wording is server-issued with the public certificate.
                     cert.isBlackLabel
                     ? "PRISTINE 10P"
-                    : cert.gradeType === "numeric" && cert.gradeNumeric > 0
-                      ? mvgsTierName(cert.gradeNumeric).toUpperCase()
-                      : cert.grade
+                    : cert.grade
                   : "\u00a0"}
               </div>
 
@@ -470,12 +463,7 @@ export default function CertDetailPage() {
                     {/* Pristine 10P comes from the MVGS gate (cert.isBlackLabel), not the
                         ≥96 score band: a high score that fails the gate shows its real grade
                         (e.g. Gem Mint 10), matching the slab/PDF/headline. Same gate as v908/v909. */}
-                    MVGS Score: {cert.gradeStrengthScore}/100 ·{" "}
-                    {cert.isBlackLabel
-                      ? "Pristine 10P"
-                      : mvgsGradeLabel(cert.gradeStrengthScore) === "Pristine 10P"
-                        ? `${mvgsTierName(cert.gradeNumeric)} ${cert.gradeNumeric}`
-                        : mvgsGradeLabel(cert.gradeStrengthScore)}
+                    MVGS Score: {cert.gradeStrengthScore}/100 · {cert.isBlackLabel ? "Pristine 10P" : cert.grade}
                   </span>
                   <span
                     className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] cursor-help"

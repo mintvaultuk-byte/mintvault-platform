@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("scanner", {
   hidePopover: () => ipcRenderer.invoke("hide-popover"),
   openLogs: () => ipcRenderer.invoke("open-logs"),
   openLastCert: () => ipcRenderer.invoke("open-last-cert"),
+  acknowledgeCardRegistered: () => ipcRenderer.invoke("acknowledge-card-registered"),
   setSetting: (key, value) => ipcRenderer.invoke("set-setting", { key, value }),
   scanTarget: () => ipcRenderer.invoke("scan-target"),
   runPositioningPreview: () => ipcRenderer.invoke("run-positioning-preview"),

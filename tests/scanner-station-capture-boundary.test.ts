@@ -14,6 +14,9 @@ const routes = read("server/routes.ts");
 const staffRoutes = read("server/routes/staff.ts");
 const sessions = read("server/scanner-capture-service.ts");
 const stations = read("server/partner/station-service.ts");
+const partnerStationRoutes = read("server/partner/station-routes.ts");
+const partnerGrading = read("client/src/pages/partner/grading.tsx");
+const stationMigration = read("migrations/0075_partner_station_single_active_capture.sql");
 const escapedRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 describe("signed-station capture boundary", () => {
@@ -93,6 +96,38 @@ describe("signed-station capture boundary", () => {
     expect(stations).toContain("const calibrationInvalidated = hardwareChanged || profileChanged");
     expect(stations).toContain("current_calibration_id=CASE WHEN $11 THEN NULL ELSE current_calibration_id END");
     expect(stations).toContain('"scanner_profile_changed"');
+  });
+
+  it("lets a Partner browser arm only a server-listed station target", () => {
+    expect(partnerStationRoutes).toContain('"/stations/capture-ready"');
+    expect(partnerStationRoutes).toContain("listPartnerCaptureStations(req.partner!)");
+    expect(partnerStationRoutes).toContain('"/stations/:stationCode/capture-sessions"');
+    expect(partnerStationRoutes).toContain("authorizePartnerScannerCertificate(req.partner!, certificateId)");
+    expect(partnerGrading).toContain('fetch("/api/partner/stations/capture-ready"');
+    expect(partnerGrading).toContain("/api/partner/stations/${encodeURIComponent(stationCode)}/capture-sessions");
+    expect(partnerGrading).not.toContain("mintvault-scanner-workstation-id");
+  });
+
+  it("enforces exactly one live target per signed Partner station", () => {
+    expect(sessions).toContain("SET state='expired'");
+    expect(sessions).toContain("uq_scanner_capture_one_active_station");
+    expect(sessions).toContain("This station already has an active capture target");
+    expect(stationMigration).toContain("CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station");
+    expect(stationMigration).toContain("ON scanner_capture_sessions (station_id)");
+    expect(stationMigration).toContain("state IN ('armed', 'claimed', 'capturing')");
+  });
+
+  it("shows Next Card only from the server-persisted paired capture result", () => {
+    const scannerRoutes = routes;
+    const watcher = read("scripts/scanner-app/lib/watcher.js");
+    const renderer = read("scripts/scanner-app/renderer/app.js");
+    const scannerMain = read("scripts/scanner-app/main.js");
+    expect(sessions).toContain("isScannerCaptureCardRegistered");
+    expect(scannerRoutes).toContain("card_registered: cardRegistered");
+    expect(watcher).toContain("cardRegistered: uploaded.body?.card_registered === true");
+    expect(renderer).toContain("state.lastAcceptedCapture?.cardRegistered === true && !active");
+    expect(renderer).toContain("window.scanner.acknowledgeCardRegistered()");
+    expect(scannerMain).toContain('"acknowledge-card-registered"');
   });
 });
 
