@@ -221,6 +221,62 @@ export const SUITES = [
     note: "P9 grading edit lease: one-winner race, expiry, takeover, stale-revision refusal, I19 restart; own cluster.",
   },
 
+  // ------------------------------------------------- env-gated suites nothing was setting up
+  //
+  // Both of these gate themselves on an env var and SKIP when it is absent, and no runner ever
+  // supplied one. `npx vitest run` reports "1 skipped" and exits 0, so 33 real-database proofs —
+  // including the AG-1 location-suspend behaviour and the profile version/audit proofs — had never
+  // run in this programme. A suite that fails closed to "skipped" is only honest if something is
+  // actually expected to open it.
+  {
+    file: "tests/partner-management-ux-runtime.test.ts",
+    topology: TOPOLOGY.ADMIN,
+    cluster: "pg17",
+    database: "mintvault_partner_ux_rt",
+    adminVars: ["PARTNER_UX_RT_ADMIN"],
+    critical: true,
+    isolate: true,
+    note: "Gated on PARTNER_UX_RT_ADMIN; proves each write bumps partner_profiles.version by exactly 1 and every audit action passes the CHECK constraint.",
+  },
+  {
+    file: "tests/partner-admin-control-shell-integration.test.ts",
+    topology: TOPOLOGY.ADMIN,
+    cluster: "pg17",
+    database: "mintvault_partner_admin_shell",
+    adminVars: ["PARTNER_ADMIN_TEST"],
+    // The app under test must run on the RESTRICTED login or its cross-tenant refusals prove
+    // nothing. The suite CREATES this role itself (LOGIN PASSWORD 'synthetic', GRANT
+    // partner_runtime), and the partner runtime refuses a BYPASSRLS credential outright — which is
+    // why the admin URL cannot simply be reused. Values match .github/workflows/ci.yml exactly.
+    runtimeVars: ["PARTNER_ADMIN_TEST_RUNTIME"],
+    runtimeLogin: { user: "partner_app_test_shell", password: "synthetic" },
+    /*
+     * NOT critical YET, and that is a recorded decision rather than a convenience.
+     *
+     * Supplying the env this suite has always wanted makes it RUN for the first time in this
+     * programme, and it fails 5 of 11 — partner suspend, location suspend, user suspend, session
+     * revocation and emergency stop. Verified pre-existing: the identical 5 fail at the clean
+     * checkpoint 3f775f13 on a freshly created database with the role dropped first, so nothing in
+     * this pass caused them.
+     *
+     * The cause is a STALE FIXTURE, not a product regression. Every failure is the same shape —
+     * `GET /api/partner/session` answering 401 straight after a successful login — because P2 made
+     * partner MFA mandatory and fail-closed (session.ts: 401 "mfa required"), while this suite
+     * still logs its fixture users in without completing MFA. It seeds partner_mfa_methods only for
+     * the MFA-reset test. So those five behaviours are currently UNPROVEN, which is materially
+     * different from broken, and the repair is to the fixture.
+     *
+     * Marking it critical today would leave the gate permanently red on a defect that predates the
+     * work being gated, which teaches everyone to ignore the gate. Leaving it OUT of the matrix is
+     * what hid it for the whole programme. It is therefore listed, runnable by name, and documented
+     * — visible rather than silent. Restoring `critical: true` is the follow-up once the fixture
+     * completes MFA the way the other partner integration suites do.
+     */
+    critical: false,
+    isolate: true,
+    note: "Gated on PARTNER_ADMIN_TEST + PARTNER_ADMIN_TEST_RUNTIME. RUNS but fails 5/11 at 3f775f13 (pre-existing stale fixture: logs in without the now-mandatory MFA). Repair the fixture, then mark critical.",
+  },
+
   // ---------------------------------------------------------------- admin-only (migration proofs)
   {
     file: "tests/partner-rbac-migration.test.ts",
@@ -372,6 +428,15 @@ export function envForSuite(suite) {
   assertDisposable(url, suite.file);
 
   for (const v of suite.adminVars ?? []) env[v] = url;
+
+  // Vars that must receive the RESTRICTED login rather than the privileged one. A suite that drives
+  // the app end to end needs both: the privileged URL to build its fixture, and the runtime URL the
+  // app itself uses — handing it the privileged URL for both would silently disable RLS and turn an
+  // isolation proof into a test that cannot fail.
+  for (const v of suite.runtimeVars ?? []) {
+    const login = suite.runtimeLogin;
+    env[v] = login ? url.replace("postgres:postgres@", `${login.user}:${login.password}@`) : url;
+  }
 
   if (suite.pinAccounting || suite.topology === TOPOLOGY.RUNTIME) {
     // All four must agree or assertPartnerAccountingDatabaseTopology() aborts the suite.

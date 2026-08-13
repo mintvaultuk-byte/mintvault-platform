@@ -96,6 +96,7 @@ export const pmKeys = {
   walletBackfill: () => [`${BASE}/wallet-backfills/WALLET-BACKFILL1`] as const,
   partner: (id: string) => [`${BASE}/partners/${id}`] as const,
   users: (id: string) => [`${BASE}/partners/${id}/users`] as const,
+  locations: (id: string) => [`${BASE}/partners/${id}/locations`] as const,
   contacts: (id: string) => [`${BASE}/partners/${id}/contacts`] as const,
   branding: (id: string) => [`${BASE}/partners/${id}/branding`] as const,
   notes: (id: string) => [`${BASE}/partners/${id}/notes`] as const,
@@ -170,7 +171,13 @@ export const PROFILE_FIELD_DEFS: readonly ProfileFieldDef[] = [
   { key: "address_city", label: "Town / city", type: "text", max: 500 },
   { key: "address_postcode", label: "Postcode", type: "text", max: 500 },
   { key: "address_country", label: "Country", type: "text", max: 500 },
-  { key: "health_note", label: "Internal notes", type: "textarea", max: 500, hint: "Internal only — never shown to the partner." },
+  {
+    key: "health_note",
+    label: "Internal notes",
+    type: "textarea",
+    max: 500,
+    hint: "Internal only — never shown to the partner.",
+  },
 ] as const;
 
 export type ProfileValues = Record<string, string>;
@@ -402,7 +409,9 @@ export function canCreateDespiteDuplicates(
 export function duplicateOverrideNote(matches: readonly DuplicateMatch[]): string {
   const soft = overridableDuplicates(matches);
   if (soft.length === 0) return "";
-  const kinds = Array.from(new Set(soft.map((m) => m.kind))).sort().join(", ");
+  const kinds = Array.from(new Set(soft.map((m) => m.kind)))
+    .sort()
+    .join(", ");
   return ` [duplicate override acknowledged: ${kinds}]`;
 }
 
@@ -451,8 +460,18 @@ export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
     { key: "location", label: "Grading location", state: b(input.locationCount > 0) },
     { key: "profile", label: "Company profile completed", state: b(input.hasProfileDetail) },
     { key: "branding", label: "Branding configured", state: b(input.hasBranding) },
-    { key: "device", label: "Scanner station", state: "unavailable", hint: "Set up in MintVault Scanner: sign in, register this Mac, then wait for Super Admin approval." },
-    { key: "credits", label: "Credits configured", state: "unavailable", hint: "Credit accounting is not enabled yet." },
+    {
+      key: "device",
+      label: "Scanner station",
+      state: "unavailable",
+      hint: "Set up in MintVault Scanner: sign in, register this Mac, then wait for Super Admin approval.",
+    },
+    {
+      key: "credits",
+      label: "Credits configured",
+      state: "unavailable",
+      hint: "Credit accounting is not enabled yet.",
+    },
   ];
 }
 
@@ -586,4 +605,22 @@ export function deliveryBanner(deliveryStatus: string | undefined, createdPrefix
       // Unknown/absent status: say what is certain and nothing more.
       return `${lead} Delivery status is unconfirmed — check the invitation status in the table below.${revoked}`;
   }
+}
+
+/**
+ * Whether the operator may move a location out of ACTIVE — the client half of AG-1's
+ * last-active-location invariant.
+ *
+ * THE SERVER IS THE AUTHORITY. `setPartnerLocationStatus` refuses this in SQL, inside the same
+ * transaction that would perform it, and that refusal is what actually holds. This exists so the
+ * operator is told BEFORE they type a reason into a dialog that cannot succeed — the difference
+ * between a disabled control with an explanation and a form that fails on submit.
+ *
+ * Suspending a partner's only active shop floor would stop every station, every NEW press and every
+ * FIX, while the organisation still read as ACTIVE — healthy-looking and completely stopped. The
+ * honest action is to suspend the ORGANISATION, which says what is happening.
+ */
+export function canSuspendLocation(status: string, activeLocationCount: number): boolean {
+  if (status !== "ACTIVE") return false;
+  return activeLocationCount > 1;
 }

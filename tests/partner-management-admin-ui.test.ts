@@ -196,6 +196,54 @@ describe("G5 detail page source assertions", () => {
     expect(src).not.toContain("password_hash");
     expect(src).not.toContain("existing password");
   });
+  /*
+   * AG-1 LOCATIONS TAB.
+   *
+   * The multi-location backend has been proven since 0084 and had no operator surface at all — a
+   * partner's second shop floor could only be created by hand in SQL. These assertions pin the
+   * screen to the CANONICAL admin router and to the invariants the server already enforces, so the
+   * UI cannot quietly drift onto the legacy router or start offering an action the server refuses.
+   */
+  it("manages locations against the canonical super-admin router, inside the one partner detail page", () => {
+    for (const id of [
+      "pm-locations",
+      "pm-locations-empty",
+      "pm-location-create",
+      "pm-location-name",
+      "pm-location-address",
+      "pm-location-edit-",
+      "pm-location-suspend-",
+      "pm-location-activate-",
+      "pm-location-status-",
+      "pm-location-stations-",
+    ]) {
+      expect(src).toContain(id);
+    }
+    // The four AG-1 routes, on the canonical base. `/api/partner/` is already in the forbidden list
+    // above, which is what keeps this off the tenant-facing routes.
+    expect(src).toContain("${BASE}/partners/${partnerId}/locations");
+    expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}");
+    expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}/status");
+    // The legacy /api/super-admin/grading-partners suspend route predates AG-1 and carries none of
+    // its invariants (no last-active-location guard, no partner_management_audit row).
+    expect(src).not.toContain("grading-partners");
+  });
+
+  it("offers no location delete, because AG-1 has none", () => {
+    // A location id is referenced by stations, Card Jobs, certificate origin snapshots and audit
+    // rows, so it is suspended and never removed. Offering a delete the server would refuse would
+    // be a lie in the interface.
+    const locationsSection = src.slice(src.indexOf('tab === "locations"'), src.indexOf('tab === "profile"'));
+    expect(locationsSection).not.toMatch(/DELETE|Delete location|pm-location-delete/);
+  });
+
+  it("explains the last-active-location refusal instead of silently failing on submit", () => {
+    // The server refuses this in SQL; the client says so BEFORE a reason is typed into a dialog
+    // that cannot succeed.
+    expect(src).toContain("canSuspendLocation");
+    expect(src).toContain("Suspend the partner organisation instead");
+  });
+
   it("gates mutations on reason + expectedVersion + typed-confirm for high-risk; a11y modal", () => {
     expect(src).toContain("reasonValid(reason)");
     expect(src).toContain("expectedVersion: version");
