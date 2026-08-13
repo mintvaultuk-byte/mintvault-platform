@@ -239,6 +239,15 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
       s.authUserId = "00000000-0000-0000-0000-0000000000a5";
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
+      /*
+       * AG-3b: these suites drive DESTRUCTIVE Super Admin routes (status change, role change, MFA
+       * reset, credit adjustment), which now require a recent step-up proof. The real console
+       * obtains one from POST /api/admin/step-up after re-entering the passphrase and PIN; this
+       * test-only login stamps the equivalent so the suite exercises the ROUTE rather than
+       * repeatedly proving that the guard returns 403 — which tests/partner-admin-step-up.test.ts
+       * already proves directly, including that a MISSING stamp is refused.
+       */
+      s.adminStepUpAt = new Date().toISOString();
       req.session.save(() => res.json({ ok: true }));
     });
     registerPartnerManagementRoutes(app);
@@ -368,10 +377,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(org.rows[0].status).toBe("ACTIVE");
     // Activation DOES now provision a wallet — the one intended side effect. Zero credits, zero
     // ledger rows, so it is a true zero balance rather than an asserted one.
-    const w = await admin.query<{ n: number }>(
-      "SELECT count(*)::int n FROM partner_wallets WHERE tenant_id=$1",
-      [A]
-    );
+    const w = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_wallets WHERE tenant_id=$1", [A]);
     expect(w.rows[0].n).toBe(1);
     expect(
       (await admin.query("SELECT count(*)::int n FROM partner_credit_ledger WHERE tenant_id=$1", [A])).rows[0].n
@@ -477,11 +483,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(malformed.status).toBe(400);
     expect((await malformed.json()).error.code).toBe("VALIDATION_ERROR");
 
-    const missingConfirm = await post(
-      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
-      { reason: "missing confirm" },
-      c
-    );
+    const missingConfirm = await post(`${PM}/wallet-backfills/WALLET-BACKFILL1`, { reason: "missing confirm" }, c);
     expect(missingConfirm.status).toBe(400);
     expect((await missingConfirm.json()).error.code).toBe("VALIDATION_ERROR");
 
