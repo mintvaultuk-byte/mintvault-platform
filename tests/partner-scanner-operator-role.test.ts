@@ -190,14 +190,28 @@ describe("AG-2 integration surfaces", () => {
   const migration = readFileSync("migrations/0085_partner_scanner_operator_role.sql", "utf8");
   const seed0034 = readFileSync("migrations/0034_partner_rbac_seed.sql", "utf8");
 
+  /*
+   * Anchored on the PATH STRING and sliced to the handler, not on `r.post("/path"` — Prettier is
+   * free to split a route registration across lines, and an indexOf that misses returns -1, which
+   * silently slices the tail of the file and asserts against the wrong route entirely.
+   */
+  function guardsFor(source: string, path: string): string {
+    const idx = source.indexOf(path);
+    expect(idx, `${path} not found`).toBeGreaterThan(-1);
+    const handler = source.indexOf("async (req, res)", idx);
+    expect(handler, `${path} has no handler`).toBeGreaterThan(idx);
+    return source.slice(idx, handler);
+  }
+
   it("SOP4: station ENROLMENT is gated on the new capability, not on cards.scan", () => {
-    const enrol = stationRoutes.slice(stationRoutes.indexOf('r.post("/stations/enrol"'));
-    expect(enrol.slice(0, 300)).toContain('requirePartnerCapability("partner.stations.enrol")');
+    const enrol = guardsFor(stationRoutes, '"/stations/enrol"');
+    expect(enrol).toContain('requirePartnerCapability("partner.stations.enrol")');
+    expect(enrol).not.toContain('requirePartnerCapability("partner.cards.scan")');
   });
 
   it("SOP4b: image INVALIDATION is gated on cards.fix — a judgement, not a capture", () => {
-    const invalidate = stationRoutes.slice(stationRoutes.indexOf('"/card-jobs/:cardJobId/invalidate-side"'));
-    expect(invalidate.slice(0, 600)).toContain('requirePartnerCapability("partner.cards.fix")');
+    const invalidate = guardsFor(stationRoutes, '"/card-jobs/:cardJobId/invalidate-side"');
+    expect(invalidate).toContain('requirePartnerCapability("partner.cards.fix")');
   });
 
   it("SOP4c: station OPERATION still only needs cards.scan, so a shift is not slowed down", () => {

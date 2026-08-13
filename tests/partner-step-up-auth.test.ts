@@ -197,27 +197,39 @@ describe("AG-3 integration surfaces", () => {
   const migration = readFileSync("migrations/0086_partner_session_step_up.sql", "utf8");
 
   /**
-   * Every high-risk partner action that must demand a recent proof.
+   * Locate a route's guard list, tolerant of formatting.
    *
-   * Anchored on the ROUTE REGISTRATION, not on the path string alone: `"/users"` appears first as
-   * the GET listing, which must NOT be step-up guarded (reading the staff list is not high risk),
-   * so matching the bare string would have asserted against the wrong route and passed for the
-   * wrong reason.
+   * Anchoring on `r.post("/path"` breaks the moment Prettier splits the call across lines, and an
+   * indexOf that misses returns -1 — which silently slices the tail of the file and asserts against
+   * a completely different route. So: find each occurrence of the path string, keep the one whose
+   * registration is a POST, and slice to the handler.
+   *
+   * The POST/GET distinction is load-bearing here: `"/users"` is registered twice, and the GET
+   * listing must NOT be step-up guarded.
    */
+  function postGuards(source: string, path: string): string {
+    let from = 0;
+    for (;;) {
+      const idx = source.indexOf(path, from);
+      expect(idx, `POST ${path} not found`).toBeGreaterThan(-1);
+      const preceding = source.slice(Math.max(0, idx - 40), idx);
+      const handler = source.indexOf("async (req, res)", idx);
+      if (/r\.post\(\s*$/.test(preceding) && handler > idx) return source.slice(idx, handler);
+      from = idx + path.length;
+    }
+  }
+
   const PROTECTED = [
-    'r.post(\n    "/credits/checkout"',
-    'r.post(\n    "/users",',
-    'r.post(\n    "/users/:id/role"',
-    'r.post(\n    "/users/:id/status"',
-    'r.post(\n    "/users/:id/revoke-sessions"',
+    '"/credits/checkout"',
+    '"/users",',
+    '"/users/:id/role"',
+    '"/users/:id/status"',
+    '"/users/:id/revoke-sessions"',
   ];
 
   it("every high-risk partner action demands a recent proof", () => {
-    for (const anchor of PROTECTED) {
-      const idx = routes.indexOf(anchor);
-      expect(idx, `${anchor} not found`).toBeGreaterThan(-1);
-      const segment = routes.slice(idx, routes.indexOf("async (req, res)", idx));
-      expect(segment, `${anchor} is not step-up guarded`).toContain("requireRecentAuth()");
+    for (const path of PROTECTED) {
+      expect(postGuards(routes, path), `${path} is not step-up guarded`).toContain("requireRecentAuth()");
     }
   });
 
@@ -245,8 +257,7 @@ describe("AG-3 integration surfaces", () => {
 
   it("step-up is placed AFTER the capability guard, never before it", () => {
     // A user who may NEVER buy credits should be told that, not asked for a password first.
-    const checkout = routes.slice(routes.indexOf('r.post(\n    "/credits/checkout"'));
-    const segment = checkout.slice(0, checkout.indexOf("async (req, res)"));
+    const segment = postGuards(routes, '"/credits/checkout"');
     expect(segment.indexOf('requirePartnerCapability("partner.credits.purchase")')).toBeLessThan(
       segment.indexOf("requireRecentAuth()")
     );
