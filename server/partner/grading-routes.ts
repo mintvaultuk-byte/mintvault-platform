@@ -12,6 +12,7 @@
  */
 import { Router } from "express";
 import type { Response } from "express";
+import rateLimit from "express-rate-limit";
 import type { PoolClient } from "pg";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
@@ -70,6 +71,16 @@ function expectedReviewRevision(raw: unknown): number | null {
 }
 
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
+
+const partnerGradingEditRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-edit:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many grading edit requests. Please wait a minute and try again." },
+});
 
 function numericId(raw: unknown): number | null {
   const value = String(raw);
@@ -493,7 +504,8 @@ export function partnerGradingRouter(): Router {
       if (currentRevision !== expected) {
         return res.status(409).json({
           code: "STALE_REVIEW",
-          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          error:
+            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
         });
       }
       res.setHeader("Content-Type", "image/png");
@@ -648,6 +660,7 @@ export function partnerGradingRouter(): Router {
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);

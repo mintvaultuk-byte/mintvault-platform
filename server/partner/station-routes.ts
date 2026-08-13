@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import { resolvePartnerSession, requirePartnerAuth, requirePartnerCapability } from "./session";
 import { StationIdentityError } from "./station-identity";
 import {
@@ -14,6 +15,37 @@ import {
   type StationPrincipal,
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
+
+const partnerStationReadRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-read:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many station status requests. Please wait a minute and try again." },
+});
+
+const partnerStationHeartbeatRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-heartbeat:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many station heartbeat requests. Please wait a minute and try again." },
+});
+
+const partnerStationCaptureRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) =>
+    `partner-station-capture:${req.partner?.userId ?? "unknown"}|${req.params.stationCode ?? "unknown"}`,
+  message: { error: "Too many station capture requests. Please wait a minute and try again." },
+});
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -127,6 +159,7 @@ export function partnerStationRouter(): Router {
     "/stations/:stationCode/enrolment-status",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationReadRateLimit,
     async (req, res) => {
       try {
         res.json({ station: await getStationEnrollmentStatus(req.partner!, req.params.stationCode) });
@@ -136,22 +169,28 @@ export function partnerStationRouter(): Router {
     }
   );
 
-  r.post("/stations/heartbeat", requireSignedStation, requireSignedStationOperator, async (req, res) => {
-    try {
-      const result = await recordStationHeartbeat(req.station!, {
-        appVersion: req.body?.appVersion,
-        scannerConnected: req.body?.scannerConnected,
-        scannerHardware: req.body?.scannerHardware,
-        scannerProfileVersion: req.body?.scannerProfileVersion,
-        pendingUploadCount: req.body?.pendingUploadCount,
-        captureState: req.body?.captureState,
-        lastFailureCode: req.body?.lastFailureCode,
-      });
-      res.json({ ok: true, ...result });
-    } catch (error) {
-      stationError(res, error);
+  r.post(
+    "/stations/heartbeat",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationHeartbeatRateLimit,
+    async (req, res) => {
+      try {
+        const result = await recordStationHeartbeat(req.station!, {
+          appVersion: req.body?.appVersion,
+          scannerConnected: req.body?.scannerConnected,
+          scannerHardware: req.body?.scannerHardware,
+          scannerProfileVersion: req.body?.scannerProfileVersion,
+          pendingUploadCount: req.body?.pendingUploadCount,
+          captureState: req.body?.captureState,
+          lastFailureCode: req.body?.lastFailureCode,
+        });
+        res.json({ ok: true, ...result });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
-  });
+  );
 
   r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, async (req, res) => {
     try {
@@ -176,6 +215,7 @@ export function partnerStationRouter(): Router {
     "/stations/:stationCode/capture-sessions",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationCaptureRateLimit,
     async (req, res) => {
       try {
         const station = await resolveActiveStationByCode(req.params.stationCode);
