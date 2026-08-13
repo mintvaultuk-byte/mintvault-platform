@@ -535,6 +535,128 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
     expect(again.lease.heldByYou).toBe(true);
     expect(again.lease.revision).toBe(first.lease.revision);
   });
+
+  /* ==========================================================================================
+   * THE WRITE PATH.
+   *
+   * `assertMayWrite` was proven correct in this file from the day it was written, and had ZERO
+   * callers in server/ — so the guard it implements protected nothing. The lease answered "who may
+   * write" to nobody, and a grader who never acquired could still overwrite one who had.
+   *
+   * The gap was structural, not an oversight: the lease is keyed on the Card Job, the grading
+   * routes are keyed on the CERTIFICATE, and nothing joined the two. These tests cover that join
+   * and the certificate-shaped gate built on it.
+   * ======================================================================================== */
+
+  /** A Card Job carrying a real certificate id — the pairing 0080 requires (both, or neither). */
+  async function makeJobWithCertificate(
+    f: Fixture,
+    locationId: string,
+    tag: string
+  ): Promise<{ cardJobId: string; certificateId: number }> {
+    const cardJobId = await makeGradableJob(f, locationId, tag);
+    const certificateId = (
+      await admin.query<{ id: number }>(`INSERT INTO certificates (certificate_number) VALUES ($1) RETURNING id`, [
+        `MV-lease-${tag}`,
+      ])
+    ).rows[0].id;
+    await admin.query(`UPDATE partner_card_jobs SET certificate_id=$1, mv_number=$2 WHERE id=$3`, [
+      certificateId,
+      `MV-lease-${tag}`,
+      cardJobId,
+    ]);
+    return { cardJobId, certificateId };
+  }
+
+  it("W1: a grader who never acquired cannot write to a Card Job certificate", async () => {
+    // The whole point. Before the gate was wired this call did not exist and the write proceeded.
+    const f = await makeTenant("write1");
+    const { certificateId } = await makeJobWithCertificate(f, f.locationA, "w1");
+    const refused = await settle(leases.assertMayWriteCertificate(principal(f, f.graderTwo), certificateId, 1));
+    expect(refused).toEqual({ ok: false, code: "NOT_LEASE_HOLDER" });
+  });
+
+  it("W2: the holder writes with the current revision, and the SAME revision cannot land twice", async () => {
+    const f = await makeTenant("write2");
+    const { cardJobId, certificateId } = await makeJobWithCertificate(f, f.locationA, "w2");
+    const acquired = await leases.acquireLease(principal(f, f.graderOne), cardJobId);
+
+    const first = await leases.assertMayWriteCertificate(
+      principal(f, f.graderOne),
+      certificateId,
+      acquired.lease.revision
+    );
+    expect(first).toEqual({ cardJobId, revision: acquired.lease.revision + 1 });
+
+    // A resubmitted form carrying the revision it was loaded with is the double-save this guard
+    // exists to refuse — it must not be applied a second time.
+    const replay = await settle(
+      leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, acquired.lease.revision)
+    );
+    expect(replay).toEqual({ ok: false, code: "STALE_REVISION" });
+  });
+
+  it("W3: a certificate with NO Card Job is ungated, so connector cards grade exactly as before", async () => {
+    // Returning null rather than refusing is the difference between adding a guard and breaking
+    // every card that arrived through the import path and legitimately has no lease.
+    const f = await makeTenant("write3");
+    const certificateId = (
+      await admin.query<{ id: number }>(
+        `INSERT INTO certificates (certificate_number) VALUES ('MV-lease-connector') RETURNING id`
+      )
+    ).rows[0].id;
+    await expect(leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, 1)).resolves.toBeNull();
+  });
+
+  it("W4: a Card Job certificate with no revision supplied is refused, not waved through", async () => {
+    // A client that has not been taught the lease is the defect. Defaulting a missing revision to
+    // "current" would let exactly the client this guard targets keep writing.
+    const f = await makeTenant("write4");
+    const { cardJobId, certificateId } = await makeJobWithCertificate(f, f.locationA, "w4");
+    await leases.acquireLease(principal(f, f.graderOne), cardJobId);
+    const refused = await settle(leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, undefined));
+    expect(refused).toEqual({ ok: false, code: "STALE_REVISION" });
+  });
+
+  it("W5: a grader displaced by a takeover cannot write, even holding a revision that was current", async () => {
+    const f = await makeTenant("write5");
+    const { cardJobId, certificateId } = await makeJobWithCertificate(f, f.locationA, "w5");
+    const held = await leases.acquireLease(principal(f, f.graderOne), cardJobId);
+    await leases.takeoverLease(principal(f, f.owner, { orgWide: true }), cardJobId, "card left open at close");
+
+    const refused = await settle(
+      leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, held.lease.revision)
+    );
+    expect(refused).toEqual({ ok: false, code: "NOT_LEASE_HOLDER" });
+  });
+
+  it("W6: another partner's certificate resolves to no Card Job, so its lease cannot be reached", async () => {
+    // Cross-tenant must not become reachable just because the join now starts at the certificate.
+    const a = await makeTenant("write6a");
+    const b = await makeTenant("write6b");
+    const { certificateId } = await makeJobWithCertificate(b, b.locationA, "w6");
+    await expect(leases.assertMayWriteCertificate(principal(a, a.graderOne), certificateId, 1)).resolves.toBeNull();
+  });
+
+  it("W7: a location-scoped grader cannot reach another floor's job by naming its certificate", async () => {
+    const f = await makeTenant("write7");
+    const { certificateId } = await makeJobWithCertificate(f, f.locationB, "w7");
+    const scoped = principal(f, f.graderOne, { locationId: f.locationA });
+    await expect(leases.assertMayWriteCertificate(scoped, certificateId, 1)).resolves.toBeNull();
+
+    // The org-wide owner still reaches it — the refusal is scope, not a broken join.
+    const orgWide = principal(f, f.owner, { orgWide: true });
+    const reached = await settle(leases.assertMayWriteCertificate(orgWide, certificateId, 1));
+    expect(reached).toEqual({ ok: false, code: "NOT_LEASE_HOLDER" });
+  });
+
+  it("W8: SCANNER_OPERATOR is refused on the write path, not merely on acquire", async () => {
+    const f = await makeTenant("write8");
+    const { certificateId } = await makeJobWithCertificate(f, f.locationA, "w8");
+    const operator = principal(f, f.graderOne, { canGrade: false });
+    const refused = await settle(leases.assertMayWriteCertificate(operator, certificateId, 1));
+    expect(refused).toEqual({ ok: false, code: "FORBIDDEN" });
+  });
 });
 
 describe("P9 integration surfaces", () => {
@@ -626,5 +748,40 @@ describe("P9 integration surfaces", () => {
   it("MVGS scoring maths is untouched by this phase", () => {
     // P9 adds concurrency control, not grading logic. The protected maths must not appear here.
     expect(service).not.toMatch(/mvgs|centering|subgrade|pristine|blackLabel/i);
+  });
+
+  it("EVERY partner grading write consults the lease", () => {
+    /*
+     * The assertion that would have caught the original gap. `assertMayWrite` was proven and
+     * exported and called by nothing, so the lease guarded no write at all. A guard with no call
+     * site is indistinguishable from no guard, and only a source assertion catches that — a
+     * behavioural test passes happily against a route that never asks.
+     *
+     * All three routes below can change a partner's grade. If a fourth is ever added it must appear
+     * here too, or it is a way around the lease.
+     */
+    const routes = readFileSync("server/partner/grading-routes.ts", "utf8");
+    const writeRoutes = [
+      '"/grading/certificates/:id/grade"',
+      '"/grading/certificates/:id/submit"',
+      '"/grading/certificates/:id/edit-submission"',
+    ];
+    for (const path of writeRoutes) {
+      const start = routes.indexOf(path);
+      expect(start).toBeGreaterThan(-1);
+      const handler = routes.slice(start, routes.indexOf("\n  );", start));
+      expect(handler).toContain("requireLeaseForCertificateWrite");
+    }
+    // And the gate must reach the proven primitive rather than reimplementing its checks.
+    expect(routes).toContain("assertMayWriteCertificate");
+    expect(service).toContain("assertMayWrite(");
+  });
+
+  it("the certificate→Card Job join is tenant- and location-scoped in SQL", () => {
+    // The join is a new way to name a Card Job. If it were scoped in TypeScript instead of the
+    // WHERE clause, it would be a way to name somebody else's.
+    const resolver = service.slice(service.indexOf("export async function resolveCardJobIdForCertificate"));
+    expect(resolver.slice(0, 900)).toContain("tenant_id = $2");
+    expect(resolver.slice(0, 900)).toContain("location_id = $3::uuid");
   });
 });

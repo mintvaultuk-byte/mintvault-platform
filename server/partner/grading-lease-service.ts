@@ -434,6 +434,96 @@ export async function assertMayWrite(
   return bumped.rows[0].revision;
 }
 
+/**
+ * Resolve the Card Job behind a certificate — the join the workstation could not make.
+ *
+ * WHY THIS EXISTS. The lease is keyed on the Card Job, because that is the unit a grader edits and
+ * the unit that becomes a permanent MV. The grading workstation is keyed on the CERTIFICATE, because
+ * that is what the grading engine has always taken. Until this function there was no way to get from
+ * one to the other, which is why `assertMayWrite` had no caller: the write path physically could not
+ * name the thing the lease protects.
+ *
+ * `partner_card_jobs.certificate_id` is uniquely indexed where non-null (0080), so at most one job
+ * answers, and it is immutable once allocated — a certificate cannot drift to a different job.
+ *
+ * NULL IS A LEGITIMATE ANSWER, not a failure. A certificate that arrived through the connector
+ * import path has no Card Job and never will; those cards graded before this lease existed and must
+ * keep grading. Returning null means "no lease applies here", and the caller leaves that path
+ * exactly as it was. Only Card Job cards gain the guard.
+ *
+ * Scoped by tenant AND, for a location-bound user, by location — the same predicate loadGradableJob
+ * uses, so a scoped grader cannot reach another floor's job by naming its certificate instead.
+ */
+export async function resolveCardJobIdForCertificate(
+  client: PoolClient,
+  principal: PartnerPrincipal,
+  certificateId: number
+): Promise<string | null> {
+  if (!Number.isSafeInteger(certificateId) || certificateId <= 0) return null;
+  const scopedLocationId = principal.orgWide ? null : principal.locationId;
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT id
+       FROM partner_card_jobs
+      WHERE certificate_id = $1 AND tenant_id = $2 AND cancelled_at IS NULL
+        AND ($3::uuid IS NULL OR location_id = $3::uuid)`,
+    [certificateId, principal.tenantId, scopedLocationId]
+  );
+  return rows[0]?.id ?? null;
+}
+
+/** What a caller learns when the lease actually applied to their write. */
+export interface CertificateWriteAuthority {
+  cardJobId: string;
+  /** The revision the caller's NEXT write must present. */
+  revision: number;
+}
+
+/**
+ * The certificate-shaped front door to `assertMayWrite`.
+ *
+ * Returns null when the certificate has no Card Job — see resolveCardJobIdForCertificate. Otherwise
+ * it enforces both guards and returns the bumped revision.
+ *
+ * ON TRANSACTION SCOPE, HONESTLY. `assertMayWrite` is written to run inside the CALLER's
+ * transaction, and that is still the right shape. It cannot be honoured here: the grading write goes
+ * through the HQ grader on the Drizzle pool while the lease lives on the restricted partner-admin
+ * pool, and joining those two into one transaction would mean restructuring the grading engine —
+ * which is precisely what this pass is forbidden to do to prove a concurrency point.
+ *
+ * What survives is stronger than it looks, because the revision bump is the serialisation point:
+ *   - the row is taken FOR UPDATE, so two writers cannot both read the same revision;
+ *   - the loser presents a revision that is no longer current and is refused STALE_REVISION;
+ *   - a different holder is refused NOT_LEASE_HOLDER before any grade is touched.
+ *
+ * The residual window is between this commit and the grade write, and only an authorised TAKEOVER
+ * can occupy it — a deliberate, confirmed, audited act by an org-wide user, not a race two graders
+ * can fall into. An in-flight write from the grader being displaced can still land in that window.
+ * That is a bounded, documented MEDIUM, recorded rather than papered over; closing it properly means
+ * putting the grade write on the partner pool, which is P10's business, not P9's.
+ */
+export async function assertMayWriteCertificate(
+  principal: PartnerPrincipal,
+  certificateId: number,
+  expectedRevision: unknown
+): Promise<CertificateWriteAuthority | null> {
+  return withPartnerAdminTenantTransaction(
+    { tenantId: principal.tenantId, locationId: principal.locationId ?? null },
+    async (client) => {
+      const cardJobId = await resolveCardJobIdForCertificate(client, principal, certificateId);
+      if (!cardJobId) return null;
+      // A Card Job card whose client sent no revision is a client that has not been taught the
+      // lease. It must be refused, not waved through — a missing guard is the defect, not a default.
+      const revision = await assertMayWrite(
+        client,
+        principal,
+        cardJobId,
+        typeof expectedRevision === "number" ? expectedRevision : Number.NaN
+      );
+      return { cardJobId, revision };
+    }
+  );
+}
+
 /** Read the current lease without taking it — for rendering an occupied banner. */
 export async function getLease(principal: PartnerPrincipal, cardJobId: string): Promise<LeaseView | null> {
   return withPartnerAdminTenantTransaction(

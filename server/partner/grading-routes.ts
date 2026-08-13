@@ -43,6 +43,7 @@ import {
 import {
   GradingLeaseError,
   acquireLease,
+  assertMayWriteCertificate,
   getLease,
   heartbeatLease,
   releaseLease,
@@ -98,6 +99,35 @@ type PartnerCertAuth = {
   redoCount: number;
   provenanceValid: boolean;
 };
+
+/**
+ * Put the P9 lease on the WRITE path.
+ *
+ * Until this existed the lease was a proven service that nothing consulted: `assertMayWrite` had no
+ * caller anywhere in server/, so a grader who politely acquired could still be overwritten by one
+ * who never did. The lease answered "who may write" to nobody.
+ *
+ * Returns the caller's next lease revision, or null when this certificate has no Card Job — a
+ * connector-imported card, which has no lease and must keep grading exactly as before. Throws
+ * GradingLeaseError otherwise, which `leaseError` turns into the 409/410 the workstation acts on.
+ *
+ * The revision travels as `leaseRevision`, deliberately NOT as `expectedRevision`. There are two
+ * unrelated revisions on this surface — the lease's, and `certificates.grading_revision` which the
+ * label-preview barrier already calls `expectedRevision` — and giving them one name is how a client
+ * ends up sending a plausible number that means the wrong thing.
+ */
+async function requireLeaseForCertificateWrite(
+  principal: PartnerPrincipal,
+  certId: number,
+  body: unknown
+): Promise<number | null> {
+  const authority = await assertMayWriteCertificate(
+    principal,
+    certId,
+    (body as { leaseRevision?: unknown } | null | undefined)?.leaseRevision
+  );
+  return authority?.revision ?? null;
+}
 
 function expectedReviewRevision(raw: unknown): number | null {
   if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 1) return null;
@@ -780,6 +810,12 @@ export function partnerGradingRouter(): Router {
         ) {
           return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
         }
+        let leaseRevision: number | null;
+        try {
+          leaseRevision = await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
+        } catch (leaseFailure) {
+          return leaseError(res, leaseFailure);
+        }
         const saved = await applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!));
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         await auditInOwnTxn({
@@ -797,6 +833,9 @@ export function partnerGradingRouter(): Router {
           ok: true,
           gradingStatus: auth.auth.gradingStatus,
           reviewRevision: saved,
+          // The lease revision the client's NEXT write must present. Null for a connector card,
+          // which has no lease — the client sends nothing back and the guard stays inert.
+          leaseRevision,
           authoritativeGrade: payload?.authoritativeGrade ?? null,
         });
       } catch (err) {
@@ -823,6 +862,14 @@ export function partnerGradingRouter(): Router {
           return res
             .status(409)
             .json({ error: "Capture front and back on the approved station before submitting grades." });
+        }
+        // SUBMIT is a write like any other, and the most consequential one — it is the edge past
+        // which the grade is a submitted assessment. A stale editor must be refused HERE, not merely
+        // on the incremental saves that preceded it.
+        try {
+          await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
+        } catch (leaseFailure) {
+          return leaseError(res, leaseFailure);
         }
         if (req.body && Object.keys(req.body).length) {
           const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!));
@@ -925,6 +972,11 @@ export function partnerGradingRouter(): Router {
           return res
             .status(409)
             .json({ error: "Capture front and back on the approved station before submitting grades." });
+        }
+        try {
+          await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
+        } catch (leaseFailure) {
+          return leaseError(res, leaseFailure);
         }
         const saved = await applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!));
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
