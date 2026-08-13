@@ -1109,3 +1109,62 @@ The Scanner's FIX picker now lists the tenant-scoped queue and calls `fix-author
 does not yet drive the returned side straight into a capture session — same remaining wiring step as
 P6's NEW, and the same reason it is safe to carry: by that point the MV, the certificate and the paid
 reservation all already exist, so nothing downstream can mint credits or identity.
+
+---
+
+## AMENDMENT AUDIT — and two defects it found in my own P6 work
+
+A gap audit of the onboarding / staff / station amendment against the existing system. Most of it
+was already built; the audit's value was finding two things I had shipped half-proven in P6.
+
+### Fixed here
+
+**AF-1 — the Scanner's GRADING CREDITS cell rendered a permanent em dash.** P6 shipped the markup
+(`renderer/index.html`) and the render logic (`app.js`, which correctly prints `—` for a non-number),
+but nothing ever put a number into `summary`: `stationSummary()` projected only organisation,
+location and display name, and `getPartnerPortalContext` — the source of the session body — has no
+credit field at all. A shipped UI element with no data behind it reads to a shop as a broken Scanner.
+Now fed by `stationClient.creditSummary()` through the operator's own session, because
+`/api/partner/credits` is a portal capability and a Mac has no wallet of its own to report. Failure
+degrades to `null`, never `0`, and never blocks setup — the server re-checks the balance on every
+NEW press and refuses independently, so a station that cannot read it must still be able to work.
+
+**AF-2 — NEW CARD wrote no audit event at all.** The locked requirement is that a NEW must answer
+WHO / WHICH SHOP / WHICH LOCATION / WHICH MAC / WHICH CARD/MV / WHEN. `partner_card_jobs` carries the
+operator (`created_by`) and the location but **not** the station, so the Mac was recoverable only by
+joining `partner_card_job_op_keys` or reading ledger metadata JSON — a forensic reconstruction, not
+an audit trail. The FIX path already wrote one; NEW spends money and mints permanent identity, so it
+has a stronger claim to one, not a weaker one. `device_id` carries the station id, matching the
+convention P7 established. A REPLAYED press writes no second row: the audit records operations, not
+requests, and a double-click that bought nothing must not read later as two cards started.
+
+### Confirmed already built (no work needed)
+
+| Requirement                                                | State                                                                                                                                         |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Super Admin cannot see, set or retrieve a partner password | **VERIFIED CLEAN** — the only two writes to `password_hash` are token-driven and self-service; the admin path returns `{deliveryStatus}` only |
+| Owner invite, one-time secure link                         | 72h, hash-only storage, fails closed without a mail provider                                                                                  |
+| Accept → own password → **forced MFA**                     | `mfa_required=true` set at accept                                                                                                             |
+| No shared shop password anywhere                           | verified — per-user credentials throughout, Scanner included                                                                                  |
+| Partner Staff area                                         | invite / resend / revoke / role / status / revoke-sessions, all permission-gated                                                              |
+| Copied Scanner carries no station authority                | Keychain-backed, no plaintext fallback, globally unique key fingerprint, monotonic nonce                                                      |
+| Staff removal ⟂ station revocation                         | fully independent; suspending a user revokes sessions AND bumps `credential_version`                                                          |
+| Onboarding readiness                                       | all 7 states present (+REVOKED), computed from positive DB facts, with a genuinely three-valued `stationReady`                                |
+| Multi-station per partner                                  | supported; no count constraint                                                                                                                |
+
+### Recorded as genuine gaps, NOT built in this pass
+
+| #    | Gap                                                                                                                                                                                          | Why it is not a quick fix                                                                                                                                              |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AG-1 | **Multi-location is impossible.** One hard-coded "Main location" per partner; no create-location route or UI exists anywhere.                                                                | This silently caps multi-station, hides the Scanner's location selector, and blocks any partner with two shops. It is the real ceiling behind several amendment items. |
+| AG-2 | **No SCANNER_OPERATOR role.** `partner.cards.scan` is only held by OWNER, MANAGER and MVGS_ASSESSMENT_TECHNICIAN, so anyone who operates a scanner necessarily also holds grading authority. | The RBAC catalogue is runtime read-only and seeded by migration — a new role needs a migration plus both role-name maps.                                               |
+| AG-3 | **No step-up authentication outside MFA credential changes.** Buying credits, changing roles, removing staff, approving/revoking stations and granting credits all ride a plain session.     | Mandatory reasons, immutable audit ledgers and typed-confirm dialogs are the current substitute. There is no "recently authenticated" timestamp to build on yet.       |
+
+### Verification
+
+| Check            | P7 baseline             | After amendment fixes            |
+| ---------------- | ----------------------- | -------------------------------- |
+| Tests            | 27 failed / 4364 passed | **27 failed / 4367 passed** (+3) |
+| Failing files    | 8                       | **8 — identical set**            |
+| Newly failing    | —                       | **ZERO**                         |
+| Typecheck / lint | clean / 0 errors        | **clean / 0 errors**             |

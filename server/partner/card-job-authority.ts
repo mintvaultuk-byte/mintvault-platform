@@ -31,6 +31,7 @@ import { withPartnerAdminTenantTransaction } from "./db";
 import { reserveCreditInTransaction } from "./partner-credit-reservation-service";
 import { readEmergencyState, isHardStopped } from "./emergency";
 import { CERTIFICATE_ORIGIN_SNAPSHOT_VERSION } from "../../shared/schema";
+import { writePartnerAudit } from "./audit";
 
 export class CardJobAuthorityError extends Error {
   constructor(
@@ -731,6 +732,38 @@ export async function startNewCardJobAtStation(
        VALUES ($1,$2,$3,$4,$5,$6)`,
         [input.tenantId, input.stationId, input.clientOpId, job.rows[0].id, reservation.reservation.id, fingerprint]
       );
+
+      /*
+       * AUDIT — the locked requirement is that a NEW must answer, later and without guesswork:
+       * WHO did it, AT WHICH SHOP, AT WHICH LOCATION, ON WHICH MAC, TO WHICH CARD/MV, WHEN.
+       *
+       * `partner_card_jobs` carries the operator (`created_by`) and the location but NOT the
+       * station, so without this row the Mac was recoverable only by joining
+       * partner_card_job_op_keys or reading ledger metadata JSON — a forensic reconstruction, not
+       * an audit trail. The FIX path already writes one; NEW spends money and mints permanent
+       * identity, so it has a stronger claim to one, not a weaker one.
+       *
+       * `device_id` carries the station id, matching the convention the FIX path established.
+       */
+      await writePartnerAudit(client, {
+        tenantId: input.tenantId,
+        locationId: input.locationId,
+        actorUserId: input.actorUserId,
+        deviceId: input.stationId,
+        action: "partner_card_job_started",
+        recordType: "partner_card_job",
+        recordId: job.rows[0].id,
+        after: {
+          mvNumber: identity.mvNumber,
+          certificateId: identity.certificateId,
+          cardId,
+          submissionId,
+          reservationId: reservation.reservation.id,
+          status: job.rows[0].status,
+          walkIn: true,
+        },
+        reason: "NEW card started at a station. One Grading Credit reserved.",
+      });
 
       return {
         cardJobId: job.rows[0].id,

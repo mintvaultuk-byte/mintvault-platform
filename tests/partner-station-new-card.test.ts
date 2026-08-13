@@ -292,6 +292,58 @@ describe("P6 Scanner NEW CARD (real PostgreSQL)", () => {
     expect(cert.rows[0].origin_snapshot_version).toBe(1);
   });
 
+  it("writes an audit row answering WHO, WHICH SHOP, WHICH LOCATION, WHICH MAC, WHICH CARD/MV, WHEN", async () => {
+    /*
+     * The locked audit requirement for NEW. partner_card_jobs carries the operator and the location
+     * but NOT the station, so without this row the Mac was recoverable only by joining the op-keys
+     * table or reading ledger metadata JSON — a forensic reconstruction, not an audit trail.
+     */
+    const f = await makeTenant("audit1");
+    await addCredits(f.tenantId, 1, "audit1");
+    const card = await start(f, { clientOpId: "op-audit1-aaa" });
+
+    const audit = await admin.query<{
+      tenant_id: string;
+      location_id: string;
+      actor_user_id: string;
+      device_id: string;
+      record_id: string;
+      after_value: Record<string, unknown>;
+      created_at: string;
+    }>(
+      `SELECT tenant_id, location_id, actor_user_id, device_id, record_id, after_value, created_at
+         FROM partner_audit_events
+        WHERE tenant_id=$1 AND action='partner_card_job_started'`,
+      [f.tenantId]
+    );
+    expect(audit.rowCount).toBe(1);
+    const row = audit.rows[0];
+    expect(row.tenant_id).toBe(f.tenantId); // WHICH SHOP
+    expect(row.location_id).toBe(f.locationId); // WHICH LOCATION
+    expect(row.actor_user_id).toBe(f.userId); // WHO
+    expect(row.device_id).toBe(f.stationId); // WHICH MAC
+    expect(row.record_id).toBe(card.cardJobId); // WHICH CARD
+    expect(row.after_value).toMatchObject({ mvNumber: card.mvNumber }); // WHICH MV
+    expect(new Date(row.created_at).getTime()).toBeGreaterThan(0); // WHEN
+  });
+
+  it("a REPLAYED press does not write a second audit row", async () => {
+    // The audit records operations, not requests. A double-click that bought nothing must not read
+    // later as two cards started.
+    const f = await makeTenant("audit2");
+    await addCredits(f.tenantId, 1, "audit2");
+    await start(f, { clientOpId: "op-audit2-aaa" });
+    await start(f, { clientOpId: "op-audit2-aaa" });
+    await start(f, { clientOpId: "op-audit2-aaa" });
+
+    const audit = await admin.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM partner_audit_events
+        WHERE tenant_id=$1 AND action='partner_card_job_started'`,
+      [f.tenantId]
+    );
+    expect(audit.rows[0].n).toBe("1");
+  });
+
   it("records the operator's chosen card label when one is supplied", async () => {
     const f = await makeTenant("label1");
     await addCredits(f.tenantId, 1, "label1");
@@ -639,6 +691,23 @@ describe("P6 integration surfaces", () => {
     // The completion screen echoes the server's certId verbatim.
     expect(scannerApp).toContain("${completedCert} COMPLETE");
     expect(scannerApp).toContain("MARK CARD ${completedCert}");
+  });
+
+  it("the Scanner credit read-out is actually fed with data, not just rendered", () => {
+    /*
+     * DEFECT PINNED: P6 shipped the GRADING CREDITS markup and the render logic, but nothing ever
+     * put a number into `summary`. The cell rendered a permanent em dash — a shipped UI element
+     * with no data behind it, which reads to a shop as a broken Scanner.
+     */
+    const stationClient = readFileSync("scripts/scanner-app/lib/station-client.js", "utf8");
+    expect(stationClient).toContain("creditSummary");
+    expect(stationClient).toContain('operatorJson("GET", "/api/partner/credits")');
+    expect(scannerMain).toContain("availableCreditsOrNull");
+    expect(scannerMain).toContain("availableCredits:");
+    // The summary the renderer reads is built WITH the credits value.
+    expect(scannerMain).toContain("stationSummary(session.body, await availableCreditsOrNull())");
+    // A failed read degrades to null, never to 0, and never blocks setup.
+    expect(scannerMain).toMatch(/catch \{\s*return null;/);
   });
 
   it("the Scanner shows the operational identity the shop needs, and never fakes a credit balance", () => {
