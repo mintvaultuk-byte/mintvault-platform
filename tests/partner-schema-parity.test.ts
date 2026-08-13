@@ -211,6 +211,13 @@ describe("partner schema ↔ migration parity", () => {
       // inserts a certificate stamps the corresponding source Card Job, aborting the whole
       // allocation if any position fails to bind exactly one job.
       "0081_partner_card_job_certificate_binding.sql",
+      // 0082 supplies the (station_id, client_op_id) idempotency contract, which did not exist in any
+      // form (a repo-wide search for partner_op_keys/client_op_id returned zero hits). The credit
+      // engine was already idempotent, but only on SERVER-DERIVED keys — which a Scanner pressing
+      // NEW cannot provide, because there is no submission yet to derive one from. Append-only and
+      // write-once by trigger; the composite FK (card_job_id, tenant_id) makes a cross-tenant
+      // operation record structurally impossible.
+      "0082_partner_card_job_op_keys.sql",
     ]);
   });
 

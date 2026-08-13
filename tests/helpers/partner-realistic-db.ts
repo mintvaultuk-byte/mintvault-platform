@@ -81,6 +81,9 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // so every descendant list (USER_MANAGEMENT*, AUDIT_PRECISION, RBAC_SEED, G6D, PER_CARD,
   // LIFECYCLE) inherits it exactly once rather than each repeating it.
   "0080_partner_card_jobs",
+  // The (station_id, client_op_id) idempotency contract for NEW starts. Inherited by every
+  // descendant list so any suite exercising a station-initiated NEW has it.
+  "0082_partner_card_job_op_keys",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -241,6 +244,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // transaction as the credit reservation — without this table every partner suite that submits
   // fails. Production and every application-scope harness still get the full FK.
   "0080_partner_card_jobs",
+  // PARTNER scope: depends only on partner_organisations and partner_card_jobs, and deliberately
+  // carries NO foreign key to partner_stations (0045), which some partner-only databases lack.
+  "0082_partner_card_job_op_keys",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

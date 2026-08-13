@@ -584,3 +584,84 @@ API surface and existing tests assert on.
 | Suites fixed                                        | —                               | `tests/partner-pilot-flag-controls-ui.test.ts` |
 | `partner-submission-credit-lifecycle`               | —                               | **31/31**                                      |
 | Typecheck                                           | clean                           | **clean**                                      |
+
+---
+
+## P4 — GRADING CREDIT AUTHORITY
+
+### What was actually missing
+
+The credit engine was already idempotent — but only on **server-derived** keys. Every portal
+reservation is keyed `partner-submission-credit:<submissionId>:<cardId>:<ordinal>`, deterministic
+because the server already knows the submission. That cannot work for a Scanner pressing NEW: there
+is no submission yet to derive a key from, and the operation being retried is "start a new card",
+whose identity is inherently client-side. A dropped response, a double-click, a lost ack and an app
+restart mid-request are indistinguishable to the server.
+
+`grep -rn 'partner_op_keys|client_op_id|clientOpId'` returned **zero hits** repo-wide.
+
+### Migration 0082 + `server/partner/card-job-authority.ts`
+
+`(station_id, client_op_id)` UNIQUE — deliberately **not** `(tenant_id, station_id, client_op_id)`:
+a station belongs to exactly one tenant, so adding tenant_id would not scope anything already scoped,
+it would only permit the same pair twice under two tenant ids. The narrower key is the stronger
+guarantee. The FK is composite — `(card_job_id, tenant_id)` → `partner_card_jobs(id, tenant_id)` —
+so a cross-tenant operation record cannot be written at all. Append-only by `ENABLE ALWAYS` trigger:
+an idempotency record is write-once evidence, and rewriting one would let a replay be re-pointed.
+
+**No second wallet, no second availability formula.** Availability remains
+`partner_credit_availability.available_balance`; every credit movement goes through the canonical
+`reserveCreditInTransaction`. The authority composes the existing engine — it does not replace it.
+
+### Proven on real PostgreSQL — 11/11
+
+Concurrency cases use genuinely parallel `Promise.all` on **separate pool connections**. Sequential
+calls would pass even with the locking completely broken, so a sequential "concurrency test" is worse
+than none.
+
+| Property                                             | Result                                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| One credit → exactly one Card Job                    | available 3 → 2, one job                                                                    |
+| Replay ×5 (same station + op id)                     | same Card Job, same reservation, **no further credit spent**; jobs/reservations/ops all = 1 |
+| Same op id, DIFFERENT parameters                     | `IDEMPOTENCY_CONFLICT`                                                                      |
+| **Last-credit race**, 2 parallel starts on 1 credit  | exactly 1 winner, 1 × `INSUFFICIENT_CREDITS`, capacity lands at 0 and never below           |
+| Last-credit race across **two stations / two users** | exactly 1 winner                                                                            |
+| **Concurrent double-click** ×4, same op id           | every success names the SAME job; exactly 1 credit spent; ops = 1                           |
+| Zero credits                                         | NEW rejected server-side, 0 jobs, capacity never negative                                   |
+| **Suspension overrides credits**                     | refused with 10 credits available; credits untouched                                        |
+| **Emergency stop overrides credits**                 | refused with 10 credits available; credits untouched                                        |
+| Idempotency record                                   | UPDATE and DELETE both refused (`append-only`); tenant B sees 0 of tenant A's records       |
+| Zero credits does NOT block authorised work          | already-paid job still advances `CREDIT_RESERVED → NEEDS_SCAN`, keeps its reservation       |
+
+### BLOCKER found and fixed in-pass: cross-tenant emergency-stop leak
+
+`readEmergencyState()` selected **every** frozen control (`WHERE frozen = true`) with **no tenant
+predicate**, relying entirely on RLS. That held only because its original callers (session.ts,
+auth.ts) run on the RLS-scoped partner **runtime** pool. The moment it is called from a privileged
+path — the partner **admin** pool is BYPASSRLS by design, because the credit engine needs the wallet
+row lock — RLS stops filtering and it sees every tenant's controls.
+
+**Freezing ONE partner froze ALL partners.** Caught by the P4 suite: an emergency stop applied to one
+organisation refused new cards for two unrelated organisations. Fixed with an explicit
+`AND tenant_id = $1`, which is what this codebase already requires of itself — _"carry explicit tenant
+predicates … app.tenant_id context is observability/defence in depth, never a substitute for RLS."_
+The function is now correct on any pool, privileged or not.
+
+### A test-isolation defect of mine, found and fixed
+
+The new suite set `process.env.MINTVAULT_DATABASE_URL` to its disposable cluster and never restored
+it. Vitest can share a process across files, so later partner suites inherited a pointer to a
+**stopped** cluster and failed closed with 503 — correct behaviour, reported as someone else's
+failure. `partner-lockout-recovery` went 7 → 16 failures purely from the leak, while passing at 7 in
+isolation. The suite now captures and restores the ambient DB environment in `afterAll`.
+
+### Verification
+
+| Check                                               | Baseline                        | After P4                                       |
+| --------------------------------------------------- | ------------------------------- | ---------------------------------------------- |
+| Tests                                               | 187 failed / 4803 passed (5333) | **182 failed / 4822 passed (5347)**            |
+| Failing files                                       | 36                              | **35**                                         |
+| Regressions (per-file count + newly-failing suites) | —                               | **ZERO**                                       |
+| Suites fixed                                        | —                               | `tests/partner-pilot-flag-controls-ui.test.ts` |
+| New authority suite                                 | —                               | **11/11 passing**                              |
+| Typecheck / lint                                    | clean                           | **clean / 0 errors**                           |
