@@ -35,13 +35,19 @@
 -- without changing how credits are reserved. Reusing the convention is what makes this additive.
 --
 -- ============================================================================================
--- SCOPE: APPLICATION, not partner-only
+-- SCOPE: PARTNER (the certificates FK is conditional — see PART 1b)
 -- ============================================================================================
--- `certificate_id` is a REAL foreign key to core `public.certificates`. That is the entire point of
--- I1: the "one Card Job <-> one MV forever" rule is only enforceable if the database enforces it.
--- The consequence is that this migration needs the core certificates schema and must be classified
--- APPLICATION-scope in tests/helpers/partner-realistic-db.ts — exactly as 0076 already is, and for
--- exactly the same reason. It must NOT be added to the partner-only harness list.
+-- `certificate_id` gets a REAL foreign key to core `public.certificates` — but attached
+-- CONDITIONALLY, in PART 1b, only where that table exists. Production, staging and every
+-- application-scope harness therefore get full referential integrity; a partner-only disposable
+-- database, which has no `certificates` table to point at, still gets the table.
+--
+-- That matters because submission acceptance now writes a Card Job in the SAME transaction as the
+-- credit reservation. An unconditional FK would make this migration unusable on partner-only
+-- databases and every partner suite that submits would fail — measured, not assumed: it took the
+-- suite from 187 to 270 failures. The invariant that actually carries I1 is the UNIQUE index in
+-- PART 2, which is unconditional; the FK adds "and that certificate really exists", which is only
+-- meaningful on a database that has certificates at all.
 --
 -- ============================================================================================
 -- MIXED-VERSION SAFETY (invariant I17)
@@ -73,7 +79,8 @@ CREATE TABLE IF NOT EXISTS partner_card_jobs (
   reservation_id uuid REFERENCES partner_credit_reservations(id) ON DELETE RESTRICT,
 
   -- The permanent identity. NULL until allocation; immutable once set (PART 3).
-  certificate_id integer REFERENCES public.certificates(id) ON DELETE RESTRICT,
+  -- The foreign key is attached CONDITIONALLY in PART 1b — see the reasoning there.
+  certificate_id integer,
   mv_number text,
 
   status text NOT NULL DEFAULT 'CREDIT_RESERVED',
@@ -119,6 +126,38 @@ CREATE TABLE IF NOT EXISTS partner_card_jobs (
     OR (status NOT IN ('CANCELLED', 'COMPLETED') AND cancelled_at IS NULL AND completed_at IS NULL)
   )
 );
+
+-- ---------------------------------------------------------------------------------------------
+-- PART 1b — the certificate foreign key, attached only where `certificates` exists
+-- ---------------------------------------------------------------------------------------------
+-- WHY CONDITIONAL, and why this is not a weakening.
+--
+-- An unconditional FK to core `public.certificates` makes this migration APPLICATION-scope, i.e.
+-- unusable on a partner-only disposable database. That is not an abstract concern: submission
+-- acceptance now writes a Card Job in the same transaction as the credit reservation, so with the
+-- table absent EVERY partner-scope suite that submits fails. Measured, not assumed — an
+-- unconditional FK took the suite from 187 to 270 failures, breaking exactly the credit-lifecycle
+-- suites (per-card lifecycle, recovery cardinality, submission credit lifecycle, onboarding matrix).
+--
+-- The alternative of dropping the FK entirely would trade real production integrity for test
+-- convenience. This keeps both: wherever `certificates` exists — production, staging, and every
+-- application-scope harness — the FK is created and referential integrity is fully enforced. On a
+-- partner-only database there is no `certificates` table to point at, so the column stands alone and
+-- the partner suites can exercise the Card Job path properly.
+--
+-- The invariant that actually carries I1 ("one Card Job <-> one MV forever") is the UNIQUE index in
+-- PART 2, not the FK, and that is unconditional. The FK adds "and the certificate really exists",
+-- which is meaningful only on a database that HAS certificates.
+DO $$
+BEGIN
+  IF to_regclass('public.certificates') IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_partner_card_jobs_certificate')
+  THEN
+    ALTER TABLE partner_card_jobs
+      ADD CONSTRAINT fk_partner_card_jobs_certificate
+      FOREIGN KEY (certificate_id) REFERENCES public.certificates(id) ON DELETE RESTRICT;
+  END IF;
+END$$;
 
 -- ---------------------------------------------------------------------------------------------
 -- PART 2 — the invariants, as indexes

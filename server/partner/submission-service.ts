@@ -899,6 +899,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       // with fewer credits than cards, which is the defect this change exists to remove.
       const reservations: Awaited<ReturnType<typeof reserveCreditInTransaction>>[] = [];
       for (const unit of creditUnits) {
+        const cardReference = `partner-submission-card:${unit.cardId}:${unit.ordinal}`;
         reservations.push(
           await reserveCreditInTransaction(
             c,
@@ -908,7 +909,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
               locationId: row.location_id,
               // Unique per submission card + ordinal, so uq_partner_credit_reserve_card_live
               // enforces "one live entitlement per card" as designed.
-              cardReference: `partner-submission-card:${unit.cardId}:${unit.ordinal}`,
+              cardReference,
               submissionReference: submissionId,
               expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
               idempotencyKey: `partner-submission-credit:${submissionId}:${unit.cardId}:${unit.ordinal}`,
@@ -925,6 +926,88 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
             }
           )
         );
+
+        /*
+         * THE CANONICAL CARD JOB — created in the SAME transaction as the credit reservation that
+         * pays for it (migration 0080).
+         *
+         * This is what makes "1 Grading Credit = exactly 1 NEW Card Job" a database fact rather than
+         * a convention. Before this, a spent credit was joined to a card only by a nullable TEXT
+         * `card_reference` with no foreign key, compared elsewhere by string matching, so nothing
+         * prevented a reservation without a job, a job without a reservation, or two jobs sharing
+         * one paid credit.
+         *
+         * ATOMICITY: `c` is the same transaction as the reservation above and as every acceptance
+         * write below, so the pair either both commit or neither does. A wallet that runs out
+         * partway rolls the whole acceptance back — including these jobs — exactly as the existing
+         * all-or-nothing reservation behaviour already guarantees.
+         *
+         * IDEMPOTENCY: `reserveCreditInTransaction` returns the EXISTING reservation on a repeated
+         * idempotency key rather than minting a second one, so a retried submit must not mint a
+         * second Card Job either. `uq_partner_card_jobs_unit (card_id, ordinal)` makes that
+         * impossible at the database level and ON CONFLICT DO NOTHING makes the retry a no-op
+         * instead of an error.
+         *
+         * NO MV IS ALLOCATED HERE. certificate_id and mv_number stay NULL until the connector
+         * allocates a real certificate. A Card Job therefore exists in CREDIT_RESERVED with paid
+         * authority and no identity yet, which is precisely the state the lifecycle expects.
+         */
+        let inserted;
+        try {
+          inserted = await c.query<{ id: string }>(
+            `INSERT INTO partner_card_jobs
+             (tenant_id, submission_id, card_id, ordinal, card_reference, reservation_id,
+              location_id, created_by, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CREDIT_RESERVED')
+           ON CONFLICT (card_id, ordinal) DO NOTHING
+           RETURNING id`,
+            [
+              principal.tenantId,
+              submissionId,
+              unit.cardId,
+              unit.ordinal,
+              cardReference,
+              reservations[reservations.length - 1].reservation.id,
+              row.location_id,
+              principal.userId,
+            ]
+          );
+        } catch (err) {
+          /*
+           * 42P01 = undefined_table. This is the ONE failure mode that would otherwise be genuinely
+           * misleading (invariant I18): the acceptance rolls back and the partner sees a bare 500,
+           * with nothing anywhere naming the missing migration. Everything else — a constraint
+           * violation, a tenant mismatch — is a real defect and must keep propagating untouched.
+           */
+          if ((err as { code?: string })?.code === "42P01") {
+            throw new Error(
+              "Submission cannot be accepted: the canonical Card Job table is missing. " +
+                "Apply migrations/0080_partner_card_jobs.sql, then retry."
+            );
+          }
+          throw err;
+        }
+
+        if (inserted.rowCount === 0) {
+          /*
+           * The job already existed — the expected path for an idempotent retry. Verify it is
+           * funded by the SAME reservation rather than assuming it. A mismatch would mean one card
+           * unit is associated with two different paid credits, which is the exact double-spend this
+           * table exists to prevent, so it fails loudly and rolls the acceptance back rather than
+           * quietly proceeding.
+           */
+          const existing = await c.query<{ reservation_id: string | null }>(
+            `SELECT reservation_id FROM partner_card_jobs
+              WHERE card_id=$1 AND ordinal=$2 AND tenant_id=$3`,
+            [unit.cardId, unit.ordinal, principal.tenantId]
+          );
+          const existingReservation = existing.rows[0]?.reservation_id ?? null;
+          if (existingReservation !== reservations[reservations.length - 1].reservation.id) {
+            throw new Error(
+              "Card Job reservation mismatch: this card unit is already funded by a different credit reservation."
+            );
+          }
+        }
       }
       // Retained for the audit/event payload below, which records the acceptance as a whole.
       const reservation = reservations[0];

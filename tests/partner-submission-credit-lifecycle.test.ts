@@ -288,6 +288,20 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
         migrator,
         files.filter((file) => file.number < 19)
       );
+      /*
+       * Submission acceptance now writes a canonical Card Job in the SAME transaction as the credit
+       * reservation, so this table must exist or every reserve-on-accept assertion below fails with
+       * "relation partner_card_jobs does not exist".
+       *
+       * It is applied as RAW SQL rather than through applyMigrations() ON PURPOSE. This suite also
+       * exercises rollback-0041, whose guard refuses to run while a HIGHER-NUMBERED migration is
+       * recorded in the journal — a correct guard that must not be weakened. Routing 0080 through
+       * applyMigrations() would journal migration 80 and make that rollback test fail for a reason
+       * that has nothing to do with what it is testing. Executing the file directly creates the
+       * table the reserve tests need while leaving the journal at the state the rollback test
+       * requires. The file is idempotent (IF NOT EXISTS throughout), so this is safe.
+       */
+      await migrator.query(readFileSync("migrations/0080_partner_card_jobs.sql", "utf8"));
       // PG17 records role-membership grantors. The deployment owner must execute
       // 0041 so it can revoke the temporary definer membership it grants itself.
       await applyMigrations(

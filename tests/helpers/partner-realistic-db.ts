@@ -75,6 +75,12 @@ export const PARTNER_MIGRATIONS_WITH_G6A = [...PARTNER_MIGRATIONS_WITH_G5, "0016
 export const PARTNER_MIGRATIONS_WITH_G6B = [
   ...PARTNER_MIGRATIONS_WITH_G6A,
   "0017_partner_credit_reservations",
+  // Submission acceptance now writes a canonical Card Job in the SAME transaction as the credit
+  // reservation, so any suite that SUBMITS needs this table or the insert fails and the whole
+  // acceptance rolls back. Added here, immediately after the reservations migration it depends on,
+  // so every descendant list (USER_MANAGEMENT*, AUDIT_PRECISION, RBAC_SEED, G6D, PER_CARD,
+  // LIFECYCLE) inherits it exactly once rather than each repeating it.
+  "0080_partner_card_jobs",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -173,11 +179,6 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // so pulling this into the Partner harness would fail — it is classified here on what it TOUCHES,
   // not on which feature motivated it.
   "0079_admin_password_lockout",
-  // APPLICATION scope, deliberately: 0080 carries a REAL foreign key to core `public.certificates`,
-  // which is the whole point of invariant I1 — "one Card Job <-> one MV forever" is only enforceable
-  // if the database enforces it. A partner-only disposable database has no certificates table, so
-  // this must never be pulled into the partner harness. Same reason 0076 is classified here.
-  "0080_partner_card_jobs",
 ] as const;
 
 /**
@@ -230,6 +231,12 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // a submitted email — so the RLS coverage sweep in partner-rls-isolation.test.ts correctly ignores
   // it (that sweep asserts RLS only for partner_% tables HAVING a tenant_id column).
   "0078_partner_shared_rate_limit_buckets",
+  // PARTNER scope: 0080's foreign key to core `public.certificates` is attached CONDITIONALLY
+  // (only where that table exists), so the table itself is creatable on a partner-only disposable
+  // database. That matters because submission acceptance now writes a Card Job in the SAME
+  // transaction as the credit reservation — without this table every partner suite that submits
+  // fails. Production and every application-scope harness still get the full FK.
+  "0080_partner_card_jobs",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

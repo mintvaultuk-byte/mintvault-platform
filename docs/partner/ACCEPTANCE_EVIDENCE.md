@@ -437,3 +437,73 @@ certificate allocation through `partner_card_jobs`, and expose the single server
 function that replaces the seven duplicated guard clauses in `submission-service.ts`. Until that
 lands, `partner_card_jobs` is an unused (additive, inert) table — which is exactly why it is safe to
 apply ahead of the code.
+
+---
+
+## P3 (continued) — CARD JOB SERVICE LAYER
+
+### Card Jobs are now created inside the credit-reservation transaction
+
+`server/partner/submission-service.ts` — submission acceptance now inserts a canonical Card Job in
+the **same transaction** as the credit reservation that pays for it. This is what makes
+"1 Grading Credit = exactly 1 NEW Card Job" a database fact rather than a convention.
+
+- **Atomic:** same `PoolClient` as the reservation and every acceptance write, so the pair both
+  commit or neither does. A wallet that runs out partway rolls the whole acceptance back.
+- **Idempotent:** `reserveCreditInTransaction` returns the EXISTING reservation on a repeated
+  idempotency key, so a retried submit must not mint a second job either.
+  `uq_partner_card_jobs_unit (card_id, ordinal)` makes that impossible and `ON CONFLICT DO NOTHING`
+  makes the retry a no-op. On the conflict path the existing row's `reservation_id` is **verified**
+  rather than assumed — a mismatch means one card unit funded by two different credits, which fails
+  loudly and rolls back.
+- **No MV is allocated here.** `certificate_id`/`mv_number` stay NULL until the connector allocates a
+  real certificate, so a Card Job legitimately exists in `CREDIT_RESERVED` with paid authority and no
+  identity yet.
+
+### Two design errors of mine, found by the suite and corrected
+
+Both were caught by running the tests, not by reasoning — recorded because the reasoning that
+_produced_ them was wrong, and that is the useful part.
+
+1. **An unconditional FK to core `certificates` made 0080 application-scope**, so every partner-scope
+   harness lost the table and every suite that submits failed: **187 → 270 failures**. Fixed by
+   attaching the FK **conditionally** (PART 1b) — production, staging and every application-scope
+   harness still get full referential integrity; a partner-only database, which has no `certificates`
+   table to point at, gets the table without it. The invariant that actually carries I1 is the UNIQUE
+   index, which is unconditional. 0080 is consequently reclassified **PARTNER scope** and added once
+   to `PARTNER_MIGRATIONS_WITH_G6B`, so every descendant list inherits it.
+
+2. **Putting `partner_card_jobs` in the surface-wide schema contract was too broad a gate.** It took
+   login, `/api/partner/me` and the dashboard down with a 503 whenever 0080 was absent
+   (`expected 503 to be 200` in partner-mfa-enrolment-mandatory and partner-onboarding-matrix). A
+   surface-wide gate belongs only to schema the surface cannot function without — 0077's auth
+   projection genuinely gates every login; a submit-path dependency does not. Removed from the
+   contract; the submit path now raises its own `42P01`-specific error naming
+   `migrations/0080_partner_card_jobs.sql`, which satisfies I18's real requirement (never a
+   MISLEADING failure) without over-blocking.
+
+### A rollback guard correctly refused, and was respected rather than weakened
+
+Adding 0080 through `applyMigrations()` in `partner-submission-credit-lifecycle.test.ts` journalled
+migration 80, and `rollback-0041` refuses to run while a higher-numbered migration is recorded — a
+correct guard. Rather than relax it, 0080 is applied there as **raw SQL**, creating the table the
+reserve tests need while leaving the journal in the state the rollback test requires. The file is
+idempotent, so this is safe.
+
+### Verification
+
+| Check                                               | Baseline                              | After P3 service layer                                                                                               |
+| --------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Tests                                               | 187 failed / 4803 passed (5333)       | **182 failed / 4809 passed (5334)**                                                                                  |
+| Failing files                                       | 36                                    | **35**                                                                                                               |
+| Regressions (per-file count + newly-failing suites) | —                                     | **ZERO**                                                                                                             |
+| Suites fixed                                        | —                                     | `tests/partner-pilot-flag-controls-ui.test.ts`                                                                       |
+| `partner-submission-credit-lifecycle`               | (not previously exercising Card Jobs) | **31/31 passing** — reserve-on-accept now proves Card Job + reservation atomicity and idempotency on real PostgreSQL |
+| Typecheck / lint                                    | clean                                 | **clean / 0 errors**                                                                                                 |
+| 0080 invariant proof                                | —                                     | re-run after the conditional-FK change: **all refusals still hold**, MV unchanged across FIX                         |
+
+> **Verification-method correction.** An earlier P3 run reported "zero regressions" from a diff whose
+> input file was **empty** (0 lines), so `comm` trivially returned nothing. That claim was not
+> actually verified and is retracted. Diffs are now taken from a durable log whose line count is
+> checked before use, and compared on **per-file failure counts** rather than a globally-deduplicated
+> set of test names — the latter can mask a new failure whose name already appears elsewhere.

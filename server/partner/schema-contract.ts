@@ -103,6 +103,23 @@ export const PARTNER_SCHEMA_CONTRACT: readonly SchemaRequirement[] = [
   },
 ];
 
+/*
+ * DELIBERATELY NOT IN THE CONTRACT ABOVE: `partner_card_jobs` (migration 0080).
+ *
+ * It was added here first, and that was a design error caught by the test suite: this contract gates
+ * the ENTIRE partner surface, so requiring a table that only the SUBMIT path needs took login,
+ * /api/partner/me, the dashboard and every other route down with a 503 whenever 0080 was absent.
+ * Measured, not theorised — it turned partner-mfa-enrolment-mandatory and partner-onboarding-matrix
+ * red with `expected 503 to be 200`.
+ *
+ * The right scope for a surface-wide gate is schema the surface CANNOT FUNCTION WITHOUT — 0077's
+ * auth projection genuinely gates every login, so it belongs. A submit-path dependency does not:
+ * a partner with no Card Job table can still sign in, read their dashboard and see their credits,
+ * and should. The submit path raises its own clear, migration-naming error instead (see
+ * server/partner/submission-service.ts), which satisfies I18's real requirement — never a
+ * MISLEADING failure — without over-blocking.
+ */
+
 export interface SchemaContractResult {
   ok: boolean;
   /** Populated only when ok === false. Each entry names the requirement AND its migration. */
