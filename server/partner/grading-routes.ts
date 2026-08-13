@@ -418,7 +418,11 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
 export function partnerGradingRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
-  r.use(requirePartnerGradingEnabled);
+  // This router is mounted at the portal root so its auth middleware can protect
+  // the grading routes. Scope the grading kill switch to its own prefix: a
+  // router-wide gate would otherwise intercept submissions, customers and every
+  // later portal router before their handlers can run.
+  r.use("/grading", requirePartnerGradingEnabled);
 
   r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
     res.json({ authenticated: true, userId: req.partner!.userId });
