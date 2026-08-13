@@ -218,6 +218,12 @@ describe("partner schema ↔ migration parity", () => {
       // write-once by trigger; the composite FK (card_job_id, tenant_id) makes a cross-tenant
       // operation record structurally impossible.
       "0082_partner_card_job_op_keys.sql",
+      // 0083 catalogues the Grading Credit packs (5/10/25/50/100) and seeds the
+      // partner.credits.purchase permission. stripe_price_id is NULLABLE and every seeded pack starts
+      // NULL, so the whole flow is complete and testable while the £ amounts remain an owner
+      // decision — setting prices later is a DATA change, not a migration or a deploy. Global
+      // reference data: no tenant_id, and therefore correctly outside the RLS coverage sweep.
+      "0083_partner_credit_packs.sql",
     ]);
   });
 

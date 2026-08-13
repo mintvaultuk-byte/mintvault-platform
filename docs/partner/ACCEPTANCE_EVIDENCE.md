@@ -665,3 +665,74 @@ isolation. The suite now captures and restores the ambient DB environment in `af
 | Suites fixed                                        | —                               | `tests/partner-pilot-flag-controls-ui.test.ts` |
 | New authority suite                                 | —                               | **11/11 passing**                              |
 | Typecheck / lint                                    | clean                           | **clean / 0 errors**                           |
+
+---
+
+## P5 — BUY MORE GRADING CREDITS (grant authority landed; UX outstanding)
+
+### Pricing stayed an owner decision, and the architecture is still complete
+
+`partner_credit_packs.stripe_price_id` is NULLABLE and all five seeded packs (5/10/25/50/100) start
+NULL. A pack with no price id is **catalogued but not purchasable** — `resolvePackForCheckout` refuses
+it explicitly rather than letting Stripe fail on a missing price. So the whole flow — catalogue,
+permissions, checkout resolution, webhook-authoritative grant, replay safety, refund handling — is
+built and proven while the £ amounts remain owner-gated. Setting prices later is a **data** change:
+create the Stripe Prices, write the ids into these rows. No migration, no deploy, no code change.
+Adding a 250 pack after the pilot is likewise an INSERT.
+
+### Exactly-once is reused, not reinvented
+
+Two INDEPENDENT pre-existing mechanisms, both on the money path:
+
+1. `stripe_webhook_events` — `INSERT ... ON CONFLICT DO NOTHING` claims the event id (race-safe
+   across concurrent deliveries).
+2. `uq_partner_credit_ledger_idem (source, idempotency_key)` — the grant is written with
+   `source='stripe'` and `idempotency_key = the Stripe EVENT id`, so the database refuses a second
+   ledger row even if the claim were bypassed.
+
+They fail differently — the claim covers concurrent delivery, the unique index covers a claim table
+that was truncated, restored or bypassed — so neither is a single point of failure. The ledger already
+permitted `entry_type='purchase'` and `source='stripe'` (0016's CHECKs); nothing had ever written
+them. Granting goes through `appendFoundationCredit()`, the existing and only positive-credit write
+boundary. **No second wallet, no new availability formula.**
+
+### Proven on real PostgreSQL — 12/12
+
+| Property                                    | Result                                                                                                |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Catalogue                                   | five packs 5/10/25/50/100, **none purchasable** until priced                                          |
+| Configuring a Stripe Price id               | pack becomes purchasable immediately — data, not a deploy                                             |
+| Paid webhook                                | grants exactly the pack's credits; ledger row is `purchase` / `stripe`                                |
+| **Replay ×5 of one event**                  | **grants once** (50, not 250); exactly 1 ledger row                                                   |
+| **Concurrent delivery ×6 of one event**     | **grants once** (100, not 600); exactly 1 ledger row                                                  |
+| Two DISTINCT events                         | both grant — replay safety is not accidental blanket deduplication                                    |
+| Unpaid / expired session                    | grants nothing, capacity untouched                                                                    |
+| **Tampered metadata claiming 9999 credits** | grants **5** — credits come from the server catalogue, never from session metadata                    |
+| Unknown pack code                           | grants nothing                                                                                        |
+| Non-partner checkout                        | ignored without throwing (a throw would make Stripe retry forever)                                    |
+| Permissions                                 | OWNER yes; MANAGER only when `partner.credits.purchase` is granted; **GRADER never, even if granted** |
+| Refund/chargeback                           | recorded as an audited exception, **capacity unchanged**; recording twice is a no-op                  |
+
+The refund behaviour is deliberate: capacity may already be reserved against cards mid-grade or
+already printed, so a silent debit would strand them — and the ledger's
+`partner_credit_ledger_preserve_active_reservations` trigger would refuse it regardless. A human
+resolves it with an audited Super Admin adjustment.
+
+### Verification
+
+| Check              | Baseline                        | After P5 core                                    |
+| ------------------ | ------------------------------- | ------------------------------------------------ |
+| Tests              | 187 failed / 4803 passed (5333) | **182 failed / 4834 passed (5359)**              |
+| Failing files      | 36                              | **35**                                           |
+| Regressions        | —                               | **ZERO** (per-file count + newly-failing suites) |
+| New purchase suite | —                               | **12/12**                                        |
+| Typecheck / lint   | clean                           | **clean / 0 errors**                             |
+
+### Outstanding in P5 (explicitly not claimed as done)
+
+The **grant authority** is complete and proven. Still to build: the HTTP checkout route that creates
+the Stripe Checkout Session with `partner_tenant_id` / `partner_pack_code` metadata, the webhook
+branch wiring `fulfilPartnerCreditPurchase` into `server/webhookHandlers.ts`, and the dashboard UX
+(available / reserved / ready-to-grade, Buy More CTA, low-credit warning, zero-credit reason). Those
+are integration surfaces on top of the proven core, and none of them can grant a credit — only the
+webhook path can.

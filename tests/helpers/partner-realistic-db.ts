@@ -84,6 +84,9 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // The (station_id, client_op_id) idempotency contract for NEW starts. Inherited by every
   // descendant list so any suite exercising a station-initiated NEW has it.
   "0082_partner_card_job_op_keys",
+  // The Grading Credit pack catalogue. Needed by any suite exercising a purchase, and harmless
+  // elsewhere — it is global reference data with no tenant column.
+  "0083_partner_credit_packs",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -247,6 +250,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: depends only on partner_organisations and partner_card_jobs, and deliberately
   // carries NO foreign key to partner_stations (0045), which some partner-only databases lack.
   "0082_partner_card_job_op_keys",
+  // PARTNER scope: global reference data (no tenant_id, correctly no RLS) plus an RBAC permission
+  // seed. Depends on nothing outside the partner chain.
+  "0083_partner_credit_packs",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
