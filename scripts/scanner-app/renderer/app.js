@@ -699,42 +699,53 @@ function createText(className, value) {
   return element;
 }
 
-function renderMissingImages(orphans) {
+/**
+ * P7 — the FIX queue.
+ *
+ * The server sends entries already shaped as the operator reads them aloud:
+ *   MV421 — FRONT MISSING
+ * The list is derived from THIS partner's own Card Jobs, so there is no MV number to type and no
+ * way to name a card belonging to anybody else. Selecting one asks the server to authorise exactly
+ * the missing side(s); it costs no Grading Credits and works at a zero balance.
+ */
+function renderMissingImages(items) {
   els.orphanList.replaceChildren();
-  if (!orphans.length) {
-    els.orphanList.textContent = "No certificates are missing images.";
+  if (!items || !items.length) {
+    els.orphanList.textContent = "No cards are waiting for a replacement image.";
     return;
   }
 
-  for (const orphan of orphans) {
-    const missing = orphan.missingFront && orphan.missingBack
-      ? "missing front and back"
-      : orphan.missingFront
-        ? "missing front"
-        : orphan.missingBack
-          ? "missing back"
-          : "complete";
+  for (const item of items) {
     const row = document.createElement("div");
     row.className = "orphan-row";
     const info = document.createElement("div");
     info.className = "orphan-info";
     info.append(
-      createText("orphan-id", orphan.certId || "Unknown certificate"),
-      createText("orphan-meta", `${orphan.cardName || "(unnamed card)"}${orphan.set ? ` · ${orphan.set}` : ""} — ${missing}`),
+      createText("orphan-id", `${item.mvNumber} — ${item.missingLabel}`),
+      createText("orphan-meta", item.cardName || "(unnamed card)"),
     );
     const actions = document.createElement("div");
     actions.className = "orphan-actions";
-    if (orphan.missingFront || orphan.missingBack) {
-      const recover = document.createElement("button");
-      recover.className = "btn primary";
-      recover.textContent = "Open in MintVault";
-      recover.addEventListener("click", async () => {
-        const result = await window.scanner.openGradeCert(orphan.certId);
-        if (!result?.ok) return alert(`Couldn't open MintVault: ${result?.error || "unknown error"}`);
+    const fixBtn = document.createElement("button");
+    fixBtn.className = "btn primary";
+    fixBtn.textContent = "FIX THIS CARD";
+    fixBtn.addEventListener("click", async () => {
+      fixBtn.disabled = true;
+      try {
+        const result = await window.scanner.authoriseFix({
+          cardJobId: item.cardJobId,
+          sides: item.missingSides,
+        });
+        if (!result?.ok) {
+          alert(result?.error || "Could not start the fix");
+          return;
+        }
         closeModal(els.orphanModal);
-      });
-      actions.append(recover);
-    }
+      } finally {
+        fixBtn.disabled = false;
+      }
+    });
+    actions.append(fixBtn);
     row.append(info, actions);
     els.orphanList.append(row);
   }
@@ -792,7 +803,7 @@ els.orphansBtn.addEventListener("click", async () => {
     els.orphanList.textContent = `Could not load missing images: ${result?.body?.error || result?.status || "unknown error"}`;
     return;
   }
-  renderMissingImages(result.body?.orphans || []);
+  renderMissingImages((result.body && result.body.items) || result.body?.orphans || []);
 });
 
 els.orphanClose.addEventListener("click", () => closeModal(els.orphanModal));

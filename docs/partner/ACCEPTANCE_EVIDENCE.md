@@ -1020,3 +1020,92 @@ FRONT/BACK capture sessions automatically from that response — the operator st
 workstation, as before. The server side of that path (tenant binding for walk-in certificates) is
 built and tested; wiring the two-side arm loop into the Electron capture flow is the remaining step,
 and it cannot mint credits or MV numbers because both already exist by then.
+
+---
+
+## P7 — SCANNER FIX
+
+Repairs the dead "Fix missing images" behaviour by building the route that was missing, NOT by
+weakening the one that correctly refuses.
+
+### The defect, and why the obvious fix was the wrong one
+
+`server/lib/station-request-scope.ts` refuses a signed station on `/api/admin/orphan-certs`, so the
+Electron app's picker has been returning 403 in production (issue D-3). The tempting fix — add the
+path to the station allowlist — would have been the worst possible one: that route addresses
+`certificates` by number with **no tenant predicate**, because its only principals were ever an admin
+cookie or the HQ scanner token. Admitting a partner station would have handed every approved shop
+cross-tenant reads, evidence overwrites, presigned-URL disclosure and soft-deletes across the whole
+certificate estate.
+
+The 403 is not the bug. The missing tenant-scoped route is. `server/partner/fix-authority.ts` is that
+route. `/api/admin/orphan-certs` is left exactly as strict as it was, and a test asserts both that it
+is absent from the station allowlist and that its guard is unchanged.
+
+### The asymmetry that makes FIX safe
+
+NEW is expensive and rare: it creates identity and spends money, so the wallet guards it. FIX is
+cheap and always available: a shop with a bad scan and an empty wallet still has a paid card on the
+counter, and refusing to let them finish it would punish them for a defect in our own capture. So the
+wallet is never consulted — `fix-authority.ts` has no import by which it could reach one, and a test
+asserts the absence rather than the behaviour.
+
+It cannot become a free NEW because every operation is keyed on an EXISTING `partner_card_jobs` row
+that already has an MV, already has a reservation and already belongs to the caller's tenant. There
+is no create path, no allocator call, and the only sides that can be authorised are ones a
+deliberate, audited invalidation has already emptied.
+
+### "Delete image" is a lie we do not tell the database
+
+Nothing is removed. The current evidence row is marked `is_current = false` with a `superseded_at`
+stamp — the same append-only supersede chain recapture already uses, with `ON DELETE RESTRICT` on
+`superseded_by_id` so an original can never be cascaded away. The immutable master stays in R2. The
+Card Job, its MV, its certificate, its reservation and its credit lineage all survive: a bad
+photograph is not a reason to unpick a payment, and re-minting identity would break "one Card Job =
+one permanent MV". The card moves to FIX_REQUIRED and waits.
+
+A reason is MANDATORY on invalidation. An unexplained one is indistinguishable from an accident or an
+abuse, and the audit row is the only thing that can tell them apart later.
+
+### Proven on real PostgreSQL — 23/23, most of it hostile
+
+| Case                                       | Result                                                                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| invalidate a side                          | job, MV, certificate, reservation all unchanged; original evidence row still present, `is_current=false`, `superseded_at` set |
+| wallet before vs after                     | **byte-identical** — available, ledger rows, ledger total, reservation count                                                  |
+| audit                                      | one row naming actor, card job, MV and the operator's reason                                                                  |
+| no reason given                            | refused                                                                                                                       |
+| FIX queue                                  | `FRONT MISSING` / `BACK MISSING` / `FRONT + BACK MISSING`, sides server-derived                                               |
+| complete card                              | absent from the queue                                                                                                         |
+| **FIX at a ZERO balance**                  | works; wallet snapshot identical before and after                                                                             |
+| authorise                                  | ONLY the missing side, never both                                                                                             |
+| full FIX cycle                             | 1 job, 1 certificate, MV counter **unchanged**; 2 evidence rows for the side, exactly 1 current                               |
+| HOSTILE Partner A lists B's queue          | B's MV absent from A's queue                                                                                                  |
+| HOSTILE A acts on B's REAL Card Job id     | `CARD_JOB_NOT_FOUND` for both invalidate and authorise; B's image still current, B's wallet untouched                         |
+| HOSTILE forged Card Job id                 | refused                                                                                                                       |
+| HOSTILE REVOKED station                    | `STATION_NOT_ACTIVE`                                                                                                          |
+| HOSTILE station at the WRONG location      | refused                                                                                                                       |
+| HOSTILE replace an ACCEPTED side           | `SIDE_NOT_INVALIDATED`                                                                                                        |
+| HOSTILE ask for a side that is not missing | refused outright, **not silently narrowed**                                                                                   |
+| HOSTILE FIX an APPROVED card               | `JOB_NOT_FIXABLE` — approved work is corrected, not re-scanned                                                                |
+| HOSTILE invalidate an already-missing side | refused, not reported as done                                                                                                 |
+
+A cross-tenant or forged id returns 404, deliberately the same answer a genuinely absent id gets: a
+distinct 403 would confirm the id is real and belongs to somebody, which is the fact being probed for.
+
+### Verification
+
+| Check            | P6 baseline             | After P7                          |
+| ---------------- | ----------------------- | --------------------------------- |
+| Tests            | 27 failed / 4341 passed | **27 failed / 4364 passed** (+23) |
+| Failing files    | 8                       | **8 — identical set**             |
+| Newly failing    | —                       | **ZERO**                          |
+| Typecheck / lint | clean / 0 errors        | **clean / 0 errors**              |
+| New P7 suite     | —                       | **23/23**                         |
+
+### Carried, not hidden
+
+The Scanner's FIX picker now lists the tenant-scoped queue and calls `fix-authorise`, but the app
+does not yet drive the returned side straight into a capture session — same remaining wiring step as
+P6's NEW, and the same reason it is safe to carry: by that point the MV, the certificate and the paid
+reservation all already exist, so nothing downstream can mint credits or identity.

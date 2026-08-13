@@ -1,5 +1,11 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { resolvePartnerSession, requirePartnerAuth, requirePartnerCapability } from "./session";
+import {
+  resolvePartnerSession,
+  requirePartnerAuth,
+  requirePartnerCapability,
+  requireNotViewOnly,
+  requireNotSensitiveFrozen,
+} from "./session";
 import { StationIdentityError } from "./station-identity";
 import {
   StationServiceError,
@@ -16,6 +22,30 @@ import {
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
 import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-authority";
+import { FixAuthorityError, authoriseFix, invalidateSide, listFixQueue } from "./fix-authority";
+
+/**
+ * FIX failures map to statuses that tell the operator what to do next.
+ *
+ * A cross-tenant or forged Card Job id resolves to CARD_JOB_NOT_FOUND -> 404, deliberately the same
+ * answer a genuinely absent id gets: a distinct 403 would confirm that the id is real and belongs to
+ * somebody, which is exactly the fact an attacker is probing for.
+ */
+function fixError(res: Response, error: unknown): void {
+  if (error instanceof FixAuthorityError) {
+    const status =
+      error.code === "CARD_JOB_NOT_FOUND"
+        ? 404
+        : error.code === "STATION_NOT_ACTIVE" || error.code === "ORGANISATION_NOT_ACTIVE"
+          ? 403
+          : error.code === "JOB_NOT_FIXABLE"
+            ? 409
+            : 400;
+    res.status(status).json({ error: { code: error.code, message: error.message } });
+    return;
+  }
+  stationError(res, error);
+}
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -155,6 +185,51 @@ export function partnerStationRouter(): Router {
     }
   );
 
+  /**
+   * P7 — the dashboard's "remove this image from grading".
+   *
+   * A BROWSER action, so it is guarded by the partner session rather than a station signature: the
+   * person deciding an image is unusable is looking at it on the dashboard, not standing at the Mac.
+   * `requireNotViewOnly` and `requireNotSensitiveFrozen` apply because retiring evidence is a
+   * mutation with forensic consequences.
+   *
+   * Nothing is deleted. The image is superseded, the card moves to FIX_REQUIRED, and the MV, the
+   * certificate, the reservation and the original master all stay exactly where they are.
+   */
+  r.post(
+    "/card-jobs/:cardJobId/invalidate-side",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.cards.scan"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      const principal = req.partner!;
+      try {
+        const result = await invalidateSide({
+          tenantId: principal.tenantId,
+          locationId: principal.locationId,
+          cardJobId: String(req.params.cardJobId),
+          side: req.body?.side,
+          actorUserId: principal.userId,
+          reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+        });
+        res.json({ invalidated: result });
+      } catch (error) {
+        fixError(res, error);
+      }
+    }
+  );
+
+  /** The same server-derived FIX queue, for the dashboard. Identical tenant scoping. */
+  r.get("/fix-queue", requirePartnerAuth, requirePartnerCapability("partner.cards.view"), async (req, res) => {
+    const principal = req.partner!;
+    try {
+      res.json({ items: await listFixQueue({ tenantId: principal.tenantId, locationId: principal.locationId }) });
+    } catch (error) {
+      fixError(res, error);
+    }
+  });
+
   r.post("/stations/heartbeat", requireSignedStation, requireSignedStationOperator, async (req, res) => {
     try {
       const result = await recordStationHeartbeat(req.station!, {
@@ -221,6 +296,63 @@ export function partnerStationRouter(): Router {
       stationError(res, error);
     }
   });
+
+  /**
+   * P7 — the FIX queue, for the Scanner.
+   *
+   * THIS IS THE ROUTE THAT REPLACES THE DEAD "Fix missing images" BUTTON. That button called
+   * `/api/admin/orphan-certs`, which addresses certificates with no tenant predicate and therefore
+   * correctly refuses a signed station. Rather than weakening it, this returns the same operator
+   * affordance derived from THIS partner's own Card Jobs.
+   *
+   * Because the list is server-derived and tenant-scoped, the normal FIX flow never asks anyone to
+   * type an MV number — which is what removes the opportunity to type someone else's.
+   */
+  /*
+   * A DISTINCT PATH from the dashboard's `/fix-queue`, not a shared one. The two callers prove
+   * themselves completely differently — the dashboard by session cookie, the station by Ed25519
+   * request signature plus an operator-session header — and Express matches the first registered
+   * route, so one path with two guard stacks would silently mean only the first stack ever runs.
+   */
+  r.get("/stations/fix-queue", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+    const station = req.station!;
+    try {
+      const items = await listFixQueue({ tenantId: station.tenantId, locationId: station.locationId });
+      res.json({ items });
+    } catch (error) {
+      fixError(res, error);
+    }
+  });
+
+  /**
+   * P7 — authorise the replacement capture. COSTS ZERO GRADING CREDITS.
+   *
+   * Same Card Job, same MV, same certificate, same reservation. The service contains no wallet call
+   * at all, so this works identically when the shop's balance is zero — which is the point: a card
+   * already paid for must always be finishable.
+   */
+  r.post(
+    "/card-jobs/:cardJobId/fix-authorise",
+    requireSignedStation,
+    requireSignedStationOperator,
+    async (req, res) => {
+      const station = req.station!;
+      const operator = req.partner!;
+      try {
+        const authorisation = await authoriseFix({
+          tenantId: station.tenantId,
+          locationId: station.locationId,
+          cardJobId: String(req.params.cardJobId),
+          requestedSides: req.body?.sides,
+          stationId: station.id,
+          actorUserId: operator.userId,
+        });
+        res.json({ fix: authorisation });
+      } catch (error) {
+        fixError(res, error);
+      }
+    }
+  );
 
   r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, async (req, res) => {
     try {

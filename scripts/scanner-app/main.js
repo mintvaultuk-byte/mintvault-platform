@@ -465,8 +465,24 @@ function setupIpc() {
     return { ok: true };
   });
 
+  /**
+   * P7 — the FIX picker.
+   *
+   * Now calls the tenant-scoped partner queue instead of `/api/admin/orphan-certs`, which correctly
+   * refuses a signed station because it addresses certificates with NO tenant predicate. The button
+   * was dead for exactly that reason; the fix is a properly scoped route, not a weakened guard.
+   */
   ipcMain.handle("fetch-orphans", async () => {
-    return server.getOrphans();
+    return server.getFixQueue();
+  });
+
+  ipcMain.handle("authorise-fix", async (_event, payload) => {
+    const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
+    if (!cardJobId) return { ok: false, error: "Select a card to fix" };
+    const result = await server.authoriseFix(cardJobId, payload && payload.sides);
+    if (result.ok) return { ok: true, fix: result.body && result.body.fix };
+    const error = (result.body && result.body.error) || {};
+    return { ok: false, code: error.code || "error", error: error.message || "Could not start the fix" };
   });
 
   /**

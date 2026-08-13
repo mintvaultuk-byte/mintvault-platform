@@ -332,8 +332,35 @@ async function getNextCertId() {
   return getJson("/api/admin/next-cert-id");
 }
 
+/**
+ * LEGACY, and deliberately still 403 for a signed station.
+ *
+ * `/api/admin/orphan-certs` addresses certificates with no tenant predicate. It is kept for the
+ * admin-cookie callers it was built for and is NOT the Scanner's path — see getFixQueue below.
+ */
 async function getOrphans() {
   return getJson("/api/admin/orphan-certs");
+}
+
+/**
+ * P7 — the FIX queue, scoped to THIS station's partner and location by the server.
+ *
+ * This is what the "Fix missing images" picker now calls. The list is derived from the partner's own
+ * Card Jobs, so the operator never types an MV number — which is what removes any opportunity to
+ * name someone else's card.
+ */
+async function getFixQueue() {
+  return getJson("/api/partner/stations/fix-queue");
+}
+
+/**
+ * P7 — authorise re-capture of the missing side(s). COSTS ZERO GRADING CREDITS and works at a zero
+ * balance: the card was already paid for, and a defect in our own capture is not a reason to charge
+ * again. Same Card Job, same MV, same certificate.
+ */
+async function authoriseFix(cardJobId, sides) {
+  return postJson(`/api/partner/card-jobs/${encodeURIComponent(cardJobId)}/fix-authorise`,
+    Array.isArray(sides) && sides.length ? { sides } : {});
 }
 
 /**
@@ -476,6 +503,8 @@ module.exports = {
   },
   getNextCertId,
   getOrphans,
+  getFixQueue,
+  authoriseFix,
   startNewCard,
   getCertPreview,
   softDeleteCert,
