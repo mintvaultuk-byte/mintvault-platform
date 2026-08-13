@@ -1,4 +1,4 @@
--- 0077_partner_connector_flag_read.sql
+-- 0078_partner_connector_flag_read.sql
 --
 -- The restricted connector runtime resolves the scoped partner_grading_enabled
 -- pilot flag inside its import transaction. It needs read access only; the
