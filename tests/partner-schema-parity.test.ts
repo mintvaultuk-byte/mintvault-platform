@@ -203,6 +203,14 @@ describe("partner schema ↔ migration parity", () => {
       // legal transition graph, all in the database rather than in scattered guard clauses.
       // Purely additive: one new table; no existing table altered.
       "0080_partner_card_jobs.sql",
+      // 0081 makes the Card Job's identity actually get WRITTEN. 0080 gave a job somewhere to record
+      // certificate_id/mv_number and made it immutable once set, but nothing wrote it — the connector
+      // allocated a certificate against the destination submission_items and the job stayed NULL
+      // forever, so a job could never legally reach READY_TO_GRADE. This replaces
+      // partner_allocate_import_certificates() so the SAME loop iteration that mints an MV and
+      // inserts a certificate stamps the corresponding source Card Job, aborting the whole
+      // allocation if any position fails to bind exactly one job.
+      "0081_partner_card_job_certificate_binding.sql",
     ]);
   });
 

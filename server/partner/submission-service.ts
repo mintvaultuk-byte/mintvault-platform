@@ -55,6 +55,64 @@ const SERVICE_TIER_UNAVAILABLE = () =>
  * G6B safety backstop, while normal settlement is driven by the grading lifecycle below. */
 const PARTNER_SUBMISSION_CREDIT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
+/**
+ * THE SINGLE OWNER OF "may this operation run against a submission in this state?".
+ *
+ * This replaces SEVEN independently written guard clauses that had drifted into two different
+ * spellings of the same idea — five sites tested `status !== "draft"` and two tested
+ * `status === "cancelled"` — with the legal graph existing only as the doc comment at the top of
+ * this file. Seven copies of a rule is seven places for the eighth caller to forget it, and nothing
+ * made the two spellings agree.
+ *
+ * Expressing it as an ALLOWLIST per operation rather than a denylist is the point: a new lifecycle
+ * state added by a future migration is refused by default and must be consciously admitted here,
+ * instead of silently becoming permitted everywhere the denylist did not happen to mention it.
+ *
+ * BEHAVIOUR TODAY IS IDENTICAL. The live status domain is exactly
+ * ('draft','submitted_to_mintvault','cancelled') — migration 0007's CHECK — so "not cancelled" and
+ * "draft or submitted_to_mintvault" describe the same set. Migration 0074 widens that domain to
+ * eight values, and when it lands this allowlist becomes STRICTER rather than looser: cancelling or
+ * uploading against a submission already in `grading` or `completed` will be refused, which is what
+ * the documented state machine says should happen and what the old denylist would have allowed.
+ *
+ * This is the APPLICATION half of lifecycle enforcement. It does not replace database enforcement
+ * and must never be treated as sufficient on its own: `partner_card_jobs` carries its own
+ * ENABLE ALWAYS transition trigger (migration 0080), and `partner_runtime` holds UPDATE on
+ * `partner_submissions.status`, so the DB remains the floor.
+ */
+export type SubmissionOperation =
+  | "EDIT_SUBMISSION"
+  | "ADD_CARD"
+  | "EDIT_CARD"
+  | "REMOVE_CARD"
+  | "SUBMIT"
+  | "CANCEL"
+  | "UPLOAD_CARD_IMAGE";
+
+const SUBMISSION_OPERATION_ALLOWED_FROM: Readonly<Record<SubmissionOperation, readonly string[]>> = {
+  // Content edits require an unsubmitted submission — once handed to MintVault the contents are
+  // part of an accepted, credit-reserved handoff and may not change underneath it.
+  EDIT_SUBMISSION: ["draft"],
+  ADD_CARD: ["draft"],
+  EDIT_CARD: ["draft"],
+  REMOVE_CARD: ["draft"],
+  SUBMIT: ["draft"],
+  // Cancellation is legal from draft AND after handoff (the doc'd "rare, always audited" path).
+  CANCEL: ["draft", "submitted_to_mintvault"],
+  // Evidence may still be attached after handoff; it adds to the record rather than altering the
+  // agreed contents.
+  UPLOAD_CARD_IMAGE: ["draft", "submitted_to_mintvault"],
+};
+
+/**
+ * Throws the SAME error the seven inline guards threw, so no caller's contract changes.
+ * `NOT_DRAFT` is retained as the error identity deliberately: it is what the API surface and the
+ * existing tests assert on, and renaming it would be a breaking change dressed up as a cleanup.
+ */
+function assertSubmissionOperationAllowed(status: string, operation: SubmissionOperation): void {
+  if (!SUBMISSION_OPERATION_ALLOWED_FROM[operation].includes(status)) throw NOT_DRAFT();
+}
+
 /** Location-scope predicate, appended to every submission query. Org-wide roles see everything;
  *  everyone else is restricted to their assigned locations via partner_user_locations.
  *  `paramOffset` is the count of placeholders already used earlier in the caller's query, so the
@@ -384,7 +442,7 @@ export async function editSubmissionDraft(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "EDIT_SUBMISSION");
     if (row.version !== input.version) throw STALE();
     if (input.customerId !== undefined) await verifyCustomerOwnership(c, principal.tenantId, input.customerId);
     // Same rule as create: undefined = not changing the tier; null = explicitly clearing it;
@@ -443,7 +501,7 @@ export async function cancelSubmission(
     return await withPartnerAdminTenantTransaction({ tenantId: principal.tenantId }, async (c) => {
       const row = await loadSubmissionForUpdate(c, principal, submissionId);
       if (!row) throw NOT_FOUND();
-      if (row.status === "cancelled") throw NOT_DRAFT();
+      assertSubmissionOperationAllowed(row.status, "CANCEL");
 
       const actor = await c.query<{ email: string; status: string }>(
         `SELECT email, status FROM partner_users WHERE id=$1 AND tenant_id=$2 FOR KEY SHARE`,
@@ -535,7 +593,7 @@ export async function uploadCardImage(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status === "cancelled") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "UPLOAD_CARD_IMAGE");
     const current = await c.query<{ id: string; front_image_key: string | null; back_image_key: string | null }>(
       `SELECT id, front_image_key, back_image_key
          FROM partner_submission_cards
@@ -581,7 +639,7 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "ADD_CARD");
     const seq = await c.query<{ next: number }>(
       `SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next FROM partner_submission_cards
         WHERE submission_id=$1 AND removed_at IS NULL`,
@@ -644,7 +702,7 @@ export async function editCard(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "EDIT_CARD");
     const { rows } = await c.query(
       `UPDATE partner_submission_cards SET
          card_name = COALESCE($3, card_name),
@@ -689,7 +747,7 @@ export async function removeCard(principal: PartnerPrincipal, submissionId: stri
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "REMOVE_CARD");
     const res = await c.query(
       `UPDATE partner_submission_cards SET removed_at=now(), removed_reason=$3
         WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL`,
@@ -793,7 +851,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
 
       const row = await loadSubmissionForUpdate(c, principal, submissionId);
       if (!row) throw NOT_FOUND();
-      if (row.status !== "draft") {
+      if (!["draft"].includes(row.status)) {
         // RACE FIX: two concurrent submits with the SAME key can both reach here — the first commits
         // (setting idempotency_key + status) before this transaction's FOR UPDATE lock is granted, so
         // the pre-lock "already" check above can miss it. Re-check the NOW-committed row's own

@@ -179,6 +179,10 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // so pulling this into the Partner harness would fail — it is classified here on what it TOUCHES,
   // not on which feature motivated it.
   "0079_admin_password_lockout",
+  // APPLICATION scope: 0081 replaces the SECURITY DEFINER allocator, which reads and writes core
+  // `certificates`, `submission_items` and `cert_counter`. Same classification as 0076, which owns
+  // the original function, and for the same reason.
+  "0081_partner_card_job_certificate_binding",
 ] as const;
 
 /**

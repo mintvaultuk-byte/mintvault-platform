@@ -24,6 +24,43 @@ describe("Partner Pilot certificate allocation", () => {
     expect(migration).toContain("GRANT EXECUTE ON FUNCTION public.partner_allocate_import_certificates");
   });
 
+  /*
+   * 0081 REPLACES this function, so 0076's body is no longer what runs. Without this block the
+   * assertions above would keep passing while the DEPLOYED allocator silently lost SECURITY DEFINER,
+   * its fixed search_path, the caller-role check or the tenant-GUC check. Every security property
+   * asserted for 0076 is re-asserted here against the version that actually executes.
+   */
+  const binding = read("migrations/0081_partner_card_job_certificate_binding.sql");
+
+  it("carries every 0076 security property forward into the replacement allocator (0081)", () => {
+    expect(binding).toContain("CREATE OR REPLACE FUNCTION public.partner_allocate_import_certificates");
+    expect(binding).toContain("SECURITY DEFINER");
+    expect(binding).toContain("SET search_path = pg_catalog, public, pg_temp");
+    expect(binding).toContain("pg_has_role(session_user, 'partner_connector_runtime', 'member')");
+    expect(binding).toContain("public.partner_current_tenant()");
+    expect(binding).toContain("'PARTNER'");
+    expect(binding).toContain("origin_partner_id");
+    expect(binding).toContain("one active credit reservation per source card");
+    expect(binding).toContain("existing live certificate for this destination");
+    expect(binding).toContain("OWNER TO partner_credit_lifecycle_definer");
+  });
+
+  it("binds each allocated certificate to exactly one source Card Job and refuses to rebind", () => {
+    // The Nth destination item pairs with the Nth source unit, ordered exactly as
+    // submission-service.ts expands credit units.
+    expect(binding).toContain("row_number() OVER (ORDER BY sc.sequence_number, sc.id, cj.ordinal)");
+    // Never re-point an identity that already exists.
+    expect(binding).toContain("j.certificate_id IS NULL");
+    // A position that fails to stamp exactly one job aborts the WHOLE allocation, rather than
+    // leaving a minted MV number with no Card Job to own it.
+    expect(binding).toContain("GET DIAGNOSTICS v_stamped = ROW_COUNT");
+    expect(binding).toContain("v_stamped <> 1");
+    // And no source job may be left without an identity (more jobs than destination items).
+    expect(binding).toContain("left a source Card Job without a certificate identity");
+    // The connector role reaches partner_card_jobs ONLY through the definer, never directly.
+    expect(binding).not.toMatch(/GRANT[^;]*ON public\.partner_card_jobs[^;]*TO partner_connector_runtime/i);
+  });
+
   it("keeps the connector on the allocator authority rather than granting broad certificate writes", () => {
     expect(importer).toContain('resolveFlag(client, "partner_grading_enabled"');
     expect(importer).toContain("partner_allocate_import_certificates");
@@ -58,7 +95,10 @@ describe("Partner Pilot physical evidence and output gate", () => {
   });
 
   it("does not expose an imported assignment as Ready to Grade before both captured TIFF sides exist", () => {
-    const queue = grading.slice(grading.indexOf('r.get("/grading/queue"'), grading.indexOf('r.get("/grading/certificates/:id/images"'));
+    const queue = grading.slice(
+      grading.indexOf('r.get("/grading/queue"'),
+      grading.indexOf('r.get("/grading/certificates/:id/images"')
+    );
     expect(queue).toContain("evidence.side = 'front'");
     expect(queue).toContain("evidence.side = 'back'");
     expect(queue).toContain("session.state = 'captured'");
@@ -84,7 +124,7 @@ describe("Partner Pilot physical evidence and output gate", () => {
       "count(DISTINCT evidence.side) = 2",
       "station.approved_at IS NOT NULL",
       "isUndefinedOriginColumn",
-      'if (isUndefinedOriginColumn(error)) return [];',
+      "if (isUndefinedOriginColumn(error)) return [];",
     ]) {
       expect(eligibility).toContain(token);
     }

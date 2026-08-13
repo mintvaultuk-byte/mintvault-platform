@@ -507,3 +507,80 @@ idempotent, so this is safe.
 > actually verified and is retracted. Diffs are now taken from a durable log whose line count is
 > checked before use, and compared on **per-file failure counts** rather than a globally-deduplicated
 > set of test names — the latter can mask a new failure whose name already appears elsewhere.
+
+---
+
+## P3 COMPLETE — connector binding + lifecycle-guard convergence
+
+### 1. Certificate allocation now binds to the Card Job (migration 0081)
+
+0080 gave a Card Job somewhere to record its permanent identity and made it immutable once written —
+but **nothing wrote it**. The connector allocated a certificate and an MV number against the
+destination `submission_items` while the Card Job stayed `certificate_id = NULL` forever, so a job
+could never legally reach `READY_TO_GRADE` (0080's trigger refuses that without a certificate).
+
+0081 replaces `public.partner_allocate_import_certificates()` so the **same loop iteration** that
+mints an MV and inserts a certificate stamps the corresponding source Card Job. It had to live in the
+`SECURITY DEFINER` function rather than TypeScript: `partner_connector_runtime` is deliberately
+revoked from the partner credit surface and reaches `partner_card_jobs` only _through_ the definer.
+
+**Pairing:** destination items walk `(card_index, id)`; source jobs are ordered
+`(sequence_number, card id, ordinal)` — exactly the expansion `submission-service.ts` uses to build
+credit units, and therefore the order the jobs were created in. The pre-existing
+`v_created <> card_count` guard already depended on those two sequences matching; what is new is that
+a mismatch is now caught **per row** instead of only in aggregate.
+
+**Proven on real PostgreSQL:**
+
+| Probe                                                                  | Result                                                            |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Function installs (body is valid PL/pgSQL)                             | **yes**                                                           |
+| Nth certificate binds to Nth Card Job (3 units of one quantity-3 card) | ordinals 1→MV501, 2→MV502, 3→MV503                                |
+| Re-stamping an already-bound position                                  | **0 rows** — identity never re-pointed                            |
+| Forcing a different certificate onto a bound job                       | **refused** (0080 immutability trigger)                           |
+| Binding one certificate to a second job                                | **refused** (unique index)                                        |
+| A position with no Card Job                                            | **0 rows** → allocator raises and rolls the whole allocation back |
+
+Four independent layers stop a double-binding: the live-certificate guard, `certificate_id IS NULL`
+in the stamping predicate, the immutability trigger, and the two unique indexes.
+
+A `v_stamped <> 1` check aborts the **entire** allocation rather than leaving a minted MV number with
+no Card Job to own it, and a final sweep rejects any source job left without an identity — the
+asymmetric case (more jobs than items) the per-row check cannot see.
+
+**Test-coverage gap closed:** `partner-pilot-certificate-allocation-and-print.test.ts` asserted
+0076's body, which is no longer what runs. Every security property (SECURITY DEFINER, fixed
+`search_path`, caller-role check, tenant-GUC check, reservation-per-card guard) is now re-asserted
+against 0081, plus the binding behaviour itself.
+
+### 2. Seven duplicated lifecycle guards converged onto one owner
+
+`submission-service.ts` had seven independently written guards that had drifted into two spellings of
+the same idea — five tested `status !== "draft"`, two tested `status === "cancelled"` — with the legal
+graph living only in a doc comment. All seven now call one `assertSubmissionOperationAllowed()` backed
+by an explicit per-operation **allowlist**.
+
+Allowlist rather than denylist is the point: a new lifecycle state added by a future migration is
+refused by default and must be consciously admitted, instead of silently becoming permitted wherever
+the denylist happened not to mention it.
+
+**Behaviour today is identical** — the live status domain is exactly
+`('draft','submitted_to_mintvault','cancelled')` (0007's CHECK), so "not cancelled" and "draft or
+submitted" describe the same set. When 0074 widens it to eight values the allowlist becomes
+**stricter**, not looser. `NOT_DRAFT` is retained as the error identity deliberately — it is what the
+API surface and existing tests assert on.
+
+**DB enforcement is not weakened.** This is the application half; `partner_card_jobs` keeps its
+`ENABLE ALWAYS` transition trigger, and `partner_runtime` still holds UPDATE on
+`partner_submissions.status`, so the database remains the floor.
+
+### Verification
+
+| Check                                               | Baseline                        | After P3 completion                            |
+| --------------------------------------------------- | ------------------------------- | ---------------------------------------------- |
+| Tests                                               | 187 failed / 4803 passed (5333) | **182 failed / 4811 passed (5336)**            |
+| Failing files                                       | 36                              | **35**                                         |
+| Regressions (per-file count + newly-failing suites) | —                               | **ZERO**                                       |
+| Suites fixed                                        | —                               | `tests/partner-pilot-flag-controls-ui.test.ts` |
+| `partner-submission-credit-lifecycle`               | —                               | **31/31**                                      |
+| Typecheck                                           | clean                           | **clean**                                      |
