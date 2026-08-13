@@ -434,8 +434,12 @@ export function partnerApiRouter(): Router {
             partner_pack_code: pack.code,
             partner_initiating_user_id: principal.userId,
           },
-          success_url: `${appUrl}/partner/credits?purchase=processing`,
-          cancel_url: `${appUrl}/partner/credits?purchase=cancelled`,
+          // MUST match a real client route. `/partner/credits` is not registered in App.tsx, so the
+          // `/partner/*` catch-all silently redirected the returning buyer to the dashboard and threw
+          // the `?purchase=` signal away — the one moment the shop most needs to be told "paid,
+          // processing, credits appear shortly". The wallet page is `/partner/billing`.
+          success_url: `${appUrl}/partner/billing?purchase=processing`,
+          cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
         });
 
         res.json({ url: session.url, packCode: pack.code, credits: pack.credits });

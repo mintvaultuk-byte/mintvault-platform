@@ -312,8 +312,36 @@ export interface PartnerCreditView {
   purchaseHistory: PartnerCreditLedgerEntry[];
 }
 
+/**
+ * A Grading Credit pack from the SERVER catalogue.
+ *
+ * `credits` is display-only. The quantity that is actually granted is resolved server-side from
+ * `code` at webhook time, so a tampered response here changes what the shop is SHOWN and can never
+ * change what it RECEIVES. `purchasable` is false until an owner records a Stripe Price id — the buy
+ * control gates on that flag, never on the pack merely existing.
+ */
+export interface PartnerCreditPack {
+  id: string;
+  code: string;
+  credits: number;
+  stripePriceId: string | null;
+  purchasable: boolean;
+}
+
 export const partnerCredits = {
   view: () => req<PartnerCreditView>("GET", "/api/partner/credits"),
+  packs: () => req<{ packs: PartnerCreditPack[] }>("GET", "/api/partner/credits/packs"),
+  /**
+   * Starts a Stripe Checkout Session and returns its URL. GRANTS NOTHING — the returning browser
+   * cannot add capacity, and neither can this call. Credits appear only when the verified webhook
+   * fulfils the payment.
+   */
+  checkout: (packCode: string) =>
+    // `url` is nullable because Stripe's own Checkout Session type is: the server forwards
+    // `session.url` verbatim rather than asserting it away.
+    req<{ url: string | null; packCode: string; credits: number }>("POST", "/api/partner/credits/checkout", {
+      packCode,
+    }),
 };
 
 // ---- own sessions ----

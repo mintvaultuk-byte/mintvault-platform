@@ -245,10 +245,29 @@ describe("Locations and Billing use their real partner APIs", () => {
     expect(BILLING_PAGE).toContain("Not available");
     expect(BILLING_PAGE).toContain("runningBalance");
   });
-  it("Billing does not invent partner Stripe credit packages before the server catalogue exists", () => {
-    expect(BILLING_PAGE).toContain("Package pricing must come from the partner credit package API");
-    expect(BILLING_PAGE).toContain("Credits are never added from a success URL");
-    expect(BILLING_PAGE).not.toMatch(/partnerCredits\.(checkout|packages|purchase)/);
+  /*
+   * SUPERSEDES "Billing does not invent partner Stripe credit packages before the server catalogue
+   * exists". That test pinned the placeholder that stood in for a catalogue which did not yet exist;
+   * P5 shipped GET /api/partner/credits/packs, so the placeholder is gone and asserting its copy
+   * would now pin a regression rather than prevent one.
+   *
+   * The guarantee it protected is preserved and tightened: the browser must not invent packages,
+   * prices or capacity. It may only render what the server catalogue returns, and it may only start
+   * a checkout — never complete one.
+   */
+  it("Billing renders only the server credit-pack catalogue and cannot invent packages or capacity", () => {
+    // Packs come from the server, and the buy control is gated on the server's `purchasable` flag.
+    expect(BILLING_PAGE).toContain("partnerCredits.packs()");
+    expect(BILLING_PAGE).toContain("pack.purchasable");
+    // No client-invented pack sizes or prices: no currency literals, no hardcoded pack ladder.
+    expect(BILLING_PAGE).not.toMatch(/£\s*\d/);
+    expect(BILLING_PAGE).not.toMatch(/\bprice\s*[:=]\s*\d/i);
+    // Checkout may only hand off to a server-issued URL. It must never grant.
+    expect(BILLING_PAGE).toContain("partnerCredits.checkout(packCode)");
+    expect(BILLING_PAGE).not.toMatch(/appendFoundationCredit|fulfilPartnerCreditPurchase/);
+    // The page states plainly that the webhook, not this page, adds the credits. Whitespace-tolerant:
+    // this copy sits in JSX that Prettier is free to re-wrap.
+    expect(BILLING_PAGE.replace(/\s+/g, " ")).toContain("by the verified webhook — never by this page");
   });
 });
 
@@ -273,7 +292,19 @@ describe("partner workstation IA has mounted destinations for shell links", () =
     ]) {
       expect(APP).toContain(route);
     }
-    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
+    /*
+     * The invariant is that each shell link lands on a MOUNTED route rather than falling through the
+     * /partner/* catch-all to the dashboard — asserted by the route loop above, which is what
+     * actually protects the operator.
+     *
+     * `certificates` has since graduated from a placeholder to a real page (PartnerCertificatesPage,
+     * App.tsx). Continuing to assert its placeholder pinned the OLD state and failed on forward
+     * progress, so it is asserted here as a real destination instead. The other three are still
+     * placeholders and are still pinned as such, so that any one of them graduating is a deliberate
+     * edit rather than a silent drift.
+     */
+    expect(APP).toContain("<PartnerCertificatesPage />");
+    expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="supplies" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="orders" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');

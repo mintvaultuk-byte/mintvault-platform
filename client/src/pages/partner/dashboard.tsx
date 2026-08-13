@@ -11,7 +11,7 @@ import {
 } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 import { usePartnerSession } from "@/hooks/use-partner-session";
-import { ArrowRight, PlusCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, PlusCircle } from "lucide-react";
 
 function metric(value: number | null | undefined, empty = "Not available") {
   return value == null ? empty : value.toLocaleString("en-GB");
@@ -47,6 +47,7 @@ export default function PartnerDashboardPage() {
   const { session, hasPermission } = usePartnerSession();
   const canViewCredits = hasPermission("partner.credits.view");
   const canAssessCards = hasPermission("partner.cards.assess");
+  const canPurchaseCredits = hasPermission("partner.credits.purchase");
 
   const submissions = useQuery({
     queryKey: ["/api/partner/dashboard/submissions"],
@@ -169,6 +170,62 @@ export default function PartnerDashboardPage() {
                 </Card>
               </div>
             )}
+            {/*
+              Zero- and low-credit states.
+
+              `balanceStatus` is SERVER-DERIVED (portal-view-service computes empty at 0 and low
+              below the threshold from partner_credit_availability). This panel re-reads that verdict;
+              it never recomputes availability from the individual tiles, because a second formula in
+              the browser would be a second balance authority — the exact thing the credit model
+              forbids. Nothing here can add capacity: the only control is a link to the wallet page.
+            */}
+            {canViewCredits && credits.data && credits.data.summary.balanceStatus === "empty" && (
+              <Card className="rounded-md border-rose-400/50" data-testid="card-credit-empty">
+                <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-rose-300 mt-0.5" aria-hidden="true" />
+                    <div>
+                      <p className="font-medium" data-testid="text-credit-empty-title">
+                        No Grading Credits left
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        New cards cannot be started until you add credits. Cards already authorised keep moving —
+                        grading, fixing a missing image and printing all continue as normal.
+                      </p>
+                    </div>
+                  </div>
+                  {canPurchaseCredits && (
+                    <Link href="/partner/billing">
+                      <Button data-testid="button-buy-credits-empty">Buy more Grading Credits</Button>
+                    </Link>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+            {canViewCredits && credits.data && credits.data.summary.balanceStatus === "low" && (
+              <Card className="rounded-md border-amber-400/50" data-testid="card-credit-low">
+                <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-amber-300 mt-0.5" aria-hidden="true" />
+                    <div>
+                      <p className="font-medium" data-testid="text-credit-low-title">
+                        Running low on Grading Credits
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Top up before your next batch so the Scanner does not stop mid-session.
+                      </p>
+                    </div>
+                  </div>
+                  {canPurchaseCredits && (
+                    <Link href="/partner/billing">
+                      <Button variant="outline" data-testid="button-buy-credits-low">
+                        Buy more Grading Credits
+                      </Button>
+                    </Link>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </section>
 
           <section aria-labelledby="submission-summary-title" className="space-y-3">
@@ -273,10 +330,22 @@ export default function PartnerDashboardPage() {
               Scanner station
             </h2>
             <Card className="rounded-md" data-testid="card-dashboard-scanner-station">
-              <CardContent className="pt-6 text-sm text-muted-foreground">
-                Set up the assigned Mac in the MintVault Scanner: sign in with your Partner account, choose an
-                authorised location, register the Mac, then wait for Super Admin approval. The Scanner shows the
-                authoritative station and calibration status; this dashboard does not guess at device approval.
+              <CardContent className="pt-6 text-sm text-muted-foreground space-y-3">
+                <p>
+                  Set up the assigned Mac in the MintVault Scanner: sign in with your Partner account, choose an
+                  authorised location, register the Mac, then wait for Super Admin approval. The Scanner shows the
+                  authoritative station and calibration status; this dashboard does not guess at device approval.
+                </p>
+                {/*
+                  A display of the server's verdict, not a control. The Scanner asks the server on every
+                  NEW press and the server refuses independently of anything shown here, so this line
+                  can only ever be a hint that saves the operator a walk to the Mac.
+                */}
+                {canViewCredits && credits.data && credits.data.summary.balanceStatus === "empty" && (
+                  <p className="text-rose-300" data-testid="text-scanner-new-unavailable">
+                    NEW CARD is unavailable on every station until credits are added. FIX and grading are unaffected.
+                  </p>
+                )}
               </CardContent>
             </Card>
           </section>

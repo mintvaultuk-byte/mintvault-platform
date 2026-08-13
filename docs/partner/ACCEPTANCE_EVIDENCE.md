@@ -803,3 +803,116 @@ The **dashboard credit UX** (available / reserved / ready-to-grade tiles, Buy Mo
 not built. They are presentation over `GET /credits` and `GET /credits/packs`, both of which now
 exist and are proven. No UI can grant a credit — only the webhook path can — so this remainder
 carries no money risk.
+
+---
+
+## P5 — PRESENTATION CLOSEOUT (dashboard + billing credit UX)
+
+Closes the remainder recorded above. Presentation only over two routes that already existed and were
+already proven; no new credit authority, no second wallet, no second dashboard.
+
+### Two real defects found and fixed on the way
+
+**D1 — the checkout return URL pointed at a route that does not exist.** `success_url` and
+`cancel_url` were `${appUrl}/partner/credits?purchase=...` (`server/partner/routes.ts:437-438`).
+`/partner/credits` is not registered anywhere in `client/src/App.tsx`, so the `/partner/*` catch-all
+(`App.tsx:362`) silently redirected the returning buyer to the dashboard and discarded the
+`?purchase=` signal — at exactly the moment a shop that has just paid most needs to be told
+"received, processing". Now `/partner/billing`, which is the real wallet page. Pinned by a test that
+parses every `success_url`/`cancel_url` out of the routes file and asserts each one is a `path="…"`
+registered in `App.tsx`, so a future redirect cannot regress to a non-existent route.
+
+**D2 — `partner.credits.purchase` existed in SQL but not in the code catalogue.** Migration
+`0083_partner_credit_packs.sql:91` seeds it and `routes.ts:393` enforces it, but it was absent from
+`PARTNER_PERMISSIONS` (`server/partner/permissions.ts`). Two consequences, both silent:
+`validatePartnerRbac()` reported it under `unexpected.permissions` against every correctly-migrated
+database, and `seedPartnerRbac()` could never grant it — so `POST /credits/checkout` was unreachable
+in any test-built catalogue for a reason unrelated to the code under test. Added to the catalogue.
+`PARTNER_OWNER` spreads the whole array and every other role enumerates explicitly, so this
+reproduces 0083's grant exactly: OWNER yes, MANAGER only if an owner grants it (OD-5 default: off),
+GRADER never.
+
+Fixing D2 exposed that the RBAC catalogue is **cumulative across migrations** while two suites
+compared TypeScript against 0034 alone:
+
+- `tests/partner-rbac-migration.test.ts` — 0083 added to the real-runner batch alongside 0034/0073.
+  Order is load-bearing and now asserted: 0083's seed is guarded by
+  `IF to_regclass('public.partner_permissions') IS NOT NULL`, so applying it before 0034 would
+  silently no-op and leave the catalogue one permission short — a false negative indistinguishable
+  from a missing grant.
+- `tests/partner-rbac-parity.test.ts` — generalised to a list of additive migrations, handling both
+  grant shapes in use (`r.code IN (...)` in 0073, `r.code = '...'` in 0083). **This surfaced a
+  latent modelling error:** the parser fed additive permissions into 0034's mapping block, which is a
+  CROSS JOIN against `IN ('PARTNER_OWNER', 'PARTNER_MANAGER')`. A permission introduced by a later
+  migration cannot have been in that cross join, and treating it as such asserted that
+  `PARTNER_MANAGER` holds `partner.credits.purchase` — i.e. it would have demanded that TypeScript
+  grant a manager the right to spend the shop's money by default. The cross join is now computed over
+  0034's own permissions, and each additive migration contributes only the mappings its own grant
+  clause expresses.
+
+### Built
+
+| Surface                              | Where                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
+| Grading Credits available / reserved | already present, `pages/partner/dashboard.tsx` credit summary                      |
+| Ready to Grade                       | already present, Shop workflow section                                             |
+| Buy More Grading Credits             | `pages/partner/billing.tsx` — real server catalogue replacing the dead placeholder |
+| Low-credit warning                   | `dashboard.tsx` — `card-credit-low`, outline CTA                                   |
+| Zero-credit state                    | `dashboard.tsx` — `card-credit-empty`, **primary** CTA                             |
+| Credit Activity / ledger             | already present on both dashboard and billing                                      |
+| Returning-from-Stripe states         | `billing.tsx` — `processing` (polls) and `cancelled`                               |
+
+### Locked rules, and how each is held
+
+- **UI cannot grant credits** — no client module references `appendFoundationCredit`,
+  `fulfilPartnerCreditPurchase`, `addCredits` or `reserveCreditInTransaction`; asserted across
+  `dashboard.tsx`, `billing.tsx` and `partner-api.ts`.
+- **Browser success cannot grant** — `?purchase=processing` sets a `refetchInterval` and nothing
+  else. The checkout mutation's only success action is `window.location.assign(result.url)`.
+- **No client-side balance authority** — no client subtracts reserved from posted, and the low/empty
+  verdict is read from the server's `balanceStatus`, never recomputed against a client threshold.
+  Neither page defaults an absent balance to `0`.
+- **Buy gated on the server** — the button renders only when the pack's `purchasable` flag is true
+  (false until an owner records a Stripe Price id) and the session holds `partner.credits.purchase`.
+  The request body is `{ packCode }` alone; quantity is resolved server-side at grant time.
+- **Zero blocks NEW only** — the zero state says so in words, and asserts no `disabled` appears in
+  that branch: grading, FIX and printing are untouched.
+
+### Verification
+
+Like-for-like, same command (`npx vitest run`), same machine, immediately before and after, with the
+branch stashed for the baseline run. The earlier P5 numbers in the section above are NOT comparable —
+they were taken under the full 54-variable CI environment; this pair is not.
+
+| Check                   | Baseline (pristine HEAD)       | After P5 presentation                        |
+| ----------------------- | ------------------------------ | -------------------------------------------- |
+| Tests                   | 28 failed / 4316 passed (5337) | **27 failed / 4317 passed (5337)**           |
+| Failing files           | 9                              | **8**                                        |
+| Newly failing           | —                              | **ZERO**                                     |
+| Newly fixed             | —                              | `tests/partner-submission-wizard-ui.test.ts` |
+| Typecheck               | clean                          | **clean**                                    |
+| Lint                    | 0 errors                       | **0 errors** (2587 warnings, unchanged)      |
+| Production build        | —                              | **succeeds**                                 |
+| P4 authority suite      | 11/11                          | **11/11**                                    |
+| Partner critical matrix | 18/19                          | **18/19**                                    |
+| New presentation suite  | —                              | **17/17**                                    |
+
+`tests/partner-submission-wizard-ui.test.ts` was failing at pristine HEAD on an assertion that
+`/partner/certificates` renders `<PartnerWorkflowPlaceholderPage kind="certificates" />`. That page
+has since graduated to a real `PartnerCertificatesPage`, so the assertion pinned the OLD state and
+failed on forward progress. The invariant it existed to protect — every shell link lands on a mounted
+route rather than falling through the catch-all — is retained, and the three destinations that ARE
+still placeholders are still pinned as such.
+
+### Not green, and pre-existing (NOT caused by this work)
+
+`tests/partner-rollback.test.ts` aborts on environment at pristine HEAD and on this branch alike:
+`Migration 0076_partner_pilot_certificate_allocation.sql failed and was rolled back: 0076 requires
+the core certificate allocator and complete Partner connector schema`. This is the C-4 class recorded
+in the issue register (numbered migrations cannot bootstrap a database alone) — the suite's harness
+does not seed the core schema the way `partner-rbac-migration.test.ts` does. Recorded rather than
+silently counted as green.
+
+The other seven failing files (`vq-*`, `auth-security-migration`, `certificate-preview-revision-runtime`,
+`certificate-update-route`, `rarity-structured-migration`) are all pre-existing and untouched by this
+work — identical before and after.

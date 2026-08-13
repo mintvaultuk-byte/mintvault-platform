@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { partnerCredits, partnerErrorMessage, type PartnerCreditLedgerEntry } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { ArrowRight, Lock } from "lucide-react";
+import { usePartnerSession } from "@/hooks/use-partner-session";
+import { ArrowRight, Loader2, Lock } from "lucide-react";
 
 function credit(value: number | null, configured: boolean) {
   return value == null ? (configured ? "Unknown" : "Not available") : value.toLocaleString("en-GB");
@@ -15,8 +17,63 @@ function entryLabel(entry: PartnerCreditLedgerEntry) {
 }
 
 export default function PartnerBillingPage() {
-  const query = useQuery({ queryKey: ["/api/partner/credits"], queryFn: () => partnerCredits.view() });
-  const returnTo = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("returnTo") : null;
+  const { hasPermission } = usePartnerSession();
+  const canPurchase = hasPermission("partner.credits.purchase");
+  const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const returnTo = params.get("returnTo");
+  const purchaseOutcome = params.get("purchase");
+
+  /**
+   * The returning-from-Stripe state. `processing` is the ONLY thing the success URL is allowed to
+   * mean: the browser has come back from a redirect it fully controls, so it is not evidence that
+   * anything was paid, and it certainly cannot add capacity. All it does is make the wallet query
+   * poll so the webhook's grant becomes visible without a manual refresh.
+   */
+  const awaitingWebhook = purchaseOutcome === "processing";
+
+  const query = useQuery({
+    queryKey: ["/api/partner/credits"],
+    queryFn: () => partnerCredits.view(),
+    // Poll only while we are waiting for a webhook we did not trigger and cannot confirm client-side.
+    refetchInterval: awaitingWebhook ? 4000 : false,
+  });
+
+  const packs = useQuery({
+    queryKey: ["/api/partner/credits/packs"],
+    queryFn: () => partnerCredits.packs(),
+    enabled: hasPermission("partner.credits.view"),
+  });
+
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [pendingPack, setPendingPack] = useState<string | null>(null);
+
+  /**
+   * Hands the operator to Stripe. The server decides the price and the quantity; this mutation's
+   * entire output is a URL to navigate to. There is deliberately no success handler that touches
+   * the wallet — a client that could "apply" a purchase locally would be a second balance authority.
+   */
+  const checkout = useMutation({
+    mutationFn: (packCode: string) => partnerCredits.checkout(packCode),
+    onMutate: (packCode: string) => {
+      setCheckoutError(null);
+      setPendingPack(packCode);
+    },
+    onSuccess: (result) => {
+      // Stripe types checkout session `url` as nullable. Navigating to a missing URL would send the
+      // operator to a page literally named "null" and look like a broken shop rather than a failed
+      // call, so an absent URL is surfaced as the error it is.
+      if (!result.url) {
+        setPendingPack(null);
+        setCheckoutError("Could not start checkout. Try again.");
+        return;
+      }
+      window.location.assign(result.url);
+    },
+    onError: (err) => {
+      setPendingPack(null);
+      setCheckoutError(partnerErrorMessage(err));
+    },
+  });
 
   return (
     <div className="space-y-8">
@@ -58,34 +115,108 @@ export default function PartnerBillingPage() {
           <section aria-labelledby="packages-title" className="space-y-3">
             <div>
               <h2 id="packages-title" className="text-base font-semibold">
-                Buy credits
+                Buy more Grading Credits
               </h2>
               <p className="text-sm text-muted-foreground">
-                Package pricing must come from the partner credit package API. This environment does not expose that API
-                yet, so checkout is unavailable here and no client-side package prices are shown.
+                Packages and prices come from the server catalogue. Payment is confirmed by Stripe and credits are added
+                by the verified webhook — never by this page.
               </p>
             </div>
-            <Card className="rounded-md border-primary/30" data-testid="billing-checkout-unavailable">
-              <CardContent className="p-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-3">
-                  <Lock className="h-5 w-5 text-primary mt-0.5" aria-hidden="true" />
+
+            {awaitingWebhook && (
+              <Card className="rounded-md border-primary/40" data-testid="billing-purchase-processing">
+                <CardContent className="p-4 flex items-start gap-3">
+                  <Loader2 className="h-5 w-5 text-primary mt-0.5 animate-spin" aria-hidden="true" />
                   <div>
-                    <p className="font-medium">Checkout waiting for server package catalogue</p>
+                    <p className="font-medium">Payment received — processing</p>
                     <p className="text-sm text-muted-foreground">
-                      Stripe fulfilment remains webhook-authoritative. Credits are never added from a success URL.
+                      Your balance updates automatically as soon as Stripe confirms the payment. You can safely leave
+                      this page; nothing is lost.
                     </p>
                   </div>
-                </div>
-                {returnTo && (
-                  <Button asChild variant="outline" data-testid="button-return-to-draft">
-                    <Link href={returnTo}>
-                      Return to draft
-                      <ArrowRight className="h-4 w-4 ml-1.5" aria-hidden="true" />
-                    </Link>
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
+
+            {purchaseOutcome === "cancelled" && (
+              <Card className="rounded-md" data-testid="billing-purchase-cancelled">
+                <CardContent className="p-4">
+                  <p className="font-medium">Checkout cancelled</p>
+                  <p className="text-sm text-muted-foreground">Nothing was charged and your balance is unchanged.</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {checkoutError && (
+              <p className="text-sm text-rose-300" role="alert" data-testid="billing-checkout-error">
+                {checkoutError}
+              </p>
+            )}
+
+            {!canPurchase && (
+              <Card className="rounded-md" data-testid="billing-purchase-not-authorised">
+                <CardContent className="p-4 flex items-start gap-3">
+                  <Lock className="h-5 w-5 text-muted-foreground mt-0.5" aria-hidden="true" />
+                  <div>
+                    <p className="font-medium">Your role cannot buy Grading Credits</p>
+                    <p className="text-sm text-muted-foreground">
+                      Ask an owner at your shop to buy credits, or to grant you billing permission.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {canPurchase && packs.isLoading && <PartnerLoadingState label="Loading credit packages…" />}
+            {canPurchase && packs.error && (
+              <PartnerErrorState message={partnerErrorMessage(packs.error)} onRetry={() => void packs.refetch()} />
+            )}
+            {canPurchase && packs.data && packs.data.packs.length === 0 && (
+              <p className="text-sm text-muted-foreground" data-testid="billing-packs-empty">
+                No credit packages are available yet.
+              </p>
+            )}
+            {canPurchase && packs.data && packs.data.packs.length > 0 && (
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="billing-packs">
+                {packs.data.packs.map((pack) => (
+                  <Card key={pack.id} className="rounded-md" data-testid={`billing-pack-${pack.code}`}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-medium text-muted-foreground">{pack.code}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-2xl font-semibold">{pack.credits.toLocaleString("en-GB")}</p>
+                      <p className="text-xs text-muted-foreground">Grading Credits</p>
+                      {pack.purchasable ? (
+                        <Button
+                          className="w-full"
+                          data-testid={`button-buy-pack-${pack.code}`}
+                          disabled={checkout.isPending}
+                          onClick={() => checkout.mutate(pack.code)}
+                        >
+                          {pendingPack === pack.code ? "Starting checkout…" : "Buy"}
+                        </Button>
+                      ) : (
+                        <p
+                          className="text-xs text-muted-foreground"
+                          data-testid={`billing-pack-unavailable-${pack.code}`}
+                        >
+                          Pricing not yet configured
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {returnTo && (
+              <Button asChild variant="outline" data-testid="button-return-to-draft">
+                <Link href={returnTo}>
+                  Return to draft
+                  <ArrowRight className="h-4 w-4 ml-1.5" aria-hidden="true" />
+                </Link>
+              </Button>
+            )}
           </section>
 
           <section aria-labelledby="ledger-title" className="space-y-3">

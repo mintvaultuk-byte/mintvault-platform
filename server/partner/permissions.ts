@@ -21,6 +21,17 @@ export const PARTNER_PERMISSIONS = [
   "partner.documents.view",
   "partner.training.view",
   "partner.credits.view",
+  /*
+   * Seeded by migration 0083 and enforced by POST /credits/checkout since P5, but it was missing
+   * from this catalogue — so validatePartnerRbac() reported it as an UNEXPECTED permission against
+   * every correctly-migrated database, and seedPartnerRbac() (test fixtures) could never grant it,
+   * making the purchase route unreachable under test for reasons unrelated to the code under test.
+   *
+   * PARTNER_OWNER spreads this whole array, and every other role enumerates its grants explicitly,
+   * so listing it here reproduces 0083's grant exactly: OWNER yes, MANAGER only if an owner grants
+   * it (plan OD-5 default: off), GRADER never.
+   */
+  "partner.credits.purchase",
   "partner.orders.view",
   "partner.orders.create",
   "partner.orders.edit",
