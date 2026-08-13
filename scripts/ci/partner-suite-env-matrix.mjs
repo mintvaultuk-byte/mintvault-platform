@@ -133,6 +133,94 @@ export const SUITES = [
     note: "0044 widens the submission status domain past handover and pins the immutable location snapshot; own cluster.",
   },
 
+  // ------------------------------------------------- P3–P9 pilot authority (self-provisioning)
+  //
+  // WHY THESE WERE ADDED (2026-08-13). Every suite below was written during P3–P9 and proven at
+  // the time by running it on its own. None was ever entered into this matrix, so the "critical
+  // Partner runner" — the gate every phase closes on — did not execute a single one of them. The
+  // Card Job authority, the credit settlement edge, Scanner NEW, Scanner FIX, the grading edit
+  // lease, multi-location, SCANNER_OPERATOR and both step-up ladders were all outside the gate.
+  //
+  // That is not a theoretical gap. Running these ten files in ONE bare `vitest run` reproduces the
+  // exact silent-green this matrix exists to kill: tests/partner-station-new-card.test.ts drops 19
+  // of its 27 assertions — the last-credit race, the replay proofs, the cross-tenant refusal, the
+  // MV uniqueness proof — and the run still exits 0. The suites self-provision a PostgreSQL 17
+  // container each and assign MINTVAULT_/PARTNER_*_DATABASE_URL in their own beforeAll, so sharing
+  // a worker is precisely the process.env race documented at the top of this file.
+  //
+  // `isolate: true` is therefore load-bearing on every one of them, and `critical: true` means the
+  // runner's existing "ANY skip reddens the run" rule now actually covers the pilot authority.
+  {
+    file: "tests/partner-card-job-authority.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P3 canonical Card Job: atomic credit reservation + creation, certificate/MV binding; own cluster.",
+  },
+  {
+    file: "tests/partner-credit-purchase.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P5 Stripe purchase/grant/refund into the Grading Credit authority; own cluster.",
+  },
+  {
+    file: "tests/partner-station-new-card.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P6 Scanner NEW: last-credit race, replay, MV uniqueness, cross-tenant refusal; own cluster. Loses 19 assertions if it shares a worker.",
+  },
+  {
+    file: "tests/partner-scanner-fix.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P7 Scanner FIX: zero-credit replacement on the same Card Job/MV/certificate lineage; own cluster.",
+  },
+  {
+    file: "tests/partner-multi-location.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "AG-1 multi-location: location-scoped FIX queue and start authority; own cluster.",
+  },
+  {
+    file: "tests/partner-scanner-operator-role.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "AG-2 SCANNER_OPERATOR least privilege, read back from the seeded catalogue; own cluster.",
+  },
+  {
+    file: "tests/partner-step-up-auth.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "AG-3 Partner step-up on credits checkout, invites, role/status change, session revocation; own cluster.",
+  },
+  {
+    file: "tests/partner-admin-step-up.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "AG-3b Super Admin step-up on destructive admin actions; own cluster.",
+  },
+  {
+    file: "tests/partner-dashboard-operations.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P8 operational console: one tenant-scoped service, server-derived buckets and readiness; own cluster.",
+  },
+  {
+    file: "tests/partner-grading-lease.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P9 grading edit lease: one-winner race, expiry, takeover, stale-revision refusal, I19 restart; own cluster.",
+  },
+
   // ---------------------------------------------------------------- admin-only (migration proofs)
   {
     file: "tests/partner-rbac-migration.test.ts",
