@@ -62,6 +62,10 @@ let partnerServer: http.Server;
 let adminBase: string;
 let partnerBase: string;
 let ADMIN_EMAIL: string;
+/** Row id of the seeded admin user — the fixture must stamp this as `authUserId`, exactly as the
+ *  real PIN step does via stampAuthSession (server/routes/auth.ts). Without it the session is not
+ *  attributable and every audited super-admin mutation is correctly refused as UNAUTHENTICATED. */
+let ADMIN_USER_ID: string;
 
 (isLocal ? describe : describe.skip)("Super Admin control shell (main app, real requireAdmin, disposable DB)", () => {
   beforeAll(async () => {
@@ -104,10 +108,11 @@ let ADMIN_EMAIL: string;
     const authMod = await import("../server/auth");
     ADMIN_EMAIL = authMod.ADMIN_EMAIL;
     // seed the admin user requireAdmin validates against
-    await admin.query(
-      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1",
+    const seededAdmin = await admin.query<{ id: string }>(
+      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1 RETURNING id",
       [ADMIN_EMAIL.toLowerCase()]
     );
+    ADMIN_USER_ID = String(seededAdmin.rows[0].id);
 
     // seed partners, locations, users, roles, assignments, flags
     const { seedPartnerRbac } = await import("../server/partner/permissions");
@@ -162,6 +167,11 @@ let ADMIN_EMAIL: string;
       const s = req.session as unknown as Record<string, unknown>;
       s.isAdmin = true;
       s.adminEmail = ADMIN_EMAIL;
+      // authUserId is part of the REAL session: the PIN step calls stampAuthSession(), which sets
+      // it (server/routes/auth.ts:215). Omitting it here made this fixture claim a parity it did
+      // not have, and hid the fact that audited super-admin mutations require an identified actor.
+      s.authUserId = ADMIN_USER_ID;
+      s.authRole = "admin";
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
       req.session.save(() => res.json({ ok: true }));

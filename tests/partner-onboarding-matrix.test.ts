@@ -837,7 +837,9 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     expect((acceptedUser.readiness as Json).blockedReasons).toContain("Organisation is PENDING.");
 
     await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [TENANT_A]);
-    const awaitingMfa = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
+    const awaitingMfa = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, {
+      cookie: superAdminCookie,
+    });
     const awaitingMfaUser = ((awaitingMfa.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
     expect((awaitingMfaUser.readiness as Json).onboardingState).toBe("AWAITING_MFA_SETUP");
     expect((awaitingMfaUser.readiness as Json).loginEnabled).toBe(false);
@@ -887,8 +889,18 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
 
     const auth = await import("../server/partner/auth");
     const oldToken = await auth.createPasswordResetToken(TENANT_A, userId);
-    const freshToken = await auth.createPasswordResetToken(TENANT_A, userId);
-    expect(await auth.consumePasswordResetToken(oldToken, finalPassword)).toBe(false);
+    expect(oldToken).not.toBeNull();
+
+    // The reissue cooldown (denial-of-recovery guard) deliberately preserves a fresh live link, so
+    // an immediate second request mints NOTHING and leaves the first token usable. That is the
+    // property that stops an unauthenticated attacker holding a partner's recovery shut.
+    expect(await auth.createPasswordResetToken(TENANT_A, userId)).toBeNull();
+
+    // A superseding link is still issuable through the authenticated operator path, which bypasses
+    // the cooldown — and superseding must still invalidate the previous link.
+    const freshToken = await auth.createPasswordResetToken(TENANT_A, userId, { force: true });
+    expect(freshToken).not.toBeNull();
+    expect(await auth.consumePasswordResetToken(oldToken!, finalPassword)).toBe(false);
     expect(await auth.consumePasswordResetToken(freshToken, "a".repeat(73))).toBe(false);
     expect(await auth.consumePasswordResetToken(freshToken, finalPassword)).toBe(true);
 

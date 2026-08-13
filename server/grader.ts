@@ -13,12 +13,7 @@
  * by any /api/grader/* endpoint).
  */
 import type { Request, Response, NextFunction } from "express";
-import {
-  normaliseGradeType,
-  kindOfOverallGrade,
-  rejectKindChange,
-  gradeTypeToPersist,
-} from "./lib/grade-kind";
+import { normaliseGradeType, kindOfOverallGrade, rejectKindChange, gradeTypeToPersist } from "./lib/grade-kind";
 import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
 import { sql, type SQL } from "drizzle-orm";
@@ -283,13 +278,30 @@ export async function migrateGraderSchema(): Promise<void> {
 // Phase 2 — re-validate the grader account is still live + still can_grade per
 // request, cached 60s (same stale-session defense as staff.ts requireStaff;
 // separate cache here to avoid a staff↔grader import cycle).
+/**
+ * CACHE IS NO LONGER CONSULTED FOR AUTHORISATION (invariant I19).
+ *
+ * The 60s per-process memo meant that revoking `can_grade`, or soft-deleting a grader, only took
+ * effect on the Machine that served the revoking request; the other Machine in the two-Machine
+ * production topology kept authorising the revoked grader for up to a minute. That is an
+ * incident-response control silently failing exactly when it is needed. Every authorisation
+ * decision below is now a live indexed primary-key lookup — the same thing requireAdmin does.
+ *
+ * WHY THE CACHE WRITE AND ITS INVALIDATOR ARE LEFT IN PLACE, RATHER THAN DELETED:
+ * this file is covered by the protected-grading tripwire in tests/variant-line-consolidation.test.ts,
+ * which scans BOTH added and removed lines of `git diff origin/main -- server/grader.ts` and rejects
+ * any changed line matching /grade/i together with arithmetic. `graderSessionCache` contains the
+ * substring "grade" and the existing write carries `Date.now() + 60_000`, so merely DELETING that
+ * pre-existing line trips a guard that protects the grading engine. Removing the READ is what fixes
+ * the security defect; touching the write would buy nothing and would require weakening a protected
+ * guard to do it. The map is written and never read — bounded exactly as before (one entry per
+ * grader, overwritten in place), so this is not a new leak.
+ */
 const graderSessionCache = new Map<string, { ok: boolean; expiry: number }>();
 export function invalidateGraderSessionCache(graderId: string): void {
   graderSessionCache.delete(String(graderId));
 }
 async function validateGraderSession(graderId: string): Promise<boolean> {
-  const c = graderSessionCache.get(graderId);
-  if (c && Date.now() < c.expiry) return c.ok;
   const r = await db.execute(sql`SELECT deleted_at, can_grade FROM users WHERE id = ${graderId} LIMIT 1`);
   const row = r.rows[0] as any;
   const ok = !!row && !row.deleted_at && !!row.can_grade;

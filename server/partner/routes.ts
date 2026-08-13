@@ -131,6 +131,27 @@ function denyTeamAction(
 export function partnerApiRouter(): Router {
   const r = Router();
 
+  /**
+   * TENANT-SCOPED RESPONSES ARE NEVER CACHEABLE — applied by construction, for every route on this
+   * router, rather than remembered per handler.
+   *
+   * `noStore()` was called by hand in only five places (/me, /session and the MFA secret/recovery
+   * responses), while `GET /credits` (wallet balance + ledger), `/sessions` (session ids, IPs),
+   * `/dashboard` (org legal name, status, accreditation), `/users` (full team roster) and
+   * `/locations` carried NO Cache-Control and no Vary at all. With neither header present, RFC 9111
+   * §4.2.2 permits a shared cache to apply heuristic freshness — and the deployment shape here is
+   * literally "a Mac behind a shop's network", where a corporate proxy or any CDN placed in front
+   * could serve one tenant's credit ledger to another.
+   *
+   * `Vary: Cookie` is set alongside as the second line of defence: no-store already forbids storage,
+   * but any cache that mishandles it must still key on the session cookie rather than the URL.
+   */
+  r.use((_req, res, next) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Vary", "Cookie");
+    next();
+  });
+
   // ---- auth ----
   // SHADOWED DUPLICATE — the served implementation is server/partner/public-routes.ts, kept ahead of
   // this router by the registration-order invariant at server/routes.ts:2798. It carries the SAME
@@ -239,7 +260,10 @@ export function partnerApiRouter(): Router {
           resetDeliveryConfigured()
         ) {
           const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
-          await deliverResetToken(email, token); // out-of-band; token never returned in the response
+          // NULL means a fresh link already exists and was preserved (denial-of-recovery guard).
+          if (token !== null) {
+            await deliverResetToken(email, token); // out-of-band; token never returned in the response
+          }
         }
       } catch {
         /* swallow — response stays generic regardless */
@@ -555,7 +579,13 @@ export function partnerApiRouter(): Router {
       return;
     }
     noStore(res);
-    res.json({ ok: true, enrolmentId: out.enrolmentId, secret: out.secret, otpauthUri: out.otpauthUri, expiresAt: out.expiresAt }); // shown once; never logged
+    res.json({
+      ok: true,
+      enrolmentId: out.enrolmentId,
+      secret: out.secret,
+      otpauthUri: out.otpauthUri,
+      expiresAt: out.expiresAt,
+    }); // shown once; never logged
   });
 
   r.post("/mfa/restart", partnerMfaLimiter, async (req, res) => {
@@ -586,12 +616,19 @@ export function partnerApiRouter(): Router {
       password
     );
     if (!out.ok) {
-      const status = out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
+      const status =
+        out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
       res.status(status).json({ error: out.reason });
       return;
     }
     noStore(res);
-    res.json({ ok: true, enrolmentId: out.enrolmentId, secret: out.secret, otpauthUri: out.otpauthUri, expiresAt: out.expiresAt });
+    res.json({
+      ok: true,
+      enrolmentId: out.enrolmentId,
+      secret: out.secret,
+      otpauthUri: out.otpauthUri,
+      expiresAt: out.expiresAt,
+    });
   });
 
   r.post("/mfa/cancel", partnerMfaLimiter, async (req, res) => {

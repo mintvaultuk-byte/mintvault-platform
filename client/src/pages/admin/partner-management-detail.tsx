@@ -257,9 +257,7 @@ export default function PartnerManagementDetailPage() {
     mutationFn: async (run: (reason: string, value: string) => Promise<unknown>) => run(reason, modalValue),
     onSuccess: (data: any) => {
       setBanner(
-        modal?.successMessage
-          ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage)
-          : "Action completed."
+        modal?.successMessage ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage) : "Action completed."
       );
       closeModal();
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
@@ -727,7 +725,11 @@ export default function PartnerManagementDetailPage() {
                         <td>
                           {u.password_configured ? "Password set" : "Password setup needed"}
                           <br />
-                          {u.mfa_required ? (u.mfa_configured ? "MFA enabled" : "MFA setup needed") : "MFA not required"}
+                          {u.mfa_required
+                            ? u.mfa_configured
+                              ? "MFA enabled"
+                              : "MFA setup needed"
+                            : "MFA not required"}
                         </td>
                         <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "—"}</td>
                         <td>{u.invitation_status ?? (u.status === "ACTIVE" ? "ACCEPTED" : "—")}</td>
@@ -1723,7 +1725,16 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
       </div>
     );
   }
-  const ready = primary.readiness.loginEnabled;
+  // VERSION-SKEW GUARD — same reasoning as the onboardingState guard below, applied to the whole
+  // object rather than one field. Fly runs a ROLLING deploy across two Machines, so a new SPA bundle
+  // can be served by one Machine while the other still runs the previous build and returns a user
+  // row with no `readiness` object at all. Every unguarded deref below then throws during
+  // render, and because the ONLY error boundary is at the application root
+  // (client/src/App.tsx) whose sole recovery is window.location.reload(), a persistently
+  // old-shaped response white-screens the entire admin SPA in a reload loop.
+  const readiness = primary.readiness ?? null;
+  const ready = readiness?.loginEnabled ?? false;
+  const blockedReasons = readiness?.blockedReasons ?? [];
   const invitationStatus = primary.invitationStatus ?? (primary.userStatus === "ACTIVE" ? "ACCEPTED" : "—");
   return (
     <div data-testid="pm-onboarding-section" style={{ marginTop: 14, paddingTop: 12 }}>
@@ -1745,10 +1756,10 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
             one machine while the other still runs the previous build and returns a readiness
             object with no `onboardingState`. An unguarded .replaceAll() would throw during
             render and white-screen this page for the whole roll. */}
-        {String(primary.readiness.onboardingState ?? "UNKNOWN").replaceAll("_", " ")}
+        {String(readiness?.onboardingState ?? "UNKNOWN").replaceAll("_", " ")}
       </div>
       <div style={{ display: "grid", gap: 4, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
-        <Field label="Organisation status" v={primary.readiness.organisationActive ? "ACTIVE" : "Not active"} />
+        <Field label="Organisation status" v={readiness?.organisationActive ? "ACTIVE" : "Not active"} />
         <Field label="Partner user status" v={primary.userStatus} />
         <Field label="Email" v={primary.email} />
         <Field label="Role" v={primary.role} />
@@ -1758,21 +1769,23 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
         <Field label="Accepted" v={primary.acceptedAt} />
         <Field label="Last login" v={primary.lastLoginAt} />
         <Field label="Active sessions" v={String(primary.activeSessions ?? 0)} />
-        <Field label="Portal enabled" v={primary.readiness.portalEnabled ? "yes" : "no"} />
-        <Field label="Login enabled" v={primary.readiness.loginFlagEnabled ? "yes" : "no"} />
-        <Field label="Password configured" v={primary.readiness.passwordConfigured ? "yes" : "no"} />
-        <Field label="MFA required" v={primary.readiness.mfaRequired ? "yes" : "no"} />
-        <Field label="MFA configured" v={primary.readiness.mfaConfigured ? "yes" : "no"} />
-        <Field label="Eligible location" v={primary.readiness.locationEligible ? "yes" : "no"} />
+        <Field label="Portal enabled" v={readiness?.portalEnabled ? "yes" : "no"} />
+        <Field label="Login enabled" v={readiness?.loginFlagEnabled ? "yes" : "no"} />
+        <Field label="Password configured" v={readiness?.passwordConfigured ? "yes" : "no"} />
+        <Field label="MFA required" v={readiness?.mfaRequired ? "yes" : "no"} />
+        <Field label="MFA configured" v={readiness?.mfaConfigured ? "yes" : "no"} />
+        <Field label="Eligible location" v={readiness?.locationEligible ? "yes" : "no"} />
       </div>
       <div data-testid="pm-login-readiness-reasons" style={{ marginTop: 8, fontSize: 13 }}>
         {ready ? (
           "Login is currently allowed."
         ) : (
           <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {primary.readiness.blockedReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
+            {blockedReasons.length === 0 ? (
+              <li>Readiness detail is unavailable — retry after the deployment settles.</li>
+            ) : (
+              blockedReasons.map((reason) => <li key={reason}>{reason}</li>)
+            )}
           </ul>
         )}
       </div>
@@ -2097,7 +2110,11 @@ function UserActions({
             title: `Send a password-setup link to ${user.email}?`,
             successMessage: "Password setup link issued.",
             highRisk: true,
-            body: <p style={{ fontSize: 12 }}>This sends a fresh single-use link. The password and link are never shown to MintVault staff.</p>,
+            body: (
+              <p style={{ fontSize: 12 }}>
+                This sends a fresh single-use link. The password and link are never shown to MintVault staff.
+              </p>
+            ),
             run: post(`/partners/${partnerId}/users/${user.id}/password-reset`, {}),
           })
         }
@@ -2114,7 +2131,12 @@ function UserActions({
             kind: "user-reset-mfa",
             title: `Reset MFA for ${user.email}?`,
             highRisk: true,
-            body: <p style={{ fontSize: 12 }}>All MFA methods and recovery codes are disabled and every active session is revoked. The user must enrol a new authenticator.</p>,
+            body: (
+              <p style={{ fontSize: 12 }}>
+                All MFA methods and recovery codes are disabled and every active session is revoked. The user must enrol
+                a new authenticator.
+              </p>
+            ),
             run: post(`/partners/${partnerId}/users/${user.id}/reset-mfa`, {}),
           })
         }

@@ -477,6 +477,37 @@ async function runTransferV2Sweep() {
   guardedPartnerCreditReservationExpiry();
   trackInterval(guardedPartnerCreditReservationExpiry, 60 * 60 * 1000);
 
+  // Grading Credit reconciliation — hourly, advisory-locked, STRICTLY READ-ONLY.
+  //
+  // reconcileCreditReservations() has existed and been tested for some time but was never wired to
+  // anything, so wallet-vs-ledger drift could occur in production with nobody informed. Drift in the
+  // credit ledger is a money-correctness fault: it must raise an alert, and must NEVER be silently
+  // repaired, because an automatic correction destroys the evidence needed to explain what happened.
+  // Remediation is an audited Super Admin adjustment.
+  //
+  // An `error`-severity issue means an invariant is already broken (balance mismatch, negative
+  // balance, missing consume evidence, duplicate terminal transition, cross-tenant reference), so it
+  // is logged at error level with a bounded sample. Expected steady state is exactly zero.
+  const guardedPartnerCreditReconciliation = guard("partner-credit-reconciliation", async () => {
+    const { runPartnerCreditReconciliation } = await import("./jobs/partner-credit-reconciliation");
+    const result = await runPartnerCreditReconciliation();
+    if (!result.ran) {
+      log(`skipped: ${result.skippedReason}`, "partner-credit-reconciliation");
+      return;
+    }
+    if (result.errors === 0 && result.warnings === 0) return; // silent when clean — zero is the norm
+    const summary = Object.entries(result.byCode)
+      .map(([code, n]) => `${code}=${n}`)
+      .join(" ");
+    // eslint-disable-next-line no-console
+    console.error(
+      `[partner-credit-reconciliation] LEDGER DRIFT DETECTED errors=${result.errors} ` +
+        `warnings=${result.warnings} ${summary}\n  ${result.sample.join("\n  ")}`
+    );
+  });
+  guardedPartnerCreditReconciliation();
+  trackInterval(guardedPartnerCreditReconciliation, 60 * 60 * 1000);
+
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
   // hour. Job fail-softs if the migration hasn't run yet, so it's safe

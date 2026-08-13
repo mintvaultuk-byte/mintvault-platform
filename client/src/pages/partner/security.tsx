@@ -293,12 +293,12 @@ export default function PartnerSecurityPage() {
         </h2>
         {sessions.isLoading && <p className="text-sm text-muted-foreground">Loading sessions…</p>}
         {sessions.error && <p className="text-sm text-destructive">{partnerErrorMessage(sessions.error)}</p>}
-        {sessions.data?.sessions.filter((item) => !item.revokedAt).length === 0 && (
+        {sessions.data?.sessions?.filter((item) => !item.revokedAt).length === 0 && (
           <p className="text-sm text-muted-foreground">No active sessions</p>
         )}
         <div className="space-y-2" data-testid="list-partner-sessions">
           {sessions.data?.sessions
-            .filter((item) => !item.revokedAt)
+            ?.filter((item) => !item.revokedAt)
             .map((item) => (
               <div
                 key={item.id}

@@ -7,11 +7,11 @@
  */
 import { Router, type Express, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
-import { requireAdmin } from "../auth";
+import { requireSuperAdmin } from "../auth";
 import { partnerAdminQuery } from "./db";
 import { PARTNER_FLAGS } from "./flags";
 import { getPartnerAdminCapability } from "./admin-capability";
-import { g5StatusFor, toG5Error } from "./partner-management-errors";
+import { G5RequestError, g5StatusFor, toG5Error } from "./partner-management-errors";
 import { setPartnerUserStatus, resetPartnerUserMfa, type ActorContext } from "./partner-management-service";
 
 async function adminAudit(
@@ -48,9 +48,17 @@ const legacyMutationRateLimit = rateLimit({
 
 function actorOf(req: Request): ActorContext {
   const session = req.session as { authUserId?: string; adminEmail?: string };
+  // Fail rather than attribute a privileged partner mutation to a phantom actor. The previous
+  // null-UUID/"admin" fallback meant an MFA reset or account change could be recorded against
+  // 00000000-0000-0000-0000-000000000000 with no real identity — an unattributable audit entry for
+  // exactly the actions that most need attribution. The canonical partner-management router already
+  // throws here; these two must agree.
+  if (!session?.authUserId || !session?.adminEmail) {
+    throw new G5RequestError("UNAUTHENTICATED", "An identified admin session is required.");
+  }
   return {
-    actorUserId: session.authUserId ?? "00000000-0000-0000-0000-000000000000",
-    actorEmail: session.adminEmail ?? "admin",
+    actorUserId: session.authUserId,
+    actorEmail: session.adminEmail,
     requestId: String(req.headers["x-request-id"] ?? `legacy-gp-${req.method}-${Date.now()}`),
     idempotencyKey: typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined,
   };
@@ -75,7 +83,14 @@ async function requirePartnerAdminCapability(_req: Request, res: Response, next:
 
 export function superAdminPartnerRouter(): Router {
   const r = Router();
-  r.use(requireAdmin);
+  // requireSuperAdmin, NOT requireAdmin. This legacy router reaches the SAME hardened services as
+  // /api/super-admin/partner-management (which has always required Super Admin) — including
+  // resetPartnerUserMfa, which disables every MFA method, burns recovery codes and revokes sessions
+  // for an arbitrary partner user in an arbitrary tenant. Gating it on plain `requireAdmin` meant any
+  // non-super-admin admin session could strip a partner OWNER's second factor cross-tenant, then
+  // drive that owner's password reset — full tenant takeover without Super Admin. The two routers
+  // must not disagree about who may perform an identical state change.
+  r.use(requireSuperAdmin);
   r.use(requirePartnerAdminCapability);
 
   r.get("/", async (_req, res) => {

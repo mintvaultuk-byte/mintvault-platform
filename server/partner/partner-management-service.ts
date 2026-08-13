@@ -27,7 +27,10 @@ export interface ActorContext {
 
 type CreatePartnerFailurePoint = "after_org_insert" | "after_default_location_insert";
 type InvitePartnerFailurePoint =
-  "after_user_insert" | "after_role_assignment" | "before_invitation_insert" | "before_invitation_audit";
+  | "after_user_insert"
+  | "after_role_assignment"
+  | "before_invitation_insert"
+  | "before_invitation_audit";
 
 interface InviteBarrier {
   point: "after_duplicate_check";
@@ -274,9 +277,7 @@ export async function provisionMissingActivePartnerWallets(
       );
       const walletId =
         inserted.rows[0]?.id ??
-        (
-          await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])
-        ).rows[0]?.id;
+        (await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])).rows[0]?.id;
       if (!walletId) throw new G5RequestError("INTERNAL_ERROR", "Wallet backfill could not verify wallet.");
 
       const created = inserted.rowCount === 1;
@@ -736,7 +737,6 @@ export async function changeStatus(
       const wallet = await ensureWallet({ actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, org.id);
       walletProvisioned = !!wallet;
     }
-
 
     // Bump the aggregate version under optimistic lock AND set the status in ONE data-modifying-CTE
     // statement, so the two writes are atomic (no "version bumped but status unchanged" window) without
@@ -1412,12 +1412,20 @@ export interface PartnerLoginReadiness {
   loginEnabled: boolean;
   loginFlagEnabled: boolean;
   portalEnabled: boolean;
+  /**
+   * Whether this tenant has at least one APPROVED, ACTIVE station.
+   * `null` means the station subsystem is not present on this database (migration 0045 unapplied),
+   * which is DIFFERENT from "no station yet" and must not be reported as either ready or blocked.
+   */
+  stationReady: boolean | null;
   onboardingState:
     | "INVITED"
     | "AWAITING_PASSWORD_SETUP"
     | "AWAITING_MFA_SETUP"
+    | "STATION_SETUP_REQUIRED"
     | "READY_TO_LOG_IN"
     | "SUSPENDED"
+    | "REVOKED"
     | "LOGIN_BLOCKED";
   blockedReasons: string[];
 }
@@ -1435,7 +1443,8 @@ function buildLoginReadiness(
     invitation_expires_at: string | null;
   },
   portalEnabled: boolean,
-  loginFlagEnabled: boolean
+  loginFlagEnabled: boolean,
+  stationReady: boolean | null
 ): PartnerLoginReadiness {
   const organisationActive = row.org_status === "ACTIVE";
   const userActive = row.user_status === "ACTIVE";
@@ -1464,17 +1473,46 @@ function buildLoginReadiness(
     blockedReasons.push("Partner must enrol an MFA authenticator before the portal is available.");
   }
   if (!locationEligible) blockedReasons.push("Partner user has no active eligible location.");
-  const onboardingState: PartnerLoginReadiness["onboardingState"] =
-    row.user_status === "SUSPENDED" || row.org_status === "SUSPENDED" || row.user_status === "REVOKED" || row.org_status === "REVOKED"
+  // A partner with no approved station can sign in but cannot perform the pilot's core action
+  // (capture a card), so reporting them simply "READY" overstates readiness. `null` means the
+  // station subsystem is absent from this database, which is not the partner's problem and must not
+  // be surfaced as a blocked reason.
+  if (stationReady === false) {
+    blockedReasons.push("No approved station is enrolled for this partner — capture is unavailable.");
+  }
+
+  /*
+   * STATE DERIVATION. Three corrections to what this previously reported:
+   *
+   * 1. REVOKED was collapsed into SUSPENDED. Revocation is terminal; suspension is reversible.
+   *    Reporting a revoked account as "suspended" reads to an operator as "reactivate it", which is
+   *    not possible, so the two are now distinct.
+   *
+   * 2. INVITED ignored `invitationValid`, which was computed directly above and then never used in
+   *    this expression. A user whose invitation had EXPIRED still reported INVITED, so an operator
+   *    waited for an acceptance that could never arrive instead of resending. An INVITED user with a
+   *    dead invitation now falls through to AWAITING_PASSWORD_SETUP, whose blockedReasons already
+   *    carry the accurate "No valid invitation is available…" line.
+   *
+   * 3. STATION_SETUP_REQUIRED did not exist at all, so a partner with no station reported
+   *    READY_TO_LOG_IN — true for login, misleading for readiness.
+   */
+  const orgTerminal = row.org_status === "REVOKED" || row.user_status === "REVOKED";
+  const orgSuspended = row.org_status === "SUSPENDED" || row.user_status === "SUSPENDED";
+  const onboardingState: PartnerLoginReadiness["onboardingState"] = orgTerminal
+    ? "REVOKED"
+    : orgSuspended
       ? "SUSPENDED"
-      : row.user_status === "INVITED"
+      : row.user_status === "INVITED" && invitationValid
         ? "INVITED"
         : !passwordConfigured
           ? "AWAITING_PASSWORD_SETUP"
           : mfaRequired && !mfaConfigured
             ? "AWAITING_MFA_SETUP"
             : portalEnabled && loginFlagEnabled && organisationActive && userActive && locationEligible
-              ? "READY_TO_LOG_IN"
+              ? stationReady === false
+                ? "STATION_SETUP_REQUIRED"
+                : "READY_TO_LOG_IN"
               : "LOGIN_BLOCKED";
   return {
     organisationActive,
@@ -1485,9 +1523,18 @@ function buildLoginReadiness(
     mfaRequired,
     mfaConfigured,
     locationEligible,
+    stationReady,
+    // loginEnabled is deliberately NOT gated on the station: a partner with no station must still be
+    // able to sign in — that is how they reach the station-enrolment screen. Station readiness is
+    // reported separately, via onboardingState and blockedReasons.
     loginEnabled:
-      portalEnabled && loginFlagEnabled && organisationActive && userActive && passwordConfigured &&
-      (!mfaRequired || mfaConfigured) && locationEligible,
+      portalEnabled &&
+      loginFlagEnabled &&
+      organisationActive &&
+      userActive &&
+      passwordConfigured &&
+      (!mfaRequired || mfaConfigured) &&
+      locationEligible,
     loginFlagEnabled,
     portalEnabled,
     onboardingState,
@@ -1551,6 +1598,29 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       LIMIT 500`,
     [org.id]
   );
+  /*
+   * Station readiness is probed SEPARATELY rather than joined into the query above, because
+   * `partner_stations` arrives in migration 0045 and several test migration lists deliberately stop
+   * short of it. Referencing the table inline would make this whole endpoint fail on those
+   * databases; a guarded probe degrades to `null` (= "cannot tell") instead.
+   *
+   * `null` is a THIRD state, not a synonym for false: it must never be reported as a blocked reason
+   * (the partner has done nothing wrong) nor silently treated as ready.
+   */
+  let stationReady: boolean | null = null;
+  try {
+    const stationRows = await partnerAdminQuery<{ present: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM partner_stations
+          WHERE tenant_id = $1 AND status = 'ACTIVE' AND approved_at IS NOT NULL
+       ) AS present`,
+      [org.id]
+    );
+    stationReady = stationRows.rows[0]?.present === true;
+  } catch {
+    stationReady = null; // station subsystem absent on this database — report unknown, not blocked
+  }
+
   return {
     organisation: { id: org.id, legalName: org.legal_name, status: org.status },
     portalEnabled,
@@ -1568,7 +1638,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       acceptedAt: u.invitation_consumed_at,
       lastLoginAt: u.last_login_at,
       activeSessions: u.active_sessions ?? 0,
-      readiness: buildLoginReadiness(u, portalEnabled, loginFlagEnabled),
+      readiness: buildLoginReadiness(u, portalEnabled, loginFlagEnabled, stationReady),
     })),
   };
 }
@@ -1803,7 +1873,11 @@ export async function sendPartnerUserPasswordReset(
   const email = u.rows[0].email;
   return withAudit(actor, org.id, "partner_user_password_reset_initiated", reason, { userId }, async () => {
     const { createPasswordResetToken } = await import("./auth");
-    const token = await createPasswordResetToken(org.id, userId);
+    // force: this is an authenticated Super Admin action already wrapped in withAudit above. The
+    // reissue cooldown exists to stop an UNAUTHENTICATED flood holding a partner's recovery shut;
+    // applying it here would leave the operator with no token to deliver and no way to help.
+    const token = await createPasswordResetToken(org.id, userId, { force: true });
+    if (token === null) throw new Error("Password reset token was not issued.");
     let deliveryStatus = "SENT";
     try {
       const { deliverResetToken } = await import("./delivery");
@@ -1946,11 +2020,7 @@ export async function revokePartnerUserSessions(
 }
 
 export async function acceptPartnerInvitation(token: string, password: string) {
-  if (
-    typeof token !== "string" ||
-    token.length < 20 ||
-    !isValidPartnerPassword(password)
-  ) {
+  if (typeof token !== "string" || token.length < 20 || !isValidPartnerPassword(password)) {
     return { ok: false as const, reason: "invalid" as const };
   }
   const tokenHash = sha256(token);

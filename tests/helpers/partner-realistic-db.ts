@@ -168,6 +168,11 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // Allocates into core certificates/cert_counter while deriving the immutable
   // Partner mapping. It must never be pulled into the Partner-only harness.
   "0076_partner_pilot_certificate_allocation",
+  // APPLICATION scope, deliberately: 0079 ALTERs the CORE `users` table (adding the durable admin
+  // password-step lockout columns). A partner-only disposable database has no `users` table at all,
+  // so pulling this into the Partner harness would fail — it is classified here on what it TOUCHES,
+  // not on which feature motivated it.
+  "0079_admin_password_lockout",
 ] as const;
 
 /**
@@ -213,6 +218,13 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
   "0077_partner_credential_lifecycle_hardening",
+  // PARTNER scope, deliberately: 0078 creates ONE standalone table
+  // (partner_rate_limit_buckets) plus an index and a grant to partner_runtime, which migration 0001
+  // already creates. It touches no core table, so it is safe on a partner-only disposable database.
+  // It carries no tenant_id — the limiters it backs run PRE-AUTHENTICATION, keyed on an IP prefix or
+  // a submitted email — so the RLS coverage sweep in partner-rls-isolation.test.ts correctly ignores
+  // it (that sweep asserts RLS only for partner_% tables HAVING a tenant_id column).
+  "0078_partner_shared_rate_limit_buckets",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

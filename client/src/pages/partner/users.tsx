@@ -71,7 +71,7 @@ export default function PartnerUsersPage() {
   });
 
   const currentUser = useMemo(
-    () => query.data?.users.find((u) => u.id === session?.userId) ?? null,
+    () => query.data?.users?.find((u) => u.id === session?.userId) ?? null,
     [query.data?.users, session?.userId]
   );
   const isOwner = currentUser?.role === "OWNER";

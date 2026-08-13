@@ -20,6 +20,25 @@ jobs:
       # database because the realistic-roles helper reassigns `public` schema ownership to
       # pn_migrator, which must not happen to the shared test database.
       PARTNER_MANAGEMENT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_rt
+      # Super Admin control shell (tests/partner-admin-control-shell-integration.test.ts).
+      #
+      # These two were MISSING, so the whole suite — 11 tests covering partner/location/user
+      # suspension, session revocation, emergency stop and MFA reset against the REAL requireAdmin /
+      # requireSuperAdmin middleware — was `describe.skip` and reported green while never running.
+      # That silent skip is why a privilege-escalation defect survived: the legacy MFA-reset route
+      # was gated on plain `requireAdmin` while the canonical route required Super Admin, and the
+      # only test that exercised it never executed in CI.
+      #
+      # BOTH URLs must name the SAME database: server/partner/db.ts:65 asserts that
+      # PARTNER_DATABASE_URL and MINTVAULT_DATABASE_URL share one database identity for partner
+      # credit settlement, and the suite assigns these two variables to exactly those.
+      #
+      # The RUNTIME URL must NOT be a superuser. The suite creates `partner_app_test_shell` itself
+      # (CREATE ROLE ... LOGIN PASSWORD 'synthetic'; GRANT partner_runtime TO ...), and the partner
+      # runtime refuses a BYPASSRLS credential outright (PARTNER_RUNTIME_BYPASSRLS_FORBIDDEN) — which
+      # is correct, and is why the admin URL cannot simply be reused here.
+      PARTNER_ADMIN_TEST: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_admin_shell
+      PARTNER_ADMIN_TEST_RUNTIME: postgres://partner_app_test_shell:synthetic@127.0.0.1:55433/mintvault_partner_admin_shell
       # Super Admin Project Control real-PostgreSQL suites
       # (tests/project-control-migration.integration.test.ts and
       #  tests/project-control-concurrency.integration.test.ts).
@@ -423,6 +442,7 @@ jobs:
                             mintvault_partner_rbac_mig mintvault_partner_rbac_rt \
                             mintvault_partner_ux_rt mintvault_partner_rls mintvault_partner_cert_origin \
                             mintvault_partner_definer mintvault_partner_mgmt_mig \
+                            mintvault_partner_admin_shell \
                             mintvault_correction_test; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"

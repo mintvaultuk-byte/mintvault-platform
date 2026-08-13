@@ -186,6 +186,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
+import { generateUploadToken, verifyUploadToken } from "./lib/upload-token";
 import { uploadToR2, getR2SignedUrl, getR2Buffer, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import {
   persistImageUploadAudited,
@@ -2750,11 +2751,11 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       }
     });
 
-      res.json({ ok: true, wasApproved, reviewRevision: savedReviewRevision, authoritativeGrade });
-    } catch (error: any) {
-      console.error("[grade] save error:", error.message);
-      sendServerError(res, error);
-    }
+    res.json({ ok: true, wasApproved, reviewRevision: savedReviewRevision, authoritativeGrade });
+  } catch (error: any) {
+    console.error("[grade] save error:", error.message);
+    sendServerError(res, error);
+  }
 }
 
 /** The canonical approval CAS token is server-issued and never coerced from a client string. */
@@ -8723,19 +8724,14 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Upload token (phone QR) ──────────────────────────────────────
 
-  // In-memory token store: token -> { certId, imageType, expiresAt }
-  const _uploadTokens = new Map<string, { certId: string; imageType: string; expiresAt: number }>();
-
+  // Tokens are STATELESS and signed (server/lib/upload-token.ts). The previous implementation kept a
+  // module-level Map, which is per-process: production runs two Fly Machines, and the phone that
+  // scans the QR code is a separate client with no affinity to the Machine that minted the token, so
+  // roughly half of scans hit a Machine that had never seen it and failed as "invalid or expired".
   app.post("/api/admin/upload-token", requireAdmin, (req, res) => {
     const { certId, imageType } = req.body;
     if (!certId || !imageType) return res.status(400).json({ error: "certId and imageType required" });
-    const token = crypto.randomBytes(16).toString("hex");
-    const expiresAt = Date.now() + 15 * 60 * 1000;
-    _uploadTokens.set(token, { certId: String(certId), imageType, expiresAt });
-    // Cleanup expired tokens
-    for (const [k, v] of _uploadTokens.entries()) {
-      if (Date.now() > v.expiresAt) _uploadTokens.delete(k);
-    }
+    const { token, expiresAt } = generateUploadToken(String(certId), String(imageType));
     const uploadUrl = `${process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS}` : "https://mintvaultuk.com"}/upload/${certId}/${imageType}?token=${token}`;
     res.json({ token, expiresAt: new Date(expiresAt).toISOString(), uploadUrl });
   });
@@ -8748,16 +8744,15 @@ Defects (admin-confirmed): ${defectLines}`;
       const token = req.query.token as string;
       if (!token) return res.status(401).json({ error: "Token required" });
 
-      const entry = _uploadTokens.get(token);
-      if (!entry) return res.status(401).json({ error: "Invalid or expired token" });
-      if (Date.now() > entry.expiresAt) {
-        _uploadTokens.delete(token);
-        return res.status(401).json({ error: "Token expired" });
-      }
-
       const certId = String(req.params.certId);
       const imageType = String(req.params.imageType);
-      if (entry.imageType !== imageType) return res.status(400).json({ error: "Token imageType mismatch" });
+      // The target is inside the signed payload, so a token minted for one certificate/side cannot
+      // be replayed against another — the separate imageType equality check this replaces could only
+      // ever catch half of that, and never the certId. Verification is constant-time and works on
+      // EITHER Machine because nothing is stored server-side.
+      if (!verifyUploadToken(certId, imageType, token)) {
+        return res.status(401).json({ error: "Invalid or expired token" });
+      }
 
       const dbCert = await findCertByIdFlex(certId);
       if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
@@ -10403,7 +10398,8 @@ Defects (admin-confirmed): ${defectLines}`;
         if (prepared.alreadyAccepted) {
           return res.json({ ok: true, already_accepted: true });
         }
-        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } = await import("./scanner-capture-service");
+        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } =
+          await import("./scanner-capture-service");
         activeSession = await beginScannerCapture(sessionId, req.scannerStation?.code ?? req.body?.device_id);
         const { getR2Buffer } = await import("./r2");
         const stagedTiff = await getR2Buffer(prepared.staging.objectKey);
@@ -10446,15 +10442,13 @@ Defects (admin-confirmed): ${defectLines}`;
         });
         const { completeScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
         await completeScannerEvidenceFinalisation(stagingId);
-        return res
-          .status(201)
-          .json({
-            ok: true,
-            certId: activeSession.certificateNumber,
-            side: activeSession.side,
-            raw_uploaded: true,
-            card_registered: cardRegistered,
-          });
+        return res.status(201).json({
+          ok: true,
+          certId: activeSession.certificateNumber,
+          side: activeSession.side,
+          raw_uploaded: true,
+          card_registered: cardRegistered,
+        });
       } catch (error: any) {
         const reason = error?.message || "staged scanner capture rejected";
         if (!evidenceCommitted) {
@@ -10489,7 +10483,8 @@ Defects (admin-confirmed): ${defectLines}`;
     async (req, res) => {
       const sessionId = String(req.params.sessionId);
       try {
-        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } = await import("./scanner-capture-service");
+        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } =
+          await import("./scanner-capture-service");
         const { parseLide400CaptureProvenance, assertLide400Evidence } = await import("./lib/lide400-profile");
         const { inspectScannerEvidence, uploadRawScannerSide, markRawUploaded, setScanStatus } =
           await import("./scan-ingest-service");
@@ -10576,15 +10571,13 @@ Defects (admin-confirmed): ${defectLines}`;
             recapture: session.recapture,
           }
         );
-        return res
-          .status(201)
-          .json({
-            ok: true,
-            certId: session.certificateNumber,
-            side: session.side,
-            raw_uploaded: true,
-            card_registered: cardRegistered,
-          });
+        return res.status(201).json({
+          ok: true,
+          certId: session.certificateNumber,
+          side: session.side,
+          raw_uploaded: true,
+          card_registered: cardRegistered,
+        });
       } catch (error: any) {
         const reason = error?.message || "scanner capture rejected";
         try {

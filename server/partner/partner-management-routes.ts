@@ -33,6 +33,7 @@ import * as svc from "./partner-management-service";
 import type { ActorContext } from "./partner-management-service";
 import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admin-capability";
 import { validatePartnerRbac, partnerRbacBlocksReadiness } from "./permissions";
+import { checkPartnerSchemaContract } from "./schema-contract";
 import { resolveGlobalFlag } from "./flags";
 
 /**
@@ -148,7 +149,16 @@ export function partnerManagementRouter(): Router {
     }
 
     const rbacBlocks = partnerRbacBlocksReadiness(rbac.state, partnerSurfaceEnabled);
-    const ready = current.ok && !rbacBlocks;
+
+    /*
+     * Schema contract (invariant I18). This is the surface an operator actually looks at, so a
+     * version deployed ahead of its migration must say so HERE rather than being inferred from a
+     * scatter of unrelated 401s and 500s across login, password reset and invitation accept.
+     * Read-only and cached-on-success; it can never seed or repair anything.
+     */
+    const schema = await checkPartnerSchemaContract();
+
+    const ready = current.ok && !rbacBlocks && schema.ok;
 
     /*
      * failureCode is always a FIXED enum and remedy is always a STATIC string. No raw database error
@@ -170,6 +180,13 @@ export function partnerManagementRouter(): Router {
         remedy: rbacBlocks ? (rbac.remedy ?? REMEDY_APPLY_RBAC_MIGRATION) : null,
         missing: rbac.missing,
         unexpected: rbac.unexpected,
+      },
+      schemaContract: {
+        ok: schema.ok,
+        // Each entry names the requirement AND the migration file that supplies it. This is
+        // deployment configuration, never tenant data, so it is safe on this Super-Admin surface.
+        missing: schema.missing,
+        probeError: schema.error ?? null,
       },
     });
   });

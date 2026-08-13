@@ -153,7 +153,10 @@ export default function PartnerManagementPage() {
   const [walletBackfillResult, setWalletBackfillResult] = useState<WalletBackfillResult | null>(null);
   const [fleetStatus, setFleetStatus] = useState<FleetStationStatus | "ALL">("PENDING");
   const [fleetReason, setFleetReason] = useState("");
-  const [fleetAction, setFleetAction] = useState<{ stationCode: string; action: "active" | "suspended" | "revoked" | "reject" } | null>(null);
+  const [fleetAction, setFleetAction] = useState<{
+    stationCode: string;
+    action: "active" | "suspended" | "revoked" | "reject";
+  } | null>(null);
 
   const legalNameErr = validateLegalName(legalName);
   const dupDecision = canCreateDespiteDuplicates(duplicates, dupAcknowledged);
@@ -246,16 +249,30 @@ export default function PartnerManagementPage() {
   });
 
   const fleetMutation = useMutation({
-    mutationFn: async ({ stationCode, action, reason }: { stationCode: string; action: "active" | "suspended" | "revoked" | "reject"; reason: string }) =>
-      (await apiRequest("POST", `${FLEET_BASE}/stations/${encodeURIComponent(stationCode)}/${action}`, { reason })).json(),
+    mutationFn: async ({
+      stationCode,
+      action,
+      reason,
+    }: {
+      stationCode: string;
+      action: "active" | "suspended" | "revoked" | "reject";
+      reason: string;
+    }) =>
+      (
+        await apiRequest("POST", `${FLEET_BASE}/stations/${encodeURIComponent(stationCode)}/${action}`, { reason })
+      ).json(),
     onSuccess: async (_data, input) => {
-      setBanner(`${input.stationCode} ${input.action === "active" ? "approved" : input.action === "reject" ? "rejected" : input.action}.`);
+      setBanner(
+        `${input.stationCode} ${input.action === "active" ? "approved" : input.action === "reject" ? "rejected" : input.action}.`
+      );
       setFleetAction(null);
       setFleetReason("");
       await queryClient.invalidateQueries({ queryKey: [FLEET_BASE] });
     },
     onError: (err: unknown) => {
-      setBanner(serverErrorMessage((err as { body?: unknown })?.body, "Station action failed. No station state was changed."));
+      setBanner(
+        serverErrorMessage((err as { body?: unknown })?.body, "Station action failed. No station state was changed.")
+      );
     },
   });
 
@@ -341,7 +358,10 @@ export default function PartnerManagementPage() {
       activePartnersForWallets.refetch();
     },
     onError: (err: unknown) => {
-      const msg = serverErrorMessage((err as { body?: unknown })?.body, "Wallet backfill failed. No result was recorded.");
+      const msg = serverErrorMessage(
+        (err as { body?: unknown })?.body,
+        "Wallet backfill failed. No result was recorded."
+      );
       setBanner(msg);
     },
   });
@@ -575,7 +595,12 @@ export default function PartnerManagementPage() {
           <div data-testid="pm-station-fleet" style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(["PENDING", "ACTIVE", "SUSPENDED", "REVOKED", "ALL"] as const).map((status) => (
-                <Chip key={status} active={fleetStatus === status} onClick={() => setFleetStatus(status)} testId={`pm-fleet-filter-${status}`}>
+                <Chip
+                  key={status}
+                  active={fleetStatus === status}
+                  onClick={() => setFleetStatus(status)}
+                  testId={`pm-fleet-filter-${status}`}
+                >
                   {status}
                 </Chip>
               ))}
@@ -586,23 +611,88 @@ export default function PartnerManagementPage() {
               <div role="alert" data-testid="pm-fleet-error" style={{ color: "var(--admin-red)" }}>
                 Station fleet is unavailable. No station action can be submitted.
               </div>
-            ) : (fleet.data?.stations.length ?? 0) === 0 ? (
+            ) : (fleet.data?.stations?.length ?? 0) === 0 ? (
               <div data-testid="pm-fleet-empty">No stations match this state.</div>
             ) : (
               <table className="min-w-full text-left text-sm" data-testid="pm-fleet-table">
-                <thead><tr><th>Station</th><th>Partner / location</th><th>Readiness</th><th>Last seen</th><th /></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Station</th>
+                    <th>Partner / location</th>
+                    <th>Readiness</th>
+                    <th>Last seen</th>
+                    <th />
+                  </tr>
+                </thead>
                 <tbody>
-                  {fleet.data?.stations.map((station) => (
+                  {fleet.data?.stations?.map((station) => (
                     <tr key={station.stationCode} data-testid={`pm-fleet-row-${station.stationCode}`}>
-                      <td><code>{station.stationCode}</code><div><Badge variant={fleetBadge(station.status)}>{station.status}</Badge></div></td>
-                      <td>{station.partnerName}<div style={{ fontSize: 12, opacity: .7 }}>{station.locationName}</div></td>
-                      <td>{station.calibrationStatus} · {station.scannerConnected ? "connected" : "offline"}<div style={{ fontSize: 12, opacity: .7 }}>{station.lastFailureCode || station.captureState}</div></td>
+                      <td>
+                        <code>{station.stationCode}</code>
+                        <div>
+                          <Badge variant={fleetBadge(station.status)}>{station.status}</Badge>
+                        </div>
+                      </td>
+                      <td>
+                        {station.partnerName}
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>{station.locationName}</div>
+                      </td>
+                      <td>
+                        {station.calibrationStatus} · {station.scannerConnected ? "connected" : "offline"}
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>
+                          {station.lastFailureCode || station.captureState}
+                        </div>
+                      </td>
                       <td>{station.lastSeenAt ? new Date(station.lastSeenAt).toLocaleString() : "Never"}</td>
-                      <td><div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {station.status === "PENDING" && <><AdminButton size="sm" variant="gold" onClick={() => setFleetAction({ stationCode: station.stationCode, action: "active" })}>Approve</AdminButton><AdminButton size="sm" variant="ghost" onClick={() => setFleetAction({ stationCode: station.stationCode, action: "reject" })}>Reject</AdminButton></>}
-                        {station.status === "ACTIVE" && <AdminButton size="sm" variant="ghost" onClick={() => setFleetAction({ stationCode: station.stationCode, action: "suspended" })}>Suspend</AdminButton>}
-                        {station.status === "SUSPENDED" && <><AdminButton size="sm" variant="gold" onClick={() => setFleetAction({ stationCode: station.stationCode, action: "active" })}>Re-approve</AdminButton><AdminButton size="sm" variant="ghost" onClick={() => setFleetAction({ stationCode: station.stationCode, action: "revoked" })}>Revoke</AdminButton></>}
-                      </div></td>
+                      <td>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {station.status === "PENDING" && (
+                            <>
+                              <AdminButton
+                                size="sm"
+                                variant="gold"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "active" })}
+                              >
+                                Approve
+                              </AdminButton>
+                              <AdminButton
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "reject" })}
+                              >
+                                Reject
+                              </AdminButton>
+                            </>
+                          )}
+                          {station.status === "ACTIVE" && (
+                            <AdminButton
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setFleetAction({ stationCode: station.stationCode, action: "suspended" })}
+                            >
+                              Suspend
+                            </AdminButton>
+                          )}
+                          {station.status === "SUSPENDED" && (
+                            <>
+                              <AdminButton
+                                size="sm"
+                                variant="gold"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "active" })}
+                              >
+                                Re-approve
+                              </AdminButton>
+                              <AdminButton
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "revoked" })}
+                              >
+                                Revoke
+                              </AdminButton>
+                            </>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -821,10 +911,7 @@ export default function PartnerManagementPage() {
 
                   {duplicates.length > 0 && (
                     <div data-testid="pm-create-duplicates" style={{ marginBottom: 12 }}>
-                      <div
-                        role="alert"
-                        style={{ color: "var(--admin-gold, #D4AF37)", fontSize: 13, marginBottom: 6 }}
-                      >
+                      <div role="alert" style={{ color: "var(--admin-gold, #D4AF37)", fontSize: 13, marginBottom: 6 }}>
                         {blockingDuplicates(duplicates).length > 0
                           ? "This conflicts with an existing partner."
                           : "This looks similar to a partner you already have."}
@@ -867,8 +954,8 @@ export default function PartnerManagementPage() {
                       data-testid="pm-create-dup-failed"
                       style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 13, marginBottom: 8 }}
                     >
-                      The duplicate check could not run, so this partner has NOT been checked against
-                      existing ones. Review the partners list before continuing.
+                      The duplicate check could not run, so this partner has NOT been checked against existing ones.
+                      Review the partners list before continuing.
                     </div>
                   )}
                   {!dupCheckFailed && duplicates.length === 0 && (
@@ -933,14 +1020,78 @@ export default function PartnerManagementPage() {
           </div>
         )}
         {fleetAction && (
-          <div role="dialog" aria-modal="true" aria-labelledby="pm-fleet-action-title" data-testid="pm-fleet-action-modal" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", display: "grid", placeItems: "center", zIndex: 50 }}>
-            <div style={{ background: "var(--admin-panel, #141414)", padding: 20, borderRadius: 12, width: "min(480px,92vw)" }}>
-              <h3 id="pm-fleet-action-title">{fleetAction.action === "active" ? "Approve" : fleetAction.action === "reject" ? "Reject" : fleetAction.action} station</h3>
-              <p style={{ fontSize: 12, opacity: .75 }}><code>{fleetAction.stationCode}</code>. This rotates its credential epoch. A reason is required and recorded.</p>
-              <label style={{ display: "grid", gap: 5, fontSize: 12 }}>Reason<textarea autoFocus rows={3} maxLength={1000} value={fleetReason} onChange={(event) => setFleetReason(event.target.value)} data-testid="pm-fleet-action-reason" style={{ border: "1px solid var(--admin-line-hard)", borderRadius: 6, padding: "9px 10px", background: "var(--admin-panel2)" }} /></label>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pm-fleet-action-title"
+            data-testid="pm-fleet-action-modal"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,.6)",
+              display: "grid",
+              placeItems: "center",
+              zIndex: 50,
+            }}
+          >
+            <div
+              style={{
+                background: "var(--admin-panel, #141414)",
+                padding: 20,
+                borderRadius: 12,
+                width: "min(480px,92vw)",
+              }}
+            >
+              <h3 id="pm-fleet-action-title">
+                {fleetAction.action === "active"
+                  ? "Approve"
+                  : fleetAction.action === "reject"
+                    ? "Reject"
+                    : fleetAction.action}{" "}
+                station
+              </h3>
+              <p style={{ fontSize: 12, opacity: 0.75 }}>
+                <code>{fleetAction.stationCode}</code>. This rotates its credential epoch. A reason is required and
+                recorded.
+              </p>
+              <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+                Reason
+                <textarea
+                  autoFocus
+                  rows={3}
+                  maxLength={1000}
+                  value={fleetReason}
+                  onChange={(event) => setFleetReason(event.target.value)}
+                  data-testid="pm-fleet-action-reason"
+                  style={{
+                    border: "1px solid var(--admin-line-hard)",
+                    borderRadius: 6,
+                    padding: "9px 10px",
+                    background: "var(--admin-panel2)",
+                  }}
+                />
+              </label>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-                <AdminButton size="sm" variant="ghost" disabled={fleetMutation.isPending} onClick={() => { setFleetAction(null); setFleetReason(""); }}>Cancel</AdminButton>
-                <AdminButton size="sm" variant={fleetAction.action === "active" ? "gold" : "ghost"} disabled={fleetReason.trim().length < 3 || fleetMutation.isPending} onClick={() => fleetMutation.mutate({ ...fleetAction, reason: fleetReason.trim() })} data-testid="pm-fleet-action-submit">{fleetMutation.isPending ? "Saving…" : "Confirm"}</AdminButton>
+                <AdminButton
+                  size="sm"
+                  variant="ghost"
+                  disabled={fleetMutation.isPending}
+                  onClick={() => {
+                    setFleetAction(null);
+                    setFleetReason("");
+                  }}
+                >
+                  Cancel
+                </AdminButton>
+                <AdminButton
+                  size="sm"
+                  variant={fleetAction.action === "active" ? "gold" : "ghost"}
+                  disabled={fleetReason.trim().length < 3 || fleetMutation.isPending}
+                  onClick={() => fleetMutation.mutate({ ...fleetAction, reason: fleetReason.trim() })}
+                  data-testid="pm-fleet-action-submit"
+                >
+                  {fleetMutation.isPending ? "Saving…" : "Confirm"}
+                </AdminButton>
               </div>
             </div>
           </div>

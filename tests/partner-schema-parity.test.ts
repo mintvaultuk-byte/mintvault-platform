@@ -171,6 +171,28 @@ describe("partner schema ↔ migration parity", () => {
       // project the new column. Production is applied through 0076, so 0077 is the single
       // outstanding migration for this release.
       "0077_partner_credential_lifecycle_hardening.sql",
+      // 0078 (shared partner rate-limit buckets) is additive and carries NO tenant data. It supplies
+      // the shared store that server/partner/rate-limit.ts has always required but never had: the
+      // only implementation was a per-process Map, so on the two-Machine production topology every
+      // partner rate limit (login, MFA, password reset, invitation accept) was silently DOUBLE its
+      // stated value and reset on every rolling deploy.
+      //
+      // Deliberately has no tenant_id and no RLS: these limiters run PRE-AUTHENTICATION, keyed on an
+      // IP prefix or a submitted email, when no tenant is known. It is therefore correctly outside
+      // the tenant-isolation model and is excluded from the RLS coverage sweep in
+      // partner-rls-isolation.test.ts, which asserts RLS only for partner_% tables HAVING tenant_id.
+      //
+      // Safe either side of the deploy: the application probes for the table and falls back to the
+      // in-memory store when it is absent, so this may be applied before or after the release.
+      "0078_partner_shared_rate_limit_buckets.sql",
+      // 0079 (admin password-step lockout) is not a partner migration; this pin covers EVERY
+      // numbered migration so any addition is consciously acknowledged. It adds
+      // users.password_failed_count / password_locked_until, mirroring the PIN step's long-standing
+      // durable lockout (server/pin.ts). The password step previously had no persistent counter at
+      // all — only a per-process Map and an express-rate-limit MemoryStore — so on two Machines the
+      // advertised budget was double and every rolling deploy reset it, on the highest-privilege
+      // credential in the system. Additive with defaults, so it is old-version-safe.
+      "0079_admin_password_lockout.sql",
     ]);
   });
 

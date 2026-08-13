@@ -320,7 +320,7 @@ export default function PartnerDashboardPage() {
             <h2 id="recent-submissions-title" className="text-base font-semibold">
               Recent submissions
             </h2>
-            {recentSubmissions.data?.items.length ? (
+            {recentSubmissions.data?.items?.length ? (
               <div
                 className="divide-y divide-border border-y border-border"
                 data-testid="list-dashboard-recent-submissions"

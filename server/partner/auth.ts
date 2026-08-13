@@ -343,7 +343,7 @@ export async function markSessionMfaPassed(tenantId: string, sessionId: string, 
           AND s.revoked_at IS NULL
           AND u.id=s.user_id
           AND u.credential_version=s.credential_version`,
-      [sessionId, userId, tenantId],
+      [sessionId, userId, tenantId]
     );
     return updated.rowCount === 1;
   });
@@ -369,25 +369,85 @@ export async function revokeAllSessions(tenantId: string, userId: string, reason
 // ---------------- password reset (single use, expiring) ----------------
 export const RESET_TOKEN_MINUTES = 30;
 
-export async function createPasswordResetToken(tenantId: string, userId: string): Promise<string> {
+/**
+ * DENIAL-OF-RECOVERY GUARD. A live link may not be replaced while it is still fresh.
+ *
+ * Issuance used to invalidate every outstanding link and mint a new one on EVERY request. Delivery
+ * is deliberately fire-and-forget (see public-routes.ts — awaiting it made latency an
+ * account-existence oracle), so the invalidation committed even when the mail never arrived. An
+ * unauthenticated attacker could therefore hold a victim's recovery permanently shut simply by
+ * looping the public request endpoint: each call killed the previous link, and any provider failure
+ * or provider-side rate limit silently discarded the replacement. The victim's inbox accumulated
+ * only dead links.
+ *
+ * The fix is to make a flood a NO-OP instead of a weapon: while a live, unexpired link issued within
+ * this window exists, the existing link is LEFT VALID and nothing new is minted. The legitimate user
+ * keeps the link already in their inbox; the attacker gains nothing by repeating the call.
+ *
+ * This must stay SHORTER than RESET_TOKEN_MINUTES, so a user who genuinely lost the mail can always
+ * obtain a fresh link well before the outstanding one expires.
+ */
+export const RESET_REISSUE_COOLDOWN_MINUTES = 5;
+
+/**
+ * Returns the new token, or NULL when a fresh link already exists and was deliberately preserved.
+ * A null return is a success (the caller must still answer generically) — it means "there is already
+ * a usable link in that inbox", not "something went wrong".
+ */
+export async function createPasswordResetToken(
+  tenantId: string,
+  userId: string,
+  /**
+   * `force` bypasses the reissue cooldown. It is ONLY for an AUTHENTICATED, AUDITED operator action
+   * (Super Admin issuing a link on a partner's behalf), where the caller needs a token in hand and
+   * the anonymous-flood threat does not apply. It must never be reachable from an unauthenticated
+   * route — that would restore the denial-of-recovery defect exactly.
+   */
+  options: { force?: boolean } = {}
+): Promise<string | null> {
   const token = crypto.randomBytes(32).toString("base64url");
+  let issued = false;
   await withTenant({ tenantId }, async (c) => {
-    // Keep issuance and consumption serialised on the user row. A replacement
-    // link invalidates every earlier link before the new hash is inserted.
+    // Keep issuance and consumption serialised on the user row, so two concurrent requests cannot
+    // both observe "no live link" and both mint. The cooldown check below relies on this lock.
     const user = await c.query("SELECT id FROM partner_users WHERE id=$1 FOR UPDATE", [userId]);
     if (user.rowCount !== 1) throw new Error("Partner user is unavailable for password reset.");
-    await c.query(
-      "UPDATE partner_password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL",
-      [userId]
-    );
+
+    const fresh = options.force
+      ? { rowCount: 0 }
+      : await c.query(
+          `SELECT 1 FROM partner_password_reset_tokens
+            WHERE user_id=$1
+              AND used_at IS NULL
+              AND expires_at > now()
+              AND created_at > now() - ($2 || ' minutes')::interval
+            LIMIT 1`,
+          [userId, String(RESET_REISSUE_COOLDOWN_MINUTES)]
+        );
+    if ((fresh.rowCount ?? 0) > 0) {
+      // Audited under a DISTINCT action so a sustained flood is visible in the audit trail rather
+      // than indistinguishable from ordinary use — the previous behaviour left no attack signal.
+      await writePartnerAudit(c, {
+        tenantId,
+        actorUserId: userId,
+        action: "partner_password_reset_reissue_suppressed",
+      });
+      return;
+    }
+
+    // Only now is superseding the old link safe: we are about to mint a replacement for delivery.
+    await c.query("UPDATE partner_password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL", [
+      userId,
+    ]);
     await c.query(
       `INSERT INTO partner_password_reset_tokens (tenant_id, user_id, token_hash, expires_at)
        VALUES ($1,$2,$3, now() + ($4 || ' minutes')::interval)`,
       [tenantId, userId, sha256(token), String(RESET_TOKEN_MINUTES)]
     );
     await writePartnerAudit(c, { tenantId, actorUserId: userId, action: "partner_password_reset_requested" });
+    issued = true;
   });
-  return token; // delivered out-of-band (email); never logged
+  return issued ? token : null; // delivered out-of-band (email); never logged
 }
 
 /**
