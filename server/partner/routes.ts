@@ -57,6 +57,7 @@ import {
   verifyActiveTotpNoReplay,
   getMfaStatus,
 } from "./mfa-service";
+import { canPurchaseCredits, listCreditPacks, resolvePackForCheckout } from "./credit-purchase-service";
 import {
   getPartnerCreditView,
   getPartnerPortalContext,
@@ -355,6 +356,102 @@ export function partnerApiRouter(): Router {
         .json({ error: { code: "credit_view_unavailable", message: "Credit information is unavailable." } });
     }
   });
+
+  /**
+   * The Grading Credit pack catalogue.
+   *
+   * Readable by anyone who can see credits, so the dashboard can show what is available and, when
+   * pricing is not yet configured, say so honestly instead of hiding the feature. `purchasable` is
+   * false for every pack until the owner records a Stripe Price id — the UI must gate the buy
+   * control on that flag, not on the pack merely existing.
+   */
+  r.get("/credits/packs", requirePartnerCapability("partner.credits.view"), async (_req, res) => {
+    try {
+      res.json({ packs: await listCreditPacks() });
+    } catch (err) {
+      console.error("[partner credits] pack catalogue failed:", (err as Error).message);
+      res.status(500).json({ error: { code: "credit_packs_unavailable", message: "Credit packs are unavailable." } });
+    }
+  });
+
+  /**
+   * Begin a Grading Credit purchase.
+   *
+   * THIS ROUTE GRANTS NOTHING. It creates a Stripe Checkout Session and returns its URL. Credits
+   * appear only when the verified webhook fulfils the payment — so a user who abandons checkout,
+   * loses connectivity, or replays the success page a hundred times receives exactly what they paid
+   * for and nothing more.
+   *
+   * The pack CODE is the only client input, and the credit quantity is looked up server-side from
+   * it; quantity is never taken from the request, and never from session metadata on the way back.
+   *
+   * requireNotViewOnly / requireNotSensitiveFrozen are applied because spending money is a sensitive
+   * mutation: a view-only or emergency-frozen principal must not be able to start one.
+   */
+  r.post(
+    "/credits/checkout",
+    requirePartnerCapability("partner.credits.purchase"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      const principal = req.partner!;
+      try {
+        /*
+         * A grading role never buys, even if the purchase permission was granted by mistake.
+         * The permission gate above is the primary control; this is the deliberate second one,
+         * because "GRADER cannot buy" is a business rule rather than a configuration choice.
+         */
+        const roles = await withTenant({ tenantId: principal.tenantId }, async (c) => {
+          const { rows } = await c.query<{ code: string }>(
+            `SELECT r.code FROM partner_user_roles ur
+               JOIN partner_roles r ON r.id = ur.role_id
+              WHERE ur.tenant_id=$1 AND ur.user_id=$2`,
+            [principal.tenantId, principal.userId]
+          );
+          return rows.map((x) => x.code);
+        });
+        if (!roles.some((role) => canPurchaseCredits(role, principal.permissions))) {
+          res.status(403).json({
+            error: { code: "forbidden", message: "Your role cannot buy Grading Credits." },
+          });
+          return;
+        }
+
+        const packCode = typeof req.body?.packCode === "string" ? req.body.packCode : "";
+        const pack = await resolvePackForCheckout(packCode);
+
+        const { getUncachableStripeClient } = await import("../stripeClient");
+        const stripe = await getUncachableStripeClient();
+        const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+          line_items: [{ price: pack.stripePriceId!, quantity: 1 }],
+          // The webhook reads ONLY these keys to attribute the payment. The credit quantity is
+          // deliberately absent: it is resolved from partner_credit_packs by pack code at grant
+          // time, so tampered metadata cannot mint capacity.
+          metadata: {
+            partner_tenant_id: principal.tenantId,
+            partner_pack_code: pack.code,
+            partner_initiating_user_id: principal.userId,
+          },
+          success_url: `${appUrl}/partner/credits?purchase=processing`,
+          cancel_url: `${appUrl}/partner/credits?purchase=cancelled`,
+        });
+
+        res.json({ url: session.url, packCode: pack.code, credits: pack.credits });
+      } catch (err) {
+        const code = (err as { code?: string })?.code;
+        if (code === "PACK_NOT_FOUND" || code === "PACK_NOT_PURCHASABLE") {
+          res.status(400).json({ error: { code, message: (err as Error).message } });
+          return;
+        }
+        console.error("[partner credits] checkout failed:", (err as Error).message);
+        res
+          .status(502)
+          .json({ error: { code: "checkout_unavailable", message: "Could not start checkout. Try again." } });
+      }
+    }
+  );
 
   r.get("/sessions", requirePartnerAuth, async (req, res) => {
     try {

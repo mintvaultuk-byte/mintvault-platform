@@ -11,6 +11,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -275,5 +277,77 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
       [tenantId]
     );
     expect(ex2.rows[0].n).toBe("1");
+  });
+});
+
+/**
+ * The INTEGRATION surfaces wired on top of the proven grant core: the webhook branch and the
+ * checkout route. These are source-level contract assertions — the behavioural guarantees are proven
+ * against real PostgreSQL above. What they protect is the wiring itself: a future edit that removes
+ * the metadata contract, pre-claims the partner event, or lets the browser grant would still pass
+ * every behavioural test while breaking the money path.
+ */
+describe("P5 integration surfaces", () => {
+  const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const webhook = read("server/webhookHandlers.ts");
+  const routes = read("server/partner/routes.ts");
+
+  it("routes the partner branch through the proven grant, and NEVER pre-claims it", () => {
+    expect(webhook).toContain("fulfilPartnerCreditPurchase");
+    expect(webhook).toContain("meta.partner_tenant_id && meta.partner_pack_code");
+
+    /*
+     * The partner branch must NOT call claimStripeEvent. Its claim would be written through the
+     * main `db` while the grant goes through the partner ADMIN pool, so they cannot share a
+     * transaction: a claim that succeeded before a transient grant failure would mark the event
+     * processed, Stripe's retry would skip it, and the partner would pay and never receive the
+     * credits. Exactly-once is carried by the ledger unique index, which lives in the same database
+     * as the grant.
+     */
+    const branch = webhook.slice(
+      webhook.indexOf("meta.partner_tenant_id && meta.partner_pack_code"),
+      webhook.indexOf("charge.refunded")
+    );
+    expect(branch).not.toContain("claimStripeEvent");
+  });
+
+  it("routes refunds and disputes to audited exception handling, never to a wallet debit", () => {
+    expect(webhook).toContain('event.type === "charge.refunded"');
+    expect(webhook).toContain('event.type === "charge.dispute.created"');
+    expect(webhook).toContain("recordPurchaseException");
+    // No negative ledger write anywhere on the refund path.
+    const refundBranch = webhook.slice(webhook.indexOf('event.type === "charge.refunded"'));
+    expect(refundBranch).not.toMatch(/appendFoundationCredit/);
+  });
+
+  it("checkout creates a session and grants nothing itself", () => {
+    expect(routes).toContain('r.post(\n    "/credits/checkout"');
+    expect(routes).toContain('requirePartnerCapability("partner.credits.purchase")');
+    // Spending money is a sensitive mutation: view-only and emergency-frozen principals are refused.
+    expect(routes).toContain("requireNotViewOnly");
+    expect(routes).toContain("requireNotSensitiveFrozen");
+    // The route may never grant — only the webhook may.
+    const checkout = routes.slice(routes.indexOf('"/credits/checkout"'));
+    expect(checkout).not.toMatch(/appendFoundationCredit|fulfilPartnerCreditPurchase/);
+  });
+
+  it("carries only attribution in metadata — never the credit quantity", () => {
+    const checkout = routes.slice(routes.indexOf('"/credits/checkout"'));
+    expect(checkout).toContain("partner_tenant_id");
+    expect(checkout).toContain("partner_pack_code");
+    // Quantity is resolved server-side from the pack code at grant time. Putting it in metadata
+    // would make a tampered session able to mint capacity.
+    expect(checkout).not.toMatch(/metadata:\s*\{[^}]*credits/s);
+  });
+
+  it("hard-blocks a grading role even if the purchase permission was granted", () => {
+    const checkout = routes.slice(routes.indexOf('"/credits/checkout"'));
+    expect(checkout).toContain("canPurchaseCredits");
+    expect(checkout).toContain("Your role cannot buy Grading Credits.");
+  });
+
+  it("exposes the pack catalogue so the dashboard can gate on `purchasable`", () => {
+    expect(routes).toContain('"/credits/packs"');
+    expect(routes).toContain("listCreditPacks");
   });
 });

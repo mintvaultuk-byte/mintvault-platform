@@ -736,3 +736,70 @@ branch wiring `fulfilPartnerCreditPurchase` into `server/webhookHandlers.ts`, an
 (available / reserved / ready-to-grade, Buy More CTA, low-credit warning, zero-credit reason). Those
 are integration surfaces on top of the proven core, and none of them can grant a credit — only the
 webhook path can.
+
+---
+
+## P5 (continued) — CHECKOUT ROUTE + WEBHOOK WIRING
+
+### A correction to my own earlier P5 note
+
+The P5 core evidence described exactly-once as "two independent mechanisms" — the
+`stripe_webhook_events` claim plus the ledger unique index. That is true of the **estimate-credits**
+path, which claims and grants in ONE transaction on ONE connection. It is **not** the right design for
+the partner path, and I did not implement it that way.
+
+`stripe_webhook_events` is written through the main `db`; the partner credit ledger is written through
+the separate partner **admin** pool. They cannot share a transaction. Pre-claiming would therefore
+create the one failure mode that actually loses money: event marked processed → transient error on
+the grant → Stripe's retry skipped as "already processed" → **the partner pays and never receives the
+credits**.
+
+So the partner branch deliberately does **not** call `claimStripeEvent`. Exactly-once is carried by
+`uq_partner_credit_ledger_idem (source, idempotency_key)`, which lives in the _same database as the
+grant_ and therefore cannot disagree with it. A retry after a transient failure correctly grants; a
+retry after success correctly does not. This is already proven behaviourally — replay ×5 and
+concurrent delivery ×6 both grant exactly once **with no claim involved**.
+
+A test now pins this: the partner branch is asserted **not** to contain `claimStripeEvent`, so a
+future "consistency" edit cannot reintroduce the lost-grant window.
+
+### What was wired
+
+- **`GET /api/partner/credits/packs`** — catalogue, gated on `partner.credits.view`. Returns
+  `purchasable`, which is false for every pack until an owner records a Stripe Price id, so the
+  dashboard can show the feature honestly rather than hiding it.
+- **`POST /api/partner/credits/checkout`** — creates a Stripe Checkout Session and returns its URL.
+  **Grants nothing**; asserted by test to contain neither `appendFoundationCredit` nor
+  `fulfilPartnerCreditPurchase`. Gated on `partner.credits.purchase` plus `requireNotViewOnly` and
+  `requireNotSensitiveFrozen` — spending money is a sensitive mutation, so a view-only or
+  emergency-frozen principal cannot start one. A grading role is hard-blocked by a second, explicit
+  check even if the purchase permission was granted by mistake, because "GRADER cannot buy" is a
+  business rule, not a configuration choice.
+- **Session metadata carries attribution only** — `partner_tenant_id`, `partner_pack_code`,
+  `partner_initiating_user_id`. The credit **quantity is deliberately absent** and is resolved
+  server-side from the pack code at grant time; a test asserts no `credits` key can appear in that
+  metadata block.
+- **Webhook branch** in the existing `webhookHandlers.ts` dispatch (no new webhook architecture),
+  keyed on the partner metadata.
+- **`charge.refunded` / `charge.dispute.created`** route to `recordPurchaseException`. A test asserts
+  the refund path contains no `appendFoundationCredit`: capacity may already be reserved against
+  cards mid-grade or printed, so a silent debit would strand them, and the ledger's
+  preserve-active-reservations trigger would refuse it anyway.
+
+### Verification
+
+| Check            | Baseline                        | After P5 integration                             |
+| ---------------- | ------------------------------- | ------------------------------------------------ |
+| Tests            | 187 failed / 4803 passed (5333) | **182 failed / 4840 passed (5365)**              |
+| Failing files    | 36                              | **35**                                           |
+| Regressions      | —                               | **ZERO** (per-file count + newly-failing suites) |
+| Purchase suite   | 12/12                           | **18/18** (6 new integration-contract tests)     |
+| Typecheck / lint | clean                           | **clean / 0 errors**                             |
+
+### Still outstanding in P5
+
+The **dashboard credit UX** (available / reserved / ready-to-grade tiles, Buy More CTA gated on
+`purchasable`, low-credit warning, zero-credit reason) and the Scanner-facing zero/low-credit UX are
+not built. They are presentation over `GET /credits` and `GET /credits/packs`, both of which now
+exist and are proven. No UI can grant a credit — only the webhook path can — so this remainder
+carries no money risk.
