@@ -275,6 +275,9 @@ export function partnerApiRouter(): Router {
 
   // ---- session ----
   const sessionIdentity = async (req: import("express").Request, res: import("express").Response) => {
+    // Identity + permissions + shop-facing names. Same no-store discipline as every other
+    // partner GET in this router — this response must never sit in a shared/proxy cache.
+    noStore(res);
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;

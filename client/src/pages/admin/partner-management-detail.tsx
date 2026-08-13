@@ -1741,7 +1741,11 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
           color: ready ? "var(--admin-green, #7fbf7f)" : "var(--admin-red, #cd8073)",
         }}
       >
-        {primary.readiness.onboardingState.replaceAll("_", " ")}
+        {/* Fly runs a ROLLING deploy across two machines, so a new SPA bundle can be served by
+            one machine while the other still runs the previous build and returns a readiness
+            object with no `onboardingState`. An unguarded .replaceAll() would throw during
+            render and white-screen this page for the whole roll. */}
+        {String(primary.readiness.onboardingState ?? "UNKNOWN").replaceAll("_", " ")}
       </div>
       <div style={{ display: "grid", gap: 4, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
         <Field label="Organisation status" v={primary.readiness.organisationActive ? "ACTIVE" : "Not active"} />

@@ -165,6 +165,12 @@ describe("partner schema ↔ migration parity", () => {
       "0074_partner_submission_lifecycle_and_location_snapshot.sql",
       "0075_partner_station_single_active_capture.sql",
       "0076_partner_pilot_certificate_allocation.sql",
+      // 0077 (partner credential lifecycle hardening) is additive: it adds
+      // partner_users.password_set_at, collapses partner_password_reset_tokens to one live
+      // link per user (partial unique index), and re-declares partner_auth_lookup() to
+      // project the new column. Production is applied through 0076, so 0077 is the single
+      // outstanding migration for this release.
+      "0077_partner_credential_lifecycle_hardening.sql",
     ]);
   });
 

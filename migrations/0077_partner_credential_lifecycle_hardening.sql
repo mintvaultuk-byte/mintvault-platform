@@ -8,6 +8,21 @@ ALTER TABLE partner_users ADD COLUMN IF NOT EXISTS password_set_at timestamptz;
 
 -- A recovery link is a credential. Keep only the newest live link for each user
 -- before enforcing that invariant for all future issuances.
+--
+-- RLS NOTE (must not be removed): partner_password_reset_tokens is ENABLE + FORCE ROW
+-- LEVEL SECURITY (0002), and FORCE subjects the TABLE OWNER to the policy too. The
+-- migration runner sets no `app.tenant_id`, so partner_current_tenant() is NULL and the
+-- policy matches ZERO rows for a non-BYPASSRLS owner — the realistic production role
+-- (see 0006's header and tests/helpers/partner-realistic-db.ts). The sweep below would
+-- therefore silently UPDATE 0 rows, while CREATE UNIQUE INDEX — which is a storage-level
+-- heap scan and is NOT RLS-filtered — still sees every duplicate and aborts the whole
+-- migration with "could not create unique index ... Duplicate keys exist."
+--
+-- Toggling FORCE off for the sweep affects the OWNER only: ENABLE stays on throughout, so
+-- partner_runtime and every other non-owner role remain fully RLS-governed for the entire
+-- transaction. The runner wraps this file in BEGIN/COMMIT, so any failure restores FORCE.
+ALTER TABLE partner_password_reset_tokens NO FORCE ROW LEVEL SECURITY;
+
 WITH ranked AS (
   SELECT id,
          row_number() OVER (PARTITION BY tenant_id, user_id ORDER BY created_at DESC, id DESC) AS rn
@@ -23,6 +38,8 @@ UPDATE partner_password_reset_tokens t
 CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_password_reset_one_live
   ON partner_password_reset_tokens (tenant_id, user_id)
   WHERE used_at IS NULL;
+
+ALTER TABLE partner_password_reset_tokens FORCE ROW LEVEL SECURITY;
 
 DROP FUNCTION IF EXISTS public.partner_auth_lookup(text);
 CREATE FUNCTION public.partner_auth_lookup(p_email text)

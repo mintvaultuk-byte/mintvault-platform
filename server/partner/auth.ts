@@ -37,10 +37,18 @@ function sha256(s: string): string {
 
 /** Logged once per process, not per request — same shape as mount.ts's incoherent-env report. */
 let loggedMissingMfaProjection = false;
+/** Same one-shot-per-process discipline as the MFA projection warning above. */
+let loggedMissingPasswordProvenance = false;
 
 export interface LoginResult {
   ok: boolean;
-  reason?: "invalid" | "locked" | "suspended" | "mfa_required" | "mfa_state_unavailable";
+  reason?:
+    | "invalid"
+    | "locked"
+    | "suspended"
+    | "mfa_required"
+    | "mfa_state_unavailable"
+    | "credential_provenance_unavailable";
   // present only on ok:
   sessionToken?: string;
   userId?: string;
@@ -127,6 +135,37 @@ export async function partnerLogin(email: string, password: string, ip?: string 
       );
     }
     return { ok: false, reason: "mfa_state_unavailable" };
+  }
+
+  // ── SAME FAIL-CLOSED REASONING, FOR THE CREDENTIAL-PROVENANCE PROJECTION (0077) ──
+  //
+  // `password_set_at` gates every login below. On a database that has NOT yet applied
+  // 0077, partner_auth_lookup() simply does not project the column, so `SELECT *`
+  // returns a row without the key, `!u.password_set_at` is `true` for EVERY account,
+  // and all partner logins are refused as "suspended" → a generic 401 "invalid
+  // credentials". The outcome is safe, but with no log line and no distinguishable
+  // status it is indistinguishable from every partner suddenly having the wrong
+  // password — the operator has nothing to diagnose from. That is the same silent
+  // schema-drift trap the has_active_mfa guard above exists to prevent.
+  //
+  // ABSENT (schema drift) and NULL (a real user who has never set their own password)
+  // are DIFFERENT states and must not be conflated: node-postgres omits the key
+  // entirely when the function does not project it, and sets it to `null` when it
+  // does and the value is NULL. `in` distinguishes them; a truthiness test cannot.
+  //
+  // Position matches the guard above: AFTER the constant-cost bcrypt compare, BEFORE
+  // any state mutation or session mint. A missing projection is a property of the
+  // DEPLOYMENT, identical for every caller, so this adds no per-account oracle.
+  if (!("password_set_at" in u)) {
+    if (!loggedMissingPasswordProvenance) {
+      loggedMissingPasswordProvenance = true;
+      console.error(
+        "[partner] refusing ALL partner logins: partner_auth_lookup() does not project password_set_at. " +
+          "Apply migrations/0077_partner_credential_lifecycle_hardening.sql, then restart. " +
+          "(This is the migration-after-deploy ordering fault — 0077 must be applied BEFORE this build ships.)"
+      );
+    }
+    return { ok: false, reason: "credential_provenance_unavailable" };
   }
 
   if (u.org_status !== "ACTIVE" || u.user_status !== "ACTIVE" || !u.password_set_at) {
