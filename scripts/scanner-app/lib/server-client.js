@@ -336,6 +336,26 @@ async function getOrphans() {
   return getJson("/api/admin/orphan-certs");
 }
 
+/**
+ * P6 — "NEW CARD": ask the server to authorise one new Card Job against one Grading Credit.
+ *
+ * `clientOpId` is the RETRY TOKEN and must stay identical across every retry of one press. The
+ * server keys idempotency on (station, clientOpId), so a dropped response, a double-click or an app
+ * restart mid-request all return the SAME card, the same MV and the same reservation — and spend
+ * nothing further. Generating a fresh id on retry is precisely how a shop would be charged twice,
+ * which is why the caller owns it and this function never invents one.
+ *
+ * The station sends no tenant, no location and no operator: the server takes all three from the
+ * signed station identity and the operator session header. It cannot ask for a card on behalf of
+ * anyone else.
+ */
+async function startNewCard(clientOpId, cardName) {
+  return postJson("/api/partner/card-jobs", {
+    clientOpId,
+    ...(cardName ? { cardName } : {}),
+  });
+}
+
 async function getCertPreview(certId) {
   return getJson(`/api/admin/certs/${encodeURIComponent(certId)}/preview`);
 }
@@ -456,6 +476,7 @@ module.exports = {
   },
   getNextCertId,
   getOrphans,
+  startNewCard,
   getCertPreview,
   softDeleteCert,
   uploadPair,

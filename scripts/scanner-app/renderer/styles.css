@@ -680,3 +680,25 @@ body {
   font-size: 10px;
   padding: 3px 8px;
 }
+
+/* P6 — card completion. Deliberately the loudest thing on the screen: the operator has to read the
+   MV number off it and write it on the physical card before that card leaves the station. */
+.card-complete {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #d4af37;
+  border-radius: 8px;
+  text-align: center;
+  background: rgba(212, 175, 55, 0.08);
+}
+.card-complete-title {
+  display: block;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  color: #d4af37;
+}
+.card-complete-instruction {
+  margin: 6px 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}

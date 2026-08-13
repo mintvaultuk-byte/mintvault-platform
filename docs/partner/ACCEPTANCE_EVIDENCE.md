@@ -916,3 +916,107 @@ silently counted as green.
 The other seven failing files (`vq-*`, `auth-security-migration`, `certificate-preview-revision-runtime`,
 `certificate-update-route`, `rarity-structured-migration`) are all pre-existing and untouched by this
 work — identical before and after.
+
+---
+
+## P6 — SCANNER NEW CARD
+
+Wires the proven P4 authority into the place it is actually pressed. No second authority, no second
+wallet, no second Scanner: one shared guard block, one credit engine, one idempotency table.
+
+### The gap P6 had to close
+
+`startNewCardJob` had **zero callers outside its test**. Reaching it from a station meant resolving
+four blockers that the portal path never encounters, each verified in the code before anything was
+written:
+
+| #   | Blocker                                                                                                                                                           | Evidence                                                |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| 1   | The authority needs an EXISTING submission card; the only creator is the portal wizard's `addCard()` on a draft. No walk-in concept existed anywhere in the repo. | `submission-service.ts:637-677`                         |
+| 2   | Partner MV numbers are minted ONLY by the connector definer routine, which hard-requires a customer and a service tier.                                           | `0081:61-67`, `connector-validation-service.ts:339,371` |
+| 3   | `scanner_capture_sessions.certificate_id` is `NOT NULL` with an FK — no certificate means no capture session can be armed at all.                                 | `0047:62-64`                                            |
+| 4   | `partner_card_jobs` refuses `READY_TO_GRADE` while `certificate_id IS NULL`, so "MVxxx COMPLETE" was blocked at the lifecycle level, not merely in display.       | `0080:305-308`                                          |
+
+Resolved per master plan §9 step 5 (MV allocated inside the NEW transaction) — see OD-8. This needs
+**no schema change at all**: no migration was added by P6.
+
+### Built
+
+- `startNewCardJobAtStation()` — one transaction covering the walk-in submission, its card, the MV
+  and certificate, the credit reservation, the Card Job and the operation record. Guards are shared
+  with the portal path via a single extracted `assertStartAllowed()`, because two copies is how a
+  station path quietly ends up enforcing less than the portal path.
+- `POST /api/partner/card-jobs` — `requireSignedStation` **and** `requireSignedStationOperator`.
+  Tenant, location and station are read from the authenticated principals; the only client input is
+  the retry token and an optional card label.
+- Capture tenant binding extended: a walk-in certificate has no connector import row, so the
+  existing join could never match it. The new branch demands the SAME three facts (tenant, location,
+  station ACTIVE) through `partner_card_jobs` instead. Both paths must fail before a capture is
+  refused, and the connector path is untouched.
+- Scanner app: NEW CARD button, `MVxxx COMPLETE / MARK CARD MVxxx / NEXT CARD` panel, and a
+  server-reported credit read-out. The retry token is minted in the MAIN process and held across
+  retries — a renderer minting one per click would turn an impatient double-click into two paid
+  cards. A transport failure deliberately KEEPS the token, because that is precisely the case where
+  we do not know whether the card was created.
+
+### Two real defects caught by the tests, not by review
+
+1. **`trading_name` does not exist on `partner_organisations`.** It lives on `partner_profiles`
+   (migration 0015) and is nullable, which is exactly why 0035 documents `legal_name` as the origin
+   fallback. The first draft of `mintPartnerCertificate` read it from the wrong table and would have
+   failed on every real NEW press. Now a LEFT JOIN, guarded by `to_regclass` so a database without
+   profiles degrades to "no trading name" rather than a failed NEW.
+2. **Migration 0041 installs a trigger on `certificates` reading `NEW.card_id` / `NEW.submission_item_id`.**
+   Any insert into a certificates table lacking those columns dies with `record "new" has no field
+"card_id"`. Production has them; the test fixture did not. A walk-in card leaves both NULL, so the
+   credit-hold guard resolves no destination submission and correctly declines to block.
+
+### Proven on real PostgreSQL — 24/24
+
+Concurrency cases are genuinely parallel on separate pool connections via `Promise.all`. A
+sequential "concurrency test" would pass with the locking completely removed.
+
+| Case                                                 | Result                                                                                               |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| one credit → one Card Job, one MV, complete at birth | available 0, status `NEEDS_SCAN`, identity paired                                                    |
+| PARTNER origin snapshot stamped from live records    | trading name, location, snapshot version 1                                                           |
+| replay ×5                                            | same job, same MV, same reservation; **no orphan submission, no orphan card, no second certificate** |
+| same op id + different location                      | `IDEMPOTENCY_CONFLICT`                                                                               |
+| last-credit race, two presses                        | exactly one winner, exactly one job, **counter advanced by exactly 1**                               |
+| last-credit race across two stations                 | exactly one winner                                                                                   |
+| concurrent double-click ×4                           | one job, one MV, 4 of 5 credits left                                                                 |
+| **refused NEW burns no MV**                          | counter unchanged, no submission, no card, no certificate                                            |
+| zero credits                                         | rejected server-side                                                                                 |
+| suspension / emergency stop                          | refused, credits untouched                                                                           |
+| six sequential NEW presses                           | six unique, strictly monotonic MV numbers                                                            |
+| re-pointing one job at another's certificate         | refused by the DB: `immutable once allocated`                                                        |
+| Partner A's station against Partner B                | refused, both wallets untouched                                                                      |
+| credits at zero                                      | already-authorised card still advances and keeps its MV                                              |
+
+Plus source-level contract assertions: the route demands both identities and takes tenant/location/
+station only from the authenticated principals; 402 for insufficient credits; the walk-in binding is
+an ADDITIONAL check with the connector join intact; the Scanner holds one retry token across retries
+and keeps it on transport failure; the Scanner never derives an MV (`last + 1` and `nextCertOverride`
+both asserted absent); an unanswered balance renders as an em dash, never 0.
+
+### Verification
+
+| Check                             | P5 baseline             | After P6                                           |
+| --------------------------------- | ----------------------- | -------------------------------------------------- |
+| Tests                             | 27 failed / 4317 passed | **27 failed / 4341 passed** (+24)                  |
+| Failing files                     | 8                       | **8 — identical set**                              |
+| Newly failing                     | —                       | **ZERO**                                           |
+| Typecheck                         | clean                   | **clean**                                          |
+| Lint                              | 0 errors                | **0 errors**                                       |
+| Production build                  | succeeds                | **succeeds**                                       |
+| P4 authority suite                | 11/11                   | **11/11** (guards refactored, behaviour unchanged) |
+| Capture boundary + station suites | green                   | **33/33**                                          |
+| New P6 suite                      | —                       | **24/24**                                          |
+
+### Not yet done in P6 (carried, not hidden)
+
+The Scanner's NEW press authorises the job and returns its MV, but the app does not yet ARM the
+FRONT/BACK capture sessions automatically from that response — the operator still arms from the web
+workstation, as before. The server side of that path (tenant binding for walk-in certificates) is
+built and tested; wiring the two-side arm loop into the Electron capture flow is the remaining step,
+and it cannot mint credits or MV numbers because both already exist by then.

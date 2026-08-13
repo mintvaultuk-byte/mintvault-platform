@@ -19,6 +19,17 @@ const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
 const os    = require("node:os");
+const { randomUUID } = require("node:crypto");
+
+/**
+ * The in-flight NEW CARD retry token (P6).
+ *
+ * Advisory process state only, and safe to lose: if the app restarts mid-press the token is gone
+ * and the next press is a genuinely new request — the SERVER's (station, client_op_id) record is
+ * the authority on what was already bought, never this variable. That is what invariant I19
+ * requires: no process-local state may be authoritative over money.
+ */
+let pendingNewCardOpId = null;
 
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
@@ -456,6 +467,40 @@ function setupIpc() {
 
   ipcMain.handle("fetch-orphans", async () => {
     return server.getOrphans();
+  });
+
+  /**
+   * P6 — NEW CARD.
+   *
+   * THE RETRY TOKEN IS MINTED HERE, IN THE MAIN PROCESS, AND HELD UNTIL THE SERVER ANSWERS. A
+   * renderer that generated a fresh id per click would turn an impatient double-click into two
+   * paid cards. Holding it means every retry of the SAME press carries the SAME token, so the
+   * server answers the second one from its idempotency record rather than the wallet.
+   *
+   * The token is cleared only once the server has given a definitive answer — success or a refusal
+   * the operator must act on. A network error deliberately KEEPS it, because that is exactly the
+   * case where we do not know whether the card was created.
+   */
+  ipcMain.handle("start-new-card", async (_event, payload) => {
+    const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
+    if (!pendingNewCardOpId) pendingNewCardOpId = `new-${randomUUID()}`;
+    let result;
+    try {
+      result = await server.startNewCard(pendingNewCardOpId, cardName);
+    } catch (err) {
+      // Outcome unknown — keep the token so a retry replays instead of buying a second card.
+      return { ok: false, retryable: true, error: err && err.message ? err.message : "Could not reach MintVault" };
+    }
+    if (result.ok) {
+      pendingNewCardOpId = null;
+      const job = result.body && result.body.cardJob ? result.body.cardJob : {};
+      return { ok: true, cardJob: job };
+    }
+    // A refusal the operator can act on (no credits, suspended, station not approved) is final for
+    // this press: the token is released so their NEXT press is a genuinely new request.
+    pendingNewCardOpId = null;
+    const error = (result.body && result.body.error) || {};
+    return { ok: false, retryable: false, code: error.code || "error", error: error.message || "Could not start a new card" };
   });
 
   // Recovery opens the exact historic certificate in the authenticated web

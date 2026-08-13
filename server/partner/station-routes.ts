@@ -15,6 +15,7 @@ import {
   type StationPrincipal,
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
+import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-authority";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -38,11 +39,11 @@ function stationError(res: Response, error: unknown): void {
         ? 403
         : error.code === "station_not_found"
           ? 404
-        : error.code === "station_replay"
-          ? 409
-          : error.code === "version_blocked"
-            ? 426
-            : 400;
+          : error.code === "station_replay"
+            ? 409
+            : error.code === "version_blocked"
+              ? 426
+              : 400;
     res.status(status).json({ error: { code: error.code, message: error.message } });
     return;
   }
@@ -167,6 +168,56 @@ export function partnerStationRouter(): Router {
       });
       res.json({ ok: true, ...result });
     } catch (error) {
+      stationError(res, error);
+    }
+  });
+
+  /**
+   * P6 — "NEW CARD": authorise exactly ONE new Card Job against exactly ONE Grading Credit.
+   *
+   * BOTH identities are required and neither substitutes for the other (locked station rule):
+   *   requireSignedStation          the approved Mac, proven by its Ed25519 request signature
+   *   requireSignedStationOperator  the human, proven by an MFA-passed partner session holding
+   *                                 partner.cards.scan, with tenant/location matching the station
+   *
+   * A stolen laptop with no operator session cannot start work, and a valid operator on an
+   * unenrolled Mac cannot either.
+   *
+   * TENANT, LOCATION AND OPERATOR ARE TAKEN FROM THE AUTHENTICATED PRINCIPALS, NEVER THE BODY. The
+   * only thing the client supplies is `clientOpId` — the retry token — and an optional card label.
+   * There is therefore no request a station can craft that starts a card for another partner.
+   */
+  r.post("/card-jobs", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+    const station = req.station!;
+    const operator = req.partner!;
+    try {
+      const result = await startNewCardJobAtStation({
+        tenantId: station.tenantId,
+        locationId: station.locationId,
+        stationId: station.id,
+        clientOpId: typeof req.body?.clientOpId === "string" ? req.body.clientOpId : "",
+        actorUserId: operator.userId,
+        actorEmail: req.body?.operatorEmail ?? operator.userId,
+        cardName: typeof req.body?.cardName === "string" ? req.body.cardName : null,
+      });
+      // 200 on replay, 201 on a genuinely new job: a retrying station can tell the difference
+      // without having to compare ids, and neither answer costs a second credit.
+      res.status(result.replayed ? 200 : 201).json({ cardJob: result });
+    } catch (error) {
+      if (error instanceof CardJobAuthorityError) {
+        const status =
+          error.code === "INSUFFICIENT_CREDITS"
+            ? 402
+            : error.code === "IDEMPOTENCY_CONFLICT"
+              ? 409
+              : error.code === "CARD_UNIT_INVALID"
+                ? 400
+                : error.code === "IDENTITY_UNAVAILABLE"
+                  ? 503
+                  : 403;
+        res.status(status).json({ error: { code: error.code, message: error.message } });
+        return;
+      }
       stationError(res, error);
     }
   });

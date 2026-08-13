@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("scanner", {
     return () => ipcRenderer.removeListener("state-update", wrapped);
   },
   fetchOrphans: () => ipcRenderer.invoke("fetch-orphans"),
+  startNewCard: (payload) => ipcRenderer.invoke("start-new-card", payload),
   openGradeCert: (certId) => ipcRenderer.invoke("open-grade-cert", certId),
   getVersion: () => ipcRenderer.invoke("get-version"),
   getStationSetup: () => ipcRenderer.invoke("get-station-setup"),

@@ -181,7 +181,39 @@ export async function createScannerCaptureSession(input: {
           LIMIT 1`,
         [input.stationId, row.submission_id]
       );
-      if (stationScope.rows.length !== 1) {
+      /*
+       * SECOND, EQUALLY STRICT BINDING PATH — a Card Job started at the counter (P6).
+       *
+       * The connector join above proves tenant scope for cards that reached MintVault through a
+       * portal submission and the import bridge. A walk-in card never travels that road: its
+       * certificate is minted directly in the NEW transaction, so it has no connector import row
+       * and the join above can never match it. Without this branch, every Scanner-started card
+       * would be refused at the moment the operator tried to capture the card they had just paid
+       * for.
+       *
+       * This is NOT a relaxation. It demands exactly the same three facts through the Card Job
+       * instead of the import: the certificate belongs to a job whose tenant_id AND location_id
+       * equal this station's, and the station is ACTIVE. Partner A's station still cannot arm
+       * Partner B's certificate, and a station cannot reach a job at another of its own tenant's
+       * locations.
+       */
+      let bound = stationScope.rows.length === 1;
+      if (!bound) {
+        const cardJobScope = await client.query(
+          `SELECT 1
+             FROM partner_stations station
+             JOIN partner_card_jobs job
+               ON job.tenant_id=station.tenant_id
+              AND job.location_id=station.location_id
+              AND job.certificate_id=$2
+            WHERE station.id=$1
+              AND station.status='ACTIVE'
+            LIMIT 1`,
+          [input.stationId, input.certificateId]
+        );
+        bound = cardJobScope.rows.length === 1;
+      }
+      if (!bound) {
         throw new Error("Certificate is not bound to this station's tenant and location");
       }
     }
@@ -490,7 +522,9 @@ export async function getScannerCaptureStatus(
         FOR UPDATE`,
       [sessionId, deviceId]
     );
-    const row = found.rows[0] as (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean }) | undefined;
+    const row = found.rows[0] as
+      | (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean })
+      | undefined;
     if (!row) throw new Error("Capture session not found for this scanner");
     if (
       (row.state === "armed" || row.state === "claimed") &&
@@ -514,7 +548,8 @@ export async function getScannerCaptureStatus(
       row.failure_reason = null;
     }
     await client.query("COMMIT");
-    const cardRegistered = row.card_registered === true || (accepted && await isScannerCaptureCardRegistered(Number(row.certificate_id)));
+    const cardRegistered =
+      row.card_registered === true || (accepted && (await isScannerCaptureCardRegistered(Number(row.certificate_id))));
     return { session: mapRow(row), accepted, cardRegistered };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});

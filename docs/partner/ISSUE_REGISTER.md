@@ -487,3 +487,46 @@ Required for AT-23. Cheap and reversible, but it is an infrastructure change.
 
 See A-3. Without a signed, notarised, self-contained installer, locked rule 20 cannot be met and the
 pilot answer to _"can this Mac go in a shop tomorrow"_ is **NO on packaging grounds alone**.
+
+---
+
+## G. OWNER DECISIONS RAISED BY P6
+
+### OD-7 — A walk-in card has no customer. OWNER-DECISION (built under a stated assumption)
+
+**Status:** RECORDED · **Phase:** P6 · **Not blocking local work.**
+
+The locked P6 flow is: authenticated operator + approved station → press NEW CARD → server
+authorises one Card Job against one Grading Credit. There is no customer step in it, and a shop
+taking a card over the counter has no customer record to attach.
+
+The repo had no walk-in concept at all: the only creator of `partner_submission_cards` is the portal
+wizard's `addCard()`, which requires an existing draft submission. `partner_submissions.customer_id`
+and `service_tier_code` are both NULLABLE, so a customer-less submission is schema-legal — but the
+connector's validation gate treats `customer_missing` (`connector-validation-service.ts:339-347`) and
+`service_tier_missing` (`:371-379`) as **blocking**.
+
+**Built assuming:** a Scanner-originated submission is a complete unit of work in its own right
+(MV allocated, credit reserved, evidence captured) and is NOT eligible for connector import — it has
+nothing left for the importer to do. One submission is created per NEW card, so `card_count` is
+always 1 and the connector's per-submission arithmetic stays trivially consistent if the policy ever
+changes.
+
+**Owner question:** should a walk-in card capture a customer at intake (name/phone for collection),
+or does the shop own that relationship entirely off-platform? If the former, this becomes an
+additional optional step on the Scanner, not a change to the credit or MV model.
+
+### OD-8 — MV allocation moved into the NEW transaction for the station path. PLAN CONFIRMED
+
+**Status:** IMPLEMENTED · **Phase:** P6
+
+Master plan §9 step 5 always specified allocating the MV inside the NEW-card transaction; P4
+implemented the portal path only and deferred identity (`mvNumber: null`, "NULL until the connector
+allocates"). For a station that deferral is not a display gap, it is a hard block in three places:
+`scanner_capture_sessions.certificate_id` is NOT NULL with an FK; `partner_card_jobs` refuses
+READY_TO_GRADE while `certificate_id IS NULL`; and the Scanner is specified to show "MV421 COMPLETE".
+
+Implemented per the plan, reusing the existing row-locked `cert_counter` allocator — which is gapless
+precisely because it is a locked row rather than a sequence, so a failed NEW returns its number
+instead of burning it (proven: STATION-NEW4). The portal path is unchanged and still defers to the
+connector.
