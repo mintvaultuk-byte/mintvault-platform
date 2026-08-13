@@ -429,7 +429,13 @@ export function registerGraderRoutes(app: Express): void {
       if (!saved) {
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
-      return res.json({ ok: true, gradingStatus: auth.gradingStatus, reviewRevision: saved });
+      const payload = await buildCertGradingPayload(certId);
+      return res.json({
+        ok: true,
+        gradingStatus: auth.gradingStatus,
+        reviewRevision: saved,
+        authoritativeGrade: payload?.authoritativeGrade ?? null,
+      });
     } catch (e: any) {
       // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
       // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
@@ -1096,12 +1102,99 @@ export function registerGraderRoutes(app: Express): void {
     if (!images) return res.status(404).json({ error: "Certificate not found" });
     return res.json(images);
   });
+  // Explicit Partner QA provenance panel. The canonical workstation already
+  // shows the authoritative grade/subgrades and both images; this small,
+  // admin-only projection supplies the intake/station/operator facts that let
+  // a reviewer decide whether that exact physical card may clear the hold.
+  app.get(
+    "/api/admin/grade-review/certificates/:id/partner-context",
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      const certId = parseInt(String(req.params.id), 10);
+      const a = await getCertAssignment(certId);
+      if (!a) return res.status(404).json({ error: "Certificate not found" });
+      if (a.gradingStatus !== "pending_review") {
+        return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+      }
+      try {
+        const result = await db.execute(sql`
+        SELECT c.origin_type, c.origin_partner_public_ref, c.origin_partner_legal_name,
+               c.origin_location_public_ref, c.origin_location_name, c.graded_by,
+               c.redo_count, c.rejection_reason,
+               NULLIF(concat_ws(' ', operator.first_name, operator.last_name), '') AS operator_name,
+               operator.email AS operator_email,
+               COALESCE(station_data.station_codes, ARRAY[]::text[]) AS station_codes,
+               COALESCE(evidence_data.evidence_complete, false) AS evidence_complete
+          FROM certificates c
+          LEFT JOIN partner_users operator
+            ON operator.id::text = c.graded_by
+           AND operator.tenant_id = c.origin_partner_id
+          LEFT JOIN LATERAL (
+            SELECT array_agg(DISTINCT station.station_code ORDER BY station.station_code) AS station_codes
+              FROM certificate_image_evidence evidence
+              JOIN scanner_capture_sessions session
+                ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+               AND session.certificate_id = c.id
+               AND session.side = evidence.side
+               AND session.state = 'captured'
+              JOIN partner_stations station
+                ON station.id = session.station_id
+               AND station.tenant_id = c.origin_partner_id
+               AND station.location_id = c.origin_location_id
+             WHERE evidence.certificate_id = c.id
+               AND evidence.is_current = true
+               AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+               AND evidence.format = 'tiff'
+          ) station_data ON true
+          LEFT JOIN LATERAL (
+            SELECT count(DISTINCT evidence.side) = 2 AS evidence_complete
+              FROM certificate_image_evidence evidence
+              JOIN scanner_capture_sessions session
+                ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+               AND session.certificate_id = c.id
+               AND session.side = evidence.side
+               AND session.state = 'captured'
+              JOIN partner_stations station
+                ON station.id = session.station_id
+               AND station.tenant_id = c.origin_partner_id
+               AND station.location_id = c.origin_location_id
+               AND station.approved_at IS NOT NULL
+             WHERE evidence.certificate_id = c.id
+               AND evidence.is_current = true
+               AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+               AND evidence.format = 'tiff'
+          ) evidence_data ON true
+         WHERE c.id = ${certId}
+         LIMIT 1
+      `);
+        const row = result.rows[0] as any;
+        if (!row) return res.status(404).json({ error: "Certificate not found" });
+        if (row.origin_type !== "PARTNER") return res.json({ partner: null });
+        return res.json({
+          partner: {
+            publicRef: row.origin_partner_public_ref ?? null,
+            legalName: row.origin_partner_legal_name ?? null,
+            locationRef: row.origin_location_public_ref ?? null,
+            locationName: row.origin_location_name ?? null,
+            operator: row.operator_name || row.operator_email || row.graded_by || null,
+            stationCodes: row.station_codes ?? [],
+            evidenceComplete: row.evidence_complete === true,
+            redoCount: Number(row.redo_count ?? 0),
+            correctionReason: row.rejection_reason ?? null,
+          },
+        });
+      } catch (error) {
+        console.error("[partner-qa-context] unavailable:", error instanceof Error ? error.message : error);
+        return res.status(503).json({ error: "Partner QA provenance is unavailable." });
+      }
+    }
+  );
   app.put("/api/admin/grade-review/certificates/:id/grade", requireAdmin, async (req: Request, res: Response) => {
     try {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
       if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ ok: true, reviewRevision: r.revision });
+      return res.json({ ok: true, reviewRevision: r.revision, authoritativeGrade: r.authoritativeGrade });
     } catch (e: any) {
       if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[admin grade-review save] error:", e.message);

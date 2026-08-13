@@ -18,24 +18,24 @@ function innerFor(lFloat: number, tFloat: number, totalMarginPct = 20): Rect {
 }
 
 describe("computeCentering", () => {
-  it("perfectly centred card → 50/50 and grade 10 on both sides", () => {
+  it("perfectly centred card → 50/50 observation ratios", () => {
     const inner = innerFor(50, 50);
-    expect(computeCentering(FULL_OUTER, inner, "front")).toMatchObject({ lr: "50/50", tb: "50/50", subgrade: 10 });
-    expect(computeCentering(FULL_OUTER, inner, "back")).toMatchObject({ lr: "50/50", tb: "50/50", subgrade: 10 });
+    expect(computeCentering(FULL_OUTER, inner, "front")).toEqual({ lr: "50/50", tb: "50/50" });
+    expect(computeCentering(FULL_OUTER, inner, "back")).toEqual({ lr: "50/50", tb: "50/50" });
   });
 
-  it("honours front-strict / back-lenient — identical rects grade differently", () => {
-    // 60/40 L/R, 50/50 T/B. Front chart: bigger 60 → grade 9. Back: 60 → 10.
-    // The OLD private ladder was side-agnostic and gave 8 for BOTH — the bug.
+  it("emits the same observed ratios regardless of the card side", () => {
+    // The browser records geometry only. The server applies the stricter
+    // front / lenient back chart after it receives this measurement.
     const inner = innerFor(60, 50);
     const front = computeCentering(FULL_OUTER, inner, "front");
     const back = computeCentering(FULL_OUTER, inner, "back");
     expect(front.lr).toBe("60/40");
-    expect(front.subgrade).toBe(9);
-    expect(back.subgrade).toBe(10);
+    expect(front.tb).toBe("50/50");
+    expect(back).toEqual(front);
   });
 
-  it("subgrade always equals min of the two axes on the canonical chart", () => {
+  it("does not expose a browser-calculated subgrade", () => {
     const samples: Array<[number, number]> = [
       [50, 50],
       [55, 50],
@@ -49,8 +49,7 @@ describe("computeCentering", () => {
     for (const side of ["front", "back"] as const) {
       for (const [l, t] of samples) {
         const r = computeCentering(FULL_OUTER, innerFor(l, t), side);
-        const expected = Math.min(centeringAxisGrade(r.lr, side), centeringAxisGrade(r.tb, side));
-        expect(r.subgrade).toBe(expected);
+        expect("subgrade" in r).toBe(false);
       }
     }
   });
@@ -62,11 +61,10 @@ describe("computeCentering", () => {
   });
 });
 
-describe("server manual-centering subgrade parity", () => {
+describe("server manual-centering grade resolution", () => {
   // The server save endpoint (POST /api/admin/certificates/:id/manual-centering)
   // computes its subgrade as min(centeringAxisGrade(lr, side), centeringAxisGrade(tb, side))
-  // on the bigger-side-first ratio strings — the same canonical chart as
-  // computeCentering and the client panel. This locks in the fix that replaced
+  // on the bigger-side-first ratio strings. This locks in the fix that replaced
   // the old side-agnostic worstDev ladder, which gave 8 for a 60/40 front
   // (worstDev = 10) where the strict front chart gives 9.
   const serverSubgrade = (lr: string, tb: string, side: "front" | "back") =>
@@ -80,7 +78,7 @@ describe("server manual-centering subgrade parity", () => {
     expect(serverSubgrade("60/40", "50/50", "back")).toBe(10);
   });
 
-  it("matches computeCentering for the same rects — one source of truth", () => {
+  it("uses the submitted browser ratios as server observations", () => {
     const samples: Array<[number, number]> = [
       [50, 50],
       [60, 50],
@@ -91,7 +89,7 @@ describe("server manual-centering subgrade parity", () => {
     for (const side of ["front", "back"] as const) {
       for (const [l, t] of samples) {
         const r = computeCentering(FULL_OUTER, innerFor(l, t), side);
-        expect(serverSubgrade(r.lr, r.tb, side)).toBe(r.subgrade);
+        expect(serverSubgrade(r.lr, r.tb, side)).toBeTypeOf("number");
       }
     }
   });

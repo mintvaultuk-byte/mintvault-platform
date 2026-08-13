@@ -78,7 +78,20 @@ describe("no unresolved merge conflict survives in the partner surface", () => {
 /** Conflict 1 — server/partner/routes.ts. */
 describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
   const code = stripComments(routes);
-  const session = code.slice(code.indexOf('r.get("/session"'), code.indexOf('r.get("/credits"'));
+  // The handler body was extracted into `const sessionIdentity` so that `/me` (the stable
+  // identity contract) and `/session` (the backwards-compatible alias) share ONE implementation.
+  // Slicing from the route registration would therefore capture only `r.get(...)` and every
+  // assertion below would pass vacuously against a one-line string — silently retiring the very
+  // guard that exists to stop the MFA-posture fields being lost. Anchor on the handler instead.
+  const handlerStart = code.indexOf("const sessionIdentity");
+  const session = code.slice(handlerStart, code.indexOf('r.get("/credits"'));
+
+  it("binds BOTH /me and /session to the one shared identity handler", () => {
+    // If these ever diverge, the assertions below stop covering whichever route drifted away.
+    expect(handlerStart).toBeGreaterThan(-1);
+    expect(session).toContain('r.get("/me", sessionIdentity)');
+    expect(session).toContain('r.get("/session", sessionIdentity)');
+  });
 
   it("still spreads this branch's portal context into the session payload", () => {
     expect(session).toContain("getPartnerPortalContext(req.partner)");

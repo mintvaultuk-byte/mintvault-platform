@@ -150,6 +150,13 @@ describe("server-authorised certificate label preview", () => {
     expect(previewRoute).toContain("generateLabelPreviewPNG(cert)");
   });
 
+  it("blocks a Partner label preview while Super Admin QA is pending", () => {
+    expect(
+      authorizePartnerLabelPreview(partnerPrincipal(), partnerCandidate({ gradingStatus: "pending_review" }))
+    ).toMatchObject({ ok: false, status: 403, error: "This card is awaiting Super Admin QA" });
+    expect(ACCESS).toContain('candidate.gradingStatus === "pending_review"');
+  });
+
   it("preserves the authorised saved certificate number and omitted metadata", async () => {
     const base = saved();
     const cert = await buildLabelPreviewCertificate(base, {
@@ -175,10 +182,12 @@ describe("server-authorised certificate label preview", () => {
     const preview = read("client/src/components/grading-workflow/CertificatePreviewPanel.tsx");
     expect(panel).toContain("onPreviewSaved?.(readReviewRevision(data))");
     expect(workstation).toContain("revision={previewRevision}");
-    expect(preview).toContain('body: JSON.stringify(body)');
+    expect(preview).toContain("body: JSON.stringify(body)");
     expect(preview).toContain('res.headers.get("X-MintVault-Review-Revision")');
     expect(preview).toContain("authoritativeRevision !== expectedRevision");
-    expect(preview).toContain("[endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]");
+    expect(preview).toContain(
+      "[endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]"
+    );
   });
 
   it("provides Pending Review language and service tier from the authorised queue", () => {

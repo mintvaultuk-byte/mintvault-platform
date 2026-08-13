@@ -11,7 +11,7 @@
  */
 import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
-import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
+import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { ensureWallet } from "./partner-wallet-service";
 import { APP_BASE_URL } from "../app-url";
@@ -27,7 +27,10 @@ export interface ActorContext {
 
 type CreatePartnerFailurePoint = "after_org_insert" | "after_default_location_insert";
 type InvitePartnerFailurePoint =
-  "after_user_insert" | "after_role_assignment" | "before_invitation_insert" | "before_invitation_audit";
+  | "after_user_insert"
+  | "after_role_assignment"
+  | "before_invitation_insert"
+  | "before_invitation_audit";
 
 interface InviteBarrier {
   point: "after_duplicate_check";
@@ -274,9 +277,7 @@ export async function provisionMissingActivePartnerWallets(
       );
       const walletId =
         inserted.rows[0]?.id ??
-        (
-          await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])
-        ).rows[0]?.id;
+        (await client.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [org.id])).rows[0]?.id;
       if (!walletId) throw new G5RequestError("INTERNAL_ERROR", "Wallet backfill could not verify wallet.");
 
       const created = inserted.rowCount === 1;
@@ -736,7 +737,6 @@ export async function changeStatus(
       const wallet = await ensureWallet({ actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, org.id);
       walletProvisioned = !!wallet;
     }
-
 
     // Bump the aggregate version under optimistic lock AND set the status in ONE data-modifying-CTE
     // statement, so the two writes are atomic (no "version bumped but status unchanged" window) without
@@ -1873,13 +1873,7 @@ export async function revokePartnerUserSessions(
 }
 
 export async function acceptPartnerInvitation(token: string, password: string) {
-  if (
-    typeof token !== "string" ||
-    token.length < 20 ||
-    typeof password !== "string" ||
-    password.length < MIN_PASSWORD_LEN ||
-    password.length > MAX_PASSWORD_LEN
-  ) {
+  if (typeof token !== "string" || token.length < 20 || !isValidPartnerPassword(password)) {
     return { ok: false as const, reason: "invalid" as const };
   }
   const tokenHash = sha256(token);
@@ -1946,7 +1940,7 @@ export async function acceptPartnerInvitation(token: string, password: string) {
      */
     await client.query(
       `UPDATE partner_users
-          SET password_hash=$2, status='ACTIVE', failed_login_count=0, locked_until=NULL,
+          SET password_hash=$2, password_set_at=now(), status='ACTIVE', failed_login_count=0, locked_until=NULL,
               mfa_required=true, credential_version=credential_version+1, updated_at=now()
         WHERE id=$1 AND tenant_id=$3`,
       [inv.user_id, pwHash, inv.tenant_id]

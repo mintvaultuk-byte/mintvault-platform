@@ -79,6 +79,19 @@ const GRADING_PAYLOAD = {
   surfaceScore: "9.5",
   grade: "9.5",
   gradeOverall: "9.5",
+  // The production grade route returns this server-issued result on both the
+  // initial record and every save. The workstation intentionally refuses to
+  // render a client-calculated grade, so the harness must model that contract
+  // instead of echoing writable grade fields from the request body.
+  authoritativeGrade: {
+    overall: "9.5",
+    gradeType: "numeric",
+    label: "MINT 9.5",
+    subgrades: { centering: 9, corners: 9.5, edges: 9.5, surface: 9.5 },
+    pristine: false,
+    score: null,
+    deductions: {},
+  },
   rarityCode: "rare_holo",
   finishVariant: "holo",
   promoType: "",
@@ -105,7 +118,13 @@ export interface CanonicalHarnessRequest {
 }
 
 export type CanonicalHarnessOperation =
-  "asset" | "catalogue" | "images" | "grading-load" | "save" | "preview" | "unknown";
+  | "asset"
+  | "catalogue"
+  | "images"
+  | "grading-load"
+  | "save"
+  | "preview"
+  | "unknown";
 
 export interface CanonicalHarnessFixtureState {
   requests: CanonicalHarnessRequest[];
@@ -339,14 +358,16 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
     if (method === "PUT" && /^\d+\/grade$/.test(certificateSuffix)) {
       savedPayloads[role] = body;
       savedRevisions[role] = (savedRevisions[role] ?? 1) + 1;
+      const authoritativeGrade = records[role].authoritativeGrade;
       const persisted = body as Record<string, unknown>;
       records[role] = {
         ...records[role],
         ...normalisePersistedGradingRecord(persisted),
+        authoritativeGrade,
         reviewRevision: savedRevisions[role],
       };
       finish("fixture", role);
-      return json({ ok: true, reviewRevision: savedRevisions[role] });
+      return json({ ok: true, reviewRevision: savedRevisions[role], authoritativeGrade });
     }
     if (method === "POST" && certificateSuffix === "label/preview") {
       const certificateId = Number((body as { certificateId?: unknown } | null)?.certificateId);

@@ -187,13 +187,13 @@ describe("partner rate-limit bucket key derivation", () => {
       [A]
     );
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash)
-       VALUES ($1,'loginRlUser',$2,$2,$3,'ACTIVE',$4)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, password_set_at)
+       VALUES ($1,'loginRlUser',$2,$2,$3,'ACTIVE',$4,now())`,
       [USER, A, USER_EMAIL, hash]
     );
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, mfa_required)
-       VALUES ($1,'loginRlMfa',$2,$2,$3,'ACTIVE',$4,true)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, password_set_at, mfa_required)
+       VALUES ($1,'loginRlMfa',$2,$2,$3,'ACTIVE',$4,now(),true)`,
       [MFA_USER, A, MFA_EMAIL, hash]
     );
     await admin.query(

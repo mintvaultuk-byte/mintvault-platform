@@ -1,11 +1,5 @@
 import { Router, type Express } from "express";
-import {
-  partnerLogin,
-  createPasswordResetToken,
-  consumePasswordResetToken,
-  MIN_PASSWORD_LEN,
-  MAX_PASSWORD_LEN,
-} from "./auth";
+import { partnerLogin, createPasswordResetToken, consumePasswordResetToken, isValidPartnerPassword } from "./auth";
 import { setPartnerCookie } from "./session";
 import {
   partnerLoginIpLimiter,
@@ -84,6 +78,15 @@ export function partnerPublicRouter(): Router {
         res.status(503).json({ error: "partner login unavailable" });
         return;
       }
+      // `credential_provenance_unavailable` is the SAME class of fault, for migration 0077 (the
+      // build shipped before the migration was applied), so it gets the same treatment: an
+      // operator-visible 503 rather than telling every partner their password is wrong. Kept as a
+      // SEPARATE statement, not folded into the condition above, so the fail-closed source guard
+      // in tests/partner-mfa-fail-closed.test.ts still matches its exact pinned string.
+      if (result.reason === "credential_provenance_unavailable") {
+        res.status(503).json({ error: "partner login unavailable" });
+        return;
+      }
       res.status(401).json({ error: "invalid credentials" });
       return;
     }
@@ -138,12 +141,7 @@ export function partnerPublicRouter(): Router {
       return;
     }
     const { token, newPassword } = req.body ?? {};
-    if (
-      typeof token !== "string" ||
-      typeof newPassword !== "string" ||
-      newPassword.length < MIN_PASSWORD_LEN ||
-      newPassword.length > MAX_PASSWORD_LEN
-    ) {
+    if (typeof token !== "string" || !isValidPartnerPassword(newPassword)) {
       res.status(400).json({ error: "invalid request" });
       return;
     }

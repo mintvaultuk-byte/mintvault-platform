@@ -80,6 +80,19 @@ const RESET_HELPER = path.join(__dirname, "reset-agent.sh");
 const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
 const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
 const APP_VERSION  = (() => { try { return require("./package.json").version; } catch { return "?"; } })();
+
+function versionTuple(raw) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(String(raw || "").trim());
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function versionSatisfies(installed, minimum) {
+  if (!minimum) return true;
+  const a = versionTuple(installed);
+  const b = versionTuple(minimum);
+  if (!a || !b) return false;
+  return a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2])));
+}
 const LAST_RESET   = path.join(SCANS_BASE, "last-reset.json");
 
 // Append a timestamped line to the operator log (tray "Show logs" target).
@@ -389,6 +402,16 @@ async function stationSetupState() {
     return { ok: true, stage: "station_unavailable", summary, stationCode: code };
   }
   const station = status.body.station;
+  if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
+    return {
+      ok: true,
+      stage: "update_required",
+      summary,
+      stationCode: code,
+      minimumSupportedVersion: station.minimumSupportedVersion,
+      error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
+    };
+  }
   try { stationIdentity.setStationStatus(station.status); } catch {}
   return {
     ok: true,
@@ -521,23 +544,16 @@ function setupIpc() {
     return watcher.rescanPreview(previewId);
   });
 
-  // "Update app" — run update.sh DETACHED (git pull + npm install + launchctl
-  // kickstart). Detached because kickstart kills THIS process; the script must
-  // outlive us. Output goes to the scanner log.
+  // Scanner software is released only as an owner-approved, signed package.
+  // Never turn a physical station into a mutable Git checkout or run npm on
+  // an operator's Mac: that would make dependency resolution part of capture
+  // authority. The UI sends the operator to the controlled release channel.
   ipcMain.handle("update-app", async () => {
-    const script = path.join(__dirname, "update.sh");
-    if (!fs.existsSync(script)) return { ok: false, error: "update.sh missing — update via git pull manually" };
-    try {
-      const child = require("node:child_process").spawn("/bin/bash", [script], {
-        detached: true,
-        stdio: "ignore",
-      });
-      child.unref();
-      console.log("[main] update.sh launched detached — app will be restarted by the script");
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err?.message || String(err) };
-    }
+    return {
+      ok: false,
+      code: "signed_release_required",
+      error: "Install the current signed MintVault Scanner package through the approved release channel. This station will not self-update from Git.",
+    };
   });
 
   // Reset the scanner — 3-tier escalation against the LIVE com.mintvault.scanner
@@ -584,6 +600,16 @@ function setupIpc() {
     const url = `${base}/cert/${encodeURIComponent(certId)}`;
     shell.openExternal(url);
     return { ok: true, url };
+  });
+
+  // This only dismisses a server-derived, persisted CARD REGISTERED notice.
+  // It cannot arm, retarget, or otherwise mutate a capture session.
+  ipcMain.handle("acknowledge-card-registered", () => {
+    if (!stateMod.get().lastAcceptedCapture?.cardRegistered) {
+      return { ok: false, error: "No registered card is awaiting acknowledgement" };
+    }
+    stateMod.set({ state: "idle", lastAcceptedCapture: null });
+    return { ok: true };
   });
 }
 
@@ -679,7 +705,7 @@ app.whenReady().then(async () => {
       const result = await stationClient.heartbeat(heartbeatPayload());
       if (!result.ok) {
         console.warn(`[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`);
-        if ([401, 403, 404].includes(result.status)) await stationSetupState();
+        if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked") await stationSetupState();
       }
     } catch (error) {
       console.warn(`[station-heartbeat] failed: ${error?.message || error}`);

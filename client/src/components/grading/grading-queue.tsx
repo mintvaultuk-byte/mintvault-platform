@@ -99,7 +99,9 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
         cardName: queue.find((c) => c.certId === certId)?.cardName || certId,
         grade: isNaN(gradeNum) ? grade : gradeNum,
         durationSeconds: cardSeconds,
-        isBlackLabel: gradeNum === 10,
+        // A ten is not automatically Pristine. The server returns that
+        // designation through its canonical certificate/report payload.
+        isBlackLabel: false,
       },
     ]);
     onGradeApproved?.(certId, grade);

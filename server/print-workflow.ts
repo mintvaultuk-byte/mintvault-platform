@@ -20,6 +20,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
+import { getPartnerPrintEligibilityBlocks } from "./partner/print-eligibility";
 import {
   effectivePrintState,
   nextState,
@@ -354,6 +355,22 @@ export async function createBatchAtomic(params: {
 }): Promise<CreateBatchResult> {
   const { identity } = params;
   const requested = [...new Set(params.certIds)];
+  // Partner output is a stricter authority than the generic lifecycle. Check
+  // this before idempotent reuse too: a stale cached sheet must never become a
+  // bypass if QA, credit, mapping, or physical evidence is no longer proven.
+  const partnerBlocks = await getPartnerPrintEligibilityBlocks(requested);
+  if (partnerBlocks.length > 0) {
+    return {
+      applied: [],
+      rejected: partnerBlocks,
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
+  }
   const states = await loadEffectiveStates(requested);
 
   const { deriveBatchId, CERTS_PER_PAGE, SHEET_LAYOUT_VERSION } = await import("./print-batch");
@@ -744,6 +761,8 @@ export async function markBatchPrinted(batchId: string, identity: ActorIdentity)
   }
   const kind = batchRow.kind;
   const certIds = batchRow.cert_ids ?? [];
+  const partnerBlocks = await getPartnerPrintEligibilityBlocks(certIds);
+  if (partnerBlocks.length > 0) return { applied: [], rejected: partnerBlocks };
   const states = await loadEffectiveStates(certIds);
 
   const applied: string[] = [];

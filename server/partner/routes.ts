@@ -274,7 +274,10 @@ export function partnerApiRouter(): Router {
   });
 
   // ---- session ----
-  r.get("/session", async (req, res) => {
+  const sessionIdentity = async (req: import("express").Request, res: import("express").Response) => {
+    // Identity + permissions + shop-facing names. Same no-store discipline as every other
+    // partner GET in this router — this response must never sit in a shared/proxy cache.
+    noStore(res);
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -313,7 +316,10 @@ export function partnerApiRouter(): Router {
     } catch {
       res.status(503).json({ error: { code: "portal_context_unavailable", message: "Shop details are unavailable." } });
     }
-  });
+  };
+  // `/me` is the stable identity contract; `/session` remains the backwards-compatible alias.
+  r.get("/me", sessionIdentity);
+  r.get("/session", sessionIdentity);
 
   r.get("/credits", requirePartnerCapability("partner.credits.view"), async (req, res) => {
     try {
@@ -549,7 +555,13 @@ export function partnerApiRouter(): Router {
       return;
     }
     noStore(res);
-    res.json({ ok: true, enrolmentId: out.enrolmentId, secret: out.secret, otpauthUri: out.otpauthUri, expiresAt: out.expiresAt }); // shown once; never logged
+    res.json({
+      ok: true,
+      enrolmentId: out.enrolmentId,
+      secret: out.secret,
+      otpauthUri: out.otpauthUri,
+      expiresAt: out.expiresAt,
+    }); // shown once; never logged
   });
 
   r.post("/mfa/restart", partnerMfaLimiter, async (req, res) => {
@@ -580,12 +592,19 @@ export function partnerApiRouter(): Router {
       password
     );
     if (!out.ok) {
-      const status = out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
+      const status =
+        out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
       res.status(status).json({ error: out.reason });
       return;
     }
     noStore(res);
-    res.json({ ok: true, enrolmentId: out.enrolmentId, secret: out.secret, otpauthUri: out.otpauthUri, expiresAt: out.expiresAt });
+    res.json({
+      ok: true,
+      enrolmentId: out.enrolmentId,
+      secret: out.secret,
+      otpauthUri: out.otpauthUri,
+      expiresAt: out.expiresAt,
+    });
   });
 
   r.post("/mfa/cancel", partnerMfaLimiter, async (req, res) => {

@@ -264,7 +264,7 @@ describe("partner workstation IA has mounted destinations for shell links", () =
       expect(SHELL).toContain(href);
     }
   });
-  it("App mounts the placeholder destinations instead of falling through to dashboard", () => {
+  it("App mounts every shell destination instead of falling through to dashboard", () => {
     for (const route of [
       'path="/partner/certificates"',
       'path="/partner/supplies"',
@@ -273,7 +273,7 @@ describe("partner workstation IA has mounted destinations for shell links", () =
     ]) {
       expect(APP).toContain(route);
     }
-    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
+    expect(APP).toContain("<PartnerCertificatesPage />");
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="supplies" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="orders" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');

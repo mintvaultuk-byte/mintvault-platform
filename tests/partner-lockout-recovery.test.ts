@@ -172,9 +172,9 @@ describe("P0-F lockout recovery coverage is wired up", () => {
     const pw = await bcrypt.hash(OLD_PASSWORD, 12);
     const spw = await bcrypt.hash(SUSPENDED_PASSWORD, 12);
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status) VALUES
-         ($1,'lockVictim',$3,$3,$4,$5,'ACTIVE'),
-         ($2,'lockSuspended',$3,$3,$6,$7,'SUSPENDED')`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status) VALUES
+         ($1,'lockVictim',$3,$3,$4,$5,now(),'ACTIVE'),
+         ($2,'lockSuspended',$3,$3,$6,$7,now(),'SUSPENDED')`,
       [VICTIM, SUSPENDED, TENANT, VICTIM_EMAIL, pw, SUSPENDED_EMAIL, spw]
     );
     for (const uid of [VICTIM, SUSPENDED]) {

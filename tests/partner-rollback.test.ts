@@ -80,7 +80,11 @@ async function applyAllRealistic(): Promise<void> {
      * applyMigrations is journal-driven and idempotent, so the second call re-reads the journal
      * and applies only what remains.
      */
-    const all = listMigrationFiles();
+    // 0075/0076 are application-scope migrations: each requires the complete
+    // scanner/certificate allocator schema and is exercised by its dedicated
+    // real-Postgres migration proof. This Partner rollback harness owns only
+    // the Partner schema plus the narrow core fixture documented below.
+    const all = listMigrationFiles().filter((migration) => !["0075", "0076"].includes(migration.number));
     const throughG6D = all.filter((f) => Number(f.number) <= 41);
     await applyMigrations(migrator, throughG6D); // populates schema_migrations journal
     // The owner-approved repair, executed by the migrator itself via its ADMIN option — exactly

@@ -11,7 +11,8 @@
  *   - not already approved or deleted.
  */
 import { Router } from "express";
-import type { Response } from "express";
+import type { NextFunction, Response } from "express";
+import rateLimit from "express-rate-limit";
 import type { PoolClient } from "pg";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
@@ -30,7 +31,9 @@ import {
 } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { auditInOwnTxn } from "./audit";
-import { withPartnerAdminTransaction } from "./db";
+import { withPartnerAdminTransaction, withTenant } from "./db";
+import { resolveFlag } from "./flags";
+import { getPartnerPrintEligibilityBlocks } from "./print-eligibility";
 import {
   requireNotSensitiveFrozen,
   requireNotViewOnly,
@@ -41,6 +44,7 @@ import {
 
 type PartnerCertAuth = {
   certId: number;
+  certificateNumber: string;
   gradingStatus: string;
   assignedGraderId: string | null;
   gradedBy: string | null;
@@ -71,6 +75,16 @@ function expectedReviewRevision(raw: unknown): number | null {
 
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
 
+const partnerGradingEditRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-edit:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many grading edit requests. Please wait a minute and try again." },
+});
+
 function numericId(raw: unknown): number | null {
   const value = String(raw);
   if (!/^[1-9][0-9]*$/.test(value)) return null;
@@ -92,11 +106,46 @@ function sendPartnerGradingError(res: Response, err: unknown): void {
   res.status(500).json({ error: "Partner grading is unavailable." });
 }
 
+/**
+ * Grading is deliberately a tenant/location-scoped pilot capability, not a
+ * global UI affordance. Resolve it on the restricted Partner runtime
+ * connection and fail closed: an unavailable flag store must never open the
+ * grading and label-preview surface by accident.
+ */
+async function requirePartnerGradingEnabled(
+  req: Parameters<typeof requirePartnerAuth>[0],
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const principal = req.partner;
+  if (!principal) {
+    res.status(401).json({ error: "authentication required" });
+    return;
+  }
+  try {
+    const enabled = await withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, (client) =>
+      resolveFlag(client, "partner_grading_enabled", principal)
+    );
+    if (!enabled) {
+      res.status(503).json({ error: "Partner grading is unavailable." });
+      return;
+    }
+    next();
+  } catch (err) {
+    // Do not reveal runtime/database detail to a Partner caller. The server log
+    // is sufficient for operations, while the route stays closed.
+    // eslint-disable-next-line no-console
+    console.error("[partner grading] flag resolution failed:", err instanceof Error ? err.message : err);
+    res.status(503).json({ error: "Partner grading is unavailable." });
+  }
+}
+
 async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Promise<PartnerCertAuth | null> {
   if (!principal.orgWide && !principal.locationId) return null;
   const { rows } = await withPartnerAdminTransaction((client) =>
     client.query<PartnerCertAuth>(
       `SELECT cert.id AS "certId",
+              cert.certificate_number AS "certificateNumber",
               cert.grader_status AS "gradingStatus",
               cert.assigned_grader_id AS "assignedGraderId",
               cert.graded_by AS "gradedBy",
@@ -117,7 +166,12 @@ async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Pro
               cert.grade::text,
               cert.rejection_reason AS "rejectionReason",
               cert.redo_count::int AS "redoCount",
-              true AS "provenanceValid"
+              (
+                cert.origin_type = 'PARTNER'
+                AND cert.origin_partner_id = pci.partner_organisation_id
+                AND cert.origin_location_id = pci.partner_location_id
+                AND cert.submission_item_id = si.id
+              ) AS "provenanceValid"
          FROM certificates cert
          LEFT JOIN cards c ON c.id = cert.card_id
          LEFT JOIN submission_items si ON si.id = cert.submission_item_id
@@ -140,6 +194,9 @@ async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Pro
           AND psh.submission_id = pci.partner_submission_id
         WHERE cert.id = $1
           AND cert.deleted_at IS NULL
+          AND cert.origin_type = 'PARTNER'
+          AND cert.origin_partner_id = pci.partner_organisation_id
+          AND cert.origin_location_id = pci.partner_location_id
           AND pci.partner_organisation_id = $2
           AND pci.state IN ('completed','imported')`,
       [certId, principal.tenantId]
@@ -207,6 +264,9 @@ function partnerDraftWriteGuard(principal: PartnerPrincipal) {
          AND psh.tenant_id = pci.partner_organisation_id
          AND psh.submission_id = pci.partner_submission_id
        WHERE cert_check.id = certificates.id
+         AND cert_check.origin_type = 'PARTNER'
+         AND cert_check.origin_partner_id = pci.partner_organisation_id
+         AND cert_check.origin_location_id = pci.partner_location_id
          AND pci.partner_organisation_id = ${principal.tenantId}
          AND (${principal.orgWide} OR pci.partner_location_id = ${principal.locationId})
          AND pci.state IN ('completed','imported')
@@ -308,24 +368,61 @@ async function partnerImageFallback(auth: PartnerCertAuth): Promise<Record<strin
 async function imagesForPartnerCert(auth: PartnerCertAuth) {
   const payload = (await buildCertImagesPayload(auth.certId)) ?? { urls: {}, quality: {} };
   const fallback = await partnerImageFallback(auth);
+  // Intake photos can help an operator prepare a target, but may never replace
+  // accepted scanner derivatives. Those are bound to a certificate/session/
+  // station in the immutable evidence ledger.
+  const urls = { ...payload.urls } as Record<string, string | null>;
+  for (const side of ["front", "back"] as const) {
+    const hasCapturedImage = Boolean(urls[`${side}_display`] || urls[`${side}_original`] || urls[`${side}_working`]);
+    if (!hasCapturedImage && fallback[`${side}_original`]) {
+      urls[`${side}_original`] = fallback[`${side}_original`];
+      urls[`${side}_display`] = fallback[`${side}_display`];
+    }
+  }
   return {
-    urls: {
-      ...payload.urls,
-      ...Object.fromEntries(Object.entries(fallback).filter(([, value]) => value)),
-    },
+    urls,
     quality: payload.quality ?? {},
   };
 }
 
 async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
-  const images = await imagesForPartnerCert(auth);
-  const urls = images.urls ?? {};
-  return !!(urls.front_display || urls.front_original) && !!(urls.back_display || urls.back_original);
+  // A mutable certificate path or original Partner upload is not proof of a
+  // physical capture. Require both CURRENT TIFF masters, each linked to a
+  // terminal capture session on an ACTIVE station in this exact location.
+  const { rows } = await withPartnerAdminTransaction((client) =>
+    client.query<{ side: "front" | "back" }>(
+      `SELECT evidence.side
+         FROM certificate_image_evidence evidence
+         JOIN scanner_capture_sessions session
+           ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+          AND session.certificate_id = evidence.certificate_id
+          AND session.side = evidence.side
+          AND session.state = 'captured'
+         JOIN partner_stations station
+           ON station.id = session.station_id
+          AND station.status = 'ACTIVE'
+          AND station.tenant_id = $2::uuid
+          AND station.location_id = $3::uuid
+        WHERE evidence.certificate_id = $1
+          AND evidence.is_current = true
+          AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+          AND evidence.format = 'tiff'
+        GROUP BY evidence.side`,
+      [auth.certId, auth.tenantId, auth.locationId]
+    )
+  );
+  const captured = new Set(rows.map((row) => row.side));
+  return captured.has("front") && captured.has("back");
 }
 
 export function partnerGradingRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
+  // This router is mounted at the portal root so its auth middleware can protect
+  // the grading routes. Scope the grading kill switch to its own prefix: a
+  // router-wide gate would otherwise intercept submissions, customers and every
+  // later portal router before their handlers can run.
+  r.use("/grading", requirePartnerGradingEnabled);
 
   r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
     res.json({ authenticated: true, userId: req.partner!.userId });
@@ -376,6 +473,54 @@ export function partnerGradingRouter(): Router {
               AND cert.assigned_grader_id = $2
               AND cert.grader_status IN ('assigned','pending_review')
               AND cert.deleted_at IS NULL
+              AND cert.origin_type = 'PARTNER'
+              AND cert.origin_partner_id = pci.partner_organisation_id
+              AND cert.origin_location_id = pci.partner_location_id
+              -- Ready to Grade is a physical-capture state, not merely a
+              -- connector-import/assignment state.  Each side must be the
+              -- current immutable TIFF accepted by a terminal session on an
+              -- active station in this exact Partner location.  Keep this
+              -- predicate here (rather than trusting a browser transition) so
+              -- a guessed certificate ID can never make an uncaptured card
+              -- appear in the operational queue.
+              AND EXISTS (
+                SELECT 1
+                  FROM certificate_image_evidence evidence
+                  JOIN scanner_capture_sessions session
+                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+                   AND session.certificate_id = evidence.certificate_id
+                   AND session.side = evidence.side
+                   AND session.state = 'captured'
+                  JOIN partner_stations station
+                    ON station.id = session.station_id
+                   AND station.status = 'ACTIVE'
+                   AND station.tenant_id = pci.partner_organisation_id
+                   AND station.location_id = pci.partner_location_id
+                 WHERE evidence.certificate_id = cert.id
+                   AND evidence.side = 'front'
+                   AND evidence.is_current = true
+                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+                   AND evidence.format = 'tiff'
+              )
+              AND EXISTS (
+                SELECT 1
+                  FROM certificate_image_evidence evidence
+                  JOIN scanner_capture_sessions session
+                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+                   AND session.certificate_id = evidence.certificate_id
+                   AND session.side = evidence.side
+                   AND session.state = 'captured'
+                  JOIN partner_stations station
+                    ON station.id = session.station_id
+                   AND station.status = 'ACTIVE'
+                   AND station.tenant_id = pci.partner_organisation_id
+                   AND station.location_id = pci.partner_location_id
+                 WHERE evidence.certificate_id = cert.id
+                   AND evidence.side = 'back'
+                   AND evidence.is_current = true
+                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+                   AND evidence.format = 'tiff'
+              )
               ${locationWhere}
             ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC`,
           params
@@ -455,6 +600,10 @@ export function partnerGradingRouter(): Router {
       if (!access.ok) return res.status(access.status).json({ error: access.error });
       const auth = authorizeAssignedPartnerCert(req.partner!, candidate);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      const partnerBlocks = await getPartnerPrintEligibilityBlocks([auth.auth.certificateNumber]);
+      if (partnerBlocks.length > 0) {
+        return res.status(409).json({ error: partnerBlocks[0].message, code: partnerBlocks[0].code });
+      }
 
       const saved = await storage.getCertificate(certId);
       if (!saved) return res.status(404).json({ error: "Not found" });
@@ -493,7 +642,8 @@ export function partnerGradingRouter(): Router {
       if (currentRevision !== expected) {
         return res.status(409).json({
           code: "STALE_REVIEW",
-          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          error:
+            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
         });
       }
       res.setHeader("Content-Type", "image/png");
@@ -542,7 +692,13 @@ export function partnerGradingRouter(): Router {
           sessionId: req.partner!.sessionId,
           correlationId: auth.auth.partnerSubmissionId,
         });
-        res.json({ ok: true, gradingStatus: auth.auth.gradingStatus, reviewRevision: saved });
+        const payload = await buildCertGradingPayload(certId);
+        res.json({
+          ok: true,
+          gradingStatus: auth.auth.gradingStatus,
+          reviewRevision: saved,
+          authoritativeGrade: payload?.authoritativeGrade ?? null,
+        });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }
@@ -564,7 +720,9 @@ export function partnerGradingRouter(): Router {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not submittable` });
         }
         if (!(await requireBothImages(auth.auth))) {
-          return res.status(409).json({ error: "Upload front and back images before submitting grades." });
+          return res
+            .status(409)
+            .json({ error: "Capture front and back on the approved station before submitting grades." });
         }
         if (req.body && Object.keys(req.body).length) {
           const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!));
@@ -611,6 +769,9 @@ export function partnerGradingRouter(): Router {
                  AND psh.tenant_id = pci.partner_organisation_id
                  AND psh.submission_id = pci.partner_submission_id
                WHERE cert_check.id = certificates.id
+                 AND cert_check.origin_type = 'PARTNER'
+                 AND cert_check.origin_partner_id = pci.partner_organisation_id
+                 AND cert_check.origin_location_id = pci.partner_location_id
                  AND pci.partner_organisation_id = ${req.partner!.tenantId}
                  AND (${req.partner!.orgWide} OR pci.partner_location_id = ${req.partner!.locationId})
                  AND pci.state IN ('completed','imported')
@@ -648,6 +809,7 @@ export function partnerGradingRouter(): Router {
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);
@@ -661,7 +823,9 @@ export function partnerGradingRouter(): Router {
           return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
         }
         if (!(await requireBothImages(auth.auth))) {
-          return res.status(409).json({ error: "Upload front and back images before submitting grades." });
+          return res
+            .status(409)
+            .json({ error: "Capture front and back on the approved station before submitting grades." });
         }
         const saved = await applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!));
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
@@ -705,6 +869,9 @@ export function partnerGradingRouter(): Router {
                  AND psh.tenant_id = pci.partner_organisation_id
                  AND psh.submission_id = pci.partner_submission_id
                WHERE cert_check.id = certificates.id
+                 AND cert_check.origin_type = 'PARTNER'
+                 AND cert_check.origin_partner_id = pci.partner_organisation_id
+                 AND cert_check.origin_location_id = pci.partner_location_id
                  AND pci.partner_organisation_id = ${req.partner!.tenantId}
                  AND (${req.partner!.orgWide} OR pci.partner_location_id = ${req.partner!.locationId})
                  AND pci.state IN ('completed','imported')
@@ -736,7 +903,13 @@ export function partnerGradingRouter(): Router {
           correlationId: auth.auth.partnerSubmissionId,
           after: { gradingStatus: "pending_review", reviewRequired: true },
         });
-        res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(req.body || {}) });
+        const payload = await buildCertGradingPayload(certId);
+        res.json({
+          ok: true,
+          gradingStatus: "pending_review",
+          changed: Object.keys(req.body || {}),
+          authoritativeGrade: payload?.authoritativeGrade ?? null,
+        });
       } catch (err) {
         sendPartnerGradingError(res, err);
       }

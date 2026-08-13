@@ -43,6 +43,7 @@ const els = {
   acceptPreviewBtn: document.getElementById("acceptPreviewBtn"),
   rescanPreviewBtn: document.getElementById("rescanPreviewBtn"),
   rescanErrorBtn: document.getElementById("rescanErrorBtn"),
+  nextCardBtn: document.getElementById("nextCardBtn"),
   captureActionHint: document.getElementById("captureActionHint"),
   positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
   positioningHint: document.getElementById("positioningHint"),
@@ -144,6 +145,13 @@ function renderTarget(state) {
     return;
   }
 
+  if (state.lastAcceptedCapture?.cardRegistered && !state.activeCapture) {
+    els.targetCert.textContent = state.lastAcceptedCapture.certId;
+    els.targetSide.textContent = "CARD REGISTERED";
+    els.targetHint.textContent = "Both server-owned sides are captured. Select Next Card only after the physical card has been cleared from this station.";
+    return;
+  }
+
   if (state.state === "success" && state.lastAcceptedCapture?.certId) {
     const accepted = state.lastAcceptedCapture;
     els.targetCert.textContent = accepted.certId;
@@ -180,8 +188,16 @@ function renderWorkflowGuide(state) {
   els.workflowGuide.hidden = presentationPending;
   if (presentationPending) return;
 
-  const accepted = state.state === "success" ? state.lastAcceptedCapture : null;
+  const accepted = state.lastAcceptedCapture;
   if (accepted?.certId) {
+    if (accepted.cardRegistered && !active) {
+      els.workflowGuide.dataset.guideState = "complete";
+      els.placementVisual.classList.remove("flip-required");
+      els.workflowGuideStep.textContent = "CARD REGISTERED";
+      els.workflowGuideTitle.textContent = "Both sides are saved";
+      els.workflowGuideHint.textContent = "Select Next Card only after clearing this card from the scanner.";
+      return;
+    }
     const frontAccepted = accepted.side === "front";
     els.workflowGuide.dataset.guideState = frontAccepted ? "back" : "complete";
     els.placementVisual.classList.toggle("flip-required", frontAccepted);
@@ -249,6 +265,11 @@ function renderStationSetup(next) {
   } else if (stage === "pending") {
     els.stationSetupTitle.textContent = "Waiting for MintVault approval";
     els.stationSetupText.textContent = `${stationSetup.stationCode || "This Mac"} is registered and awaiting Super Admin approval. Keep the app open; no card can be scanned yet.`;
+  } else if (stage === "update_required") {
+    els.stationSetupTitle.textContent = "UPDATE REQUIRED";
+    els.stationSetupText.textContent = stationSetup.minimumSupportedVersion
+      ? `This Mac must run MintVault Scanner ${stationSetup.minimumSupportedVersion} or later. Install the current signed MintVault Scanner release, then reopen the app.`
+      : "Install the current signed MintVault Scanner release, then reopen the app.";
   } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
     els.stationSetupTitle.textContent = "Station unavailable";
     els.stationSetupText.textContent = "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
@@ -516,6 +537,7 @@ function renderCaptureActions(state) {
   const hasTarget = Boolean(active?.certId && active?.side);
   const scanLabel = hasTarget ? `SCAN ${side}` : "SCAN CARD";
   const scanEnabled = awaitingScan && state.scannerHealth?.status === "ready" && !actionInFlight;
+  const cardRegistered = state.lastAcceptedCapture?.cardRegistered === true && !active;
 
   // Keep the final evidence action visible in every state. A disabled,
   // explained SCAN CARD makes the target-bound rule clear without implying
@@ -525,6 +547,7 @@ function renderCaptureActions(state) {
   setActionButton(els.acceptPreviewBtn, `ACCEPT ${side}`, previewReady, actionInFlight);
   setActionButton(els.rescanPreviewBtn, `RESCAN ${side}`, previewReady, actionInFlight);
   setActionButton(els.rescanErrorBtn, `RESCAN ${side}`, previewError, actionInFlight);
+  setActionButton(els.nextCardBtn, "NEXT CARD", cardRegistered, actionInFlight);
 
   if (previewVisible) renderPreview(active);
   if (!previewVisible && renderedPreviewId) {
@@ -722,11 +745,9 @@ if (els.appVersion) {
 }
 
 els.updateBtn.addEventListener("click", async () => {
-  if (!confirm("Update the scanner app to the latest version and restart it?\nScanning pauses for about one minute.")) return;
+  if (!confirm("Scanner updates are installed only from an approved signed MintVault package. Open the release instructions?")) return;
   const result = await window.scanner.updateApp();
-  alert(result?.ok
-    ? "Updating — the scanner app will restart shortly."
-    : `Update failed to start: ${result?.error || "unknown error"}`);
+  alert(result?.error || "Install the current signed MintVault Scanner package through the approved release channel.");
 });
 
 els.orphansBtn.addEventListener("click", async () => {
@@ -761,6 +782,7 @@ els.savePlacementBtn.addEventListener("click", () => void runCaptureAction((prev
 els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId)));
 els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
+els.nextCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.acknowledgeCardRegistered()));
 
 els.restartServiceBtn.addEventListener("click", async () => {
   if (!confirm("Restart the scanner service?\n\nUse this only when the service is unresponsive. An active capture may be interrupted.")) return;

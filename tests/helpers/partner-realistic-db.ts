@@ -28,6 +28,9 @@ export const PARTNER_MIGRATIONS = [
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
   "0009_partner_connector_validation",
+  // Runtime authentication now requires the provenance projection this migration
+  // adds. Keep the baseline harness aligned with the deployed login contract.
+  "0077_partner_credential_lifecycle_hardening",
 ] as const;
 
 /**
@@ -52,6 +55,7 @@ export const PARTNER_MIGRATIONS_WITH_G3F = [
   ...PARTNER_MIGRATIONS_WITH_G3E,
   "0012_partner_connector_import_attempts",
   "0013_partner_connector_claim_index",
+  "0078_partner_connector_flag_read",
 ] as const;
 
 /** G4 — append-only Super-Admin operational-action audit table (0014). */
@@ -160,7 +164,14 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
  * Classification rule: does the migration read or write any table outside the
  * `partner_*` namespace in a way that requires it to already exist?
  */
-export const APPLICATION_SCOPE_MIGRATIONS = ["0073_lineage_convergence"] as const;
+export const APPLICATION_SCOPE_MIGRATIONS = [
+  "0073_lineage_convergence",
+  // Extends scanner_capture_sessions, which is a core-certificate dependency.
+  "0075_partner_station_single_active_capture",
+  // Allocates into core certificates/cert_counter while deriving the immutable
+  // Partner mapping. It must never be pulled into the Partner-only harness.
+  "0076_partner_pilot_certificate_allocation",
+] as const;
 
 /**
  * Every migration a partner-only disposable database may apply, in order.
@@ -204,6 +215,8 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0046_scanner_processing_jobs",
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
+  "0077_partner_credential_lifecycle_hardening",
+  "0078_partner_connector_flag_read",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

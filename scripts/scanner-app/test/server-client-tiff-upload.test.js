@@ -555,7 +555,10 @@ test("accepting front leaves it untouched when a later back preview is rescanned
     if (side === "front") frontPath = filePath;
     return { path: filePath, provenance: { profileVersion: "mintvault-canon-lide-400-v3" } };
   };
-  fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: { certId: "MV902" } }; };
+  fixture.server.uploadCaptureEvidence = async () => {
+    uploads++;
+    return { ok: true, body: { certId: "MV902", card_registered: uploads === 2 } };
+  };
 
   await fixture.watcher.pollTargetedCapture();
   await fixture.watcher.scanActiveTarget();
@@ -573,6 +576,12 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   assert.equal(fs.readFileSync(acceptedFront).equals(acceptedFrontBytes), true, "back Rescan never alters accepted front evidence");
   assert.equal(fixture.state.get().activeCapture.side, "back");
   assert.equal(fixture.watcher.readTargetedQueue()[0].phase, "awaiting_scan");
+
+  await fixture.watcher.scanActiveTarget();
+  assert.equal((await fixture.watcher.acceptPreview(fixture.state.get().activeCapture.previewId)).ok, true);
+  assert.equal(uploads, 2);
+  assert.equal(fixture.state.get().lastAcceptedCapture?.side, "back");
+  assert.equal(fixture.state.get().lastAcceptedCapture?.cardRegistered, true);
 });
 
 test("scanner client preserves a station's legacy ingest host for target-session routes", () => {

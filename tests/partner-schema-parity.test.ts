@@ -163,6 +163,15 @@ describe("partner schema ↔ migration parity", () => {
       // hosts; per-environment delivery is what --only + --convergence-mode exists for.
       "0073_lineage_convergence.sql",
       "0074_partner_submission_lifecycle_and_location_snapshot.sql",
+      "0075_partner_station_single_active_capture.sql",
+      "0076_partner_pilot_certificate_allocation.sql",
+      // 0077 (partner credential lifecycle hardening) is additive: it adds
+      // partner_users.password_set_at, collapses partner_password_reset_tokens to one live
+      // link per user (partial unique index), and re-declares partner_auth_lookup() to
+      // project the new column. This and the following connector grant are forward-only
+      // migrations; their identities must remain independently pinned.
+      "0077_partner_credential_lifecycle_hardening.sql",
+      "0078_partner_connector_flag_read.sql",
     ]);
   });
 

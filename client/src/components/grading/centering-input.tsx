@@ -6,9 +6,6 @@ interface Props {
   backLR: string;
   backTB: string;
   subgrade: number | null;
-  onChange: (field: "frontLR" | "frontTB" | "backLR" | "backTB", val: string) => void;
-  overrideGrade: number | null;
-  onOverride: (val: number | null) => void;
 }
 
 function gradeColor(g: number | null): string {
@@ -84,15 +81,8 @@ function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: stri
   );
 }
 
-export default function CenteringInput({
-  frontLR,
-  frontTB,
-  backLR,
-  backTB,
-  subgrade,
-  overrideGrade,
-}: Props) {
-  const displayGrade = overrideGrade ?? subgrade;
+export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgrade }: Props) {
+  const displayGrade = subgrade;
 
   const fields: { key: "frontLR" | "frontTB" | "backLR" | "backTB"; label: string; value: string }[] = [
     { key: "frontLR", label: "Front L/R", value: frontLR },
@@ -128,14 +118,13 @@ export default function CenteringInput({
       <div className="flex items-center gap-4">
         <CenteringDiagram frontLR={frontLR} frontTB={frontTB} />
         <div className="flex-1">
-          <p className="text-[var(--admin-ink-dim)] text-[10px] mb-1 uppercase tracking-widest">Calculated subgrade</p>
+          <p className="text-[var(--admin-ink-dim)] text-[10px] mb-1 uppercase tracking-widest">
+            Server-issued subgrade
+          </p>
           <p className="text-3xl font-black" style={{ color: gradeColor(displayGrade) }}>
             {displayGrade !== null ? displayGrade : "—"}
           </p>
-          {/* Override removed (owner directive 2026-07-02): the centering
-              subgrade is 100% MVGS auto (from the Card Tool ratios) — no manual
-              override, matching corners/edges/surface. */}
-          <span className="text-[9px] text-[var(--admin-ink-faint)] italic mt-1 block">MVGS auto</span>
+          <span className="text-[9px] text-[var(--admin-ink-faint)] italic mt-1 block">Issued after save</span>
         </div>
       </div>
     </div>
