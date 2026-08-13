@@ -40,6 +40,38 @@ import {
   requirePartnerCapability,
   type PartnerPrincipal,
 } from "./session";
+import {
+  GradingLeaseError,
+  acquireLease,
+  getLease,
+  heartbeatLease,
+  releaseLease,
+  takeoverLease,
+} from "./grading-lease-service";
+
+/**
+ * Lease failures mapped to statuses a workstation can act on.
+ *
+ * A cross-tenant or cross-location Card Job resolves to 404 — the same answer an absent id gets,
+ * because a distinct 403 would confirm the id is real and belongs to somebody.
+ */
+function leaseError(res: import("express").Response, error: unknown): void {
+  if (error instanceof GradingLeaseError) {
+    const status =
+      error.code === "CARD_JOB_NOT_FOUND"
+        ? 404
+        : error.code === "FORBIDDEN"
+          ? 403
+          : error.code === "LEASE_HELD_BY_ANOTHER" || error.code === "STALE_REVISION" || error.code === "NOT_GRADABLE"
+            ? 409
+            : 410; // NOT_LEASE_HOLDER / LEASE_EXPIRED — your editing session is gone
+    res.status(status).json({ error: { code: error.code, message: error.message, ...(error.detail ?? {}) } });
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.error("[partner grading lease] failed:", (error as Error).message);
+  res.status(500).json({ error: { code: "lease_unavailable", message: "Could not open this card for editing." } });
+}
 
 type PartnerCertAuth = {
   certId: number;
@@ -112,9 +144,8 @@ async function requirePartnerGradingEnabled(
     return;
   }
   try {
-    const enabled = await withTenant(
-      { tenantId: principal.tenantId, locationId: principal.locationId },
-      (client) => resolveFlag(client, "partner_grading_enabled", principal)
+    const enabled = await withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, (client) =>
+      resolveFlag(client, "partner_grading_enabled", principal)
     );
     if (!enabled) {
       res.status(503).json({ error: "Partner grading is unavailable." });
@@ -414,6 +445,89 @@ export function partnerGradingRouter(): Router {
     res.json({ authenticated: true, userId: req.partner!.userId });
   });
 
+  /* ------------------------------------------------------------------------------------------
+   * P9 — GRADING EDIT LEASE.
+   *
+   * Keyed on the CARD JOB — the unit a grader edits and the unit that becomes a permanent MV. All
+   * five require partner.cards.assess, so SCANNER_OPERATOR (cards.scan + cards.view, never
+   * cards.assess) cannot reach any of them.
+   *
+   * These do not grade. They decide who MAY grade; the MVGS engine is untouched.
+   * ---------------------------------------------------------------------------------------- */
+  r.get("/grading/card-jobs/:cardJobId/lease", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
+    try {
+      res.json({ lease: await getLease(req.partner!, String(req.params.cardJobId)) });
+    } catch (error) {
+      leaseError(res, error);
+    }
+  });
+
+  r.post(
+    "/grading/card-jobs/:cardJobId/lease",
+    requirePartnerCapability("partner.cards.assess"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const result = await acquireLease(req.partner!, String(req.params.cardJobId), req.body?.displayName);
+        res.status(result.reacquired ? 200 : 201).json(result);
+      } catch (error) {
+        leaseError(res, error);
+      }
+    }
+  );
+
+  r.post(
+    "/grading/card-jobs/:cardJobId/lease/heartbeat",
+    requirePartnerCapability("partner.cards.assess"),
+    requireNotViewOnly,
+    async (req, res) => {
+      try {
+        res.json({ lease: await heartbeatLease(req.partner!, String(req.params.cardJobId)) });
+      } catch (error) {
+        leaseError(res, error);
+      }
+    }
+  );
+
+  r.post(
+    "/grading/card-jobs/:cardJobId/lease/release",
+    requirePartnerCapability("partner.cards.assess"),
+    async (req, res) => {
+      try {
+        await releaseLease(req.partner!, String(req.params.cardJobId));
+        res.json({ ok: true });
+      } catch (error) {
+        leaseError(res, error);
+      }
+    }
+  );
+
+  /*
+   * Taking a card off another grader. Deliberately a SEPARATE route from acquire: it is a different
+   * act, it needs org-wide authority and a reason, and it is audited. A flag on acquire would let a
+   * UI perform it by accident.
+   */
+  r.post(
+    "/grading/card-jobs/:cardJobId/lease/takeover",
+    requirePartnerCapability("partner.cards.assess"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const lease = await takeoverLease(
+          req.partner!,
+          String(req.params.cardJobId),
+          typeof req.body?.reason === "string" ? req.body.reason : "",
+          req.body?.displayName
+        );
+        res.json({ lease });
+      } catch (error) {
+        leaseError(res, error);
+      }
+    }
+  );
+
   r.get("/grading/queue", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
     try {
       const principal = req.partner!;
@@ -628,7 +742,8 @@ export function partnerGradingRouter(): Router {
       if (currentRevision !== expected) {
         return res.status(409).json({
           code: "STALE_REVIEW",
-          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          error:
+            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
         });
       }
       res.setHeader("Content-Type", "image/png");
@@ -705,7 +820,9 @@ export function partnerGradingRouter(): Router {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not submittable` });
         }
         if (!(await requireBothImages(auth.auth))) {
-          return res.status(409).json({ error: "Capture front and back on the approved station before submitting grades." });
+          return res
+            .status(409)
+            .json({ error: "Capture front and back on the approved station before submitting grades." });
         }
         if (req.body && Object.keys(req.body).length) {
           const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!));
@@ -805,7 +922,9 @@ export function partnerGradingRouter(): Router {
           return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
         }
         if (!(await requireBothImages(auth.auth))) {
-          return res.status(409).json({ error: "Capture front and back on the approved station before submitting grades." });
+          return res
+            .status(409)
+            .json({ error: "Capture front and back on the approved station before submitting grades." });
         }
         const saved = await applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!));
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });

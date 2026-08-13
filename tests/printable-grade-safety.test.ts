@@ -219,7 +219,14 @@ describe("the kind predicate matches the renderer EXACTLY (hostile-review Critic
         expect(rendered, `gradeType=${JSON.stringify(gt)} grade=${JSON.stringify(g)}`).toBe(predicted);
       }
     }
-  });
+    /*
+     * EXPLICIT TIMEOUT, because this case renders 54 real label PNGs through node-canvas — genuine
+     * CPU work, not I/O. Vitest's 5s default happened to fit while the suite was the heaviest thing
+     * running; once other suites started spinning up disposable PostgreSQL clusters alongside it,
+     * the same passing assertions began timing out. Raising it does not weaken anything: every
+     * assertion is unchanged, and a genuine hang still fails, just later.
+     */
+  }, 60_000);
 
   it("uses the shared isNonNumericGrade predicate rather than its own trimmed set", async () => {
     const { isNonNumericGrade } = await import("../shared/schema");

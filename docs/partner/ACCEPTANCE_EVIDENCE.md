@@ -1452,3 +1452,94 @@ or `.filter(...locationId)` in the page; the wide station table scrolls inside i
 Ready to Grade currently links to the existing `/partner/grading` page. P9 is what makes that the
 ONE canonical workstation with an edit lease; this deliberately does not introduce a partner-specific
 grading surface in the meantime.
+
+---
+
+## P9 — CANONICAL GRADING WORKSTATION + EDIT LEASE
+
+### The defect
+
+`grep` for `grading_lease` / `edit_lease` returned nothing. Two graders could open the same Card Job
+and both save; the second save won, **silently**, and the first grader's assessment vanished without
+either being told — on a record that becomes a permanent published grade with a certificate behind
+it. Migration 0087 and `grading-lease-service.ts` close that.
+
+### Two guards, because one is not enough
+
+**The lease** answers _who may write_, enforced by a partial UNIQUE index. "At most one active
+editor" checked by SELECT-then-INSERT is not enforcement — two concurrent acquires interleave
+between the read and the write. An advisory lock makes the loser's answer intelligible
+(`LEASE_HELD_BY_ANOTHER`) rather than a raw constraint violation, but the index is the authority.
+
+**The revision** answers _what they were looking at_. A grader who held the lease, lost it to an
+authorised takeover, then submits a form loaded ten minutes ago must be refused — and the lease alone
+cannot catch that, because by then they do not hold it and the honest answer is "your copy is stale",
+not "you are not the holder". A takeover therefore **carries the revision forward**; restarting it at
+1 would make the displaced grader's stale form look current again.
+
+### Expiry without a sweeper
+
+Every acquire releases an expired lease inside its own transaction before taking a new one, so an
+abandoned card frees up with **no background job having run**. Correctness never waits on a worker.
+An expired holder cannot simply heartbeat it back to life either — somebody else may already be
+part-way through, so they go via acquire and are told.
+
+### Proven — 27/27 on real PostgreSQL, races genuinely parallel
+
+All 13 required proofs, on separate pool connections via `Promise.all`:
+
+| #   | Proof                                         | Result                                                                                            |
+| --- | --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 1-2 | two graders open the same card simultaneously | exactly one wins; **DB holds exactly one live lease**                                             |
+| 3   | the loser cannot mutate                       | `NOT_LEASE_HOLDER` on write, not merely on acquire                                                |
+| 4   | heartbeat                                     | extends the lease                                                                                 |
+| 5   | expired lease                                 | reacquirable; the old row **released, not deleted**                                               |
+| 6   | authorised takeover                           | succeeds                                                                                          |
+| 7   | takeover audited                              | actor, previous holder, reason, revision carried forward                                          |
+| 8   | displaced grader saves afterwards             | refused — no silent overwrite                                                                     |
+| 9   | Partner A leases Partner B's job              | `CARD_JOB_NOT_FOUND` — same answer an absent id gets                                              |
+| 10  | Location A leases Location B's work           | refused; the org-wide owner **can**, which makes it scoping not a bug                             |
+| 11  | SCANNER_OPERATOR                              | `FORBIDDEN` on acquire, heartbeat **and** takeover                                                |
+| 12  | non-gradable card                             | `NOT_GRADABLE`                                                                                    |
+| 13  | **process restart**                           | lease survives — re-imported module still refuses, row visible to an independent connection (I19) |
+
+Plus: a stale revision is refused **even from the rightful holder**; a location-scoped grader cannot
+seize a colleague's card; a takeover without a reason is refused; the occupied banner names the
+holder but leaks no email or id; and a refresh by the same grader extends rather than locking them
+out of their own card.
+
+### One canonical workstation — asserted, not assumed
+
+The partner grading routes were already an **adapter** over `../grader`, not a second engine. P9 adds
+the lease alongside them and asserts it: the adapter still imports `../grader`, defines no
+`computeGrade`/`scoreCard`/`MvgsEngine` of its own, and the lease service contains no reference to
+MVGS, centering, subgrades, pristine or Black Label. **Protected scoring maths is untouched.**
+
+All five lease routes require `partner.cards.assess`, so SCANNER_OPERATOR — which holds `cards.scan`
+and `cards.view` but never `cards.assess` — cannot reach any of them. Takeover is a **separate
+route**, not a flag on acquire, so a UI cannot perform it by accident.
+
+### One regression, diagnosed rather than dismissed
+
+`tests/printable-grade-safety.test.ts` began failing in the full run while passing in isolation. It
+was a **timeout, not an assertion**: the case renders 54 real label PNGs through node-canvas, took
+~9s, and Vitest's 5s default had only ever fit because that suite was the heaviest thing running.
+Once P9's disposable PostgreSQL cluster ran alongside it, the same passing assertions timed out.
+Given an explicit 60s timeout — every assertion unchanged, and a genuine hang still fails.
+
+### Verification
+
+| Check                    | P8 baseline             | After P9                          |
+| ------------------------ | ----------------------- | --------------------------------- |
+| Tests                    | 27 failed / 4452 passed | **27 failed / 4479 passed** (+27) |
+| Failing files            | 7                       | **7 — identical set**             |
+| Newly failing            | —                       | **ZERO**                          |
+| Critical partner matrix  | 19/19                   | **19/19**                         |
+| Typecheck / lint / build | clean                   | **clean / 0 errors / succeeds**   |
+
+### Carried
+
+The lease is server-complete with HTTP routes; the workstation CLIENT does not yet call
+acquire/heartbeat or render an occupied banner. The authority is enforced server-side regardless —
+a client that never acquires simply cannot write — so this is a UX gap, not a correctness one. The
+Super Admin locations screen also remains outstanding (routes live and tested since AG-1).

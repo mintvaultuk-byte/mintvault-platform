@@ -239,6 +239,11 @@ describe("partner schema ↔ migration parity", () => {
       // last re-proved its human. partner_sessions is migration-authoritative (raw SQL, like the
       // 0002 auth tables) and deliberately outside Drizzle, so there is no model to update.
       "0086_partner_session_step_up.sql",
+      // 0087 adds partner_grading_leases: at most ONE active editor per Card Job, enforced by a
+      // partial UNIQUE index rather than application logic, because a SELECT-then-INSERT check is
+      // not enforcement — two concurrent acquires interleave between the read and the write.
+      // Raw-SQL surface like the other station/scanner tables; deliberately outside Drizzle.
+      "0087_partner_grading_edit_lease.sql",
     ]);
   });
 

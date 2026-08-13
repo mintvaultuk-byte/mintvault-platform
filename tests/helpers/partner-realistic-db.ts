@@ -261,6 +261,8 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0085_partner_scanner_operator_role",
   // PARTNER scope: one nullable column on partner_sessions. Touches no core table.
   "0086_partner_session_step_up",
+  // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
+  "0087_partner_grading_edit_lease",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -380,6 +382,8 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0084_partner_location_management",
   // AG-3 step-up stamp. Additive nullable column; harmless where step-up is never exercised.
   "0086_partner_session_step_up",
+  // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
+  "0087_partner_grading_edit_lease",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
