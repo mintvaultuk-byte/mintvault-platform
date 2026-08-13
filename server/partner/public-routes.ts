@@ -1,11 +1,5 @@
 import { Router, type Express } from "express";
-import {
-  partnerLogin,
-  createPasswordResetToken,
-  consumePasswordResetToken,
-  MIN_PASSWORD_LEN,
-  MAX_PASSWORD_LEN,
-} from "./auth";
+import { partnerLogin, createPasswordResetToken, consumePasswordResetToken, isValidPartnerPassword } from "./auth";
 import { setPartnerCookie } from "./session";
 import {
   partnerLoginIpLimiter,
@@ -147,12 +141,7 @@ export function partnerPublicRouter(): Router {
       return;
     }
     const { token, newPassword } = req.body ?? {};
-    if (
-      typeof token !== "string" ||
-      typeof newPassword !== "string" ||
-      newPassword.length < MIN_PASSWORD_LEN ||
-      newPassword.length > MAX_PASSWORD_LEN
-    ) {
+    if (typeof token !== "string" || !isValidPartnerPassword(newPassword)) {
       res.status(400).json({ error: "invalid request" });
       return;
     }

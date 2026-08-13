@@ -212,6 +212,7 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0046_scanner_processing_jobs",
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
+  "0077_partner_credential_lifecycle_hardening",
   "0078_partner_connector_flag_read",
 ] as const;
 
