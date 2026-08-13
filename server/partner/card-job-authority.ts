@@ -159,6 +159,31 @@ async function assertStartAllowed(
     );
   }
 
+  /*
+   * AG-1: the LOCATION must be active too.
+   *
+   * With one location this was moot — a partner either worked or did not. With several, suspending
+   * one shop floor has to stop work at that shop floor and nowhere else, and the organisation's own
+   * status cannot express that. `authenticateStationRequest` already refuses a signed request from
+   * a station whose location is not ACTIVE, so this is the second, independent check: the HTTP
+   * boundary and the authority must not disagree about whether a shop is open.
+   *
+   * The tenant predicate is on the same row, so a location id belonging to another partner is not
+   * merely inactive here — it does not exist.
+   */
+  if (input.locationId) {
+    const location = await client.query<{ status: string }>(
+      `SELECT status FROM partner_locations WHERE id=$1 AND tenant_id=$2`,
+      [input.locationId, input.tenantId]
+    );
+    if (location.rows[0]?.status !== "ACTIVE") {
+      throw new CardJobAuthorityError(
+        "ORGANISATION_NOT_ACTIVE",
+        "This location cannot start new cards while it is not active."
+      );
+    }
+  }
+
   const emergency = await readEmergencyState(client, {
     tenantId: input.tenantId,
     locationId: input.locationId ?? null,

@@ -34,6 +34,17 @@ const stripComments = (src: string): string =>
  * inside a string literal makes the block-comment regex swallow real code — that is exactly what
  * happened to server/routes.ts and silently emptied the mount assertions.
  */
+/*
+ * ALSO NOW USED FOR server/partner/routes.ts, for the identical reason and after the identical
+ * failure: a comment there mentioned the partner catch-all path, whose slash-star sequence opened a
+ * block comment as far as the regex above was concerned. Everything from that point to the next
+ * close-comment vanished, including `r.get("/sessions")`, and this sentinel reported a route as
+ * DELETED that was sitting in the file untouched.
+ *
+ * The hazard was removed at source as well — a comment should not be able to hide code — but the
+ * stripper is the durable fix, because the next person to write a path pattern in a comment will
+ * not know this rule exists.
+ */
 const dropCommentLines = (src: string): string =>
   src
     .split("\n")
@@ -77,7 +88,7 @@ describe("no unresolved merge conflict survives in the partner surface", () => {
 
 /** Conflict 1 — server/partner/routes.ts. */
 describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
-  const code = stripComments(routes);
+  const code = dropCommentLines(routes);
   // The handler body was extracted into `const sessionIdentity` so that `/me` (the stable
   // identity contract) and `/session` (the backwards-compatible alias) share ONE implementation.
   // Slicing from the route registration would therefore capture only `r.get(...)` and every
@@ -126,7 +137,7 @@ describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
   });
 
   it("keeps all three routes this branch added, each behind an auth gate", () => {
-    const routesCode = stripComments(routes);
+    const routesCode = dropCommentLines(routes);
     for (const [route, gate] of [
       ['r.get("/credits"', 'requirePartnerCapability("partner.credits.view")'],
       ['r.get("/sessions"', "requirePartnerAuth"],
@@ -139,7 +150,7 @@ describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
   });
 
   it("keeps origin/main's current-factor requirement on recovery-code regeneration", () => {
-    const code = stripComments(routes);
+    const code = dropCommentLines(routes);
     expect(code).toContain('r.post("/mfa/recovery-codes/regenerate"');
     // The control is not the route's existence — it is the current-factor proof passed to
     // mfaRegenerateRecovery. Deleting that argument silently lets an enrolled user remint their

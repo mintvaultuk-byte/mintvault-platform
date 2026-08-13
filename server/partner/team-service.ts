@@ -11,6 +11,9 @@ export const PORTAL_ROLE_TO_PARTNER_ROLE = {
   ADMIN: "PARTNER_MANAGER",
   GRADER: "MVGS_ASSESSMENT_TECHNICIAN",
   STAFF: "PARTNER_RECEPTION",
+  // AG-2 — the least-privilege shop-floor role. An owner can now hire someone to run the scanner
+  // without also handing them grading authority, station enrolment and the wallet.
+  SCANNER_OPERATOR: "SCANNER_OPERATOR",
 } as const;
 
 export type PortalTeamRole = keyof typeof PORTAL_ROLE_TO_PARTNER_ROLE;
@@ -20,11 +23,18 @@ const PARTNER_ROLE_TO_PORTAL_ROLE: Record<string, PortalTeamRole> = {
   PARTNER_MANAGER: "ADMIN",
   MVGS_ASSESSMENT_TECHNICIAN: "GRADER",
   PARTNER_RECEPTION: "STAFF",
+  SCANNER_OPERATOR: "SCANNER_OPERATOR",
 };
+/*
+ * Highest authority first. SCANNER_OPERATOR sits BELOW the technician: it can operate a station but
+ * cannot grade, so a person holding both should display as the grading role — the more capable one
+ * describes what they actually are.
+ */
 const PORTAL_ROLE_PRECEDENCE = [
   "PARTNER_OWNER",
   "PARTNER_MANAGER",
   "MVGS_ASSESSMENT_TECHNICIAN",
+  "SCANNER_OPERATOR",
   "PARTNER_RECEPTION",
 ] as const;
 

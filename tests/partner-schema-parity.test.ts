@@ -224,6 +224,21 @@ describe("partner schema ↔ migration parity", () => {
       // decision — setting prices later is a DATA change, not a migration or a deploy. Global
       // reference data: no tenant_id, and therefore correctly outside the RLS coverage sweep.
       "0083_partner_credit_packs.sql",
+      // 0084 adds NO table and NO column. partner_locations has been multi-location capable since
+      // 0001; the only DB-level blocker was that partner_management_audit.action_type is
+      // CHECK-constrained, so the new administrative actions could not be recorded honestly. It
+      // widens that constraint (preserving every earlier value verbatim) and adds a live-name
+      // uniqueness index plus a tenant+status index. Nothing to add to Drizzle.
+      "0084_partner_location_management.sql",
+      // 0085 adds NO table and NO column either. It seeds the SCANNER_OPERATOR role plus the two
+      // capabilities AG-2 split out of partner.cards.scan (partner.stations.enrol,
+      // partner.cards.fix), both granted to exactly the roles that already held cards.scan — so no
+      // existing role changed. Catalogue data, not schema.
+      "0085_partner_scanner_operator_role.sql",
+      // 0086 adds ONE nullable column, partner_sessions.last_step_up_at, recording when a session
+      // last re-proved its human. partner_sessions is migration-authoritative (raw SQL, like the
+      // 0002 auth tables) and deliberately outside Drizzle, so there is no model to update.
+      "0086_partner_session_step_up.sql",
     ]);
   });
 

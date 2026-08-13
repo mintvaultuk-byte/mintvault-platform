@@ -95,7 +95,24 @@ function missingLabelOf(sides: FixSide[]): string {
  * A card appears here when it has an allocated identity and at least one side with no CURRENT
  * evidence row — which is exactly the state a deliberate invalidation leaves behind.
  */
-export async function listFixQueue(input: { tenantId: string; locationId?: string | null }): Promise<FixQueueEntry[]> {
+export async function listFixQueue(input: {
+  tenantId: string;
+  locationId?: string | null;
+  /**
+   * AG-1: confine the queue to `locationId`.
+   *
+   * TRUE for a station, always. A Mac stands on one shop floor and can only physically hold cards
+   * taken there; listing another branch's cards would show an operator work they cannot do —
+   * `authoriseFix` refuses a location mismatch — and would leak which cards exist at a site they
+   * have no business seeing. Tenant isolation alone is not enough once a partner has two shops.
+   *
+   * FALSE only for an org-wide dashboard user (OWNER / MANAGER / FINANCE_VIEWER), who is entitled
+   * to the whole estate by role — the same rule findSoleEligibleLocation and switchLocation already
+   * apply. This function does not decide who is org-wide; the caller passes the answer.
+   */
+  restrictToLocation?: boolean;
+}): Promise<FixQueueEntry[]> {
+  const confineToLocation = input.restrictToLocation === true && Boolean(input.locationId);
   return withPartnerAdminTenantTransaction(
     { tenantId: input.tenantId, locationId: input.locationId ?? null },
     async (client) => {
@@ -131,9 +148,10 @@ export async function listFixQueue(input: { tenantId: string; locationId?: strin
             AND job.mv_number IS NOT NULL
             AND job.status = ANY($2::text[])
             AND job.cancelled_at IS NULL
+            AND ($3::uuid IS NULL OR job.location_id = $3::uuid)
           ORDER BY job.updated_at DESC
           LIMIT 500`,
-        [input.tenantId, [...FIXABLE_STATUSES]]
+        [input.tenantId, [...FIXABLE_STATUSES], confineToLocation ? input.locationId : null]
       );
 
       return rows

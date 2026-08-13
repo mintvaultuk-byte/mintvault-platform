@@ -56,7 +56,9 @@ import {
   mfaDisable,
   verifyActiveTotpNoReplay,
   getMfaStatus,
+  verifyStepUp,
 } from "./mfa-service";
+import { recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
 import { canPurchaseCredits, listCreditPacks, resolvePackForCheckout } from "./credit-purchase-service";
 import {
   getPartnerCreditView,
@@ -393,6 +395,10 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.credits.purchase"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: spending the shop's money is the single most consequential thing a partner session can
+    // do, and it is irreversible once Stripe has the payment. Placed AFTER the capability guard so
+    // a role that may never buy is told that, rather than asked for a password that would not help.
+    requireRecentAuth(),
     async (req, res) => {
       const principal = req.partner!;
       try {
@@ -435,9 +441,15 @@ export function partnerApiRouter(): Router {
             partner_initiating_user_id: principal.userId,
           },
           // MUST match a real client route. `/partner/credits` is not registered in App.tsx, so the
-          // `/partner/*` catch-all silently redirected the returning buyer to the dashboard and threw
-          // the `?purchase=` signal away — the one moment the shop most needs to be told "paid,
-          // processing, credits appear shortly". The wallet page is `/partner/billing`.
+          // partner catch-all route silently redirected the returning buyer to the dashboard and
+          // threw the `?purchase=` signal away — the one moment the shop most needs to be told
+          // "paid, processing, credits appear shortly". The wallet page is `/partner/billing`.
+          //
+          // NB: that catch-all's path pattern is deliberately NOT written out here. A slash-star
+          // sequence inside a comment opens a block comment as far as a naive stripper is
+          // concerned, and tests/partner-main-reconciliation-merge-loss.test.ts strips comments
+          // before asserting that routes still exist — so writing it literally silently swallowed
+          // every route below this point and failed a merge-loss sentinel.
           success_url: `${appUrl}/partner/billing?purchase=processing`,
           cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
         });
@@ -508,6 +520,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: an invitation mints a credential that can become a login.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const reason = optionalReason(req.body?.reason, "Partner team member invited");
@@ -569,6 +583,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: changing a colleague's role hands over or takes away authority.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const role = requirePortalTeamRole(req.body?.role);
@@ -589,6 +605,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: suspending or removing someone ends their access immediately.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const status = req.body?.status;
@@ -644,6 +662,50 @@ export function partnerApiRouter(): Router {
 
   // ---- MFA enrolment (Item 3) ----
   // enrol/confirm are reachable by an mfa-pending session (a user with mfa_required but no method yet).
+  /**
+   * AG-3 — STEP-UP: re-prove the human behind this session.
+   *
+   * Rate-limited with the MFA limiter because it accepts a password and a second factor, and is
+   * therefore exactly as brute-forceable as the MFA routes it borrows its standard from.
+   *
+   * On success it stamps the session and says how long the proof lasts, so the client can avoid
+   * asking again inside the window. It returns NO new session and NO token: this raises the
+   * privilege of the session already in hand rather than issuing anything new.
+   */
+  r.post("/auth/step-up", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+    const principal = req.partner!;
+    try {
+      const result = await verifyStepUp(
+        { tenantId: principal.tenantId, userId: principal.userId },
+        req.body?.password,
+        {
+          code: typeof req.body?.code === "string" ? req.body.code : undefined,
+          recoveryCode: typeof req.body?.recoveryCode === "string" ? req.body.recoveryCode : undefined,
+        }
+      );
+      if (!result.ok) {
+        // A wrong password and a missing second factor are told apart, because the user can act on
+        // the difference. Neither answer reveals whether the ACCOUNT exists — the session already
+        // proves that, so there is nothing left to enumerate here.
+        res.status(result.reason === "second_factor_required" ? 400 : 403).json({
+          error: {
+            code: result.reason === "second_factor_required" ? "second_factor_required" : "unauthorised",
+            message:
+              result.reason === "second_factor_required"
+                ? "Enter the code from your authenticator app."
+                : "That password was not correct.",
+          },
+        });
+        return;
+      }
+      await recordStepUp(principal.sessionId);
+      res.json({ ok: true, windowMinutes: STEP_UP_WINDOW_MINUTES });
+    } catch (err) {
+      console.error("[partner step-up] failed:", (err as Error).message);
+      res.status(500).json({ error: { code: "step_up_failed", message: "Could not confirm your password." } });
+    }
+  });
+
   r.post("/mfa/enrol", partnerMfaLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
@@ -830,6 +892,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.sessions.revoke"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: signing someone out of everything is a security action.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const reason = optionalReason(req.body?.reason, "Partner team member sessions revoked");

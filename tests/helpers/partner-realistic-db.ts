@@ -253,6 +253,14 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: global reference data (no tenant_id, correctly no RLS) plus an RBAC permission
   // seed. Depends on nothing outside the partner chain.
   "0083_partner_credit_packs",
+  // PARTNER scope: widens the partner_management_audit action vocabulary and indexes
+  // partner_locations. Touches no core table, so it is safe on a partner-only disposable database.
+  "0084_partner_location_management",
+  // PARTNER scope: seeds one role and two permissions into the RBAC catalogue 0034 established.
+  // Touches no core table.
+  "0085_partner_scanner_operator_role",
+  // PARTNER scope: one nullable column on partner_sessions. Touches no core table.
+  "0086_partner_session_step_up",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -366,6 +374,12 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   // (0044_partner_mfa_pending_lifecycle), and the migration runner rejects duplicate NUMBERS
   // before it runs anything. The applied file could not move, so this unapplied one did.
   "0074_partner_submission_lifecycle_and_location_snapshot",
+  // AG-1. MUST follow 0074: both rewrite chk_partner_management_audit_action, and 0084 preserves
+  // 0074's vocabulary verbatim while widening it. Applying them out of order would silently drop
+  // 'partner_wallet_backfilled'.
+  "0084_partner_location_management",
+  // AG-3 step-up stamp. Additive nullable column; harmless where step-up is never exercised.
+  "0086_partner_session_step_up",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only

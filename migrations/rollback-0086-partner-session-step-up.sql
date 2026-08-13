@@ -1,0 +1,11 @@
+-- ============================================================================================
+-- ROLLBACK 0086 — PARTNER SESSION STEP-UP
+--
+-- Drops partner_sessions.last_step_up_at. Safe: the column records only WHEN a session last
+-- re-proved its human, and its absence fails closed by construction — a build that still enforces
+-- step-up would refuse every high-risk action rather than allowing one.
+--
+-- Pair it with reverting the application, otherwise the step-up middleware queries a column that no
+-- longer exists and the high-risk routes 500 instead of 403.
+-- ============================================================================================
+ALTER TABLE partner_sessions DROP COLUMN IF EXISTS last_step_up_at;

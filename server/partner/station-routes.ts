@@ -130,24 +130,36 @@ async function requireSignedStationOperator(req: Request, res: Response, next: N
 export function partnerStationRouter(): Router {
   const r = Router();
 
-  r.post("/stations/enrol", requirePartnerAuth, requirePartnerCapability("partner.cards.scan"), async (req, res) => {
-    try {
-      const station = await requestStationEnrollment(req.partner!, {
-        locationId: req.body?.locationId,
-        publicKeyPem: req.body?.publicKeyPem,
-        installationFingerprint: req.body?.installationFingerprint,
-        appVersion: req.body?.appVersion,
-      });
-      res.status(201).json({ station });
-    } catch (error) {
-      stationError(res, error);
+  /*
+   * AG-2: bringing a NEW Mac into service is station management, not station operation, so it is
+   * gated on partner.stations.enrol rather than partner.cards.scan. Migration 0085 grants that to
+   * exactly the three roles that already held cards.scan, so nobody who could enrol before has
+   * lost the ability — but SCANNER_OPERATOR, which can operate an approved station, cannot bring a
+   * new one into service.
+   */
+  r.post(
+    "/stations/enrol",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.stations.enrol"),
+    async (req, res) => {
+      try {
+        const station = await requestStationEnrollment(req.partner!, {
+          locationId: req.body?.locationId,
+          publicKeyPem: req.body?.publicKeyPem,
+          installationFingerprint: req.body?.installationFingerprint,
+          appVersion: req.body?.appVersion,
+        });
+        res.status(201).json({ station });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
-  });
+  );
 
   r.get(
     "/stations/enrolment-locations",
     requirePartnerAuth,
-    requirePartnerCapability("partner.cards.scan"),
+    requirePartnerCapability("partner.stations.enrol"),
     async (req, res) => {
       try {
         res.json({ locations: await listPermittedStationLocations(req.partner!) });
@@ -199,7 +211,9 @@ export function partnerStationRouter(): Router {
   r.post(
     "/card-jobs/:cardJobId/invalidate-side",
     requirePartnerAuth,
-    requirePartnerCapability("partner.cards.scan"),
+    // AG-2: taking an image OUT of grading is a judgement, not a capture. SCANNER_OPERATOR captures
+    // the replacement but does not decide that a replacement is needed.
+    requirePartnerCapability("partner.cards.fix"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
     async (req, res) => {
@@ -224,7 +238,19 @@ export function partnerStationRouter(): Router {
   r.get("/fix-queue", requirePartnerAuth, requirePartnerCapability("partner.cards.view"), async (req, res) => {
     const principal = req.partner!;
     try {
-      res.json({ items: await listFixQueue({ tenantId: principal.tenantId, locationId: principal.locationId }) });
+      /*
+       * Org-wide roles (OWNER / MANAGER / FINANCE_VIEWER) are entitled to the whole estate; everyone
+       * else sees only the shop floor they are assigned to. `orgWide` is resolved server-side from
+       * the user's roles on every request — the same rule switchLocation applies — so this is not a
+       * client-supplied scope.
+       */
+      res.json({
+        items: await listFixQueue({
+          tenantId: principal.tenantId,
+          locationId: principal.locationId,
+          restrictToLocation: !principal.orgWide,
+        }),
+      });
     } catch (error) {
       fixError(res, error);
     }
@@ -317,7 +343,12 @@ export function partnerStationRouter(): Router {
   r.get("/stations/fix-queue", requireSignedStation, requireSignedStationOperator, async (req, res) => {
     const station = req.station!;
     try {
-      const items = await listFixQueue({ tenantId: station.tenantId, locationId: station.locationId });
+      // A Mac stands on ONE shop floor. Always confined — never the whole estate.
+      const items = await listFixQueue({
+        tenantId: station.tenantId,
+        locationId: station.locationId,
+        restrictToLocation: true,
+      });
       res.json({ items });
     } catch (error) {
       fixError(res, error);

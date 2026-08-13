@@ -530,3 +530,74 @@ Implemented per the plan, reusing the existing row-locked `cert_counter` allocat
 precisely because it is a locked row rather than a sequence, so a failed NEW returns its number
 instead of burning it (proven: STATION-NEW4). The portal path is unchanged and still defers to the
 connector.
+
+---
+
+## H. AG-1 / AG-2 / AG-3 — CLOSED, AND WHAT REMAINS
+
+### AG-1 — multi-location. CLOSED (migration 0084)
+
+`partner_locations` was multi-location capable since 0001; nothing could create a second row.
+Added Super Admin create / rename / suspend / reactivate plus per-user location assignment, reusing
+`partner_locations` and `partner_user_locations` — no second location model, no new table, no column.
+
+**Two live defects found while auditing downstream code, both fixed:**
+
+- `listFixQueue` filtered on `tenant_id` ALONE. With one location that was indistinguishable from
+  correct; with two, a station at Rochester would have listed Bluewater's cards — work it cannot do
+  (`authoriseFix` refuses a location mismatch) and should not see. Now confined to the station's own
+  location, and only for a station: an org-wide dashboard user still sees the whole estate.
+- `assertStartAllowed` never checked the LOCATION's status, so suspending one shop floor would not
+  have stopped NEW there, and the organisation's own status cannot express "this branch only".
+
+**REMAINING (API exists, console does not):** there is no Super Admin _UI_ for locations yet. The
+routes are live and tested; the screen belongs with the P8 dashboard work.
+
+### AG-2 — SCANNER_OPERATOR. CLOSED (migration 0085)
+
+`partner.cards.scan` was doing three unrelated jobs: operate an approved station, enrol a new one,
+and take an image out of grading. A least-privilege role was not expressible until those were
+separated, so 0085 splits out `partner.stations.enrol` and `partner.cards.fix` and grants both to
+**exactly** the three roles that already held `cards.scan` — OWNER, MANAGER, TECHNICIAN — so no
+existing role gained or lost any real-world ability. Proven by a negative test per role.
+
+SCANNER_OPERATOR holds three permissions and no more: `location.view`, `cards.view`, `cards.scan`.
+Assignable from both the Super Admin console and the partner's own Staff area — a role nobody can be
+given is not a role.
+
+### AG-3 — step-up authentication. CLOSED for the partner surface (migration 0086)
+
+One nullable `partner_sessions.last_step_up_at`, deliberately never backfilled: every session that
+predates the column reads as un-proved, which is what fail-closed means here. The window (15 min) is
+evaluated by PostgreSQL, so a skewed app clock cannot widen it.
+
+Guarded: credits checkout, staff invite, role change, status change, session revocation. Reading the
+staff list is not guarded — only mutations are.
+
+**Deliberately NOT guarded: the capture path.** NEW and FIX must stay fast or a shop will work
+around the friction by never signing out, which is strictly worse than the risk. Those routes
+already carry two independent proofs per request — an approved station's Ed25519 signature and an
+MFA-passed operator. A test pins this so a later "consistency" edit cannot slow the shop floor.
+
+**REMAINING — SUPER ADMIN step-up (AG-3b).** Station approval/revocation, MFA reset, password-reset
+initiation and audited credit grants are Super Admin actions running on the ADMIN session
+(`req.session.authUserId`), not a partner session, so `partner_sessions.last_step_up_at` cannot
+carry them. They need the equivalent stamp on the admin session subsystem. Today they are protected
+by `requireSuperAdmin`, typed-confirmation dialogs and mandatory reasons — real controls, but not
+re-authentication. Recorded rather than half-built.
+
+### C-4 / rollback harness — CLOSED
+
+`tests/partner-rollback.test.ts` could not execute. It drives the REAL runner over every migration
+and aborted in `beforeAll`, reporting as "4 skipped" — indistinguishable from an ungated suite.
+Three fixture gaps, each fixed with the real shapes rather than weakened SQL:
+
+1. no `cert_counter` — 0076's precondition RAISEs without it;
+2. `certificates` lacked `submission_item_id` and the origin-snapshot columns 0081 INSERTs;
+3. **0076 REVOKEs the migrator's definer membership AND admin option as its final act**, exactly as
+   0041 does, so 0081's `CREATE OR REPLACE FUNCTION` failed with "must be owner of function". The
+   harness now issues the same owner-approved repair grant between 0076 and 0081 that it already
+   issued between 0041 and 0042 — from the superuser client, because 0076 removed the migrator's
+   ability to grant it to itself.
+
+**All 19 critical partner suites are now green, rollback included.**

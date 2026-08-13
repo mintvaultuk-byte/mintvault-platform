@@ -1168,3 +1168,116 @@ requests, and a double-click that bought nothing must not read later as two card
 | Failing files    | 8                       | **8 — identical set**            |
 | Newly failing    | —                       | **ZERO**                         |
 | Typecheck / lint | clean / 0 errors        | **clean / 0 errors**             |
+
+---
+
+## AG-1 / AG-2 / AG-3 + THE CRITICAL ROLLBACK HARNESS
+
+Three migrations, none of which adds a table or changes an existing role's abilities.
+
+|      | What                                                                      | Migration                           |
+| ---- | ------------------------------------------------------------------------- | ----------------------------------- |
+| AG-1 | Multi-location: SA create/rename/suspend/reactivate + per-user assignment | 0084 (audit vocabulary + 2 indexes) |
+| AG-2 | SCANNER_OPERATOR least-privilege role                                     | 0085 (1 role, 2 split capabilities) |
+| AG-3 | Recent-auth step-up for high-risk partner actions                         | 0086 (1 nullable column)            |
+
+### AG-1 — and the two live defects the audit found downstream
+
+`partner_locations` was multi-location capable since 0001; nothing could create a second row.
+Reused as-is: no second location model, no new table, no column, no backfill. Adding the CRUD was
+the easy part — the risk was everything written when "the tenant" and "the location" were the same
+thing. Two of those were real:
+
+- **`listFixQueue` filtered on `tenant_id` alone.** With one location, indistinguishable from
+  correct. With two, a station at Rochester would list Bluewater's cards — work it cannot do
+  (`authoriseFix` already refused a location mismatch) and had no business seeing. Now confined to
+  the station's own shop floor, and _only_ for a station: an org-wide dashboard user still sees the
+  whole estate, because confining an owner would be a different bug.
+- **`assertStartAllowed` never checked the location's status.** Suspending one shop floor would not
+  have stopped NEW there, and an organisation's status cannot express "this branch only".
+
+17/17 on real PostgreSQL, including: two live locations cannot share a name case- and
+whitespace-insensitively; a suspended location frees its name; the last ACTIVE location cannot be
+suspended (suspend the organisation instead — leaving a partner with no active location stops all
+work while still looking healthy); the certificate origin snapshot records the shop floor; a
+single-location partner is completely unaffected; a station's location must belong to its tenant.
+
+### AG-2 — a capability split, not a new role bolted on
+
+`partner.cards.scan` was doing three unrelated jobs: operate an approved station, enrol a new one,
+and take an image out of grading. A least-privilege role was **not expressible** until those were
+separated. 0085 splits out `partner.stations.enrol` and `partner.cards.fix` and grants both to
+exactly the three roles that already held `cards.scan`, so OWNER / MANAGER / TECHNICIAN can do
+precisely what they could do before — the same set, expressed more precisely.
+
+The assertion that matters is the negative one, and it is per-role: **no existing role lost
+anything.** A shop discovering at 09:00 that their manager can no longer enrol the new Mac would be
+a far worse outcome than never adding the role at all.
+
+SCANNER_OPERATOR holds three permissions and no more, and is assignable from both consoles — a role
+nobody can be given is not a role. 12/12 against the real seeded catalogue, read back from the
+database rather than from the TypeScript map, because the catalogue is seeded by migration and
+read-only at runtime.
+
+### AG-3 — step-up that expires, and deliberately does not touch the shop floor
+
+One nullable `partner_sessions.last_step_up_at`, **never backfilled**: every session predating the
+column reads as un-proved. Backfilling to `now()` would have handed every open browser a free pass
+at the moment of deployment. The 15-minute window is evaluated by PostgreSQL, so a skewed app clock
+cannot widen it, and the migration asserts its own column is nullable for exactly this reason.
+
+Guarded: credits checkout, staff invite, role change, status change, session revocation. Reading the
+staff list is not — only mutations are. Step-up is placed AFTER the capability guard, so a role that
+may never buy credits is told that rather than asked for a password that would not have helped.
+
+**The capture path is deliberately exempt, and a test pins it.** NEW and FIX must stay fast or a shop
+will work around the friction by never signing out — strictly worse than the risk it closes. Those
+routes already carry two independent proofs per request: an approved station's Ed25519 signature and
+an MFA-passed operator. 16/16.
+
+### The critical rollback harness — now executes for the first time
+
+`tests/partner-rollback.test.ts` aborted in `beforeAll` and reported as "4 skipped", which is
+indistinguishable from an ungated suite. Carrying that into a release as "pre-existing" would have
+meant shipping with **no rollback coverage at all**. Three fixture gaps, each fixed with real shapes
+rather than weakened SQL:
+
+1. no `cert_counter` — 0076's precondition RAISEs without it;
+2. `certificates` lacked `submission_item_id` and the origin-snapshot columns 0081 INSERTs;
+3. **0076 REVOKEs the migrator's definer membership AND admin option as its final act**, exactly as
+   0041 does — so 0081's `CREATE OR REPLACE FUNCTION` failed with "must be owner of function". The
+   harness now issues the same owner-approved repair grant between 0076 and 0081 that it already
+   issued between 0041 and 0042, from the SUPERUSER client, because 0076 removed the migrator's
+   ability to grant it to itself.
+
+**4/4, and all 19 critical partner suites green — rollback included.**
+
+### One regression I introduced and fixed
+
+`tests/partner-main-reconciliation-merge-loss.test.ts` began failing with `route r.get("/sessions")
+was lost`. The route was untouched. A comment I wrote in P5 mentioned the partner catch-all path,
+and its slash-star sequence opened a block comment as far as that sentinel's regex stripper was
+concerned — swallowing every route after it. Fixed at source (a comment must not be able to hide
+code) AND by switching those assertions to the line-based stripper the same file already uses for
+`server/routes.ts` after an identical failure, because the next person to write a path pattern in a
+comment will not know the rule exists.
+
+### Verification
+
+| Check                    | P7 baseline             | After AG-1/2/3 + harness          |
+| ------------------------ | ----------------------- | --------------------------------- |
+| Tests                    | 27 failed / 4364 passed | **27 failed / 4416 passed** (+52) |
+| Failing files            | 8                       | **7**                             |
+| Newly failing            | —                       | **ZERO**                          |
+| Newly fixed              | —                       | **`partner-rollback`**            |
+| Critical partner matrix  | 18/19                   | **19/19**                         |
+| Typecheck / lint / build | clean                   | **clean / 0 errors / succeeds**   |
+
+### Recorded, not built
+
+- **SA console UI for locations.** The routes are live and tested; the screen belongs with P8.
+- **AG-3b — Super Admin step-up.** Station approval/revocation, MFA reset, password-reset initiation
+  and audited credit grants run on the ADMIN session, not a partner session, so
+  `partner_sessions.last_step_up_at` cannot carry them. They need the equivalent stamp on the admin
+  session subsystem. Today: `requireSuperAdmin` + typed confirmation + mandatory reason — real
+  controls, but not re-authentication.

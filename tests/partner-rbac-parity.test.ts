@@ -44,7 +44,11 @@ const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
  *
  * The two grant SHAPES differ, so the parser below handles both rather than assuming one.
  */
-const ADDITIVE_MIGRATIONS = ["0073_lineage_convergence.sql", "0083_partner_credit_packs.sql"] as const;
+const ADDITIVE_MIGRATIONS = [
+  "0073_lineage_convergence.sql",
+  "0083_partner_credit_packs.sql",
+  "0085_partner_scanner_operator_role.sql",
+] as const;
 const additiveSqlByFile = ADDITIVE_MIGRATIONS.map(
   (file) => [file, readFileSync(join(process.cwd(), "migrations", file), "utf8")] as const
 );
@@ -115,27 +119,65 @@ describe("Partner RBAC parity — TypeScript ⇄ migration 0034", () => {
    * contributes only the mappings its own grant clause actually expresses.
    */
   const migMaps = parseMigrationMappings(parseMigrationPermissions());
+  /*
+   * ADDITIVE PERMISSIONS. 0083 declares one per VALUES row; 0085 declares two in a single
+   * multi-row VALUES. Both shapes are matched.
+   */
   for (const [, additiveSql] of additiveSqlByFile) {
-    for (const match of additiveSql.matchAll(/VALUES \('([^']+)',\s*'[^']+'\)/g)) {
+    for (const match of additiveSql.matchAll(/\('([a-z][a-z0-9.]*\.[a-z0-9.]+)',\s*'[^']*'\)/g)) {
       if (!migPerms.includes(match[1])) migPerms.push(match[1]);
     }
   }
-  for (const [file, additiveSql] of additiveSqlByFile) {
-    const additivePermission = additiveSql.match(/p\.code = '([^']+)'/)?.[1];
-    if (!additivePermission) throw new Error(`${file}: could not parse the granted permission`);
-    /*
-     * Two grant shapes are in use, and guessing wrong yields an EMPTY role set — which would make
-     * this whole comparison silently weaker rather than red. So parse both explicitly and fail loudly
-     * if neither matches:
-     *   `WHERE r.code IN ('A','B')`   (0073, multi-role)
-     *   `WHERE r.code = 'A'`          (0083, single role)
-     */
-    const inClause = additiveSql.match(/r\.code IN \(([^)]*)\)/)?.[1];
-    const eqClause = additiveSql.match(/r\.code = '([^']+)'/)?.[1];
-    const roleCodes = inClause ? [...inClause.matchAll(/'([^']+)'/g)].map((m) => m[1]) : eqClause ? [eqClause] : [];
-    if (roleCodes.length === 0) throw new Error(`${file}: could not parse the granted role(s)`);
-    for (const role of roleCodes) migMaps.add(`${role}|${additivePermission}`);
+
+  /*
+   * ADDITIVE ROLES. 0073 and 0083 added none; 0085 adds SCANNER_OPERATOR. Without this the
+   * "every TypeScript role exists in the migrations" assertion would fail on a role the migration
+   * genuinely does seed.
+   */
+  for (const [, additiveSql] of additiveSqlByFile) {
+    const roleInsert = additiveSql.match(/INSERT INTO partner_roles \(code, label\) VALUES([\s\S]*?)ON CONFLICT/);
+    if (!roleInsert) continue;
+    for (const match of roleInsert[1].matchAll(/\('([A-Z_]+)',\s*'((?:[^']|'')*)'\)/g)) {
+      if (!migRoles.some((r) => r.code === match[1])) {
+        migRoles.push({ code: match[1], label: match[2].replace(/''/g, "'") });
+      }
+    }
   }
+
+  /*
+   * ADDITIVE GRANTS, parsed generically as (permission set) x (role set).
+   *
+   * Every grant block in these migrations has the same skeleton — a SELECT joining
+   * partner_permissions on a code predicate, with a WHERE on the role code — but each half appears
+   * in BOTH an `= 'X'` and an `IN ('X','Y')` form, and 0085 uses a different combination from
+   * 0073 and 0083. Parsing each block as two sets and taking their product covers all four
+   * combinations, instead of hard-coding the shapes seen so far.
+   *
+   * FAILING LOUDLY MATTERS MORE THAN PARSING CLEVERLY: a regex that silently matches nothing would
+   * make this whole comparison weaker rather than red, which is the exact failure mode this file's
+   * parser-sanity guard exists to prevent. So a grant block that yields an empty set on either side
+   * throws.
+   */
+  const GRANT_BLOCK = /INSERT INTO partner_role_permissions[\s\S]*?(?=INSERT INTO|ON CONFLICT DO NOTHING;|$)/g;
+  function codesIn(fragment: string | undefined): string[] {
+    if (!fragment) return [];
+    return [...fragment.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  }
+  for (const [file, additiveSql] of additiveSqlByFile) {
+    let sawGrant = false;
+    for (const block of additiveSql.matchAll(GRANT_BLOCK)) {
+      const body = block[0];
+      const permFragment = body.match(/p\.code (?:=\s*'[^']+'|IN \(([^)]*)\))/)?.[0];
+      const roleFragment = body.match(/r\.code (?:=\s*'[^']+'|IN \(([^)]*)\))/)?.[0];
+      const perms = codesIn(permFragment);
+      const roles = codesIn(roleFragment);
+      if (perms.length === 0 || roles.length === 0) continue;
+      sawGrant = true;
+      for (const role of roles) for (const perm of perms) migMaps.add(`${role}|${perm}`);
+    }
+    if (!sawGrant) throw new Error(`${file}: no role-permission grant block could be parsed`);
+  }
+
   const tsMaps = typescriptMappings();
 
   // Guard the parser itself: if a refactor of the SQL silently defeats these regexes, every

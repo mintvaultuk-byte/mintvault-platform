@@ -561,6 +561,106 @@ export function partnerManagementRouter(): Router {
     }
   });
 
+  /* ------------------------------------------------------------------------------------------
+   * AG-1 — MULTI-LOCATION.
+   *
+   * These are the routes that were simply missing. partner_locations has been multi-location
+   * capable since 0001, but createPartner() inserted one 'Main location' and nothing anywhere
+   * could add a second — which silently capped stations to one shop floor and made the Scanner's
+   * location selector dead code.
+   *
+   * Super Admin only, like every other route on this router (requireSuperAdmin +
+   * requirePartnerAdminCapability applied at mount). Partner Owners and Managers reach their own
+   * locations through the EXISTING portal surfaces and the EXISTING RBAC — no new partner-side
+   * authority is granted here.
+   * ---------------------------------------------------------------------------------------- */
+  r.get("/partners/:partnerId/locations", async (req, res) => {
+    try {
+      res.json({ locations: await svc.listPartnerLocations(req.params.partnerId) });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/locations", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "location created");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.createPartnerLocation(
+          actor,
+          req.params.partnerId,
+          { name: req.body?.name, address: req.body?.address },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.patch("/partners/:partnerId/locations/:locationId", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "location updated");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.updatePartnerLocation(
+          actor,
+          req.params.partnerId,
+          req.params.locationId,
+          { name: req.body?.name, address: req.body?.address },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /*
+   * Suspending a shop floor stops capture there. A REASON IS MANDATORY — unlike creation, this
+   * takes work away from people, and the audit row is the only thing that can later distinguish a
+   * deliberate closure from a mistake.
+   */
+  r.post("/partners/:partnerId/locations/:locationId/status", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.setPartnerLocationStatus(
+          actor,
+          req.params.partnerId,
+          req.params.locationId,
+          String(req.body?.status ?? ""),
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /* Which shop floors a named user may operate at. Replaces the whole set in one decision. */
+  r.post("/partners/:partnerId/users/:userId/locations", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.setPartnerUserLocations(actor, req.params.partnerId, req.params.userId, req.body?.locationIds, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.post("/partners/:partnerId/contacts", async (req, res) => {
     try {
       const actor = actorOf(req);
