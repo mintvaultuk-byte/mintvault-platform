@@ -528,3 +528,72 @@ export function formatPence(pence: number | null | undefined): string {
   if (pence == null) return "Estimated — price confirmed by MintVault";
   return `£${(pence / 100).toFixed(2)} — price confirmed by MintVault`;
 }
+
+// ---- P8 operational dashboard ----
+export interface PartnerOperationsCounts {
+  reservedInProgress: number;
+  needsScan: number;
+  fixRequired: number;
+  readyToGrade: number;
+  inReview: number;
+  completed: number;
+}
+
+export interface PartnerStationRow {
+  stationCode: string;
+  locationId: string | null;
+  locationName: string | null;
+  status: string;
+  lastSeenAt: string | null;
+  appVersion: string | null;
+  calibrationStatus: string | null;
+  scannerConnected: boolean | null;
+  /** The SERVER's readiness verdict. Never recomputed here — the console and the Scanner must agree. */
+  ready: boolean;
+}
+
+export interface PartnerOperationsLocation {
+  id: string;
+  name: string;
+  status: string;
+  stationCount: number;
+}
+
+export interface PartnerOperationsView {
+  counts: PartnerOperationsCounts;
+  stations: PartnerStationRow[];
+  locations: PartnerOperationsLocation[];
+  locationScoped: boolean;
+  scopedLocationId: string | null;
+}
+
+export interface PartnerFixQueueEntry {
+  cardJobId: string;
+  mvNumber: string;
+  certificateId: number;
+  status: string;
+  cardName: string | null;
+  missingSides: Array<"front" | "back">;
+  /** Rendered server-side, e.g. "FRONT + BACK MISSING". */
+  missingLabel: string;
+  locationId: string | null;
+  updatedAt: string;
+}
+
+export interface PartnerOnboardingReadiness {
+  onboardingState: string;
+  organisationActive: boolean;
+  passwordConfigured: boolean;
+  mfaRequired: boolean;
+  mfaConfigured: boolean;
+  loginEnabled: boolean;
+  /** null = the station subsystem is absent on this deployment; NOT the same as "no station yet". */
+  stationReady: boolean | null;
+  blockedReasons?: string[];
+}
+
+export const partnerOperations = {
+  view: () => req<PartnerOperationsView>("GET", "/api/partner/dashboard/operations"),
+  fixQueue: () => req<{ items: PartnerFixQueueEntry[] }>("GET", "/api/partner/fix-queue"),
+  readiness: () => req<PartnerOnboardingReadiness>("GET", "/api/partner/onboarding-readiness"),
+};

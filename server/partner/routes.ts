@@ -60,6 +60,7 @@ import {
 } from "./mfa-service";
 import { recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
 import { canPurchaseCredits, listCreditPacks, resolvePackForCheckout } from "./credit-purchase-service";
+import { getPartnerOperations } from "./dashboard-operations-service";
 import {
   getPartnerCreditView,
   getPartnerPortalContext,
@@ -468,6 +469,49 @@ export function partnerApiRouter(): Router {
       }
     }
   );
+
+  /**
+   * P8 — the operational read behind the EXISTING Partner Dashboard.
+   *
+   * One tenant-scoped call returning the lifecycle counts, the station fleet and the shop floors.
+   * Gated on `partner.dashboard.view`, which every operational role holds and the view-only ones
+   * hold too — this is a READ, and read-only navigation is deliberately never step-up guarded.
+   *
+   * The principal supplies tenant and location; the request supplies nothing. There is no parameter
+   * by which a caller can widen their own scope, which is what makes the negative tests meaningful
+   * rather than decorative.
+   */
+  r.get("/dashboard/operations", requirePartnerCapability("partner.dashboard.view"), async (req, res) => {
+    try {
+      res.json(await getPartnerOperations(req.partner!));
+    } catch (err) {
+      console.error("[partner dashboard] operations read failed:", (err as Error).message);
+      res.status(500).json({
+        error: { code: "operations_unavailable", message: "Operational summary is unavailable right now." },
+      });
+    }
+  });
+
+  /**
+   * P8 — this organisation's OWN onboarding readiness.
+   *
+   * Reuses getPartnerOnboardingReadiness, the same computation the Super Admin console reads, called
+   * with the tenant id from the SESSION. That is deliberate: a second readiness implementation would
+   * be a second definition of "is this shop set up", and the two would drift — which is precisely
+   * the "READY because rows exist" failure the original was written to end.
+   */
+  r.get("/onboarding-readiness", requirePartnerCapability("partner.dashboard.view"), async (req, res) => {
+    try {
+      const { getPartnerOnboardingReadiness } = await import("./partner-management-service");
+      const readiness = await getPartnerOnboardingReadiness(req.partner!.tenantId);
+      res.json(readiness);
+    } catch (err) {
+      console.error("[partner dashboard] readiness read failed:", (err as Error).message);
+      res
+        .status(500)
+        .json({ error: { code: "readiness_unavailable", message: "Setup status is unavailable right now." } });
+    }
+  });
 
   r.get("/sessions", requirePartnerAuth, async (req, res) => {
     try {

@@ -1366,3 +1366,89 @@ check and which was verified directly. Only the brittle regex was corrected.
 | Newly failing            | —                       | **ZERO**                          |
 | Typecheck / lint / build | clean                   | **clean / 0 errors / succeeds**   |
 | New AG-3b suite          | —                       | **17/17**                         |
+
+---
+
+## P8 — PARTNER DASHBOARD INTEGRATION
+
+The EXISTING dashboard becomes the operational shop console. No Dashboard V2, no parallel partner
+admin system — a test asserts there is exactly one `/partner/dashboard` route and that the new
+sections live in the same file as the pre-existing credit summary.
+
+### One service, not seven endpoints
+
+`GET /api/partner/dashboard/operations` returns the lifecycle counts, the station fleet and the shop
+floors in one tenant-scoped call. Seven endpoints would mean seven round trips from a shop's
+broadband — and, more importantly, seven places to get the tenant predicate right. One service means
+one place, and the negative tests only have to hold one thing true.
+
+The route takes **nothing** from the request: tenant and location come from the authenticated
+principal, asserted by a test that the handler contains no `req.query`, `req.body` or `req.params`.
+
+### What is surfaced
+
+| Group           | Content                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| Card work       | Reserved/in progress · Needs scan · FIX required · Ready to grade · In review · Completed    |
+| Primary actions | Scan new card · Buy more Grading Credits · FIX queue · Ready to grade                        |
+| FIX queue       | server-derived, `MV421 — FRONT MISSING`, with the wording that MV/certificate/credit survive |
+| Stations        | code, location, status, last seen, app version, **server-decided** readiness                 |
+| Locations       | name, status, station count — no "Main location" assumption                                  |
+| Setup status    | the eight readiness states, in plain English                                                 |
+
+### Decisions worth naming
+
+**Status buckets are explicit lists, not a pattern match.** Migration 0080's CHECK is the authority
+on what a status may be; a future status must be placed in a bucket DELIBERATELY. A clever prefix
+match would silently absorb it into the wrong one and tell a shop it has less work than it does.
+
+**The fleet view deliberately differs from the arming picker.** `listPartnerCaptureStations` returns
+ACTIVE stations only, because offering a revoked Mac in an arming picker would be a bug. A fleet view
+has the opposite requirement: the shop needs to see the Mac that _stopped_ working, and its status is
+the answer. Proven by a test asserting PENDING, SUSPENDED and REVOKED all appear.
+
+**Station readiness is the server's verdict and the browser never recomputes it** — otherwise the
+console and the Scanner can disagree about whether a Mac can work, and the operator believes the
+wrong one. A test asserts the page contains no `calibrationStatus === "VALID"` of its own.
+
+**Readiness reuses the Super Admin computation**, called with the tenant id from the session. A
+second implementation of "is this shop set up" would drift, which is exactly the "READY because rows
+exist" failure the original was written to end.
+
+### Proven on real PostgreSQL — 19/19
+
+Most of it negative, because the counts are arithmetic but the isolation is a leak between two
+businesses that may be competitors on the same high street.
+
+| Case                                        | Result                                                                 |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| every lifecycle status → exactly one bucket | 10 statuses, 6 buckets, exact                                          |
+| CANCELLED job                               | counted nowhere                                                        |
+| **Partner A vs Partner B**                  | A sees 1 card not B's 4; B's stations and **locations never returned** |
+| **location-scoped user**                    | sees one shop floor; the org-wide owner of the same shop sees both     |
+| fleet                                       | PENDING + SUSPENDED + REVOKED all present                              |
+| readiness verdict                           | stale heartbeat, bad calibration and non-ACTIVE each → not ready       |
+| never-seen station                          | `lastSeenAt` null, not ready                                           |
+| location station count                      | REVOKED station not counted                                            |
+| empty partner                               | zeroes, not nulls and not an error                                     |
+
+Plus surface contracts: no Dashboard V2; all six figures and all four primary actions present; the
+FIX wording states MV/certificate/credit survive; scoping is server-side with no `.filter(...tenantId)`
+or `.filter(...locationId)` in the page; the wide station table scrolls inside its own
+`overflow-x-auto` container rather than breaking the page on a laptop or tablet.
+
+### Verification
+
+| Check                    | AG-3b baseline          | After P8                          |
+| ------------------------ | ----------------------- | --------------------------------- |
+| Tests                    | 27 failed / 4433 passed | **27 failed / 4452 passed** (+19) |
+| Failing files            | 7                       | **7 — identical set**             |
+| Newly failing            | —                       | **ZERO**                          |
+| Critical partner matrix  | 19/19                   | **19/19**                         |
+| Typecheck / lint / build | clean                   | **clean / 0 errors / succeeds**   |
+
+### Carried into P9
+
+Ready to Grade currently links to the existing `/partner/grading` page. P9 is what makes that the
+ONE canonical workstation with an edit lease; this deliberately does not introduce a partner-specific
+grading surface in the meantime.
