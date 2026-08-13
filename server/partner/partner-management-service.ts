@@ -1940,7 +1940,7 @@ export async function acceptPartnerInvitation(token: string, password: string) {
      */
     await client.query(
       `UPDATE partner_users
-          SET password_hash=$2, status='ACTIVE', failed_login_count=0, locked_until=NULL,
+          SET password_hash=$2, password_set_at=now(), status='ACTIVE', failed_login_count=0, locked_until=NULL,
               mfa_required=true, credential_version=credential_version+1, updated_at=now()
         WHERE id=$1 AND tenant_id=$3`,
       [inv.user_id, pwHash, inv.tenant_id]

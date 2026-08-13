@@ -134,8 +134,8 @@ describe("partner lockout decay coverage is wired up", () => {
       [TENANT]
     );
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, mfa_required)
-       VALUES ($1,'decayVictim',$2,$2,$3,'ACTIVE',$4,false)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, password_set_at, mfa_required)
+       VALUES ($1,'decayVictim',$2,$2,$3,'ACTIVE',$4,now(),false)`,
       [VICTIM, TENANT, VICTIM_EMAIL, bcrypt.hashSync(PASSWORD, 10)]
     );
     await admin.query(

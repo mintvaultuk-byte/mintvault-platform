@@ -468,9 +468,9 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     );
     const pw = await bcrypt.hash(OWNER_PASSWORD, 12);
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES
-         ($1,'pspOwnA',$3,$3,$5,$7,'ACTIVE',false),
-         ($2,'pspOwnB',$4,$4,$6,$7,'ACTIVE',false)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required) VALUES
+         ($1,'pspOwnA',$3,$3,$5,$7,now(),'ACTIVE',false),
+         ($2,'pspOwnB',$4,$4,$6,$7,now(),'ACTIVE',false)`,
       [OWNER_A, OWNER_B, TENANT_A, TENANT_B, OWNER_A_EMAIL, OWNER_B_EMAIL, pw]
     );
     await admin.query(

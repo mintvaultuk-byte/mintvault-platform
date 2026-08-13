@@ -137,11 +137,11 @@ let admin: Client;
 
       const pw = await bcrypt.hash("correct-horse-battery", 12);
       await admin.query(
-        `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES
-       ($1,'apiua1',$4,$4,'owner@apia.com',$6,'ACTIVE',false),
-       ($2,'apiua2',$4,$4,'reception@apia.com',$6,'ACTIVE',false),
-       ($3,'apiua3',$4,$4,'solo@apia.com',$6,'ACTIVE',false),
-       ($5,'apiub1',$7,$7,'owner@apib.com',$6,'ACTIVE',false)`,
+        `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required) VALUES
+       ($1,'apiua1',$4,$4,'owner@apia.com',$6,now(),'ACTIVE',false),
+       ($2,'apiua2',$4,$4,'reception@apia.com',$6,now(),'ACTIVE',false),
+       ($3,'apiua3',$4,$4,'solo@apia.com',$6,now(),'ACTIVE',false),
+       ($5,'apiub1',$7,$7,'owner@apib.com',$6,now(),'ACTIVE',false)`,
         [OWNER_A, RECEPTION_A, RECEPTION_SOLO, A, OWNER_B, pw, B]
       );
       const roleId = async (code: string) =>
@@ -224,7 +224,12 @@ let admin: Client;
     };
     const png = () =>
       new Blob(
-        [Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9J4P8AAAAASUVORK5CYII=", "base64")],
+        [
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9J4P8AAAAASUVORK5CYII=",
+            "base64"
+          ),
+        ],
         { type: "image/png" }
       );
     const multipart = async (path: string, cookie: string, file: Blob | null = png(), filename = "card.png") => {
@@ -761,16 +766,34 @@ let admin: Client;
 
     describe("POST /submissions/:id/cards/:cardId/images/:side — real multipart binding", () => {
       const bindings = async (cardId: string) =>
-        (await admin.query("SELECT front_image_key, back_image_key FROM partner_submission_cards WHERE id=$1", [cardId])).rows[0];
+        (
+          await admin.query("SELECT front_image_key, back_image_key FROM partner_submission_cards WHERE id=$1", [
+            cardId,
+          ])
+        ).rows[0];
       const uploadEvents = async (submissionId: string) =>
-        Number((await admin.query("SELECT count(*)::int n FROM partner_submission_events WHERE submission_id=$1 AND event_type='card_image_uploaded'", [submissionId])).rows[0].n);
+        Number(
+          (
+            await admin.query(
+              "SELECT count(*)::int n FROM partner_submission_events WHERE submission_id=$1 AND event_type='card_image_uploaded'",
+              [submissionId]
+            )
+          ).rows[0].n
+        );
 
       it("binds valid front and back uploads to exactly the selected tenant/card/sides and audits each once", async () => {
         const cookie = await login("owner@apia.com");
         const submissionId = await draftId(cookie);
-        const c1 = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, { cardName: "Image Card 1" });
-        const c2 = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, { cardName: "Image Card 2" });
-        const front = await multipart(`/api/partner/submissions/${submissionId}/cards/${c1.body.id}/images/front`, cookie);
+        const c1 = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, {
+          cardName: "Image Card 1",
+        });
+        const c2 = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, {
+          cardName: "Image Card 2",
+        });
+        const front = await multipart(
+          `/api/partner/submissions/${submissionId}/cards/${c1.body.id}/images/front`,
+          cookie
+        );
         expect(front.status).toBe(200);
         const afterFront = await bindings(c1.body.id);
         expect(afterFront.front_image_key).toBe(front.body.key);
@@ -779,7 +802,10 @@ let admin: Client;
         expect(objectStore.has(front.body.key)).toBe(true);
         expect(await bindings(c2.body.id)).toEqual({ front_image_key: null, back_image_key: null });
 
-        const back = await multipart(`/api/partner/submissions/${submissionId}/cards/${c1.body.id}/images/back`, cookie);
+        const back = await multipart(
+          `/api/partner/submissions/${submissionId}/cards/${c1.body.id}/images/back`,
+          cookie
+        );
         expect(back.status).toBe(200);
         expect((await bindings(c1.body.id)).back_image_key).toBe(back.body.key);
         expect(back.body.key).toMatch(new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/back-`));
@@ -789,9 +815,21 @@ let admin: Client;
       it("rejects side manipulation, malformed/empty files and records no binding event", async () => {
         const cookie = await login("owner@apia.com");
         const submissionId = await draftId(cookie);
-        const card = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, { cardName: "Reject Card" });
-        for (const [side, file, name] of [["left", png(), "card.png"], ["front", null, "card.png"], ["front", new Blob(["not an image"], { type: "image/png" }), "spoof.png"], ["front", png(), "card.exe"]] as const) {
-          const r = await multipart(`/api/partner/submissions/${submissionId}/cards/${card.body.id}/images/${side}`, cookie, file, name);
+        const card = await j("POST", `/api/partner/submissions/${submissionId}/cards`, cookie, {
+          cardName: "Reject Card",
+        });
+        for (const [side, file, name] of [
+          ["left", png(), "card.png"],
+          ["front", null, "card.png"],
+          ["front", new Blob(["not an image"], { type: "image/png" }), "spoof.png"],
+          ["front", png(), "card.exe"],
+        ] as const) {
+          const r = await multipart(
+            `/api/partner/submissions/${submissionId}/cards/${card.body.id}/images/${side}`,
+            cookie,
+            file,
+            name
+          );
           expect(r.status).toBeGreaterThanOrEqual(400);
         }
         expect(await bindings(card.body.id)).toEqual({ front_image_key: null, back_image_key: null });
@@ -806,9 +844,15 @@ let admin: Client;
         const sB = await draftId(ownerB, LB);
         const cB = await j("POST", `/api/partner/submissions/${sB}/cards`, ownerB, { cardName: "B" });
         const reception = await login("reception@apia.com");
-        expect((await multipart(`/api/partner/submissions/${sA}/cards/${cA.body.id}/images/front`, reception)).status).toBe(404);
-        expect((await multipart(`/api/partner/submissions/${sB}/cards/${cB.body.id}/images/front`, ownerA)).status).toBe(404);
-        expect((await multipart(`/api/partner/submissions/${sA}/cards/${cB.body.id}/images/front`, ownerA)).status).toBe(404);
+        expect(
+          (await multipart(`/api/partner/submissions/${sA}/cards/${cA.body.id}/images/front`, reception)).status
+        ).toBe(404);
+        expect(
+          (await multipart(`/api/partner/submissions/${sB}/cards/${cB.body.id}/images/front`, ownerA)).status
+        ).toBe(404);
+        expect(
+          (await multipart(`/api/partner/submissions/${sA}/cards/${cB.body.id}/images/front`, ownerA)).status
+        ).toBe(404);
         expect(await bindings(cA.body.id)).toEqual({ front_image_key: null, back_image_key: null });
         expect(await bindings(cB.body.id)).toEqual({ front_image_key: null, back_image_key: null });
         expect(await uploadEvents(sA)).toBe(0);

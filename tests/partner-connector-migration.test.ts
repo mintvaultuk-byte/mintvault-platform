@@ -22,7 +22,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom, applyEveryMigrationRealistic, partnerScopeOnly } from "./helpers/partner-realistic-db";
+import {
+  provisionRealisticRoles,
+  migratorUrlFrom,
+  applyEveryMigrationRealistic,
+  partnerScopeOnly,
+} from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -50,9 +55,8 @@ const rb = (name: string) => readFileSync(join(process.cwd(), "migrations", name
  * equivalent. Sorted by filename to match the query's ORDER BY.
  */
 function partnerMigrationFilenames(): string[] {
-  return listMigrationFiles()
+  return partnerScopeOnly(listMigrationFiles())
     .map((f) => f.filename)
-    .filter((n) => /^00.+partner/.test(n))
     .sort();
 }
 
@@ -117,7 +121,8 @@ async function applyAllRealistic(): Promise<void> {
 
     it("every partner migration journal row is present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename = ANY($1) ORDER BY filename",
+        [partnerMigrationFilenames()]
       );
       // Derived from migrations/, NOT hard-coded. This assertion previously read `toHaveLength(15)`
       // and had rotted to 19 as later partner migrations landed — and because this whole suite was

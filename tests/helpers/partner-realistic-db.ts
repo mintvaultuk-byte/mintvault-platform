@@ -28,6 +28,9 @@ export const PARTNER_MIGRATIONS = [
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
   "0009_partner_connector_validation",
+  // Runtime authentication now requires the provenance projection this migration
+  // adds. Keep the baseline harness aligned with the deployed login contract.
+  "0077_partner_credential_lifecycle_hardening",
 ] as const;
 
 /**

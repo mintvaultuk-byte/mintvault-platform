@@ -98,10 +98,10 @@ async function seedMintVaultTables(): Promise<void> {
     );
     const pw = await bcrypt.hash("correct-horse-battery", 12);
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES
-       ($1,'wfua1',$3,$3,'owner@wfa.com',$5,'ACTIVE',false),
-       ($2,'wfua2',$3,$3,'reception@wfa.com',$5,'ACTIVE',false),
-       ($4,'wfub1',$6,$6,'owner@wfb.com',$5,'ACTIVE',false)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required) VALUES
+       ($1,'wfua1',$3,$3,'owner@wfa.com',$5,now(),'ACTIVE',false),
+       ($2,'wfua2',$3,$3,'reception@wfa.com',$5,now(),'ACTIVE',false),
+       ($4,'wfub1',$6,$6,'owner@wfb.com',$5,now(),'ACTIVE',false)`,
       [OWNER_A, RECEPTION_A, A, OWNER_B, pw, B]
     );
     const wallet = await import("../server/partner/partner-wallet-service");

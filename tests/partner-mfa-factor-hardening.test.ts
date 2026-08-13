@@ -197,8 +197,8 @@ describe("MFA current-factor hardening coverage is wired up", () => {
         [tenant, `org-${ref}`, `Hardening ${ref} Ltd`]
       );
       await admin.query(
-        `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, mfa_required)
-         VALUES ($1,$2,$3,$3,$4,'ACTIVE',$5,true)`,
+        `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, password_set_at, mfa_required)
+         VALUES ($1,$2,$3,$3,$4,'ACTIVE',$5,now(),true)`,
         [user, ref, tenant, email, hash]
       );
       await admin.query(
