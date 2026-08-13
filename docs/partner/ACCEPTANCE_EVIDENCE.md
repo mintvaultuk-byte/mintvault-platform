@@ -1281,3 +1281,88 @@ comment will not know the rule exists.
   `partner_sessions.last_step_up_at` cannot carry them. They need the equivalent stamp on the admin
   session subsystem. Today: `requireSuperAdmin` + typed confirmation + mandatory reason — real
   controls, but not re-authentication.
+
+---
+
+## AG-3b — SUPER ADMIN STEP-UP
+
+AG-3 gave PARTNER sessions a step-up stamp. The most destructive actions in the system are not
+partner actions: approving or revoking a station, suspending a partner organisation, resetting
+somebody's MFA, initiating a password reset, granting Grading Credits, emergency stop. Those run as
+Super Admin on the ADMIN session, which `partner_sessions.last_step_up_at` cannot reach.
+`requireSuperAdmin` + typed confirmation + mandatory reason are real controls, but none of them is
+evidence that the person at the keyboard is still the person who logged in.
+
+### No second architecture, and no migration
+
+The stamp lives on the express session, which connect-pg-simple already persists to the `session`
+table. That makes it **shared server state by construction** — both Fly Machines read and write the
+same row and a rolling deploy does not discard it (invariant I19) — without a new table, a new
+token, or a second admin auth path. The verify route reuses the same passphrase + PIN helpers the
+admin login uses, so there is one definition of "this is the administrator" rather than a weaker
+copy, and it shares the same lockout counters: an attacker with a stolen cookie guessing the PIN
+burns the same budget and trips the same lockout as one at the front door.
+
+`POST /api/admin/step-up` is itself `requireSuperAdmin`-gated — a plain admin cannot mint a Super
+Admin proof.
+
+### Guarded
+
+Station approve / suspend / revoke / reject · partner user role change · partner user status ·
+password-reset initiation · MFA reset · session revocation · partner organisation status ·
+audited Grading Credit adjustment · emergency stop.
+
+**Not guarded:** read-only admin navigation. Step-up on reads would train an administrator to type
+their password reflexively many times an hour, destroying the signal it exists to create. Ordinary
+grading and QA work is untouched — existing policy governs that.
+
+The admin window is **10 minutes**, deliberately tighter than the partner's 15: a Super Admin action
+is cross-tenant and frequently irreversible, so it is sized for "finish the task you just proved
+yourself for", not for a working session. A test asserts admin < partner rather than pinning either
+number.
+
+### Proven — 17/17, real Express over the real connect-pg-simple store
+
+| Case                                                             | Result                                                               |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------- |
+| never stepped up (every session predating this)                  | **403 `admin_step_up_required`**                                     |
+| no admin session at all                                          | **401** — authenticate, not re-confirm                               |
+| fresh proof                                                      | permits the action                                                   |
+| **stamp aged in the SESSION TABLE**                              | refused — the row is rewritten, not an in-memory object              |
+| stamp in the FUTURE                                              | refused — a tampered/skewed stamp must not make the window unbounded |
+| corrupt stamp                                                    | fails closed                                                         |
+| **PARTNER session**                                              | 401 — cannot satisfy Super Admin step-up                             |
+| partner session carrying an admin-shaped stamp                   | still 401 — `isAdmin` is absent                                      |
+| **stamp read back from `session` via an independent connection** | present and parseable — proves shared, not process-local             |
+| read-only navigation                                             | never prompted                                                       |
+
+Plus source-level contracts: every listed destructive route carries the guard; the module has no
+module-level Map holding authority; freshness is decided by PostgreSQL (`now() - interval`) and the
+stamp is taken as `SELECT now()`, so two machines with drifting clocks cannot disagree; a step-up is
+logged distinctly as `admin_step_up` rather than borrowed from `ok`, because "logged in" and
+"authorised a station revocation" are different events; and the existing audit rows still fire —
+step-up is an ADDITIONAL control, not a replacement for the trail.
+
+### Two failures this pass surfaced
+
+**Mine.** A blanket regex coercing `req.params.X` to `String(...)` — needed because adding a
+middleware changes Express's inferred param type — reached routes I had not guarded, including the
+profile PATCH, breaking a mass-assignment guard assertion. Reverted and re-applied only where the
+compiler actually demands it.
+
+**Pre-existing, and fixed because it is a security test in the blast radius.**
+`tests/partner-mfa-fail-closed.test.ts` was red at `708210e1`: it required
+`password: string,` **with a trailing comma** within the `mfaEnrolRestart` signature, and Prettier
+removes that comma when `password` is the last parameter. The security property itself was never
+broken — `verifyPassword` still runs before any write, which the same test's substantive assertions
+check and which was verified directly. Only the brittle regex was corrected.
+
+### Verification
+
+| Check                    | AG baseline             | After AG-3b                       |
+| ------------------------ | ----------------------- | --------------------------------- |
+| Tests                    | 27 failed / 4416 passed | **27 failed / 4433 passed** (+17) |
+| Failing files            | 7                       | **7 — identical set**             |
+| Newly failing            | —                       | **ZERO**                          |
+| Typecheck / lint / build | clean                   | **clean / 0 errors / succeeds**   |
+| New AG-3b suite          | —                       | **17/17**                         |

@@ -6,6 +6,7 @@
  * events. Mounted additively under /api/super-admin/grading-partners.
  */
 import { Router, type Express, type Request, type Response } from "express";
+import { requireAdminStepUp } from "../lib/admin-step-up";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { partnerAdminQuery } from "./db";
@@ -280,7 +281,9 @@ export function superAdminPartnerRouter(): Router {
     res.json({ ok: true });
   });
 
-  r.post("/:partnerId/emergency-stop", async (req, res) => {
+  // AG-3b: emergency stop halts every NEW card for a partner instantly. It is the right tool in a
+  // real incident and the wrong one in anybody else's hands.
+  r.post("/:partnerId/emergency-stop", requireAdminStepUp(), async (req, res) => {
     const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
     await partnerAdminQuery(
       "INSERT INTO partner_emergency_controls (tenant_id, scope, frozen, set_by, reason) VALUES ($1,'partner',true,$2,$3)",
@@ -293,7 +296,7 @@ export function superAdminPartnerRouter(): Router {
       "INSERT INTO partner_security_events (tenant_id, severity, kind) VALUES ($1,'critical','partner_emergency_stop')",
       [req.params.partnerId]
     );
-    await adminAudit(req.params.partnerId, "partner_emergency_stop", String(req.body?.reason ?? ""), email);
+    await adminAudit(String(req.params.partnerId), "partner_emergency_stop", String(req.body?.reason ?? ""), email);
     res.json({ ok: true });
   });
 

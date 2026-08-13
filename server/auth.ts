@@ -316,6 +316,14 @@ declare module "express-session" {
     authRole: string;
     credentialVersion: number;
     authenticatedAt: number;
+    /**
+     * AG-3b — when this ADMIN session last re-proved its human (password + PIN), as an ISO string
+     * taken from PostgreSQL. Absent means never; it is never backfilled, so every session that
+     * predates this reads as un-proved. Persisted with the rest of the session by
+     * connect-pg-simple, which is what makes it shared across Fly Machines rather than
+     * process-local (invariant I19).
+     */
+    adminStepUpAt: string | undefined;
     // Legacy customer magic link auth (dashboard)
     customerEmail: string;
     // Unified account auth

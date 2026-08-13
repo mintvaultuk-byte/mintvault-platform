@@ -12,6 +12,7 @@
  * follow-up, consistent with the existing admin/staff in-process counters.
  */
 import { Router, type Express, type Request, type Response } from "express";
+import { requireAdminStepUp } from "../lib/admin-step-up";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import {
@@ -344,7 +345,7 @@ export function partnerManagementRouter(): Router {
         actor.requestId,
         await svc.invitePartnerUser(
           actor,
-          req.params.partnerId,
+          String(req.params.partnerId),
           {
             firstName: requireNonEmpty(req.body?.firstName, "firstName"),
             lastName: requireNonEmpty(req.body?.lastName, "lastName"),
@@ -427,7 +428,8 @@ export function partnerManagementRouter(): Router {
     }
   });
 
-  r.post("/partners/:partnerId/users/:userId/role", async (req, res) => {
+  // AG-3b: changing a partner user's role hands over or removes authority inside that shop.
+  r.post("/partners/:partnerId/users/:userId/role", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
@@ -436,8 +438,8 @@ export function partnerManagementRouter(): Router {
         actor.requestId,
         await svc.changePartnerUserRole(
           actor,
-          req.params.partnerId,
-          req.params.userId,
+          String(req.params.partnerId),
+          String(req.params.userId),
           requirePartnerUserRole(req.body?.role),
           reason
         )
@@ -447,7 +449,8 @@ export function partnerManagementRouter(): Router {
     }
   });
 
-  r.post("/partners/:partnerId/users/:userId/status", async (req, res) => {
+  // AG-3b: suspending or removing a partner user ends their access immediately.
+  r.post("/partners/:partnerId/users/:userId/status", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
@@ -458,7 +461,7 @@ export function partnerManagementRouter(): Router {
       mutationResponse(
         res,
         actor.requestId,
-        await svc.setPartnerUserStatus(actor, req.params.partnerId, req.params.userId, status, reason)
+        await svc.setPartnerUserStatus(actor, String(req.params.partnerId), String(req.params.userId), status, reason)
       );
     } catch (err) {
       sendError(res, err);
@@ -466,14 +469,15 @@ export function partnerManagementRouter(): Router {
   });
 
   /** Email the user a password-reset link. No password is ever set, shown or stored by the admin. */
-  r.post("/partners/:partnerId/users/:userId/password-reset", async (req, res) => {
+  // AG-3b: initiating a password reset mints a credential-recovery link for somebody else's account.
+  r.post("/partners/:partnerId/users/:userId/password-reset", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
       mutationResponse(
         res,
         actor.requestId,
-        await svc.sendPartnerUserPasswordReset(actor, req.params.partnerId, req.params.userId, reason)
+        await svc.sendPartnerUserPasswordReset(actor, String(req.params.partnerId), String(req.params.userId), reason)
       );
     } catch (err) {
       sendError(res, err);
@@ -481,28 +485,30 @@ export function partnerManagementRouter(): Router {
   });
 
   /** Clear the user's second factor and force re-enrolment. Revokes sessions. */
-  r.post("/partners/:partnerId/users/:userId/reset-mfa", async (req, res) => {
+  // AG-3b: clearing somebody's second factor removes a security control from their account.
+  r.post("/partners/:partnerId/users/:userId/reset-mfa", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
       mutationResponse(
         res,
         actor.requestId,
-        await svc.resetPartnerUserMfa(actor, req.params.partnerId, req.params.userId, reason)
+        await svc.resetPartnerUserMfa(actor, String(req.params.partnerId), String(req.params.userId), reason)
       );
     } catch (err) {
       sendError(res, err);
     }
   });
 
-  r.post("/partners/:partnerId/users/:userId/revoke-sessions", async (req, res) => {
+  // AG-3b: signing a partner user out of everything is a security action.
+  r.post("/partners/:partnerId/users/:userId/revoke-sessions", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = optionalReason(req.body?.reason, "partner user sessions revoked");
       mutationResponse(
         res,
         actor.requestId,
-        await svc.revokePartnerUserSessions(actor, req.params.partnerId, req.params.userId, reason)
+        await svc.revokePartnerUserSessions(actor, String(req.params.partnerId), String(req.params.userId), reason)
       );
     } catch (err) {
       sendError(res, err);
@@ -544,7 +550,8 @@ export function partnerManagementRouter(): Router {
     }
   });
 
-  r.post("/partners/:partnerId/status", async (req, res) => {
+  // AG-3b: suspending a partner organisation stops every shop floor it owns.
+  r.post("/partners/:partnerId/status", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
@@ -554,7 +561,7 @@ export function partnerManagementRouter(): Router {
       mutationResponse(
         res,
         actor.requestId,
-        await svc.changeStatus(actor, req.params.partnerId, status, version, reason)
+        await svc.changeStatus(actor, String(req.params.partnerId), status, version, reason)
       );
     } catch (err) {
       sendError(res, err);

@@ -19,7 +19,9 @@ import {
   ADMIN_EMAIL,
   FAILED_LOGIN_DELAY_MS,
   isSuperAdminEmail,
+  requireSuperAdmin,
 } from "../auth";
+import { recordAdminStepUp, clearAdminStepUp, ADMIN_STEP_UP_WINDOW_MINUTES } from "../lib/admin-step-up";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "../customer-auth";
 import { sendMagicLink, sendPinResetLink } from "../email";
 import {
@@ -156,6 +158,63 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error: any) {
       console.error("Login error:", error.message);
       res.status(500).json({ error: "Invalid credentials" });
+    }
+  });
+
+  /**
+   * AG-3b — SUPER ADMIN STEP-UP: re-prove the human behind an existing admin session.
+   *
+   * NOT A SECOND LOGIN. It issues no session, regenerates nothing and changes no privilege — it
+   * stamps the session already in hand. `requireSuperAdmin` still decides WHO may act; this decides
+   * whether they have proved themselves RECENTLY enough for a destructive action.
+   *
+   * Demands the SAME two factors the admin login does — passphrase and PIN — verified through the
+   * same helpers, so there is one definition of "this is the administrator" rather than a weaker
+   * copy. Rate-limited with the same limiter for the same reason.
+   *
+   * The lockout counters are deliberately shared with login: an attacker who has stolen a session
+   * cookie and is guessing the PIN to unlock destructive actions must burn the same budget as one
+   * guessing at the front door, and must trip the same lockout.
+   */
+  app.post("/api/admin/step-up", adminCredentialRateLimit, requireSuperAdmin, async (req, res) => {
+    try {
+      const { password, pin } = req.body ?? {};
+      if (typeof password !== "string" || typeof pin !== "string" || !password || !pin) {
+        return res.status(400).json({ error: "Password and PIN are required" });
+      }
+
+      const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp } = await import("../pin");
+      const ipH = hashIp(req.ip || "unknown");
+      const adminEmail = String((req.session as { adminEmail?: string }).adminEmail || ADMIN_EMAIL);
+
+      const lockState = await checkLockout(adminEmail);
+      if (lockState.locked) {
+        await logPinEvent(adminEmail, false, "locked", ipH);
+        return res.status(423).json({ error: "Account locked. Try again later." });
+      }
+
+      const adminUser = await storage.getUserByEmail(adminEmail);
+      if (!adminUser || !(adminUser as { pinHash?: string }).pinHash) {
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const passwordCheck = await verifyAdminPassword(password, adminUser);
+      const pinValid = passwordCheck.valid && (await verifyPin(pin, (adminUser as { pinHash: string }).pinHash));
+      if (!passwordCheck.valid || !pinValid) {
+        const post = await registerFailure(adminEmail);
+        await logPinEvent(adminEmail, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        return res.status(post.locked ? 423 : 401).json({ error: "Invalid credentials" });
+      }
+
+      await resetFailures(adminEmail);
+      await logPinEvent(adminEmail, true, "admin_step_up", ipH);
+      await recordAdminStepUp(req);
+      return res.json({ ok: true, windowMinutes: ADMIN_STEP_UP_WINDOW_MINUTES });
+    } catch (err) {
+      console.error("[admin step-up] failed:", (err as Error).message);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 

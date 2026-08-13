@@ -71,7 +71,9 @@ describe("partner login fails CLOSED when the MFA projection is missing", () => 
       expect(src, `${name} must map mfa_state_unavailable to 503`).toContain(
         'if (result.reason === "mfa_state_unavailable")'
       );
-      expect(src, `${name} must not leak the reason`).toContain('res.status(503).json({ error: "partner login unavailable" })');
+      expect(src, `${name} must not leak the reason`).toContain(
+        'res.status(503).json({ error: "partner login unavailable" })'
+      );
     }
   });
 
@@ -96,7 +98,13 @@ describe("partner MFA restart requires elevated verification", () => {
   const MFA_SERVICE = readFileSync("server/partner/mfa-service.ts", "utf8");
 
   it("takes a password and verifies it BEFORE any state change", () => {
-    expect(MFA_SERVICE).toMatch(/export async function mfaEnrolRestart\([\s\S]{0,220}?password: string,/);
+    /*
+     * `password: string` may be the LAST parameter, in which case Prettier removes the trailing
+     * comma — so requiring one asserted a formatting accident rather than the signature. The
+     * substantive checks below (verifyPassword runs, and runs BEFORE any write) are unchanged and
+     * are what actually guard this path; this line only confirms the parameter is still taken.
+     */
+    expect(MFA_SERVICE).toMatch(/export async function mfaEnrolRestart\([\s\S]{0,220}?password: string\s*[,)]/);
     const fnAt = MFA_SERVICE.indexOf("export async function mfaEnrolRestart(");
     const body = MFA_SERVICE.slice(fnAt, fnAt + 2600);
     const verifyAt = body.indexOf("if (!(await verifyPassword(c, ctx.userId, password)))");
@@ -111,7 +119,9 @@ describe("partner MFA restart requires elevated verification", () => {
   it("still refuses to become a factor-REPLACEMENT path even with a valid password", () => {
     const fnAt = MFA_SERVICE.indexOf("export async function mfaEnrolRestart(");
     const body = MFA_SERVICE.slice(fnAt, fnAt + 2600);
-    expect(body).toContain('if (await hasActiveMethod(c, ctx.userId)) return { ok: false, reason: "requires_current_factor" };');
+    expect(body).toContain(
+      'if (await hasActiveMethod(c, ctx.userId)) return { ok: false, reason: "requires_current_factor" };'
+    );
   });
 
   it("preserves session-bound pending enrolment and its expiry", () => {
