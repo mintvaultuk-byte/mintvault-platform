@@ -193,6 +193,16 @@ describe("partner schema ↔ migration parity", () => {
       // advertised budget was double and every rolling deploy reset it, on the highest-privilege
       // credential in the system. Additive with defaults, so it is old-version-safe.
       "0079_admin_password_lockout.sql",
+      // 0080 introduces the CANONICAL PARTNER CARD JOB — the entity the whole partner programme is
+      // specified in terms of, which did not previously exist in any form (a repo-wide search for
+      // card_job/cardJob/grading_job returned zero hits). One row per PAID UNIT, keyed
+      // (card_id, ordinal) to match the credit system's existing expansion convention exactly, with
+      // real foreign keys replacing the nullable-text coupling that previously joined a spent credit
+      // to an MV number by string comparison. Enforces I1 (MV/certificate unique and immutable once
+      // allocated), I2 (a reservation funds at most one job), I7 (identity columns immutable) and the
+      // legal transition graph, all in the database rather than in scattered guard clauses.
+      // Purely additive: one new table; no existing table altered.
+      "0080_partner_card_jobs.sql",
     ]);
   });
 

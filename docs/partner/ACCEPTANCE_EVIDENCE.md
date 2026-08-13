@@ -357,3 +357,83 @@ denial-of-recovery security test.
    of the host, against an observed overshoot of **11 ms**. The `<= 30` bound was widened to `<= 31`
    with the reasoning recorded; the tight lower bound is unchanged, so the assertion still proves
    "30 minutes, not 5 and not 300".
+
+---
+
+## P3 — CANONICAL CARD JOB (foundation landed)
+
+### The finding this phase exists to fix
+
+The programme is specified entirely in terms of a "Card Job" (one paid job = one permanent MV
+number = one physical card). **That entity did not exist.** A repository-wide search for
+`card_job` / `cardJob` / `grading_job` returned zero hits. What existed instead:
+
+- `partner_submissions` — an ORDER, carrying a scalar `card_count`;
+- `partner_submission_cards` — INTAKE only, and carrying `quantity >= 1`, so not one-card-one-row.
+  0007 states the omission is deliberate: _"NO grade/cert/label columns exist on this table AT ALL"_;
+- `partner_credit_reservations` — joined to a card by **`card_reference TEXT` with no foreign key**,
+  matched elsewhere by **string comparison** (0076's allocator).
+
+So the chain from "a credit was spent" to "this MV number" had no referential integrity at any point,
+and invariants I1, I2, I4 and I8 had nothing to attach to.
+
+### The unit of identity — reused, not invented
+
+A Card Job is one **(card row, ordinal)** unit. This is not a new concept: `submission-service.ts`
+already expands each card by `quantity` and reserves one credit per unit, keyed
+`partner-submission-card:<cardId>:<ordinal>`, and its own comment states _"the unit of account here
+is (card row, ordinal) — not the card row."_ `partner_card_jobs.card_reference` stores exactly that
+string, so an existing reservation and its Card Job join without a backfill guess and without
+changing how credits are reserved.
+
+### Migration 0080 — proven on real PostgreSQL
+
+Applies; idempotent; accepted by the real runner (44 migrations, **no duplicate-number conflict, no
+destructive statements**). Classified **APPLICATION scope** — it carries a real FK to core
+`public.certificates`, which is precisely what makes I1 enforceable, and therefore must never enter
+the partner-only harness (same reason 0076 is application-scope).
+
+Every invariant was tested for **refusal**, not merely for existence:
+
+| Invariant | Probe                                             | Result                           |
+| --------- | ------------------------------------------------- | -------------------------------- |
+| I2        | second job reusing the same reservation           | **refused**                      |
+| I2        | second unit with its own reservation              | allowed                          |
+| I2        | duplicate `(card_id, ordinal)`                    | **refused**                      |
+| —         | `mv_number` without `certificate_id`              | **refused**                      |
+| I1        | changing `mv_number` after allocation             | **refused**                      |
+| I1        | clearing `certificate_id` after allocation        | **refused**                      |
+| I1        | reusing the same certificate on another job       | **refused**                      |
+| I1        | reusing the same MV number on another job         | **refused**                      |
+| I7        | moving a job to another tenant                    | **refused**                      |
+| I7        | re-pointing `reservation_id`                      | **refused**                      |
+| graph     | `NEEDS_SCAN → COMPLETED` (illegal skip)           | **refused**                      |
+| graph     | `READY_TO_GRADE` without an allocated certificate | **refused**                      |
+| graph     | resurrecting a `CANCELLED` job                    | **refused**                      |
+| FIX       | `READY_TO_GRADE → FIX_REQUIRED`                   | allowed, **and MV900 unchanged** |
+| I6        | tenant B reading tenant A's jobs                  | **0 rows**                       |
+| I6        | tenant A reading its own                          | 2 rows                           |
+| I6        | **no tenant GUC set**                             | **0 rows (default deny)**        |
+
+The FIX row is the one that matters most for the business rules: a FIX transition changes state
+without touching `mv_number`, `certificate_id` or `reservation_id` — those are immutable-once-set by
+trigger — so FIX structurally _cannot_ mint a new MV or a new reservation (I4).
+
+Both triggers are `ENABLE ALWAYS`, matching 0035's origin guard: a plain trigger is skipped when
+`session_replication_role = 'replica'`, which would otherwise let a replication-mode session rewrite
+the platform's permanent public identity.
+
+### Regression status
+
+Full suite after P3: **182 failed / 4809 passed / 343 skipped (5334)** — identical to the
+post-verification state. **Zero newly failing tests and zero newly failing files** vs the baseline,
+measured on both axes. Typecheck clean.
+
+### What remains in P3 (not yet built)
+
+The DB contract is landed and proven; the **service layer that writes it is not**. Still to do:
+create Card Jobs inside the existing credit-reservation transaction at submit, route the connector's
+certificate allocation through `partner_card_jobs`, and expose the single server-side transition
+function that replaces the seven duplicated guard clauses in `submission-service.ts`. Until that
+lands, `partner_card_jobs` is an unused (additive, inert) table — which is exactly why it is safe to
+apply ahead of the code.

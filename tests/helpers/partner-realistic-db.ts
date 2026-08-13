@@ -173,6 +173,11 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // so pulling this into the Partner harness would fail — it is classified here on what it TOUCHES,
   // not on which feature motivated it.
   "0079_admin_password_lockout",
+  // APPLICATION scope, deliberately: 0080 carries a REAL foreign key to core `public.certificates`,
+  // which is the whole point of invariant I1 — "one Card Job <-> one MV forever" is only enforceable
+  // if the database enforces it. A partner-only disposable database has no certificates table, so
+  // this must never be pulled into the partner harness. Same reason 0076 is classified here.
+  "0080_partner_card_jobs",
 ] as const;
 
 /**
