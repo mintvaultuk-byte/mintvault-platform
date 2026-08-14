@@ -8,13 +8,38 @@ production action, no change to protected MVGS maths.
 
 | | |
 | --- | --- |
-| **Final RC SHA** | this commit (see `git log -1` on `codex/partner-pilot-pass2`) |
-| Code change in this pass | `504891dd` — test/harness only, 3 files, **564 insertions, 0 deletions** |
+| **Final RC SHA** | see `git log -1` on `codex/partner-pilot-pass2` (final commit of this pass) |
+| Commits in this pass | `504891dd` M-1 fix (3 files, +564/−0) · `eea7c28b` RC record · `7919edab` merge of origin/main · `524a79fc` density-guard de-drift |
 | Predecessor RC | `e6fd6c5f985243e59a2ee2435672414048c1a095` |
 | Branch / worktree | `codex/partner-pilot-pass2` @ `/Users/cornelius/mintvault-partner-pilot-pass2` |
 | **Migration high-water** | **0090** (unchanged — no migration authored or edited this pass) |
-| `origin/main` | `839edd9c45215bfba157b930b9ec5690d47ceac0` — **unmoved**, verified live via `git ls-remote` |
-| Ancestry | `origin/main` fully contained in HEAD (`merge-base --is-ancestor` = 0); RC is 41+ commits ahead; `HEAD..origin/main` empty. **No divergence, nothing to reconcile.** |
+| `origin/main` | **`067ed0c6d3f5abfae275f8cd272bef87c99e20b4`** — it **MOVED during this pass** (was `839edd9c`) |
+| Ancestry | `origin/main` @ `067ed0c6` fully contained in HEAD after the reconciliation merge. **No divergence.** |
+
+### origin/main moved mid-pass — reconciled, not skipped
+
+At Stage 0 and throughout the work `origin/main` was `839edd9c` and production served `839edd9c`.
+The **closing** verification sweep caught both moving: PR #299 (`067ed0c6` merge of
+`144fffa8 ui: compact canonical grading workstation`) landed on main and shipped to production.
+
+Delta inspected before any action, per the "do not blindly merge" instruction:
+
+- **Touches:** `client/src/components/grading/{centering-input,grade-display,grading-panel,image-viewer}.tsx`,
+  `client/src/components/grading-workflow/*`, one dev harness page, 11 test files, governance docs.
+- **Does NOT touch the protected MVGS engine.** `shared/mvgs-scoring.ts`, `shared/centering.ts`,
+  `shared/pristine.ts`, `shared/mvgs-input-builder.ts`, `server/grader.ts`, `server/routes/grader.ts`,
+  `server/mvgs-scoring.ts`, `server/grading-prompt.ts`, `server/lib/cert-pristine.ts` are all absent
+  from the diff. No server route, no migration, no shared logic.
+
+**Decision: reconcile.** An RC that does not contain live production cannot be deployed without
+clobbering it — that is the v1070-over-v1069 incident pattern, and `safe-deploy` GUARD 1L would
+correctly block the deploy. Containing live prod is a precondition for being a release candidate at
+all, not a scope expansion. Merged clean as `7919edab`; MVGS 243/243 re-verified after.
+
+**⚠️ Production was deployed TWICE by concurrent sessions during this single pass** (`839edd9c`
+~14:16 UTC, then `067ed0c6` ~15:5x). Any production plan written against this RC must re-read
+`fly releases` and `/api/version` immediately before deploying — the RC's containment of live prod
+is true as of ~16:1x UTC and the next concurrent deploy can invalidate it.
 
 **Runtime artifact is byte-unchanged from `e6fd6c5f`.** This pass touches only `tests/`. The four
 build entrypoints are `server/index.ts`, `scripts/run-mvgs-v2-migration.ts`,
@@ -94,6 +119,29 @@ Neither hazard is live on staging — verified read-only, see below.
 | Prettier | all 3 changed files conform; pre-commit hook altered nothing |
 | **Fresh-state PostgreSQL migration proof** | the critical gate itself — 35 self-provisioning suites each stand up their own PG17 and apply migrations in order |
 
+### Re-gated AFTER the origin/main reconciliation merge
+
+| Gate | Result |
+| --- | --- |
+| `origin/main` @ `067ed0c6` contained in HEAD | YES |
+| `npm run check` (tsc) | clean |
+| **Protected MVGS / grading guards** | **243 / 243** — unchanged; engine intact |
+| Migration identity / parity / lineage family | **126 / 126** |
+| **Partner critical gate** | **36 / 36 suites — 691 passed / 0 failed / 0 skipped** (identical before and after the merge) |
+| `npm run lint` | **0 errors** |
+| `npm run build` | green incl. `dist/migrate.cjs` |
+| `git diff --check` | clean |
+| Density-pass scope guard (de-drifted) | **8 / 8** |
+
+### A note on bare `vitest run` in this environment
+
+`docs/partner/RELEASE_MATRIX_AT1_AT23.md` already states bare `npx vitest run` is not trusted for
+judging this gate. That held here, emphatically: one full-suite run during this pass reported 29
+failing files while the machine sat at **load average 60–93**. Every one of those extra failures —
+including a protected MVGS guard — **passed on re-run in isolation** (MVGS 243/243; a five-file
+sample of the "new" failures 41/41). This is the documented parallel-contention pattern, not a
+regression. The authoritative gates are the serialized, isolated ones above.
+
 ### Strict regression comparison (full `vitest run`, both directions)
 
 Bare `npx vitest run` is documented as untrusted for this repo (`docs/partner/RELEASE_MATRIX_AT1_AT23.md`),
@@ -157,6 +205,8 @@ divergence and no clobber risk.
 | DB-F3 | MEDIUM | 0075 apply-order hazard (pinned by test). Not live on staging. Matters for a rebuilt or newly-forked staging-lineage estate. |
 | DB-F4 | LOW | 0090's `IF NOT EXISTS` + `to_regclass`-only verification could silently no-op over a legacy table shape (pinned by the new FK assertion). Not present on staging. |
 | DB-F5 | LOW | 0090's MFA verification matches `pg_proc.proname` only — any `partner_auth_lookup` signature satisfies it, unlike 0073 which checks the projection. Cannot be fixed without editing applied migration bytes. |
+| **RC-F7** | **MEDIUM (protected grading, PRE-EXISTING)** | `tests/structured-variant-persistence.test.ts` test 22 is RED, and was RED at pristine `e6fd6c5f`. **Root cause found, and it is a one-line omission — not an unauthorised grading change.** There are two copies of the same `server/grader.ts` founder-signature guard: `variant-line-consolidation.test.ts` carries signatures **A–G** and passes; `structured-variant-persistence.test.ts` carries **A–F** and fails. Commit `90fc4290 test(mvgs): register founder-authorised signature G for the Card Job QA hooks` registered G in **one file only**. The RC's grader delta (+57/−4, from `73b2072e` Card Job → canonical grading bridge and `f35d8456`) matches G. **The founder authorisation exists; it was applied to one of two identical guards.** Deliberately NOT fixed here — propagating a founder signature on a protected grading guard is owner territory, not something I may self-grant. |
+| RC-F8 | LOW (fixed) | PR #299 shipped a scope guard using `git diff --name-only origin/main` — vacuous on main (empty diff → loop never runs) and false-tripping on any branch with unrelated work. Identical to the defect `tests/helpers/grading-release-scope.ts` documents for PR #214. De-drifted to the pass's own immutable range `839edd9c..144fffa8` (`524a79fc`), made fail-closed; the seven current-code geometry assertions untouched. 8/8 green. |
 
 **Zero BLOCKER. Zero HIGH in code.** The two HIGHs are process/record defects, not defects in the
 software.

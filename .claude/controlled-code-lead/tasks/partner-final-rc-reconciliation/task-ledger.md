@@ -158,3 +158,37 @@ NOTE FOR THE OWNER: production was deployed TWICE by concurrent sessions during 
 (839edd9c at ~14:16, then 067ed0c6 at ~15:5x). Any production plan written against this RC must
 re-read `fly releases` and `/api/version` immediately before deploying — the RC's containment of
 live prod is true as of 16:0x UTC and can be invalidated by the next concurrent deploy.
+
+### FINDING RC-F7 (MEDIUM, protected grading, PRE-EXISTING — not introduced by this pass)
+`tests/structured-variant-persistence.test.ts` test 22 ("no grading/MVGS/centering/Pristine/
+cert-number engine file is modified") is RED on this branch, and was RED at pristine e6fd6c5f.
+
+ROOT CAUSE FOUND — it is a one-line omission, not an unauthorised grading change:
+There are TWO copies of the same `server/grader.ts` founder-signature guard.
+- `tests/variant-line-consolidation.test.ts` carries signatures A-G and PASSES.
+- `tests/structured-variant-persistence.test.ts` carries A-F only and FAILS.
+Commit `90fc4290 test(mvgs): register founder-authorised signature G for the Card Job QA hooks`
+registered signature G in `variant-line-consolidation.test.ts` ONLY (1 file changed). The RC's
+server/grader.ts delta vs origin/main (+57/-4, from `73b2072e` Card Job -> canonical grading bridge
+and `f35d8456`) matches signature G — which the second copy has never heard of.
+
+So the founder authorisation EXISTS; it was applied to one of two identical guards.
+
+DELIBERATELY NOT FIXED BY ME. Registering or propagating a founder-authorised signature on a
+protected grading guard is owner territory (mvgs-grading-protected). I am reporting it, not
+self-granting it. Owner decision: confirm the Card Job bridge change is the one authorised at
+90fc4290 and propagate signature G to structured-variant-persistence.test.ts, or revert the grader
+delta.
+
+Note both guards resolve their base via `tests/helpers/protected-diff.ts`
+(`PROTECTED_DIFF_BASE = process.env.PROTECTED_GUARD_BASE || "origin/main"`), i.e. the same
+moving-window pattern. On a long-lived release branch this compares the WHOLE programme against
+mainline. `PROTECTED_GUARD_BASE` exists as the override.
+
+### FINDING RC-F8 (LOW, test design) — PR #299 reintroduced a solved bug; FIXED this pass
+PR #299's `tests/canonical-compact-workstation-density.test.ts` scope guard used
+`git diff --name-only origin/main`, which is vacuous on main (empty diff -> loop never runs) and
+false-trips on any branch carrying unrelated work. This is the exact defect
+`tests/helpers/grading-release-scope.ts` documents and fixes for PR #214. De-drifted to the pass's
+own immutable range `839edd9c..144fffa8` (commit 524a79fc), made fail-closed, and the seven
+current-code geometry assertions left untouched. 8/8 green.
