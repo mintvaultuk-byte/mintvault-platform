@@ -1,4 +1,4 @@
-# Deployment state — Scanner SOL campaign / WP0
+# Deployment state — Scanner SOL campaign / through WP6
 
 ## Production
 
@@ -18,6 +18,10 @@
 - Configured origin: `git@github.com:mintvaultuk-byte/mintvault-platform.git`
 - Pushed: no
 - Deployed: nowhere
+- Local package only: arm64 app/DMG/ZIP/update metadata/checksums generated and
+  independently verified; ad-hoc identity, `releaseReady:false`, not uploaded.
+- Apple authority: no valid Developer ID identity was installed or used; exact
+  owner Team authority remains `OWNER_REQUIRED`; no notary credential accessed.
 
 ## Known divergence
 

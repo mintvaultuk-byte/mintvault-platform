@@ -1,0 +1,66 @@
+name: Scanner package drift
+
+on:
+  pull_request:
+    paths:
+      - "scripts/scanner-app/**"
+      - ".github/workflows/scanner-package.yml"
+      - ".github/workflows/scanner-release.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/scanner-app/**"
+      - ".github/workflows/scanner-package.yml"
+      - ".github/workflows/scanner-release.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scanner-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64-structural-package:
+    name: arm64 package, archives and drift guards
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.14.1"
+          cache: npm
+          cache-dependency-path: scripts/scanner-app/package-lock.json
+      - name: Assert Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - name: Install exact Scanner dependencies
+        working-directory: scripts/scanner-app
+        run: npm ci --ignore-scripts
+      - name: Rebuild production native dependency and run Scanner tests
+        working-directory: scripts/scanner-app
+        run: |
+          npm rebuild sharp
+          npm audit --audit-level=high
+          npm test
+      - name: Build and verify non-releasable structural artifacts
+        working-directory: scripts/scanner-app
+        run: npm run package:mac:local
+      - name: Re-verify artifact ledger after packaging
+        working-directory: scripts/scanner-app
+        run: |
+          node -e 'require("./scripts/finalize-release-artifacts").verifyArtifactSet({ dist: require("node:path").resolve("dist"), mode: "local" })'
+      - name: Upload structural package evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mintvault-scanner-arm64-structural-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            scripts/scanner-app/dist/MintVault-Scanner-*-arm64.dmg
+            scripts/scanner-app/dist/MintVault-Scanner-*-arm64.zip
+            scripts/scanner-app/dist/latest-mac.yml
+            scripts/scanner-app/dist/SHA256SUMS
+            scripts/scanner-app/dist/mintvault-scanner-release.json

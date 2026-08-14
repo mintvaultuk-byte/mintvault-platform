@@ -40,13 +40,15 @@ function configureRuntime({ isPackaged, resourcesPath, execPath, expectedTeamIde
   });
 }
 
-function loadReleaseTrust(resourcesPath) {
+function loadReleaseTrust(resourcesPath, expectedTeamIdentifier) {
   const trustPath = path.join(path.resolve(resourcesPath), "release-trust.json");
   readRegularFile(trustPath, "release trust contract", MAX_MANIFEST_BYTES);
   let trust;
   try { trust = JSON.parse(fs.readFileSync(trustPath, "utf8")); }
   catch { fail("release trust contract is not valid JSON"); }
-  if (trust?.schemaVersion !== 1 || !/^[A-Z0-9]{10}$/.test(String(trust.teamIdentifier || ""))) {
+  if (trust?.schemaVersion !== 1 || trust.appIdentifier !== APP_IDENTIFIER
+      || !/^[A-Z0-9]{10}$/.test(String(expectedTeamIdentifier || ""))
+      || trust.teamIdentifier !== expectedTeamIdentifier) {
     fail("release trust contract has no valid MintVault Team Identifier");
   }
   return Object.freeze({ teamIdentifier: trust.teamIdentifier });
@@ -55,11 +57,14 @@ function loadReleaseTrust(resourcesPath) {
 function resolvePaths() {
   if (!configuredRuntime) fail("Electron runtime was not configured");
   const root = configuredRuntime.isPackaged
-    ? path.join(configuredRuntime.resourcesPath, "helpers")
+    ? path.join(path.dirname(configuredRuntime.resourcesPath), "Helpers")
     : path.resolve(__dirname, "..", "native", "bin");
+  const manifestRoot = configuredRuntime.isPackaged
+    ? path.join(configuredRuntime.resourcesPath, "helper-manifests")
+    : root;
   return {
     helperPath: path.join(root, HELPER_FILENAME),
-    manifestPath: path.join(root, MANIFEST_FILENAME),
+    manifestPath: path.join(manifestRoot, MANIFEST_FILENAME),
     runtime: configuredRuntime,
   };
 }
@@ -160,8 +165,10 @@ function verifyHelperAt({ helperPath, manifestPath, runtime, expected = captureE
   if (helperSignature.identifier !== manifest.bundleIdentifier) fail("capture helper signing identifier is wrong");
 
   if (runtime.isPackaged) {
-    const expectedHelper = path.join(runtime.resourcesPath, "helpers", expected.helperName);
-    const expectedManifest = path.join(runtime.resourcesPath, "helpers", expected.manifestName);
+    const expectedRoot = path.join(path.dirname(runtime.resourcesPath), "Helpers");
+    const expectedManifestRoot = path.join(runtime.resourcesPath, "helper-manifests");
+    const expectedHelper = path.join(expectedRoot, expected.helperName);
+    const expectedManifest = path.join(expectedManifestRoot, expected.manifestName);
     if (path.resolve(helperPath) !== expectedHelper || path.resolve(manifestPath) !== expectedManifest) {
       fail("packaged helper or manifest is outside the sealed resources directory");
     }
@@ -216,11 +223,14 @@ function verifiedCaptureHelper() {
 function verifiedIdentityHelper() {
   if (!configuredRuntime) fail("Electron runtime was not configured");
   const root = configuredRuntime.isPackaged
-    ? path.join(configuredRuntime.resourcesPath, "helpers")
+    ? path.join(path.dirname(configuredRuntime.resourcesPath), "Helpers")
     : path.resolve(__dirname, "..", "native", "bin");
+  const manifestRoot = configuredRuntime.isPackaged
+    ? path.join(configuredRuntime.resourcesPath, "helper-manifests")
+    : root;
   return verifyHelperAt({
     helperPath: path.join(root, IDENTITY_HELPER_FILENAME),
-    manifestPath: path.join(root, IDENTITY_MANIFEST_FILENAME),
+    manifestPath: path.join(manifestRoot, IDENTITY_MANIFEST_FILENAME),
     runtime: configuredRuntime,
     expected: identityExpected(),
   });

@@ -1,6 +1,6 @@
 # Architecture — AFTER — Scanner SOL campaign
 
-**State:** WP1 capture-helper, WP2 identity/client, WP3 live-authority and WP5 encrypted-queue edges AS-BUILT locally; server/package edges remain PROPOSED until frozen P14 and later WP verification.
+**State:** WP1 capture-helper, WP2 identity/client, WP3 live-authority, WP5 encrypted-queue and WP6 credential-independent package edges are AS-BUILT locally; signed-release, updater and server edges remain gated on later work.
 
 ```mermaid
 flowchart LR
@@ -57,3 +57,11 @@ fresh grant, and only a tuple-exact canonical server disposition permits local
 resolution. Rescan replacement is atomic and ACCEPTED is a restart-convergent
 deletion journal. The Partner API nodes remain proposed until frozen-P14
 server semantics are reconciled and proven end to end.
+
+WP6 confirms an arm64-only Electron app with exact MintVault identity, macOS
+12.0 floor, frozen helper locations and runtime-only ASAR boundary. One fresh
+preparation binds source/mode/Team/helper bytes; independent JS and compiled
+Team pins prevent a candidate trust file from choosing its own authority.
+Local app, ZIP and DMG copies are independently verified and share one bundle
+digest/source/helper set. The `PKG` edge remains only locally AS-BUILT: its real
+Developer-ID/notary authority and deployed update feed are R-3/WP7/WP9 gates.

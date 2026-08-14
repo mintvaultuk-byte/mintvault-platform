@@ -16,15 +16,17 @@ function fixture(t, { packaged = false, helperTeam = "", appTeam = "", expectedT
   const resourcesPath = packaged
     ? path.join(root, "MintVault Scanner.app", "Contents", "Resources")
     : root;
-  const helperRoot = packaged ? path.join(resourcesPath, "helpers") : root;
+  const helperRoot = packaged ? path.join(path.dirname(resourcesPath), "Helpers") : root;
+  const manifestRoot = packaged ? path.join(resourcesPath, "helper-manifests") : root;
   const execPath = packaged
     ? path.join(root, "MintVault Scanner.app", "Contents", "MacOS", "MintVault Scanner")
     : process.execPath;
   fs.mkdirSync(path.dirname(execPath), { recursive: true });
   if (packaged) fs.writeFileSync(execPath, "app");
   fs.mkdirSync(helperRoot, { recursive: true });
+  fs.mkdirSync(manifestRoot, { recursive: true });
   const helperPath = path.join(helperRoot, "mv-capture-helper");
-  const manifestPath = path.join(helperRoot, "helper-manifest.json");
+  const manifestPath = path.join(manifestRoot, "helper-manifest.json");
   const bytes = Buffer.from("fixture arm64 Mach-O bytes");
   fs.writeFileSync(helperPath, bytes, { mode: 0o755 });
   const manifest = {
@@ -73,6 +75,24 @@ test("accepts an exact arm64 ad-hoc development helper with a sealed manifest", 
   assert.equal(verified.manifest.sha256, value.manifest.sha256);
   assert.equal(verified.helperSignature.identifier, "com.mintvault.scanner.capture-helper");
   assert.equal(value.calls.filter((call) => call.command === "/usr/bin/codesign").length, 2);
+});
+
+test("release trust cannot replace the independently packaged Team pin", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-release-trust-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, "release-trust.json"), JSON.stringify({
+    schemaVersion: 1,
+    appIdentifier: "com.mintvault.scanner",
+    teamIdentifier: "MINTVAULT1",
+  }));
+  assert.equal(integrity.loadReleaseTrust(root, "MINTVAULT1").teamIdentifier, "MINTVAULT1");
+  assert.throws(() => integrity.loadReleaseTrust(root, "ATTACKER01"), /valid MintVault Team Identifier/);
+  fs.writeFileSync(path.join(root, "release-trust.json"), JSON.stringify({
+    schemaVersion: 1,
+    appIdentifier: "com.mintvault.scanner",
+    teamIdentifier: "ATTACKER01",
+  }));
+  assert.throws(() => integrity.loadReleaseTrust(root, "MINTVAULT1"), /valid MintVault Team Identifier/);
 });
 
 test("rejects a symlink before invoking any external verifier", (t) => {

@@ -2,6 +2,7 @@
   "name": "mintvault-scanner-app",
   "version": "1.2.1",
   "description": "MintVault scanner menu-bar app — single-process replacement for watcher.mjs + guide-window + swiftbar.",
+  "author": "MintVault",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -9,15 +10,20 @@
     "dev": "electron . --enable-logging",
     "build:native": "node scripts/build-native-helpers.js",
     "verify:native": "node scripts/verify-native-helpers.js",
+    "package:mac:dir": "node scripts/package-macos.js --dir",
+    "package:mac:local": "node scripts/package-macos.js --local",
+    "package:mac:release": "node scripts/package-macos.js --release",
+    "verify:package": "node scripts/verify-packaged-app.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "chokidar": "^4.0.1",
     "form-data": "^4.0.0",
     "node-fetch": "^3.3.2",
-    "sharp": "^0.33.5"
+    "sharp": "0.35.3"
   },
   "devDependencies": {
-    "electron": "42.2.0"
+    "electron": "42.9.0",
+    "electron-builder": "26.15.3"
   }
 }

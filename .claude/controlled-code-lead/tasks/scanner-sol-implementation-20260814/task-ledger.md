@@ -33,11 +33,11 @@
 |---|---|---|---|
 | 0 — Baseline | done | 2026-08-14 | Exact source/Partner/tooling facts recorded |
 | 1 — Review plan | done | 2026-08-14 | A9 Partner, A1 Scanner, tooling scopes isolated |
-| 2 — Investigation | done through WP5 | 2026-08-14 | WP2 A3/A4, WP3 A4 and WP5 A5 controlled reviews complete |
-| 3 — Lead verification | done through WP5 | 2026-08-14 | Queue custody, grants, tuple binding, dispositions and fault boundaries reproduced and verified |
-| 4 — Implementation authorisation | done through safe-isolated WP5 | 2026-08-14 | Owner prompt authorises local Scanner work; moving P14 forbids server authority/migration wiring until semantic reconciliation |
-| 5 — Implementation | done through safe-isolated WP5 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority; WP5 encrypted queue and canonical local disposition boundary |
-| 6 — Regression | local done through WP5 | 2026-08-14 | Scanner 99 pass/3 normal skips plus 3/3 opt-in SE; root focused 96 pass/3 environment skips; governance/type/build green; lint 0 errors; A5 CLEAN |
+| 2 — Investigation | done through WP6 | 2026-08-14 | WP2 A3/A4, WP3 A4, WP5 A5 and WP6 A2/A7 controlled reviews complete |
+| 3 — Lead verification | done through WP6 | 2026-08-14 | Package dependencies, nested signing order, source/Team authority, ASAR runtime and both artifact copies reproduced and verified |
+| 4 — Implementation authorisation | done through safe-isolated WP6 | 2026-08-14 | Owner prompt authorises local Scanner work; moving P14 forbids server authority/migration wiring until semantic reconciliation |
+| 5 — Implementation | done through safe-isolated WP6 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority; WP5 encrypted queue; WP6 deterministic arm64 package/release pipeline |
+| 6 — Regression | local done through WP6 | 2026-08-14 | Scanner 112 pass/3 opt-in SE skips; package/helper 30/30; zero Scanner audit vulnerabilities; local app/DMG/ZIP independently verified; A7 CLEAN |
 | 7 — Final report | pending | | Only after WP12 or a legitimate external/owner gate |
 
 ## Reviewer assignments
@@ -48,13 +48,15 @@
 | A1 Scanner | Existing Electron/native/package/queue/identity inventory, read-only | Interrupted after confirmed headline; Lead rechecked source, no broad clean claim accepted |
 | Tooling | Engineering OS/Graphify availability and correct commands, read-only | Complete; `source-verification.md` |
 | A1 WP1 helper | Native helper/controller/targeted tests, read-only | Complete; R-1 compiler and mutable executable reproduced from source; CLI contract preserved |
-| A2 WP1 compatibility | Electron/package/install/signing metadata, read-only | Complete; Electron 42.2.0 arm64, macOS 12.0 candidate floor, no production package/identity |
+| A2 WP1 compatibility | Electron/package/install/signing metadata, read-only | Complete; initial Electron/macOS 12.0 candidate floor and missing production package/identity; dependency pin superseded in WP6 |
 | A3 WP2 identity | Scanner station identity/Keychain/helper contract, read-only | Complete; R-4/R-14/R-19/R-21 exact source evidence and migration order |
 | A4 WP2 authority | Committed replay/session/idempotency authority, read-only | Complete; safe client work separated from final-P14 server/schema changes |
 | A3 WP2 hostile | Current identity helper/Keychain/migration trust boundary, read-only | Initial 4 HIGH; all repaired; final re-review CLEAN |
 | A4 WP2 hostile | Current request ordering/op durability/upload auth, read-only | Three review rounds; final 400 key-conflict response-loss edge repaired; final re-review CLEAN |
 | A4 WP3 auth | Human/session/MFA/RBAC/enrolment/live authority, read-only | Six HIGHs; Scanner-owned shift/live-gate/MFA first-run repaired; P14-owned token/idle/terminal lifecycle registered |
 | A5 WP5 queue | Queue/encryption/custody/grant/finalisation/provenance review, read-only | Initial custody/disposition defects plus tuple and crash-boundary follow-ups repaired; final re-review CLEAN |
+| A2 WP6 compatibility | Package/helper layout, preparation freshness, artifact/release boundary, read-only | Findings repaired; WP6 package scope CLEAN; updater/login items assigned to WP7 |
+| A7 WP6 package/CI | Dependency, workflow, Team trust, package hygiene and independent artifacts, read-only | Six hostile rounds; every Scanner-owned BLOCKER/HIGH repaired; final re-review CLEAN |
 
 ## WP3 implementation and regression evidence
 
@@ -88,6 +90,29 @@
   No WP5 Scanner path failed, and protected grader/server files were untouched.
 - Native helpers rebuilt and verified arm64/minOS 12.0: capture helper 1.0.0,
   identity helper 1.1.0. These remain ad-hoc local artifacts, not release proof.
+
+## WP6 implementation and regression evidence
+
+- Added exact `com.mintvault.scanner` / `MintVault Scanner` arm64 packaging for
+  macOS 12.0 with branded icon, minimal hardened-runtime entitlements, ASAR
+  runtime allowlist and helpers frozen under `Contents/Helpers`.
+- Exact-pinned Electron 42.9.0, Sharp 0.35.3 and electron-builder 26.15.3.
+  Scanner `npm audit` reports zero vulnerabilities.
+- A fresh UUID preparation binds source commit/tree state, package mode, Team,
+  helper source and final signed hashes. Direct/stale builder invocation fails
+  closed. The independently reviewed Team authority is embedded in signed ASAR
+  JavaScript and compiled into the native identity helper.
+- Local packaging generated app, DMG, ZIP, canonical `latest-mac.yml`,
+  `SHA256SUMS` and release manifest. ZIP and read-only-mounted DMG were reopened;
+  both contained the same bundle digest, source SHA, helper hashes and 19 arm64
+  Mach-O files, and all declared production dependencies imported through the
+  packaged Electron executable.
+- Scanner suite: 112 passed / 3 explicit Secure-Enclave skips. Focused
+  package/helper suite: 30/30. Workflow YAML parses, every action is full-SHA
+  pinned, and release validates approved main/exact source before credentials.
+- No Apple credential was accessed. Exact owner Team pin, Developer-ID signing,
+  notarisation, stapling/Gatekeeper on a real RC and clean-machine acceptance
+  remain R-3/WP9 external proof; the local package is explicitly non-release.
 
 ## Authoritative links
 

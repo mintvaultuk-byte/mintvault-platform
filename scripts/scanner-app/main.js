@@ -30,7 +30,10 @@ const stationAuthorityLatch = require("./lib/station-authority-latch");
 const helperIntegrity = require("./lib/helper-integrity");
 const newCardOperation = require("./lib/new-card-operation");
 
-const releaseTrust = app.isPackaged ? helperIntegrity.loadReleaseTrust(process.resourcesPath) : null;
+const packagedTeamPin = app.isPackaged ? require("./generated/release-team-pin") : null;
+const releaseTrust = app.isPackaged
+  ? helperIntegrity.loadReleaseTrust(process.resourcesPath, packagedTeamPin?.teamIdentifier)
+  : null;
 helperIntegrity.configureRuntime({
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,

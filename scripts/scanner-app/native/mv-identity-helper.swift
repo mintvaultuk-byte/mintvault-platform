@@ -217,6 +217,10 @@ private func namespace(for request: HelperRequest, signing: SigningContext) thro
         signing.teamIdentifier.range(of: #"^[A-Z0-9]{10}$"#, options: .regularExpression) != nil else {
     throw IdentityError(code: "RELEASE_TRUST_REQUIRED", message: "Production station identity requires the release-signed helper")
   }
+  guard signing.teamIdentifier == MintVaultReleaseAuthority.teamIdentifier,
+        MintVaultReleaseAuthority.packageMode == "release" else {
+    throw IdentityError(code: "RELEASE_TRUST_REQUIRED", message: "Identity helper is not signed by the pinned MintVault release Team")
+  }
   try requireMintVaultParent(teamIdentifier: signing.teamIdentifier)
   return IdentityNamespace(
     service: service,

@@ -27,14 +27,22 @@ assigned station ID. On first launch it shows **Sign in to MintVault**:
 
 The non-secret `~/.mintvault-scanner.env` can contain only a controlled API-base override and `MINTVAULT_STATION_CONFIG_PATH` for local calibration storage. Leave X/Y values absent until a disposable card has been visibly detected in **PREVIEW**. Saving that safe proposal writes `MINTVAULT_LIDE_SCAN_X_MM` and `MINTVAULT_LIDE_SCAN_Y_MM` only to the explicit local station configuration path. They locate one fixed 100 × 130 mm hardware acquisition box for a simple bottom-left jig; they are not day-to-day controls.
 
-Install a new station with:
+For legacy source-development recovery only, never for a production station:
 
 ```sh
 cd ~/mintvault-platform/scripts/scanner-app
 ./setup-new-mac.sh
 ```
 
-The production installer places the signed application at `/Applications/MintVault Scanner.app`; it does not prompt staff for a secret, station ID or X/Y values. Sign in, wait for station approval, then run **PREVIEW** with a disposable card. The application ships its precompiled arm64 ImageCaptureCore helper and verifies its sealed digest, architecture, minimum macOS, signature, signing identifier, and production Team ID before every spawn. Production stations need no Xcode, command-line tools, source checkout, Git, npm, or separately installed Node runtime.
+The production installer is the signed, notarised and stapled DMG described in
+[`PACKAGING.md`](PACKAGING.md). It places the application at
+`/Applications/MintVault Scanner.app`; it does not prompt staff for a secret,
+station ID or X/Y values. Sign in, wait for station approval, then run
+**PREVIEW** with a disposable card. The application ships its precompiled arm64
+ImageCaptureCore helper and verifies its sealed digest, architecture, minimum
+macOS, signature, signing identifier, and production Team ID before every
+spawn. Production stations need no Xcode, command-line tools, source checkout,
+Git, npm, or separately installed Node runtime.
 
 The source-only `setup-new-mac.sh`/LaunchAgent path is retained temporarily for
 development and legacy recovery and is not the production installation path.
@@ -93,7 +101,7 @@ Only an explicit server disposition carrying that exact full binding can move
 evidence through `ACCEPTED` to `RESOLVED`; an empty or legacy-success response
 remains `NEEDS_RECONCILIATION` with ciphertext intact.
 
-## Operations
+## Legacy source-development operations
 
 ```sh
 launchctl print gui/$(id -u)/com.mintvault.scanner
@@ -101,7 +109,8 @@ tail -f ~/mintvault-scans/scanner-app.log
 ./uninstall.sh
 ```
 
-Do not load a legacy scanner watcher alongside `com.mintvault.scanner`.
+These LaunchAgent commands do not apply to the production DMG application. Do
+not load a legacy scanner watcher alongside `com.mintvault.scanner`.
 
 ## Tests
 

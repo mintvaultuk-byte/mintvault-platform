@@ -1,4 +1,4 @@
-# Definition of Proof — WP0/WP1
+# Definition of Proof — through WP6
 
 | Dimension | Status |
 |---|---|
@@ -44,3 +44,19 @@ WP5 proves local confidentiality, durable lifecycle convergence and fail-closed
 server acknowledgement handling. It does not claim final Partner server
 enforcement, a signed package, cross-Mac clone rejection, Pilot hardware or
 production activation; those remain explicit later work-package gates.
+
+## WP6 proof boundary
+
+| Dimension | Status |
+|---|---|
+| Design | package identity/layout, nested signing order, Team/source authority, artifacts and CI contract frozen |
+| Implementation | credential-independent app/DMG/ZIP and release pipeline complete |
+| Verification | Local Proof: real arm64 artifacts reopened, runtime-imported and cross-bound; hostile A7 CLEAN |
+| Activation | none; local artifacts are ad-hoc, `releaseReady:false`, not uploaded or installed on Pilot |
+
+WP6 proves that credential-independent production packaging is executable and
+fail-closed: 19 Mach-O files are arm64/macOS-12-compatible, dependency audit is
+clean, runtime imports succeed from ASAR, and DMG/ZIP independently bind the
+same app, helpers and source. It does not claim the owner Team value,
+Developer-ID signature, notarisation, staple/Gatekeeper, update deployment or a
+clean target-Mac acceptance run; those remain R-3 and WP7/WP9 gates.

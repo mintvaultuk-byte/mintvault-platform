@@ -1,5 +1,7 @@
 node_modules
 scripts/scanner-app/native/bin/
+scripts/scanner-app/build/generated/
+scripts/scanner-app/dist/
 dist
 .DS_Store
 server/public

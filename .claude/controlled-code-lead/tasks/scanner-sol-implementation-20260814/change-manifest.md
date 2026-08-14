@@ -69,7 +69,8 @@ helper contract without claiming external-credential proof.
   executes before every native operation.
 - Added helper/protocol version to every native JSON result and rejects stale
   protocol responses in JavaScript.
-- Exact-pinned Electron 42.2.0 and documented the candidate macOS 12.0 floor.
+- Exact-pinned Electron 42.2.0 for the WP1 helper boundary; WP6 superseded this
+  with patched Electron 42.9.0 while retaining the macOS 12.0 floor.
 - Repaired the one pre-existing Scanner suite failure by aligning its stale
   source assertion and modal copy to the already-implemented target-bound FIX
   behaviour; no Partner/server authority was changed.
@@ -187,3 +188,38 @@ and terminal pre-approval enrolment dispositions remain P14 reconciliation work.
 No Partner server, migration, active Partner worktree, external environment,
 credential or remote Git state was changed. Strict server-side disposition and
 authorisation enforcement remains a frozen-P14 reconciliation dependency.
+
+## WP6 planned change manifest
+
+| Finding | Safe-isolated surface | Repair class |
+|---|---|---|
+| R-2/R-3/R-10 package/release gap | Electron builder, entitlements, native signing order, app/DMG/ZIP manifests and verifiers | D/F |
+| R-34 Team-origin trust | Owner-reviewed Team authority embedded independently in ASAR and compiled helper | F |
+| R-41 vulnerable dependencies | Exact runtime/build pins and zero-advisory CI audit | D |
+| R-42 stale generated inputs | Fresh source/Team/helper-bound preparation nonce and `beforePack` gate | D/F |
+| R-43 workflow trust | Full-SHA actions, approved source/ref gate, protected credentials and minimal permissions | F |
+| R-44/R-45 package/artifact false greens | Runtime entrypoint import smoke, source hygiene, independent ZIP/DMG reopen and provenance cross-binding | D/F |
+
+## WP6 actual changes
+
+- Added an explicit runtime-only electron-builder allowlist, branded ICNS,
+  arm64-only DMG/ZIP targets, exact app identity and macOS 12.0 floor. Only the
+  two required native runtime payloads leave ASAR; helper executables and their
+  manifests have frozen, non-conflicting bundle paths.
+- Added separate local-structural and release modes. Local output is ad-hoc and
+  declares `releaseReady:false`; release requires a clean owner-approved SHA,
+  owner-pinned Team, exact Developer ID identity, one notary credential set,
+  hardened runtime, helper-first signing, notarisation, stapling and Gatekeeper.
+- Added source/preparation/helper bindings, sealed release trust, compiled and
+  ASAR Team pins, canonical update metadata, SHA-256 checksums and an exhaustive
+  MintVault release ledger. Both distribution formats are independently opened
+  and compared after finalisation.
+- Added package and release workflows with Apple-Silicon assertion, full-SHA
+  action pins, minimal permissions, protected release environment, exact
+  main/source approval before secret materialisation, and credential cleanup.
+- Upgraded Electron/Sharp/transitive Undici to audit-clean versions. Package
+  verification excludes native/toolchain source while retaining and executing
+  required JavaScript runtime entrypoints such as `node-fetch/src/index.js`.
+
+No Apple authority, release upload, deployment, migration, active Partner
+worktree or production/staging system was touched in WP6.
