@@ -1055,13 +1055,17 @@ export function registerSubmissionRoutes(app: Express): void {
   // ── Public packing slip (token-gated) ─────────────────────────────────────
   app.get("/api/submissions/:submissionId/packing-slip", submissionPdfRateLimit, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      const submissionId = req.params.submissionId;
+      if (typeof submissionId !== "string") {
+        return res.status(400).json({ error: "Valid submission id required" });
+      }
+      const submission = await storage.getSubmissionBySubmissionId(submissionId);
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
 
       const token = req.query.token;
-      if (!verifyPdfToken(req.params.submissionId, token)) {
+      if (!verifyPdfToken(submissionId, token)) {
         return res.status(403).json({ error: "Invalid or expired token" });
       }
 
@@ -1117,13 +1121,17 @@ export function registerSubmissionRoutes(app: Express): void {
   // ── Public shipping label (token-gated) ───────────────────────────────────
   app.get("/api/submissions/:submissionId/shipping-label", submissionPdfRateLimit, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      const submissionId = req.params.submissionId;
+      if (typeof submissionId !== "string") {
+        return res.status(400).json({ error: "Valid submission id required" });
+      }
+      const submission = await storage.getSubmissionBySubmissionId(submissionId);
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
 
       const token = req.query.token;
-      if (!verifyPdfToken(req.params.submissionId, token)) {
+      if (!verifyPdfToken(submissionId, token)) {
         return res.status(403).json({ error: "Invalid or expired token" });
       }
 
