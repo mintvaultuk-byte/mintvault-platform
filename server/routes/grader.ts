@@ -86,6 +86,19 @@ const staffCustomSetEditLimit = rateLimit({
   message: { error: "Too many set edit attempts. Please wait a few minutes and try again." },
 });
 
+// Saving or submitting a grade performs a guarded certificate mutation plus an
+// audit write. Limit after the staff capability gate and key by the authenticated
+// grader so a shared grading-room address cannot exhaust another operator's budget.
+const graderGradeMutationRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `grader-grade-mutation:${String((req.session as any).staffId ?? (req.session as any).graderId ?? "unknown")}`,
+  message: { error: "Too many grading changes. Please wait a minute and try again." },
+});
+
 /** Panel actions the grader proxy may delegate to the admin handlers. */
 const GRADER_PROXY_ACTIONS = new Set([
   "recrop",
@@ -403,7 +416,7 @@ export function registerGraderRoutes(app: Express): void {
   );
 
   // ── Grader DRAFT save (repeatable; status stays 'assigned') ─────────────────
-  app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), async (req: Request, res: Response) => {
+  app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), graderGradeMutationRateLimit, async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
@@ -448,7 +461,7 @@ export function registerGraderRoutes(app: Express): void {
 
   // ── Grader SUBMIT for approval (assigned → pending_review) ───────────────────
   // Registered BEFORE the generic :action proxy so 'submit' isn't proxied.
-  app.post("/api/grader/certificates/:id/submit", requireCapability("grade"), async (req: Request, res: Response) => {
+  app.post("/api/grader/certificates/:id/submit", requireCapability("grade"), graderGradeMutationRateLimit, async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);

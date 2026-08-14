@@ -105,6 +105,18 @@ const staffScanReadLimit = rateLimit({
   message: { error: "Too many scanner status requests. Please wait a minute and try again." },
 });
 
+// Apply this before Multer buffers up to 25 MiB. The key is the authenticated
+// scanner, not a shared office IP, and it does not share the capture-arm budget.
+const staffScanUploadLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `staff-scan-upload:${String((req.session as any).staffId ?? "unknown")}`,
+  message: { error: "Too many scanner upload requests. Please wait a minute and try again." },
+});
+
 function sendSetLibraryError(res: Response, err: unknown): void {
   if (err instanceof SetLibraryError) {
     res.status(err.status).json({ error: err.message });
@@ -339,6 +351,7 @@ export function registerStaffRoutes(app: Express): void {
   app.post(
     "/api/staff/scan/certificates/:id/upload",
     requireCapability("scan"),
+    staffScanUploadLimit,
     scanUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },

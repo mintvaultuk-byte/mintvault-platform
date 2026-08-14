@@ -48,6 +48,16 @@ const partnerStationCaptureRateLimit = rateLimit({
   message: { error: "Too many station capture requests. Please wait a minute and try again." },
 });
 
+const partnerStationCalibrationRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-calibration:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -210,7 +220,7 @@ export function partnerStationRouter(): Router {
     }
   );
 
-  r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+  r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, partnerStationCalibrationRateLimit, async (req, res) => {
     try {
       const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
         scannerHardware: req.body?.scannerHardware,
@@ -276,6 +286,7 @@ export function partnerStationRouter(): Router {
     "/stations/capture-sessions/:sessionId",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationReadRateLimit,
     async (req, res) => {
       try {
         const sessionId = String(req.params.sessionId || "");
