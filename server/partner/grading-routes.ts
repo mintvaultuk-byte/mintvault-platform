@@ -24,6 +24,7 @@
  */
 import { Router } from "express";
 import type { NextFunction, Response } from "express";
+import rateLimit from "express-rate-limit";
 import type { PoolClient } from "pg";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
@@ -175,6 +176,40 @@ function expectedReviewRevision(raw: unknown): number | null {
 }
 
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
+
+const partnerGradingEditRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-edit:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many grading edit requests. Please wait a minute and try again." },
+});
+
+// These routes run after the MFA/capability gate, so a per-operator budget
+// limits abusive replay without penalising a partner location that shares an IP.
+// Preview rendering and grade writes are deliberately separate: preview polling
+// must never consume the write budget required to save a legitimate review.
+const partnerGradingReadRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-read:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many grading read requests. Please wait a minute and try again." },
+});
+
+const partnerGradingPreviewRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-preview:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many label preview requests. Please wait a minute and try again." },
+});
 
 /**
  * May a grading DRAFT be written to this work item right now, by lineage?
@@ -748,7 +783,11 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
 export function partnerGradingRouter(): Router {
   const r = Router();
   r.use(requirePartnerAuth);
-  r.use(requirePartnerGradingEnabled);
+  // This router is mounted at the portal root so its auth middleware can protect
+  // the grading routes. Scope the grading kill switch to its own prefix: a
+  // router-wide gate would otherwise intercept submissions, customers and every
+  // later portal router before their handlers can run.
+  r.use("/grading", requirePartnerGradingEnabled);
 
   r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
     res.json({ authenticated: true, userId: req.partner!.userId });
@@ -1094,7 +1133,7 @@ export function partnerGradingRouter(): Router {
     }
   });
 
-  r.get("/grading/certificates/:id/images", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
+  r.get("/grading/certificates/:id/images", requirePartnerCapability("partner.cards.assess"), partnerGradingReadRateLimit, async (req, res) => {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
@@ -1106,7 +1145,7 @@ export function partnerGradingRouter(): Router {
     }
   });
 
-  r.get("/grading/certificates/:id/grading", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
+  r.get("/grading/certificates/:id/grading", requirePartnerCapability("partner.cards.assess"), partnerGradingReadRateLimit, async (req, res) => {
     try {
       const certId = numericId(req.params.id);
       if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
@@ -1120,7 +1159,7 @@ export function partnerGradingRouter(): Router {
     }
   });
 
-  r.post("/grading/certificates/label/preview", requirePartnerCapability("partner.cards.preview"), async (req, res) => {
+  r.post("/grading/certificates/label/preview", requirePartnerCapability("partner.cards.preview"), partnerGradingPreviewRateLimit, async (req, res) => {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       const certId = numericId(body.certificateId ?? body.id);
@@ -1197,6 +1236,7 @@ export function partnerGradingRouter(): Router {
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);
@@ -1260,6 +1300,7 @@ export function partnerGradingRouter(): Router {
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);
@@ -1437,6 +1478,7 @@ export function partnerGradingRouter(): Router {
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);

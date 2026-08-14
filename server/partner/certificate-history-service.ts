@@ -36,7 +36,9 @@ export type PartnerCertificateDetail = PartnerCertificateHistoryRow & {
   backImageUrl: string | null;
 };
 
-export async function listPartnerCertificateHistory(principal: PartnerPrincipal): Promise<PartnerCertificateHistoryRow[]> {
+export async function listPartnerCertificateHistory(
+  principal: PartnerPrincipal
+): Promise<PartnerCertificateHistoryRow[]> {
   if (!principal.orgWide && !principal.locationId) return [];
   const params: unknown[] = [principal.tenantId];
   let locationWhere = "";

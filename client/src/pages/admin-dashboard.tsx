@@ -105,6 +105,7 @@ interface DbInfo {
 }
 
 import CertificateForm from "@/components/certificate-form";
+import CaptureWizard from "@/components/grading/capture-wizard";
 import { CertificateToolsDrawer, CertificateToolsButton } from "@/components/grading-workflow/CertificateToolsDrawer";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
@@ -510,8 +511,49 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               <GradingWorkstation
                 mode="super-admin"
                 apiBase="/api/admin"
+                scannerControls={
+                  !editingCert.frontImagePath && !editingCert.backImagePath ? (
+                    <CaptureWizard
+                      certId={editingCert.id}
+                      onComplete={() => {
+                        void queryClient.invalidateQueries({
+                          queryKey: ["/api/admin/certificates", editingCert.id, "images"],
+                        });
+                        void queryClient.invalidateQueries({
+                          queryKey: [`/api/admin/certificates/${editingCert.id}/images`],
+                        });
+                        void refetchEditingCert(editingCert.id);
+                      }}
+                    />
+                  ) : (
+                    <details className="rounded-lg border border-[var(--admin-gold)]/20 p-3">
+                      <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-[var(--admin-gold)]/80">
+                        Controlled Canon recapture
+                      </summary>
+                      <p className="mt-2 text-xs text-[var(--admin-ink-dim)]">
+                        Use only when correcting image evidence. This appends a revision and never replaces or deletes
+                        the earlier TIFF master.
+                      </p>
+                      <div className="mt-3">
+                        <CaptureWizard
+                          certId={editingCert.id}
+                          recapture
+                          onComplete={() => {
+                            void queryClient.invalidateQueries({
+                              queryKey: ["/api/admin/certificates", editingCert.id, "images"],
+                            });
+                            void queryClient.invalidateQueries({
+                              queryKey: [`/api/admin/certificates/${editingCert.id}/images`],
+                            });
+                            void refetchEditingCert(editingCert.id);
+                          }}
+                        />
+                      </div>
+                    </details>
+                  )
+                }
                 previewCertificateId={editingCert.id}
-                    certId={editingCert.id}
+                certId={editingCert.id}
                 certIdStr={editingCert?.certId}
                 cardName={editingCert?.cardName || ""}
                 cardSet={editingCert?.setName || ""}
@@ -525,33 +567,33 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                 batch={
                   editingCert?.submissionItemId ? { submissionId: String(editingCert.submissionItemId) } : undefined
                 }
-                    pendingAnalysis={pendingAnalysis}
-                    onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
+                pendingAnalysis={pendingAnalysis}
+                onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
                 onManualIdentification={(id) => setExternalIdentification(id)}
-                    onGradeApproved={() => {
-                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                      setShowForm(false);
-                      setEditingCert(null);
-                    }}
-                    onCertUpdated={async () => {
+                onGradeApproved={() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                  setShowForm(false);
+                  setEditingCert(null);
+                }}
+                onCertUpdated={async () => {
                   if (!editingCert?.id) return;
-                      try {
-                        const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
-                          credentials: "include",
-                        });
+                  try {
+                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
+                      credentials: "include",
+                    });
                     const rows = await r.json();
                     const updated = (Array.isArray(rows) ? rows : []).find((c: any) => c.id === editingCert.id);
-                        if (updated) setEditingCert(updated);
-                      } catch {
+                    if (updated) setEditingCert(updated);
+                  } catch {
                     /* best-effort refresh */
-                      }
-                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                    }}
-                    correctionMode={correctionMode}
-                    onCorrectionGradingReady={(getPayload) => {
-                      correctionGradingRef.current = getPayload;
-                    }}
-                  />
+                  }
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                }}
+                correctionMode={correctionMode}
+                onCorrectionGradingReady={(getPayload) => {
+                  correctionGradingRef.current = getPayload;
+                }}
+              />
             ) : (
               <div
                 className="h-full overflow-y-auto rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)] p-4"
@@ -591,8 +633,8 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                   setPendingAnalysis(result);
                   queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
                 }}
-            />
-          </div>
+              />
+            </div>
           )}
           {/* Ownership + NFC moved OUT of the grading scroll into the drawer above. */}
           {editingCert && editingCert.id && (

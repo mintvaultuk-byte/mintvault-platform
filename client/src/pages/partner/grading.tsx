@@ -296,10 +296,15 @@ function PartnerGradingSession({
         </section>
       ) : null}
 
-      <PartnerCaptureControls certId={card.certId} />
       <GradingWorkstation
         mode="partner"
         apiBase="/api/partner/grading"
+        /*
+         * From origin/main: station capture is now a CAPABILITY SLOT on the canonical workstation
+         * rather than a sibling element. Adopted here so the Partner surface keeps using the one
+         * unified workstation — the whole point of the slot — instead of forking a second layout.
+         */
+        scannerControls={<PartnerCaptureControls certId={card.certId} />}
         graderMode
         graderEdit={card.gradingStatus === "pending_review"}
         gradingEnabled={editable}

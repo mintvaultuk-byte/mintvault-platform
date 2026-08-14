@@ -76,7 +76,6 @@ import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCatalogueRoutes } from "./routes/admin/catalogue";
 import { registerProjectControlRoutes } from "./routes/admin/project-control";
-import { registerLabelPreviewRoutes } from "./routes/admin/label-preview";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
 import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
@@ -89,7 +88,7 @@ import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
-import { registerGraderRoutes } from "./routes/grader";
+import { registerReviewPreviewRoutes } from "./routes/review-preview";
 import { registerCorrectionModeRoutes } from "./correction-mode";
 import {
   migrateGraderSchema,
@@ -2838,7 +2837,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Domain route modules ───────────────────────────────────────────────────
   registerPublicRoutes(app);
   registerAuthRoutes(app);
-  registerGraderRoutes(app);
+  registerReviewPreviewRoutes(app);
   registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
   registerPrintWorkflowRoutes(app); // Approval → Printing → Printed lifecycle (requireAdmin; staff via can_print proxy)
@@ -2864,7 +2863,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPokemonKnowledgeRoutes(app);
   registerCatalogueRoutes(app);
   registerProjectControlRoutes(app); // Super Admin Project Control dashboard (super-admin-gated, internal)
-  registerLabelPreviewRoutes(app);
   registerCardIdentificationRoutes(app);
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);

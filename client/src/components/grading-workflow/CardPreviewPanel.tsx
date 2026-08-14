@@ -13,12 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from "lucide-react";
-import {
-  createCardInspectionState,
-  normaliseCardInspectionState,
-  updateCardInspectionView,
-  type CardInspectionState,
-} from "./card-inspection-state";
+import { normaliseCardInspectionState, updateCardInspectionView, type CardInspectionState } from "./card-inspection-state";
 
 interface ImagesResponse {
   urls?: Record<string, string | null>;
@@ -53,18 +48,18 @@ export function CardPreviewPanel({
       (/api/grader, /api/admin/grade-review) so the preview loads role-scoped
       signed URLs — and shares GradingPanel's images cache key. */
   apiBase?: string;
-  inspectionState?: CardInspectionState;
-  onInspectionStateChange?: (state: CardInspectionState) => void;
+  /** Required: the canonical workstation owns inspection state above all
+      stages, so the rail can never create a competing per-viewer state. */
+  inspectionState: CardInspectionState;
+  onInspectionStateChange: (state: CardInspectionState) => void;
 }) {
-  const [internalInspection, setInternalInspection] = useState(createCardInspectionState);
-  const currentInspection = normaliseCardInspectionState(inspectionState ?? internalInspection);
+  const currentInspection = normaliseCardInspectionState(inspectionState);
   const side = currentInspection.side;
   const view = currentInspection.views[side];
   const zoom = view.zoom;
   const commitInspection = (next: CardInspectionState) => {
     const normalised = normaliseCardInspectionState(next);
-    if (inspectionState === undefined) setInternalInspection(normalised);
-    onInspectionStateChange?.(normalised);
+    onInspectionStateChange(normalised);
   };
   const setSide = (nextSide: "front" | "back") => commitInspection({ ...currentInspection, side: nextSide });
   const setView = (patch: Partial<typeof view>) =>

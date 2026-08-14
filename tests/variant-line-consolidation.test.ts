@@ -338,9 +338,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
             .replace(b3Columns, "")
             .replace(authorityOutputFields, "")
             .replace(/'(centering|corners|edges|surface)'/g, "")
-        ).not.toMatch(
-          /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
-        );
+        ).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
         continue;
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);

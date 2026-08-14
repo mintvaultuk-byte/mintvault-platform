@@ -2,13 +2,13 @@
 
 **Written:** 2026-08-12, Stage 4 before product edits.
 
-| Metric | Estimate |
-|---|---|
-| Files expected to change | 18–24 |
-| Estimated lines changed | 900–1,200 |
-| Estimated commits | 3–5 |
-| Estimated tests | 14–20 regression cases plus the existing full suite |
-| Estimated duration | multiple controlled implementation passes |
+| Metric                   | Estimate                                            |
+| ------------------------ | --------------------------------------------------- |
+| Files expected to change | 18–24                                               |
+| Estimated lines changed  | 900–1,200                                           |
+| Estimated commits        | 3–5                                                 |
+| Estimated tests          | 14–20 regression cases plus the existing full suite |
+| Estimated duration       | multiple controlled implementation passes           |
 
 ## Basis
 

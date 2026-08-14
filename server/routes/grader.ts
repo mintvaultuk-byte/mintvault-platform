@@ -86,6 +86,19 @@ const staffCustomSetEditLimit = rateLimit({
   message: { error: "Too many set edit attempts. Please wait a few minutes and try again." },
 });
 
+// Saving or submitting a grade performs a guarded certificate mutation plus an
+// audit write. Limit after the staff capability gate and key by the authenticated
+// grader so a shared grading-room address cannot exhaust another operator's budget.
+const graderGradeMutationRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `grader-grade-mutation:${String((req.session as any).staffId ?? (req.session as any).graderId ?? "unknown")}`,
+  message: { error: "Too many grading changes. Please wait a minute and try again." },
+});
+
 /** Panel actions the grader proxy may delegate to the admin handlers. */
 const GRADER_PROXY_ACTIONS = new Set([
   "recrop",
@@ -403,7 +416,7 @@ export function registerGraderRoutes(app: Express): void {
   );
 
   // ── Grader DRAFT save (repeatable; status stays 'assigned') ─────────────────
-  app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), async (req: Request, res: Response) => {
+  app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), graderGradeMutationRateLimit, async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
@@ -448,7 +461,7 @@ export function registerGraderRoutes(app: Express): void {
 
   // ── Grader SUBMIT for approval (assigned → pending_review) ───────────────────
   // Registered BEFORE the generic :action proxy so 'submit' isn't proxied.
-  app.post("/api/grader/certificates/:id/submit", requireCapability("grade"), async (req: Request, res: Response) => {
+  app.post("/api/grader/certificates/:id/submit", requireCapability("grade"), graderGradeMutationRateLimit, async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
@@ -1106,15 +1119,18 @@ export function registerGraderRoutes(app: Express): void {
   // shows the authoritative grade/subgrades and both images; this small,
   // admin-only projection supplies the intake/station/operator facts that let
   // a reviewer decide whether that exact physical card may clear the hold.
-  app.get("/api/admin/grade-review/certificates/:id/partner-context", requireAdmin, async (req: Request, res: Response) => {
-    const certId = parseInt(String(req.params.id), 10);
-    const a = await getCertAssignment(certId);
-    if (!a) return res.status(404).json({ error: "Certificate not found" });
-    if (a.gradingStatus !== "pending_review") {
-      return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
-    }
-    try {
-      const result = await db.execute(sql`
+  app.get(
+    "/api/admin/grade-review/certificates/:id/partner-context",
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      const certId = parseInt(String(req.params.id), 10);
+      const a = await getCertAssignment(certId);
+      if (!a) return res.status(404).json({ error: "Certificate not found" });
+      if (a.gradingStatus !== "pending_review") {
+        return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+      }
+      try {
+        const result = await db.execute(sql`
         SELECT c.origin_type, c.origin_partner_public_ref, c.origin_partner_legal_name,
                c.origin_location_public_ref, c.origin_location_name, c.graded_by,
                c.redo_count, c.rejection_reason,
@@ -1164,27 +1180,28 @@ export function registerGraderRoutes(app: Express): void {
          WHERE c.id = ${certId}
          LIMIT 1
       `);
-      const row = result.rows[0] as any;
-      if (!row) return res.status(404).json({ error: "Certificate not found" });
-      if (row.origin_type !== "PARTNER") return res.json({ partner: null });
-      return res.json({
-        partner: {
-          publicRef: row.origin_partner_public_ref ?? null,
-          legalName: row.origin_partner_legal_name ?? null,
-          locationRef: row.origin_location_public_ref ?? null,
-          locationName: row.origin_location_name ?? null,
-          operator: row.operator_name || row.operator_email || row.graded_by || null,
-          stationCodes: row.station_codes ?? [],
-          evidenceComplete: row.evidence_complete === true,
-          redoCount: Number(row.redo_count ?? 0),
-          correctionReason: row.rejection_reason ?? null,
-        },
-      });
-    } catch (error) {
-      console.error("[partner-qa-context] unavailable:", error instanceof Error ? error.message : error);
-      return res.status(503).json({ error: "Partner QA provenance is unavailable." });
+        const row = result.rows[0] as any;
+        if (!row) return res.status(404).json({ error: "Certificate not found" });
+        if (row.origin_type !== "PARTNER") return res.json({ partner: null });
+        return res.json({
+          partner: {
+            publicRef: row.origin_partner_public_ref ?? null,
+            legalName: row.origin_partner_legal_name ?? null,
+            locationRef: row.origin_location_public_ref ?? null,
+            locationName: row.origin_location_name ?? null,
+            operator: row.operator_name || row.operator_email || row.graded_by || null,
+            stationCodes: row.station_codes ?? [],
+            evidenceComplete: row.evidence_complete === true,
+            redoCount: Number(row.redo_count ?? 0),
+            correctionReason: row.rejection_reason ?? null,
+          },
+        });
+      } catch (error) {
+        console.error("[partner-qa-context] unavailable:", error instanceof Error ? error.message : error);
+        return res.status(503).json({ error: "Partner QA provenance is unavailable." });
+      }
     }
-  });
+  );
   app.put("/api/admin/grade-review/certificates/:id/grade", requireAdmin, async (req: Request, res: Response) => {
     try {
       const adminUser = (req.session as any).adminEmail || "admin";

@@ -25,12 +25,12 @@ flowchart LR
 
 ## Current facts
 
-| Fact | Evidence |
-|---|---|
-| Production serves `b0de0880` and health is OK. | `/api/version`, `/health` on 2026-08-12. |
-| Production Partner public routes are closed with `503`. | Two public route status probes on 2026-08-12. |
-| Pass 1 server-authority code is not integrated into baseline. | `git merge-base --is-ancestor 7368b07e origin/main` returned false; inverse returned true. |
-| Pilot must remain fail-closed rather than use a privileged DB fallback. | Attached Pass 2 requirements and existing Partner runtime ledger. |
+| Fact                                                                    | Evidence                                                                                   |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Production serves `b0de0880` and health is OK.                          | `/api/version`, `/health` on 2026-08-12.                                                   |
+| Production Partner public routes are closed with `503`.                 | Two public route status probes on 2026-08-12.                                              |
+| Pass 1 server-authority code is not integrated into baseline.           | `git merge-base --is-ancestor 7368b07e origin/main` returned false; inverse returned true. |
+| Pilot must remain fail-closed rather than use a privileged DB fallback. | Attached Pass 2 requirements and existing Partner runtime ledger.                          |
 
 ## Constraints
 

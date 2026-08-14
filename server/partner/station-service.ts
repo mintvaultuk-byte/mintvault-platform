@@ -189,7 +189,10 @@ function shouldPersistAttestedVersion(current: string | null, attested: string |
   if (!next) return false;
   const existing = current ? versionTuple(current) : null;
   if (!existing) return true;
-  return next[0] > existing[0] || (next[0] === existing[0] && (next[1] > existing[1] || (next[1] === existing[1] && next[2] >= existing[2])));
+  return (
+    next[0] > existing[0] ||
+    (next[0] === existing[0] && (next[1] > existing[1] || (next[1] === existing[1] && next[2] >= existing[2])))
+  );
 }
 
 async function resolvePermittedLocation(
@@ -466,7 +469,11 @@ export async function authenticateStationRequest(
         AND EXISTS (SELECT 1 FROM partner_organisations o WHERE o.id=s.tenant_id AND o.status='ACTIVE')
         AND EXISTS (SELECT 1 FROM partner_locations l WHERE l.id=s.location_id AND l.status='ACTIVE')
       RETURNING s.id, s.app_version`,
-    [station.id, parsed.envelope.nonce.toString(), shouldPersistAttestedVersion(station.app_version, attestedVersion) ? attestedVersion : null]
+    [
+      station.id,
+      parsed.envelope.nonce.toString(),
+      shouldPersistAttestedVersion(station.app_version, attestedVersion) ? attestedVersion : null,
+    ]
   );
   if (advanced.rows.length !== 1)
     throw new StationServiceError("station_replay", "Station request was replayed or the station was suspended");

@@ -10,7 +10,12 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom, applyEveryMigrationRealistic, partnerScopeOnly } from "./helpers/partner-realistic-db";
+import {
+  provisionRealisticRoles,
+  migratorUrlFrom,
+  applyEveryMigrationRealistic,
+  partnerScopeOnly,
+} from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -79,9 +84,8 @@ async function seedMintVaultTables(): Promise<void> {
  * single-character wildcard, so the regex below is the equivalent. Sorted to match ORDER BY.
  */
 function partnerMigrationFilenames(): string[] {
-  return listMigrationFiles()
+  return partnerScopeOnly(listMigrationFiles())
     .map((f) => f.filename)
-    .filter((n) => /^00.+partner/.test(n))
     .sort();
 }
 
@@ -124,7 +128,8 @@ async function applyAllRealistic(): Promise<void> {
 
     it("every partner migration journal row is present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename = ANY($1) ORDER BY filename",
+        [partnerMigrationFilenames()]
       );
       // Derived from migrations/, NOT hard-coded — see partnerMigrationFilenames() above. This read
       // `toHaveLength(13)` against a directory that now holds 19; a new magic number would simply

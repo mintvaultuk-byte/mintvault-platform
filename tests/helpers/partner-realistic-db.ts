@@ -28,6 +28,8 @@ export const PARTNER_MIGRATIONS = [
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
   "0009_partner_connector_validation",
+  // Runtime authentication now requires the provenance projection this migration
+  // adds. Keep the baseline harness aligned with the deployed login contract.
   "0077_partner_credential_lifecycle_hardening",
 ] as const;
 
@@ -53,6 +55,7 @@ export const PARTNER_MIGRATIONS_WITH_G3F = [
   ...PARTNER_MIGRATIONS_WITH_G3E,
   "0012_partner_connector_import_attempts",
   "0013_partner_connector_claim_index",
+  "0078_partner_connector_flag_read",
 ] as const;
 
 /** G4 — append-only Super-Admin operational-action audit table (0014). */
@@ -234,6 +237,8 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
   "0077_partner_credential_lifecycle_hardening",
+  // From origin/main: forward-only connector flag-read grant. PARTNER scope.
+  "0078_partner_connector_flag_read",
   // (0089_partner_shared_rate_limit_buckets — renumbered from 0078 — is appended in numeric order
   // at the end of this list.) Originally described here: it creates ONE standalone table
   // (partner_rate_limit_buckets) plus an index and a grant to partner_runtime, which migration 0001

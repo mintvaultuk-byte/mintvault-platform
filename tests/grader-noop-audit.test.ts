@@ -73,7 +73,7 @@ describe("role write paths suppress no-op audit rows", () => {
         grade_edges: "9.0",
         grade_surface: "9.0",
       },
-      "admin@example.test",
+      "admin@example.test"
     );
 
     expect(result).toMatchObject({ ok: true, revision: 1, authoritativeGrade: expect.any(Object) });

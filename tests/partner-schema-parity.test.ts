@@ -168,9 +168,11 @@ describe("partner schema ↔ migration parity", () => {
       // 0077 (partner credential lifecycle hardening) is additive: it adds
       // partner_users.password_set_at, collapses partner_password_reset_tokens to one live
       // link per user (partial unique index), and re-declares partner_auth_lookup() to
-      // project the new column. Production is applied through 0076, so 0077 is the single
-      // outstanding migration for this release.
+      // project the new column. This and the following connector grant are forward-only
+      // migrations; their identities must remain independently pinned.
       "0077_partner_credential_lifecycle_hardening.sql",
+      
+      "0078_partner_connector_flag_read.sql",
       // 0078 (shared partner rate-limit buckets) is additive and carries NO tenant data. It supplies
       // the shared store that server/partner/rate-limit.ts has always required but never had: the
       // only implementation was a per-process Map, so on the two-Machine production topology every

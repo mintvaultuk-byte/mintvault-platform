@@ -9,10 +9,26 @@
  * credits, zero DB.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readdirSync, readFileSync, statSync } from "fs";
+import { join, relative } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+const CLIENT_SOURCE_ROOT = join(process.cwd(), "client/src");
+
+function productionClientSources(directory = CLIENT_SOURCE_ROOT): Array<{ path: string; source: string }> {
+  return readdirSync(directory).flatMap((entry) => {
+    const absolute = join(directory, entry);
+    if (statSync(absolute).isDirectory()) return productionClientSources(absolute);
+    if (!/\.(?:ts|tsx)$/.test(entry) || entry.startsWith("dev-")) return [];
+    return [{ path: relative(process.cwd(), absolute), source: readFileSync(absolute, "utf8") }];
+  });
+}
+
+const PRODUCTION_CLIENT_SOURCES = productionClientSources();
+const directJsxMounts = (component: string) =>
+  PRODUCTION_CLIENT_SOURCES.filter(({ source }) => new RegExp(`<${component}(?=[\\s/>])`).test(source)).map(
+    ({ path }) => path
+  );
 
 const SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
@@ -112,14 +128,14 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     // be a flex COLUMN (so the child can claim height) and must carry a real
     // desktop viewport bound (so there is a height to claim).
     expect(ADMIN_DASH, "/admin workstation wrapper must be a flex column").toMatch(
-    // NO `flex-1` in this assertion, and that is the whole point. `flex-1` is
-    // `flex: 1 1 0%`, and on a flex ITEM flex-basis REPLACES height for main-axis
-    // sizing — so with it present the bound is computed and discarded and the item
-    // stretches to its auto-height parent. Measured in a real browser against the
-    // compiled CSS at 1280x800: with flex-1 the workspace was 2568px, the document
-    // scrolled, the right pane did NOT scroll internally and the Live Certificate
-    // Preview sat at y=2552. Without it: 728px, right pane scrolls, preview bottom
-    // 763px, document not scrollable. Same result at 1024x768 (696px / 731px).
+      // NO `flex-1` in this assertion, and that is the whole point. `flex-1` is
+      // `flex: 1 1 0%`, and on a flex ITEM flex-basis REPLACES height for main-axis
+      // sizing — so with it present the bound is computed and discarded and the item
+      // stretches to its auto-height parent. Measured in a real browser against the
+      // compiled CSS at 1280x800: with flex-1 the workspace was 2568px, the document
+      // scrolled, the right pane did NOT scroll internally and the Live Certificate
+      // Preview sat at y=2552. Without it: 728px, right pane scrolls, preview bottom
+      // 763px, document not scrollable. Same result at 1024x768 (696px / 731px).
       /className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/
     );
     expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
@@ -194,6 +210,36 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     }
   });
 
+  it("repository-wide production guard: one shell, panel, preview implementation and stage owner", () => {
+    expect(directJsxMounts("CanonicalGradingWorkstationShell")).toEqual([
+      "client/src/components/grading-workflow/GradingWorkstation.tsx",
+    ]);
+    expect(directJsxMounts("GradingPanel")).toEqual(["client/src/components/grading-workflow/GradingWorkstation.tsx"]);
+    expect(directJsxMounts("CertificatePreviewPanel")).toEqual([
+      "client/src/components/grading-workflow/GradingWorkstation.tsx",
+    ]);
+    expect(directJsxMounts("CardPreviewPanel")).toEqual([
+      "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
+    ]);
+    expect(directJsxMounts("RoleReviewSummary")).toEqual(["client/src/components/grading/grading-panel.tsx"]);
+    expect(directJsxMounts("ReviewSummary")).toEqual([]);
+    expect(
+      PRODUCTION_CLIENT_SOURCES.filter(({ source }) =>
+        /(?:export\s+)?(?:function|const)\s+CertificatePreviewPanel\b/.test(source)
+      ).map(({ path }) => path)
+    ).toEqual(["client/src/components/grading-workflow/CertificatePreviewPanel.tsx"]);
+    expect(
+      PRODUCTION_CLIENT_SOURCES.filter(({ source }) =>
+        /const\s+\[\s*(?:stage|wfStage)\s*,\s*set\w+\s*\]\s*=\s*useState/.test(source)
+      ).map(({ path }) => path)
+    ).toEqual(["client/src/components/grading-workflow/GradingWorkstation.tsx"]);
+    expect(
+      PRODUCTION_CLIENT_SOURCES.filter(({ source }) => /useState\(createCardInspectionState\)/.test(source)).map(
+        ({ path }) => path
+      )
+    ).toEqual(["client/src/components/grading-workflow/GradingWorkstation.tsx"]);
+  });
+
   it("static stage-injection guard: no route can inject a full form or own the canonical stage controller", () => {
     expect(WORKSTATION).not.toMatch(/editor\s*\??:/);
     expect(WORKSTATION).not.toMatch(/\{editor\??\.\(/);
@@ -204,6 +250,17 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(ADMIN_DASH).toMatch(
       /editingCert\s*\?\s*\(\s*<GradingWorkstation[\s\S]*?:\s*\([\s\S]*?certificate-create-surface/
     );
+  });
+
+  it("keeps scanner/station controls inside the canonical Card Details body", () => {
+    expect(WORKSTATION).toContain("scannerControls?: ReactNode");
+    expect(WORKSTATION).toContain('data-canonical-section="scanner-controls"');
+    expect(WORKSTATION).toContain('data-testid="workstation-scanner-controls"');
+    expect(PARTNER).toMatch(/<GradingWorkstation[\s\S]*?scannerControls=\{<PartnerCaptureControls/);
+    expect(ADMIN_DASH).toMatch(/<GradingWorkstation[\s\S]*?scannerControls=\{/);
+    expect(ADMIN_DASH).toContain("<CaptureWizard");
+    expect(CERT_FORM).not.toContain("CaptureWizard");
+    expect(CERT_FORM).not.toContain("scannerCaptureRequired");
   });
 });
 

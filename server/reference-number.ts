@@ -12,10 +12,9 @@ import { sql } from "drizzle-orm";
 const ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 export function generateReferenceNumber(): string {
-  const bytes = crypto.randomBytes(12);
   let result = "";
   for (let i = 0; i < 12; i++) {
-    result += ALPHABET[bytes[i] % ALPHABET.length];
+    result += ALPHABET[crypto.randomInt(ALPHABET.length)];
   }
   return `${result.slice(0, 4)}-${result.slice(4, 8)}-${result.slice(8, 12)}`;
 }

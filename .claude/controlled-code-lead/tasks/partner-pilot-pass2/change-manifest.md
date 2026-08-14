@@ -18,12 +18,12 @@ operation.
 
 ## Files to change
 
-| File set | Change | Why | Class |
-|---|---|---|---|
-| 24 files in `7368b07e` | Semantically integrate the focused Pass 1 authority commit and its tests. | PP2-F2; preserve server-issued grades and remove browser authority. | B |
-| `migrations/0074_partner_submission_lifecycle_and_location_snapshot.sql` | Pin function search path and qualify the provenance table. | PP2-F3; source-only security repair. | E |
-| `migrations/rollback-0073-lineage-convergence.sql` | Preserve the matching rollback journal correction. | PP2-F3; migration lineage integrity. | E |
-| `tests/partner-submission-lifecycle-migration.test.ts` | Add the executable pg_temp forgery regression. | PP2-F3 proof. | E |
+| File set                                                                 | Change                                                                    | Why                                                                 | Class |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----- |
+| 24 files in `7368b07e`                                                   | Semantically integrate the focused Pass 1 authority commit and its tests. | PP2-F2; preserve server-issued grades and remove browser authority. | B     |
+| `migrations/0074_partner_submission_lifecycle_and_location_snapshot.sql` | Pin function search path and qualify the provenance table.                | PP2-F3; source-only security repair.                                | E     |
+| `migrations/rollback-0073-lineage-convergence.sql`                       | Preserve the matching rollback journal correction.                        | PP2-F3; migration lineage integrity.                                | E     |
+| `tests/partner-submission-lifecycle-migration.test.ts`                   | Add the executable pg_temp forgery regression.                            | PP2-F3 proof.                                                       | E     |
 
 ## Explicitly not changed
 
@@ -68,28 +68,28 @@ flag, alter a credit, render/print a live label, or access production data.
 
 The existing signed scanner/evidence contract is certificate-targeted: a
 capture session, its TIFF masters and the canonical workstation all bind to
-`certificates.id`.  The safe compatible point is therefore the locked connector
+`certificates.id`. The safe compatible point is therefore the locked connector
 import, after the source submission has atomically reserved exactly one active
-credit per card and before either side can be armed.  `0076` allocates the
+credit per card and before either side can be armed. `0076` allocates the
 global MV identity and immutable Partner origin in that same database
 transaction; a failed import rolls back the allocator increment and no client
-or Scanner predicts an identity.  The same identity stays attached through
-capture, correction, QA, print and completion.  It is deliberately not output
+or Scanner predicts an identity. The same identity stays attached through
+capture, correction, QA, print and completion. It is deliberately not output
 or public-finalised until the stricter QA/credit/evidence print authority
-passes.  This earlier-than-registration timing is retained for compatibility
+passes. This earlier-than-registration timing is retained for compatibility
 with the canonical target model and must be exercised in the owner physical
 canary; an abandoned post-import card retains its historical identity and is
 never reassigned.
 
 ## Files to change
 
-| File set | Change | Why | Class |
-|---|---|---|---|
-| `migrations/0076_partner_pilot_certificate_allocation.sql` | New narrow SECURITY DEFINER allocator, fixed search path, exact connector/tenant derivation, immutable origin snapshot, assignee, MV allocation, and one-live-cert-per-item guard. | PP2-F7. Source only until owner-authorised journal reconciliation. | E |
-| connector/grading routes | Invoke the allocator only when the scoped flag is enabled; require current station-bound TIFF evidence and exact Partner origin for all Partner grading reads/writes. | PP2-F7 and wrong-card prevention. | B/C |
-| `server/partner/print-eligibility.ts` and print/preview call sites | Require completed mapping, QA clear, settled per-card credit set, two current captured TIFF masters, approved station provenance, MV identity and allowed print state. | PP2-F6. | B/C |
-| QA context, certificate history and portal page | Show Super Admin Partner/location/operator/station/evidence/correction facts beside the canonical workstation; replace the Partner certificate-history placeholder with a scoped read-only projection. | Parts 7 and 9. | B |
-| migration/source boundary tests | Classify 0075/0076 as application scope and pin allocator, evidence, QA/output and history boundaries. | Regression proof. | B/E |
+| File set                                                           | Change                                                                                                                                                                                                 | Why                                                                | Class |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | ----- |
+| `migrations/0076_partner_pilot_certificate_allocation.sql`         | New narrow SECURITY DEFINER allocator, fixed search path, exact connector/tenant derivation, immutable origin snapshot, assignee, MV allocation, and one-live-cert-per-item guard.                     | PP2-F7. Source only until owner-authorised journal reconciliation. | E     |
+| connector/grading routes                                           | Invoke the allocator only when the scoped flag is enabled; require current station-bound TIFF evidence and exact Partner origin for all Partner grading reads/writes.                                  | PP2-F7 and wrong-card prevention.                                  | B/C   |
+| `server/partner/print-eligibility.ts` and print/preview call sites | Require completed mapping, QA clear, settled per-card credit set, two current captured TIFF masters, approved station provenance, MV identity and allowed print state.                                 | PP2-F6.                                                            | B/C   |
+| QA context, certificate history and portal page                    | Show Super Admin Partner/location/operator/station/evidence/correction facts beside the canonical workstation; replace the Partner certificate-history placeholder with a scoped read-only projection. | Parts 7 and 9.                                                     | B     |
+| migration/source boundary tests                                    | Classify 0075/0076 as application scope and pin allocator, evidence, QA/output and history boundaries.                                                                                                 | Regression proof.                                                  | B/E   |
 
 ## Explicitly not changed
 
@@ -136,12 +136,12 @@ station.
 
 ## Files to change
 
-| File | Change | Why | Class |
-|---|---|---|---|
-| `server/partner/station-service.ts` | Add a PENDING-only rejection transition with a credential-epoch rotation and dedicated audit event. | PP2-F11. | B |
-| `server/partner/station-admin-routes.ts` | Add the Super Admin rejection endpoint beside existing reasoned lifecycle routes. | PP2-F11. | B |
-| `client/src/pages/admin/partner-management.tsx` | Render the paginated fleet view and reason-confirmed constrained actions. | PP2-F11. | B |
-| `tests/partner-station-fleet-control.test.ts` | Pin server/route/UI control boundaries. | PP2-F11 proof. | B |
+| File                                            | Change                                                                                              | Why            | Class |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------- | ----- |
+| `server/partner/station-service.ts`             | Add a PENDING-only rejection transition with a credential-epoch rotation and dedicated audit event. | PP2-F11.       | B     |
+| `server/partner/station-admin-routes.ts`        | Add the Super Admin rejection endpoint beside existing reasoned lifecycle routes.                   | PP2-F11.       | B     |
+| `client/src/pages/admin/partner-management.tsx` | Render the paginated fleet view and reason-confirmed constrained actions.                           | PP2-F11.       | B     |
+| `tests/partner-station-fleet-control.test.ts`   | Pin server/route/UI control boundaries.                                                             | PP2-F11 proof. | B     |
 
 ## Explicitly not changed
 
@@ -176,12 +176,12 @@ not make the scanner an allocation, grading, QA or print authority.
 
 ## Files to change
 
-| File | Change | Why | Class |
-|---|---|---|---|
-| `server/scanner-capture-service.ts` | Derive paired card registration only from captured front and back target sessions. | PP2-F10 server fact. | B |
-| `server/routes.ts` | Return the derived `card_registered` fact from successful capture and reconciliation responses. | PP2-F10 transport. | B |
-| `scripts/scanner-app/{lib/watcher.js,main.js,preload.js,renderer/*}` | Persist/display the server result, and permit a local acknowledgement that can neither arm nor retarget a capture. | PP2-F10 operator hand-off. | B |
-| scanner boundary and state-machine tests | Prove a second accepted side holds the server-derived acknowledgement state. | PP2-F10 proof. | B |
+| File                                                                 | Change                                                                                                             | Why                        | Class |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------- | ----- |
+| `server/scanner-capture-service.ts`                                  | Derive paired card registration only from captured front and back target sessions.                                 | PP2-F10 server fact.       | B     |
+| `server/routes.ts`                                                   | Return the derived `card_registered` fact from successful capture and reconciliation responses.                    | PP2-F10 transport.         | B     |
+| `scripts/scanner-app/{lib/watcher.js,main.js,preload.js,renderer/*}` | Persist/display the server result, and permit a local acknowledgement that can neither arm nor retarget a capture. | PP2-F10 operator hand-off. | B     |
+| scanner boundary and state-machine tests                             | Prove a second accepted side holds the server-derived acknowledgement state.                                       | PP2-F10 proof.             | B     |
 
 ## Explicitly not changed
 
@@ -220,14 +220,14 @@ to any environment by this task.
 
 ## Files to change
 
-| File | Change | Why | Class |
-|---|---|---|---|
-| `server/partner/station-service.ts` | List only active, permitted, calibrated station summaries without credential material. | PP2-F8. | B |
-| `server/partner/station-routes.ts` | Add scoped station discovery and session-state reads around the existing target arm route. | PP2-F8. | B |
-| `server/scanner-capture-service.ts` | Transactionally expire stale station targets and rely on a partial unique station index. | PP2-F9. | B |
-| `client/src/pages/partner/grading.tsx` | Add station-picker/front-back capture controls to the canonical Partner grading page; no free-form station ID. | PP2-F8. | B |
-| `migrations/0075_partner_station_single_active_capture.sql` | Add the partial unique station index; source only. | E |
-| focused scanner/migration tests | Pin scope, route and index proof. | B/E proof. |
+| File                                                        | Change                                                                                                         | Why        | Class |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------- | ----- |
+| `server/partner/station-service.ts`                         | List only active, permitted, calibrated station summaries without credential material.                         | PP2-F8.    | B     |
+| `server/partner/station-routes.ts`                          | Add scoped station discovery and session-state reads around the existing target arm route.                     | PP2-F8.    | B     |
+| `server/scanner-capture-service.ts`                         | Transactionally expire stale station targets and rely on a partial unique station index.                       | PP2-F9.    | B     |
+| `client/src/pages/partner/grading.tsx`                      | Add station-picker/front-back capture controls to the canonical Partner grading page; no free-form station ID. | PP2-F8.    | B     |
+| `migrations/0075_partner_station_single_active_capture.sql` | Add the partial unique station index; source only.                                                             | E          |
+| focused scanner/migration tests                             | Pin scope, route and index proof.                                                                              | B/E proof. |
 
 ## Explicitly not changed
 
@@ -267,13 +267,13 @@ external-system change.
 
 ## Files to change
 
-| File | Change | Why | Class |
-|---|---|---|---|
-| `server/partner/grading-routes.ts` | Resolve `partner_grading_enabled` under the authenticated tenant/location transaction before any grading endpoint. Fail closed on flag/database error. | PP2-F5. | B |
-| `server/services/label-preview-access.ts` | Deny a Partner preview for `pending_review`; Super Admin QA remains the sole review/print authority. | PP2-F6. | B |
-| `tests/label-preview-security.test.ts` | Prove the QA-pending denial. | PP2-F6 proof. | B |
-| `tests/structured-variant-persistence.test.ts` | Admit only the already-authorised server-owned resolver signature while retaining its scoring/certificate-number prohibition. | Package A proof repair. | B |
-| `tests/grader-noop-audit.test.ts` | Update the mocked server-owned resolver path and asserted API response. | Package A proof repair. | B |
+| File                                           | Change                                                                                                                                                 | Why                     | Class |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ----- |
+| `server/partner/grading-routes.ts`             | Resolve `partner_grading_enabled` under the authenticated tenant/location transaction before any grading endpoint. Fail closed on flag/database error. | PP2-F5.                 | B     |
+| `server/services/label-preview-access.ts`      | Deny a Partner preview for `pending_review`; Super Admin QA remains the sole review/print authority.                                                   | PP2-F6.                 | B     |
+| `tests/label-preview-security.test.ts`         | Prove the QA-pending denial.                                                                                                                           | PP2-F6 proof.           | B     |
+| `tests/structured-variant-persistence.test.ts` | Admit only the already-authorised server-owned resolver signature while retaining its scoring/certificate-number prohibition.                          | Package A proof repair. | B     |
+| `tests/grader-noop-audit.test.ts`              | Update the mocked server-owned resolver path and asserted API response.                                                                                | Package A proof repair. | B     |
 
 ## Explicitly not changed
 
