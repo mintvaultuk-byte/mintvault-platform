@@ -192,6 +192,30 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // `certificates`, `submission_items` and `cert_counter`. Same classification as 0076, which owns
   // the original function, and for the same reason.
   "0081_partner_card_job_certificate_binding",
+  // APPLICATION scope, on the migration's own declaration: 0088 carries the banner
+  // `SCOPE: APPLICATION (requires certificates)` in its header. Its ENTIRE payload is a partial
+  // unique index on core `certificates (lower(nfc_uid))`.
+  //
+  // It is guarded by to_regclass, so unlike 0079 it would not FAIL on a partner-only database — it
+  // would no-op. That is precisely why it must be classified here rather than waved through as
+  // partner-scope: a no-op recorded as "applied" is a false negative. It would tell the partner
+  // harness that NFC binding integrity had been exercised when nothing was built and nothing was
+  // asserted. Contrast 0080, which IS partner-scope: its core FK is conditional, but the
+  // partner_card_jobs table it creates is real and partner suites depend on it.
+  //
+  // Consequence, and the reason this is the correct classification rather than bookkeeping: the two
+  // suites that DECLARE 0088 (partner-pilot-concurrency, partner-card-job-output) now get the core
+  // schema provisioned by the harness itself instead of relying on each suite remembering to seed
+  // `certificates` first. The dependency becomes guaranteed rather than incidental.
+  "0088_nfc_binding_integrity",
+  // APPLICATION scope, unambiguously: 0090 opens with hard preconditions that RAISE EXCEPTION when
+  // `certificates` is absent (and likewise for partner_stations and the partner_runtime role), then
+  // its inlined 0047 body does `ALTER TABLE certificates ADD COLUMN ...` and creates tables with
+  // `REFERENCES certificates(id)`. Classifying it partner-scope would reproduce the exact 0073
+  // failure mode this contract exists to prevent — an application-scope migration falling into a
+  // partner-only harness and failing closed there. See tests/lineage-convergence-0090.test.ts for
+  // the real-PostgreSQL proof of its convergence behaviour.
+  "0090_lineage_convergence_scanner",
 ] as const;
 
 /**
