@@ -106,8 +106,8 @@ describe("3. all three grading stages use the SAME WorkstationHeaderStrip compon
 describe("4. all three stages use the same desktop breakpoint (md) for the two-column shell", () => {
   it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
-    expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(ASIDE).toContain("md:w-[40%] md:shrink-0");
+    expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
+    expect(ASIDE).toContain("md:w-[35%] md:shrink-0");
     // no competing/second breakpoint (e.g. lg:, 2xl:) governs the aside's own width.
     expect(ASIDE).not.toMatch(/lg:w-\[|2xl:w-\[|xl:w-\[/);
   });
@@ -178,8 +178,8 @@ describe("8. workflow stage buttons use the compact shared sizing", () => {
   it("stage buttons are single-line, compact padding, ~28px icon circle", () => {
     const classIdx = BAR.indexOf("className={`flex");
     const buttonClass = BAR.slice(classIdx, BAR.indexOf("${", classIdx));
-    expect(buttonClass).toContain("px-2 py-2");
-    expect(BAR).toContain("h-7 w-7");
+    expect(buttonClass).toContain("px-2 py-1");
+    expect(BAR).toContain("h-6 w-6");
     expect(BAR).not.toMatch(/<span[^>]*>\s*\{stage\.sublabel\}/);
   });
 });
@@ -223,7 +223,7 @@ describe("12. right panel scrolls independently where required", () => {
     const j = WORKSTATION.indexOf("<GradingPanel", i);
     const controlPanel = WORKSTATION.slice(i, j);
     expect(controlPanel).toContain("WORKSTATION_BODY_SCROLL_CLASS");
-    expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
+    expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1"');
     expect(FORM.slice(FORM.indexOf("onSubmit={handleSubmit}"), FORM.indexOf('className="space-y-2.5"') + 30)).toContain(
       'className="space-y-2.5"'
     );

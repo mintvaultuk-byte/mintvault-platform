@@ -21,7 +21,7 @@ import React, { type ReactNode, type Ref } from "react";
  * and the grading body.
  *
  * The body (children) MUST be the canonical scroll element
- * (`min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1`) — Super Admin passes its
+ * (`min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1`) — Super Admin passes its
  * existing <form> with exactly those classes (unchanged); role routes pass a
  * <div> with the same classes (see WORKSTATION_BODY_SCROLL_CLASS). An
  * architecture test enforces this so no route can fork the scroll model.
@@ -54,7 +54,7 @@ export const WORKSTATION_HEADER_REGION_CLASS = "shrink-0 space-y-1";
 
 /** The one canonical grading-body scroll class. Admin's <form> and every role
  *  <div> use exactly this — enforced by the architecture test. */
-export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1";
+export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1";
 
 export interface CanonicalGradingWorkstationShellProps {
   /** Persistent left card + live-certificate preview rail. */
@@ -78,7 +78,7 @@ export function CanonicalGradingWorkstationShell({
 }: CanonicalGradingWorkstationShellProps) {
   return (
     <div ref={rootRef} className={WORKSTATION_FILL_CLASS} data-testid="grading-workspace" data-canonical-shell="true">
-      <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 md:flex-row">
         {previewAside}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
           {children}

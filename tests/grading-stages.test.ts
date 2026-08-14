@@ -171,10 +171,10 @@ describe("card preview is read-only (spec 3)", () => {
     // The two-column row lives in the sole canonical GradingWorkstation shell.
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     const shellSrc = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
-    expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
     expect(WORKSTATION).toContain("<WorkstationPreviewAside");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
     expect(asideSrc).toContain("<CardPreviewPanel");
   });
