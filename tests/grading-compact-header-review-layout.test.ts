@@ -52,10 +52,10 @@ describe("1. compact stage buttons (no more two-line dashboard cards)", () => {
   it("padding and icon-circle size are reduced from the previous oversized dimensions", () => {
     const buttonClassIdx = BAR.indexOf("className={`flex");
     const buttonClass = BAR.slice(buttonClassIdx, BAR.indexOf("${", buttonClassIdx));
-    expect(buttonClass).toContain("px-2 py-2");
+    expect(buttonClass).toContain("px-2 py-1");
     expect(buttonClass).not.toContain("px-2.5 py-1.5"); // old oversized padding gone
-    expect(BAR).toContain("h-7 w-7"); // compact ~28px number/check circle
-    expect(BAR).not.toContain("h-6 w-6"); // confirms this is a deliberate resize, not a stray duplicate
+    expect(BAR).toContain("h-6 w-6"); // compact 24px number/check circle
+    expect(BAR).not.toContain("h-7 w-7"); // confirms the former larger marker is gone
   });
   it("the secondary sublabel line is gone — single-line label only", () => {
     expect(BAR).not.toMatch(/<span[^>]*>\s*\{stage\.sublabel\}/);
@@ -144,15 +144,15 @@ describe("4. Review restores the two-column workstation (card left, details righ
     // exact same row (same aside gate, same flex row), so it inherits the
     // identical md breakpoint rather than requiring a new one. The column
     // ratio itself now lives in ONE shared constant (WorkstationPreviewAside).
-    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(ASIDE_SRC).toContain("md:w-[40%] md:shrink-0");
+    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
+    expect(ASIDE_SRC).toContain("md:w-[35%] md:shrink-0");
     expect(ASIDE_SRC).toContain("WORKSTATION_PREVIEW_WIDTH_CLASS");
   });
   it("mobile stacking remains supported (no md:/lg:-only mandatory two-column)", () => {
     // Base (mobile-first) classes are flex-col; md:flex-row only applies at
     // the md breakpoint and above, so below it the aside and control panel
     // stack vertically like Card Details already does.
-    expect(CANON_SHELL).toMatch(/flex min-h-0 flex-1 flex-col gap-3 md:flex-row/);
+    expect(CANON_SHELL).toMatch(/flex min-h-0 flex-1 flex-col gap-2 md:flex-row/);
   });
 });
 

@@ -1,0 +1,17 @@
+{
+  "capturedAt": "2026-08-14T14:52:37Z",
+  "repository": "/Users/cornelius/mintvault-platform",
+  "baselineCommit": "839edd9c45215bfba157b930b9ec5690d47ceac0",
+  "files": {
+    "AGENTS.md": "aef4bb118fe915e27e1a54fa717b4f3c13e9fca4d686693dd44e4f8c62b1dafc",
+    "CLAUDE.md": "5e7399828be47316ec65168f79c7a0f33803e12218d229363e3c6f3bc6f6e5f4",
+    "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md": "91f5de760d89e84a7c0d95e4dc77c77549933e8d219a74a86a9fc89955a43ebc",
+    "docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md": "b1633f642bf46f03331cfbb4fe04ddff0e9f54ec232e5c5c786fe510de07ab63",
+    ".claude/skills/controlled-code-lead/SKILL.md": "8df2dd4059c9f975d99e62bed70f1cff7fa0d11d5cf5cb698462b7afe801fced",
+    ".claude/skills/mvgs-grading-protected/SKILL.md": "de39fccf5f20935855c7ad973b379e04014ca659a486418042fe277e6daf9363",
+    ".claude/skills/mintvault-concurrent-session-discipline/SKILL.md": "909e8adcddf9d6968ddeb1724c3f1c9dd671cb1bdb73fd72d07ca16abdf77a0d",
+    ".claude/skills/mintvault-design-system/SKILL.md": "6bcb3d727eb0dc535b67052081f5b10e742da4c83b624d4c7087f56140bd5b6f",
+    ".claude/controlled-code-lead/protected-systems.md": "d582f96598ba278d39b467b84a4d89a66fdc1bcbea07e7c74ab2974636ffdaf3",
+    ".claude/controlled-code-lead/scope-and-concurrency.md": "c59e6dbd78ac2c11bd443c265c60fb379930d81718f9cdfeba8d5e4939907b08"
+  }
+}

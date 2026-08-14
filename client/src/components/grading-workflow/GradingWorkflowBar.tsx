@@ -48,7 +48,7 @@ export function GradingWorkflowBar({
             data-testid={`workflow-stage-${stage.key}`}
             onClick={() => onStageClick?.(i, stage)}
             title={`${stage.label} — ${stage.sublabel}`}
-            className={`flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-2 text-left transition ${
+            className={`flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition ${
               isCurrent
                 ? "border border-[var(--admin-gold)] bg-[var(--admin-gold)]/15"
                 : isComplete
@@ -57,7 +57,7 @@ export function GradingWorkflowBar({
             }`}
           >
             <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
                 isComplete
                   ? "bg-[var(--admin-gold)] text-[#1A1400]"
                   : isCurrent

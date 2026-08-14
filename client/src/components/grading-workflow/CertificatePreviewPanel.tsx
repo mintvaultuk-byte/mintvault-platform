@@ -168,7 +168,16 @@ export function CertificatePreviewPanel({
       // Without this acknowledgement, the workstation waiter never settles.
       complete(false);
     };
-  }, [endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs, retryNonce]);
+  }, [
+    endpoint,
+    expectedRevision,
+    key,
+    requireExpectedRevision,
+    revision,
+    onRevisionComplete,
+    requestTimeoutMs,
+    retryNonce,
+  ]);
 
   // Revoke the last object URL on unmount.
   useEffect(
@@ -180,7 +189,7 @@ export function CertificatePreviewPanel({
 
   return (
     <div
-      className="mx-auto w-full max-w-[266px]"
+      className="mx-auto w-full max-w-[230px]"
       data-testid="certificate-preview-panel"
       data-preview-state={error ? "error" : url ? "ready" : loading ? "loading" : "empty"}
       data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}
@@ -192,8 +201,8 @@ export function CertificatePreviewPanel({
         <img
           src={url}
           alt="Front certificate preview"
-          width={266}
-          height={76}
+          width={231}
+          height={66}
           className="block h-auto w-full object-contain"
           data-testid="certificate-preview-image"
         />
@@ -213,7 +222,11 @@ export function CertificatePreviewPanel({
         </button>
       ) : (
         loading && (
-          <p className="text-center text-[11px] text-slate-500" data-testid="certificate-preview-status" aria-live="polite">
+          <p
+            className="text-center text-[11px] text-slate-500"
+            data-testid="certificate-preview-status"
+            aria-live="polite"
+          >
             Preparing preview…
           </p>
         )

@@ -272,7 +272,7 @@ describe("4. Stage 1 manual card-detail fields are visible by default", () => {
       "utf8"
     );
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
-    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
   });
   it("proposed AI/TCGdex result stays visually distinct from existing certificate details", () => {
     expect(FORM).toContain('data-testid="ai-identify-summary"');
