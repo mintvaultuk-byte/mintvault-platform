@@ -6,6 +6,7 @@
  */
 const stationIdentity = require("./station-identity");
 const stationRequestQueue = require("./station-request-queue");
+const stationAuthorityLatch = require("./station-authority-latch");
 const enrolmentOperation = require("./enrolment-operation");
 
 let fetchPromise = null;
@@ -70,7 +71,7 @@ async function signedJson(method, apiPath, payload) {
       headers: { ...headers, "content-type": "application/json" },
       body: serialized,
     });
-    return { ok: response.ok, status: response.status, body: await readJson(response) };
+    return stationAuthorityLatch.observe({ ok: response.ok, status: response.status, body: await readJson(response) });
   });
 }
 
@@ -91,6 +92,40 @@ async function signIn(email, password) {
 
 async function completeMfa({ code, recoveryCode }) {
   return operatorJson("POST", "/api/partner/auth/mfa", { code, recoveryCode });
+}
+
+/**
+ * SHIFT CHANGE is local-first: delete the human credential before any network
+ * wait, then make a best-effort server revocation with the retained in-memory
+ * value. Station identity and already-authorised evidence custody are untouched.
+ */
+async function signOutWith({ token, clearSession, fetchImpl, origin }) {
+  clearSession();
+  if (!token) return { ok: true, remoteRevoked: true };
+  try {
+    const response = await fetchImpl(`${origin}/api/partner/auth/logout`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: `mv.partner.sid=${encodeURIComponent(token)}` },
+      body: "{}",
+    });
+    return { ok: true, remoteRevoked: response.ok };
+  } catch {
+    return { ok: true, remoteRevoked: false };
+  }
+}
+
+async function signOut() {
+  const token = stationIdentity._private.readOperatorSession();
+  stationIdentity.clearOperatorSession();
+  let fetch;
+  try { fetch = await getFetch(); }
+  catch { return { ok: true, remoteRevoked: false }; }
+  return signOutWith({
+    token,
+    clearSession: () => {},
+    fetchImpl: fetch,
+    origin: baseUrl(),
+  });
 }
 
 async function stationSession() {
@@ -138,6 +173,7 @@ module.exports = {
   creditSummary,
   signIn,
   completeMfa,
+  signOut,
   stationSession,
   enrolmentLocations,
   enrolmentStatus,
@@ -145,5 +181,5 @@ module.exports = {
   registerThisMac,
   heartbeat,
   saveCalibration,
-  _private: { cookieTokenFrom, baseUrl },
+  _private: { cookieTokenFrom, baseUrl, signOutWith },
 };

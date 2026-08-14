@@ -16,6 +16,7 @@ const { Transform } = require("node:stream");
 const FormData  = require("form-data");
 const stationIdentity = require("./station-identity");
 const stationRequestQueue = require("./station-request-queue");
+const stationAuthorityLatch = require("./station-authority-latch");
 // node-fetch v3 is ESM-only. Lazy-load via dynamic import; cache the promise.
 let _fetchPromise = null;
 function getFetch() {
@@ -207,7 +208,7 @@ async function postFormNow(url, form, extraHeaders = {}) {
     const text = await res.text();
     let body;
     try { body = JSON.parse(text); } catch { body = { raw: text }; }
-    return { ok: res.ok, status: res.status, body };
+    return stationAuthorityLatch.observe({ ok: res.ok, status: res.status, body });
   } catch (err) {
     if (err.name === "AbortError") {
       const reason = bodyEnded
@@ -308,7 +309,7 @@ async function getJson(urlPath) {
     const text = await res.text();
     let body;
     try { body = JSON.parse(text); } catch { body = { raw: text }; }
-    return { ok: res.ok, status: res.status, body };
+    return stationAuthorityLatch.observe({ ok: res.ok, status: res.status, body });
   });
 }
 
@@ -324,7 +325,7 @@ async function postJson(urlPath, payload) {
     const text = await res.text();
     let body;
     try { body = JSON.parse(text); } catch { body = { raw: text }; }
-    return { ok: res.ok, status: res.status, body };
+    return stationAuthorityLatch.observe({ ok: res.ok, status: res.status, body });
   });
 }
 
@@ -340,7 +341,7 @@ async function deleteJson(urlPath, payload) {
     const text = await res.text();
     let body;
     try { body = JSON.parse(text); } catch { body = { raw: text }; }
-    return { ok: res.ok, status: res.status, body };
+    return stationAuthorityLatch.observe({ ok: res.ok, status: res.status, body });
   });
 }
 

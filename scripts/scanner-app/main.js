@@ -25,6 +25,8 @@ const server   = require("./lib/server-client");
 const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
+const stationAuthority = require("./lib/station-authority");
+const stationAuthorityLatch = require("./lib/station-authority-latch");
 const helperIntegrity = require("./lib/helper-integrity");
 const newCardOperation = require("./lib/new-card-operation");
 
@@ -391,20 +393,22 @@ async function availableCreditsOrNull() {
 }
 
 /** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
-async function stationSetupState() {
+let lastKnownAvailableCredits = null;
+
+async function computeStationSetupState({ refreshCredits = true } = {}) {
   let session;
   try {
     session = await stationClient.stationSession();
   } catch (error) {
-    return { ok: true, stage: "sign_in", error: error?.message || "Sign in to MintVault" };
+    return { ok: true, ...stationAuthority.sessionStage({ transportError: true }), detail: error?.message };
   }
-  if (!session.ok || !session.body?.mfaPassed) {
-    if (session.status === 503) {
-      return { ok: true, stage: "station_unavailable", error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin." };
-    }
-    return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
+  const human = stationAuthority.sessionStage(session);
+  if (human.clearSession) stationIdentity.clearOperatorSession();
+  if (human.stage !== "authenticated") {
+    return { ok: true, stage: human.stage, ...(human.error ? { error: human.error } : {}) };
   }
-  const summary = stationSummary(session.body, await availableCreditsOrNull());
+  if (refreshCredits) lastKnownAvailableCredits = await availableCreditsOrNull();
+  const summary = stationSummary(session.body, lastKnownAvailableCredits);
   const identity = stationIdentity.identityStatus();
   if (!["ABSENT_NEW", "READY_V2"].includes(identity.state)) {
     return {
@@ -415,30 +419,53 @@ async function stationSetupState() {
     };
   }
   const code = identity.stationCode || null;
+  const capability = stationAuthority.requiredCapabilityStage(human, { enrolled: Boolean(code) });
+  if (capability.stage !== "authenticated") {
+    return { ok: true, stage: capability.stage, summary, error: capability.error };
+  }
   if (!code) {
     const locations = await stationClient.enrolmentLocations();
     if (!locations.ok) {
       return {
         ok: true,
-        stage: "station_unavailable",
+        stage: locations.status === 403 ? "no_partner_access" : locations.status === 503 ? "degraded" : "offline",
         summary,
         error: locations.status === 503
           ? "MintVault station enrolment is temporarily unavailable. Contact a MintVault Super Admin."
           : "MintVault could not confirm this station’s authorised location.",
       };
     }
+    const permittedLocations = Array.isArray(locations.body?.locations) ? locations.body.locations.map((location) => ({
+      id: String(location.id), name: String(location.name),
+    })) : [];
+    if (permittedLocations.length === 0) {
+      return { ok: true, stage: "no_location", summary, error: "No active authorised location is available for this account." };
+    }
     return {
       ok: true,
       stage: "register",
       summary,
-      locations: locations.ok && Array.isArray(locations.body?.locations) ? locations.body.locations.map((location) => ({
-        id: String(location.id), name: String(location.name),
-      })) : [],
+      locations: permittedLocations,
     };
   }
   const status = await stationClient.enrolmentStatus(code);
   if (!status.ok || !status.body?.station) {
-    return { ok: true, stage: "station_unavailable", summary, stationCode: code };
+    const errorCode = status.body?.error?.code;
+    return {
+      ok: true,
+      stage: errorCode === "REPLAY_STATE_DESYNC"
+        ? "replay_state_desync"
+        : status.status === 403
+          ? "no_partner_access"
+          : status.status === 503
+            ? "degraded"
+            : status.status === 401
+              ? "sign_in"
+              : "station_unavailable",
+      summary,
+      stationCode: code,
+      error: status.body?.error?.message || status.body?.error || "MintVault could not verify this station.",
+    };
   }
   const station = status.body.station;
   if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
@@ -452,13 +479,58 @@ async function stationSetupState() {
     };
   }
   try { stationIdentity.setStationStatus(station.status); } catch {}
+  const resolved = stationAuthority.stationStage(station.status);
+  const scannerHealth = String(stateMod.get().scannerHealth?.status || "checking");
+  const stage = resolved.stage === "active" && ["disconnected", "error"].includes(scannerHealth)
+    ? "scanner_disconnected"
+    : resolved.stage;
   return {
     ok: true,
-    stage: String(station.status || "PENDING").toLowerCase(),
+    stage,
     summary,
     stationCode: code,
     calibrationStatus: station.calibrationStatus || "UNPROVISIONED",
+    ...(resolved.error ? { error: resolved.error } : {}),
   };
+}
+
+async function stationSetupState(options) {
+  if (!stationIdentity.hasOperatorSession()) {
+    return stationAuthority.withLocalSession({ ok: true, stage: "sign_in" }, false);
+  }
+  const replay = stationAuthorityLatch.current();
+  if (replay) return stationAuthority.withLocalSession(replay, stationIdentity.hasOperatorSession());
+  const result = await computeStationSetupState(options);
+  return stationAuthority.withLocalSession(result, stationIdentity.hasOperatorSession());
+}
+
+async function requireLiveOperationalAuthority() {
+  const latched = stationAuthorityLatch.current();
+  if (latched) return stationAuthority.operationalDenial(latched);
+  const setup = await stationSetupState({ refreshCredits: false });
+  const setupDenied = stationAuthority.operationalDenial(setup);
+  if (setupDenied) return setupDenied;
+  try {
+    const signedStatus = await stationClient.heartbeat(heartbeatPayload());
+    const replay = stationAuthorityLatch.current();
+    if (replay) return stationAuthority.operationalDenial(replay);
+    if (!signedStatus.ok) {
+      return {
+        ok: false,
+        code: signedStatus.body?.error?.code || "station_authority_denied",
+        error: signedStatus.body?.error?.message || "MintVault could not confirm current station authority.",
+      };
+    }
+  } catch {
+    return stationAuthority.operationalDenial({ stage: "offline" });
+  }
+  return null;
+}
+
+async function publishStationSetupState() {
+  const setup = await stationSetupState({ refreshCredits: false });
+  if (popover && !popover.isDestroyed()) popover.webContents.send("station-setup-update", setup);
+  return setup;
 }
 
 function heartbeatPayload() {
@@ -505,6 +577,8 @@ function setupIpc() {
   });
 
   ipcMain.handle("authorise-fix", async (_event, payload) => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
     if (!cardJobId) return { ok: false, error: "Select a card to fix" };
     const result = await server.authoriseFix(cardJobId, payload && payload.sides);
@@ -525,6 +599,8 @@ function setupIpc() {
    * case where we do not know whether the card was created.
    */
   ipcMain.handle("start-new-card", async (_event, payload) => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
     let operation;
     let result;
@@ -597,17 +673,21 @@ function setupIpc() {
     return result.ok ? stationSetupState() : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
   });
   ipcMain.handle("station-sign-out", async () => {
-    if (stateMod.get().activeCapture || watcher?.targetedPendingUploadCount()) {
-      return { ok: false, error: "Finish or safely retry the current card before switching operator" };
-    }
-    stationIdentity.clearOperatorSession();
-    return { ok: true, stage: "sign_in" };
+    const result = await stationClient.signOut();
+    return {
+      ok: true,
+      stage: "sign_in",
+      remoteRevoked: result.remoteRevoked,
+      ...(result.remoteRevoked ? {} : { warning: "Signed out on this Mac; MintVault will expire the prior remote session." }),
+    };
   });
 
   // These are purpose-built station controls. The renderer never receives a
   // local TIFF path and never supplies a certificate/card/side: Watcher derives
   // all of that from its server-claimed active target and rejects stale IDs.
   ipcMain.handle("scan-target", async () => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     if (!watcher) return { ok: false, error: "Scanner service is starting" };
     return watcher.scanActiveTarget();
   });
@@ -616,6 +696,8 @@ function setupIpc() {
   // request the one fixed full-platen local JPEG scan, but supplies neither a
   // file path nor any certificate/card/side identity.
   ipcMain.handle("run-positioning-preview", async () => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     if (!watcher) return { ok: false, error: "Scanner service is starting" };
     return watcher.runPositioningPreview();
   });
@@ -625,7 +707,9 @@ function setupIpc() {
     return watcher.positioningPreviewData(previewId);
   });
 
-  ipcMain.handle("apply-positioning-preview", (_event, previewId) => {
+  ipcMain.handle("apply-positioning-preview", async (_event, previewId) => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
     return watcher.applyPositioningPreview(previewId);
   });
@@ -636,11 +720,15 @@ function setupIpc() {
   });
 
   ipcMain.handle("accept-capture-preview", async (_event, previewId) => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
     return watcher.acceptPreview(previewId);
   });
 
   ipcMain.handle("rescan-capture-preview", async (_event, previewId) => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
     return watcher.rescanPreview(previewId);
   });
@@ -805,8 +893,18 @@ app.whenReady().then(async () => {
     try {
       const result = await stationClient.heartbeat(heartbeatPayload());
       if (!result.ok) {
-        console.warn(`[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`);
-        if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked") await stationSetupState();
+        const code = result.body?.error?.code;
+        console.warn(`[station-heartbeat] rejected: ${code || result.body?.error || `HTTP ${result.status}`}`);
+        if (result.status === 409 && code === "station_replay") {
+          const replay = { ...stationAuthorityLatch.current(), canSignOut: stationIdentity.hasOperatorSession() };
+          if (popover && !popover.isDestroyed()) popover.webContents.send("station-setup-update", replay);
+        } else if ([401, 403, 404, 426].includes(result.status) || code === "version_blocked") {
+          await publishStationSetupState();
+        }
+      } else {
+        // A later v1 success does not clear a replay-desync latch. Only the
+        // authenticated P14 resync completion may install a newer epoch and
+        // explicitly clear it.
       }
     } catch (error) {
       console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
@@ -823,6 +921,21 @@ app.whenReady().then(async () => {
   };
   void sendHeartbeat();
   scheduleHeartbeat();
+
+  // Live dual-authority projection. This never authorises from cache: every
+  // physical IPC path performs its own fresh check above. The poll exists so a
+  // suspension, revocation, role removal, session expiry or minimum-version
+  // change closes the appliance UI without waiting for the next button press.
+  const scheduleAuthorityPoll = () => {
+    const delay = 20_000 + Math.floor(Math.random() * 10_000);
+    setTimeout(async () => {
+      try { await publishStationSetupState(); }
+      catch (error) { console.warn(`[station-authority] live status failed: ${error?.message || error}`); }
+      scheduleAuthorityPoll();
+    }, delay);
+  };
+  void publishStationSetupState();
+  scheduleAuthorityPoll();
 
   // ── Maintenance (scanner ops pack) ────────────────────────────────────
   // Log rotation: launchd holds the log fd, so rotate copy-truncate style.

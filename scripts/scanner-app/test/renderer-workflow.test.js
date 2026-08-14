@@ -35,14 +35,21 @@ test("normal placement Preview is a card-centred display crop while full platen 
   assert.doesNotMatch(main, /popover\.on\("blur"/);
 });
 
-test("operator sign-out clears only the human session and keeps the Mac station identity", () => {
+test("SHIFT CHANGE immediately clears only the human session and keeps station/evidence custody", () => {
   const identity = fs.readFileSync(path.join(APP, "lib", "station-identity.js"), "utf8");
+  const client = fs.readFileSync(path.join(APP, "lib", "station-client.js"), "utf8");
   const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
   assert.match(identity, /function clearOperatorSession\(\)/);
   assert.match(identity, /clearOperatorSession,/);
   assert.match(preload, /stationSignOut: \(\) => ipcRenderer\.invoke\("station-sign-out"\)/);
-  assert.match(main, /Finish or safely retry the current card before switching operator/);
-  assert.match(main, /stationIdentity\.clearOperatorSession\(\)/);
+  assert.doesNotMatch(main, /Finish or safely retry the current card before switching operator/);
+  assert.match(main, /stationClient\.signOut\(\)/);
+  assert.match(client, /stationIdentity\.clearOperatorSession\(\);/);
+  assert.match(renderer, /els\.signOutBtn\.hidden = !setup\?\.canSignOut/);
+  assert.match(html, /id="stationModalSignOutBtn" hidden>SIGN OUT \/ SWITCH USER/);
+  assert.match(renderer, /els\.stationModalSignOutBtn\.hidden = active \|\| !setup\?\.canSignOut/);
+  assert.match(renderer, /els\.stationModalSignOutBtn\.addEventListener\("click"/);
+  assert.doesNotMatch(identity, /function clearOperatorSession\(\)[\s\S]{0,100}retireIdentity/);
 });
 
 test("Fix missing images is target-bound recovery only and cannot delete a certificate", () => {

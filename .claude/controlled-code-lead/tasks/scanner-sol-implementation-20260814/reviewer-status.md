@@ -11,6 +11,8 @@
 | A4 WP2 authority | complete | Committed isolated server/migrations/tests read-only; no DB/edit/build/test/git mutation | v1 nonce ordering, bearer session, enrolment/idempotency gaps and P14 deferral boundary verified by Lead |
 | A3 WP2 hostile repair | complete / CLEAN | Current WIP read-only; no edit or non-test Keychain access | Four HIGHs reproduced, repaired by Lead, then verified clean; signed package proof boundary recorded |
 | A4 WP2 hostile repair | complete / CLEAN | Current WIP read-only; no edit/test/external mutation | Response-loss/key-conflict edge retained pending; P14-owned server idempotency distinguished from local scope |
+| A4 WP3 auth review | complete / CLEAN for Scanner-owned scope | Committed baseline plus current WIP read-only; no edit/test/external mutation | Six initial HIGHs plus repair rechecks; local shift/live-gate/MFA/fresh-boot/replay defects repaired; three final-P14 contract gaps retained |
+| A5 WP5 queue inventory | complete | Committed `f8e4e7ae` read-only; no edit/test/Keychain/DB/external mutation | Plaintext queue, crash custody, disposition/provenance and finalisation gaps reproduced; fresh-grant-per-attempt property preserved |
 
 Reviewer isolation was established by explicit read-only scopes. Only the Lead
 created the worktree, enrolled Engineering OS, built ignored graph artifacts and
@@ -22,3 +24,7 @@ The hostile pass added R-33..R-36 for helper caller authentication, exact Team
 pinning, unsigned multipart containment and completed-operation capacity. All
 four were repaired in this pass; final package-dependent execution proof is
 explicitly deferred, never claimed.
+WP3 added R-37..R-40 for background-idle semantics, terminal pending-enrolment
+disposition, immediate shift change and MFA-enrolment first run. Scanner-owned
+R-39/R-40 are repaired; R-37/R-38 and the token-family part of R-27 remain
+final-P14 authority work.

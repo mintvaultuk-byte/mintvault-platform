@@ -122,3 +122,35 @@ Hostile A3/A4 findings were repaired in the same pass. Final server enrolment
 idempotency, replay/resync and station-bound refresh remain deliberately
 inactive until frozen P14 reconciliation; no server authority or migration was
 changed in WP2.
+
+## WP3 planned change manifest
+
+| Finding | Safe-isolated surface | Repair class |
+|---|---|---|
+| R-25 stale local authority | Main-process live session/station/permission/version controller and physical IPC gates | A |
+| R-39 blocked/local-only shift change | Local-first credential deletion plus existing server logout call | A |
+| R-40 impossible first MFA prompt | Explicit MFA-enrolment-required appliance state | A |
+| R-27/R-37 access/refresh and idle semantics | Evidence and inactive boundary only until frozen P14 | B |
+| R-38 terminal pending-enrolment disposition | Evidence only until frozen P14 can distinguish it from active revocation | B/E |
+
+## WP3 actual changes
+
+- Added deterministic human/session/capability/station status classification.
+  Enrolled operation requires `partner.cards.scan`; new-station enrolment
+  requires `partner.stations.enrol`; missing role/location, offline, degraded,
+  update and replay-recovery states remain locked.
+- Every NEW/FIX/new physical Scan/Preview/Rescan/profile-apply IPC performs a
+  fresh server authority check before watcher/scanner access. A jittered
+  20–30-second poll projects revocation, suspension, role/session expiry and
+  version changes into the renderer; it is display only and never authorises
+  from cache.
+- SHIFT CHANGE deletes the local human credential before any network wait,
+  calls the existing logout route best-effort, never retires station identity,
+  and is visible in pending and other authenticated non-active states.
+- First-login MFA enrolment is distinct from an existing-factor challenge and
+  directs setup to the authoritative Partner dashboard without exposing factor
+  secrets through renderer IPC.
+
+No Partner server, migration or active Partner worktree file was changed.
+The 15-minute station-bound Scanner token family, machine-traffic idle semantics
+and terminal pre-approval enrolment dispositions remain P14 reconciliation work.

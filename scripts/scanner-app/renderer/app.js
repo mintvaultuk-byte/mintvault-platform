@@ -81,6 +81,7 @@ const els = {
   stationLocation: document.getElementById("stationLocation"),
   stationRegisterBtn: document.getElementById("stationRegisterBtn"),
   signOutBtn: document.getElementById("signOutBtn"),
+  stationModalSignOutBtn: document.getElementById("stationModalSignOutBtn"),
 };
 
 const STATE_LABELS = {
@@ -179,7 +180,12 @@ function renderTarget(state) {
 function renderStationIdentity(setup) {
   const active = setup?.stage === "active";
   els.stationIdentityRow.hidden = !active;
-  els.signOutBtn.hidden = !active;
+  // Pending enrolment and every other post-MFA state must still support an
+  // immediate shift change. The station identity remains visible only while
+  // active, but the human can always leave once a sanitised summary proves a
+  // current authenticated session.
+  els.signOutBtn.hidden = !setup?.canSignOut;
+  els.stationModalSignOutBtn.hidden = active || !setup?.canSignOut;
   if (!active) return;
   const organisation = [setup.summary?.organisationName, setup.summary?.locationName].filter(Boolean).join(" — ");
   els.stationOrganisation.textContent = organisation || "MintVault location";
@@ -287,7 +293,27 @@ function renderStationSetup(next) {
   } else if (stage === "identity_recovery_required") {
     els.stationSetupTitle.textContent = "Station identity recovery required";
     els.stationSetupText.textContent = "MintVault cannot prove this Mac's enrolled identity. Scanning and re-registration are paused. Contact a MintVault Super Admin.";
-  } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
+  } else if (stage === "mfa_enrolment_required") {
+    els.stationSetupTitle.textContent = "MFA setup required";
+    els.stationSetupText.textContent = "Set up MFA in the MintVault Partner dashboard, then sign in to this Scanner again.";
+  } else if (stage === "no_partner_access") {
+    els.stationSetupTitle.textContent = "No Scanner access";
+    els.stationSetupText.textContent = "This account is not authorised for this station action. Ask a Partner Owner or MintVault Super Admin to check the role.";
+  } else if (stage === "no_location") {
+    els.stationSetupTitle.textContent = "No authorised location";
+    els.stationSetupText.textContent = "This account has no active shop location available for station enrolment.";
+  } else if (stage === "offline") {
+    els.stationSetupTitle.textContent = "MintVault offline";
+    els.stationSetupText.textContent = "New physical work is paused. Existing queued evidence remains assigned to its original capture.";
+  } else if (stage === "scanner_disconnected") {
+    els.stationSetupTitle.textContent = "Scanner disconnected";
+    els.stationSetupText.textContent = "Connect the Canon LiDE 400. New physical work remains paused until ImageCaptureCore reports it ready.";
+  } else if (stage === "degraded" || stage === "replay_state_desync") {
+    els.stationSetupTitle.textContent = stage === "replay_state_desync" ? "Station recovery required" : "MintVault temporarily unavailable";
+    els.stationSetupText.textContent = stage === "replay_state_desync"
+      ? "The station replay state must be securely resynchronised before physical work can continue."
+      : "Station authority could not be verified. New physical work is paused.";
+  } else if (["rejected", "cancelled", "expired", "suspended", "revoked", "station_unavailable"].includes(stage)) {
     els.stationSetupTitle.textContent = "Station unavailable";
     els.stationSetupText.textContent = "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
   } else if (active) {
@@ -776,7 +802,7 @@ els.stationRegisterBtn.addEventListener("click", () => {
   void runStationSetupAction(() => window.scanner.registerStation({ locationId }));
 });
 
-els.signOutBtn.addEventListener("click", async () => {
+async function shiftChange() {
   if (!confirm("Sign out the current scanner user?\n\nThis Mac remains registered as the same MintVault station.")) return;
   const result = await window.scanner.stationSignOut();
   if (!result?.ok) {
@@ -784,7 +810,9 @@ els.signOutBtn.addEventListener("click", async () => {
     return;
   }
   renderStationSetup(result);
-});
+}
+els.signOutBtn.addEventListener("click", () => void shiftChange());
+els.stationModalSignOutBtn.addEventListener("click", () => void shiftChange());
 
 if (els.appVersion) {
   window.scanner.getVersion?.().then((result) => {
@@ -890,6 +918,7 @@ els.restartServiceBtn.addEventListener("click", async () => {
 });
 
 window.scanner.onStateUpdate(renderState);
+window.scanner.onStationSetupUpdate?.(renderStationSetup);
 window.scanner.getState().then(renderState);
 void refreshStationSetup();
 window.addEventListener("resize", () => {

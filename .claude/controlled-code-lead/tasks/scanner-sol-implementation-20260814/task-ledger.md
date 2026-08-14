@@ -33,11 +33,11 @@
 |---|---|---|---|
 | 0 — Baseline | done | 2026-08-14 | Exact source/Partner/tooling facts recorded |
 | 1 — Review plan | done | 2026-08-14 | A9 Partner, A1 Scanner, tooling scopes isolated |
-| 2 — Investigation | done through WP2 | 2026-08-14 | WP2 A3/A4 controlled reviews complete; Lead graph/source inspected local identity and committed authority |
-| 3 — Lead verification | done through WP2 | 2026-08-14 | Cloneable v1 envelope/main signing, nonce ordering, portal bearer reuse and idempotency gaps verified |
-| 4 — Implementation authorisation | done through safe-isolated WP2 | 2026-08-14 | Owner prompt authorises local native/client work; moving P14 forbids server authority/migration wiring until WP10 reconciliation |
-| 5 — Implementation | done through safe-isolated WP2 | 2026-08-14 | WP1 capture helper; WP2 caller-authenticated SE/Keychain identity, migration, request serialization and durable operation foundations |
-| 6 — Regression | local done through WP2 | 2026-08-14 | WP2 real test-namespace SE lifecycle/migration, hostile repair, Scanner/root/governance/type/lint/build green; signed package/cross-Mac/P14 proofs remain later gates |
+| 2 — Investigation | done through WP3; WP5 inventory complete | 2026-08-14 | WP2 A3/A4, WP3 A4 and WP5 A5 controlled reviews complete |
+| 3 — Lead verification | done through WP3 | 2026-08-14 | Human/station live-gate, shift, MFA-enrolment and remaining P14 token/lifecycle gaps verified |
+| 4 — Implementation authorisation | done through safe-isolated WP3 | 2026-08-14 | Owner prompt authorises local native/client work; moving P14 forbids server authority/migration wiring until semantic reconciliation |
+| 5 — Implementation | done through safe-isolated WP3 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority, immediate shift and first-run MFA states |
+| 6 — Regression | local done through WP3 | 2026-08-14 | Scanner 74 pass/3 opt-in skips, root WP3 contracts 21/21, governance/type/build green; A4 hostile re-review CLEAN; lint checkpoint follows commit prep |
 | 7 — Final report | pending | | Only after WP12 or a legitimate external/owner gate |
 
 ## Reviewer assignments
@@ -53,6 +53,21 @@
 | A4 WP2 authority | Committed replay/session/idempotency authority, read-only | Complete; safe client work separated from final-P14 server/schema changes |
 | A3 WP2 hostile | Current identity helper/Keychain/migration trust boundary, read-only | Initial 4 HIGH; all repaired; final re-review CLEAN |
 | A4 WP2 hostile | Current request ordering/op durability/upload auth, read-only | Three review rounds; final 400 key-conflict response-loss edge repaired; final re-review CLEAN |
+| A4 WP3 auth | Human/session/MFA/RBAC/enrolment/live authority, read-only | Six HIGHs; Scanner-owned shift/live-gate/MFA first-run repaired; P14-owned token/idle/terminal lifecycle registered |
+| A5 WP5 queue | Queue/encryption/custody/grant/finalisation/provenance inventory, read-only | Six actionable BLOCKER/HIGH; implementation follows after WP3 checkpoint |
+
+## WP3 implementation and regression evidence
+
+- Scanner-owned A4 findings are CLEAN after repeated hostile review, including
+  fresh boot/post-logout login reachability, modal-accessible shift change,
+  Accept coverage and a non-overwritable replay-desync latch.
+- Scanner normal suite: 74 passed / 3 opt-in Secure Enclave tests skipped; the
+  same opt-in tests remain green from WP2 and no native source changed in WP3.
+- Root WP3 station/RBAC contract matrix: 21/21. Governance: 4/4. TypeScript and
+  production build pass; lint is 0 errors / 2,668 baseline-plus-campaign warnings.
+  The direct MFA runtime suites require their dedicated
+  environment and were not falsely counted when the broad Vitest command
+  reported skips; server MFA authority itself was unchanged in this WP.
 
 ## Authoritative links
 

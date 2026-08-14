@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld("scanner", {
     ipcRenderer.on("state-update", wrapped);
     return () => ipcRenderer.removeListener("state-update", wrapped);
   },
+  onStationSetupUpdate: (callback) => {
+    const wrapped = (_event, payload) => callback(payload);
+    ipcRenderer.on("station-setup-update", wrapped);
+    return () => ipcRenderer.removeListener("station-setup-update", wrapped);
+  },
   fetchOrphans: () => ipcRenderer.invoke("fetch-orphans"),
   startNewCard: (payload) => ipcRenderer.invoke("start-new-card", payload),
   authoriseFix: (payload) => ipcRenderer.invoke("authorise-fix", payload),

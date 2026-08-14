@@ -280,6 +280,10 @@ function hasActiveStationSession() {
   return Boolean(identity.stationCode && identity.stationStatus === "ACTIVE" && readOperatorSession());
 }
 
+function hasOperatorSession() {
+  return Boolean(readOperatorSession());
+}
+
 module.exports = {
   enrolmentPublicPayload,
   saveEnrollment,
@@ -294,6 +298,7 @@ module.exports = {
   identityStatus,
   currentStationCode,
   hasActiveStationSession,
+  hasOperatorSession,
   _private: {
     canonicalRequest,
     canonicalRequestV2,
