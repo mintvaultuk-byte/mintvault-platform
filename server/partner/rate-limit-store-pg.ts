@@ -103,7 +103,7 @@ export async function installSharedPartnerRateLimitStore(): Promise<boolean> {
       // eslint-disable-next-line no-console
       console.warn(
         "[partner] partner_rate_limit_buckets is absent — partner rate limits remain PER-MACHINE " +
-          "(apply migrations/0078_partner_shared_rate_limit_buckets.sql to make them fleet-wide)."
+          "(apply migrations/0089_partner_shared_rate_limit_buckets.sql to make them fleet-wide)."
       );
       return false;
     }

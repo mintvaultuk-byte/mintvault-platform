@@ -1,11 +1,29 @@
 -- Partner Portal — SHARED rate-limit buckets (invariant I19: no process-local authoritative state).
 --
--- NUMBER SAFETY. 0078 is the first number above the GLOBAL migration high-water mark discovered
--- across every ref in this repository (`git log --all --diff-filter=A` over migrations/), which is
--- 0077. MintVault has a documented history of number collisions (0019, 0020, 0033, 0044, 0045, 0046,
--- 0047, 0048 and 0053 each have two or three different files), so the number was taken from the
--- whole repository rather than from this worktree alone. The runner independently rejects duplicate
--- numbers before applying anything.
+-- NUMBER SAFETY — RENUMBERED 0078 -> 0089 (owner-authorised, 2026-08-14).
+--
+-- This shipped as 0078, chosen as the first number above the global high-water mark of 0077
+-- discovered across every ref at the time. Concurrent work on origin/main subsequently landed a
+-- DIFFERENT migration at the same number — `0078_partner_connector_flag_read.sql` — so the release
+-- lineage and main each held a distinct 0078. MintVault has already been bitten by exactly this at
+-- 0046, where two different files occupied one slot and the journal (keyed on filename) could not
+-- tell: the runner's MIGRATION IDENTITY GUARD exists because of it.
+--
+-- WHICH ONE MOVED, AND WHY THIS ONE. The rule is that an APPLIED migration never changes identity;
+-- only an unapplied one may move. A read-only journal inspection of BOTH environments confirmed
+-- neither 0078 was applied anywhere:
+--
+--     production (ep-wispy-morning):  no 0078 rows; highest applied 0076
+--     staging    (ep-purple-voice):   no 0078 rows; highest applied 0073
+--
+-- With both free to move, main's lineage is canonical and keeps 0078; this one moved. 0089 was
+-- verified free across EVERY ref in the repository, not merely this worktree — a sibling branch
+-- (codex/scanner-sol-implementation-20260814) already carries this lineage's 0079-0087, and the
+-- global maximum was 0088.
+--
+-- ORDER SAFETY. This migration creates one self-contained table, its index and its grant. Nothing in
+-- 0079-0088 references `partner_rate_limit_buckets`, so moving it after them changes no behaviour.
+-- Its semantics are untouched by the renumber.
 --
 -- WHY THIS TABLE EXISTS.
 -- server/partner/rate-limit.ts has always shipped a pluggable store whose only implementation was

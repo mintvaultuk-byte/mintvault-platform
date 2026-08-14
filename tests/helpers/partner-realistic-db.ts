@@ -234,13 +234,13 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
   "0077_partner_credential_lifecycle_hardening",
-  // PARTNER scope, deliberately: 0078 creates ONE standalone table
+  // (0089_partner_shared_rate_limit_buckets — renumbered from 0078 — is appended in numeric order
+  // at the end of this list.) Originally described here: it creates ONE standalone table
   // (partner_rate_limit_buckets) plus an index and a grant to partner_runtime, which migration 0001
   // already creates. It touches no core table, so it is safe on a partner-only disposable database.
   // It carries no tenant_id — the limiters it backs run PRE-AUTHENTICATION, keyed on an IP prefix or
   // a submitted email — so the RLS coverage sweep in partner-rls-isolation.test.ts correctly ignores
   // it (that sweep asserts RLS only for partner_% tables HAVING a tenant_id column).
-  "0078_partner_shared_rate_limit_buckets",
   // PARTNER scope: 0080's foreign key to core `public.certificates` is attached CONDITIONALLY
   // (only where that table exists), so the table itself is creatable on a partner-only disposable
   // database. That matters because submission acceptance now writes a Card Job in the SAME
@@ -263,6 +263,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0086_partner_session_step_up",
   // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
   "0087_partner_grading_edit_lease",
+  // RENUMBERED 0078 -> 0089: main landed a different 0078. Self-contained table, so the later
+  // position changes nothing. PARTNER scope — touches no core table.
+  "0089_partner_shared_rate_limit_buckets",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
