@@ -76,11 +76,11 @@ call, not a defect — but do not claim "AT-23 green on the final RC" without it
 
 Terra recommended application-scope. **Verified against source before changing anything:**
 
-- **0088 declares its own scope** — `migrations/0088_nfc_binding_integrity.sql:36`:
-  `-- SCOPE: APPLICATION (requires \`certificates\`)`. Its entire payload is a partial unique index on
-core `certificates (lower(nfc*uid))`. It is `to_regclass`-guarded, so it would \_not fail* on a
-  partner-only database — it would **no-op**, which is precisely why it must be classified
-  application-scope: a no-op recorded as "applied" claims coverage that does not exist.
+- **0088 declares its own scope.** `migrations/0088_nfc_binding_integrity.sql:36` reads
+  `SCOPE: APPLICATION (requires certificates)`. Its entire payload is one partial unique index on
+  the core certificates table, keyed on `lower(nfc_uid)`. It is `to_regclass`-guarded, so it would
+  **not** fail on a partner-only database — it would **no-op**, which is precisely why it must be
+  classified application-scope: a no-op recorded as "applied" claims coverage that does not exist.
 - **0090 fails closed** — `RAISE EXCEPTION '0090 precondition failed: certificates table is missing'`,
   plus preconditions on `partner_stations` and role `partner_runtime`; its inlined 0047 body
   `ALTER TABLE certificates ADD COLUMN …` and FKs `REFERENCES certificates(id)`.
