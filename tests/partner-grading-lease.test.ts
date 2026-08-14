@@ -398,31 +398,90 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
     if (!stale.ok) expect(stale.code).toBe("NOT_LEASE_HOLDER");
   });
 
-  it("8b: a STALE revision is refused even from the rightful holder", async () => {
+  it("8b: a revision from a DIFFERENT editing session is refused, and the holder's own autosave is not", async () => {
     /*
-     * The second, independent guard. Holding the lease is not enough — a form loaded before an
-     * earlier save would silently overwrite it, which is the corruption this whole mechanism exists
-     * to prevent.
+     * THE REVISION IS AN EDITING-SESSION GENERATION, NOT A PER-WRITE COUNTER.
+     *
+     * It used to be bumped on every accepted write. Putting the lease on the write path proved that
+     * unusable: the workstation AUTOSAVES, so a grader who legitimately holds the card writes
+     * repeatedly from one open form, and a per-write bump failed the SECOND autosave and every one
+     * after it for a grader who had done nothing wrong. That is not a safety property.
+     *
+     * What 0087 actually requires is that a form belonging to a FINISHED session is refused. So the
+     * generation is stable while one grader holds one card, and moves on when the card changes hands.
      */
     const f = await makeTenant("lease8b");
     const job = await makeGradableJob(f, f.locationA, "i");
     const held = await leases.acquireLease(principal(f, f.graderOne), job);
     const db = await import("../server/partner/db");
-
-    const next = await db.withPartnerAdminTenantTransaction(
-      { tenantId: f.tenantId, locationId: f.locationA },
-      (client) => leases.assertMayWrite(client, principal(f, f.graderOne), job, held.lease.revision)
-    );
-    expect(next).toBe(held.lease.revision + 1);
-
-    // Re-submitting the ORIGINAL form is refused.
-    const replay = await settle(
+    const write = (revision: number) =>
       db.withPartnerAdminTenantTransaction({ tenantId: f.tenantId, locationId: f.locationA }, (client) =>
-        leases.assertMayWrite(client, principal(f, f.graderOne), job, held.lease.revision)
+        leases.assertMayWrite(client, principal(f, f.graderOne), job, revision)
+      );
+
+    // Repeated saves from one open form all succeed, and the generation does not move.
+    expect(await write(held.lease.revision)).toBe(held.lease.revision);
+    expect(await write(held.lease.revision)).toBe(held.lease.revision);
+    expect(await write(held.lease.revision)).toBe(held.lease.revision);
+
+    // A revision from any other session is refused.
+    for (const wrong of [held.lease.revision + 1, held.lease.revision - 1]) {
+      const refused = await settle(write(wrong));
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) expect(refused.code).toBe("STALE_REVISION");
+    }
+  });
+
+  it("8c: a lease REACQUIRED after expiry starts a new generation, so the lapsed holder's form is refused", async () => {
+    /*
+     * The gap expiry left open. Takeover already carried the revision forward; expiry did not, so a
+     * grader who closed a laptop mid-card and came back could have their ten-minute-old form accepted
+     * the moment a fresh session happened to land on the same number. Expiry is simply the other way
+     * a session ends.
+     */
+    const f = await makeTenant("lease8c");
+    const job = await makeGradableJob(f, f.locationA, "i8c");
+    const first = await leases.acquireLease(principal(f, f.graderOne), job);
+
+    // The laptop closed: age the lease past its TTL exactly as the clock would. `acquired_at` moves
+    // with it because chk_partner_grading_leases_expiry requires expires_at > acquired_at — a lease
+    // that expired before it was taken is not a state the database permits, so the fixture must not
+    // invent one.
+    await admin.query(
+      `UPDATE partner_grading_leases
+          SET acquired_at = now() - interval '10 minutes',
+              heartbeat_at = now() - interval '10 minutes',
+              expires_at = now() - interval '1 minute'
+        WHERE tenant_id=$1 AND card_job_id=$2 AND released_at IS NULL`,
+      [f.tenantId, job]
+    );
+
+    // A colleague picks the card up. `acquireLease` releases the expired lease inside its own
+    // transaction, so this needs no sweeper to have run.
+    const second = await leases.acquireLease(principal(f, f.graderTwo), job);
+    expect(second.reacquired).toBe(true);
+    expect(second.lease.revision).toBeGreaterThan(first.lease.revision);
+
+    // The lapsed holder's stale form is refused — as NOT_LEASE_HOLDER, because they no longer hold
+    // it at all, which is the more accurate of the two true answers.
+    const db = await import("../server/partner/db");
+    const stale = await settle(
+      db.withPartnerAdminTenantTransaction({ tenantId: f.tenantId, locationId: f.locationA }, (client) =>
+        leases.assertMayWrite(client, principal(f, f.graderOne), job, first.lease.revision)
       )
     );
-    expect(replay.ok).toBe(false);
-    if (!replay.ok) expect(replay.code).toBe("STALE_REVISION");
+    expect(stale.ok).toBe(false);
+    if (!stale.ok) expect(stale.code).toBe("NOT_LEASE_HOLDER");
+
+    // And the new holder presenting the OLD generation is refused too, so the number itself is not
+    // reusable regardless of who presents it.
+    const wrongGeneration = await settle(
+      db.withPartnerAdminTenantTransaction({ tenantId: f.tenantId, locationId: f.locationA }, (client) =>
+        leases.assertMayWrite(client, principal(f, f.graderTwo), job, first.lease.revision)
+      )
+    );
+    expect(wrongGeneration.ok).toBe(false);
+    if (!wrongGeneration.ok) expect(wrongGeneration.code).toBe("STALE_REVISION");
   });
 
   it("7b: the takeover CARRIES the revision forward rather than restarting it", async () => {
@@ -599,24 +658,23 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
     expect(refused).toEqual({ ok: false, code: "NOT_LEASE_HOLDER" });
   });
 
-  it("W2: the holder writes with the current revision, and the SAME revision cannot land twice", async () => {
+  it("W2: the holder autosaves repeatedly at one generation, and any other generation is refused", async () => {
     const f = await makeTenant("write2");
     const { cardJobId, certificateId } = await makeJobWithCertificate(f, f.locationA, "w2");
     const acquired = await leases.acquireLease(principal(f, f.graderOne), cardJobId);
+    const current = acquired.lease.revision;
 
-    const first = await leases.assertMayWriteCertificate(
-      principal(f, f.graderOne),
-      certificateId,
-      acquired.lease.revision
-    );
-    expect(first).toEqual({ cardJobId, revision: acquired.lease.revision + 1 });
+    // The workstation autosaves from ONE open form. Every one of these is a legitimate write by the
+    // rightful holder and must be accepted; the generation does not move.
+    for (let i = 0; i < 3; i += 1) {
+      await expect(
+        leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, current)
+      ).resolves.toEqual({ cardJobId, revision: current });
+    }
 
-    // A resubmitted form carrying the revision it was loaded with is the double-save this guard
-    // exists to refuse — it must not be applied a second time.
-    const replay = await settle(
-      leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, acquired.lease.revision)
-    );
-    expect(replay).toEqual({ ok: false, code: "STALE_REVISION" });
+    // A form belonging to any other editing session is refused.
+    const stale = await settle(leases.assertMayWriteCertificate(principal(f, f.graderOne), certificateId, current + 1));
+    expect(stale).toEqual({ ok: false, code: "STALE_REVISION" });
   });
 
   it("W3: a certificate with NO Card Job is ungated, so connector cards grade exactly as before", async () => {

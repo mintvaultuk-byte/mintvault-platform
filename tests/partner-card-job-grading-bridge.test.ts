@@ -774,18 +774,30 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     expect(await runDraftWriteGuard(intruder, card.certificateId)).toBe(-1);
   });
 
-  it("AT-B11b: revision discipline — a write authority is granted once and the same revision is then stale", async () => {
+  it("AT-B11b: the workstation can AUTOSAVE — one generation, many writes — and a foreign generation cannot", async () => {
+    /*
+     * The revision is an editing-SESSION generation, not a per-write counter. It used to be bumped on
+     * every accepted write, which made the SECOND autosave from the rightful holder fail
+     * STALE_REVISION — an unusable workstation rather than a safety property, and the reason this UX
+     * could not previously be wired honestly. Replay protection lives on the irreversible edge
+     * (submit), where the Card Job transition and the credit idempotency key enforce it, rather than
+     * being approximated by a counter on every keystroke.
+     */
     const card = await readyToGradeCard(shopA);
     const holder = principal(shopA, shopA.graderOne);
     const acquired = await leases.acquireLease(holder, card.cardJobId, "Ada");
+    const current = acquired.lease.revision;
 
-    const first = await leases.assertMayWriteCertificate(holder, card.certificateId, acquired.lease.revision);
-    expect(first?.revision).toBe(acquired.lease.revision + 1);
+    for (let i = 0; i < 3; i += 1) {
+      const authority = await leases.assertMayWriteCertificate(holder, card.certificateId, current);
+      expect(authority).toEqual({ cardJobId: card.cardJobId, revision: current });
+      // And each of those writes genuinely lands, rather than merely being authorised.
+      expect(await runDraftWriteGuard(holder, card.certificateId)).toBe(1);
+    }
 
-    // Replaying the SAME revision is refused: a form submitted twice cannot land twice.
-    const replay = await settle(leases.assertMayWriteCertificate(holder, card.certificateId, acquired.lease.revision));
-    expect(replay.ok).toBe(false);
-    if (!replay.ok) expect(replay.code).toBe("STALE_REVISION");
+    const foreign = await settle(leases.assertMayWriteCertificate(holder, card.certificateId, current + 1));
+    expect(foreign.ok).toBe(false);
+    if (!foreign.ok) expect(foreign.code).toBe("STALE_REVISION");
   });
 
   /* ============================================================================================

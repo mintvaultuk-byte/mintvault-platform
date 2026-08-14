@@ -244,6 +244,21 @@ interface Props {
    *  audits) instead of /submit — so an edit can NEVER publish or auto-approve.
    *  Only meaningful with graderMode. */
   graderEdit?: boolean;
+  /**
+   * Extra fields merged into EVERY grading write this panel makes (`/grade`, `/submit`,
+   * `/edit-submission`, and the approve payload) — read at call time, never captured.
+   *
+   * WHY IT EXISTS. Partner Card Job grading is protected by a server-side EDIT LEASE, and the server
+   * refuses any Card Job write that does not present the CURRENT lease revision. That revision
+   * changes on every accepted write, so it cannot be a static prop and it cannot live in a closure
+   * captured at mount — it must be read at the moment the request is built.
+   *
+   * WHY IT IS ONE PROP RATHER THAN SEVEN CALL SITES. Every write here already funnels through
+   * `buildPayload()`. Merging there covers all of them at once, and an omission becomes impossible
+   * rather than merely unlikely. Absent (HQ admin, staff, Super Admin review) nothing is merged and
+   * the payload is byte-identical to what it always was.
+   */
+  writeEnvelope?: () => Record<string, unknown>;
   correctionMode?: boolean;
   onCorrectionGradingReady?: (getPayload: () => Record<string, unknown>) => void;
   correctionFeedback?: {
@@ -380,6 +395,7 @@ export default function GradingPanel({
   graderMode = false,
   adminReview = false,
   graderEdit = false,
+  writeEnvelope,
   correctionMode = false,
   onCorrectionGradingReady,
   correctionFeedback,
@@ -1671,7 +1687,9 @@ export default function GradingPanel({
           id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
           type: ad.type?.replace(/_/g, " ") || "Unknown",
           severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
-            "minor" | "moderate" | "significant",
+            | "minor"
+            | "moderate"
+            | "significant",
           description: ad.description || "",
           location: ad.location || (ad as any).detected_in || "front",
           image_side: imageSide,
@@ -2003,6 +2021,10 @@ export default function GradingPanel({
     // This payload contains observations and operator notes only. The server
     // derives and persists all grade outputs from these fields.
     const out: Record<string, unknown> = {
+      // Write-authority fields (e.g. the Partner Card Job lease revision) go FIRST, so a stray
+      // observation field can never shadow one. They are read here, at request-build time, because
+      // the lease revision changes on every accepted write.
+      ...(writeEnvelope?.() ?? {}),
       auth_status: authStatus,
       auth_notes: authNotes,
       grade_explanation: gradeExplanation,
@@ -3450,23 +3472,45 @@ export default function GradingPanel({
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)]">Dark border</span>
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)]">
+                      Dark border
+                    </span>
                     <div className="flex gap-3">
                       <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="checkbox" checked={darkBorderFront} onChange={() => setDarkBorderFront((v) => !v)} className="accent-[var(--admin-gold)] h-4 w-4" data-testid="check-dark-border-front" />
+                        <input
+                          type="checkbox"
+                          checked={darkBorderFront}
+                          onChange={() => setDarkBorderFront((v) => !v)}
+                          className="accent-[var(--admin-gold)] h-4 w-4"
+                          data-testid="check-dark-border-front"
+                        />
                         <span className="text-[10px] text-[var(--admin-ink-dim)]">Front</span>
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="checkbox" checked={darkBorderBack} onChange={() => setDarkBorderBack((v) => !v)} className="accent-[var(--admin-gold)] h-4 w-4" data-testid="check-dark-border-back" />
+                        <input
+                          type="checkbox"
+                          checked={darkBorderBack}
+                          onChange={() => setDarkBorderBack((v) => !v)}
+                          className="accent-[var(--admin-gold)] h-4 w-4"
+                          data-testid="check-dark-border-back"
+                        />
                         <span className="text-[10px] text-[var(--admin-ink-dim)]">Back</span>
                       </label>
                     </div>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)] block mb-1">Eye appeal</span>
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)] block mb-1">
+                      Eye appeal
+                    </span>
                     <div className="flex gap-1">
                       {[-2, -1, 0, 1, 2].map((n) => (
-                        <button key={n} type="button" onClick={() => setEyeAppealModifier(n)} className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${eyeAppealModifier === n ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]" : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"}`} data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}>
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setEyeAppealModifier(n)}
+                          className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${eyeAppealModifier === n ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]" : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"}`}
+                          data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}
+                        >
                           {n > 0 ? `+${n}` : n}
                         </button>
                       ))}
@@ -3475,7 +3519,11 @@ export default function GradingPanel({
                 </div>
                 {authoritativeGrade && Object.keys(authoritativeGrade.deductions).length > 0 && (
                   <div className="text-[10px] text-[var(--admin-ink-dim)] font-mono">
-                    {Object.entries(authoritativeGrade.deductions).map(([key, value]) => <span key={key} className="inline-block mr-2 whitespace-nowrap">{key}: {value}</span>)}
+                    {Object.entries(authoritativeGrade.deductions).map(([key, value]) => (
+                      <span key={key} className="inline-block mr-2 whitespace-nowrap">
+                        {key}: {value}
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
