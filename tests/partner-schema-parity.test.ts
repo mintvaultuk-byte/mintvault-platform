@@ -171,7 +171,7 @@ describe("partner schema ↔ migration parity", () => {
       // project the new column. This and the following connector grant are forward-only
       // migrations; their identities must remain independently pinned.
       "0077_partner_credential_lifecycle_hardening.sql",
-      
+
       "0078_partner_connector_flag_read.sql",
       // 0078 (shared partner rate-limit buckets) is additive and carries NO tenant data. It supplies
       // the shared store that server/partner/rate-limit.ts has always required but never had: the
@@ -259,6 +259,14 @@ describe("partner schema ↔ migration parity", () => {
       // or staging (highest 0073), so the unapplied one was free to move; main's lineage is canonical
       // and kept the number. Creates one self-contained table, so the later position is order-safe.
       "0089_partner_shared_rate_limit_buckets.sql",
+      // 0090 is the forward-only convergence for STAGING-lineage hosts (2026-08-14). The absorb of
+      // production v1078 shipped production's immutable scanner trio at 0045/0046/0047 — but
+      // staging's journal holds a DIFFERENT lineage at 0044/0046/0047, so the identity guard
+      // (correctly) refuses those three files there forever. They are excluded per-host via
+      // migrations/lineage-exclusions.json (exact incoming+occupant pairs, fail-closed), and 0090
+      // — the next globally free number — verifies the MFA content and inlines the two idempotent
+      // scanner bodies verbatim, so it is a no-op on production and on fresh estates.
+      "0090_lineage_convergence_scanner.sql",
     ]);
   });
 
