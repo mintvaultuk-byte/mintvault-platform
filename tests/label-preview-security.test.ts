@@ -186,7 +186,7 @@ describe("server-authorised certificate label preview", () => {
     expect(preview).toContain('res.headers.get("X-MintVault-Review-Revision")');
     expect(preview).toContain("authoritativeRevision !== expectedRevision");
     expect(preview).toContain(
-      "[endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]"
+      "[endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs, retryNonce]"
     );
   });
 
