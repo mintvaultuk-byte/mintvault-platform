@@ -6,16 +6,22 @@ production action, no change to protected MVGS maths.
 
 ## Identity
 
-|                          |                                                                                                                                                                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CODE FREEZE**          | **`524a79fc`** — the last commit touching anything outside `.claude/`. This is the artifact.                                                                                                                                                                                  |
-| **Final RC SHA (tip)**   | **`4384c8a0`** — code freeze + governance records only. `git diff --name-only 524a79fc..HEAD` returns `.claude/` paths **exclusively**, so tip and freeze build byte-identically. Deploy either; the record tip is preferable because it carries the corrected rollback plan. |
-| Commits in this pass     | `504891dd` M-1 fix (3 files, +564/−0) · `eea7c28b` RC record · `7919edab` merge of origin/main · `524a79fc` density-guard de-drift · then documentation only (`3eb8c84f`, `3ff657e5`, `e4d3bf5d`, `4384c8a0`)                                                                 |
-| Predecessor RC           | `e6fd6c5f985243e59a2ee2435672414048c1a095`                                                                                                                                                                                                                                    |
-| Branch / worktree        | `codex/partner-pilot-pass2` @ `/Users/cornelius/mintvault-partner-pilot-pass2`                                                                                                                                                                                                |
-| **Migration high-water** | **0090** (unchanged — no migration authored or edited this pass)                                                                                                                                                                                                              |
-| `origin/main`            | **`067ed0c6d3f5abfae275f8cd272bef87c99e20b4`** — it **MOVED during this pass** (was `839edd9c`)                                                                                                                                                                               |
-| Ancestry                 | `origin/main` @ `067ed0c6` fully contained in HEAD after the reconciliation merge. **No divergence.**                                                                                                                                                                         |
+|                          |                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CODE FREEZE**          | **`524a79fc`** — the last commit touching anything outside `.claude/`. This is the artifact.                                                                                                                                                                  |
+| **Deployable tip**       | the current branch tip. Every commit after the code freeze is `.claude/`-only, so tip and freeze build byte-identically — deliberately NOT pinned here, because each governance commit would move it and make this line lie. Verify with the one-liner below. |
+| Commits in this pass     | `504891dd` M-1 fix (3 files, +564/−0) · `eea7c28b` RC record · `7919edab` merge of `origin/main` · `524a79fc` density-guard de-drift · everything after: documentation only                                                                                   |
+| Predecessor RC           | `e6fd6c5f985243e59a2ee2435672414048c1a095`                                                                                                                                                                                                                    |
+| Branch / worktree        | `codex/partner-pilot-pass2` @ `/Users/cornelius/mintvault-partner-pilot-pass2`                                                                                                                                                                                |
+| **Migration high-water** | **0090** (unchanged — no migration authored or edited this pass)                                                                                                                                                                                              |
+| `origin/main`            | **`067ed0c6d3f5abfae275f8cd272bef87c99e20b4`** — it **MOVED during this pass** (was `839edd9c`)                                                                                                                                                               |
+| Ancestry                 | `origin/main` @ `067ed0c6` fully contained in HEAD after the reconciliation merge. **No divergence.**                                                                                                                                                         |
+
+**Prove the tip is artifact-identical to the code freeze before deploying** (must print nothing):
+
+```bash
+git diff --name-only 524a79fc..HEAD | grep -v '^\.claude/'
+```
 
 ### origin/main moved mid-pass — reconciled, not skipped
 
@@ -72,7 +78,7 @@ Terra recommended application-scope. **Verified against source before changing a
 
 - **0088 declares its own scope** — `migrations/0088_nfc_binding_integrity.sql:36`:
   `-- SCOPE: APPLICATION (requires \`certificates\`)`. Its entire payload is a partial unique index on
-core `certificates (lower(nfc_uid))`. It is `to_regclass`-guarded, so it would _not fail_ on a
+core `certificates (lower(nfc*uid))`. It is `to_regclass`-guarded, so it would \_not fail* on a
   partner-only database — it would **no-op**, which is precisely why it must be classified
   application-scope: a no-op recorded as "applied" claims coverage that does not exist.
 - **0090 fails closed** — `RAISE EXCEPTION '0090 precondition failed: certificates table is missing'`,
