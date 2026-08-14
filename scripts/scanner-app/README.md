@@ -34,7 +34,14 @@ cd ~/mintvault-platform/scripts/scanner-app
 ./setup-new-mac.sh
 ```
 
-It renders the one canonical LaunchAgent (`com.mintvault.scanner`) and starts the Electron app. It does not prompt staff for a secret, station ID or X/Y values: sign in, wait for station approval, then run **PREVIEW** with a disposable card. The app builds its small ImageCaptureCore adapter locally with Xcode command-line tools; it adds no scanner npm dependency.
+The production installer places the signed application at `/Applications/MintVault Scanner.app`; it does not prompt staff for a secret, station ID or X/Y values. Sign in, wait for station approval, then run **PREVIEW** with a disposable card. The application ships its precompiled arm64 ImageCaptureCore helper and verifies its sealed digest, architecture, minimum macOS, signature, signing identifier, and production Team ID before every spawn. Production stations need no Xcode, command-line tools, source checkout, Git, npm, or separately installed Node runtime.
+
+The source-only `setup-new-mac.sh`/LaunchAgent path is retained temporarily for
+development and legacy recovery and is not the production installation path.
+Build the helper only on the controlled Apple Silicon build host with
+`npm run build:native`; station runtime never invokes a compiler. The current
+dependency-backed minimum supported macOS candidate is 12.0 and remains subject
+to packaged physical acceptance on the Pilot fleet.
 
 For an isolated local compatibility proof only, both client and server require
 `MINTVAULT_ALLOW_LEGACY_SCANNER_TOKEN=1` in addition to a non-production

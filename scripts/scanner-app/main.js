@@ -36,6 +36,13 @@ const server   = require("./lib/server-client");
 const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
+const helperIntegrity = require("./lib/helper-integrity");
+
+helperIntegrity.configureRuntime({
+  isPackaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  execPath: process.execPath,
+});
 
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();

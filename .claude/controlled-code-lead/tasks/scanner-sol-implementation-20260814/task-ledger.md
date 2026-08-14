@@ -33,11 +33,11 @@
 |---|---|---|---|
 | 0 — Baseline | done | 2026-08-14 | Exact source/Partner/tooling facts recorded |
 | 1 — Review plan | done | 2026-08-14 | A9 Partner, A1 Scanner, tooling scopes isolated |
-| 2 — Investigation | done for WP0 | 2026-08-14 | A9/tooling complete; A1 headline only; Lead inspected authoritative Scanner source |
-| 3 — Lead verification | done for WP0 | 2026-08-14 | Base, ancestry, dirty state, gaps, tool versions and graph verified |
-| 4 — Implementation authorisation | done for WP0 | 2026-08-14 | Owner master prompt authorises isolated WP0 artifacts; no protected external action |
-| 5 — Implementation | done for WP0 | 2026-08-14 | OS enrollment plus 36-file WP0 control checkpoint |
-| 6 — Regression | done for WP0 except post-commit graph check | 2026-08-14 | Governance 4/4; typecheck/lint/build green; targeted Scanner/Partner/protected tests non-vacuous |
+| 2 — Investigation | done for WP0; done for WP1 | 2026-08-14 | A9/tooling complete; WP1 A1/A2 controlled reviews complete; Lead inspected authoritative Scanner source and local binaries |
+| 3 — Lead verification | done for WP0; done for WP1 | 2026-08-14 | WP1 compiler path, helper trust gap, package absence, Electron architecture and macOS floor verified |
+| 4 — Implementation authorisation | done for WP0; done for WP1 | 2026-08-14 | Owner master prompt authorises isolated WP1 helper/package-boundary work; no credential or external mutation |
+| 5 — Implementation | done for WP0; done for WP1 | 2026-08-14 | WP1 precompiled capture-helper build, exact integrity boundary, versioned protocol and macOS 12.0 floor |
+| 6 — Regression | done for WP0; local WP1 done | 2026-08-14 | WP1 native execution/integrity hostile matrix/Scanner/root gates green; physical Canon and Developer-ID package proof correctly remain later gates |
 | 7 — Final report | pending | | Only after WP12 or a legitimate external/owner gate |
 
 ## Reviewer assignments
@@ -47,6 +47,8 @@
 | A9 P14 | Partner pass2 Git/P14/authority surfaces, read-only | Complete; `reviewer-status.md` and `p14-reconciliation.md` |
 | A1 Scanner | Existing Electron/native/package/queue/identity inventory, read-only | Interrupted after confirmed headline; Lead rechecked source, no broad clean claim accepted |
 | Tooling | Engineering OS/Graphify availability and correct commands, read-only | Complete; `source-verification.md` |
+| A1 WP1 helper | Native helper/controller/targeted tests, read-only | Complete; R-1 compiler and mutable executable reproduced from source; CLI contract preserved |
+| A2 WP1 compatibility | Electron/package/install/signing metadata, read-only | Complete; Electron 42.2.0 arm64, macOS 12.0 candidate floor, no production package/identity |
 
 ## Authoritative links
 
@@ -73,3 +75,12 @@
 - Scanner app baseline: 34 passed / 1 source-contract pin failed (`renderer-workflow` expects obsolete recovery button text); assigned to WP8 and not treated as a proved product HIGH.
 - Scanner staging-service integration: 2 skipped because the required integration environment was absent; not claimed green.
 - Existing lockfiles report root 5 high and Scanner 4 high dependency advisories; reachability/remediation is assigned to WP6 package/security verification and is not downgraded or auto-fixed.
+
+## WP1 implementation and regression evidence
+
+- Controlled A1/A2 reviews confirmed runtime compiler/mutable-helper trust and package/macOS gaps; Lead reproduced each source/metadata fact.
+- Build-time-only `mv-capture-helper` is arm64, minOS 12.0, ad-hoc signed locally with identifier `com.mintvault.scanner.capture-helper`, and passes its generated sealed-manifest verifier.
+- Direct helper and controller execution returned a versioned, structured `disconnected` result on the current Mac. No Canon hardware was attached, so physical 1200-DPI evidence remains unclaimed.
+- Hostile helper matrix: 15 passed / 0 failed. Root packaged-helper/profile tests: 10 passed / 0 failed. Scanner suite: 50 passed / 0 failed.
+- The one WP0 Scanner baseline failure was an obsolete source assertion. The test and misleading modal copy now pin the existing server-derived Card Job/missing-side FIX flow; no business-authority source changed.
+- Governance 4/4, root TypeScript, lint (0 errors), production build and diff whitespace gates pass.

@@ -1,4 +1,4 @@
-# Definition of Proof — WP0
+# Definition of Proof — WP0/WP1
 
 | Dimension | Status |
 |---|---|
@@ -16,3 +16,17 @@
 - Governance, TypeScript, lint, production build, protected MVGS/label and targeted Scanner/Partner tests executed non-vacuously; full-suite baseline failures explicitly classified rather than hidden.
 
 WP0 creates no production feature and makes no production/staging claim.
+
+## WP1 proof boundary
+
+| Dimension | Status |
+|---|---|
+| Design | helper filename, protocol, identifier, arm64 and macOS 12.0 candidate floor frozen |
+| Implementation | runtime compilation removed; exact packaged/dev resource resolver and integrity verifier implemented |
+| Verification | Local Proof: real Mach-O build/execute plus hostile fixtures and regression suites |
+| Activation | none; generated ad-hoc helper is ignored build output, not a Developer-ID release artifact |
+
+WP1 proves that runtime capture no longer requires or trusts a compiler/source
+cache. It does not claim a Canon physical scan, Developer-ID signature,
+notarised package, Gatekeeper result, clean macOS 12 endpoint, or production
+activation. Those remain WP6/WP9/WP11/WP12 external or physical gates.

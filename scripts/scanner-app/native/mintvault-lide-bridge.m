@@ -15,6 +15,8 @@
 static NSString *const kExpectedFullName = @"CanoScan LiDE 400";
 static NSString *const kExpectedCanonName = @"Canon LiDE 400";
 static NSString *const kExpectedShortName = @"LiDE 400";
+static NSString *const kHelperVersion = @"1.0.0";
+static NSInteger const kHelperProtocolVersion = 1;
 
 @interface MintVaultLideBridge : NSObject <ICDeviceBrowserDelegate, ICScannerDeviceDelegate>
 @property(nonatomic, strong) ICDeviceBrowser *browser;
@@ -272,8 +274,11 @@ static NSString *const kExpectedShortName = @"LiDE 400";
 @end
 
 static void printJSON(NSDictionary *value) {
+  NSMutableDictionary *versioned = [value mutableCopy];
+  versioned[@"helperVersion"] = kHelperVersion;
+  versioned[@"protocolVersion"] = @(kHelperProtocolVersion);
   NSError *error = nil;
-  NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:&error];
+  NSData *data = [NSJSONSerialization dataWithJSONObject:versioned options:0 error:&error];
   if (!data || error) data = [@"{\"status\":\"control_unavailable\",\"error\":\"Unable to encode bridge result\"}" dataUsingEncoding:NSUTF8StringEncoding];
   fwrite(data.bytes, 1, data.length, stdout);
   fputc('\n', stdout);

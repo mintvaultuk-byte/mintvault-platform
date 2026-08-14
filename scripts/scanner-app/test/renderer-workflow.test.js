@@ -47,8 +47,10 @@ test("operator sign-out clears only the human session and keeps the Mac station 
 
 test("Fix missing images is target-bound recovery only and cannot delete a certificate", () => {
   const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
-  assert.match(html, /Recovery only\. It opens the selected card in MintVault/);
-  assert.match(renderer, /recover\.textContent = "Open in MintVault"/);
+  assert.match(html, /Recovery only\. MintVault authorises only the selected Card Job’s exact missing side/);
+  assert.match(renderer, /fixBtn\.textContent = "FIX THIS CARD"/);
+  assert.match(renderer, /window\.scanner\.authoriseFix\(\{\s*cardJobId: item\.cardJobId,\s*sides: item\.missingSides,/s);
+  assert.doesNotMatch(renderer, /manualMv|certificateNumber.*authoriseFix/);
   assert.doesNotMatch(html, /Soft-delete|deleteModal/);
   assert.doesNotMatch(renderer, /deleteCert|delete-cert|Soft-delete/);
   assert.doesNotMatch(preload, /deleteCert|delete-cert/);

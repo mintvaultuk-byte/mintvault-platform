@@ -1,28 +1,21 @@
 /**
  * Canon CanoScan LiDE 400 controller for the existing scanner-app process.
- * It compiles/runs the small ImageCaptureCore adapter locally; no Canon GUI is
- * automated and the result still travels through the canonical server ingest.
+ * It runs only the precompiled, integrity-checked ImageCaptureCore helper
+ * shipped inside the application. No Canon GUI or runtime compiler is used.
  */
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const stationIdentity = require("./station-identity");
+const helperIntegrity = require("./helper-integrity");
 
 const PROFILE_VERSION = "mintvault-canon-lide-400-v3";
 const MODEL = "CanoScan LiDE 400";
-const APP_DIR = path.resolve(__dirname, "..");
-const SOURCE = path.join(APP_DIR, "native", "mintvault-lide-bridge.m");
-const SUPPORT = process.env.MINTVAULT_SCANS_DIR
-  ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
-  : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
-const BINARY = path.join(SUPPORT, "mintvault-lide-bridge");
 const CALIBRATION_MIN_MM = Object.freeze({ width: 110, height: 140 });
 const PLATEN_MAX_MM = Object.freeze({ width: 216, height: 297 });
 const PROFILE_AREA_MM = Object.freeze({ width: 100, height: 130 });
 const POSITIONING_PREVIEW_DPI = 300;
 const POSITIONING_PREVIEW_COORDINATE_SPACE = "imagecapturecore-scan-area-upright-raster-v1";
-let buildPromise = null;
 
 function stationId() {
   const enrolled = stationIdentity.currentStationCode();
@@ -114,7 +107,7 @@ function run(command, args, timeoutMs) {
       const out = Buffer.concat(stdout).toString("utf8").trim();
       try {
         const parsed = JSON.parse(out);
-        resolve(parsed);
+        resolve(helperIntegrity.assertCompatibleResult(parsed));
       } catch {
         reject(new Error(`LiDE bridge exited ${code ?? "?"}: ${Buffer.concat(stderr).toString("utf8").trim() || out || "no result"}`));
       }
@@ -122,41 +115,11 @@ function run(command, args, timeoutMs) {
   });
 }
 
-function runCommand(command, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
-    const stderr = [];
-    const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("LiDE bridge build timed out")); }, timeoutMs);
-    child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`LiDE bridge build failed: ${Buffer.concat(stderr).toString("utf8").trim() || `exit ${code}`}`));
-    });
-  });
-}
-
 async function ensureBridge() {
   if (process.platform !== "darwin") throw new Error("Canon LiDE control requires macOS Image Capture");
-  // Rebuild after an app update as well as on the first launch.  Otherwise a
-  // LaunchAgent can keep an older native adapter indefinitely even though its
-  // JavaScript wrapper has been upgraded.
-  if (fs.existsSync(BINARY) && fs.existsSync(SOURCE)) {
-    const binaryMtime = fs.statSync(BINARY).mtimeMs;
-    const sourceMtime = fs.statSync(SOURCE).mtimeMs;
-    if (binaryMtime >= sourceMtime) return BINARY;
-  }
-  if (!buildPromise) {
-    buildPromise = (async () => {
-      if (!fs.existsSync(SOURCE)) throw new Error("LiDE ImageCaptureCore bridge source is missing");
-      fs.mkdirSync(SUPPORT, { recursive: true });
-      await runCommand("/usr/bin/xcrun", ["clang", "-fobjc-arc", "-fmodules", "-framework", "Foundation", "-framework", "ImageCaptureCore", SOURCE, "-o", BINARY], 60_000);
-      fs.chmodSync(BINARY, 0o700);
-      return BINARY;
-    })().finally(() => { buildPromise = null; });
-  }
-  return buildPromise;
+  // Verification deliberately runs before every spawn. A valid signature from
+  // a prior operation cannot authorise a subsequently replaced executable.
+  return helperIntegrity.verifiedCaptureHelper().path;
 }
 
 async function health() {

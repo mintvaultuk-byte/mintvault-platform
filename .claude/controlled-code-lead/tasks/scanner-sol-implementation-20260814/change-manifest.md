@@ -43,3 +43,36 @@ dirty repository. Its generated plan is captured in command evidence.
 5. Run WP0 governance and drift gates.
 
 **Approved to proceed:** owner master prompt; no protected external action in WP0.
+
+## WP1 planned change manifest (before application edits)
+
+| Finding | Planned surface | Repair class |
+|---|---|---|
+| R-1 runtime compilation | `lib/lide400-controller.js`, new helper-integrity boundary | D |
+| R-1 mutable unverified executable | generated helper manifest, exact-path/hash/architecture/signature/team/protocol verification | D |
+| R-10 macOS floor drift | native build metadata, exact Electron pin, compatibility tests/docs | C |
+| Native protocol ambiguity | `native/mintvault-lide-bridge.m` version fields and controller validation | C |
+
+The local build may invoke Apple compilation/signing tools only as a build-time
+operation in this isolated development worktree. Production runtime code will
+contain no compiler/source fallback. Developer-ID signing/notarisation and the
+complete release package remain WP6/R-3 work; WP1 establishes their nested
+helper contract without claiming external-credential proof.
+
+## WP1 actual changes
+
+- Added `helper-integrity.js`, build/verify scripts, a generated-manifest
+  contract and fail-closed checks for exact path, regular/executable file,
+  bounded size, SHA-256, arm64-only, minOS 12.0, code signature, helper ID,
+  production hardened runtime and application-matching Team ID.
+- Removed every controller runtime compiler/source/cache path. Integrity now
+  executes before every native operation.
+- Added helper/protocol version to every native JSON result and rejects stale
+  protocol responses in JavaScript.
+- Exact-pinned Electron 42.2.0 and documented the candidate macOS 12.0 floor.
+- Repaired the one pre-existing Scanner suite failure by aligning its stale
+  source assertion and modal copy to the already-implemented target-bound FIX
+  behaviour; no Partner/server authority was changed.
+
+Protected systems untouched: MVGS math/labels, payments, migrations, production
+data, active Partner pass2, staging/production, credentials, remote Git.

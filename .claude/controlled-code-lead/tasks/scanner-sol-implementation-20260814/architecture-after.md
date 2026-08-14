@@ -1,6 +1,6 @@
 # Architecture — AFTER — Scanner SOL campaign
 
-**State:** PROPOSED at WP0; AS-BUILT confirmation is required at WP9/WP12.
+**State:** WP1 capture-helper edge AS-BUILT locally; remaining graph PROPOSED until later WPs and final WP9/WP12 confirmation.
 
 ```mermaid
 flowchart LR
@@ -37,4 +37,8 @@ flowchart LR
 
 ## AS-BUILT confirmation
 
-Pending implementation, behavioural/mutation/hostile proof and final P14 reconciliation.
+WP1 confirms main-process configuration of one exact resource path and
+verification of the capture helper's sealed digest, arm64 architecture, macOS
+floor, signature, identifier, protocol and matching production Team ID before
+every spawn. Identity, queue, server-policy and package edges remain pending
+implementation, behavioural/mutation/hostile proof and final P14 reconciliation.
