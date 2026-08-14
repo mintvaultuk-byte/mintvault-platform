@@ -8,6 +8,9 @@
 
 @import Foundation;
 @import ImageCaptureCore;
+@import Security;
+#import <CommonCrypto/CommonDigest.h>
+#import "../build/generated/release-team-pin.h"
 
 // Canon's ICA module has shipped `CanoScan LiDE 400`, `Canon LiDE 400`, and
 // `LiDE 400` as the public ImageCaptureCore device name.  Accept only these
@@ -15,8 +18,67 @@
 static NSString *const kExpectedFullName = @"CanoScan LiDE 400";
 static NSString *const kExpectedCanonName = @"Canon LiDE 400";
 static NSString *const kExpectedShortName = @"LiDE 400";
-static NSString *const kHelperVersion = @"1.0.1";
+static NSString *const kHelperVersion = @"1.0.2";
 static NSInteger const kHelperProtocolVersion = 1;
+
+static NSDictionary *signingContext(SecCodeRef code) {
+  SecStaticCodeRef staticCode = NULL;
+  if (SecCodeCopyStaticCode(code, kSecCSDefaultFlags, &staticCode) != errSecSuccess || !staticCode) return nil;
+  CFDictionaryRef information = NULL;
+  OSStatus status = SecCodeCopySigningInformation(staticCode, kSecCSSigningInformation, &information);
+  CFRelease(staticCode);
+  if (status != errSecSuccess || !information) return nil;
+  NSDictionary *values = CFBridgingRelease(information);
+  return @{
+    @"identifier": values[(__bridge NSString *)kSecCodeInfoIdentifier] ?: @"",
+    @"teamIdentifier": values[(__bridge NSString *)kSecCodeInfoTeamIdentifier] ?: @"",
+  };
+}
+
+static BOOL codeSatisfies(SecCodeRef code, NSString *identifier, NSString *teamIdentifier) {
+  NSString *requirementText = [NSString stringWithFormat:
+    @"anchor apple generic and identifier \"%@\" and certificate leaf[subject.OU] = \"%@\"",
+    identifier, teamIdentifier];
+  SecRequirementRef requirement = NULL;
+  if (SecRequirementCreateWithString((__bridge CFStringRef)requirementText, kSecCSDefaultFlags, &requirement) != errSecSuccess || !requirement) return NO;
+  BOOL valid = SecCodeCheckValidity(code, kSecCSStrictValidate, requirement) == errSecSuccess;
+  CFRelease(requirement);
+  return valid;
+}
+
+static NSString *runtimeTrustError(void) {
+#if MINTVAULT_RELEASE_MODE
+  NSString *expectedTeam = MINTVAULT_TEAM_IDENTIFIER;
+  if (![expectedTeam rangeOfString:@"^[A-Z0-9]{10}$" options:NSRegularExpressionSearch].length) {
+    return @"Capture helper has no pinned MintVault release Team";
+  }
+  SecCodeRef selfCode = NULL;
+  if (SecCodeCopySelf(kSecCSDefaultFlags, &selfCode) != errSecSuccess || !selfCode) {
+    return @"Capture helper signing context is unavailable";
+  }
+  NSDictionary *selfContext = signingContext(selfCode);
+  BOOL selfValid = [selfContext[@"identifier"] isEqualToString:@"com.mintvault.scanner.capture-helper"]
+    && [selfContext[@"teamIdentifier"] isEqualToString:expectedTeam]
+    && codeSatisfies(selfCode, @"com.mintvault.scanner.capture-helper", expectedTeam);
+  CFRelease(selfCode);
+  if (!selfValid) return @"Capture helper is not the pinned signed MintVault helper";
+
+  pid_t parentPid = getppid();
+  if (parentPid <= 1) return @"Capture helper requires the signed MintVault Scanner parent";
+  NSDictionary *attributes = @{ (__bridge NSString *)kSecGuestAttributePid: @(parentPid) };
+  SecCodeRef parentCode = NULL;
+  if (SecCodeCopyGuestWithAttributes(NULL, (__bridge CFDictionaryRef)attributes, kSecCSDefaultFlags, &parentCode) != errSecSuccess || !parentCode) {
+    return @"Capture helper caller cannot be authenticated";
+  }
+  NSDictionary *parentContext = signingContext(parentCode);
+  BOOL parentValid = [parentContext[@"identifier"] isEqualToString:@"com.mintvault.scanner"]
+    && [parentContext[@"teamIdentifier"] isEqualToString:expectedTeam]
+    && codeSatisfies(parentCode, @"com.mintvault.scanner", expectedTeam);
+  CFRelease(parentCode);
+  if (!parentValid) return @"Capture helper caller is not the signed MintVault Scanner";
+#endif
+  return nil;
+}
 
 @interface MintVaultLideBridge : NSObject <ICDeviceBrowserDelegate, ICScannerDeviceDelegate>
 @property(nonatomic, strong) ICDeviceBrowser *browser;
@@ -245,9 +307,43 @@ static NSInteger const kHelperProtocolVersion = 1;
     return;
   }
   ICScannerFunctionalUnit *unit = scanner.selectedFunctionalUnit;
+  NSError *readError = nil;
+  NSFileHandle *capture = [NSFileHandle fileHandleForReadingFromURL:self.scanURL error:&readError];
+  if (!capture || readError) {
+    [self finish:@{ @"status": @"scan_failed", @"error": @"LiDE output could not be opened for attestation" }];
+    return;
+  }
+  CC_SHA256_CTX digestContext;
+  CC_SHA256_Init(&digestContext);
+  unsigned long long capturedBytes = 0;
+  @try {
+    while (YES) {
+      NSData *chunk = [capture readDataOfLength:1024 * 1024];
+      if (chunk.length == 0) break;
+      CC_SHA256_Update(&digestContext, chunk.bytes, (CC_LONG)chunk.length);
+      capturedBytes += chunk.length;
+    }
+  } @catch (NSException *exception) {
+    [capture closeFile];
+    [self finish:@{ @"status": @"scan_failed", @"error": @"LiDE output attestation read failed" }];
+    return;
+  }
+  [capture closeFile];
+  if (capturedBytes == 0) {
+    [self finish:@{ @"status": @"scan_failed", @"error": @"LiDE output was empty during attestation" }];
+    return;
+  }
+  unsigned char digestBytes[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256_Final(digestBytes, &digestContext);
+  NSMutableString *digestHex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+  for (NSUInteger index = 0; index < CC_SHA256_DIGEST_LENGTH; index++) {
+    [digestHex appendFormat:@"%02x", digestBytes[index]];
+  }
   NSMutableDictionary *payload = [[self devicePayload:scanner ready:YES] mutableCopy];
   payload[@"status"] = @"captured";
   payload[@"path"] = self.scanURL.path;
+  payload[@"fileSha256"] = digestHex;
+  payload[@"fileSizeBytes"] = @(capturedBytes);
   payload[@"requestedDpi"] = @(self.positioningPreview ? 300 : 1200);
   payload[@"driverResolutionDpi"] = @(unit.resolution);
   payload[@"scanAreaMm"] = self.appliedScanAreaMm ?: @{
@@ -293,6 +389,11 @@ int main(int argc, const char * argv[]) {
     if (!scanning && !(argc == 2 && strcmp(argv[1], "health") == 0)) {
       printJSON(@{ @"status": @"control_unavailable", @"error": @"Usage: health | preview <output-dir> | scan <output-dir> <origin-x-mm> <origin-y-mm> | calibrate <output-dir> <origin-x-mm> <origin-y-mm> <width-mm> <height-mm>" });
       return 64;
+    }
+    NSString *trustError = runtimeTrustError();
+    if (trustError) {
+      printJSON(@{ @"status": @"control_unavailable", @"error": trustError });
+      return 77;
     }
     MintVaultLideBridge *bridge = [MintVaultLideBridge new];
     bridge.scanning = scanning;

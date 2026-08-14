@@ -45,13 +45,12 @@ module.exports = async function beforePack() {
     const manifest = JSON.parse(fs.readFileSync(path.join(preparation.ROOT, "native", "bin", manifestName), "utf8"));
     const digest = contract.run("/usr/bin/shasum", ["-a", "256", helperPath]).trim().split(/\s+/)[0];
     const sourceDigest = contract.run("/usr/bin/shasum", ["-a", "256", path.join(preparation.ROOT, "native", sourceName)]).trim().split(/\s+/)[0];
-    const authorityDigest = name === "identity"
-      ? contract.run("/usr/bin/shasum", ["-a", "256", preparation.RELEASE_TEAM_PIN_SWIFT]).trim().split(/\s+/)[0]
-      : null;
+    const authorityPath = name === "identity" ? preparation.RELEASE_TEAM_PIN_SWIFT : preparation.RELEASE_TEAM_PIN_HEADER;
+    const authorityDigest = contract.run("/usr/bin/shasum", ["-a", "256", authorityPath]).trim().split(/\s+/)[0];
     const expectedBinding = { preparationId: record.preparationId, packageMode: record.mode, sourceCommit: record.sourceCommit, teamIdentifier: record.teamIdentifier };
     if (digest !== helper.sha256 || helper.identifier !== expectedIdentifier || manifest.sha256 !== digest
         || manifest.sourceSha256 !== sourceDigest
-        || (name === "identity" && manifest.authoritySourceSha256 !== authorityDigest)
+        || manifest.authoritySourceSha256 !== authorityDigest
         || JSON.stringify(manifest.packageBinding) !== JSON.stringify(expectedBinding)) {
       throw new Error(`${name} helper input is stale or belongs to another preparation`);
     }

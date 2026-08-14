@@ -4,26 +4,24 @@
  * attach a local file, choose a certificate target, or set a profile.
  */
 const { contextBridge, ipcRenderer } = require("electron");
+const BRIDGE_VERSION = 2;
 
-contextBridge.exposeInMainWorld("scanner", {
+function subscribe(channel, callback) {
+  if (typeof callback !== "function") throw new TypeError("Scanner event callback must be a function");
+  const wrapped = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, wrapped);
+  return () => ipcRenderer.removeListener(channel, wrapped);
+}
+
+const bridge = Object.freeze({
+  version: BRIDGE_VERSION,
   getState: () => ipcRenderer.invoke("get-state"),
-  onStateUpdate: (callback) => {
-    const wrapped = (_event, payload) => callback(payload);
-    ipcRenderer.on("state-update", wrapped);
-    return () => ipcRenderer.removeListener("state-update", wrapped);
-  },
-  onStationSetupUpdate: (callback) => {
-    const wrapped = (_event, payload) => callback(payload);
-    ipcRenderer.on("station-setup-update", wrapped);
-    return () => ipcRenderer.removeListener("station-setup-update", wrapped);
-  },
-  onUpdateStatus: (callback) => {
-    const wrapped = (_event, payload) => callback(payload);
-    ipcRenderer.on("update-status", wrapped);
-    return () => ipcRenderer.removeListener("update-status", wrapped);
-  },
+  onStateUpdate: (callback) => subscribe("state-update", callback),
+  onStationSetupUpdate: (callback) => subscribe("station-setup-update", callback),
+  onUpdateStatus: (callback) => subscribe("update-status", callback),
   fetchOrphans: () => ipcRenderer.invoke("fetch-orphans"),
   startNewCard: (payload) => ipcRenderer.invoke("start-new-card", payload),
+  cancelCard: () => ipcRenderer.invoke("cancel-card"),
   authoriseFix: (payload) => ipcRenderer.invoke("authorise-fix", payload),
   openGradeCert: (certId) => ipcRenderer.invoke("open-grade-cert", certId),
   getVersion: () => ipcRenderer.invoke("get-version"),
@@ -49,3 +47,5 @@ contextBridge.exposeInMainWorld("scanner", {
   acceptCapturePreview: (previewId) => ipcRenderer.invoke("accept-capture-preview", previewId),
   rescanCapturePreview: (previewId) => ipcRenderer.invoke("rescan-capture-preview", previewId),
 });
+
+contextBridge.exposeInMainWorld("scanner", bridge);

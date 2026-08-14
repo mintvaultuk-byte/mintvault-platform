@@ -143,8 +143,8 @@ function verifyArtifactLedger({ dist, mode }) {
   ];
   const actualArtifacts = (manifest.artifacts || []).map((entry) => entry.filename);
   const expectedHelpers = {
-    capture: { name: "mv-capture-helper", identifier: contract.CAPTURE_HELPER_IDENTIFIER, version: "1.0.1" },
-    identity: { name: "mv-identity-helper", identifier: contract.IDENTITY_HELPER_IDENTIFIER, version: "1.1.0" },
+    capture: { name: "mv-capture-helper", identifier: contract.CAPTURE_HELPER_IDENTIFIER, version: "1.0.2" },
+    identity: { name: "mv-identity-helper", identifier: contract.IDENTITY_HELPER_IDENTIFIER, version: "1.1.2" },
   };
   if (manifest.schemaVersion !== 1 || manifest.packageMode !== mode || manifest.releaseReady !== release
       || !Number.isFinite(Date.parse(manifest.generatedAt))

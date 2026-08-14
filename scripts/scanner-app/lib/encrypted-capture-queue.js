@@ -10,7 +10,9 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
+const { readBoundedJson } = require("./bounded-file");
 
 const MAGIC = Buffer.from("MVQUEUE2", "ascii");
 const NONCE_BYTES = 12;
@@ -18,6 +20,10 @@ const TAG_BYTES = 16;
 const METADATA_LENGTH_BYTES = 4;
 const FIXED_HEADER_BYTES = MAGIC.length + METADATA_LENGTH_BYTES;
 const MAX_EMBEDDED_METADATA_BYTES = 64 * 1024;
+const MAX_TIFF_MASTER_BYTES = 512 * 1024 * 1024;
+const MAX_PREVIEW_JPEG_BYTES = 32 * 1024 * 1024;
+const MAX_INDEX_BYTES = 8 * 1024 * 1024;
+const MAX_WRAPPED_KEY_BYTES = 64 * 1024;
 const INDEX_SCHEMA_VERSION = 1;
 const ARTIFACT_SCHEMA_VERSION = 1;
 const STATES = new Set([
@@ -90,12 +96,19 @@ function atomicWriteJson(filePath, value) {
   fsyncDirectory(path.dirname(filePath));
 }
 
-function readEmbeddedHeader(filePath) {
-  const stat = fs.statSync(filePath);
-  if (!stat.isFile() || stat.size <= FIXED_HEADER_BYTES + NONCE_BYTES + TAG_BYTES) {
+function openEmbeddedArtifact(filePath) {
+  let handle;
+  try {
+    handle = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  } catch {
+    throw new QueueCorruptionError("Encrypted capture artifact cannot be opened safely");
+  }
+  const stat = fs.fstatSync(handle);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
+      || stat.size <= FIXED_HEADER_BYTES + NONCE_BYTES + TAG_BYTES) {
+    fs.closeSync(handle);
     throw new QueueCorruptionError("Encrypted capture artifact is truncated");
   }
-  const handle = fs.openSync(filePath, fs.constants.O_RDONLY);
   try {
     const fixed = Buffer.alloc(FIXED_HEADER_BYTES);
     fs.readSync(handle, fixed, 0, fixed.length, 0);
@@ -113,12 +126,40 @@ function readEmbeddedHeader(filePath) {
       throw new QueueCorruptionError("Encrypted capture embedded metadata schema is invalid");
     }
     const nonceOffset = FIXED_HEADER_BYTES + metadataLength;
+    const plaintextBytes = embedded.authenticatedMetadata.byteLength;
+    const maximumBytes = artifactMaximumBytes(embedded.authenticatedMetadata.kind);
+    if (!Number.isSafeInteger(plaintextBytes) || plaintextBytes < 1 || plaintextBytes > maximumBytes) {
+      throw new QueueCorruptionError("Encrypted capture authenticated byte length is invalid");
+    }
+    const expectedContainerBytes = nonceOffset + NONCE_BYTES + plaintextBytes + TAG_BYTES;
+    if (stat.size !== expectedContainerBytes) {
+      throw new QueueCorruptionError("Encrypted capture container size does not match authenticated plaintext length");
+    }
     const nonce = Buffer.alloc(NONCE_BYTES);
     const tag = Buffer.alloc(TAG_BYTES);
     fs.readSync(handle, nonce, 0, nonce.length, nonceOffset);
     fs.readSync(handle, tag, 0, tag.length, stat.size - TAG_BYTES);
-    return { stat, embedded, metadataBytes, nonce, tag, ciphertextOffset: nonceOffset + NONCE_BYTES };
-  } finally { fs.closeSync(handle); }
+    return { handle, stat, embedded, metadataBytes, nonce, tag, ciphertextOffset: nonceOffset + NONCE_BYTES };
+  } catch (error) {
+    fs.closeSync(handle);
+    throw error;
+  }
+}
+
+function readEmbeddedHeader(filePath) {
+  const opened = openEmbeddedArtifact(filePath);
+  try {
+    const { handle: _handle, ...header } = opened;
+    return header;
+  } finally {
+    fs.closeSync(opened.handle);
+  }
+}
+
+function artifactMaximumBytes(kind) {
+  if (kind === "TIFF_MASTER") return MAX_TIFF_MASTER_BYTES;
+  if (kind === "PREVIEW_JPEG") return MAX_PREVIEW_JPEG_BYTES;
+  throw new QueueCorruptionError("Encrypted capture artifact kind is invalid");
 }
 
 async function sha256File(filePath) {
@@ -126,6 +167,20 @@ async function sha256File(filePath) {
   const stream = fs.createReadStream(filePath);
   stream.on("data", (chunk) => hash.update(chunk));
   await new Promise((resolve, reject) => stream.on("end", resolve).on("error", reject));
+  return hash.digest("hex");
+}
+
+function sha256Descriptor(descriptor, byteLength) {
+  const hash = crypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, byteLength));
+  let offset = 0;
+  while (offset < byteLength) {
+    const length = Math.min(buffer.length, byteLength - offset);
+    const count = fs.readSync(descriptor, buffer, 0, length, offset);
+    if (count !== length) throw new Error("Capture artifact changed while being read");
+    hash.update(buffer.subarray(0, count));
+    offset += count;
+  }
   return hash.digest("hex");
 }
 
@@ -138,7 +193,7 @@ function defaultKeyProtector() {
 }
 
 class EncryptedCaptureQueue {
-  constructor({ baseDir, keyProtector = null, now = () => new Date(), randomUUID = () => crypto.randomUUID() } = {}) {
+  constructor({ baseDir, keyProtector = null, now = () => new Date(), randomUUID = () => crypto.randomUUID(), afterArtifactOpen = null, afterSourceHash = null } = {}) {
     if (!path.isAbsolute(String(baseDir || ""))) throw new Error("Capture queue base directory must be absolute");
     this.baseDir = path.resolve(baseDir);
     this.root = path.join(this.baseDir, "capture-queue");
@@ -150,6 +205,8 @@ class EncryptedCaptureQueue {
     this.keyProtector = keyProtector || defaultKeyProtector();
     this.now = now;
     this.randomUUID = randomUUID;
+    this.afterArtifactOpen = typeof afterArtifactOpen === "function" ? afterArtifactOpen : () => {};
+    this.afterSourceHash = typeof afterSourceHash === "function" ? afterSourceHash : () => {};
     this.cachedKey = null;
     for (const directory of [this.root, this.artifactsDir, this.quarantineDir, this.scratchDir]) ensurePrivateDirectory(directory);
   }
@@ -157,7 +214,7 @@ class EncryptedCaptureQueue {
   readIndex() {
     if (!fs.existsSync(this.indexPath)) return { schemaVersion: INDEX_SCHEMA_VERSION, entries: [] };
     let index;
-    try { index = JSON.parse(fs.readFileSync(this.indexPath, "utf8")); }
+    try { index = readBoundedJson(this.indexPath, { maximumBytes: MAX_INDEX_BYTES, label: "Capture queue index" }); }
     catch { throw new QueueCorruptionError("Capture queue index is not valid JSON"); }
     if (index?.schemaVersion !== INDEX_SCHEMA_VERSION || !Array.isArray(index.entries)) {
       throw new QueueCorruptionError("Capture queue index schema is invalid");
@@ -296,7 +353,7 @@ class EncryptedCaptureQueue {
     if (this.cachedKey) return this.cachedKey;
     let record;
     if (fs.existsSync(this.keyPath)) {
-      try { record = JSON.parse(fs.readFileSync(this.keyPath, "utf8")); }
+      try { record = readBoundedJson(this.keyPath, { maximumBytes: MAX_WRAPPED_KEY_BYTES, label: "Wrapped capture queue key" }); }
       catch { throw new QueueCorruptionError("Wrapped capture queue key is corrupt"); }
       if (record?.schemaVersion !== 1 || typeof record.queueKeyId !== "string" || typeof record.wrappedQueueKey !== "string") {
         throw new QueueCorruptionError("Wrapped capture queue key schema is invalid");
@@ -369,7 +426,11 @@ class EncryptedCaptureQueue {
     if (artifact?.schemaVersion !== ARTIFACT_SCHEMA_VERSION || artifact.encryption !== "AES-256-GCM" ||
         typeof artifact.relativePath !== "string" || path.isAbsolute(artifact.relativePath) || artifact.relativePath.includes("..") ||
         !/^[a-f0-9]{64}$/.test(String(artifact.sha256 || "")) || !Number.isSafeInteger(artifact.byteLength) || artifact.byteLength < 1 ||
-        typeof artifact.authenticatedMetadata !== "object" || artifact.authenticatedMetadata === null) {
+        typeof artifact.authenticatedMetadata !== "object" || artifact.authenticatedMetadata === null
+        || artifact.byteLength > artifactMaximumBytes(artifact.authenticatedMetadata?.kind)
+        || artifact.authenticatedMetadata.byteLength !== artifact.byteLength
+        || artifact.authenticatedMetadata.sha256 !== artifact.sha256
+        || artifact.authenticatedMetadata.mimeType !== artifact.mimeType) {
       throw new QueueCorruptionError("Encrypted capture artifact metadata is invalid");
     }
     const expected = canonicalJson(artifact.authenticatedMetadata);
@@ -421,91 +482,146 @@ class EncryptedCaptureQueue {
     return candidate;
   }
 
-  async attachFile(inputEntry, sourcePath, { kind = "TIFF_MASTER", mimeType = "image/tiff", quarantine = false } = {}) {
-    const stat = fs.lstatSync(sourcePath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1) throw new Error("Capture artifact is not a regular non-empty file");
-    fs.chmodSync(sourcePath, 0o600);
-    const entry = { ...inputEntry, queueEntryId: inputEntry.queueEntryId || this.randomUUID() };
-    safeName(entry.queueEntryId, "Queue entry ID");
-    const sha256 = await sha256File(sourcePath);
-    const authenticatedMetadata = this.authenticatedMetadata(entry, { kind, mimeType, sha256, byteLength: stat.size });
-    const aad = Buffer.from(canonicalJson(authenticatedMetadata));
-    const { raw, keyId } = this.ensureKey();
-    const nonce = crypto.randomBytes(NONCE_BYTES);
-    const cipher = crypto.createCipheriv("aes-256-gcm", raw, nonce, { authTagLength: TAG_BYTES });
-    cipher.setAAD(aad, { plaintextLength: stat.size });
-    const directory = quarantine ? this.quarantineDir : this.artifactsDir;
-    const basename = `${entry.queueEntryId}.${kind === "PREVIEW_JPEG" ? "preview" : "master"}.mvq`;
-    const finalPath = path.join(directory, basename);
-    const temporary = `${finalPath}.${process.pid}.${this.randomUUID()}.tmp`;
-    const embedded = Buffer.from(canonicalJson({ schemaVersion: 2, keyId, authenticatedMetadata }));
-    if (embedded.length > MAX_EMBEDDED_METADATA_BYTES) throw new Error("Authenticated capture metadata exceeds its size limit");
-    const metadataLength = Buffer.alloc(METADATA_LENGTH_BYTES);
-    metadataLength.writeUInt32BE(embedded.length);
-    const output = fs.createWriteStream(temporary, { flags: "wx", mode: 0o600 });
-    output.write(Buffer.concat([MAGIC, metadataLength, embedded, nonce]));
+  async attachFile(inputEntry, sourcePath, {
+    kind = "TIFF_MASTER",
+    mimeType = "image/tiff",
+    quarantine = false,
+    sourceDescriptor = null,
+    expectedSha256 = null,
+    expectedByteLength = null,
+  } = {}) {
+    const expectedMime = kind === "TIFF_MASTER" ? "image/tiff" : kind === "PREVIEW_JPEG" ? "image/jpeg" : null;
+    if (!expectedMime || mimeType !== expectedMime) throw new Error("Capture artifact kind or media type is invalid");
+    let descriptor = sourceDescriptor;
+    let ownsDescriptor = false;
     try {
-      await pipeline(fs.createReadStream(sourcePath), cipher, output);
-      fs.appendFileSync(temporary, cipher.getAuthTag());
-      const handle = fs.openSync(temporary, fs.constants.O_RDONLY);
-      try { fs.fsyncSync(handle); } finally { fs.closeSync(handle); }
-      fs.renameSync(temporary, finalPath);
-      fs.chmodSync(finalPath, 0o600);
-      fsyncDirectory(directory);
-    } catch (error) {
-      try { fs.unlinkSync(temporary); } catch { /* best effort for uncommitted ciphertext only */ }
-      throw error;
+      if (!Number.isInteger(descriptor) || descriptor < 0) {
+        descriptor = fs.openSync(sourcePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        ownsDescriptor = true;
+      }
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size < 1 || stat.size > artifactMaximumBytes(kind)) {
+        throw new Error("Capture artifact is not a bounded regular single-link non-empty file");
+      }
+      if (expectedByteLength != null && expectedByteLength !== stat.size) {
+        throw new Error("Capture artifact size does not match the trusted helper attestation");
+      }
+      fs.fchmodSync(descriptor, 0o600);
+      const sha256 = sha256Descriptor(descriptor, stat.size);
+      if (expectedSha256 != null && (!/^[a-f0-9]{64}$/.test(String(expectedSha256)) || expectedSha256 !== sha256)) {
+        throw new Error("Capture artifact digest does not match the trusted helper attestation");
+      }
+      this.afterSourceHash({ sourcePath, descriptor, stat, sha256 });
+      const entry = { ...inputEntry, queueEntryId: inputEntry.queueEntryId || this.randomUUID() };
+      safeName(entry.queueEntryId, "Queue entry ID");
+      const authenticatedMetadata = this.authenticatedMetadata(entry, { kind, mimeType, sha256, byteLength: stat.size });
+      const aad = Buffer.from(canonicalJson(authenticatedMetadata));
+      const { raw, keyId } = this.ensureKey();
+      const nonce = crypto.randomBytes(NONCE_BYTES);
+      const cipher = crypto.createCipheriv("aes-256-gcm", raw, nonce, { authTagLength: TAG_BYTES });
+      cipher.setAAD(aad, { plaintextLength: stat.size });
+      const directory = quarantine ? this.quarantineDir : this.artifactsDir;
+      const basename = `${entry.queueEntryId}.${kind === "PREVIEW_JPEG" ? "preview" : "master"}.mvq`;
+      const finalPath = path.join(directory, basename);
+      const temporary = `${finalPath}.${process.pid}.${this.randomUUID()}.tmp`;
+      const embedded = Buffer.from(canonicalJson({ schemaVersion: 2, keyId, authenticatedMetadata }));
+      if (embedded.length > MAX_EMBEDDED_METADATA_BYTES) throw new Error("Authenticated capture metadata exceeds its size limit");
+      const metadataLength = Buffer.alloc(METADATA_LENGTH_BYTES);
+      metadataLength.writeUInt32BE(embedded.length);
+      const output = fs.createWriteStream(temporary, { flags: "wx", mode: 0o600 });
+      output.write(Buffer.concat([MAGIC, metadataLength, embedded, nonce]));
+      const streamedHash = crypto.createHash("sha256");
+      let streamedBytes = 0;
+      const audit = new Transform({
+        transform(chunk, _encoding, callback) {
+          streamedBytes += chunk.length;
+          if (streamedBytes > stat.size) return callback(new Error("Capture artifact grew while being encrypted"));
+          streamedHash.update(chunk);
+          callback(null, chunk);
+        },
+      });
+      try {
+        await pipeline(fs.createReadStream(null, { fd: descriptor, autoClose: false, start: 0, end: stat.size - 1 }), audit, cipher, output);
+        const after = fs.fstatSync(descriptor);
+        if (after.dev !== stat.dev || after.ino !== stat.ino || after.nlink !== 1 || after.size !== stat.size
+            || streamedBytes !== stat.size || streamedHash.digest("hex") !== sha256) {
+          throw new Error("Capture artifact changed while being encrypted");
+        }
+        fs.appendFileSync(temporary, cipher.getAuthTag());
+        const handle = fs.openSync(temporary, fs.constants.O_RDONLY);
+        try { fs.fsyncSync(handle); } finally { fs.closeSync(handle); }
+        fs.renameSync(temporary, finalPath);
+        fs.chmodSync(finalPath, 0o600);
+        fsyncDirectory(directory);
+      } catch (error) {
+        try { fs.unlinkSync(temporary); } catch { /* best effort for uncommitted ciphertext only */ }
+        throw error;
+      }
+      const relativePath = path.relative(this.root, finalPath);
+      const artifact = Object.freeze({
+        schemaVersion: ARTIFACT_SCHEMA_VERSION,
+        encryption: "AES-256-GCM",
+        keyId,
+        relativePath,
+        sha256,
+        byteLength: stat.size,
+        mimeType,
+        aadSha256: crypto.createHash("sha256").update(aad).digest("hex"),
+        authenticatedMetadata,
+        encryptedAt: this.now().toISOString(),
+      });
+      const field = kind === "PREVIEW_JPEG" ? "previewArtifact" : "artifact";
+      const updated = this.upsert({ ...entry, [field]: artifact });
+      let currentPathStat = null;
+      try { currentPathStat = fs.lstatSync(sourcePath); } catch { /* already unlinked */ }
+      if (currentPathStat && currentPathStat.dev === stat.dev && currentPathStat.ino === stat.ino) {
+        try { fs.unlinkSync(sourcePath); }
+        catch (error) {
+          throw new Error(`Encrypted capture is durable but plaintext removal failed: ${error.message}`);
+        }
+      }
+      return updated;
+    } finally {
+      if (ownsDescriptor && descriptor !== null) fs.closeSync(descriptor);
     }
-    const relativePath = path.relative(this.root, finalPath);
-    const artifact = Object.freeze({
-      schemaVersion: ARTIFACT_SCHEMA_VERSION,
-      encryption: "AES-256-GCM",
-      keyId,
-      relativePath,
-      sha256,
-      byteLength: stat.size,
-      mimeType,
-      aadSha256: crypto.createHash("sha256").update(aad).digest("hex"),
-      authenticatedMetadata,
-      encryptedAt: this.now().toISOString(),
-    });
-    const field = kind === "PREVIEW_JPEG" ? "previewArtifact" : "artifact";
-    const updated = this.upsert({ ...entry, [field]: artifact });
-    try { fs.unlinkSync(sourcePath); }
-    catch (error) {
-      // Ciphertext and its index entry are already durable. Refuse to continue
-      // until the duplicate plaintext can be removed; startup recovery retries.
-      throw new Error(`Encrypted capture is durable but plaintext removal failed: ${error.message}`);
-    }
-    return updated;
   }
 
   async decryptToFile(artifact, destination) {
     const source = this.artifactPath(artifact);
-    const header = readEmbeddedHeader(source);
-    const embeddedCanonical = canonicalJson(header.embedded.authenticatedMetadata);
-    if (header.embedded.keyId !== artifact.keyId || embeddedCanonical !== canonicalJson(artifact.authenticatedMetadata)) {
-      throw new QueueCorruptionError("Encrypted capture embedded metadata does not match the queue index");
-    }
-    const { raw, keyId } = this.ensureKey();
-    if (artifact.keyId !== keyId) throw new QueueCorruptionError("Encrypted capture artifact uses an unknown queue key");
-    const decipher = crypto.createDecipheriv("aes-256-gcm", raw, header.nonce, { authTagLength: TAG_BYTES });
-    const aad = Buffer.from(canonicalJson(artifact.authenticatedMetadata));
-    decipher.setAAD(aad, { plaintextLength: artifact.byteLength });
-    decipher.setAuthTag(header.tag);
-    ensurePrivateDirectory(path.dirname(destination));
-    const output = fs.createWriteStream(destination, { flags: "wx", mode: 0o600 });
+    const header = openEmbeddedArtifact(source);
     try {
-      await pipeline(fs.createReadStream(source, { start: header.ciphertextOffset, end: header.stat.size - TAG_BYTES - 1 }), decipher, output);
-      const recovered = fs.statSync(destination);
-      if (recovered.size !== artifact.byteLength || await sha256File(destination) !== artifact.sha256) {
-        throw new QueueCorruptionError("Decrypted capture digest or size does not match immutable metadata");
+      this.afterArtifactOpen(source, header);
+      const embeddedCanonical = canonicalJson(header.embedded.authenticatedMetadata);
+      if (header.embedded.keyId !== artifact.keyId || embeddedCanonical !== canonicalJson(artifact.authenticatedMetadata)) {
+        throw new QueueCorruptionError("Encrypted capture embedded metadata does not match the queue index");
       }
-      return destination;
-    } catch (error) {
-      try { fs.unlinkSync(destination); } catch { /* incomplete plaintext only */ }
-      if (error instanceof QueueCorruptionError) throw error;
-      throw new QueueCorruptionError("Encrypted capture authentication failed");
+      const { raw, keyId } = this.ensureKey();
+      if (artifact.keyId !== keyId) throw new QueueCorruptionError("Encrypted capture artifact uses an unknown queue key");
+      const decipher = crypto.createDecipheriv("aes-256-gcm", raw, header.nonce, { authTagLength: TAG_BYTES });
+      const aad = Buffer.from(canonicalJson(artifact.authenticatedMetadata));
+      decipher.setAAD(aad, { plaintextLength: artifact.byteLength });
+      decipher.setAuthTag(header.tag);
+      ensurePrivateDirectory(path.dirname(destination));
+      const output = fs.createWriteStream(destination, { flags: "wx", mode: 0o600 });
+      try {
+        await pipeline(fs.createReadStream(null, {
+          fd: header.handle,
+          autoClose: false,
+          start: header.ciphertextOffset,
+          end: header.stat.size - TAG_BYTES - 1,
+        }), decipher, output);
+        const recovered = fs.statSync(destination);
+        if (recovered.size !== artifact.byteLength || await sha256File(destination) !== artifact.sha256) {
+          throw new QueueCorruptionError("Decrypted capture digest or size does not match immutable metadata");
+        }
+        return destination;
+      } catch (error) {
+        try { fs.unlinkSync(destination); } catch { /* incomplete plaintext only */ }
+        if (error instanceof QueueCorruptionError) throw error;
+        throw new QueueCorruptionError("Encrypted capture authentication failed");
+      }
+    } finally {
+      fs.closeSync(header.handle);
     }
   }
 
@@ -524,29 +640,46 @@ class EncryptedCaptureQueue {
       throw new Error("Encrypted artifact exceeds the in-memory preview limit");
     }
     const source = this.artifactPath(artifact);
-    const payload = fs.readFileSync(source);
-    const header = readEmbeddedHeader(source);
-    if (header.embedded.keyId !== artifact.keyId || canonicalJson(header.embedded.authenticatedMetadata) !== canonicalJson(artifact.authenticatedMetadata)) {
-      throw new QueueCorruptionError("Encrypted capture embedded metadata does not match the queue index");
-    }
-    const { raw, keyId } = this.ensureKey();
-    if (artifact.keyId !== keyId) throw new QueueCorruptionError("Encrypted capture artifact uses an unknown queue key");
+    const header = openEmbeddedArtifact(source);
     try {
-      const decipher = crypto.createDecipheriv("aes-256-gcm", raw, header.nonce, { authTagLength: TAG_BYTES });
-      const aad = Buffer.from(canonicalJson(artifact.authenticatedMetadata));
-      decipher.setAAD(aad, { plaintextLength: artifact.byteLength });
-      decipher.setAuthTag(header.tag);
-      const plaintext = Buffer.concat([
-        decipher.update(payload.subarray(header.ciphertextOffset, payload.length - TAG_BYTES)),
-        decipher.final(),
-      ]);
-      if (plaintext.length !== artifact.byteLength || crypto.createHash("sha256").update(plaintext).digest("hex") !== artifact.sha256) {
-        throw new QueueCorruptionError("Decrypted capture digest or size does not match immutable metadata");
+      this.afterArtifactOpen(source, header);
+      if (header.stat.size > FIXED_HEADER_BYTES + MAX_EMBEDDED_METADATA_BYTES + NONCE_BYTES + maximumBytes + TAG_BYTES) {
+        throw new Error("Encrypted artifact exceeds the in-memory preview container limit");
       }
-      return plaintext;
-    } catch (error) {
-      if (error instanceof QueueCorruptionError) throw error;
-      throw new QueueCorruptionError("Encrypted capture authentication failed");
+      // Exact authenticated container sizing is checked above before any whole
+      // container allocation. A sparse/appended attacker file therefore cannot
+      // turn a small authenticated Preview into an unbounded synchronous read.
+      const payload = Buffer.allocUnsafe(header.stat.size);
+      let offset = 0;
+      while (offset < payload.length) {
+        const read = fs.readSync(header.handle, payload, offset, payload.length - offset, offset);
+        if (read === 0) throw new QueueCorruptionError("Encrypted capture artifact changed while being read");
+        offset += read;
+      }
+      if (header.embedded.keyId !== artifact.keyId || canonicalJson(header.embedded.authenticatedMetadata) !== canonicalJson(artifact.authenticatedMetadata)) {
+        throw new QueueCorruptionError("Encrypted capture embedded metadata does not match the queue index");
+      }
+      const { raw, keyId } = this.ensureKey();
+      if (artifact.keyId !== keyId) throw new QueueCorruptionError("Encrypted capture artifact uses an unknown queue key");
+      try {
+        const decipher = crypto.createDecipheriv("aes-256-gcm", raw, header.nonce, { authTagLength: TAG_BYTES });
+        const aad = Buffer.from(canonicalJson(artifact.authenticatedMetadata));
+        decipher.setAAD(aad, { plaintextLength: artifact.byteLength });
+        decipher.setAuthTag(header.tag);
+        const plaintext = Buffer.concat([
+          decipher.update(payload.subarray(header.ciphertextOffset, payload.length - TAG_BYTES)),
+          decipher.final(),
+        ]);
+        if (plaintext.length !== artifact.byteLength || crypto.createHash("sha256").update(plaintext).digest("hex") !== artifact.sha256) {
+          throw new QueueCorruptionError("Decrypted capture digest or size does not match immutable metadata");
+        }
+        return plaintext;
+      } catch (error) {
+        if (error instanceof QueueCorruptionError) throw error;
+        throw new QueueCorruptionError("Encrypted capture authentication failed");
+      }
+    } finally {
+      fs.closeSync(header.handle);
     }
   }
 

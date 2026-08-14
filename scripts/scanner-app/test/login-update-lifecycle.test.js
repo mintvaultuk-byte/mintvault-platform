@@ -64,9 +64,11 @@ test("minimum-version absence fails closed and UPDATE_REQUIRED has usable modal 
 });
 
 test("reinstall-safe identity and queue custody live outside the application bundle", () => {
-  assert.match(source("lib/state.js"), /Library["),.\s]+Application Support["),.\s]+MintVaultScanner/);
+  assert.match(source("lib/state.js"), /runtimePaths\.appSupport/);
+  assert.match(source("lib/runtime-paths.js"), /Library["),.\s]+Application Support["),.\s]+MintVaultScanner/);
+  assert.match(source("lib/runtime-paths.js"), /nativeAccountHome\(\)/);
   assert.match(source("lib/station-identity.js"), /Keychain|keychain/i);
-  assert.match(source("lib/watcher.js"), /os\.homedir\(\), "mintvault-scans"/);
+  assert.match(source("lib/watcher.js"), /runtimePaths\.scansBase/);
   assert.match(source("lib/watcher.js"), /new EncryptedCaptureQueue\(\{ baseDir: BASE/);
 });
 
@@ -76,13 +78,15 @@ test("an update restart is denied across every watcher operation that can expose
   watcher.targetCaptureInFlight = false;
   watcher.previewActionInFlight = false;
   watcher.positioningPreviewInFlight = false;
+  watcher.profileAcceptanceInFlight = false;
   watcher.scannerHealthPromise = null;
   watcher.recoveryPlaintextWork = 0;
   watcher.initialDrainTimer = null;
   watcher.initialDrainPromise = null;
   watcher.updateInstallPending = false;
+  watcher.identityRetirementPending = false;
   assert.equal(watcher.isRestartSafeForUpdate(), true);
-  for (const key of ["uploading", "targetCaptureInFlight", "previewActionInFlight", "positioningPreviewInFlight", "scannerHealthPromise", "recoveryPlaintextWork", "initialDrainTimer", "initialDrainPromise", "updateInstallPending"]) {
+  for (const key of ["uploading", "targetCaptureInFlight", "previewActionInFlight", "positioningPreviewInFlight", "profileAcceptanceInFlight", "scannerHealthPromise", "recoveryPlaintextWork", "initialDrainTimer", "initialDrainPromise", "updateInstallPending", "identityRetirementPending"]) {
     watcher[key] = true;
     assert.equal(watcher.isRestartSafeForUpdate(), false, key);
     watcher[key] = false;
@@ -158,6 +162,28 @@ test("install quiesce refuses every watcher entry point before it can touch scan
   assert.match(main, /updateDeniedAfterHeartbeat/);
   assert.match(main, /if \(targetedCapturePollInFlight \|\| updateInstallPending\) return/);
   assert.match(main, /beforeInstall: beginUpdateInstall/);
+});
+
+test("prepared identity retirement refuses every watcher entry point, including hot-folder quarantine", async () => {
+  const watcher = Object.create(Watcher.prototype);
+  watcher.updateInstallPending = false;
+  watcher.identityRetirementPending = false;
+  watcher.setIdentityRetirementPending(true);
+  const checks = [
+    watcher.runPositioningPreview(),
+    watcher.applyPositioningPreview("preview"),
+    watcher.refreshScannerHealth(),
+    watcher.pollTargetedCapture(),
+    watcher.scanActiveTarget(),
+    watcher.acceptPreview("preview"),
+    watcher.rescanPreview("preview"),
+    watcher.drainInbox(),
+    watcher.handleNewFile("/definitely/not/opened.tif"),
+  ];
+  for (const result of await Promise.all(checks)) {
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "identity_retirement_pending");
+  }
 });
 
 test("an asynchronous inbox event is restart-unsafe until its plaintext handling settles", async () => {

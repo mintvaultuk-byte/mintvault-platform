@@ -8,15 +8,55 @@
  */
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const helper = require("./identity-helper-client");
+const runtimePaths = require("./runtime-paths");
+const { readBoundedJson } = require("./bounded-file");
 
-const SUPPORT = process.env.MINTVAULT_SCANS_DIR
-  ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
-  : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+const SUPPORT = runtimePaths.appSupport();
 const LEGACY_IDENTITY_FILE = path.join(SUPPORT, "station-identity.enc.json");
 const OPERATOR_SESSION_FILE = path.join(SUPPORT, "operator-session.enc.json");
+let retirementGuard = () => {};
+
+function configureRetirementGuard(guard) {
+  if (typeof guard !== "function") throw new Error("Station identity retirement guard is invalid");
+  retirementGuard = guard;
+}
+
+function identityScopedResidue() {
+  const scans = runtimePaths.scansBase();
+  const residue = [
+    path.join(SUPPORT, "semantic-operations-v1.json"),
+    path.join(SUPPORT, "semantic-operations-v1.json.key-v1.json"),
+    path.join(SUPPORT, "locked-scanner-profile.v1.json"),
+    path.join(SUPPORT, "pending-scanner-profile.v1.json"),
+    path.join(scans, "capture-queue", "index.v1.json"),
+    path.join(scans, "capture-queue", "wrapped-key.v1.json"),
+    path.join(scans, "targeted-capture-queue.json"),
+    path.join(scans, "pending-queue.json"),
+    path.join(scans, "upload-hashes.json"),
+  ].filter((candidate) => fs.existsSync(candidate));
+  const custodyDirectories = [
+    path.join(scans, "capture-queue", "artifacts"),
+    path.join(scans, "capture-queue", "quarantine"),
+    path.join(scans, "capture-queue", "scratch"),
+    path.join(scans, "capture-staging"),
+    path.join(scans, "positioning-preview"),
+  ];
+  for (const directory of custodyDirectories) {
+    if (!fs.existsSync(directory)) continue;
+    const pending = [directory];
+    while (pending.length) {
+      const current = pending.pop();
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const candidate = path.join(current, entry.name);
+        if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(candidate);
+        else residue.push(candidate);
+      }
+    }
+  }
+  return residue;
+}
 
 function getSafeStorage() {
   let electron;
@@ -105,7 +145,7 @@ function assertLegacyIdentity(identity) {
 function readLegacyIdentity() {
   if (!fs.existsSync(LEGACY_IDENTITY_FILE)) return null;
   let envelope;
-  try { envelope = JSON.parse(fs.readFileSync(LEGACY_IDENTITY_FILE, "utf8")); }
+  try { envelope = readBoundedJson(LEGACY_IDENTITY_FILE, { maximumBytes: 1024 * 1024, label: "Legacy station identity" }); }
   catch { throw new Error("Legacy station identity is corrupt; identity recovery is required"); }
   if (!envelope || envelope.version !== 1 || typeof envelope.ciphertext !== "string") {
     throw new Error("Legacy station identity envelope is invalid; identity recovery is required");
@@ -117,7 +157,7 @@ function readLegacyIdentity() {
 function readOperatorSession() {
   if (!fs.existsSync(OPERATOR_SESSION_FILE)) return null;
   try {
-    const envelope = JSON.parse(fs.readFileSync(OPERATOR_SESSION_FILE, "utf8"));
+    const envelope = readBoundedJson(OPERATOR_SESSION_FILE, { maximumBytes: 64 * 1024, label: "Operator session" });
     if (!envelope || envelope.version !== 1 || typeof envelope.ciphertext !== "string") return null;
     const payload = JSON.parse(getSafeStorage().decryptString(Buffer.from(envelope.ciphertext, "base64")));
     return typeof payload.token === "string" && payload.token.length >= 20 ? payload.token : null;
@@ -131,7 +171,13 @@ function setOperatorSession(token) {
     throw new Error("Operator session is invalid");
   }
   if (!token) {
-    try { fs.unlinkSync(OPERATOR_SESSION_FILE); } catch (error) { if (error?.code !== "ENOENT") throw error; }
+    let removed = false;
+    try { fs.unlinkSync(OPERATOR_SESSION_FILE); removed = true; }
+    catch (error) { if (error?.code !== "ENOENT") throw error; }
+    if (removed) {
+      const directory = fs.openSync(SUPPORT, fs.constants.O_RDONLY);
+      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    }
     return;
   }
   const safeStorage = getSafeStorage();
@@ -183,9 +229,19 @@ function migrateLegacyIdentityIfPresent() {
 }
 
 function publicIdentity({ allowCreate = false } = {}) {
-  const current = migrateLegacyIdentityIfPresent();
+  let current = migrateLegacyIdentityIfPresent();
   if (current.state === "READY_V2") return current;
-  if (current.state === "ABSENT_NEW" && allowCreate) return helper.create();
+  if (current.state === "ABSENT_NEW" && allowCreate) {
+    retirementGuard();
+    current = helper.status();
+    if (current.state !== "ABSENT_NEW") throw new Error("Station identity state changed during retirement recovery");
+    if (identityScopedResidue().length) {
+      const error = new Error("Retired or lost station identity state requires recovery before a fresh enrolment key can be created");
+      error.code = "IDENTITY_RECOVERY_REQUIRED";
+      throw error;
+    }
+    return helper.create();
+  }
   throw new Error("Station identity is absent; explicit new-station enrolment is required");
 }
 
@@ -276,6 +332,28 @@ function unwrapQueueKey(wrappedQueueKey, queueKeyId) {
   return raw;
 }
 
+function semanticLedgerStatus() {
+  const result = helper.semanticLedgerStatus();
+  return {
+    generation: Number(result.generation || 0),
+    digest: typeof result.digest === "string" ? result.digest : null,
+    pendingGeneration: Number.isSafeInteger(result.pendingGeneration) ? result.pendingGeneration : null,
+    pendingDigest: typeof result.pendingDigest === "string" ? result.pendingDigest : null,
+  };
+}
+
+function prepareSemanticLedger(generation, digest) {
+  return helper.semanticLedgerPrepare({ semanticLedgerGeneration: generation, semanticLedgerDigest: digest });
+}
+
+function commitSemanticLedger(generation, digest) {
+  return helper.semanticLedgerCommit({ semanticLedgerGeneration: generation, semanticLedgerDigest: digest });
+}
+
+function abortSemanticLedger(generation, digest) {
+  return helper.semanticLedgerAbort({ semanticLedgerGeneration: generation, ...(digest ? { semanticLedgerDigest: digest } : {}) });
+}
+
 function retireIdentity(expectedFingerprint) {
   const result = helper.retire(expectedFingerprint);
   clearOperatorSession();
@@ -290,7 +368,7 @@ function currentStationCode() {
 function identityStatus() {
   try { return migrateLegacyIdentityIfPresent(); }
   catch (error) {
-    const knownStates = new Set(["LOCKED", "NAMESPACE_MISMATCH", "CORRUPT", "IDENTITY_RECOVERY_REQUIRED"]);
+    const knownStates = new Set(["LOCKED", "NAMESPACE_MISMATCH", "CORRUPT", "IDENTITY_RECOVERY_REQUIRED", "RETIREMENT_INCOMPLETE"]);
     const state = knownStates.has(error?.code) ? error.code : "IDENTITY_RECOVERY_REQUIRED";
     return { state, error: error.message };
   }
@@ -311,6 +389,7 @@ function hasOperatorSession() {
 }
 
 module.exports = {
+  configureRetirementGuard,
   enrolmentPublicPayload,
   saveEnrollment,
   setStationStatus,
@@ -322,6 +401,10 @@ module.exports = {
   applyReplayState,
   wrapQueueKey,
   unwrapQueueKey,
+  semanticLedgerStatus,
+  prepareSemanticLedger,
+  commitSemanticLedger,
+  abortSemanticLedger,
   retireIdentity,
   identityStatus,
   currentStationCode,
@@ -337,5 +420,8 @@ module.exports = {
     readOperatorSession,
     assertLegacyIdentity,
     proveMigration,
+    supportPath: SUPPORT,
+    operatorSessionPath: OPERATOR_SESSION_FILE,
+    identityScopedResidue,
   },
 };

@@ -13,11 +13,12 @@ const OUTPUT = path.join(OUTPUT_DIRECTORY, "mv-capture-helper");
 const MANIFEST = path.join(OUTPUT_DIRECTORY, "helper-manifest.json");
 const IDENTITY_SOURCE = path.join(ROOT, "native", "mv-identity-helper.swift");
 const IDENTITY_AUTHORITY_SOURCE = preparation.RELEASE_TEAM_PIN_SWIFT;
+const CAPTURE_AUTHORITY_SOURCE = preparation.RELEASE_TEAM_PIN_HEADER;
 const IDENTITY_OUTPUT = path.join(OUTPUT_DIRECTORY, "mv-identity-helper");
 const IDENTITY_MANIFEST = path.join(OUTPUT_DIRECTORY, "identity-helper-manifest.json");
 const IDENTIFIER = contract.CAPTURE_HELPER_IDENTIFIER;
-const HELPER_VERSION = "1.0.1";
-const IDENTITY_HELPER_VERSION = "1.1.0";
+const HELPER_VERSION = "1.0.2";
+const IDENTITY_HELPER_VERSION = "1.1.2";
 const PROTOCOL_VERSION = 1;
 const MINIMUM_MACOS = "12.0";
 const PREPARATION_RECORD = path.join(ROOT, "build", "generated", "package-preparation.json");
@@ -114,6 +115,7 @@ function main() {
       "-fmodules",
       "-framework", "Foundation",
       "-framework", "ImageCaptureCore",
+      "-framework", "Security",
       SOURCE,
       "-o", temporaryOutput,
     ]);
@@ -154,6 +156,7 @@ function main() {
       minimumMacOS: MINIMUM_MACOS,
       sha256: sha256(temporaryOutput),
       sourceSha256: sha256(SOURCE),
+      authoritySourceSha256: sha256(CAPTURE_AUTHORITY_SOURCE),
       ...(packageBinding ? { packageBinding } : {}),
     };
     const identityManifest = {

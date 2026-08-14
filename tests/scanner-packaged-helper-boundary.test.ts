@@ -28,8 +28,11 @@ describe("Scanner packaged native-helper boundary", () => {
     expect(main).toContain("isPackaged: app.isPackaged");
     expect(main).toContain("resourcesPath: process.resourcesPath");
     expect(main).toContain("execPath: process.execPath");
-    expect(integrity).toContain('path.join(configuredRuntime.resourcesPath, "helpers")');
+    expect(integrity).toContain('path.join(path.dirname(configuredRuntime.resourcesPath), "Helpers")');
+    expect(integrity).toContain('path.join(configuredRuntime.resourcesPath, "helper-manifests")');
     expect(integrity).not.toContain("process.env");
+    expect(main).toContain("server.configureRuntime({ isPackaged: app.isPackaged })");
+    expect(source("lib/server-client.js")).toContain('const PRODUCTION_API_BASE = "https://mintvaultuk.com"');
   });
 
   it("pins helper name, identifier, protocol, architecture, macOS floor, signature and Team boundary", () => {
@@ -44,8 +47,13 @@ describe("Scanner packaged native-helper boundary", () => {
       "Team Identifier does not match",
       "SHA-256 does not match",
     ]) expect(integrity).toContain(contract);
-    expect(native).toContain('kHelperVersion = @"1.0.0"');
+    expect(native).toContain('kHelperVersion = @"1.0.2"');
     expect(native).toContain('versioned[@"protocolVersion"]');
+    expect(native).toContain("SecCodeCopySelf");
+    expect(native).toContain("SecCodeCopyGuestWithAttributes");
+    expect(native).toContain('codeSatisfies(parentCode, @"com.mintvault.scanner", expectedTeam)');
+    expect(native).toContain("MINTVAULT_RELEASE_MODE");
+    expect(builder).toContain("authoritySourceSha256: sha256(CAPTURE_AUTHORITY_SOURCE)");
   });
 
   it("packages the identity helper through the same sealed arm64 and Team boundary", () => {
@@ -57,7 +65,7 @@ describe("Scanner packaged native-helper boundary", () => {
     expect(identityClient).toContain("verifiedIdentityHelper()");
     expect(identityClient).toContain('spawnSync(helper.path');
     expect(builder).toContain('"swiftc"');
-    expect(builder).toContain('signAndVerify(temporaryIdentityOutput, "com.mintvault.scanner.identity-helper")');
+    expect(builder).toContain("signAndVerify(temporaryIdentityOutput, contract.IDENTITY_HELPER_IDENTIFIER");
   });
 
   it("keeps station private material inside a device-only Secure Enclave boundary", () => {
@@ -83,6 +91,6 @@ describe("Scanner packaged native-helper boundary", () => {
     expect(identity).toContain("SecCodeCopyGuestWithAttributes");
     expect(identity).toContain('parentContext.identifier == "com.mintvault.scanner"');
     expect(integrity).toContain("pinned MintVault Team Identifier");
-    expect(main).toContain("loadReleaseTrust(process.resourcesPath)");
+    expect(main).toContain("loadReleaseTrust(process.resourcesPath, packagedTeamPin, packageMetadata.version)");
   });
 });

@@ -9,19 +9,17 @@
  */
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const stationIdentity = require("./station-identity");
+const runtimePaths = require("./runtime-paths");
 
 const SCHEMA_VERSION = 1;
 const PROFILE_FILENAME = "locked-scanner-profile.v1.json";
 const PENDING_PROFILE_FILENAME = "pending-scanner-profile.v1.json";
 const MAX_ENVELOPE_BYTES = 1024 * 1024;
-let runtime = Object.freeze({ isPackaged: false });
-
 function configureRuntime({ isPackaged }) {
   if (typeof isPackaged !== "boolean") throw new Error("Scanner package state is unavailable");
-  runtime = Object.freeze({ isPackaged });
+  runtimePaths.configureRuntime({ isPackaged });
 }
 
 function canonicalJson(value) {
@@ -177,10 +175,7 @@ function assertReplaceableProfilePath(profilePath) {
 }
 
 function defaultProfilePath() {
-  const support = !runtime.isPackaged && process.env.MINTVAULT_SCANS_DIR
-    ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
-    : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
-  return path.join(support, PROFILE_FILENAME);
+  return path.join(runtimePaths.appSupport(), PROFILE_FILENAME);
 }
 
 function defaultPendingProfilePath() {
@@ -340,6 +335,15 @@ function clearPending() {
   return new LockedScannerProfileStore({ profilePath: defaultPendingProfilePath() }).remove();
 }
 
+function retirementFiles() {
+  return [defaultProfilePath(), defaultPendingProfilePath()].filter((candidate) => {
+    if (!fs.existsSync(candidate)) return false;
+    assertSecureDirectory(path.dirname(candidate));
+    assertReplaceableProfilePath(candidate);
+    return true;
+  });
+}
+
 module.exports = {
   SCHEMA_VERSION,
   configureRuntime,
@@ -348,6 +352,7 @@ module.exports = {
   loadPending,
   savePending,
   clearPending,
+  retirementFiles,
   LockedScannerProfileStore,
   _private: { canonicalJson, normalizedProfile, defaultProfilePath, defaultPendingProfilePath },
 };

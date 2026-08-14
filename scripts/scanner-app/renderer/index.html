@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'">
 <title>MintVault Scanner</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -87,6 +88,7 @@
   <section class="row capture-actions" id="captureActionsRow">
     <div class="action-grid" aria-label="Scanner actions">
       <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
+      <button class="btn capture-primary" id="cancelCardBtn" hidden>CANCEL CARD</button>
       <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
       <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
       <button class="btn capture-primary" id="orphansBtn">FIX MISSING IMAGES</button>

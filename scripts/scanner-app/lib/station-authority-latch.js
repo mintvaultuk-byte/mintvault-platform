@@ -27,4 +27,10 @@ function clearAfterResync() {
   latched = null;
 }
 
-module.exports = Object.freeze({ observe, current, clearAfterResync, _private: { errorCode } });
+// Exact device retirement destroys the credential whose replay state was
+// latched. A later fresh identity must not inherit that credential's denial.
+function clearAfterIdentityRetirement() {
+  latched = null;
+}
+
+module.exports = Object.freeze({ observe, current, clearAfterResync, clearAfterIdentityRetirement, _private: { errorCode } });

@@ -52,6 +52,10 @@ module.exports = {
   applyReplayState: (payload) => call("apply-replay-state", payload),
   wrapQueueKey: (payload) => call("wrap-queue-key", payload),
   unwrapQueueKey: (payload) => call("unwrap-queue-key", payload),
+  semanticLedgerStatus: () => call("semantic-ledger-status"),
+  semanticLedgerPrepare: (payload) => call("semantic-ledger-prepare", payload),
+  semanticLedgerCommit: (payload) => call("semantic-ledger-commit", payload),
+  semanticLedgerAbort: (payload) => call("semantic-ledger-abort", payload),
   retire: (expectedFingerprint) => call("retire", { expectedFingerprint }),
   _private: { call, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES },
 };

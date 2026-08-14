@@ -4,8 +4,16 @@ const semanticOperations = require("./semantic-operations");
 function assertPayload(payload) {
   if (!payload || typeof payload !== "object" ||
       typeof payload.publicKeyFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(payload.publicKeyFingerprint) ||
-      typeof payload.publicKeyPem !== "string" || typeof payload.installationFingerprint !== "string") {
+      typeof payload.publicKeyPem !== "string" || !/^[a-f0-9]{64}$/.test(String(payload.installationFingerprint || ""))
+      || payload.identitySchemaVersion !== 2 || !/^\d+\.\d+\.\d+$/.test(String(payload.appVersion || ""))) {
     throw new Error("Station enrolment identity payload is invalid");
+  }
+  let key;
+  try { key = crypto.createPublicKey(payload.publicKeyPem); }
+  catch { throw new Error("Station enrolment public key is invalid"); }
+  const fingerprint = crypto.createHash("sha256").update(key.export({ format: "der", type: "spki" })).digest("hex");
+  if (key.asymmetricKeyType !== "ed25519" || fingerprint !== payload.publicKeyFingerprint) {
+    throw new Error("Station enrolment public key does not match its fingerprint");
   }
   return payload;
 }
@@ -16,7 +24,8 @@ function createCoordinator(store = semanticOperations) {
       const current = assertPayload(livePayload);
       const pending = store.pending("STATION_ENROLMENT");
       if (pending) {
-        if (pending.payload.publicKeyFingerprint !== current.publicKeyFingerprint) {
+        if (["publicKeyFingerprint", "publicKeyPem", "installationFingerprint", "identitySchemaVersion"]
+          .some((field) => pending.payload[field] !== current[field])) {
           const error = new Error("Pending station enrolment belongs to a different device identity");
           error.code = "IDENTITY_RECOVERY_REQUIRED";
           throw error;

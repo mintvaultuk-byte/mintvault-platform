@@ -8,6 +8,7 @@ const stationIdentity = require("./station-identity");
 const stationRequestQueue = require("./station-request-queue");
 const stationAuthorityLatch = require("./station-authority-latch");
 const enrolmentOperation = require("./enrolment-operation");
+const { directFetch, boundedResponseText } = require("./http-safety");
 
 let fetchPromise = null;
 function getFetch() {
@@ -32,7 +33,7 @@ function cookieTokenFrom(response) {
 }
 
 async function readJson(response) {
-  const raw = await response.text();
+  const raw = await boundedResponseText(response);
   try { return JSON.parse(raw); } catch { return { raw }; }
 }
 
@@ -45,7 +46,7 @@ async function operatorJson(method, apiPath, payload) {
     headers: { "content-type": "application/json", cookie: `mv.partner.sid=${encodeURIComponent(operatorSession)}` },
   };
   if (method !== "GET" && method !== "HEAD") init.body = JSON.stringify(payload || {});
-  const response = await fetch(`${baseUrl()}${apiPath}`, init);
+  const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, init);
   return { ok: response.ok, status: response.status, body: await readJson(response) };
 }
 
@@ -66,7 +67,7 @@ async function signedJson(method, apiPath, payload) {
     const fetch = await getFetch();
     const serialized = Buffer.from(JSON.stringify(payload || {}));
     const headers = stationIdentity.signStoredRequest({ method, path: apiPath, body: serialized });
-    const response = await fetch(`${baseUrl()}${apiPath}`, {
+    const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, {
       method,
       headers: { ...headers, "content-type": "application/json" },
       body: serialized,
@@ -85,7 +86,7 @@ async function signedJsonV2(method, apiPath, payload, semanticOperationId) {
     const headers = stationIdentity.signStoredRequestV2({
       method, path: apiPath, body: serialized, semanticOperationId,
     });
-    const response = await fetch(`${baseUrl()}${apiPath}`, {
+    const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, {
       method,
       headers: { ...headers, "content-type": "application/json" },
       body: serialized,
@@ -96,7 +97,7 @@ async function signedJsonV2(method, apiPath, payload, semanticOperationId) {
 
 async function signIn(email, password) {
   const fetch = await getFetch();
-  const response = await fetch(`${baseUrl()}/api/partner/auth/login`, {
+  const response = await directFetch(fetch, `${baseUrl()}/api/partner/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -122,7 +123,7 @@ async function signOutWith({ token, clearSession, fetchImpl, origin }) {
   clearSession();
   if (!token) return { ok: true, remoteRevoked: true };
   try {
-    const response = await fetchImpl(`${origin}/api/partner/auth/logout`, {
+    const response = await directFetch(fetchImpl, `${origin}/api/partner/auth/logout`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie: `mv.partner.sid=${encodeURIComponent(token)}` },
       body: "{}",

@@ -18,30 +18,41 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, pow
 const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
-const os    = require("node:os");
+const runtimePaths = require("./lib/runtime-paths");
+
+// Configure all durable locations from Electron's immutable package fact
+// before any identity, state, operation or queue module captures a path.
+runtimePaths.configureRuntime({ isPackaged: app.isPackaged });
 
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
 const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
+const terminalIdentityRetirement = require("./lib/terminal-identity-retirement");
 const stationAuthority = require("./lib/station-authority");
 const stationAuthorityLatch = require("./lib/station-authority-latch");
 const helperIntegrity = require("./lib/helper-integrity");
 const lide400 = require("./lib/lide400-controller");
 const newCardOperation = require("./lib/new-card-operation");
+const fixOperation = require("./lib/fix-operation");
+const cancelCardOperation = require("./lib/cancel-card-operation");
 const { createUpdateManager } = require("./lib/update-manager");
 const { ensureDefaultAfterEnrolment } = require("./lib/login-item");
+const rendererContainment = require("./lib/renderer-containment");
 
+const packageMetadata = require("./package.json");
 const packagedTeamPin = app.isPackaged ? require("./generated/release-team-pin") : null;
 const releaseTrust = app.isPackaged
-  ? helperIntegrity.loadReleaseTrust(process.resourcesPath, packagedTeamPin?.teamIdentifier)
+  ? helperIntegrity.loadReleaseTrust(process.resourcesPath, packagedTeamPin, packageMetadata.version)
   : null;
+server.configureRuntime({ isPackaged: app.isPackaged });
 helperIntegrity.configureRuntime({
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
   execPath: process.execPath,
   expectedTeamIdentifier: releaseTrust?.teamIdentifier || null,
+  packageMode: releaseTrust?.packageMode || null,
 });
 
 // macOS: this is a menu-bar-only app, no Dock icon.
@@ -61,8 +72,15 @@ let watcher      = null;
 let updateManager = null;
 let isQuitting   = false;
 let updateInstallPending = false;
+let serviceRestartPending = false;
+let deferredResumeRestart = false;
+let cardCancellationPromise = null;
+let identityRetirementPending = false;
+let terminalIdentityRetirementPromise = null;
+let watcherBootDeferredForRetirement = false;
 
 const ASSETS = path.join(__dirname, "assets");
+const RENDERER_URL = rendererContainment.rendererUrl(__dirname);
 
 // ── Audible feedback ─────────────────────────────────────────────────────
 
@@ -89,9 +107,9 @@ function playSystemSound(filename) {
 // item. Recovery never shells out to an external service manager, package
 // manager, or mutable source checkout.
 
-const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
+const SCANS_BASE   = runtimePaths.scansBase();
 const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
-const APP_VERSION  = (() => { try { return require("./package.json").version; } catch { return "?"; } })();
+const APP_VERSION  = packageMetadata.version;
 lide400.configureRuntime({ isPackaged: app.isPackaged, appVersion: APP_VERSION });
 
 function versionTuple(raw) {
@@ -288,8 +306,14 @@ function createPopover() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
     },
   });
+  popover.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  popover.webContents.on("will-navigate", (event) => event.preventDefault());
+  popover.webContents.on("will-redirect", (event) => event.preventDefault());
+  popover.webContents.on("will-attach-webview", (event) => event.preventDefault());
   popover.loadFile(path.join(__dirname, "renderer", "index.html"));
 
   popover.on("close", (e) => {
@@ -340,28 +364,244 @@ function togglePopover() {
 // ── IPC bridge ───────────────────────────────────────────────────────────
 
 function pushStateToRenderer() {
-  if (popover && !popover.isDestroyed()) {
-    popover.webContents.send("state-update", stateMod.get());
+  if (trustedPopoverLoaded()) {
+    popover.webContents.send("state-update", rendererContainment.rendererStateProjection(stateMod.get()));
   }
   refreshTray();
 }
 
 function publishUpdateStatus(status) {
-  if (popover && !popover.isDestroyed()) popover.webContents.send("update-status", status);
+  if (trustedPopoverLoaded()) popover.webContents.send("update-status", rendererContainment.safeUpdateStatus(status));
+}
+
+function trustedPopoverLoaded() {
+  return Boolean(popover && !popover.isDestroyed() && popover.webContents?.mainFrame?.url === RENDERER_URL);
+}
+
+function registerIpc(channel, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    if (!rendererContainment.isTrustedRendererEvent(event, popover, RENDERER_URL)) {
+      return { ok: false, code: "untrusted_renderer", error: "Scanner rejected an untrusted renderer request." };
+    }
+    return handler(event, ...args);
+  });
+}
+
+function plainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null));
+}
+
+function boundedInput(value, maximum, pattern = null) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum) return "";
+  return !pattern || pattern.test(value) ? value : "";
+}
+
+function previewIdInput(value) {
+  return boundedInput(value, 36, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
 }
 
 function restartIsSafe() {
   const current = stateMod.get();
-  return !updateInstallPending
+  return !updateInstallPending && !identityRetirementPending && !serviceRestartPending && !cardCancellationPromise
     && !["scanning_front", "scanning_back", "finalising", "uploading", "validating", "retrying", "positioning_preview_scanning", "processing_preview"].includes(current.state)
     && !["SCANNING_FRONT", "SCANNING_BACK", "FINALISING", "UPLOADING", "VALIDATING", "RETRYING", "PROCESSING_PREVIEW"].includes(current.activeCapture?.stage)
     && (watcher?.isRestartSafeForUpdate?.() ?? true);
 }
 
+function beginIdentityRetirement() {
+  if (identityRetirementPending) {
+    return finishIdentityRetirementQuiesce;
+  }
+  if (!restartIsSafe()) return null;
+  identityRetirementPending = true;
+  watcher?.setIdentityRetirementPending(true);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    finishIdentityRetirementQuiesce();
+  };
+}
+
+function holdIdentityRetirementQuiesce() {
+  identityRetirementPending = true;
+  watcher?.setIdentityRetirementPending(true);
+}
+
+function finishIdentityRetirementQuiesce() {
+  watcher?.setIdentityRetirementPending(false);
+  identityRetirementPending = false;
+}
+
+async function startDeferredWatcherAfterRetirement() {
+  if (!watcherBootDeferredForRetirement || identityRetirementPending || !watcher) return;
+  await watcher.start();
+  watcherBootDeferredForRetirement = false;
+}
+
+async function retireTerminalStationIdentity({ station, resolved }) {
+  if (terminalIdentityRetirementPromise) return terminalIdentityRetirementPromise;
+  terminalIdentityRetirementPromise = (async () => {
+    const release = beginIdentityRetirement();
+    if (!release) {
+      return {
+        ok: true,
+        stage: resolved.stage,
+        canServiceStation: false,
+        error: "This terminal station credential is retained fail-closed until current Scanner custody work safely quiesces.",
+      };
+    }
+    let keepQuiesced = false;
+    try {
+      const retired = terminalIdentityRetirement.retire({
+        status: station.status,
+        stationCode: station.stationCode,
+        publicKeyFingerprint: station.publicKeyFingerprint,
+        watcher,
+      });
+      if (!retired.retired) throw new Error("Terminal station status did not retire the device credential");
+      stationAuthorityLatch.clearAfterIdentityRetirement();
+      finishIdentityRetirementQuiesce();
+      await startDeferredWatcherAfterRetirement();
+      return {
+        ok: true,
+        stage: "identity_retired",
+        canServiceStation: false,
+        error: "The ended station registration was securely retired. Sign in again to request a fresh station identity.",
+      };
+    } catch (error) {
+      // PREPARED is a durable cross-process transition. Once it exists, the
+      // watcher stays closed until exact recovery removes it; otherwise a
+      // cached queue key could create post-snapshot custody after retirement.
+      try { keepQuiesced = terminalIdentityRetirement.readTombstone() !== null; }
+      catch { keepQuiesced = true; }
+      if (keepQuiesced) holdIdentityRetirementQuiesce();
+      console.error(`[station-identity] exact terminal retirement failed closed: ${error?.message || error}`);
+      return {
+        ok: true,
+        stage: resolved.stage,
+        canServiceStation: false,
+        error: "This terminal station credential remains locked until MintVault proves the exact identity and all semantic/evidence custody is resolved.",
+      };
+    } finally {
+      if (!keepQuiesced) release();
+    }
+  })();
+  try { return await terminalIdentityRetirementPromise; }
+  finally { terminalIdentityRetirementPromise = null; }
+}
+
+async function cancelCurrentCard() {
+  if (cardCancellationPromise) return cardCancellationPromise;
+  cardCancellationPromise = (async () => {
+    const lifecycleDenied = updateInstallDenial();
+    if (lifecycleDenied) return lifecycleDenied;
+    if (!watcher) return { ok: false, error: "Scanner service is starting" };
+    let recoveryOperation;
+    try {
+      recoveryOperation = cancelCardOperation.pending();
+      if (!recoveryOperation) {
+        const localPending = watcher.pendingCardCancellation();
+        if (localPending) recoveryOperation = cancelCardOperation.recover(localPending.operationId, localPending.target);
+      }
+    }
+    catch (error) { return { ok: false, retryable: true, code: "cancel_recovery_required", error: error.message }; }
+    const cancellation = recoveryOperation
+      ? watcher.beginCardCancellationForTarget(recoveryOperation.payload)
+      : watcher.beginCardCancellation();
+    if (!cancellation.ok) return cancellation;
+    try {
+      const denied = await requireLiveOperationalAuthority();
+      if (denied) return denied;
+      let operation;
+      try { operation = recoveryOperation || cancelCardOperation.beginOrResume(cancellation.target); }
+      catch (error) {
+        return { ok: false, retryable: true, code: error.code || "cancel_recovery_required", error: error.message };
+      }
+      if (operation.state === "COMPLETED") {
+        const outcome = cancelCardOperation.completedOutcome(operation);
+        return outcome.status === "CANCELLED"
+          ? watcher.applyCardJobCancellation(outcome.payload)
+          : watcher.applyCardJobCancellationRefusal(outcome.payload);
+      }
+      try { watcher.markCardCancellationPending(operation.payload, operation.id); }
+      catch (error) { return { ok: false, retryable: true, code: "cancel_local_commit_failed", error: error.message }; }
+      let result;
+      try { result = await server.cancelCardJob(operation); }
+      catch (error) {
+        return { ok: false, retryable: true, error: error.message || "Could not reach MintVault" };
+      }
+      const exact = cancelCardOperation.validateCancellation(operation, result);
+      if (exact) {
+        cancelCardOperation.complete(operation, exact.resultReference);
+        return watcher.applyCardJobCancellation(operation.payload);
+      }
+      if (cancelCardOperation.definitiveEvidenceRefusal(operation, result)) {
+        cancelCardOperation.complete(operation, `refused:${operation.payload.cardJobId}:accepted-evidence`);
+        return watcher.applyCardJobCancellationRefusal(operation.payload);
+      }
+      const error = result?.body?.error;
+      return {
+        ok: false,
+        retryable: true,
+        code: error?.code || "cancel_outcome_unconfirmed",
+        error: error?.message || "MintVault could not confirm cancellation; retry to recover the same operation.",
+      };
+    } finally {
+      watcher.finishCardCancellation();
+    }
+  })();
+  try { return await cardCancellationPromise; }
+  finally { cardCancellationPromise = null; }
+}
+
+async function recoverPendingCardCancellation() {
+  let pending;
+  try { pending = cancelCardOperation.pending() || watcher?.pendingCardCancellation(); }
+  catch (error) {
+    console.error(`[card-cancel] durable recovery failed closed: ${error?.message || error}`);
+    return;
+  }
+  if (!pending || !stationIdentity.hasActiveStationSession()) return;
+  const result = await cancelCurrentCard();
+  if (!result?.ok && result?.retryable !== false) {
+    console.warn(`[card-cancel] same-operation recovery remains pending: ${result?.error || "unknown response"}`);
+  }
+}
+
 function updateInstallDenial() {
   return updateInstallPending
     ? { ok: false, code: "update_install_pending", error: "MintVault Scanner is quiesced while the signed update is installed." }
+    : identityRetirementPending
+      ? { ok: false, code: "identity_retirement_pending", error: "MintVault Scanner is securely retiring the prior station identity." }
+    : serviceRestartPending
+      ? { ok: false, code: "scanner_restart_pending", error: "MintVault Scanner is completing an exclusive service restart." }
     : null;
+}
+
+async function restartScannerService(reason) {
+  if (!restartIsSafe()) {
+    return { ok: false, code: "restart_deferred", error: "Finish the current scan, Preview, upload, profile setup, or recovery before restarting Scanner." };
+  }
+  serviceRestartPending = true;
+  watcher?.setUpdateInstallPending(true);
+  try {
+    logToFile(`${reason}: exclusive in-process scanner service restart`);
+    await watcher.stop({ requireIdle: false });
+    // Main-process IPC and polling remain latched while start performs its own
+    // recovery. The watcher latch is released only for that controlled start.
+    watcher.setUpdateInstallPending(false);
+    await watcher.start();
+    if (!watcher.chokidar) throw new Error("Scanner service did not resume its watcher");
+    return { ok: true, tier: "soft", status: "Restarted" };
+  } catch (error) {
+    logToFile(`${reason}: restart failed without relaunch: ${error?.message || error}`);
+    return { ok: false, code: "restart_failed", error: "Scanner service could not restart safely. No in-flight work was interrupted; contact MintVault support." };
+  } finally {
+    watcher?.setUpdateInstallPending(false);
+    serviceRestartPending = false;
+  }
 }
 
 function beginUpdateInstall() {
@@ -436,6 +676,35 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
   if (refreshCredits) lastKnownAvailableCredits = await availableCreditsOrNull();
   const summary = stationSummary(session.body, lastKnownAvailableCredits);
   const canServiceStation = human.permissions.has(stationAuthority.ENROL_PERMISSION);
+  let preparedRetirementAwaitingReproof = false;
+  try {
+    const recovered = terminalIdentityRetirement.recoverIfRetired({ watcher });
+    if (recovered.recovered) {
+      stationAuthorityLatch.clearAfterIdentityRetirement();
+      finishIdentityRetirementQuiesce();
+      await startDeferredWatcherAfterRetirement();
+      return {
+        ok: true,
+        stage: "identity_retired",
+        canServiceStation: false,
+        error: "The ended station registration was securely retired. Sign in again to request a fresh station identity.",
+      };
+    }
+    if (recovered.awaitingTerminalReproof) {
+      preparedRetirementAwaitingReproof = true;
+      holdIdentityRetirementQuiesce();
+    }
+  } catch (error) {
+    holdIdentityRetirementQuiesce();
+    console.error(`[station-identity] retirement recovery remains fail closed: ${error?.message || error}`);
+    return {
+      ok: true,
+      stage: "identity_recovery_required",
+      summary,
+      canServiceStation: false,
+      error: "Station identity retirement recovery must complete before this Mac can scan or register again.",
+    };
+  }
   const identity = stationIdentity.identityStatus();
   if (!["ABSENT_NEW", "READY_V2"].includes(identity.state)) {
     return {
@@ -501,6 +770,19 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
     };
   }
   const station = status.body.station;
+  const resolved = stationAuthority.stationStage(station.status);
+  if (resolved.terminalIdentity) {
+    return retireTerminalStationIdentity({ station, resolved });
+  }
+  if (preparedRetirementAwaitingReproof) {
+    return {
+      ok: true,
+      stage: "identity_recovery_required",
+      summary,
+      canServiceStation: false,
+      error: "MintVault did not re-prove the prepared terminal registration. The credential remains locked and no physical work can start.",
+    };
+  }
   if (!versionTuple(station.minimumSupportedVersion)) {
     return {
       ok: true,
@@ -547,7 +829,6 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
     };
   }
   try { stationIdentity.setStationStatus(station.status); } catch {}
-  const resolved = stationAuthority.stationStage(station.status);
   const scannerHealthState = stateMod.get().scannerHealth || {};
   const scannerHealth = String(scannerHealthState.status || "checking");
   const calibrationStatus = station.calibrationStatus || "UNPROVISIONED";
@@ -577,6 +858,16 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
 }
 
 async function stationSetupState(options) {
+  if (watcherBootDeferredForRetirement && !identityRetirementPending) {
+    try { await startDeferredWatcherAfterRetirement(); }
+    catch (error) {
+      return stationAuthority.withLocalSession({
+        ok: true,
+        stage: "identity_recovery_required",
+        error: "Scanner custody recovery could not restart after exact identity retirement.",
+      }, stationIdentity.hasOperatorSession());
+    }
+  }
   if (!stationIdentity.hasOperatorSession()) {
     return stationAuthority.withLocalSession({ ok: true, stage: "sign_in" }, false);
   }
@@ -648,7 +939,7 @@ async function requireLiveProfileSetupAuthority() {
 
 async function publishStationSetupState() {
   const setup = await stationSetupState({ refreshCredits: false });
-  if (popover && !popover.isDestroyed()) popover.webContents.send("station-setup-update", setup);
+  if (trustedPopoverLoaded()) popover.webContents.send("station-setup-update", setup);
   return setup;
 }
 
@@ -680,12 +971,13 @@ function heartbeatPayload() {
 }
 
 function setupIpc() {
-  ipcMain.handle("get-state", () => stateMod.get());
+  registerIpc("get-state", () => rendererContainment.rendererStateProjection(stateMod.get()));
 
   // Generic settings setter — only allows keys whitelisted in lib/state.js.
   // Used by the popover's Settings section (auto-open-on-error checkbox).
-  ipcMain.handle("set-setting", (_e, payload) => {
-    if (!payload || typeof payload.key !== "string") return { ok: false, error: "missing key" };
+  registerIpc("set-setting", (_e, payload) => {
+    if (!plainObject(payload) || !["autoOpenOnError", "soundEnabled"].includes(payload.key)
+        || typeof payload.value !== "boolean") return { ok: false, error: "invalid setting" };
     stateMod.setSetting(payload.key, payload.value);
     pushStateToRenderer();
     return { ok: true };
@@ -698,17 +990,34 @@ function setupIpc() {
    * refuses a signed station because it addresses certificates with NO tenant predicate. The button
    * was dead for exactly that reason; the fix is a properly scoped route, not a weakened guard.
    */
-  ipcMain.handle("fetch-orphans", async () => {
+  registerIpc("fetch-orphans", async () => {
     return server.getFixQueue();
   });
 
-  ipcMain.handle("authorise-fix", async (_event, payload) => {
+  registerIpc("authorise-fix", async (_event, payload) => {
     const denied = await requireLiveOperationalAuthority();
     if (denied) return denied;
-    const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
+    if (!plainObject(payload) || (payload.sides !== undefined && (!Array.isArray(payload.sides)
+        || payload.sides.length > 2 || payload.sides.some((side) => !["front", "back"].includes(side))))) {
+      return { ok: false, error: "Invalid FIX request" };
+    }
+    const cardJobId = boundedInput(payload.cardJobId, 128, /^[A-Za-z0-9_-]+$/);
     if (!cardJobId) return { ok: false, error: "Select a card to fix" };
-    const result = await server.authoriseFix(cardJobId, payload && payload.sides);
-    if (result.ok) return { ok: true, fix: result.body && result.body.fix };
+    let operation;
+    let result;
+    try {
+      operation = fixOperation.beginOrResume(cardJobId, payload.sides);
+      result = await server.authoriseFix(operation.payload.cardJobId, operation.payload.sides, operation.id);
+    } catch (error) {
+      return { ok: false, retryable: true, code: error.code || "fix_recovery_required", error: error.message || "Could not reach MintVault" };
+    }
+    const fix = result.body?.fix;
+    if (result.ok && fix?.cardJobId === operation.payload.cardJobId && /^MV\d+$/i.test(String(fix.mvNumber || ""))
+        && Array.isArray(fix.authorisedSides) && JSON.stringify([...fix.authorisedSides].sort()) === JSON.stringify(operation.payload.sides)) {
+      fixOperation.complete(operation, `fix:${fix.cardJobId}:${String(fix.mvNumber).toUpperCase()}:${operation.payload.sides.join("+")}`);
+      return { ok: true, fix };
+    }
+    if (result.ok) return { ok: false, retryable: true, code: "invalid_fix_authorisation", error: "MintVault returned an incomplete FIX authorisation; retrying will recover the same operation" };
     const error = (result.body && result.body.error) || {};
     return { ok: false, code: error.code || "error", error: error.message || "Could not start the fix" };
   });
@@ -724,7 +1033,7 @@ function setupIpc() {
    * the operator must act on. A network error deliberately KEEPS it, because that is exactly the
    * case where we do not know whether the card was created.
    */
-  ipcMain.handle("start-new-card", async (_event, payload) => {
+  registerIpc("start-new-card", async (_event, payload) => {
     const denied = await requireLiveOperationalAuthority();
     if (denied) return denied;
     const storage = watcher?.captureStorageStatus();
@@ -736,7 +1045,8 @@ function setupIpc() {
         error: "New cards are paused until this Mac has enough free space for the encrypted evidence queue",
       };
     }
-    const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
+    if (!plainObject(payload)) return { ok: false, error: "Invalid card request" };
+    const cardName = typeof payload.cardName === "string" && payload.cardName.length <= 200 ? payload.cardName : "";
     let operation;
     let result;
     try {
@@ -770,41 +1080,50 @@ function setupIpc() {
     };
   });
 
+  registerIpc("cancel-card", () => cancelCurrentCard());
+
   // Recovery opens the exact historic certificate in the authenticated web
   // workstation. That page creates the server-owned capture session; this app
   // never arms arbitrary certificate/side combinations from a scanner token.
-  ipcMain.handle("open-grade-cert", async (_e, certId) => {
-    if (!certId || !/^MV\d+$/i.test(String(certId))) return { ok: false, error: "format MV###" };
+  registerIpc("open-grade-cert", async (_e, certId) => {
+    if (!boundedInput(certId, 24, /^MV\d+$/i)) return { ok: false, error: "format MV###" };
     const base = server.API_BASE.replace(/\/$/, "");
     const url = `${base}/admin?search=${encodeURIComponent(String(certId).toUpperCase())}`;
     shell.openExternal(url);
     return { ok: true, url };
   });
 
-  ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
-  ipcMain.handle("get-update-status", () => updateManager?.status() || {
+  registerIpc("get-version", () => ({ ok: true, version: APP_VERSION }));
+  registerIpc("get-update-status", () => rendererContainment.safeUpdateStatus(updateManager?.status() || {
     status: "disabled",
     currentVersion: APP_VERSION,
     error: "Automatic update is available only in a signed MintVault release.",
-  });
+  }));
 
-  ipcMain.handle("get-station-setup", () => stationSetupState());
-  ipcMain.handle("station-sign-in", async (_event, payload) => {
-    const email = typeof payload?.email === "string" ? payload.email.trim() : "";
-    const password = typeof payload?.password === "string" ? payload.password : "";
+  registerIpc("get-station-setup", () => stationSetupState());
+  registerIpc("station-sign-in", async (_event, payload) => {
+    if (!plainObject(payload)) return { ok: false, error: "Email and password are required" };
+    const email = boundedInput(payload.email?.trim(), 254, /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+    const password = boundedInput(payload.password, 1024);
     if (!email || !password) return { ok: false, error: "Email and password are required" };
     const result = await stationClient.signIn(email, password);
-    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error || "MintVault sign-in failed" };
+    if (!result.ok) return { ok: false, error: result.body?.error || "MintVault sign-in failed" };
+    void recoverPendingCardCancellation();
+    return stationSetupState();
   });
-  ipcMain.handle("station-complete-mfa", async (_event, payload) => {
-    const code = typeof payload?.code === "string" ? payload.code.trim() : "";
-    const recoveryCode = typeof payload?.recoveryCode === "string" ? payload.recoveryCode.trim() : "";
+  registerIpc("station-complete-mfa", async (_event, payload) => {
+    if (!plainObject(payload)) return { ok: false, error: "Authentication code or recovery code is required" };
+    const code = typeof payload.code === "string" ? boundedInput(payload.code.trim(), 128, /^[A-Za-z0-9 -]+$/) : "";
+    const recoveryCode = typeof payload.recoveryCode === "string" ? boundedInput(payload.recoveryCode.trim(), 128, /^[A-Za-z0-9 -]+$/) : "";
     if (!code && !recoveryCode) return { ok: false, error: "Authentication code or recovery code is required" };
     const result = await stationClient.completeMfa({ code, recoveryCode });
-    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error || "Authentication code was not accepted" };
+    if (!result.ok) return { ok: false, error: result.body?.error || "Authentication code was not accepted" };
+    void recoverPendingCardCancellation();
+    return stationSetupState();
   });
-  ipcMain.handle("register-station", async (_event, payload) => {
-    const locationId = typeof payload?.locationId === "string" && payload.locationId ? payload.locationId : undefined;
+  registerIpc("register-station", async (_event, payload) => {
+    if (!plainObject(payload)) return { ok: false, error: "Selected location is invalid" };
+    const locationId = boundedInput(payload.locationId, 128, /^[A-Za-z0-9_-]+$/) || undefined;
     if (locationId) {
       const selected = await stationClient.selectLocation(locationId);
       if (!selected.ok) return { ok: false, error: selected.body?.error || "Selected location is not available" };
@@ -812,7 +1131,7 @@ function setupIpc() {
     const result = await stationClient.registerThisMac({ locationId, appVersion: APP_VERSION });
     return result.ok ? stationSetupState() : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
   });
-  ipcMain.handle("station-sign-out", async () => {
+  registerIpc("station-sign-out", async () => {
     const result = await stationClient.signOut();
     return {
       ok: true,
@@ -825,7 +1144,7 @@ function setupIpc() {
   // These are purpose-built station controls. The renderer never receives a
   // local TIFF path and never supplies a certificate/card/side: Watcher derives
   // all of that from its server-claimed active target and rejects stale IDs.
-  ipcMain.handle("scan-target", async () => {
+  registerIpc("scan-target", async () => {
     const denied = await requireLiveOperationalAuthority();
     if (denied) return denied;
     if (!watcher) return { ok: false, error: "Scanner service is starting" };
@@ -835,7 +1154,7 @@ function setupIpc() {
   // Setup Preview is intentionally not a target operation. The renderer can
   // request the one fixed full-platen local JPEG scan, but supplies neither a
   // file path nor any certificate/card/side identity.
-  ipcMain.handle("run-positioning-preview", async () => {
+  registerIpc("run-positioning-preview", async () => {
     const projection = await stationSetupState({ refreshCredits: false });
     const denied = projection.stage === "active"
       ? await requireLiveOperationalAuthority()
@@ -845,18 +1164,24 @@ function setupIpc() {
     return watcher.runPositioningPreview();
   });
 
-  ipcMain.handle("get-positioning-preview", (_event, previewId) => {
-    if (!stationIdentity.hasOperatorSession()) return { ok: false, error: "Sign in before viewing a positioning Preview" };
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
-    return watcher.positioningPreviewData(previewId);
+  registerIpc("get-positioning-preview", async (_event, previewId) => {
+    const projection = await stationSetupState({ refreshCredits: false });
+    const denied = projection.stage === "active"
+      ? await requireLiveOperationalAuthority()
+      : await requireLiveProfileSetupAuthority();
+    if (denied) return denied;
+    const id = previewIdInput(previewId);
+    if (!watcher || !id) return { ok: false, error: "Positioning preview is unavailable" };
+    return watcher.positioningPreviewData(id);
   });
 
-  ipcMain.handle("apply-positioning-preview", async (_event, previewId) => {
+  registerIpc("apply-positioning-preview", async (_event, previewId) => {
     const denied = await requireLiveProfileSetupAuthority();
     if (denied) return denied;
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
+    const id = previewIdInput(previewId);
+    if (!watcher || !id) return { ok: false, error: "Positioning preview is unavailable" };
     const committed = await watcher.submitPositioningCalibration(
-      previewId,
+      id,
       (candidate) => stationClient.saveCalibration(candidate),
     );
     if (!committed.ok) return committed;
@@ -864,73 +1189,68 @@ function setupIpc() {
     return stationSetupState({ refreshCredits: false });
   });
 
-  ipcMain.handle("get-capture-preview", (_event, previewId) => {
-    if (!stationIdentity.hasOperatorSession()) return { ok: false, error: "Sign in before reviewing a capture" };
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
-    return watcher.previewData(previewId);
-  });
-
-  ipcMain.handle("accept-capture-preview", async (_event, previewId) => {
+  registerIpc("get-capture-preview", async (_event, previewId) => {
     const denied = await requireLiveOperationalAuthority();
     if (denied) return denied;
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
-    return watcher.acceptPreview(previewId);
+    const id = previewIdInput(previewId);
+    if (!watcher || !id) return { ok: false, error: "Preview is unavailable" };
+    return watcher.previewData(id);
   });
 
-  ipcMain.handle("rescan-capture-preview", async (_event, previewId) => {
+  registerIpc("accept-capture-preview", async (_event, previewId) => {
     const denied = await requireLiveOperationalAuthority();
     if (denied) return denied;
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
-    return watcher.rescanPreview(previewId);
+    const id = previewIdInput(previewId);
+    if (!watcher || !id) return { ok: false, error: "Preview is unavailable" };
+    return watcher.acceptPreview(id);
+  });
+
+  registerIpc("rescan-capture-preview", async (_event, previewId) => {
+    const denied = await requireLiveOperationalAuthority();
+    if (denied) return denied;
+    const id = previewIdInput(previewId);
+    if (!watcher || !id) return { ok: false, error: "Preview is unavailable" };
+    return watcher.rescanPreview(id);
   });
 
   // Signed-package update only. The manager separately verifies the newer-only
   // metadata, MintVault release ledger, exact checksum set and downloaded ZIP
   // before electron-updater may install anything.
-  ipcMain.handle("update-app", async (_event, payload) => {
+  registerIpc("update-app", async (_event, payload) => {
     if (!updateManager?.enabled) {
       return { ok: false, code: "signed_release_required", error: "Use an approved signed MintVault Scanner package." };
     }
-    const action = payload?.action;
+    if (!plainObject(payload)) return { ok: false, code: "invalid_update_action", error: "Choose Update & Restart or DMG Reinstall." };
+    const action = payload.action;
     if (action === "check") return { ok: true, ...(await updateManager.check({ download: false })) };
     if (action === "update_and_restart") return updateManager.updateAndRestart();
     return { ok: false, code: "invalid_update_action", error: "Choose Update & Restart or DMG Reinstall." };
   });
 
-  ipcMain.handle("open-dmg-reinstall", async () => {
+  registerIpc("open-dmg-reinstall", async () => {
     if (!updateManager?.enabled) {
       return { ok: false, code: "signed_release_required", error: "Use an approved signed MintVault Scanner DMG." };
     }
-    return updateManager.openReinstallDmg((verifiedPath) => shell.openPath(verifiedPath));
+    const result = await updateManager.openReinstallDmg((verifiedPath) => shell.openPath(verifiedPath));
+    return result?.ok ? { ok: true, version: result.version || null } : { ok: false, error: result?.error || "Verified DMG is unavailable." };
   });
 
   // Reset the in-process service. If it cannot recover, relaunch this same
   // signed application; production never depends on an external service helper.
-  ipcMain.handle("reset-scanner", async () => {
+  registerIpc("reset-scanner", async () => {
     const updateDenied = updateInstallDenial();
     if (updateDenied) return updateDenied;
-    // Tier 1 — Soft: restart the in-process station service.
-    try {
-      logToFile("Soft: in-process scanner service restart");
-      await watcher.stop();
-      await watcher.start();
-      if (watcher.chokidar) {
-        logToFile("Soft OK → scanner service running");
-        pushStateToRenderer();
-        refreshTray();
-        return { ok: true, tier: "soft", status: "Restarted" };
-      }
-      logToFile("Soft: scanner service did not come back up → escalating");
-    } catch (err) {
-      logToFile(`Soft failed: ${err.message} → escalating`);
+    const result = await restartScannerService("operator reset");
+    if (result.ok) {
+      pushStateToRenderer();
+      refreshTray();
     }
-    scheduleApplicationRelaunch("in-app scanner service restart insufficient");
-    return { ok: true, tier: "application", status: "Restarting Scanner…", escalated: true };
+    return result;
   });
 
-  ipcMain.handle("hide-popover", () => { if (popover) popover.hide(); return { ok: true }; });
+  registerIpc("hide-popover", () => { if (popover) popover.hide(); return { ok: true }; });
 
-  ipcMain.handle("open-logs", () => {
+  registerIpc("open-logs", () => {
     shell.openPath(SCANNER_LOG);
     return { ok: true };
   });
@@ -938,7 +1258,7 @@ function setupIpc() {
   // Open the public logbook page for the most-recently-uploaded cert.
   // Reuses the existing lastUploadedCert state field after an accepted
   // target-bound capture. The public /cert/:id route shows its evidence.
-  ipcMain.handle("open-last-cert", () => {
+  registerIpc("open-last-cert", () => {
     const certId = stateMod.get().lastUploadedCert;
     if (!certId) return { ok: false, error: "no cert uploaded yet this session" };
     const base = server.API_BASE.replace(/\/$/, "");
@@ -949,7 +1269,7 @@ function setupIpc() {
 
   // This only dismisses a server-derived, persisted CARD REGISTERED notice.
   // It cannot arm, retarget, or otherwise mutate a capture session.
-  ipcMain.handle("acknowledge-card-registered", () => {
+  registerIpc("acknowledge-card-registered", () => {
     if (!stateMod.get().lastAcceptedCapture?.cardRegistered) {
       return { ok: false, error: "No registered card is awaiting acknowledgement" };
     }
@@ -981,6 +1301,13 @@ app.whenReady().then(async () => {
   });
 
   watcher = new Watcher();
+  const retirementRecovery = terminalIdentityRetirement.recoverIfRetired({ watcher });
+  if (retirementRecovery.recovered) stationAuthorityLatch.clearAfterIdentityRetirement();
+  if (retirementRecovery.awaitingTerminalReproof) {
+    holdIdentityRetirementQuiesce();
+    watcherBootDeferredForRetirement = true;
+  }
+  stationIdentity.configureRetirementGuard(() => terminalIdentityRetirement.recoverIfRetired({ watcher }));
   let lastErrorState = false;
   let lastSuccessState = false;
   let lastPositioningPreviewId = null;
@@ -1017,10 +1344,11 @@ app.whenReady().then(async () => {
   });
 
   setupTray();
-  await watcher.start();
+  if (!watcherBootDeferredForRetirement) await watcher.start();
   // Recovery can decrypt legacy/retry material into private scratch. Do not
   // expose renderer IPC until that startup recovery has completely quiesced.
   setupIpc();
+  if (!identityRetirementPending) void recoverPendingCardCancellation();
   createPopover();
   // Session polling is deliberately inside the one existing scanner process.
   // It never watches a staging folder or calls the legacy unbound ingest.
@@ -1172,10 +1500,21 @@ app.whenReady().then(async () => {
   // Wake-from-sleep recovery: FSEvents subscriptions can go stale across a
   // long sleep — restart the folder watcher and immediately sweep the inbox.
   powerMonitor.on("resume", async () => {
-    if (updateInstallPending) return;
-    console.log("[maintenance] system resumed from sleep — restarting watcher + sweeping inbox");
-    try { await watcher.stop(); await watcher.start(); } catch (err) { console.error(`[maintenance] resume restart failed: ${err?.message}`); }
-    watcher.drainInbox().catch(() => {});
+    if (updateInstallPending || deferredResumeRestart) return;
+    deferredResumeRestart = true;
+    const recoverAfterResume = async () => {
+      if (updateInstallPending) { deferredResumeRestart = false; return; }
+      const result = await restartScannerService("wake recovery");
+      if (!result.ok && result.code === "restart_deferred") {
+        const retry = setTimeout(recoverAfterResume, 1_000);
+        retry.unref?.();
+        return;
+      }
+      deferredResumeRestart = false;
+      if (!result.ok) console.error(`[maintenance] resume restart failed: ${result.error}`);
+      else watcher.drainInbox().catch(() => {});
+    };
+    void recoverAfterResume();
   });
   // Belt-and-braces: sweep the inbox every 10 min for anything chokidar
   // missed. drainInbox is idempotent and respects the confirm/pause gates.

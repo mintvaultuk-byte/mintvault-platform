@@ -32,13 +32,14 @@ function completeEvidenceBinding(filePath, overrides = {}) {
     originalOperatorId: "operator-7",
     originalOperatorRole: "SCANNER_OPERATOR",
     capturePurpose: "AUTHORITATIVE_CARD_CAPTURE",
+    cancelEligible: overrides.cancelEligible ?? overrides.side !== "back",
     authorisationIssuedAt: "2026-08-14T09:00:00.000Z",
     authorisationExpiresAt: "2026-08-14T09:10:00.000Z",
     deviceCapturedAt: "2026-08-14T09:03:21.000Z",
     deviceTimestampAuthority: "NON_AUTHORITATIVE",
     appVersion: "1.2.1",
     captureHelperVersion: helperIntegrity.HELPER_VERSION,
-    identityHelperVersion: "1.1.0",
+    identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
     expectedSha256: crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex"),
     expectedByteLength: fs.statSync(filePath).size,
     expectedMimeType: "image/tiff",
@@ -116,13 +117,17 @@ test("scanner client refuses a non-direct grant without falling back to multipar
   fs.writeFileSync(source, tiff);
 
   const priorBase = process.env.MINTVAULT_API_BASE;
+  const priorInsecureUpload = process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
   process.env.MINTVAULT_API_BASE = `http://127.0.0.1:${server.address().port}`;
+  process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = "1";
   const clientPath = require.resolve("../lib/server-client");
   delete require.cache[clientPath];
   const client = require("../lib/server-client");
   t.after(() => {
     if (priorBase === undefined) delete process.env.MINTVAULT_API_BASE;
     else process.env.MINTVAULT_API_BASE = priorBase;
+    if (priorInsecureUpload === undefined) delete process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
+    else process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = priorInsecureUpload;
     delete require.cache[clientPath];
   });
 
@@ -145,6 +150,65 @@ test("scanner client refuses a non-direct grant without falling back to multipar
   assert.match(grant.body.toString("utf8"), /sha256/);
   assert.equal(requests.some((request) => /^multipart\/form-data/.test(String(request.headers["content-type"] || ""))), false);
   assert.equal(requests[3].url, "/api/admin/scanner/capture-sessions/session-123?device_id=mac-mintvault-station-a");
+});
+
+test("insecure or malformed direct grants are rejected before any upload receiver sees bytes", async (t) => {
+  let requests = 0;
+  let bytes = 0;
+  const receiver = http.createServer((request, response) => {
+    requests += 1;
+    request.on("data", (chunk) => { bytes += chunk.length; });
+    request.on("end", () => response.writeHead(204).end());
+  });
+  await listen(receiver);
+  t.after(() => close(receiver));
+  const client = require("../lib/server-client");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-invalid-grant-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const source = path.join(tempDir, "master.tif");
+  fs.writeFileSync(source, Buffer.from([0x49, 0x49, 0x2a, 0x00, 0x08]));
+  const prior = process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
+  delete process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
+  t.after(() => { if (prior === undefined) delete process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD; else process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = prior; });
+  await assert.rejects(
+    client._private.putStagedTiff(`http://127.0.0.1:${receiver.address().port}/collect`, {}, source, 5),
+    /pinned HTTPS storage boundary/,
+  );
+  assert.throws(
+    () => client._private.validateDirectUploadGrant("https://example.r2.cloudflarestorage.com/object", { authorization: "secret" }, "stage-123"),
+    /headers are invalid/,
+  );
+  assert.equal(requests, 0);
+  assert.equal(bytes, 0);
+});
+
+test("staging transport and storage errors never project signed grant URLs or untrusted response bodies", async (t) => {
+  const client = require("../lib/server-client");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-staging-redaction-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const source = path.join(tempDir, "master.tif");
+  fs.writeFileSync(source, Buffer.from([0x49, 0x49, 0x2a, 0x00, 0x08]));
+  const prior = process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
+  process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = "1";
+  t.after(() => { if (prior === undefined) delete process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD; else process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = prior; });
+
+  const querySecret = "SENTINEL_QUERY_CREDENTIAL";
+  const transport = await client._private.putStagedTiff(`http://127.0.0.1:1/upload?X-Amz-Credential=${querySecret}`, {}, source, 5);
+  assert.equal(transport.ok, false);
+  assert.equal(JSON.stringify(transport).includes(querySecret), false);
+  assert.equal(transport.body.error, "Evidence staging transport failed");
+
+  const bodySecret = "SENTINEL_UNTRUSTED_STORAGE_BODY";
+  const receiver = http.createServer((request, response) => {
+    request.resume();
+    request.on("end", () => response.writeHead(403, { "content-type": "text/plain" }).end(bodySecret));
+  });
+  await listen(receiver);
+  t.after(() => close(receiver));
+  const rejected = await client._private.putStagedTiff(`http://127.0.0.1:${receiver.address().port}/upload`, {}, source, 5);
+  assert.equal(rejected.status, 403);
+  assert.equal(JSON.stringify(rejected).includes(bodySecret), false);
+  assert.equal(rejected.body.error, "Evidence staging service rejected upload — HTTP 403");
 });
 
 test("scanner client sends an exact TIFF only to a server-minted staging URL before finalisation", async (t) => {
@@ -188,13 +252,17 @@ test("scanner client sends an exact TIFF only to a server-minted staging URL bef
   const source = path.join(tempDir, "lide-master.tif");
   fs.writeFileSync(source, tiff);
   const priorBase = process.env.MINTVAULT_API_BASE;
+  const priorInsecureUpload = process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
   process.env.MINTVAULT_API_BASE = `http://127.0.0.1:${server.address().port}`;
+  process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = "1";
   const clientPath = require.resolve("../lib/server-client");
   delete require.cache[clientPath];
   const client = require("../lib/server-client");
   t.after(() => {
     if (priorBase === undefined) delete process.env.MINTVAULT_API_BASE;
     else process.env.MINTVAULT_API_BASE = priorBase;
+    if (priorInsecureUpload === undefined) delete process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD;
+    else process.env.MINTVAULT_ALLOW_INSECURE_TEST_UPLOAD = priorInsecureUpload;
     delete require.cache[clientPath];
   });
 
@@ -349,6 +417,7 @@ function claimedTarget(overrides = {}) {
     originalOperatorId: "operator-original-7",
     originalOperatorRole: "SCANNER_OPERATOR",
     capturePurpose: "AUTHORITATIVE_CARD_CAPTURE",
+    cancelEligible: overrides.cancelEligible ?? overrides.side !== "back",
     authorisationIssuedAt: issuedAt,
     authorisationExpiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
@@ -438,7 +507,7 @@ async function sealedCandidate(fixture, overrides = {}) {
     capturedAtMs: Date.now(),
     appVersion: require("../package.json").version,
     captureHelperVersion: helperIntegrity.HELPER_VERSION,
-    identityHelperVersion: "1.1.0",
+    identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
     provenance,
     masterValidation,
     frameAssessment,
@@ -489,7 +558,41 @@ async function writeCalibrationProof(dir, {
 function configureClaimedStation({ watcher, state, server, lide }) {
   server.hasToken = () => true;
   server.claimNextCapture = async () => ({ ok: true, body: { capture: claimedTarget() } });
-  server.renewCapture = async () => ({ ok: true, body: { capture: claimedTarget() } });
+  server.renewCapture = async () => {
+    const current = watcher.activeTargetEntry();
+    const serverNow = new Date();
+    return {
+      ok: true,
+      body: {
+        serverNow: serverNow.toISOString(),
+        capture: {
+          state: "claimed",
+          id: current.sessionId,
+          captureAuthorisationId: current.captureAuthorisationId,
+          semanticOperationId: current.semanticOperationId,
+          certificateNumber: current.certId,
+          side: current.side,
+          workstationId: current.workstationId,
+          cardJobId: current.cardJobId,
+          revision: current.revision,
+          profileRevisionId: current.profileRevisionId,
+          tenantId: current.tenantId,
+          locationId: current.locationId,
+          stationId: current.stationCredentialId,
+          originalOperatorId: current.originalOperatorId,
+          originalOperatorRole: current.originalOperatorRole,
+          capturePurpose: current.capturePurpose,
+          cancelEligible: current.cancelEligible,
+          authorisationIssuedAt: current.authorisationIssuedAt,
+          authorisationExpiresAt: current.authorisationExpiresAt,
+          expiresAt: new Date(Math.min(
+            serverNow.getTime() + 60_000,
+            Date.parse(current.authorisationExpiresAt) - 1,
+          )).toISOString(),
+        },
+      },
+    };
+  };
   server.requestRescanAuthorisation = async (sessionId) => ({
     ok: true,
     body: {
@@ -532,6 +635,60 @@ test("claiming a target displays it but never performs a physical scan or upload
   assert.equal(fixture.watcher.readTargetedQueue()[0].phase, "awaiting_scan");
 });
 
+test("server-eligible pre-evidence Card Job cancellation is exclusive and archives the exact target", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  configureClaimedStation(fixture);
+  await fixture.watcher.pollTargetedCapture();
+  assert.equal(fixture.watcher.activeTargetEntry()?.cancelEligible, true, JSON.stringify(fixture.watcher.activeTargetEntry()));
+  const begun = fixture.watcher.beginCardCancellation();
+  assert.equal(begun.ok, true, JSON.stringify(begun));
+  assert.equal(fixture.watcher.isRestartSafeForUpdate(), false);
+  assert.equal((await fixture.watcher.scanActiveTarget()).ok, false, "no scan can race cancellation");
+  const operationId = crypto.randomUUID();
+  fixture.watcher.markCardCancellationPending(begun.target, operationId);
+  fixture.watcher.finishCardCancellation();
+  assert.equal((await fixture.watcher.scanActiveTarget()).code, "cancel_pending", "ambiguous CANCEL keeps Scan locked");
+  const resumed = fixture.watcher.beginCardCancellationForTarget(begun.target);
+  assert.equal(resumed.entry.cancelOperationId, operationId);
+  const applied = fixture.watcher.applyCardJobCancellation(begun.target);
+  fixture.watcher.finishCardCancellation();
+  assert.equal(applied.ok, true);
+  assert.equal(fixture.state.get().activeCapture, null);
+  const archived = fixture.watcher.captureQueue.entries().find((entry) => entry.queueEntryId === begun.entry.queueEntryId);
+  assert.equal(archived.lifecycleState, "QUARANTINED");
+  assert.equal(archived.disposition, "CANCELLED");
+  assert.equal(fixture.watcher.applyCardJobCancellation(begun.target).alreadyApplied, true, "restart/double apply converges");
+});
+
+test("ambiguous CANCEL survives restart, blocks Accept/Rescan, and can reconcile after the target disappears", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  configureClaimedStation(fixture);
+  fixture.lide.scan = async (dir) => ({ path: await writeStationTiff(dir), provenance: captureProvenance() });
+  await fixture.watcher.pollTargetedCapture();
+  await fixture.watcher.scanActiveTarget();
+  const previewId = fixture.state.get().activeCapture.previewId;
+  const begun = fixture.watcher.beginCardCancellation();
+  const operationId = crypto.randomUUID();
+  fixture.watcher.markCardCancellationPending(begun.target, operationId);
+  fixture.watcher.finishCardCancellation(); // response was lost; durable marker remains
+  assert.equal((await fixture.watcher.acceptPreview(previewId)).code, "cancel_pending");
+  assert.equal((await fixture.watcher.rescanPreview(previewId)).code, "cancel_pending");
+
+  let renewals = 0;
+  fixture.server.renewCapture = async () => { renewals += 1; return { ok: false, status: 409, body: { error: "not awaiting" } }; };
+  fixture.state.set({ activeCapture: null });
+  assert.equal(await fixture.watcher.resumeTargetedCaptures(), true);
+  assert.equal(renewals, 0, "restart recovery never keepalives or archives a cancellation-pending target");
+  assert.equal(fixture.state.get().activeCapture.stage, "cancel_pending");
+
+  fixture.watcher.removeTargetedPending(begun.target.captureSessionId);
+  const absentRecovery = fixture.watcher.beginCardCancellationForTarget(begun.target);
+  assert.equal(absentRecovery.ok, true);
+  assert.equal(absentRecovery.entry, null);
+  assert.equal(fixture.watcher.applyCardJobCancellation(begun.target).localTargetAbsent, true);
+  fixture.watcher.finishCardCancellation();
+});
+
 test("an incomplete capture authorisation is rejected before arming or physical scan", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
@@ -546,6 +703,50 @@ test("an incomplete capture authorisation is rejected before arming or physical 
   assert.equal(result.authorisationRejected, true);
   assert.equal(scans, 0);
   assert.equal(fixture.watcher.readTargetedQueue().length, 0);
+});
+
+test("a physical scan requires an exact server-timed claimed renewal", async (t) => {
+  const mutations = [
+    ["empty response", () => ({})],
+    ["wrong session", (body) => ({ ...body, capture: { ...body.capture, id: "different-session" } })],
+    ["wrong operator", (body) => ({ ...body, capture: { ...body.capture, originalOperatorId: "different-operator" } })],
+    ["wrong side", (body) => ({ ...body, capture: { ...body.capture, side: "back" } })],
+    ["wrong profile", (body) => ({ ...body, capture: { ...body.capture, profileRevisionId: "different-profile" } })],
+    ["wrong revision", (body) => ({ ...body, capture: { ...body.capture, revision: body.capture.revision + 1 } })],
+    ["wrong purpose", (body) => ({ ...body, capture: { ...body.capture, capturePurpose: "DIAGNOSTIC" } })],
+    ["terminal state", (body) => ({ ...body, capture: { ...body.capture, state: "cancelled" } })],
+  ];
+  for (const [label, mutate] of mutations) {
+    await t.test(label, async (subtest) => {
+      const fixture = isolatedTargetedWatcher(subtest);
+      configureClaimedStation(fixture);
+      await fixture.watcher.pollTargetedCapture();
+      const exactRenewal = fixture.server.renewCapture;
+      fixture.server.renewCapture = async (...args) => {
+        const response = await exactRenewal(...args);
+        return { ...response, body: mutate(response.body) };
+      };
+      let scans = 0;
+      fixture.lide.scan = async () => { scans += 1; throw new Error("physical scan must remain closed"); };
+      const result = await fixture.watcher.scanActiveTarget();
+      assert.equal(result.ok, false);
+      assert.equal(scans, 0);
+    });
+  }
+
+  await t.test("exact renewal", async (subtest) => {
+    const fixture = isolatedTargetedWatcher(subtest);
+    configureClaimedStation(fixture);
+    await fixture.watcher.pollTargetedCapture();
+    let scans = 0;
+    fixture.lide.scan = async (dir) => {
+      scans += 1;
+      return { path: await writeStationTiff(dir), provenance: captureProvenance() };
+    };
+    const result = await fixture.watcher.scanActiveTarget();
+    assert.equal(result.ok, true);
+    assert.equal(scans, 1);
+  });
 });
 
 test("capture authorisation identifiers cannot escape app-private staging paths", async (t) => {
@@ -960,6 +1161,62 @@ test("a frame that lacks four-side evidence margin is previewed but can only be 
   assert.equal(uploads, 0);
 });
 
+test("fresh Rescan authorisation cannot change session or original operator provenance", async (t) => {
+  for (const [field, changed] of [
+    ["sessionId", "different-session"],
+    ["originalOperatorId", "different-operator"],
+    ["originalOperatorRole", "PARTNER_OWNER"],
+    ["capturePurpose", "DIFFERENT_PURPOSE"],
+  ]) {
+    await t.test(field, async (subtest) => {
+      const fixture = isolatedTargetedWatcher(subtest);
+      configureClaimedStation(fixture);
+      fixture.lide.scan = async (dir) => ({
+        path: await writeStationTiff(dir),
+        provenance: captureProvenance(),
+      });
+      await fixture.watcher.pollTargetedCapture();
+      await fixture.watcher.scanActiveTarget();
+      const current = fixture.watcher.activeTargetEntry();
+      const previewId = current.previewId;
+      fixture.server.requestRescanAuthorisation = async () => ({
+        ok: true,
+        body: {
+          capture: claimedTarget({
+            id: field === "sessionId" ? changed : current.sessionId,
+            certificateNumber: current.certId,
+            side: current.side,
+            cardJobId: current.cardJobId,
+            profileRevisionId: current.profileRevisionId,
+            tenantId: current.tenantId,
+            locationId: current.locationId,
+            stationId: current.stationCredentialId,
+            workstationId: current.workstationId,
+            originalOperatorId: field === "originalOperatorId" ? changed : current.originalOperatorId,
+            originalOperatorRole: field === "originalOperatorRole" ? changed : current.originalOperatorRole,
+            capturePurpose: field === "capturePurpose" ? changed : current.capturePurpose,
+            captureAuthorisationId: `${current.captureAuthorisationId}-fresh`,
+            semanticOperationId: crypto.randomUUID(),
+            revision: current.revision + 1,
+          }),
+        },
+      });
+
+      const result = await fixture.watcher.rescanPreview(previewId);
+      assert.equal(result.ok, false);
+      assert.match(result.error, /changed the pinned|not bound to a SCANNER_OPERATOR|not authoritative card capture/);
+      const live = fixture.watcher.activeTargetEntry();
+      assert.equal(live.queueEntryId, current.queueEntryId);
+      assert.equal(live.phase, current.phase);
+      assert.equal(live[field], current[field]);
+      assert.notEqual(
+        fixture.watcher.captureQueue.entries().find((entry) => entry.queueEntryId === current.queueEntryId)?.lifecycleState,
+        "QUARANTINED",
+      );
+    });
+  }
+});
+
 test("rapid Scan clicks start exactly one physical capture", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
@@ -1300,6 +1557,29 @@ test("scanner client preserves a station's legacy ingest host for target-session
     client._private.baseFromLegacyIngestUrl("https://scanner.example.test/api/admin/scan-ingest"),
     "https://scanner.example.test"
   );
+});
+
+test("packaged Scanner ignores API and legacy-ingest origin overrides before credential use", (t) => {
+  const priorBase = process.env.MINTVAULT_API_BASE;
+  const priorIngest = process.env.MINTVAULT_INGEST_URL;
+  const priorToken = process.env.SCANNER_API_TOKEN;
+  process.env.MINTVAULT_API_BASE = "http://127.0.0.1:65534/credential-collector";
+  process.env.MINTVAULT_INGEST_URL = "https://attacker.invalid/api/admin/scan-ingest";
+  process.env.SCANNER_API_TOKEN = "must-not-leave-packaged-runtime";
+  const clientPath = require.resolve("../lib/server-client");
+  delete require.cache[clientPath];
+  const client = require("../lib/server-client");
+  t.after(() => {
+    if (priorBase === undefined) delete process.env.MINTVAULT_API_BASE; else process.env.MINTVAULT_API_BASE = priorBase;
+    if (priorIngest === undefined) delete process.env.MINTVAULT_INGEST_URL; else process.env.MINTVAULT_INGEST_URL = priorIngest;
+    if (priorToken === undefined) delete process.env.SCANNER_API_TOKEN; else process.env.SCANNER_API_TOKEN = priorToken;
+    delete require.cache[clientPath];
+  });
+
+  assert.equal(client.API_BASE, "http://127.0.0.1:65534/credential-collector", "unpackaged harness keeps its explicit override");
+  assert.equal(client.configureRuntime({ isPackaged: true }), "https://mintvaultuk.com");
+  assert.equal(client.API_BASE, "https://mintvaultuk.com");
+  assert.deepEqual(client._private.legacyAuthHeaders(), {}, "packaged runtime cannot load or transmit a legacy token");
 });
 
 test("queue recovery signs without the current human while new target claims remain human-bound", async (t) => {

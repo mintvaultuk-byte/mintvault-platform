@@ -1,8 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { _private: terminalRetirement } = require("../lib/terminal-identity-retirement");
 
 const enabled = process.env.MINTVAULT_RUN_SECURE_ENCLAVE_TESTS === "1";
 const helperPath = path.join(__dirname, "..", "native", "bin", "mv-identity-helper");
@@ -28,6 +31,17 @@ function invokeProductionDirect(command) {
     input: JSON.stringify({ command }), encoding: "utf8", timeout: 20_000, maxBuffer: 256 * 1024,
   });
   return { status: child.status, result: JSON.parse(String(child.stdout || "")) };
+}
+
+function invokeCrash(testService, command, payload, phase) {
+  const child = spawnSync(helperPath, [], {
+    input: JSON.stringify({ command, testService, ...payload, testFailurePhase: phase }),
+    encoding: "utf8",
+    timeout: 20_000,
+    maxBuffer: 256 * 1024,
+  });
+  assert.equal(child.status, 86, `${phase} must terminate at the injected process boundary`);
+  assert.equal(String(child.stdout || ""), "");
 }
 
 function verify(publicKeyPem, canonical, signature) {
@@ -164,4 +178,135 @@ test("real migration preserves the legacy key, proves possession and converges s
     publicKeyPem: replacement.publicKey.export({ format: "pem", type: "spki" }).toString(),
   }, { allowFailure: true }).result;
   assert.equal(mismatch.error.code, "IDENTITY_MISMATCH");
+});
+
+test("identity create, migration and retirement recover every journalled process interruption", { skip: !enabled }, (t) => {
+  for (const phase of ["create-after-journal", "create-after-wrapping-key", "create-after-envelope"]) {
+    const testService = namespace(phase);
+    t.after(() => cleanup(testService));
+    invokeCrash(testService, "create", {}, phase);
+    const recovered = invoke(testService, "status").result;
+    const created = recovered.state === "ABSENT_NEW" ? invoke(testService, "create").result : recovered;
+    assert.equal(created.state, "READY_V2");
+    assert.equal(invoke(testService, "retire", { expectedFingerprint: created.publicKeyFingerprint }).result.state, "ABSENT_NEW");
+  }
+
+  for (const phase of ["migrate-after-journal", "migrate-after-wrapping-key", "migrate-after-envelope"]) {
+    const testService = namespace(phase);
+    t.after(() => cleanup(testService));
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const payload = {
+      privateKeyRaw: privateKey.export({ format: "jwk" }).d,
+      publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+      installationId: crypto.randomUUID(),
+      stationCode: "MV-STN-ABCDEFGHJK",
+      stationStatus: "ACTIVE",
+      requestNonce: 4,
+      proofChallenge: crypto.randomBytes(32).toString("base64url"),
+    };
+    invokeCrash(testService, "migrate-v1", payload, phase);
+    const status = invoke(testService, "status").result;
+    const migrated = invoke(testService, "migrate-v1", payload).result;
+    assert.equal(status.state === "ABSENT_NEW" || status.state === "READY_V2", true);
+    assert.equal(migrated.publicKeyFingerprint,
+      crypto.createHash("sha256").update(publicKey.export({ format: "der", type: "spki" })).digest("hex"));
+    assert.equal(invoke(testService, "retire", { expectedFingerprint: migrated.publicKeyFingerprint }).result.state, "ABSENT_NEW");
+  }
+
+  for (const phase of ["retire-after-journal", "retire-after-envelope", "retire-after-wrapping-key"]) {
+    const testService = namespace(phase);
+    t.after(() => cleanup(testService));
+    const created = invoke(testService, "create").result;
+    invoke(testService, "bind-station", {
+      stationCode: "MV-STN-ABCDEFGHJK",
+      expectedFingerprint: created.publicKeyFingerprint,
+      stationStatus: "REJECTED",
+    });
+    invokeCrash(testService, "retire", { expectedFingerprint: created.publicKeyFingerprint }, phase);
+    if (phase === "retire-after-journal") {
+      const signed = invoke(testService, "sign-request-v1", {
+        method: "POST",
+        path: "/api/partner/stations/heartbeat",
+        timestamp: Date.now(),
+        contentSha256: "a".repeat(64),
+      }, { allowFailure: true });
+      assert.equal(signed.result.error.code, "IDENTITY_RETIREMENT_PENDING");
+      const wrapped = invoke(testService, "wrap-queue-key", {
+        queueKeyId: crypto.randomUUID(), queueKeyRaw: crypto.randomBytes(32).toString("base64url"),
+      }, { allowFailure: true });
+      assert.equal(wrapped.result.error.code, "IDENTITY_RETIREMENT_PENDING");
+    }
+    const incomplete = invoke(testService, "status").result;
+    assert.equal(incomplete.state, "RETIREMENT_INCOMPLETE");
+    assert.equal(incomplete.publicKeyFingerprint, created.publicKeyFingerprint);
+    assert.equal(incomplete.credentialUsable, phase === "retire-after-journal");
+    assert.equal(invoke(testService, "retire", { expectedFingerprint: created.publicKeyFingerprint }).result.state, "ABSENT_NEW");
+    assert.equal(invoke(testService, "status").result.state, "ABSENT_NEW");
+  }
+});
+
+test("JS boot coordinator converges every real native retirement interruption without custody drift", { skip: !enabled }, (t) => {
+  for (const phase of ["retire-after-journal", "retire-after-envelope", "retire-after-wrapping-key"]) {
+    const testService = namespace(`coordinator-${phase}`);
+    t.after(() => cleanup(testService));
+    const created = invoke(testService, "create").result;
+    const stationCode = "MV-STN-ABCDEFGHJK";
+    invoke(testService, "bind-station", {
+      stationCode, expectedFingerprint: created.publicKeyFingerprint, stationStatus: "REJECTED",
+    });
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-native-retirement-coordinator-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const appSupport = path.join(root, "support");
+    const scansBase = path.join(root, "scans");
+    fs.mkdirSync(appSupport, { recursive: true });
+    fs.mkdirSync(scansBase, { recursive: true });
+    const semanticFile = path.join(appSupport, "semantic.json");
+    const profileFile = path.join(appSupport, "profile.json");
+    const queueFile = path.join(scansBase, "queue.json");
+    for (const file of [semanticFile, profileFile, queueFile]) fs.writeFileSync(file, path.basename(file));
+
+    let firstRetire = true;
+    const identity = {
+      identityStatus: () => invoke(testService, "status").result,
+      retireIdentity: (expectedFingerprint) => {
+        if (firstRetire) {
+          firstRetire = false;
+          invokeCrash(testService, "retire", { expectedFingerprint }, phase);
+          throw new Error(`injected ${phase}`);
+        }
+        return invoke(testService, "retire", { expectedFingerprint }).result;
+      },
+      clearOperatorSession: () => {},
+    };
+    const semantic = {
+      retirementFiles: () => [semanticFile],
+      retirementPaths: () => [semanticFile],
+      completeIdentityRetirement: () => {},
+    };
+    const profile = { retirementFiles: () => [profileFile] };
+    const watcher = {
+      identityRetirementFiles: () => [queueFile],
+      identityRetirementRawFiles: () => [queueFile],
+      completeIdentityRetirement: () => {},
+    };
+    const coordinator = terminalRetirement.createCoordinator({
+      identity, semantic, profile, appSupport, scansBase,
+      tombstonePath: path.join(appSupport, "retirement.json"),
+    });
+
+    assert.throws(() => coordinator.retire({
+      status: "REJECTED",
+      stationCode,
+      publicKeyFingerprint: created.publicKeyFingerprint,
+      watcher,
+    }), new RegExp(phase));
+    const nativeStatus = invoke(testService, "status").result;
+    assert.equal(nativeStatus.state, "RETIREMENT_INCOMPLETE");
+    assert.equal(nativeStatus.credentialUsable, phase === "retire-after-journal");
+    assert.equal(coordinator.recoverIfRetired({ watcher }).recovered, true);
+    assert.equal(invoke(testService, "status").result.state, "ABSENT_NEW");
+    for (const file of [semanticFile, profileFile, queueFile]) assert.equal(fs.existsSync(file), false);
+    assert.equal(coordinator.readTombstone(), null);
+  }
 });

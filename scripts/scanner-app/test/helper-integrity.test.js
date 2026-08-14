@@ -32,13 +32,14 @@ function fixture(t, { packaged = false, helperTeam = "", appTeam = "", expectedT
   const manifest = {
     schemaVersion: 1,
     helperName: "mv-capture-helper",
-    helperVersion: "1.0.1",
+    helperVersion: integrity.HELPER_VERSION,
     protocolVersion: 1,
     bundleIdentifier: "com.mintvault.scanner.capture-helper",
     architecture: "arm64",
     minimumMacOS: "12.0",
     sha256: sha256(bytes),
     sourceSha256: sha256("source"),
+    authoritySourceSha256: sha256("compiled release authority"),
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
   const calls = [];
@@ -77,6 +78,14 @@ test("accepts an exact arm64 ad-hoc development helper with a sealed manifest", 
   assert.equal(value.calls.filter((call) => call.command === "/usr/bin/codesign").length, 2);
 });
 
+test("rejects a helper manifest that omits its compiled authority source binding", (t) => {
+  const value = fixture(t);
+  delete value.manifest.authoritySourceSha256;
+  fs.writeFileSync(value.manifestPath, `${JSON.stringify(value.manifest)}\n`);
+  assert.throws(() => integrity._private.verifyHelperAt(value.options), /authority source SHA-256/);
+  assert.equal(value.calls.length, 0, "manifest authority fails before any external verifier runs");
+});
+
 test("release trust cannot replace the independently packaged Team pin", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-release-trust-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -84,15 +93,43 @@ test("release trust cannot replace the independently packaged Team pin", (t) => 
     schemaVersion: 1,
     appIdentifier: "com.mintvault.scanner",
     teamIdentifier: "MINTVAULT1",
+    architecture: "arm64",
+    minimumMacOS: "12.0",
+    version: "1.2.1",
+    packageMode: "release",
+    updateBaseUrl: "https://updates.mintvaultuk.com/scanner",
   }));
-  assert.equal(integrity.loadReleaseTrust(root, "MINTVAULT1").teamIdentifier, "MINTVAULT1");
-  assert.throws(() => integrity.loadReleaseTrust(root, "ATTACKER01"), /valid MintVault Team Identifier/);
+  const pin = { schemaVersion: 1, appIdentifier: "com.mintvault.scanner", teamIdentifier: "MINTVAULT1", packageMode: "release" };
+  const trust = integrity.loadReleaseTrust(root, pin, "1.2.1");
+  assert.equal(trust.teamIdentifier, "MINTVAULT1");
+  assert.equal(trust.packageMode, "release");
+  assert.equal(trust.updateBaseUrl, "https://updates.mintvaultuk.com/scanner");
+  assert.throws(() => integrity.loadReleaseTrust(root, { ...pin, teamIdentifier: "ATTACKER01" }, "1.2.1"), /signed package authority/);
   fs.writeFileSync(path.join(root, "release-trust.json"), JSON.stringify({
     schemaVersion: 1,
     appIdentifier: "com.mintvault.scanner",
     teamIdentifier: "ATTACKER01",
+    architecture: "arm64",
+    minimumMacOS: "12.0",
+    version: "1.2.1",
+    packageMode: "release",
+    updateBaseUrl: "https://updates.mintvaultuk.com/scanner",
   }));
-  assert.throws(() => integrity.loadReleaseTrust(root, "MINTVAULT1"), /valid MintVault Team Identifier/);
+  assert.throws(() => integrity.loadReleaseTrust(root, pin, "1.2.1"), /signed package authority/);
+});
+
+test("local and release package modes remain bound to the signed pin", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-release-mode-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const base = {
+    schemaVersion: 1, appIdentifier: "com.mintvault.scanner", teamIdentifier: "LOCALDEV00",
+    architecture: "arm64", minimumMacOS: "12.0", version: "1.2.1",
+    packageMode: "local", updateBaseUrl: "https://updates.invalid/mintvault/scanner",
+  };
+  fs.writeFileSync(path.join(root, "release-trust.json"), JSON.stringify(base));
+  const pin = { schemaVersion: 1, appIdentifier: "com.mintvault.scanner", teamIdentifier: "LOCALDEV00", packageMode: "local" };
+  assert.equal(integrity.loadReleaseTrust(root, pin, "1.2.1").packageMode, "local");
+  assert.throws(() => integrity.loadReleaseTrust(root, { ...pin, packageMode: "release" }, "1.2.1"), /signed package authority/);
 });
 
 test("rejects a symlink before invoking any external verifier", (t) => {
@@ -168,12 +205,29 @@ test("packaged runtime accepts only the same non-empty Team ID as the applicatio
   });
 });
 
+test("release helpers require a root-owned non-writable install tree", (t) => {
+  const value = fixture(t, { packaged: true, helperTeam: "MINTVAULT1", appTeam: "MINTVAULT1" });
+  value.options.runtime.packageMode = "release";
+  assert.throws(() => integrity._private.verifyHelperAt(value.options), /root-owned and not group\/other writable/);
+  let immutableChecks = 0;
+  const verified = integrity._private.verifyHelperAt({
+    ...value.options,
+    assertImmutableTree(targets) {
+      immutableChecks += 1;
+      assert.ok(targets.includes(value.helperPath));
+      assert.ok(targets.includes(value.manifestPath));
+    },
+  });
+  assert.equal(verified.path, value.helperPath);
+  assert.equal(immutableChecks, 2, "the immutable install boundary is checked before and after pathname-based verifiers");
+});
+
 test("rejects stale or malformed native response protocol before controller use", () => {
-  assert.deepEqual(integrity.assertCompatibleResult({ helperVersion: "1.0.1", protocolVersion: 1, status: "ready" }), {
-    helperVersion: "1.0.1", protocolVersion: 1, status: "ready",
+  assert.deepEqual(integrity.assertCompatibleResult({ helperVersion: integrity.HELPER_VERSION, protocolVersion: 1, status: "ready" }), {
+    helperVersion: integrity.HELPER_VERSION, protocolVersion: 1, status: "ready",
   });
   assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "0.9.0", protocolVersion: 1 }), /response protocol\/version/);
-  assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "1.0.1", protocolVersion: 2 }), /response protocol\/version/);
+  assert.throws(() => integrity.assertCompatibleResult({ helperVersion: integrity.HELPER_VERSION, protocolVersion: 2 }), /response protocol\/version/);
 });
 
 test("identity helper uses its own sealed manifest and signing identifier contract", (t) => {
@@ -185,7 +239,7 @@ test("identity helper uses its own sealed manifest and signing identifier contra
     ...value.manifest,
     helperName: "mv-identity-helper",
     bundleIdentifier: "com.mintvault.scanner.identity-helper",
-    helperVersion: "1.1.0",
+    helperVersion: integrity.IDENTITY_HELPER_VERSION,
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
   value.options.runTool = (command, args) => {
@@ -207,7 +261,7 @@ test("identity helper uses its own sealed manifest and signing identifier contra
 });
 
 test("rejects stale or malformed identity-helper response protocol", () => {
-  assert.equal(integrity.assertCompatibleIdentityResult({ ok: true, helperVersion: "1.1.0", protocolVersion: 1 }).ok, true);
+  assert.equal(integrity.assertCompatibleIdentityResult({ ok: true, helperVersion: integrity.IDENTITY_HELPER_VERSION, protocolVersion: 1 }).ok, true);
   assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "0.9.0", protocolVersion: 1 }), /response protocol\/version/);
-  assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "1.1.0", protocolVersion: 2 }), /response protocol\/version/);
+  assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: integrity.IDENTITY_HELPER_VERSION, protocolVersion: 2 }), /response protocol\/version/);
 });

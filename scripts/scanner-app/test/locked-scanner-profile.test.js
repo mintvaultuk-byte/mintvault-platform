@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const helperIntegrity = require("../lib/helper-integrity");
 
 const { LockedScannerProfileStore, _private } = require("../lib/locked-scanner-profile");
 
@@ -48,8 +49,8 @@ function profile(overrides = {}) {
     outputFormat: "TIFF",
     presentationRotationDegrees: 180,
     appVersion: "1.2.1",
-    captureHelperVersion: "1.0.1",
-    identityHelperVersion: "1.1.0",
+    captureHelperVersion: helperIntegrity.HELPER_VERSION,
+    identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
     capabilityProof: {
       sha256: "a".repeat(64),
       sizeBytes: 1_000_000,
@@ -61,7 +62,7 @@ function profile(overrides = {}) {
       widthPx: 4724,
       heightPx: 6142,
       acquisitionRegion: { x: 22, y: 39, width: 100, height: 130 },
-      captureHelperVersion: "1.0.1",
+      captureHelperVersion: helperIntegrity.HELPER_VERSION,
       frameAssessment: {
         accepted: true,
         cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 },

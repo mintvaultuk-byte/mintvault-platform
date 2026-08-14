@@ -139,6 +139,8 @@ function managerFixture({
   beforeInstallOverride = null,
   evidenceTimeoutMs = 30_000,
   artifactTimeoutMs = 30_000,
+  now = () => Date.now(),
+  monotonicNow = () => Number(process.hrtime.bigint() / 1_000_000n),
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mv-update-test-"));
   const fixture = releaseFixture(root, fixtureOverrides);
@@ -173,6 +175,9 @@ function managerFixture({
     }),
     evidenceTimeoutMs,
     artifactTimeoutMs,
+    now,
+    monotonicNow,
+    allowPathUpdaterForTests: true,
   });
   return {
     root,
@@ -295,6 +300,26 @@ test("a compromised feed cannot select a different newer release or an old signe
   const allowed = await rollback.manager.check({ download: true });
   assert.equal(allowed.status, "ready_to_restart");
   assert.equal(rollback.updater.allowDowngrade, true);
+});
+
+test("rollback authority expires monotonically even after the wall clock is rewound", async () => {
+  let wall = Date.now();
+  let monotonic = 1_000;
+  const context = managerFixture({
+    appVersion: "1.3.0",
+    fixtureOverrides: { version: "1.2.2", minimumVersion: "1.2.0", operation: "ROLLBACK", reason: "Owner-authorised emergency rollback" },
+    now: () => wall,
+    monotonicNow: () => monotonic,
+  });
+  context.fixture.policy.issuedAt = new Date(wall - 1_000).toISOString();
+  context.fixture.policy.expiresAt = new Date(wall + 10_000).toISOString();
+  context.manager.setMinimumVersion("1.2.0");
+  context.manager.setPolicy(context.fixture.policy);
+  monotonic += 11_000;
+  wall -= 60_000;
+  const refused = await context.manager.check({ download: false });
+  assert.equal(refused.status, "error");
+  assert.equal(context.updater.downloadCalls, 0);
 });
 
 test("new checks invalidate an old downloaded candidate and install rehashes immediately before quit", async () => {
@@ -487,6 +512,86 @@ test("bounded artifact writes refuse pre-existing paths and symlinks", async () 
     },
   ), /EEXIST/);
   assert.equal(fs.readFileSync(sentinel, "utf8"), "do not overwrite");
+});
+
+test("Squirrel install bytes are copied into an anonymous descriptor before a retained writer can mutate the cache", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mv-update-anonymous-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const candidate = path.join(root, "candidate.zip");
+  const original = crypto.randomBytes(256 * 1024);
+  const expectedSha256 = digest("sha256", original);
+  fs.writeFileSync(candidate, original, { mode: 0o600 });
+  const retainedWriter = fs.openSync(candidate, fs.constants.O_RDWR);
+  const source = _private.openVerifiedCandidate(candidate, {
+    expectedSize: original.length,
+    expectedSha256,
+    label: "test ZIP",
+  });
+  const anonymous = _private.anonymousVerifiedSnapshot(source, root, {
+    expectedSize: original.length,
+    expectedSha256,
+    label: "test ZIP",
+  });
+  try {
+    fs.writeSync(retainedWriter, Buffer.alloc(4096, 0x41), 0, 4096, 0);
+    assert.equal(anonymous.validate(), true);
+    assert.equal(_private.digestDescriptor(anonymous.descriptor, original.length), expectedSha256);
+    assert.equal(anonymous.stat.nlink, 0);
+  } finally {
+    fs.closeSync(retainedWriter);
+    source.close();
+    anonymous.close();
+  }
+});
+
+test("production DMG recovery mounts the unlinked verified descriptor read-only before Gatekeeper/open", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "mv-update-dmg-fd-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dmg = path.join(root, "candidate.dmg");
+  const bytes = crypto.randomBytes(128 * 1024);
+  fs.writeFileSync(dmg, bytes, { mode: 0o600 });
+  const retainedWriter = fs.openSync(dmg, fs.constants.O_RDWR);
+  const sourceAuthority = _private.openVerifiedCandidate(dmg, {
+    expectedSize: bytes.length,
+    expectedSha256: digest("sha256", bytes),
+    label: "test DMG",
+  });
+  const authority = _private.anonymousVerifiedSnapshot(sourceAuthority, root, {
+    expectedSize: bytes.length,
+    expectedSha256: digest("sha256", bytes),
+    label: "test DMG",
+  });
+  fs.unlinkSync(dmg);
+  sourceAuthority.close();
+  fs.writeSync(retainedWriter, Buffer.alloc(4096, 0x55), 0, 4096, 0);
+  const calls = [];
+  let opened = null;
+  try {
+    const result = await _private.openDescriptorBoundDmg(authority, {
+      downloadDirectory: root,
+      expectedTeamIdentifier: TEAM,
+      openPath: async (mountpoint) => { opened = mountpoint; return ""; },
+      runTool(command, args, options) {
+        calls.push({ command, args, fd: options.stdio?.[3] });
+        if (command === "/usr/bin/hdiutil" && args[0] === "attach") {
+          const mountpoint = args[args.indexOf("-mountpoint") + 1];
+          fs.mkdirSync(path.join(mountpoint, "MintVault Scanner.app"));
+          return { status: 0, stdout: "", stderr: "" };
+        }
+        if (command === "/usr/bin/codesign" && args[0] === "-d") {
+          return { status: 0, stdout: "", stderr: `Identifier=com.mintvault.scanner\nTeamIdentifier=${TEAM}\nflags=0x10000(runtime)\n` };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.mountpoint, opened);
+    assert.ok(calls.some((call) => call.command === "/usr/bin/hdiutil" && call.args.at(-1) === "/dev/fd/3" && call.fd === authority.descriptor));
+    assert.ok(calls.some((call) => call.command === "/usr/sbin/spctl"));
+  } finally {
+    fs.closeSync(retainedWriter);
+    authority.close();
+  }
 });
 
 test("the streaming limiter stops file output at the authenticated size", async () => {

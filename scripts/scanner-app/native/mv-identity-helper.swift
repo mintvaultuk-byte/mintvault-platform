@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Security
 
-private let helperVersion = "1.1.0"
+private let helperVersion = "1.1.2"
 private let protocolVersion = 1
 private let schemaVersion = 2
 private let service = "com.mintvault.scanner.identity"
@@ -38,6 +38,16 @@ private struct HelperRequest: Codable {
   let queueKeyRaw: String?
   let queueKeyId: String?
   let wrappedQueueKey: String?
+  let semanticLedgerGeneration: Int64?
+  let semanticLedgerDigest: String?
+  let testFailurePhase: String?
+}
+
+private struct IdentityTransitionMarker: Codable {
+  let schemaVersion: Int
+  let kind: String
+  let publicKeyFingerprint: String?
+  let stationCode: String?
 }
 
 private struct QueueKeyEnvelope: Codable {
@@ -72,6 +82,10 @@ private struct IdentityEnvelope: Codable {
   var credentialEpoch: Int64
   var requestEpoch: Int64
   var requestSequence: Int64
+  var semanticLedgerGeneration: Int64?
+  var semanticLedgerDigest: String?
+  var semanticLedgerPendingGeneration: Int64?
+  var semanticLedgerPendingDigest: String?
   let createdAt: String
 }
 
@@ -240,6 +254,71 @@ private func keychainQuery(_ namespace: IdentityNamespace) -> [String: Any] {
   ]
   if let accessGroup = namespace.accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
   return query
+}
+
+private func transitionQuery(_ namespace: IdentityNamespace) -> [String: Any] {
+  var query: [String: Any] = [
+    kSecClass as String: kSecClassGenericPassword,
+    kSecAttrService as String: "\(namespace.service).identity-transition-v1",
+    kSecAttrAccount as String: namespace.account,
+    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+    kSecAttrSynchronizable as String: kCFBooleanFalse as Any,
+  ]
+  if let accessGroup = namespace.accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+  return query
+}
+
+private func readTransition(_ namespace: IdentityNamespace) throws -> IdentityTransitionMarker? {
+  var query = transitionQuery(namespace)
+  query[kSecReturnData as String] = kCFBooleanTrue
+  query[kSecMatchLimit as String] = kSecMatchLimitOne
+  var result: CFTypeRef?
+  let status = SecItemCopyMatching(query as CFDictionary, &result)
+  if status == errSecItemNotFound { return nil }
+  if status == errSecMissingEntitlement {
+    throw IdentityError(code: "NAMESPACE_MISMATCH", message: "Identity helper lacks the frozen Keychain access-group entitlement")
+  }
+  guard status == errSecSuccess, let data = result as? Data,
+        let marker = try? JSONDecoder().decode(IdentityTransitionMarker.self, from: data),
+        marker.schemaVersion == 1, ["CREATE", "MIGRATE", "RETIRE"].contains(marker.kind),
+        marker.publicKeyFingerprint == nil || marker.publicKeyFingerprint!.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
+    throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Station identity transition journal is corrupt")
+  }
+  return marker
+}
+
+private func writeTransition(_ marker: IdentityTransitionMarker, namespace: IdentityNamespace) throws {
+  var query = transitionQuery(namespace)
+  query[kSecValueData as String] = try JSONEncoder().encode(marker)
+  query[kSecAttrLabel as String] = namespace.secureEnclaveApplicationTag
+  let status = SecItemAdd(query as CFDictionary, nil)
+  if status == errSecDuplicateItem {
+    throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Another station identity transition is already pending")
+  }
+  if status == errSecMissingEntitlement {
+    throw IdentityError(code: "NAMESPACE_MISMATCH", message: "Identity helper lacks the frozen Keychain access-group entitlement")
+  }
+  guard status == errSecSuccess else {
+    throw IdentityError(code: "KEYCHAIN_WRITE_FAILED", message: "Station identity transition could not be prepared")
+  }
+}
+
+private func deleteTransition(_ namespace: IdentityNamespace) throws {
+  let status = SecItemDelete(transitionQuery(namespace) as CFDictionary)
+  guard status == errSecSuccess || status == errSecItemNotFound else {
+    throw IdentityError(code: "KEYCHAIN_WRITE_FAILED", message: "Station identity transition could not be completed")
+  }
+}
+
+private func deleteIdentityEnvelope(_ namespace: IdentityNamespace) throws {
+  let status = SecItemDelete(keychainQuery(namespace) as CFDictionary)
+  guard status == errSecSuccess || status == errSecItemNotFound else {
+    throw IdentityError(code: "KEYCHAIN_WRITE_FAILED", message: "Station identity envelope could not be retired")
+  }
+}
+
+private func testCrash(_ request: HelperRequest, _ phase: String) {
+  if request.testService != nil && request.testFailurePhase == phase { Darwin._exit(86) }
 }
 
 private func broadKeychainQuery(_ namespace: IdentityNamespace) -> [String: Any] {
@@ -472,7 +551,12 @@ private func queueWrappingKey(
   )
 }
 
-private func makeEnvelope(privateKey: Curve25519.Signing.PrivateKey, installationId: String, namespace: IdentityNamespace) throws -> IdentityEnvelope {
+private func makeEnvelope(
+  privateKey: Curve25519.Signing.PrivateKey,
+  installationId: String,
+  namespace: IdentityNamespace,
+  afterWrappingKeyCreated: () -> Void = {}
+) throws -> IdentityEnvelope {
   let ephemeral = P256.KeyAgreement.PrivateKey()
   let publicRaw = privateKey.publicKey.rawRepresentation
   let developmentRepresentation: String?
@@ -484,14 +568,17 @@ private func makeEnvelope(privateKey: Curve25519.Signing.PrivateKey, installatio
       nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, [.privateKeyUsage], &cfError
     ) else { throw IdentityError(code: "SECURE_ENCLAVE_UNAVAILABLE", message: "Secure Enclave access control could not be created") }
     let secure = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: access)
+    afterWrappingKeyCreated()
     developmentRepresentation = secure.dataRepresentation.base64URL
     key = try developmentWrappingKey(
       secure, ephemeralPublic: ephemeral.publicKey.x963Representation, publicRaw: publicRaw
     )
   } else {
     developmentRepresentation = nil
+    let secure = try createSecureEnclaveKey(namespace)
+    afterWrappingKeyCreated()
     key = try wrappingKey(
-      createSecureEnclaveKey(namespace),
+      secure,
       ephemeralPublic: ephemeral.publicKey.x963Representation,
       publicRaw: publicRaw
     )
@@ -520,8 +607,19 @@ private func makeEnvelope(privateKey: Curve25519.Signing.PrivateKey, installatio
     credentialEpoch: 1,
     requestEpoch: 1,
     requestSequence: 0,
+    semanticLedgerGeneration: nil,
+    semanticLedgerDigest: nil,
+    semanticLedgerPendingGeneration: nil,
+    semanticLedgerPendingDigest: nil,
     createdAt: ISO8601DateFormatter().string(from: Date())
   )
+}
+
+private func envelopeFingerprint(_ envelope: IdentityEnvelope) throws -> String {
+  guard let raw = Data(base64URL: envelope.publicKeyRaw), raw.count == 32 else {
+    throw IdentityError(code: "CORRUPT", message: "Public station identity is corrupt")
+  }
+  return sha256Hex(spkiData(publicRaw: raw))
 }
 
 private func privateKey(_ envelope: IdentityEnvelope, namespace: IdentityNamespace) throws -> Curve25519.Signing.PrivateKey {
@@ -567,7 +665,7 @@ private func publicIdentity(_ envelope: IdentityEnvelope, state: String = "READY
     "state": state,
     "schemaVersion": envelope.schemaVersion,
     "publicKeyPem": publicPem(publicRaw: raw),
-    "publicKeyFingerprint": sha256Hex(spkiData(publicRaw: raw)),
+    "publicKeyFingerprint": try envelopeFingerprint(envelope),
     "installationId": envelope.installationId,
     "stationCode": envelope.stationCode ?? NSNull(),
     "stationStatus": envelope.stationStatus ?? NSNull(),
@@ -605,22 +703,99 @@ private enum IdentityHelper {
       let signing = try selfSigningContext()
       let keychain = try namespace(for: request, signing: signing)
 
+      if let transition = try readTransition(keychain), transition.kind == "RETIRE",
+         request.command != "status", request.command != "retire" {
+        throw IdentityError(code: "IDENTITY_RETIREMENT_PENDING", message: "Station identity retirement must complete before any capability can be used")
+      }
+
       switch request.command {
       case "status":
-        guard let envelope = try readEnvelope(keychain) else { response(["ok": true, "state": "ABSENT_NEW", "schemaVersion": schemaVersion]) }
+        if let transition = try readTransition(keychain) {
+          if transition.kind == "RETIRE" {
+            let envelope = try readEnvelope(keychain)
+            let wrappingKeyPresent = keychain.accessGroup == nil ? envelope != nil : (try readSecureEnclaveKey(keychain) != nil)
+            let credentialUsable = envelope != nil && wrappingKeyPresent
+            response([
+              "ok": true,
+              "state": "RETIREMENT_INCOMPLETE",
+              "schemaVersion": schemaVersion,
+              "publicKeyFingerprint": transition.publicKeyFingerprint ?? NSNull(),
+              "stationCode": transition.stationCode ?? NSNull(),
+              "credentialUsable": credentialUsable,
+            ])
+          }
+          if let envelope = try readEnvelope(keychain) {
+            if transition.kind == "MIGRATE", transition.publicKeyFingerprint != (try envelopeFingerprint(envelope)) {
+              throw IdentityError(code: "IDENTITY_MISMATCH", message: "Migration transition does not match the stored station identity")
+            }
+            _ = try privateKey(envelope, namespace: keychain)
+            try deleteTransition(keychain)
+            response(try publicIdentity(envelope))
+          }
+          // CREATE/MIGRATE never returned an identity before its envelope was
+          // committed. A journal with no envelope therefore owns any exact
+          // tagged orphan and may safely roll it back to ABSENT_NEW.
+          try deleteSecureEnclaveKey(keychain)
+          try deleteTransition(keychain)
+          guard try readSecureEnclaveKey(keychain) == nil else {
+            throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Incomplete station identity creation could not be recovered")
+          }
+          response(["ok": true, "state": "ABSENT_NEW", "schemaVersion": schemaVersion])
+        }
+        guard let envelope = try readEnvelope(keychain) else {
+          // Upgrade recovery for a pre-journal crash after permanent SE-key
+          // creation but before the identity envelope was committed.
+          if try readSecureEnclaveKey(keychain) != nil {
+            try deleteSecureEnclaveKey(keychain)
+            guard try readSecureEnclaveKey(keychain) == nil else {
+              throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Orphaned station wrapping key could not be recovered")
+            }
+          }
+          response(["ok": true, "state": "ABSENT_NEW", "schemaVersion": schemaVersion])
+        }
+        if keychain.accessGroup != nil, try readSecureEnclaveKey(keychain) == nil {
+          response([
+            "ok": true,
+            "state": "RETIREMENT_INCOMPLETE",
+            "schemaVersion": schemaVersion,
+            "publicKeyFingerprint": try envelopeFingerprint(envelope),
+            "stationCode": envelope.stationCode ?? NSNull(),
+            "credentialUsable": false,
+          ])
+        }
         _ = try privateKey(envelope, namespace: keychain)
         response(try publicIdentity(envelope))
 
       case "create":
         guard try readEnvelope(keychain) == nil else { throw IdentityError(code: "IDENTITY_EXISTS", message: "Station identity already exists") }
-        let envelope = try makeEnvelope(
-          privateKey: Curve25519.Signing.PrivateKey(),
-          installationId: UUID().uuidString.lowercased(),
-          namespace: keychain
-        )
-        do { try writeEnvelope(envelope, namespace: keychain, createOnly: true) }
-        catch { try? deleteSecureEnclaveKey(keychain); throw error }
+        guard try readTransition(keychain) == nil else {
+          throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Incomplete station identity transition must recover before creation")
+        }
+        try writeTransition(IdentityTransitionMarker(
+          schemaVersion: 1, kind: "CREATE", publicKeyFingerprint: nil, stationCode: nil
+        ), namespace: keychain)
+        testCrash(request, "create-after-journal")
+        var envelopeWritten = false
+        let envelope: IdentityEnvelope
+        do {
+          envelope = try makeEnvelope(
+            privateKey: Curve25519.Signing.PrivateKey(),
+            installationId: UUID().uuidString.lowercased(),
+            namespace: keychain,
+            afterWrappingKeyCreated: { testCrash(request, "create-after-wrapping-key") }
+          )
+          try writeEnvelope(envelope, namespace: keychain, createOnly: true)
+          envelopeWritten = true
+          testCrash(request, "create-after-envelope")
+        } catch {
+          if !envelopeWritten {
+            try? deleteSecureEnclaveKey(keychain)
+            try? deleteTransition(keychain)
+          }
+          throw error
+        }
         _ = try privateKey(envelope, namespace: keychain)
+        try deleteTransition(keychain)
         response(try publicIdentity(envelope))
 
       case "migrate-v1":
@@ -629,10 +804,24 @@ private enum IdentityHelper {
               UUID(uuidString: installationId) != nil else {
           throw IdentityError(code: "INVALID_MIGRATION", message: "Legacy identity migration payload is invalid")
         }
+        let proof = request.proofChallenge ?? ""
+        guard !proof.isEmpty, proof.utf8.count <= 256 else {
+          throw IdentityError(code: "INVALID_MIGRATION", message: "Migration proof challenge is invalid")
+        }
         let legacyPublic = try publicRaw(fromPem: legacyPem)
         let imported = try Curve25519.Signing.PrivateKey(rawRepresentation: raw)
         guard imported.publicKey.rawRepresentation == legacyPublic else {
           throw IdentityError(code: "IDENTITY_MISMATCH", message: "Legacy private and public keys do not match")
+        }
+        let migrationFingerprint = sha256Hex(spkiData(publicRaw: legacyPublic))
+        if let transition = try readTransition(keychain) {
+          guard transition.kind == "MIGRATE", transition.publicKeyFingerprint == migrationFingerprint else {
+            throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "A different station identity transition is already pending")
+          }
+          if try readEnvelope(keychain) == nil {
+            try deleteSecureEnclaveKey(keychain)
+            try deleteTransition(keychain)
+          }
         }
         var envelope: IdentityEnvelope
         if let existing = try readEnvelope(keychain) {
@@ -641,17 +830,38 @@ private enum IdentityHelper {
           }
           envelope = existing
         } else {
-          envelope = try makeEnvelope(privateKey: imported, installationId: installationId, namespace: keychain)
-          envelope.stationCode = request.stationCode
-          envelope.stationStatus = request.stationStatus
-          envelope.requestNonce = max(0, request.requestNonce ?? 0)
-          envelope.requestSequence = envelope.requestNonce
-          do { try writeEnvelope(envelope, namespace: keychain, createOnly: true) }
-          catch { try? deleteSecureEnclaveKey(keychain); throw error }
+          try writeTransition(IdentityTransitionMarker(
+            schemaVersion: 1,
+            kind: "MIGRATE",
+            publicKeyFingerprint: migrationFingerprint,
+            stationCode: request.stationCode
+          ), namespace: keychain)
+          testCrash(request, "migrate-after-journal")
+          var envelopeWritten = false
+          do {
+            envelope = try makeEnvelope(
+              privateKey: imported,
+              installationId: installationId,
+              namespace: keychain,
+              afterWrappingKeyCreated: { testCrash(request, "migrate-after-wrapping-key") }
+            )
+            envelope.stationCode = request.stationCode
+            envelope.stationStatus = request.stationStatus
+            envelope.requestNonce = max(0, request.requestNonce ?? 0)
+            envelope.requestSequence = envelope.requestNonce
+            try writeEnvelope(envelope, namespace: keychain, createOnly: true)
+            envelopeWritten = true
+            testCrash(request, "migrate-after-envelope")
+          } catch {
+            if !envelopeWritten {
+              try? deleteSecureEnclaveKey(keychain)
+              try? deleteTransition(keychain)
+            }
+            throw error
+          }
         }
-        let proof = request.proofChallenge ?? ""
-        guard !proof.isEmpty, proof.utf8.count <= 256 else { throw IdentityError(code: "INVALID_MIGRATION", message: "Migration proof challenge is invalid") }
         let signature = try privateKey(envelope, namespace: keychain).signature(for: Data("mintvault-identity-proof-v1\n\(proof)".utf8))
+        try deleteTransition(keychain)
         var values = try publicIdentity(envelope)
         values["proofSignature"] = signature.base64URL
         response(values)
@@ -724,6 +934,62 @@ private enum IdentityHelper {
         envelope.requestSequence = sequence
         try writeEnvelope(envelope, namespace: keychain, createOnly: false)
         response(try publicIdentity(envelope))
+
+      case "semantic-ledger-status":
+        let envelope = try requireEnvelope(keychain)
+        response([
+          "ok": true,
+          "generation": envelope.semanticLedgerGeneration ?? 0,
+          "digest": envelope.semanticLedgerDigest ?? NSNull(),
+          "pendingGeneration": envelope.semanticLedgerPendingGeneration ?? NSNull(),
+          "pendingDigest": envelope.semanticLedgerPendingDigest ?? NSNull(),
+        ])
+
+      case "semantic-ledger-prepare":
+        var envelope = try requireEnvelope(keychain)
+        guard let generation = request.semanticLedgerGeneration, generation > 0,
+              let digest = request.semanticLedgerDigest,
+              digest.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
+          throw IdentityError(code: "INVALID_SEMANTIC_LEDGER", message: "Semantic ledger preparation is invalid")
+        }
+        let current = envelope.semanticLedgerGeneration ?? 0
+        if envelope.semanticLedgerPendingGeneration == generation && envelope.semanticLedgerPendingDigest == digest {
+          response(["ok": true, "generation": generation, "digest": digest])
+        }
+        guard envelope.semanticLedgerPendingGeneration == nil, generation == current + 1 else {
+          throw IdentityError(code: "SEMANTIC_LEDGER_DESYNC", message: "Semantic ledger generation is not the next device generation")
+        }
+        envelope.semanticLedgerPendingGeneration = generation
+        envelope.semanticLedgerPendingDigest = digest
+        try writeEnvelope(envelope, namespace: keychain, createOnly: false)
+        response(["ok": true, "generation": generation, "digest": digest])
+
+      case "semantic-ledger-commit":
+        var envelope = try requireEnvelope(keychain)
+        guard let generation = request.semanticLedgerGeneration, let digest = request.semanticLedgerDigest,
+              envelope.semanticLedgerPendingGeneration == generation, envelope.semanticLedgerPendingDigest == digest else {
+          throw IdentityError(code: "SEMANTIC_LEDGER_DESYNC", message: "Semantic ledger commit does not match the prepared device generation")
+        }
+        envelope.semanticLedgerGeneration = generation
+        envelope.semanticLedgerDigest = digest
+        envelope.semanticLedgerPendingGeneration = nil
+        envelope.semanticLedgerPendingDigest = nil
+        try writeEnvelope(envelope, namespace: keychain, createOnly: false)
+        response(["ok": true, "generation": generation, "digest": digest])
+
+      case "semantic-ledger-abort":
+        var envelope = try requireEnvelope(keychain)
+        let current = envelope.semanticLedgerGeneration ?? 0
+        let suppliedDigest = request.semanticLedgerDigest
+        guard request.semanticLedgerGeneration == current,
+              (current == 0 ? suppliedDigest == nil : suppliedDigest == envelope.semanticLedgerDigest),
+              envelope.semanticLedgerPendingGeneration != nil else {
+          throw IdentityError(code: "SEMANTIC_LEDGER_DESYNC", message: "Semantic ledger abort does not match the committed device generation")
+        }
+        envelope.semanticLedgerPendingGeneration = nil
+        envelope.semanticLedgerPendingDigest = nil
+        try writeEnvelope(envelope, namespace: keychain, createOnly: false)
+        response(["ok": true, "generation": current, "digest": envelope.semanticLedgerDigest ?? NSNull()])
 
       case "sign-request-v2":
         var envelope = try requireEnvelope(keychain)
@@ -833,14 +1099,53 @@ private enum IdentityHelper {
         }
 
       case "retire":
-        guard let envelope = try readEnvelope(keychain),
-              request.expectedFingerprint == (try publicIdentity(envelope)["publicKeyFingerprint"] as? String) else {
-          throw IdentityError(code: "IDENTITY_MISMATCH", message: "Identity retirement fingerprint does not match")
+        guard let expectedFingerprint = request.expectedFingerprint,
+              expectedFingerprint.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
+          throw IdentityError(code: "IDENTITY_MISMATCH", message: "Identity retirement fingerprint is invalid")
         }
+        var transition = try readTransition(keychain)
+        let envelope = try readEnvelope(keychain)
+        if let existing = transition {
+          guard existing.kind == "RETIRE", existing.publicKeyFingerprint == expectedFingerprint else {
+            throw IdentityError(code: "IDENTITY_MISMATCH", message: "Identity retirement journal does not match")
+          }
+        } else if let envelope {
+          guard try envelopeFingerprint(envelope) == expectedFingerprint else {
+            throw IdentityError(code: "IDENTITY_MISMATCH", message: "Identity retirement fingerprint does not match")
+          }
+          transition = IdentityTransitionMarker(
+            schemaVersion: 1,
+            kind: "RETIRE",
+            publicKeyFingerprint: expectedFingerprint,
+            stationCode: envelope.stationCode
+          )
+          try writeTransition(transition!, namespace: keychain)
+          testCrash(request, "retire-after-journal")
+        } else {
+          // A fully absent namespace is already the requested terminal state.
+          // A tagged orphan without a native retirement journal is not tied
+          // to the claimed fingerprint and is handled only by status/create
+          // recovery, never silently accepted here.
+          guard try readSecureEnclaveKey(keychain) == nil else {
+            throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Orphaned station key lacks an exact retirement journal")
+          }
+          response(["ok": true, "state": "ABSENT_NEW", "retiredFingerprint": expectedFingerprint])
+        }
+        if let envelope, try envelopeFingerprint(envelope) != expectedFingerprint {
+          throw IdentityError(code: "IDENTITY_MISMATCH", message: "Identity retirement journal does not match the stored envelope")
+        }
+        try deleteIdentityEnvelope(keychain)
+        testCrash(request, "retire-after-envelope")
         try deleteSecureEnclaveKey(keychain)
-        let status = SecItemDelete(keychainQuery(keychain) as CFDictionary)
-        guard status == errSecSuccess else { throw IdentityError(code: "KEYCHAIN_WRITE_FAILED", message: "Station identity could not be retired") }
-        response(["ok": true, "state": "ABSENT_NEW", "retiredFingerprint": request.expectedFingerprint!])
+        testCrash(request, "retire-after-wrapping-key")
+        guard try readEnvelope(keychain) == nil, try readSecureEnclaveKey(keychain) == nil else {
+          throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Station identity retirement did not reach an absent namespace")
+        }
+        try deleteTransition(keychain)
+        guard try readTransition(keychain) == nil else {
+          throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Station identity retirement journal did not clear")
+        }
+        response(["ok": true, "state": "ABSENT_NEW", "retiredFingerprint": expectedFingerprint])
 
       default:
         throw IdentityError(code: "INVALID_COMMAND", message: "Identity helper command is not allowed")

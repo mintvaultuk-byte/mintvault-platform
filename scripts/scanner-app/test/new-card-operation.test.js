@@ -6,16 +6,18 @@ const path = require("node:path");
 const semanticOperations = require("../lib/semantic-operations");
 const newCard = require("../lib/new-card-operation");
 const { _private } = newCard;
+const { semanticAuthority } = require("./semantic-authority-fixture");
 
 test("NEW survives restart with the same op ID and exact original payload", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-new-operation-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, "operations.json");
-  const firstProcess = _private.createCoordinator(semanticOperations._private.createStore(file));
+  const authority = semanticAuthority();
+  const firstProcess = _private.createCoordinator(semanticOperations._private.createStore(file, authority));
   const first = firstProcess.beginOrResume("  Original card  ");
   assert.deepEqual(first.payload, { cardName: "Original card" });
 
-  const restartedProcess = _private.createCoordinator(semanticOperations._private.createStore(file));
+  const restartedProcess = _private.createCoordinator(semanticOperations._private.createStore(file, authority));
   const replay = restartedProcess.beginOrResume("Changed after response loss");
   assert.equal(replay.id, first.id);
   assert.deepEqual(replay.payload, { cardName: "Original card" });

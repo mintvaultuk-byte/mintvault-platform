@@ -15,7 +15,6 @@
 
 const fs       = require("node:fs");
 const path     = require("node:path");
-const os       = require("node:os");
 const crypto   = require("node:crypto");
 const { EventEmitter } = require("node:events");
 
@@ -26,6 +25,8 @@ const lide400    = require("./lide400-controller");
 const cardFrame  = require("./lide400-card-frame");
 const helperIntegrity = require("./helper-integrity");
 const scannerPackage = require("../package.json");
+const runtimePaths = require("./runtime-paths");
+const { readBoundedJson, readBoundedRegularFile } = require("./bounded-file");
 const {
   EncryptedCaptureQueue,
   QueueCorruptionError,
@@ -35,10 +36,10 @@ const {
 const { detectCardBounds, derivePlacementProposal } = require("./lide400-card-detection");
 const { COORDINATE_SPACE, assertUprightOrientation } = require("./lide400-preview-transform");
 
-// BASE is overridable via MINTVAULT_SCANS_DIR so an isolated TEST instance can
-// run on the same Mac without clobbering the live scanner's inbox / processed /
-// failed / pending-queue. Default: the shared ~/mintvault-scans (live agent).
-const BASE      = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
+// The central runtime-path contract permits MINTVAULT_SCANS_DIR only for an
+// explicitly unpackaged test/development instance. A packaged app always uses
+// the same home-rooted custody directory across relaunch/update.
+const BASE      = runtimePaths.scansBase();
 const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
@@ -112,6 +113,45 @@ function ensurePrivateDirectory(directory) {
   fs.chmodSync(directory, 0o700);
 }
 
+function directoryContainsFiles(directory) {
+  if (!fs.existsSync(directory)) return false;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isSymbolicLink() || entry.isFile()) return true;
+    if (entry.isDirectory() && directoryContainsFiles(path.join(directory, entry.name))) return true;
+  }
+  return false;
+}
+
+function regularFilesForRetirement(directory, files = []) {
+  if (!fs.existsSync(directory)) return files;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const candidate = path.join(directory, entry.name);
+    if (entry.isSymbolicLink() || (!entry.isFile() && !entry.isDirectory())) {
+      throw new Error("Scanner setup residue is unsafe for station identity retirement");
+    }
+    if (entry.isDirectory()) regularFilesForRetirement(candidate, files);
+    else files.push(candidate);
+    if (files.length > 32) throw new Error("Scanner setup residue must be cleared before station identity retirement");
+  }
+  return files;
+}
+
+function disposeHelperCapture(capture) {
+  if (!capture?.path) return;
+  if (!Number.isInteger(capture.artifactDescriptor)) {
+    try { fs.unlinkSync(capture.path); } catch { /* best effort for test/development capture */ }
+    return;
+  }
+  try {
+    const opened = fs.fstatSync(capture.artifactDescriptor);
+    let current = null;
+    try { current = fs.lstatSync(capture.path); } catch { /* already unlinked */ }
+    if (current && current.dev === opened.dev && current.ino === opened.ino) fs.unlinkSync(capture.path);
+  } finally {
+    try { fs.closeSync(capture.artifactDescriptor); } catch { /* already closed */ }
+  }
+}
+
 function requiredAuthorityString(value, label) {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text || text.length > 256) throw new Error(`Capture authorisation is missing ${label}`);
@@ -144,10 +184,14 @@ function captureEntryFromAuthorisation(capture) {
   if (expires.millis <= issued.millis) throw new Error("Capture authorisation expiry must follow server issuance");
   if (capture.capturePurpose !== AUTHORITATIVE_CAPTURE_PURPOSE) throw new Error("Capture authorisation purpose is not authoritative card capture");
   if (capture.originalOperatorRole !== "SCANNER_OPERATOR") throw new Error("Capture authorisation is not bound to a SCANNER_OPERATOR");
+  const semanticOperationId = requiredAuthorityIdentifier(capture.semanticOperationId, "semantic operation ID");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(semanticOperationId)) {
+    throw new Error("Capture authorisation has an invalid semantic operation ID");
+  }
   return {
     sessionId: requiredAuthorityIdentifier(capture.id, "capture session ID"),
     captureAuthorisationId: requiredAuthorityIdentifier(capture.captureAuthorisationId, "capture authorisation ID"),
-    semanticOperationId: requiredAuthorityIdentifier(capture.semanticOperationId, "semantic operation ID"),
+    semanticOperationId,
     cardJobId: requiredAuthorityIdentifier(capture.cardJobId, "Card Job ID"),
     certId: requiredAuthorityIdentifier(capture.certificateNumber, "certificate number"),
     side,
@@ -160,10 +204,49 @@ function captureEntryFromAuthorisation(capture) {
     originalOperatorId: requiredAuthorityIdentifier(capture.originalOperatorId, "original operator ID"),
     originalOperatorRole: capture.originalOperatorRole,
     capturePurpose: capture.capturePurpose,
+    cancelEligible: capture.cancelEligible === true,
     authorisationIssuedAt: issued.text,
     authorisationExpiresAt: expires.text,
     sessionExpiresAt: capture.expiresAt || null,
   };
+}
+
+const RENEWAL_PINNED_FIELDS = Object.freeze([
+  "sessionId",
+  "captureAuthorisationId",
+  "semanticOperationId",
+  "cardJobId",
+  "certId",
+  "side",
+  "revision",
+  "profileRevisionId",
+  "tenantId",
+  "locationId",
+  "stationCredentialId",
+  "workstationId",
+  "originalOperatorId",
+  "originalOperatorRole",
+    "capturePurpose",
+    "cancelEligible",
+  "authorisationIssuedAt",
+  "authorisationExpiresAt",
+]);
+
+function renewedCaptureAuthority(entry, body) {
+  if (body?.capture?.state !== "claimed") throw new Error("Capture renewal did not confirm a current claimed target");
+  const renewed = captureEntryFromAuthorisation(body.capture);
+  if (RENEWAL_PINNED_FIELDS.some((field) => renewed[field] !== entry[field])) {
+    throw new Error("Capture renewal changed the immutable card-side/operator tuple");
+  }
+  const serverNow = parseServerTimestamp(body.serverNow, "renewal server timestamp");
+  const leaseExpires = parseServerTimestamp(body.capture.expiresAt, "renewal lease expiry");
+  const issued = parseServerTimestamp(renewed.authorisationIssuedAt, "server issued-at timestamp");
+  const authorityExpires = parseServerTimestamp(renewed.authorisationExpiresAt, "server expiry timestamp");
+  if (serverNow.millis < issued.millis || serverNow.millis >= authorityExpires.millis
+      || leaseExpires.millis <= serverNow.millis || leaseExpires.millis > authorityExpires.millis) {
+    throw new Error("Capture renewal returned an invalid server-timed authority window");
+  }
+  return Object.freeze({ ...renewed, sessionExpiresAt: leaseExpires.text });
 }
 
 // AUTO-mode mint throttle: refuse to mint a new cert if one was created less
@@ -197,6 +280,7 @@ class Watcher extends EventEmitter {
     this.preparedPositioningCalibration = null;
     this.recoveryPlaintextWork = 0;
     this.updateInstallPending = false;
+    this.identityRetirementPending = false;
     this.initialDrainTimer = null;
     this.initialDrainPromise = null;
     this.lastScannerHealthAt = 0;
@@ -211,7 +295,9 @@ class Watcher extends EventEmitter {
   }
 
   async start() {
-    if (this.updateInstallPending) throw new Error("Scanner service cannot restart during signed update installation");
+    if (this.updateInstallPending || this.identityRetirementPending) {
+      throw new Error("Scanner service cannot restart during an exclusive lifecycle transition");
+    }
     if (this.recoveryPlaintextWork !== 0 || this.initialDrainPromise) {
       throw new Error("Scanner recovery is already in progress");
     }
@@ -311,10 +397,12 @@ class Watcher extends EventEmitter {
   // ── Pending-queue persistence (crash recovery) ───────────────────────────
 
   readPendingQueue() {
+    if (!fs.existsSync(PENDING_QUEUE)) return [];
     try {
-      const arr = JSON.parse(fs.readFileSync(PENDING_QUEUE, "utf8"));
-      return Array.isArray(arr) ? arr : [];
-    } catch { return []; }
+      const arr = readBoundedJson(PENDING_QUEUE, { maximumBytes: 8 * 1024 * 1024, label: "Legacy pending queue" });
+      if (!Array.isArray(arr) || arr.length > 512) throw new Error("Legacy pending queue schema is invalid");
+      return arr;
+    } catch { throw new QueueCorruptionError("Legacy pending queue is corrupt and requires recovery"); }
   }
 
   writePendingQueue(entries) {
@@ -378,7 +466,8 @@ class Watcher extends EventEmitter {
    *  preserving scan-one-write-one. Files are never lost — a restart's startup
    *  drain re-runs this if an ack's drain didn't finish. */
   async drainInbox() {
-    if (this.updateInstallPending) return this.updateInstallDenial();
+    const lifecycleDenied = this.updateInstallDenial();
+    if (lifecycleDenied) return lifecycleDenied;
     let files;
     try {
       files = fs
@@ -484,9 +573,9 @@ class Watcher extends EventEmitter {
   async migrateLegacyTargetedQueue() {
     if (!fs.existsSync(LEGACY_TARGETED_QUEUE)) return;
     let entries;
-    try { entries = JSON.parse(fs.readFileSync(LEGACY_TARGETED_QUEUE, "utf8")); }
+    try { entries = readBoundedJson(LEGACY_TARGETED_QUEUE, { maximumBytes: 8 * 1024 * 1024, label: "Legacy targeted capture queue" }); }
     catch { throw new QueueCorruptionError("Legacy targeted capture queue is corrupt and requires recovery"); }
-    if (!Array.isArray(entries)) throw new QueueCorruptionError("Legacy targeted capture queue schema is invalid");
+    if (!Array.isArray(entries) || entries.length > 512) throw new QueueCorruptionError("Legacy targeted capture queue schema is invalid");
     for (const entry of entries) {
       for (const candidate of [entry?.filePath, entry?.previewPath].filter(Boolean)) {
         if (fs.existsSync(candidate)) {
@@ -588,6 +677,69 @@ class Watcher extends EventEmitter {
     return this.captureQueue.storageStatus();
   }
 
+  identityRetirementFiles() {
+    if (this.updateInstallPending || this.uploading || this.targetCaptureInFlight || this.previewActionInFlight
+        || this.positioningPreviewInFlight || this.profileAcceptanceInFlight || this.scannerHealthPromise
+        || this.recoveryPlaintextWork !== 0 || this.initialDrainTimer || this.initialDrainPromise) {
+      throw new Error("Scanner work must quiesce before station identity retirement");
+    }
+    if (this.readPendingQueue().length) throw new Error("Legacy capture recovery must finish before station identity retirement");
+    const entries = this.captureQueue.entries();
+    if (entries.some((entry) => entry.artifact || entry.previewArtifact)) {
+      throw new Error("Encrypted evidence custody must resolve before station identity retirement");
+    }
+    for (const directory of [this.captureQueue.artifactsDir, this.captureQueue.quarantineDir, this.captureQueue.scratchDir, CAPTURE_STAGING]) {
+      if (directoryContainsFiles(directory)) throw new Error("Capture files must resolve before station identity retirement");
+    }
+    for (const directory of [INBOX, PROCESSED, FAILED, REJECTED, DISCARDED]) {
+      if (regularFilesForRetirement(directory).length) {
+        throw new Error("Plaintext capture custody must resolve before station identity retirement");
+      }
+    }
+    return [
+      this.captureQueue.indexPath,
+      this.captureQueue.keyPath,
+      LEGACY_TARGETED_QUEUE,
+      PENDING_QUEUE,
+      HASH_LOG,
+      ...regularFilesForRetirement(POSITIONING_PREVIEW),
+    ].filter((candidate) => fs.existsSync(candidate));
+  }
+
+  identityRetirementRawFiles() {
+    return [
+      this.captureQueue.indexPath,
+      this.captureQueue.keyPath,
+      LEGACY_TARGETED_QUEUE,
+      PENDING_QUEUE,
+      HASH_LOG,
+      ...regularFilesForRetirement(this.captureQueue.artifactsDir),
+      ...regularFilesForRetirement(this.captureQueue.quarantineDir),
+      ...regularFilesForRetirement(this.captureQueue.scratchDir),
+      ...regularFilesForRetirement(CAPTURE_STAGING),
+      ...regularFilesForRetirement(POSITIONING_PREVIEW),
+      ...regularFilesForRetirement(INBOX),
+      ...regularFilesForRetirement(PROCESSED),
+      ...regularFilesForRetirement(FAILED),
+      ...regularFilesForRetirement(REJECTED),
+      ...regularFilesForRetirement(DISCARDED),
+    ].filter((candidate) => fs.existsSync(candidate));
+  }
+
+  completeIdentityRetirement() {
+    if (this.captureQueue.cachedKey?.raw) this.captureQueue.cachedKey.raw.fill(0);
+    this.captureQueue.cachedKey = null;
+    this.bufferedFront = null;
+    this.lastPair = null;
+    this.oneShotManual = null;
+    this.pendingManualPath = null;
+    this.predictedNextCertCache = { value: null, ts: 0 };
+    this.lastCertMintAt = 0;
+    this.preparedPositioningCalibration = null;
+    stateMod.resetForIdentityRetirement();
+    this.emitState();
+  }
+
   beginRecoveryPlaintextWork() {
     this.recoveryPlaintextWork += 1;
     let released = false;
@@ -608,9 +760,15 @@ class Watcher extends EventEmitter {
     this.updateInstallPending = value === true;
   }
 
+  setIdentityRetirementPending(value) {
+    this.identityRetirementPending = value === true;
+  }
+
   updateInstallDenial() {
     return this.updateInstallPending
       ? { ok: false, code: "update_install_pending", error: "MintVault Scanner is quiesced while the signed update is installed." }
+      : this.identityRetirementPending
+        ? { ok: false, code: "identity_retirement_pending", error: "MintVault Scanner is securely retiring the prior station identity." }
       : null;
   }
 
@@ -619,16 +777,132 @@ class Watcher extends EventEmitter {
       && !this.targetCaptureInFlight
       && !this.previewActionInFlight
       && !this.positioningPreviewInFlight
+      && !this.profileAcceptanceInFlight
       && !this.scannerHealthPromise
       && this.recoveryPlaintextWork === 0
       && !this.initialDrainTimer
       && !this.initialDrainPromise
-      && !this.updateInstallPending;
+      && !this.updateInstallPending
+      && !this.identityRetirementPending;
   }
 
   activeTargetEntry() {
     const sessionId = stateMod.get().activeCapture?.id;
     return sessionId ? this.readTargetedQueue().find((entry) => entry.sessionId === sessionId) || null : null;
+  }
+
+  cancellableCardJob() {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.uploading) {
+      return { ok: false, error: "Card cancellation is unavailable while physical or evidence work is in progress" };
+    }
+    const entry = this.activeTargetEntry();
+    const allowedPhase = ["awaiting_scan", "preview_ready", "preview_error"].includes(String(entry?.phase || ""));
+    const accepted = stateMod.get().lastAcceptedCapture;
+    if (!entry || entry.cancelEligible !== true || entry.side !== "front" || !allowedPhase
+        || (accepted?.certId && accepted.certId === entry.certId)) {
+      return { ok: false, error: "This Card Job can no longer be cancelled because evidence may already be accepted" };
+    }
+    return {
+      ok: true,
+      entry,
+      target: {
+        cardJobId: entry.cardJobId,
+        captureSessionId: entry.sessionId,
+        captureAuthorisationId: entry.captureAuthorisationId,
+      },
+    };
+  }
+
+  beginCardCancellation() {
+    const current = this.cancellableCardJob();
+    if (!current.ok) return current;
+    this.previewActionInFlight = true;
+    return current;
+  }
+
+  beginCardCancellationForTarget(target) {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.uploading) {
+      return { ok: false, error: "Card cancellation recovery is waiting for current physical work to stop" };
+    }
+    const entry = this.readTargetedQueue().find((candidate) =>
+      candidate.cardJobId === target.cardJobId
+      && candidate.sessionId === target.captureSessionId
+      && candidate.captureAuthorisationId === target.captureAuthorisationId
+    ) || null;
+    this.previewActionInFlight = true;
+    if (entry) this.setTargetState(entry, "cancel_pending", "cancel_pending", "MintVault is reconciling this Card Job cancellation.");
+    return { ok: true, entry, target, recovering: true };
+  }
+
+  pendingCardCancellation() {
+    const entry = this.readTargetedQueue().find((candidate) => candidate.cancelOperationId && candidate.cancelState === "PENDING");
+    if (!entry) return null;
+    return {
+      operationId: entry.cancelOperationId,
+      target: {
+        cardJobId: entry.cardJobId,
+        captureSessionId: entry.sessionId,
+        captureAuthorisationId: entry.captureAuthorisationId,
+      },
+    };
+  }
+
+  markCardCancellationPending(target, operationId) {
+    const entry = this.readTargetedQueue().find((candidate) =>
+      candidate.cardJobId === target.cardJobId
+      && candidate.sessionId === target.captureSessionId
+      && candidate.captureAuthorisationId === target.captureAuthorisationId
+    );
+    if (!entry) return { ok: true, localTargetAbsent: true };
+    if (entry.cancelOperationId && entry.cancelOperationId !== operationId) {
+      throw new Error("Card Job target is already bound to a different cancellation operation");
+    }
+    const pending = this.addTargetedPending({ ...entry, cancelOperationId: operationId, cancelState: "PENDING" });
+    this.setTargetState(pending, "cancel_pending", "cancel_pending", "MintVault is reconciling this Card Job cancellation.");
+    return { ok: true, entry: pending };
+  }
+
+  finishCardCancellation() {
+    this.previewActionInFlight = false;
+  }
+
+  applyCardJobCancellation(target) {
+    const prior = this.captureQueue.entries().find((entry) =>
+      entry.cardJobId === target.cardJobId
+      && entry.sessionId === target.captureSessionId
+      && entry.disposition === "CANCELLED"
+    );
+    if (prior) return { ok: true, alreadyApplied: true };
+    const entry = this.activeTargetEntry();
+    if (!entry) return { ok: true, localTargetAbsent: true };
+    if (entry.cardJobId !== target.cardJobId || entry.sessionId !== target.captureSessionId
+        || entry.captureAuthorisationId !== target.captureAuthorisationId) return { ok: false, error: "The cancelled Card Job no longer matches the local active target" };
+    this.archivePreviewCandidate(entry, "MintVault cancelled this Card Job before its first accepted side and released its reservation.", {
+      disposition: "CANCELLED",
+      localOutcome: null,
+    });
+    stateMod.set({ state: "idle", activeCapture: null, lastError: null });
+    this.emitState();
+    this.logCaptureStage(entry, "card_job_cancelled_before_evidence");
+    return { ok: true };
+  }
+
+  applyCardJobCancellationRefusal(target) {
+    const entry = this.readTargetedQueue().find((candidate) =>
+      candidate.cardJobId === target.cardJobId
+      && candidate.sessionId === target.captureSessionId
+      && candidate.captureAuthorisationId === target.captureAuthorisationId
+    );
+    if (entry) {
+      const refused = this.addTargetedPending({
+        ...entry,
+        cancelEligible: false,
+        cancelOperationId: null,
+        cancelState: "REFUSED_ACCEPTED_EVIDENCE",
+      });
+      this.setTargetState(refused, refused.phase, refused.phase, "This Card Job already has accepted evidence and cannot be cancelled.");
+    }
+    return { ok: false, retryable: false, code: "CARD_JOB_HAS_ACCEPTED_EVIDENCE", error: "This Card Job already has accepted evidence and cannot be cancelled." };
   }
 
   setTargetState(entry, stage, state = stage, lastError = null) {
@@ -641,6 +915,7 @@ class Watcher extends EventEmitter {
         workstationId: entry.workstationId,
         stage,
         previewId: entry.previewId || null,
+        cancelEligible: entry.cancelEligible === true,
         attempt: Number(entry.attempt || 1),
       },
       lastError,
@@ -720,8 +995,8 @@ class Watcher extends EventEmitter {
     return null;
   }
 
-  async keepTargetAlive(entry) {
-    if (Number(entry.lastKeepaliveAt || 0) + TARGET_KEEPALIVE_MS > Date.now()) return { ok: true, entry };
+  async keepTargetAlive(entry, { force = false } = {}) {
+    if (!force && Number(entry.lastKeepaliveAt || 0) + TARGET_KEEPALIVE_MS > Date.now()) return { ok: true, entry };
     let renewed;
     try {
       renewed = await server.renewCapture(entry.sessionId, lide400.deviceId());
@@ -736,10 +1011,13 @@ class Watcher extends EventEmitter {
       }
       return { ok: false, error: reason };
     }
+    let current;
+    try { current = renewedCaptureAuthority(entry, renewed.body); }
+    catch (error) { return { ok: false, error: error.message }; }
     const next = {
       ...entry,
       lastKeepaliveAt: Date.now(),
-      sessionExpiresAt: renewed.body?.capture?.expiresAt || entry.sessionExpiresAt,
+      sessionExpiresAt: current.sessionExpiresAt,
     };
     this.addTargetedPending(next);
     return { ok: true, entry: next };
@@ -766,9 +1044,10 @@ class Watcher extends EventEmitter {
     return cardFrame.assessLide400CardFrame(masterPath, provenance?.scanAreaMm);
   }
 
-  async validateCaptureMaster(masterPath, provenance, expectedProfileRevisionId) {
-    const stat = fs.lstatSync(masterPath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 64 * 1024 || stat.size > 512 * 1024 * 1024) {
+  async validateCaptureMaster(masterPath, provenance, expectedProfileRevisionId, descriptor = null) {
+    const stat = Number.isInteger(descriptor) ? fs.fstatSync(descriptor) : fs.lstatSync(masterPath);
+    if (!stat.isFile() || (!Number.isInteger(descriptor) && stat.isSymbolicLink()) || stat.nlink !== 1
+        || stat.size < 64 * 1024 || stat.size > 512 * 1024 * 1024) {
       throw new Error("LiDE TIFF size or file type is outside the locked capture profile");
     }
     const area = provenance?.scanAreaMm;
@@ -783,6 +1062,12 @@ class Watcher extends EventEmitter {
       || !/^[a-f0-9]{64}$/.test(String(provenance?.profileDigestSha256 || ""))
     )) {
       throw new Error("LiDE capture did not use the exact server-authorised locked profile revision");
+    }
+    if (provenance?.helperAttestedByteLength != null && (
+      provenance.helperAttestedByteLength !== stat.size
+      || !/^[a-f0-9]{64}$/.test(String(provenance.helperAttestedSha256 || ""))
+    )) {
+      throw new Error("LiDE capture no longer matches the trusted helper byte attestation");
     }
     const metadata = await require("sharp")(masterPath, { limitInputPixels: false }).metadata();
     const expectedWidth = Math.round((values[0] / 25.4) * 1200);
@@ -1014,11 +1299,12 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "Positioning preview path is invalid" };
     }
     try {
-      const stat = fs.lstatSync(previewPath);
-      if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size < 4 || stat.size > PREVIEW_MAX_BYTES) {
-        throw new Error("Positioning preview file is unavailable");
-      }
-      return { ok: true, previewId, dataUrl: `data:image/jpeg;base64,${fs.readFileSync(previewPath).toString("base64")}` };
+      const bytes = readBoundedRegularFile(previewPath, {
+        minimumBytes: 4,
+        maximumBytes: PREVIEW_MAX_BYTES,
+        label: "Positioning preview",
+      });
+      return { ok: true, previewId, dataUrl: `data:image/jpeg;base64,${bytes.toString("base64")}` };
     } catch (error) {
       return { ok: false, error: error.message || "Positioning preview file is unavailable" };
     }
@@ -1039,6 +1325,12 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "Canon LiDE 400 is not ready for a positioning Preview" };
     }
     this.positioningPreviewInFlight = true;
+    if (this.scannerHealthPromise) await this.scannerHealthPromise;
+    const updateDeniedAfterHealth = this.updateInstallDenial();
+    if (updateDeniedAfterHealth) {
+      this.positioningPreviewInFlight = false;
+      return updateDeniedAfterHealth;
+    }
     this.preparedPositioningCalibration = null;
     const id = crypto.randomUUID();
     const directory = path.join(POSITIONING_PREVIEW, id);
@@ -1051,8 +1343,9 @@ class Watcher extends EventEmitter {
     });
     this.emitState();
     this.log(`positioning-preview ${JSON.stringify({ id, stage: "started", at: new Date().toISOString() })}`);
+    let capture = null;
     try {
-      const capture = await lide400.positioningPreview(directory);
+      capture = await lide400.positioningPreview(directory);
       if (capture.requestedDpi !== lide400._private.POSITIONING_PREVIEW_DPI || capture.driverResolutionDpi !== lide400._private.POSITIONING_PREVIEW_DPI) {
         throw new Error("Positioning Preview did not use the locked local setup resolution");
       }
@@ -1061,8 +1354,9 @@ class Watcher extends EventEmitter {
         throw new Error("Positioning Preview did not report its physical hardware area");
       }
       const previewPath = path.join(directory, `${id}.display.jpg`);
-      const display = await this.createPositioningPreviewDisplay(capture.path, previewPath);
-      const analysis = await this.analysePositioningPreview(capture.path, areaMm);
+      const sourceReadPath = Number.isInteger(capture.artifactDescriptor) ? `/dev/fd/${capture.artifactDescriptor}` : capture.path;
+      const display = await this.createPositioningPreviewDisplay(sourceReadPath, previewPath);
+      const analysis = await this.analysePositioningPreview(sourceReadPath, areaMm);
       const status = analysis.cardCandidate ? (analysis.placement.ready ? "detected" : "reposition") : "not_detected";
       const positioningPreview = {
         id,
@@ -1104,6 +1398,7 @@ class Watcher extends EventEmitter {
       this.log(`positioning-preview ${JSON.stringify({ id, stage: "failed", elapsedMs: Date.now() - startedAt, reason })}`, "warn");
       return { ok: false, error: reason };
     } finally {
+      disposeHelperCapture(capture);
       this.positioningPreviewInFlight = false;
     }
   }
@@ -1181,8 +1476,9 @@ class Watcher extends EventEmitter {
     if (!resolved.startsWith(root) || ![".tif", ".tiff"].includes(path.extname(resolved).toLowerCase())) {
       throw new Error("Calibration proof path is unsafe");
     }
-    const stat = fs.lstatSync(resolved);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1
+    const descriptor = capture?.artifactDescriptor;
+    const stat = Number.isInteger(descriptor) ? fs.fstatSync(descriptor) : fs.lstatSync(resolved);
+    if ((!Number.isInteger(descriptor) && stat.isSymbolicLink()) || !stat.isFile() || stat.nlink !== 1
         || stat.size < CALIBRATION_PROOF_MIN_BYTES || stat.size > CALIBRATION_PROOF_MAX_BYTES) {
       throw new Error("Calibration proof TIFF is missing, unsafe, or outside the accepted size range");
     }
@@ -1191,6 +1487,12 @@ class Watcher extends EventEmitter {
     }
     if (capture.helperVersion !== helperIntegrity.HELPER_VERSION) {
       throw new Error("Calibration capability proof did not use the current sealed capture helper");
+    }
+    if (capture.helperAttestedByteLength != null && (
+      capture.helperAttestedByteLength !== stat.size
+      || !/^[a-f0-9]{64}$/.test(String(capture.helperAttestedSha256 || ""))
+    )) {
+      throw new Error("Calibration capability proof does not match the capture helper byte attestation");
     }
     const expected = candidate.acquisitionRegion;
     const applied = capture.appliedRegionMm;
@@ -1205,7 +1507,8 @@ class Watcher extends EventEmitter {
       throw new Error("Calibration capability proof came from a different scanner");
     }
     const sharp = require("sharp");
-    const metadata = await sharp(resolved, { limitInputPixels: false }).metadata();
+    const stablePath = Number.isInteger(descriptor) ? `/dev/fd/${descriptor}` : resolved;
+    const metadata = await sharp(stablePath, { limitInputPixels: false }).metadata();
     const expectedWidthPx = Math.round((Number(expected.width) / 25.4) * 1200);
     const expectedHeightPx = Math.round((Number(expected.height) / 25.4) * 1200);
     if (metadata.format !== "tiff" || metadata.space !== "srgb" || metadata.channels !== 3
@@ -1214,19 +1517,24 @@ class Watcher extends EventEmitter {
         || !Number.isSafeInteger(metadata.height) || Math.abs(metadata.height - expectedHeightPx) > 2) {
       throw new Error("Calibration capability proof is not an exact 1200-DPI RGB 8-bit TIFF");
     }
-    const frameAssessment = await cardFrame.assessLide400CardFrame(resolved, expected);
+    const frameAssessment = await cardFrame.assessLide400CardFrame(stablePath, expected);
     if (frameAssessment.accepted !== true) {
       throw new Error(frameAssessment.reason || "Calibration capability proof did not contain a complete usable card frame");
     }
-    const hash = crypto.createHash("sha256");
-    await new Promise((resolveHash, rejectHash) => {
-      const input = fs.createReadStream(resolved, { flags: fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) });
-      input.on("data", (chunk) => hash.update(chunk));
-      input.on("error", rejectHash);
-      input.on("end", resolveHash);
-    });
+    const sha256 = Number.isInteger(descriptor)
+      ? lide400._private.sha256Descriptor(descriptor, stat.size)
+      : await new Promise((resolveHash, rejectHash) => {
+        const hash = crypto.createHash("sha256");
+        const input = fs.createReadStream(resolved, { flags: fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) });
+        input.on("data", (chunk) => hash.update(chunk));
+        input.on("error", rejectHash);
+        input.on("end", () => resolveHash(hash.digest("hex")));
+      });
+    if (capture.helperAttestedSha256 != null && sha256 !== capture.helperAttestedSha256) {
+      throw new Error("Calibration capability proof digest changed after helper attestation");
+    }
     return Object.freeze({
-      sha256: hash.digest("hex"),
+      sha256,
       sizeBytes: stat.size,
       format: "TIFF",
       requestedDpi: 1200,
@@ -1284,14 +1592,22 @@ class Watcher extends EventEmitter {
       return { ok: false, code: error.code || "profile_recovery_required", error: error.message || String(error) };
     }
     this.positioningPreviewInFlight = true;
+    if (this.scannerHealthPromise) await this.scannerHealthPromise;
+    const updateDeniedAfterHealth = this.updateInstallDenial();
+    if (updateDeniedAfterHealth) {
+      this.positioningPreviewInFlight = false;
+      return updateDeniedAfterHealth;
+    }
     stateMod.set({ positioningPreview: { ...current, verificationStatus: "scanning_1200", calibrationError: null } });
     this.emitState();
     const directory = path.join(POSITIONING_PREVIEW, previewId, "profile-proof");
     ensurePrivateDirectory(directory);
     let proofPath = null;
+    let proofCapture = null;
     try {
       return await this.withRecoveryPlaintextWork(async () => {
         const capture = await lide400.scanCalibrationRegion(directory, base.candidate.acquisitionRegion);
+        proofCapture = capture;
         proofPath = capture.path;
         const capabilityProof = await this.validateCalibrationProof(proofPath, capture, base.candidate);
         const candidate = Object.freeze({ ...base.candidate, capabilityProof });
@@ -1329,7 +1645,8 @@ class Watcher extends EventEmitter {
       }
       return { ok: false, error: error.message || String(error) };
     } finally {
-      if (proofPath && fs.existsSync(proofPath)) fs.unlinkSync(proofPath);
+      if (proofCapture) disposeHelperCapture(proofCapture);
+      else if (proofPath && fs.existsSync(proofPath)) fs.unlinkSync(proofPath);
       try { fs.rmdirSync(directory); } catch {}
       this.positioningPreviewInFlight = false;
     }
@@ -1665,6 +1982,10 @@ class Watcher extends EventEmitter {
         this.removeTargetedPending(entry?.sessionId);
         continue;
       }
+      if (entry.cancelOperationId && entry.cancelState === "PENDING") {
+        this.setTargetState(entry, "cancel_pending", "cancel_pending", "MintVault is reconciling this Card Job cancellation.");
+        return true;
+      }
       if (["upload", "upload_retry", "needs_reconciliation"].includes(entry.phase)) {
         if (!entry.artifact) return this.failTargetedCapture(entry, "Encrypted TIFF is missing; capture is quarantined for recovery");
         if (Number(entry.retryAfter || 0) > Date.now()) return true;
@@ -1673,7 +1994,7 @@ class Watcher extends EventEmitter {
         return true;
       }
       const kept = await this.keepTargetAlive(entry);
-      if (this.updateInstallPending) return false;
+      if (this.updateInstallDenial()) return false;
       if (!kept.ok) return true;
       if (entry.phase === "preview_ready") {
         try { await this.restorePreviewCandidate(kept.entry); }
@@ -1734,7 +2055,12 @@ class Watcher extends EventEmitter {
     return this.readHashLog().find((e) => e.hash === hash && e.cert === cert && e.side === side) || null;
   }
 
-  async stop() {
+  async stop({ requireIdle = true } = {}) {
+    if (requireIdle && !this.isRestartSafeForUpdate()) {
+      const error = new Error("Scanner service restart is deferred until physical and recovery work is idle");
+      error.code = "restart_deferred";
+      throw error;
+    }
     if (this.initialDrainTimer) {
       clearTimeout(this.initialDrainTimer);
       this.initialDrainTimer = null;
@@ -1951,6 +2277,9 @@ class Watcher extends EventEmitter {
     if (!current || current.phase !== "awaiting_scan") {
       return { ok: false, error: "No current card-side target is awaiting Scan" };
     }
+    if (current.cancelOperationId && current.cancelState === "PENDING") {
+      return { ok: false, code: "cancel_pending", error: "Card cancellation is awaiting MintVault reconciliation; Scan remains locked." };
+    }
     if (stateMod.get().scannerHealth?.status !== "ready") {
       return { ok: false, error: "Canon LiDE 400 is not ready for a locked-profile scan" };
     }
@@ -1960,9 +2289,15 @@ class Watcher extends EventEmitter {
     // two rapid IPC clicks can both observe `awaiting_scan` and start two
     // physical scans while the device-bound keepalive resolves.
     this.targetCaptureInFlight = true;
+    let direct = null;
     try {
-      const kept = await this.keepTargetAlive(current);
+      if (this.scannerHealthPromise) await this.scannerHealthPromise;
+      const deniedAfterHealth = this.updateInstallDenial();
+      if (deniedAfterHealth) return deniedAfterHealth;
+      const kept = await this.keepTargetAlive(current, { force: true });
       if (!kept.ok) return { ok: false, error: kept.error || "Capture target can no longer be used" };
+      const deniedAfterTargetAuthority = this.updateInstallDenial();
+      if (deniedAfterTargetAuthority) return deniedAfterTargetAuthority;
       const previewId = crypto.randomUUID();
       const captureDir = path.join(CAPTURE_STAGING, current.sessionId, previewId);
       const scanning = { ...kept.entry, phase: "scanning", previewId, captureDir, attempt: 1 };
@@ -1971,8 +2306,8 @@ class Watcher extends EventEmitter {
       ensurePrivateDirectory(captureDir);
       this.setTargetState(scanning, "scanning", current.side === "front" ? "scanning_front" : "scanning_back");
       this.logCaptureStage(scanning, "scan_started");
-      let direct;
       let lastScanError = null;
+      let liveEntry = kept.entry;
       const startedAt = Date.now();
       for (let attempt = 0; attempt <= TARGETED_RETRY_DELAYS_MS.length; attempt++) {
         try {
@@ -1981,6 +2316,11 @@ class Watcher extends EventEmitter {
             this.setTargetState(retrying, "retrying_scan", current.side === "front" ? "scanning_front" : "scanning_back", `Scanner busy — retrying ${attempt}/${TARGETED_RETRY_DELAYS_MS.length}`);
             await this.sleep(TARGETED_RETRY_DELAYS_MS[attempt - 1]);
           }
+          const immediate = await this.keepTargetAlive(liveEntry, { force: true });
+          if (!immediate.ok) throw new Error(immediate.error || "Capture target can no longer be used");
+          liveEntry = immediate.entry;
+          const deniedImmediatelyBeforeScan = this.updateInstallDenial();
+          if (deniedImmediatelyBeforeScan) return deniedImmediatelyBeforeScan;
           direct = await lide400.scan(captureDir);
           this.logCaptureStage(scanning, "scan_completed", { attempt: attempt + 1, elapsedMs: Date.now() - startedAt });
           break;
@@ -1994,7 +2334,9 @@ class Watcher extends EventEmitter {
       if (direct.provenance?.helperVersion !== helperIntegrity.HELPER_VERSION) {
         throw new Error("LiDE capture helper version does not match the trusted application manifest");
       }
-      fs.chmodSync(direct.path, 0o600);
+      if (Number.isInteger(direct.artifactDescriptor)) fs.fchmodSync(direct.artifactDescriptor, 0o600);
+      else fs.chmodSync(direct.path, 0o600);
+      const masterReadPath = Number.isInteger(direct.artifactDescriptor) ? `/dev/fd/${direct.artifactDescriptor}` : direct.path;
       const previewPath = path.join(captureDir, `${previewId}.preview.jpg`);
       const completed = this.addTargetedPending({
         ...scanning,
@@ -2007,22 +2349,25 @@ class Watcher extends EventEmitter {
         captureHelperVersion: direct.provenance.helperVersion,
         identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
       });
-      const masterValidation = await this.validateCaptureMaster(completed.filePath, completed.provenance, completed.profileRevisionId);
+      const masterValidation = await this.validateCaptureMaster(masterReadPath, completed.provenance, completed.profileRevisionId, direct.artifactDescriptor);
       const processing = this.addTargetedPending({
         ...completed,
         phase: "preview_processing",
         masterValidation,
       });
       this.setTargetState(processing, "processing_preview", "finalising", "Generating non-authoritative preview from the 1200 DPI TIFF");
-      await this.createPreviewDerivative(processing.filePath, previewPath);
+      await this.createPreviewDerivative(masterReadPath, previewPath);
       fs.chmodSync(previewPath, 0o600);
-      const frameAssessment = await this.assessCaptureFrame(processing.filePath, processing.provenance);
+      const frameAssessment = await this.assessCaptureFrame(masterReadPath, processing.provenance);
       // Both master and derivative are encrypted and indexed before the
       // operator can Accept (the first point at which network ambiguity is
       // possible). attachFile fsyncs ciphertext + index before unlinking each
       // plaintext source.
       let assessed = await this.captureQueue.attachFile({ ...processing, frameAssessment }, processing.filePath, {
         kind: "TIFF_MASTER", mimeType: "image/tiff",
+        sourceDescriptor: direct.artifactDescriptor,
+        expectedSha256: processing.provenance?.helperAttestedSha256 || null,
+        expectedByteLength: processing.provenance?.helperAttestedByteLength || null,
       });
       assessed = this.addTargetedPending({
         ...assessed,
@@ -2051,7 +2396,14 @@ class Watcher extends EventEmitter {
       let staged = this.activeTargetEntry();
       if (staged?.filePath && fs.existsSync(staged.filePath) && !staged.artifact) {
         try {
-          staged = await this.captureQueue.attachFile(staged, staged.filePath, { kind: "TIFF_MASTER", mimeType: "image/tiff", quarantine: true });
+          staged = await this.captureQueue.attachFile(staged, staged.filePath, {
+            kind: "TIFF_MASTER",
+            mimeType: "image/tiff",
+            quarantine: true,
+            sourceDescriptor: Number.isInteger(direct?.artifactDescriptor) ? direct.artifactDescriptor : null,
+            expectedSha256: staged.provenance?.helperAttestedSha256 || null,
+            expectedByteLength: staged.provenance?.helperAttestedByteLength || null,
+          });
           staged = this.addTargetedPending({ ...staged, filePath: null });
         } catch (encryptionError) {
           this.log(`capture quarantine failed closed: ${encryptionError.message}`, "error");
@@ -2077,6 +2429,9 @@ class Watcher extends EventEmitter {
       this.logCaptureStage(current, "scan_or_preview_failed", { reason });
       return { ok: false, error: reason };
     } finally {
+      if (Number.isInteger(direct?.artifactDescriptor)) {
+        try { fs.closeSync(direct.artifactDescriptor); } catch { /* descriptor was already closed during failure cleanup */ }
+      }
       this.targetCaptureInFlight = false;
     }
   }
@@ -2090,6 +2445,9 @@ class Watcher extends EventEmitter {
     const current = this.activeTargetEntry();
     if (!current || current.phase !== "preview_ready" || current.previewId !== previewId) {
       return { ok: false, error: "This preview is stale and cannot be accepted" };
+    }
+    if (current.cancelOperationId && current.cancelState === "PENDING") {
+      return { ok: false, code: "cancel_pending", error: "Card cancellation is awaiting MintVault reconciliation; Accept remains locked." };
     }
     if (!current.artifact) {
       return { ok: false, error: "The encrypted preview TIFF is no longer available; rescan this side" };
@@ -2131,6 +2489,9 @@ class Watcher extends EventEmitter {
     if (!current || !["preview_ready", "preview_error"].includes(current.phase) || current.previewId !== previewId) {
       return { ok: false, error: "This preview is stale and cannot be rescanned" };
     }
+    if (current.cancelOperationId && current.cancelState === "PENDING") {
+      return { ok: false, code: "cancel_pending", error: "Card cancellation is awaiting MintVault reconciliation; Rescan remains locked." };
+    }
     this.previewActionInFlight = true;
     try {
       const truth = await this.reconcileTargetedCapture(current);
@@ -2163,7 +2524,21 @@ class Watcher extends EventEmitter {
       let fresh;
       try { fresh = captureEntryFromAuthorisation(response.body?.capture); }
       catch (error) { return { ok: false, error: error.message }; }
-      const pinned = ["cardJobId", "certId", "side", "profileRevisionId", "tenantId", "locationId", "stationCredentialId", "workstationId"];
+      const pinned = [
+        "sessionId",
+        "cardJobId",
+        "certId",
+        "side",
+        "profileRevisionId",
+        "tenantId",
+        "locationId",
+        "stationCredentialId",
+        "workstationId",
+        "originalOperatorId",
+        "originalOperatorRole",
+        "capturePurpose",
+        "cancelEligible",
+      ];
       if (pinned.some((field) => fresh[field] !== requesting[field]) || fresh.workstationId !== lide400.stationId()) {
         return { ok: false, error: "Fresh Rescan authorisation changed the pinned card-side/station tuple" };
       }
@@ -2208,7 +2583,8 @@ class Watcher extends EventEmitter {
   // ── File handling ────────────────────────────────────────────────────
 
   async handleNewFile(filePath) {
-    if (this.updateInstallPending) return this.updateInstallDenial();
+    const lifecycleDenied = this.updateInstallDenial();
+    if (lifecycleDenied) return lifecycleDenied;
     return this.withRecoveryPlaintextWork(() => this.handleNewFileImpl(filePath));
   }
 

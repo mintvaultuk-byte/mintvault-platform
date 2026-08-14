@@ -22,7 +22,12 @@ const PROFILE_AREA_MM = Object.freeze({ width: 100, height: 130 });
 const POSITIONING_PREVIEW_DPI = 300;
 const POSITIONING_PREVIEW_COORDINATE_SPACE = "imagecapturecore-scan-area-upright-raster-v1";
 const CALIBRATION_VERSION = "mintvault-lide400-jig-v1";
+const MAX_HELPER_STDOUT_BYTES = 256 * 1024;
+const MAX_HELPER_STDERR_BYTES = 256 * 1024;
+const HELPER_KILL_GRACE_MS = 2_000;
+const MAX_CAPTURE_BYTES = 512 * 1024 * 1024;
 let runtime = Object.freeze({ isPackaged: false, appVersion: "development" });
+let helperTail = Promise.resolve();
 
 function configureRuntime({ isPackaged, appVersion }) {
   if (typeof isPackaged !== "boolean" || typeof appVersion !== "string" || !appVersion.trim()) {
@@ -37,7 +42,7 @@ function stationId() {
   if (enrolled) return enrolled;
   // Explicit local-development compatibility only.  A production daemon must
   // be enrolled rather than deriving authority from a mutable hostname/env.
-  if (process.env.NODE_ENV !== "production" && process.env.MINTVAULT_STATION_ID) {
+  if (!runtime.isPackaged && process.env.MINTVAULT_STATION_ID) {
     return String(process.env.MINTVAULT_STATION_ID).replace(/[^a-zA-Z0-9._:-]/g, "-").slice(0, 128);
   }
   return "unregistered-station";
@@ -338,29 +343,55 @@ function calibrationRegion(input) {
   return { x, y, width, height };
 }
 
-function run(command, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+function run(command, args, timeoutMs, { spawnImpl = spawn, killGraceMs = HELPER_KILL_GRACE_MS } = {}) {
+  let release;
+  const turn = new Promise((resolve) => { release = resolve; });
+  const prior = helperTail;
+  helperTail = prior.catch(() => {}).then(() => turn);
+  return prior.catch(() => {}).then(() => new Promise((resolve, reject) => {
+    const child = spawnImpl(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     const stdout = [];
     const stderr = [];
-    const timer = setTimeout(() => {
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let terminalError = null;
+    let spawnError = null;
+    let killTimer = null;
+    const terminate = (error) => {
+      if (terminalError) return;
+      terminalError = error;
       child.kill("SIGTERM");
-      reject(new Error(`LiDE bridge timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-    child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
-    child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+      killTimer = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+      killTimer.unref?.();
+    };
+    const timer = setTimeout(() => terminate(new Error(`LiDE bridge timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      const bytes = Buffer.from(chunk);
+      stdoutBytes += bytes.length;
+      if (stdoutBytes > MAX_HELPER_STDOUT_BYTES) terminate(new Error("LiDE bridge stdout exceeded its size limit"));
+      else stdout.push(bytes);
+    });
+    child.stderr.on("data", (chunk) => {
+      const bytes = Buffer.from(chunk);
+      stderrBytes += bytes.length;
+      if (stderrBytes > MAX_HELPER_STDERR_BYTES) terminate(new Error("LiDE bridge stderr exceeded its size limit"));
+      else stderr.push(bytes);
+    });
+    child.on("error", (error) => { spawnError = error; });
     child.on("close", (code) => {
       clearTimeout(timer);
-      const out = Buffer.concat(stdout).toString("utf8").trim();
+      if (killTimer) clearTimeout(killTimer);
+      if (terminalError) return reject(terminalError);
+      if (spawnError) return reject(spawnError);
+      const out = Buffer.concat(stdout, stdoutBytes).toString("utf8").trim();
       try {
         const parsed = JSON.parse(out);
         resolve(helperIntegrity.assertCompatibleResult(parsed));
       } catch {
-        reject(new Error(`LiDE bridge exited ${code ?? "?"}: ${Buffer.concat(stderr).toString("utf8").trim() || out || "no result"}`));
+        reject(new Error(`LiDE bridge exited ${code ?? "?"}: ${Buffer.concat(stderr, stderrBytes).toString("utf8").trim() || out || "no result"}`));
       }
     });
-  });
+  })).finally(release);
 }
 
 async function ensureBridge() {
@@ -368,6 +399,47 @@ async function ensureBridge() {
   // Verification deliberately runs before every spawn. A valid signature from
   // a prior operation cannot authorise a subsequently replaced executable.
   return helperIntegrity.verifiedCaptureHelper().path;
+}
+
+function sha256Descriptor(descriptor, byteLength) {
+  const hash = crypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, byteLength));
+  let offset = 0;
+  while (offset < byteLength) {
+    const length = Math.min(buffer.length, byteLength - offset);
+    const count = fs.readSync(descriptor, buffer, 0, length, offset);
+    if (count !== length) throw new Error("LiDE capture changed while its attestation was verified");
+    hash.update(buffer.subarray(0, count));
+    offset += count;
+  }
+  return hash.digest("hex");
+}
+
+function openAttestedCapture(capturedPath, result, { afterOpen = null } = {}) {
+  const expectedSize = Number(result?.fileSizeBytes);
+  const expectedSha256 = String(result?.fileSha256 || "");
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 4 || expectedSize > MAX_CAPTURE_BYTES
+      || !/^[a-f0-9]{64}$/.test(expectedSha256)) {
+    throw new Error("LiDE bridge did not attest the exact bounded capture bytes");
+  }
+  let descriptor;
+  try {
+    descriptor = fs.openSync(capturedPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== expectedSize) {
+      throw new Error("LiDE capture does not match the helper-attested file object");
+    }
+    if (typeof afterOpen === "function") afterOpen({ descriptor, stat, capturedPath });
+    const after = fs.fstatSync(descriptor);
+    if (after.dev !== stat.dev || after.ino !== stat.ino || after.nlink !== 1 || after.size !== stat.size
+        || sha256Descriptor(descriptor, stat.size) !== expectedSha256) {
+      throw new Error("LiDE capture digest does not match the trusted helper attestation");
+    }
+    return Object.freeze({ descriptor, stat, sha256: expectedSha256, byteLength: expectedSize });
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    throw error;
+  }
 }
 
 async function health() {
@@ -412,13 +484,14 @@ async function scan(outputDirectory) {
   if (!capturedPath.startsWith(root) || ![".tif", ".tiff"].includes(path.extname(capturedPath).toLowerCase())) {
     throw new Error("LiDE bridge returned an unsafe or non-TIFF output path");
   }
-  const stat = fs.statSync(capturedPath);
-  if (!stat.isFile() || stat.size < 4) throw new Error("LiDE bridge returned an empty TIFF");
+  const attested = openAttestedCapture(capturedPath, result);
   if (selected.profile && !scannerMatchesProfile(result, selected.profile)) {
+    fs.closeSync(attested.descriptor);
     throw new Error("Captured Canon does not match the locked Scanner profile");
   }
   return {
     path: capturedPath,
+    artifactDescriptor: attested.descriptor,
     provenance: {
       profileVersion: PROFILE_VERSION,
       scannerManufacturer: "Canon",
@@ -434,6 +507,8 @@ async function scan(outputDirectory) {
       captureStartedAt: startedAt,
       captureCompletedAt: new Date().toISOString(),
       helperVersion: result.helperVersion,
+      helperAttestedSha256: attested.sha256,
+      helperAttestedByteLength: attested.byteLength,
       profileRevisionId: selected.profile?.profileRevisionId || null,
       profileDigestSha256: selected.profile?.profileDigestSha256 || null,
     },
@@ -459,11 +534,13 @@ async function positioningPreview(outputDirectory) {
   if (!capturedPath.startsWith(root) || ![".jpg", ".jpeg"].includes(path.extname(capturedPath).toLowerCase())) {
     throw new Error("LiDE bridge returned an unsafe or non-JPEG positioning preview");
   }
-  const stat = fs.statSync(capturedPath);
-  if (!stat.isFile() || stat.size < 4) throw new Error("LiDE bridge returned an empty positioning preview");
+  const attested = openAttestedCapture(capturedPath, result);
   return {
     path: capturedPath,
-    sizeBytes: stat.size,
+    artifactDescriptor: attested.descriptor,
+    sizeBytes: attested.byteLength,
+    helperAttestedSha256: attested.sha256,
+    helperAttestedByteLength: attested.byteLength,
     appliedRegionMm: result.scanAreaMm,
     requestedDpi: Number(result.requestedDpi),
     driverResolutionDpi: Number(result.driverResolutionDpi),
@@ -498,11 +575,13 @@ async function scanCalibrationRegion(outputDirectory, region) {
   if (!capturedPath.startsWith(root) || ![".tif", ".tiff"].includes(path.extname(capturedPath).toLowerCase())) {
     throw new Error("LiDE bridge returned an unsafe or non-TIFF calibration output path");
   }
-  const stat = fs.statSync(capturedPath);
-  if (!stat.isFile() || stat.size < 4) throw new Error("LiDE bridge returned an empty calibration TIFF");
+  const attested = openAttestedCapture(capturedPath, result);
   return {
     path: capturedPath,
-    sizeBytes: stat.size,
+    artifactDescriptor: attested.descriptor,
+    sizeBytes: attested.byteLength,
+    helperAttestedSha256: attested.sha256,
+    helperAttestedByteLength: attested.byteLength,
     requestedRegionMm: measured,
     appliedRegionMm: result.scanAreaMm,
     requestedDpi: Number(result.requestedDpi),
@@ -531,5 +610,5 @@ module.exports = {
   currentLockedProfile,
   configureRuntime,
   requiresLockedProfile: () => runtime.isPackaged,
-  _private: { jigOrigin, developmentJigOrigin, profileSelection, scannerMatchesProfile, calibrationRegion, ensureBridge, profileInput, profileCandidate, candidateDigest, calibrationBinding, acceptanceOperation, pendingForCandidate, CALIBRATION_MIN_MM, PLATEN_MAX_MM, PROFILE_AREA_MM, POSITIONING_PREVIEW_DPI, CALIBRATION_VERSION },
+  _private: { run, jigOrigin, developmentJigOrigin, profileSelection, scannerMatchesProfile, calibrationRegion, ensureBridge, openAttestedCapture, sha256Descriptor, profileInput, profileCandidate, candidateDigest, calibrationBinding, acceptanceOperation, pendingForCandidate, CALIBRATION_MIN_MM, PLATEN_MAX_MM, PROFILE_AREA_MM, POSITIONING_PREVIEW_DPI, CALIBRATION_VERSION, MAX_HELPER_STDOUT_BYTES, MAX_HELPER_STDERR_BYTES, MAX_CAPTURE_BYTES },
 };

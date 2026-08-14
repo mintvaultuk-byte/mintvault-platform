@@ -71,8 +71,8 @@ function artifactFixture(t) {
       gatekeeperAssessed: false,
     },
     helpers: {
-      capture: { name: "mv-capture-helper", identifier: contract.CAPTURE_HELPER_IDENTIFIER, version: "1.0.1", sha256: "c".repeat(64) },
-      identity: { name: "mv-identity-helper", identifier: contract.IDENTITY_HELPER_IDENTIFIER, version: "1.1.0", sha256: "d".repeat(64) },
+      capture: { name: "mv-capture-helper", identifier: contract.CAPTURE_HELPER_IDENTIFIER, version: "1.0.2", sha256: "c".repeat(64) },
+      identity: { name: "mv-identity-helper", identifier: contract.IDENTITY_HELPER_IDENTIFIER, version: "1.1.2", sha256: "d".repeat(64) },
     },
     update: { metadata: path.basename(latestPath), zipSha512 },
     artifacts: artifactPaths.map((filePath) => ({ filename: path.basename(filePath), size: fs.statSync(filePath).size, sha256: digest(filePath, "sha256") })),

@@ -1,8 +1,10 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const http = require("node:http");
 const { Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
+const { spawnSync } = require("node:child_process");
 
 const APP_IDENTIFIER = "com.mintvault.scanner";
 const PRODUCT_NAME = "MintVault Scanner";
@@ -35,8 +37,221 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function sha256(filePath) {
-  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+function digestDescriptor(descriptor, byteLength, algorithm = "sha256", encoding = "hex") {
+  const hash = crypto.createHash(algorithm);
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, byteLength));
+  let offset = 0;
+  while (offset < byteLength) {
+    const length = Math.min(buffer.length, byteLength - offset);
+    const count = fs.readSync(descriptor, buffer, 0, length, offset);
+    if (count !== length) throw new Error("Update candidate changed while being read");
+    hash.update(buffer.subarray(0, count));
+    offset += count;
+  }
+  return hash.digest(encoding);
+}
+
+function descriptorAuthority(descriptor, stat, { expectedSha256, label }) {
+  let closed = false;
+  return Object.freeze({
+    descriptor,
+    stat,
+    validate() {
+      if (closed) throw new Error(`${label} verified descriptor is no longer available`);
+      const current = fs.fstatSync(descriptor);
+      if (current.dev !== stat.dev || current.ino !== stat.ino || current.nlink > 1 || current.size !== stat.size
+          || digestDescriptor(descriptor, stat.size) !== expectedSha256) {
+        throw new Error(`${label} changed after verification`);
+      }
+      return true;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      fs.closeSync(descriptor);
+    },
+  });
+}
+
+function openVerifiedCandidate(filePath, { expectedSize, expectedSha256, label = "Update candidate", afterOpen = null } = {}) {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 1 || expectedSize > MAX_UPDATE_ARCHIVE_BYTES
+      || !/^[a-f0-9]{64}$/.test(String(expectedSha256 || ""))) {
+    throw new Error(`${label} authenticated bounds are invalid`);
+  }
+  let descriptor;
+  try {
+    descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== expectedSize) throw new Error(`${label} is not the exact bounded regular file`);
+    if (typeof afterOpen === "function") afterOpen({ descriptor, stat, filePath });
+    const after = fs.fstatSync(descriptor);
+    if (after.dev !== stat.dev || after.ino !== stat.ino || after.nlink !== 1 || after.size !== stat.size
+        || digestDescriptor(descriptor, stat.size) !== expectedSha256) {
+      throw new Error(`${label} digest does not match authenticated policy`);
+    }
+    return descriptorAuthority(descriptor, stat, { expectedSha256, label });
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function anonymousVerifiedSnapshot(sourceAuthority, directory, { expectedSize, expectedSha256, label }) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(directory, 0o700);
+  const temporary = path.join(directory, `.descriptor-bound-${crypto.randomUUID()}.tmp`);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
+    fs.unlinkSync(temporary);
+    const hash = crypto.createHash("sha256");
+    const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, expectedSize));
+    let offset = 0;
+    while (offset < expectedSize) {
+      const length = Math.min(buffer.length, expectedSize - offset);
+      const count = fs.readSync(sourceAuthority.descriptor, buffer, 0, length, offset);
+      if (count !== length) throw new Error(`${label} changed while making its private install snapshot`);
+      let written = 0;
+      while (written < count) written += fs.writeSync(descriptor, buffer, written, count - written, offset + written);
+      hash.update(buffer.subarray(0, count));
+      offset += count;
+    }
+    if (hash.digest("hex") !== expectedSha256) throw new Error(`${label} changed while making its private install snapshot`);
+    fs.fsyncSync(descriptor);
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.nlink !== 0 || stat.size !== expectedSize) throw new Error(`${label} private snapshot is invalid`);
+    return descriptorAuthority(descriptor, stat, { expectedSha256, label });
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    try { fs.unlinkSync(temporary); } catch { /* already anonymous */ }
+    throw error;
+  }
+}
+
+async function createDescriptorBoundMacProxy(autoUpdater, evidence, event) {
+  if (!autoUpdater?.nativeUpdater || typeof autoUpdater.closeServerIfExists !== "function"
+      || typeof autoUpdater.dispatchUpdateDownloaded !== "function") {
+    throw new Error("MintVault updater cannot bind Squirrel.Mac to the verified ZIP descriptor");
+  }
+  const sourceAuthority = openVerifiedCandidate(event.downloadedFile, {
+    expectedSize: evidence.zipSize,
+    expectedSha256: evidence.zipSha256,
+    label: "MintVault update ZIP",
+  });
+  let snapshotAuthority = null;
+  try {
+    const pathStat = fs.lstatSync(event.downloadedFile);
+    if (!pathStat.isFile() || pathStat.isSymbolicLink() || pathStat.dev !== sourceAuthority.stat.dev || pathStat.ino !== sourceAuthority.stat.ino) {
+      throw new Error("MintVault update ZIP pathname changed before descriptor binding");
+    }
+    const authority = anonymousVerifiedSnapshot(sourceAuthority, path.dirname(event.downloadedFile), {
+      expectedSize: evidence.zipSize,
+      expectedSha256: evidence.zipSha256,
+      label: "MintVault update ZIP",
+    });
+    snapshotAuthority = authority;
+    fs.unlinkSync(event.downloadedFile);
+    sourceAuthority.close();
+    autoUpdater.closeServerIfExists();
+    const server = http.createServer();
+    autoUpdater.server = server;
+    server.once("close", () => authority.close());
+    const password = crypto.randomBytes(48).toString("base64url");
+    const fileUrl = `/${crypto.randomBytes(48).toString("hex")}.zip`;
+    const authorization = `Basic ${Buffer.from(`autoupdater:${password}`, "ascii").toString("base64")}`;
+    const serverUrl = () => {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("MintVault update proxy address is unavailable");
+      return `http://127.0.0.1:${address.port}`;
+    };
+    server.on("request", (request, response) => {
+      if (request.url === "/") {
+        if (request.headers.authorization !== authorization) {
+          response.writeHead(401);
+          response.end();
+          return;
+        }
+        const body = Buffer.from(JSON.stringify({ url: `${serverUrl()}${fileUrl}` }));
+        response.writeHead(200, { "Content-Type": "application/json", "Content-Length": body.length });
+        response.end(body);
+        return;
+      }
+      if (!String(request.url || "").startsWith(fileUrl)) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+      try { authority.validate(); }
+      catch {
+        response.writeHead(409);
+        response.end();
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "application/zip", "Content-Length": evidence.zipSize });
+      const stream = fs.createReadStream(null, { fd: authority.descriptor, autoClose: false, start: 0, end: evidence.zipSize - 1 });
+      stream.on("error", () => response.destroy());
+      stream.pipe(response);
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    autoUpdater.nativeUpdater.setFeedURL({
+      url: serverUrl(),
+      headers: { "Cache-Control": "no-cache", Authorization: authorization },
+    });
+    autoUpdater.dispatchUpdateDownloaded({ ...event, descriptorBound: true });
+    return authority;
+  } catch (error) {
+    sourceAuthority.close();
+    snapshotAuthority?.close();
+    throw error;
+  }
+}
+
+async function openDescriptorBoundDmg(authority, {
+  downloadDirectory,
+  expectedTeamIdentifier,
+  openPath,
+  runTool = spawnSync,
+}) {
+  authority.validate();
+  const mountpoint = path.join(downloadDirectory, `.mounted-${crypto.randomUUID()}`);
+  fs.mkdirSync(mountpoint, { mode: 0o700 });
+  let mounted = false;
+  const run = (command, args, options = {}) => runTool(command, args, {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe", authority.descriptor],
+    ...options,
+  });
+  try {
+    const attached = run("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mountpoint, "/dev/fd/3"]);
+    if (attached.error || attached.status !== 0) throw new Error("macOS refused the descriptor-bound MintVault DMG");
+    mounted = true;
+    const appPath = path.join(mountpoint, `${PRODUCT_NAME}.app`);
+    const stat = fs.lstatSync(appPath);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("MintVault DMG does not contain the exact application bundle");
+    const verified = run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=4", appPath], { stdio: ["ignore", "pipe", "pipe"] });
+    if (verified.error || verified.status !== 0) throw new Error("MintVault DMG application signature is invalid");
+    const details = run("/usr/bin/codesign", ["-d", "--verbose=4", appPath], { stdio: ["ignore", "pipe", "pipe"] });
+    const signatureText = `${details.stdout || ""}\n${details.stderr || ""}`;
+    if (details.error || details.status !== 0
+        || /^Identifier=(.+)$/m.exec(signatureText)?.[1]?.trim() !== APP_IDENTIFIER
+        || /^TeamIdentifier=(.+)$/m.exec(signatureText)?.[1]?.trim() !== expectedTeamIdentifier
+        || !/\bflags=0x[0-9a-f]+\(runtime\)/i.test(signatureText)) {
+      throw new Error("MintVault DMG application does not match the pinned signing authority");
+    }
+    const gatekeeper = run("/usr/sbin/spctl", ["--assess", "--type", "execute", "--verbose=4", appPath], { stdio: ["ignore", "pipe", "pipe"] });
+    if (gatekeeper.error || gatekeeper.status !== 0) throw new Error("Gatekeeper refused the MintVault DMG application");
+    const openError = await openPath(mountpoint);
+    if (openError) throw new Error("macOS could not open the verified MintVault DMG");
+    return Object.freeze({ ok: true, mountpoint });
+  } catch (error) {
+    if (mounted) runTool("/usr/bin/hdiutil", ["detach", "-force", mountpoint], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    try { fs.rmdirSync(mountpoint); } catch { /* mounted or already removed */ }
+    throw error;
+  }
 }
 
 function exactUpdateBase(value) {
@@ -406,12 +621,15 @@ function createUpdateManager({
   beforeInstall = () => {},
   readFile = fs.readFileSync,
   now = () => Date.now(),
+  monotonicNow = () => Number(process.hrtime.bigint() / 1_000_000n),
   evidenceTimeoutMs = DEFAULT_EVIDENCE_TIMEOUT_MS,
   artifactTimeoutMs = DEFAULT_ARTIFACT_TIMEOUT_MS,
+  allowPathUpdaterForTests = false,
 }) {
   const enabled = releaseTrust?.packageMode === "release";
   let minimumVersion = null;
   let authenticatedPolicy = null;
+  let authenticatedPolicyClock = null;
   let verifiedEvidence = null;
   let readyCandidate = null;
   let readyDmgCandidate = null;
@@ -482,6 +700,8 @@ function createUpdateManager({
   }
 
   function clearCandidate() {
+    readyCandidate?.authority?.close?.();
+    readyDmgCandidate?.authority?.close?.();
     verifiedEvidence = null;
     readyCandidate = null;
     readyDmgCandidate = null;
@@ -489,19 +709,29 @@ function createUpdateManager({
 
   function currentPolicy() {
     if (!authenticatedPolicy) throw new Error("Authenticated MintVault update policy is required");
+    if (!authenticatedPolicyClock) throw new Error("Authenticated MintVault update policy has no monotonic lifetime");
+    const wallNow = now();
+    const monotonicCurrent = monotonicNow();
+    const monotonicElapsed = monotonicCurrent - authenticatedPolicyClock.acceptedMonotonicMs;
+    const expiryBudget = authenticatedPolicyClock.expiresAtMs - authenticatedPolicyClock.acceptedWallMs;
+    if (!Number.isFinite(monotonicElapsed) || monotonicElapsed < 0 || monotonicElapsed >= expiryBudget
+        || wallNow < authenticatedPolicyClock.acceptedWallMs + monotonicElapsed - 30_000) {
+      throw new Error("MintVault update policy monotonic lifetime expired or the system clock moved backwards");
+    }
     const rawPolicy = { ...authenticatedPolicy };
     delete rawPolicy.fingerprint;
     authenticatedPolicy = validateUpdatePolicy(rawPolicy, {
       currentVersion: appVersion,
       minimumVersion,
       releaseTrust,
-      now: now(),
+      now: Math.max(wallNow, authenticatedPolicyClock.acceptedWallMs + monotonicElapsed),
     });
     return authenticatedPolicy;
   }
 
   async function downloadZipFromEvent(evidence) {
     let downloadedFile = null;
+    let descriptorAuthority = null;
     const onDownloaded = (event) => { downloadedFile = event?.downloadedFile || null; };
     const httpExecutor = autoUpdater.httpExecutor;
     if (!httpExecutor || typeof httpExecutor.download !== "function") {
@@ -509,6 +739,15 @@ function createUpdateManager({
     }
     assertDownloadCapacity(downloadDirectory, evidence.zipSize);
     const originalDownload = httpExecutor.download;
+    const originalUpdateDownloaded = autoUpdater.updateDownloaded;
+    if (typeof originalUpdateDownloaded === "function") {
+      autoUpdater.updateDownloaded = async (zipFileInfo, event) => {
+        descriptorAuthority = await createDescriptorBoundMacProxy(autoUpdater, evidence, event);
+        return [];
+      };
+    } else if (!allowPathUpdaterForTests) {
+      throw new Error("MintVault updater cannot bind Squirrel.Mac to the verified ZIP descriptor");
+    }
     httpExecutor.download = async (url, destination, options = {}) => {
       if (artifactName(String(url), evidence.updateBaseUrl) !== evidence.expectedZip) {
         throw new Error("MintVault updater requested an unauthorised ZIP path");
@@ -531,8 +770,9 @@ function createUpdateManager({
     } finally {
       autoUpdater.removeListener("update-downloaded", onDownloaded);
       httpExecutor.download = originalDownload;
+      if (typeof originalUpdateDownloaded === "function") autoUpdater.updateDownloaded = originalUpdateDownloaded;
     }
-    return downloadedFile;
+    return descriptorAuthority || downloadedFile;
   }
 
   async function checkStaticMetadata(policy) {
@@ -581,15 +821,23 @@ function createUpdateManager({
         publish({ status: "update_available", version: verifiedEvidence.version });
         if (!download) return state;
         const downloadedZip = await downloadZipFromEvent(verifiedEvidence);
-        let stat;
-        try { stat = fs.lstatSync(downloadedZip || ""); } catch { stat = null; }
-        if (!stat?.isFile() || stat.isSymbolicLink() || path.basename(downloadedZip) !== verifiedEvidence.expectedZip
-            || stat.size !== verifiedEvidence.zipSize || sha256(downloadedZip) !== verifiedEvidence.zipSha256) {
-          throw new Error("Downloaded ZIP does not match the MintVault release manifest");
+        const descriptorBound = downloadedZip && typeof downloadedZip.validate === "function";
+        let fallbackAuthority = null;
+        if (!descriptorBound) {
+          if (path.basename(downloadedZip || "") !== verifiedEvidence.expectedZip) throw new Error("Downloaded ZIP does not match the MintVault release manifest");
+          fallbackAuthority = openVerifiedCandidate(downloadedZip, {
+            expectedSize: verifiedEvidence.zipSize,
+            expectedSha256: verifiedEvidence.zipSha256,
+            label: "MintVault update ZIP",
+          });
+          fallbackAuthority.close();
         }
         readyCandidate = Object.freeze({
           version: verifiedEvidence.version,
-          path: downloadedZip,
+          path: descriptorBound ? null : downloadedZip,
+          authority: descriptorBound ? downloadedZip : null,
+          filename: verifiedEvidence.expectedZip,
+          size: verifiedEvidence.zipSize,
           sha256: verifiedEvidence.zipSha256,
           policyFingerprint: verifiedEvidence.policyFingerprint,
         });
@@ -615,10 +863,24 @@ function createUpdateManager({
     if (!readyCandidate || readyCandidate.policyFingerprint !== policy.fingerprint
         || readyCandidate.version !== policy.targetVersion
         || compareVersions(readyCandidate.version, minimumVersion) < 0
-        || path.basename(readyCandidate.path) !== policy.artifacts.zip.filename
-        || sha256(readyCandidate.path) !== readyCandidate.sha256) {
+        || readyCandidate.filename !== policy.artifacts.zip.filename
+        || readyCandidate.size !== policy.artifacts.zip.size) {
       clearCandidate();
       return { ok: false, ...publish({ status: "error", error: publicError(new Error("Downloaded ZIP no longer matches authenticated policy")) }) };
+    }
+    try {
+      if (readyCandidate.authority) readyCandidate.authority.validate();
+      else {
+        const candidate = openVerifiedCandidate(readyCandidate.path, {
+          expectedSize: readyCandidate.size,
+          expectedSha256: readyCandidate.sha256,
+          label: "MintVault update ZIP",
+        });
+        candidate.close();
+      }
+    } catch (error) {
+      clearCandidate();
+      return { ok: false, ...publish({ status: "error", error: publicError(error) }) };
     }
     if (!isRestartSafe()) {
       return { ok: false, ...publish({ status: "restart_deferred", version: verifiedEvidence.version, error: "Finish the current physical capture before restarting." }) };
@@ -640,10 +902,11 @@ function createUpdateManager({
   }
 
   function setMinimumVersion(value) {
-    if (value == null || value === "") { minimumVersion = null; authenticatedPolicy = null; clearCandidate(); return; }
+    if (value == null || value === "") { minimumVersion = null; authenticatedPolicy = null; authenticatedPolicyClock = null; clearCandidate(); return; }
     parseVersion(value);
     if (minimumVersion && minimumVersion !== String(value)) {
       authenticatedPolicy = null;
+      authenticatedPolicyClock = null;
       clearCandidate();
     }
     minimumVersion = String(value);
@@ -652,6 +915,7 @@ function createUpdateManager({
   function setPolicy(value) {
     if (value == null) {
       authenticatedPolicy = null;
+      authenticatedPolicyClock = null;
       clearCandidate();
       if (enabled) autoUpdater.allowDowngrade = false;
       return null;
@@ -663,6 +927,13 @@ function createUpdateManager({
       now: now(),
     });
     if (authenticatedPolicy?.fingerprint !== next.fingerprint) clearCandidate();
+    if (authenticatedPolicy?.fingerprint !== next.fingerprint || !authenticatedPolicyClock) {
+      authenticatedPolicyClock = Object.freeze({
+        acceptedWallMs: now(),
+        acceptedMonotonicMs: monotonicNow(),
+        expiresAtMs: Date.parse(next.expiresAt),
+      });
+    }
     authenticatedPolicy = next;
     if (enabled) autoUpdater.allowDowngrade = next.operation === "ROLLBACK";
     return Object.freeze({ policyId: next.policyId, targetVersion: next.targetVersion, operation: next.operation });
@@ -699,10 +970,12 @@ function createUpdateManager({
             maxBytes: MAX_UPDATE_ARCHIVE_BYTES,
             timeoutMs: artifactTimeoutMs,
           });
-          const stat = fs.lstatSync(temporary);
-          if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== evidence.dmgSize || sha256(temporary) !== evidence.dmgSha256) {
-            throw new Error("Downloaded DMG does not match the authenticated MintVault update policy");
-          }
+          const verified = openVerifiedCandidate(temporary, {
+            expectedSize: evidence.dmgSize,
+            expectedSha256: evidence.dmgSha256,
+            label: "Approved MintVault DMG",
+          });
+          verified.close();
           fs.renameSync(temporary, destination);
           fs.chmodSync(destination, 0o600);
           readyDmgCandidate = Object.freeze({
@@ -732,17 +1005,52 @@ function createUpdateManager({
     let policy;
     try { policy = currentPolicy(); }
     catch (error) { clearCandidate(); return { ok: false, ...publish({ status: "error", error: publicError(error) }) }; }
-    let stat;
-    try { stat = fs.lstatSync(readyDmgCandidate?.path || ""); } catch { stat = null; }
     if (!readyDmgCandidate || readyDmgCandidate.policyFingerprint !== policy.fingerprint
         || readyDmgCandidate.version !== policy.targetVersion
-        || !stat?.isFile() || stat.isSymbolicLink() || stat.size !== readyDmgCandidate.size
-        || sha256(readyDmgCandidate.path) !== readyDmgCandidate.sha256) {
+        || readyDmgCandidate.size !== policy.artifacts.dmg.size
+        || readyDmgCandidate.sha256 !== policy.artifacts.dmg.sha256) {
       clearCandidate();
       return { ok: false, ...publish({ status: "error", error: publicError(new Error("Verified DMG no longer matches authenticated policy")) }) };
     }
-    const error = await openPath(readyDmgCandidate.path);
-    return error ? { ok: false, error: "macOS could not open the verified MintVault DMG." } : { ok: true };
+    let authority;
+    let sourceAuthority;
+    try {
+      sourceAuthority = openVerifiedCandidate(readyDmgCandidate.path, {
+        expectedSize: readyDmgCandidate.size,
+        expectedSha256: readyDmgCandidate.sha256,
+        label: "Approved MintVault DMG",
+      });
+      if (allowPathUpdaterForTests) {
+        sourceAuthority.close();
+        sourceAuthority = null;
+        const error = await openPath(readyDmgCandidate.path);
+        return error ? { ok: false, error: "macOS could not open the verified MintVault DMG." } : { ok: true };
+      }
+      const stat = fs.lstatSync(readyDmgCandidate.path);
+      if (stat.dev !== sourceAuthority.stat.dev || stat.ino !== sourceAuthority.stat.ino || stat.isSymbolicLink()) {
+        throw new Error("Approved MintVault DMG pathname changed before descriptor binding");
+      }
+      authority = anonymousVerifiedSnapshot(sourceAuthority, downloadDirectory, {
+        expectedSize: readyDmgCandidate.size,
+        expectedSha256: readyDmgCandidate.sha256,
+        label: "Approved MintVault DMG",
+      });
+      fs.unlinkSync(readyDmgCandidate.path);
+      sourceAuthority.close();
+      sourceAuthority = null;
+      await openDescriptorBoundDmg(authority, {
+        downloadDirectory,
+        expectedTeamIdentifier: releaseTrust.teamIdentifier,
+        openPath,
+      });
+      readyDmgCandidate = null;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, ...publish({ status: "error", error: publicError(error) }) };
+    } finally {
+      sourceAuthority?.close();
+      authority?.close();
+    }
   }
 
   return Object.freeze({
@@ -770,6 +1078,11 @@ module.exports = Object.freeze({
   _private: Object.freeze({
     fetchBoundedBytes,
     downloadBoundedFile,
+    digestDescriptor,
+    openVerifiedCandidate,
+    anonymousVerifiedSnapshot,
+    createDescriptorBoundMacProxy,
+    openDescriptorBoundDmg,
     assertDownloadCapacity,
     MAX_LATEST_BYTES,
     MAX_RELEASE_MANIFEST_BYTES,

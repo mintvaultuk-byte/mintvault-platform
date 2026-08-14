@@ -19,16 +19,15 @@
  *   }
  */
 
+const crypto = require("node:crypto");
 const fs   = require("node:fs");
-const os   = require("node:os");
 const path = require("node:path");
+const runtimePaths = require("./runtime-paths");
+const { readBoundedJson } = require("./bounded-file");
 
-// State is isolated per-instance when MINTVAULT_SCANS_DIR is set — a TEST
-// instance keeps its state under <MINTVAULT_SCANS_DIR>/app-state/, NOT the shared
-// Application Support file, so it never clobbers the live scanner's state.json.
-const APP_SUPPORT = process.env.MINTVAULT_SCANS_DIR
-  ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
-  : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+// An explicitly unpackaged TEST may be isolated under MINTVAULT_SCANS_DIR.
+// Packaged state always uses the same Application Support namespace.
+const APP_SUPPORT = runtimePaths.appSupport();
 const STATE_PATH  = path.join(APP_SUPPORT, "state.json");
 const STATE_TMP   = path.join(APP_SUPPORT, "state.json.tmp");
 
@@ -95,11 +94,53 @@ const PAUSE_DURATION_MS = 30 * 60 * 1000;
 let mem = { ...DEFAULT };
 let listeners = [];
 
+function persistAndNotify() {
+  ensureDir();
+  try {
+    fs.writeFileSync(STATE_TMP, JSON.stringify(mem, null, 2));
+    fs.renameSync(STATE_TMP, STATE_PATH);
+  } catch (err) {
+    console.error("[state] write failed:", err.message);
+  }
+  for (const fn of listeners) {
+    try { fn(mem); } catch (e) { console.error("[state] listener:", e.message); }
+  }
+  return mem;
+}
+
+function persistIdentityRetirementStrict() {
+  ensureDir();
+  fs.chmodSync(APP_SUPPORT, 0o700);
+  const temporary = `${STATE_PATH}.${process.pid}.${crypto.randomUUID()}.retirement.tmp`;
+  const descriptor = fs.openSync(temporary, "wx", 0o600);
+  try {
+    fs.writeFileSync(descriptor, JSON.stringify(mem, null, 2));
+    fs.fsyncSync(descriptor);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch {}
+    throw error;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  try {
+    fs.renameSync(temporary, STATE_PATH);
+    fs.chmodSync(STATE_PATH, 0o600);
+    const directory = fs.openSync(APP_SUPPORT, fs.constants.O_RDONLY);
+    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch {}
+    throw error;
+  }
+  for (const fn of listeners) {
+    try { fn(mem); } catch (error) { console.error("[state] listener:", error.message); }
+  }
+  return mem;
+}
+
 function load() {
   ensureDir();
   try {
-    const raw = fs.readFileSync(STATE_PATH, "utf8");
-    const parsed = JSON.parse(raw);
+    const parsed = readBoundedJson(STATE_PATH, { maximumBytes: 2 * 1024 * 1024, label: "Scanner state" });
     mem = { ...DEFAULT, ...parsed };
     // sessionPaired resets at process boot — a "session" is one run.
     mem.sessionPaired = 0;
@@ -132,17 +173,17 @@ function set(patch) {
   mem = { ...mem, ...patch, updatedAt: new Date().toISOString() };
   // Atomic write: tmp → rename. Avoids torn reads if the renderer polls
   // mid-write (it shouldn't — IPC-only — but defence in depth).
-  ensureDir();
-  try {
-    fs.writeFileSync(STATE_TMP, JSON.stringify(mem, null, 2));
-    fs.renameSync(STATE_TMP, STATE_PATH);
-  } catch (err) {
-    console.error("[state] write failed:", err.message);
-  }
-  for (const fn of listeners) {
-    try { fn(mem); } catch (e) { console.error("[state] listener:", e.message); }
-  }
-  return mem;
+  return persistAndNotify();
+}
+
+function resetForIdentityRetirement() {
+  const preferences = {
+    autoOpenOnError: mem.autoOpenOnError !== false,
+    soundEnabled: mem.soundEnabled !== false,
+    loginItemConfigured: mem.loginItemConfigured === true,
+  };
+  mem = { ...DEFAULT, ...preferences, updatedAt: new Date().toISOString() };
+  return persistIdentityRetirementStrict();
 }
 
 function pushRecent(entry) {
@@ -186,4 +227,7 @@ function onChange(fn) {
   return () => { listeners = listeners.filter(x => x !== fn); };
 }
 
-module.exports = { load, get, set, pushRecent, onChange, setPaused, isPaused, setSetting, PAUSE_DURATION_MS, STATE_PATH };
+module.exports = {
+  load, get, set, resetForIdentityRetirement, pushRecent, onChange, setPaused, isPaused, setSetting, PAUSE_DURATION_MS, STATE_PATH,
+  _private: { persistIdentityRetirementStrict },
+};

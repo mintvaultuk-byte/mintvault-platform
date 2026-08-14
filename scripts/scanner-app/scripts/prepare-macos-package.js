@@ -10,6 +10,7 @@ const IDENTITY_ENTITLEMENTS = path.join(GENERATED, "identity-helper.entitlements
 const PREPARATION_RECORD = path.join(GENERATED, "package-preparation.json");
 const RELEASE_TEAM_PIN_JS = path.join(GENERATED, "release-team-pin.js");
 const RELEASE_TEAM_PIN_SWIFT = path.join(GENERATED, "release-team-pin.swift");
+const RELEASE_TEAM_PIN_HEADER = path.join(GENERATED, "release-team-pin.h");
 const STALE_NATIVE_OUTPUTS = Object.freeze([
   path.join(ROOT, "native", "bin", "mv-capture-helper"),
   path.join(ROOT, "native", "bin", "helper-manifest.json"),
@@ -29,6 +30,10 @@ function writeReleasePins({ teamIdentifier, mode }) {
   contract.atomicWrite(
     RELEASE_TEAM_PIN_SWIFT,
     `import Foundation\n\nenum MintVaultReleaseAuthority {\n  static let teamIdentifier = ${JSON.stringify(teamIdentifier)}\n  static let packageMode = ${JSON.stringify(mode)}\n}\n`,
+  );
+  contract.atomicWrite(
+    RELEASE_TEAM_PIN_HEADER,
+    `#define MINTVAULT_TEAM_IDENTIFIER @${JSON.stringify(teamIdentifier)}\n#define MINTVAULT_RELEASE_MODE ${mode === "release" ? 1 : 0}\n`,
   );
   return Object.freeze(pin);
 }
@@ -100,9 +105,8 @@ function sealPreparation(env = process.env) {
       : path.join(ROOT, "native", "mv-identity-helper.swift");
     const digest = contract.run("/usr/bin/shasum", ["-a", "256", helperPath]).trim().split(/\s+/)[0];
     const sourceDigest = contract.run("/usr/bin/shasum", ["-a", "256", sourcePath]).trim().split(/\s+/)[0];
-    const authorityDigest = name === "identity"
-      ? contract.run("/usr/bin/shasum", ["-a", "256", RELEASE_TEAM_PIN_SWIFT]).trim().split(/\s+/)[0]
-      : null;
+    const authorityPath = name === "identity" ? RELEASE_TEAM_PIN_SWIFT : RELEASE_TEAM_PIN_HEADER;
+    const authorityDigest = contract.run("/usr/bin/shasum", ["-a", "256", authorityPath]).trim().split(/\s+/)[0];
     const expectedBinding = {
       preparationId: preparation.preparationId,
       packageMode: preparation.mode,
@@ -110,7 +114,7 @@ function sealPreparation(env = process.env) {
       teamIdentifier: preparation.teamIdentifier,
     };
     if (digest !== manifest.sha256 || sourceDigest !== manifest.sourceSha256
-        || (name === "identity" && authorityDigest !== manifest.authoritySourceSha256)
+        || authorityDigest !== manifest.authoritySourceSha256
         || JSON.stringify(manifest.packageBinding) !== JSON.stringify(expectedBinding)) {
       throw new Error(`${name} helper is stale or not bound to this package preparation`);
     }
@@ -123,4 +127,4 @@ function sealPreparation(env = process.env) {
 
 if (require.main === module) process.stdout.write(`${JSON.stringify({ ok: true, ...prepare() })}\n`);
 
-module.exports = { prepare, sealPreparation, sourceState, writeReleasePins, ROOT, GENERATED, RELEASE_TRUST, IDENTITY_ENTITLEMENTS, PREPARATION_RECORD, RELEASE_TEAM_PIN_JS, RELEASE_TEAM_PIN_SWIFT, STALE_NATIVE_OUTPUTS };
+module.exports = { prepare, sealPreparation, sourceState, writeReleasePins, ROOT, GENERATED, RELEASE_TRUST, IDENTITY_ENTITLEMENTS, PREPARATION_RECORD, RELEASE_TEAM_PIN_JS, RELEASE_TEAM_PIN_SWIFT, RELEASE_TEAM_PIN_HEADER, STALE_NATIVE_OUTPUTS };

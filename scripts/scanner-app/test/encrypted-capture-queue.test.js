@@ -109,6 +109,98 @@ test("metadata substitution and ciphertext tampering fail authentication", async
   await assert.rejects(queue.decryptToFile(sealed.artifact, queue.scratchPath(sealed)), QueueCorruptionError);
 });
 
+test("authenticated container length rejects truncation, append and sparse extension before plaintext output", async (t) => {
+  const { baseDir, queue } = fixture(t);
+  const source = path.join(baseDir, "master.tif");
+  fs.writeFileSync(source, Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), crypto.randomBytes(1024)]));
+  const sealed = await queue.attachFile(queue.upsert(entry()), source);
+  const artifactPath = queue.artifactPath(sealed.artifact);
+  const original = fs.readFileSync(artifactPath);
+
+  for (const [name, mutate] of [
+    ["short", () => fs.writeFileSync(artifactPath, original.subarray(0, original.length - 1))],
+    ["long", () => fs.writeFileSync(artifactPath, Buffer.concat([original, Buffer.from([0])]))],
+    ["sparse", () => { fs.writeFileSync(artifactPath, original); fs.truncateSync(artifactPath, original.length + 1024 * 1024 * 1024); }],
+  ]) {
+    mutate();
+    const destination = path.join(baseDir, `${name}.plain`);
+    await assert.rejects(queue.decryptToFile(sealed.artifact, destination), /container size does not match/);
+    assert.equal(fs.existsSync(destination), false, `${name} container must fail before output is opened`);
+  }
+});
+
+test("synchronous Preview reads reject an extended container before whole-file allocation", async (t) => {
+  const { baseDir, queue } = fixture(t);
+  const source = path.join(baseDir, "preview.jpg");
+  fs.writeFileSync(source, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), crypto.randomBytes(1024)]));
+  const sealed = await queue.attachFile(queue.upsert(entry()), source, { kind: "PREVIEW_JPEG", mimeType: "image/jpeg" });
+  const artifactPath = queue.artifactPath(sealed.previewArtifact);
+  const originalSize = fs.statSync(artifactPath).size;
+  fs.truncateSync(artifactPath, originalSize + 1024 * 1024 * 1024);
+  assert.throws(() => queue.readArtifactSync(sealed.previewArtifact, 12 * 1024 * 1024), /container size does not match/);
+});
+
+test("streaming decrypt consumes the already-verified descriptor across a pathname swap", async (t) => {
+  const { baseDir, queue } = fixture(t);
+  const source = path.join(baseDir, "master.tif");
+  const plaintext = Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), crypto.randomBytes(2048)]);
+  fs.writeFileSync(source, plaintext);
+  const sealed = await queue.attachFile(queue.upsert(entry()), source);
+  const artifactPath = queue.artifactPath(sealed.artifact);
+  queue.afterArtifactOpen = () => {
+    fs.renameSync(artifactPath, `${artifactPath}.verified`);
+    fs.writeFileSync(artifactPath, Buffer.alloc(32, 0x41));
+    queue.afterArtifactOpen = () => {};
+  };
+  const destination = path.join(baseDir, "recovered.tif");
+  await queue.decryptToFile(sealed.artifact, destination);
+  assert.deepEqual(fs.readFileSync(destination), plaintext);
+});
+
+test("synchronous Preview decrypt consumes the already-verified descriptor across a pathname swap", async (t) => {
+  const { baseDir, queue } = fixture(t);
+  const source = path.join(baseDir, "preview.jpg");
+  const plaintext = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), crypto.randomBytes(2048)]);
+  fs.writeFileSync(source, plaintext);
+  const sealed = await queue.attachFile(queue.upsert(entry()), source, { kind: "PREVIEW_JPEG", mimeType: "image/jpeg" });
+  const artifactPath = queue.artifactPath(sealed.previewArtifact);
+  queue.afterArtifactOpen = () => {
+    fs.renameSync(artifactPath, `${artifactPath}.verified`);
+    const substitute = fs.openSync(artifactPath, "w", 0o600);
+    try { fs.ftruncateSync(substitute, 1024 * 1024 * 1024); } finally { fs.closeSync(substitute); }
+    queue.afterArtifactOpen = () => {};
+  };
+  assert.deepEqual(queue.readArtifactSync(sealed.previewArtifact, 12 * 1024 * 1024), plaintext);
+});
+
+test("encryption streams the attested descriptor even when the plaintext pathname is replaced after hashing", async (t) => {
+  const { baseDir, queue } = fixture(t);
+  const source = path.join(baseDir, "master.tif");
+  const plaintext = Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), crypto.randomBytes(128 * 1024)]);
+  const digest = crypto.createHash("sha256").update(plaintext).digest("hex");
+  fs.writeFileSync(source, plaintext, { mode: 0o600 });
+  const descriptor = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  queue.afterSourceHash = () => {
+    fs.renameSync(source, `${source}.attested`);
+    fs.writeFileSync(source, Buffer.alloc(plaintext.length, 0x43), { mode: 0o600 });
+    queue.afterSourceHash = () => {};
+  };
+  let sealed;
+  try {
+    sealed = await queue.attachFile(queue.upsert(entry()), source, {
+      sourceDescriptor: descriptor,
+      expectedSha256: digest,
+      expectedByteLength: plaintext.length,
+    });
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  const recovered = path.join(baseDir, "recovered.tif");
+  await queue.decryptToFile(sealed.artifact, recovered);
+  assert.deepEqual(fs.readFileSync(recovered), plaintext);
+  assert.equal(sealed.artifact.sha256, digest);
+});
+
 test("index routing, validation, phase, and lifecycle tampering fails authentication", async (t) => {
   const { baseDir, queue } = fixture(t);
   const source = path.join(baseDir, "master.tif");

@@ -5,12 +5,14 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const operations = require("../lib/semantic-operations");
+const { semanticAuthority } = require("./semantic-authority-fixture");
 
 function storeFixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-semantic-operations-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, "store.json");
-  return { file, store: operations._private.createStore(file) };
+  const authority = semanticAuthority();
+  return { file, authority, store: operations._private.createStore(file, authority) };
 }
 
 test("begin durably binds one UUID to semantic scope before returning", (t) => {
@@ -53,25 +55,65 @@ test("stored payload tampering fails closed", (t) => {
   const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
   parsed.operations[0].payload.locationId = "location-b";
   fs.writeFileSync(file, JSON.stringify(parsed));
-  assert.throws(() => store.read(), /payload does not match/);
+  assert.throws(() => store.read(), /authentication failed/);
+});
+
+test("recomputed payload digests, lifecycle flips and deletion after pending fail closed", (t) => {
+  const { file, store } = storeFixture(t);
+  store.begin({ key: "new-card:one", type: "CARD_JOB_NEW", payload: { cardName: "one" } });
+  const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  parsed.operations[0].payload.cardName = "attacker";
+  parsed.operations[0].payloadFingerprint = operations._private.fingerprint(parsed.operations[0].payload);
+  parsed.operations[0].state = "COMPLETED";
+  fs.writeFileSync(file, JSON.stringify(parsed));
+  assert.throws(() => store.read(), /authentication failed/);
+  fs.unlinkSync(file);
+  assert.throws(() => store.read(), /missing after initialization/);
+});
+
+test("a prior valid MACed ledger and wrapped-key snapshot cannot roll back device high-water", (t) => {
+  const { file, store } = storeFixture(t);
+  const first = store.begin({ key: "new-card:first", type: "CARD_JOB_NEW", payload: { cardName: "first" } });
+  const oldLedger = fs.readFileSync(file);
+  const oldKey = fs.readFileSync(store.keyPath);
+  store.complete(first.id, "card-job:first");
+  store.begin({ key: "new-card:second", type: "CARD_JOB_NEW", payload: { cardName: "second" } });
+  fs.writeFileSync(file, oldLedger);
+  fs.writeFileSync(store.keyPath, oldKey);
+  assert.throws(() => store.read(), /device high-water/);
 });
 
 test("completed history compacts without deleting any unresolved operation", (t) => {
-  const { file, store } = storeFixture(t);
-  const records = Array.from({ length: operations._private.MAX_OPERATIONS }, (_, index) => {
-    const payload = { index };
-    return {
-      id: crypto.randomUUID(), key: `completed:${index}`, type: "CARD_JOB_NEW",
-      payloadFingerprint: operations._private.fingerprint(payload), payload,
-      state: "COMPLETED", resultReference: `job-${index}`,
-      createdAt: new Date(index * 1000).toISOString(), completedAt: new Date(index * 1000 + 1).toISOString(),
-    };
-  });
-  records[0] = { ...records[0], state: "PENDING", resultReference: null, completedAt: null };
-  operations._private.durableWrite(file, { schemaVersion: 1, operations: records });
+  const { store } = storeFixture(t);
+  const pending = store.begin({ key: "pending:0", type: "CARD_JOB_NEW", payload: { index: 0 } });
+  for (let index = 1; index < operations._private.MAX_OPERATIONS; index += 1) {
+    const record = store.begin({ key: `completed:${index}`, type: "CARD_JOB_NEW", payload: { index } });
+    store.complete(record.id, `job-${index}`);
+  }
   store.begin({ key: "next-card", type: "CARD_JOB_NEW", payload: { index: "next" } });
   const retained = store.read().operations;
   assert.equal(retained.filter((operation) => operation.state === "PENDING").length, 2);
-  assert.equal(retained.some((operation) => operation.id === records[0].id), true);
+  assert.equal(retained.some((operation) => operation.id === pending.id), true);
   assert.ok(retained.length <= operations._private.RETAIN_COMPLETED + 2);
+});
+
+test("identity retirement zeroes the cached MAC key and creates a restart-readable fresh namespace", (t) => {
+  const { file, authority, store } = storeFixture(t);
+  const old = store.begin({ key: "old-identity:card", type: "CARD_JOB_NEW", payload: { cardName: "old" } });
+  store.complete(old.id, "card-job:old");
+  const retirementFiles = store.retirementFiles();
+  assert.equal(authority.wrappedKeys.length, 1);
+  const oldKey = Buffer.from(authority.wrappedKeys[0]);
+
+  store.completeIdentityRetirement();
+  for (const candidate of retirementFiles) fs.unlinkSync(candidate);
+  authority.resetForNewIdentity();
+
+  store.begin({ key: "new-identity:card", type: "CARD_JOB_NEW", payload: { cardName: "new" } });
+  assert.equal(authority.wrappedKeys.length, 2);
+  assert.equal(authority.wrappedKeys[1].equals(oldKey), false);
+  assert.equal(fs.existsSync(store.keyPath), true);
+
+  const restarted = operations._private.createStore(file, authority);
+  assert.equal(restarted.read().operations.some((operation) => operation.key === "new-identity:card"), true);
 });

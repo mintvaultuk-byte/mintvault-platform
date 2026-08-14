@@ -48,6 +48,7 @@ const els = {
   rescanErrorBtn: document.getElementById("rescanErrorBtn"),
   nextCardBtn: document.getElementById("nextCardBtn"),
   newCardBtn: document.getElementById("newCardBtn"),
+  cancelCardBtn: document.getElementById("cancelCardBtn"),
   newCardError: document.getElementById("newCardError"),
   cardCompletePanel: document.getElementById("cardCompletePanel"),
   cardCompleteTitle: document.getElementById("cardCompleteTitle"),
@@ -118,6 +119,7 @@ const STATE_LABELS = {
   success: "Capture accepted",
   error: "Capture needs attention",
   storage_pressure: "Capture paused — free disk space is too low",
+  cancel_pending: "Cancelling Card Job…",
 };
 
 let lastState = null;
@@ -322,7 +324,7 @@ function renderStationSetup(next) {
   const progressOrder = ["account", "mfa", "station", "profile", "ready"];
   const currentStep = stage === "sign_in" ? "account"
     : ["mfa", "mfa_enrolment_required"].includes(stage) ? "mfa"
-      : ["register", "pending", "rejected", "cancelled", "expired", "suspended", "revoked", "station_unavailable", "identity_recovery_required", "no_location"].includes(stage) ? "station"
+      : ["register", "pending", "rejected", "cancelled", "expired", "identity_retired", "suspended", "revoked", "station_unavailable", "identity_recovery_required", "no_location"].includes(stage) ? "station"
         : ["profile_setup_required", "profile_setup_locked", "profile_check", "scanner_disconnected", "scanner_checking"].includes(stage) ? "profile"
           : stage === "active" ? "ready" : "account";
   const currentIndex = progressOrder.indexOf(currentStep);
@@ -364,6 +366,9 @@ function renderStationSetup(next) {
   } else if (stage === "identity_recovery_required") {
     els.stationSetupTitle.textContent = "Station identity recovery required";
     els.stationSetupText.textContent = "MintVault cannot prove this Mac's enrolled identity. Scanning and re-registration are paused. Contact a MintVault Super Admin.";
+  } else if (stage === "identity_retired") {
+    els.stationSetupTitle.textContent = "Station identity securely retired";
+    els.stationSetupText.textContent = "The ended registration and its local identity namespace were removed. Sign in again to request a fresh station identity.";
   } else if (stage === "mfa_enrolment_required") {
     els.stationSetupTitle.textContent = "MFA setup required";
     els.stationSetupText.textContent = "Set up MFA in the MintVault Partner dashboard, then sign in to this Scanner again.";
@@ -746,6 +751,10 @@ function renderCaptureActions(state) {
   }
   // NEW CARD is only sensible when this station is not mid-card.
   els.newCardBtn.disabled = Boolean(active) || actionInFlight;
+  const cancelEligible = active?.cancelEligible === true
+    && active?.side === "front"
+    && ["awaiting_scan", "preview_ready", "preview_error", "cancel_pending"].includes(stage);
+  setActionButton(els.cancelCardBtn, "CANCEL CARD", cancelEligible, actionInFlight);
 
   // Keep the final evidence action visible in every state. A disabled,
   // explained SCAN CARD makes the target-bound rule clear without implying
@@ -1044,6 +1053,11 @@ els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((prev
 els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.nextCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.acknowledgeCardRegistered()));
+els.cancelCardBtn.addEventListener("click", async () => {
+  if (actionInFlight || !lastState?.activeCapture?.cancelEligible) return;
+  if (!confirm("Cancel this Card Job before its first accepted side?\n\nMintVault will release its one reserved Grading Credit. This cannot cancel a Card Job that already has accepted evidence.")) return;
+  await runCaptureAction(() => window.scanner.cancelCard());
+});
 
 /**
  * P6 — NEW CARD.

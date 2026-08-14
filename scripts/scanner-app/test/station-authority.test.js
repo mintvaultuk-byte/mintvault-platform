@@ -25,6 +25,10 @@ test("human authority distinguishes offline, MFA, enrolment and least privilege"
 test("station status and physical action gates fail closed", () => {
   assert.deepEqual(authority.stationStage("ACTIVE"), { stage: "active" });
   assert.deepEqual(authority.stationStage("REJECTED"), { stage: "rejected", terminalIdentity: true });
+  assert.deepEqual(authority.stationStage("CANCELLED"), { stage: "cancelled", terminalIdentity: true });
+  assert.deepEqual(authority.stationStage("EXPIRED"), { stage: "expired", terminalIdentity: true });
+  assert.deepEqual(authority.stationStage("SUSPENDED"), { stage: "suspended" });
+  assert.deepEqual(authority.stationStage("REVOKED"), { stage: "revoked" });
   assert.equal(authority.stationStage("unexpected").stage, "degraded");
   assert.equal(authority.operationalDenial({ stage: "active" }), null);
   assert.deepEqual(authority.operationalDenial({ stage: "revoked" }), {
@@ -81,7 +85,7 @@ test("shift change remains reachable in every state that still has a local human
 test("every new physical-operation IPC checks live authority before touching the watcher", () => {
   const main = fs.readFileSync(path.resolve(__dirname, "..", "main.js"), "utf8");
   for (const handler of ["authorise-fix", "start-new-card", "scan-target", "run-positioning-preview", "apply-positioning-preview", "accept-capture-preview", "rescan-capture-preview"]) {
-    const start = main.indexOf(`ipcMain.handle("${handler}"`);
+    const start = main.indexOf(`registerIpc("${handler}"`);
     assert.notEqual(start, -1, `${handler} handler exists`);
     const end = main.indexOf("\n  });", start);
     const body = main.slice(start, end);
@@ -92,7 +96,7 @@ test("every new physical-operation IPC checks live authority before touching the
     const watcherUse = body.indexOf("watcher");
     if (watcherUse !== -1) assert.ok(gate < watcherUse, `${handler} gates before watcher access`);
   }
-  const applyStart = main.indexOf('ipcMain.handle("apply-positioning-preview"');
+  const applyStart = main.indexOf('registerIpc("apply-positioning-preview"');
   const applyBody = main.slice(applyStart, main.indexOf("\n  });", applyStart));
   assert.match(applyBody, /requireLiveProfileSetupAuthority\(\)/);
   assert.match(applyBody, /submitPositioningCalibration\([\s\S]*stationClient\.saveCalibration\(candidate\)/);
@@ -101,8 +105,19 @@ test("every new physical-operation IPC checks live authority before touching the
   assert.match(main, /webContents\.send\("station-setup-update", setup\)/);
   assert.match(main, /scannerHealth\?\.status \|\| "checking"\) === "checking"\) return/);
   assert.match(main, /lockedHardware = lide400\.currentLockedProfile\(\)\?\.scannerHardware/);
-  assert.match(main, /async function stationSetupState\(options\) \{\s*if \(!stationIdentity\.hasOperatorSession\(\)\) \{\s*return stationAuthority\.withLocalSession\(\{ ok: true, stage: "sign_in" \}, false\)/s);
+  assert.match(main, /async function stationSetupState\(options\) \{[\s\S]*watcherBootDeferredForRetirement[\s\S]*startDeferredWatcherAfterRetirement\(\)/);
+  assert.match(main, /async function stationSetupState\(options\) \{[\s\S]*if \(!stationIdentity\.hasOperatorSession\(\)\) \{\s*return stationAuthority\.withLocalSession\(\{ ok: true, stage: "sign_in" \}, false\)/);
   assert.match(main, /const replay = stationAuthorityLatch\.current\(\);\s*if \(replay\) return stationAuthority\.withLocalSession/s);
+  assert.match(main, /async function cancelCurrentCard\(\)[\s\S]*beginCardCancellation\(\)[\s\S]*requireLiveOperationalAuthority\(\)[\s\S]*cancelCardOperation\.beginOrResume/);
+  assert.match(main, /terminalIdentityRetirement\.retire\(\{[\s\S]*status: station\.status,[\s\S]*stationCode: station\.stationCode,[\s\S]*publicKeyFingerprint: station\.publicKeyFingerprint/);
+  assert.ok(
+    main.indexOf("if (resolved.terminalIdentity)") < main.indexOf("if (!versionTuple(station.minimumSupportedVersion))"),
+    "terminal credentials are handled before operational version/profile policy",
+  );
+  assert.match(main, /terminalIdentityRetirement\.recoverIfRetired\(\{ watcher \}\)[\s\S]*watcher\.start\(\)/);
+  assert.match(main, /retirementRecovery\.awaitingTerminalReproof[\s\S]*watcherBootDeferredForRetirement = true/);
+  assert.match(main, /if \(!watcherBootDeferredForRetirement\) await watcher\.start\(\)/);
+  assert.doesNotMatch(main, /allowIdentityRetirementPending/);
 });
 
 test("a signed station replay rejection latches fail closed until authenticated resync", () => {
@@ -115,5 +130,8 @@ test("a signed station replay rejection latches fail closed until authenticated 
   latch.observe({ ok: true, status: 200, body: { ok: true } });
   assert.equal(latch.current().stage, "replay_state_desync");
   latch.clearAfterResync();
+  assert.equal(latch.current(), null);
+  latch.observe({ ok: false, status: 409, body: { error: { code: "station_replay" } } });
+  latch.clearAfterIdentityRetirement();
   assert.equal(latch.current(), null);
 });

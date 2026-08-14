@@ -21,6 +21,16 @@ test("station UI keeps final Scan visible but target-gated", () => {
   assert.match(renderer, /STEP 2 — FLIP THE CARD/);
 });
 
+test("CANCEL CARD is server-derived and visible only before accepted evidence", () => {
+  const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
+  assert.match(html, /id="cancelCardBtn" hidden>CANCEL CARD/);
+  assert.match(renderer, /active\?\.cancelEligible === true[\s\S]*active\?\.side === "front"[\s\S]*\["awaiting_scan", "preview_ready", "preview_error", "cancel_pending"\]\.includes\(stage\)/);
+  assert.match(renderer, /window\.scanner\.cancelCard\(\)/);
+  assert.match(preload, /cancelCard: \(\) => ipcRenderer\.invoke\("cancel-card"\)/);
+  assert.match(main, /cancelCardOperation\.beginOrResume\(cancellation\.target\)[\s\S]*server\.cancelCardJob\(operation\)[\s\S]*validateCancellation/);
+  assert.doesNotMatch(preload, /cancelCard: \(payload\)/);
+});
+
 test("normal placement Preview is a card-centred display crop while full platen and calibration stay secondary", () => {
   assert.match(html, /id="positioningCardPreviewViewport"/);
   assert.match(html, /id="positioningFullPreview"/);
@@ -45,6 +55,7 @@ test("profile setup is a service-only guided appliance flow and locks the underl
   assert.match(renderer, /sibling\.inert = !active/);
   assert.match(main, /requireLiveProfileSetupAuthority\(\)[\s\S]*submitPositioningCalibration\([\s\S]*saveCalibration\(candidate\)/);
   assert.match(renderer, /stage === "profile_check"[\s\S]*Scanner profile recovery required/);
+  assert.match(renderer, /stage === "identity_retired"[\s\S]*Station identity securely retired/);
 });
 
 test("SHIFT CHANGE immediately clears only the human session and keeps station/evidence custody", () => {

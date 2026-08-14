@@ -5,11 +5,16 @@ const os = require("node:os");
 const path = require("node:path");
 const semanticOperations = require("../lib/semantic-operations");
 const { _private } = require("../lib/enrolment-operation");
+const { semanticAuthority } = require("./semantic-authority-fixture");
+
+const firstKey = require("node:crypto").generateKeyPairSync("ed25519").publicKey;
+const firstPem = firstKey.export({ format: "pem", type: "spki" }).toString();
+const firstFingerprint = require("node:crypto").createHash("sha256").update(firstKey.export({ format: "der", type: "spki" })).digest("hex");
 
 function payload(overrides = {}) {
   return {
-    publicKeyFingerprint: "a".repeat(64),
-    publicKeyPem: "-----BEGIN PUBLIC KEY-----\nfixture\n-----END PUBLIC KEY-----\n",
+    publicKeyFingerprint: firstFingerprint,
+    publicKeyPem: firstPem,
     installationFingerprint: "b".repeat(64),
     installationId: "install-1",
     identitySchemaVersion: 2,
@@ -23,16 +28,17 @@ test("enrolment resumes exact stored payload across upgrade and UI drift", (t) =
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-enrolment-operation-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, "operations.json");
-  const first = _private.createCoordinator(semanticOperations._private.createStore(file));
+  const authority = semanticAuthority();
+  const first = _private.createCoordinator(semanticOperations._private.createStore(file, authority));
   const operation = first.beginOrResume(payload());
 
-  const restarted = _private.createCoordinator(semanticOperations._private.createStore(file));
+  const restarted = _private.createCoordinator(semanticOperations._private.createStore(file, authority));
   const replay = restarted.beginOrResume(payload({ appVersion: "2.0.0", locationId: "location-b" }));
   assert.equal(replay.id, operation.id);
   assert.equal(replay.payload.appVersion, "1.2.1");
   assert.equal(replay.payload.locationId, "location-a");
 
-  assert.throws(() => restarted.beginOrResume(payload({ publicKeyFingerprint: "c".repeat(64) })), {
+  assert.throws(() => restarted.beginOrResume(payload({ installationFingerprint: "c".repeat(64) })), {
     code: "IDENTITY_RECOVERY_REQUIRED",
   });
   // Only an authoritative successful station result closes the attempt before
@@ -41,4 +47,10 @@ test("enrolment resumes exact stored payload across upgrade and UI drift", (t) =
   const corrected = restarted.beginOrResume(payload({ locationId: "location-b" }));
   assert.notEqual(corrected.id, operation.id);
   assert.equal(corrected.payload.locationId, "location-b");
+});
+
+test("enrolment rejects PEM substitution even when the attacker preserves the claimed fingerprint", () => {
+  const substitute = require("node:crypto").generateKeyPairSync("ed25519").publicKey
+    .export({ format: "pem", type: "spki" }).toString();
+  assert.throws(() => _private.assertPayload(payload({ publicKeyPem: substitute })), /does not match its fingerprint/);
 });

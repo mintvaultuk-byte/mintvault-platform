@@ -7,12 +7,12 @@ const HELPER_FILENAME = "mv-capture-helper";
 const MANIFEST_FILENAME = "helper-manifest.json";
 const APP_IDENTIFIER = "com.mintvault.scanner";
 const HELPER_IDENTIFIER = "com.mintvault.scanner.capture-helper";
-const HELPER_VERSION = "1.0.1";
+const HELPER_VERSION = "1.0.2";
 const HELPER_PROTOCOL_VERSION = 1;
 const IDENTITY_HELPER_FILENAME = "mv-identity-helper";
 const IDENTITY_MANIFEST_FILENAME = "identity-helper-manifest.json";
 const IDENTITY_HELPER_IDENTIFIER = "com.mintvault.scanner.identity-helper";
-const IDENTITY_HELPER_VERSION = "1.1.0";
+const IDENTITY_HELPER_VERSION = "1.1.2";
 const IDENTITY_HELPER_PROTOCOL_VERSION = 1;
 const MANIFEST_SCHEMA_VERSION = 1;
 const MINIMUM_MACOS = "12.0";
@@ -25,33 +25,47 @@ function fail(message) {
   throw new Error(`Capture helper integrity check failed: ${message}`);
 }
 
-function configureRuntime({ isPackaged, resourcesPath, execPath, expectedTeamIdentifier = null }) {
+function configureRuntime({ isPackaged, resourcesPath, execPath, expectedTeamIdentifier = null, packageMode = null }) {
   if (typeof isPackaged !== "boolean") fail("packaged runtime state is unavailable");
   if (!path.isAbsolute(String(resourcesPath || ""))) fail("Electron resources path is invalid");
   if (!path.isAbsolute(String(execPath || ""))) fail("Electron executable path is invalid");
   if (isPackaged && !/^[A-Z0-9]{10}$/.test(String(expectedTeamIdentifier || ""))) {
     fail("packaged release has no pinned MintVault Team Identifier");
   }
+  if (isPackaged && !["local", "release"].includes(packageMode)) fail("packaged release mode is unavailable");
   configuredRuntime = Object.freeze({
     isPackaged,
     resourcesPath: path.resolve(resourcesPath),
     execPath: path.resolve(execPath),
     expectedTeamIdentifier: isPackaged ? expectedTeamIdentifier : null,
+    packageMode: isPackaged ? packageMode : "development",
   });
 }
 
-function loadReleaseTrust(resourcesPath, expectedTeamIdentifier) {
+function loadReleaseTrust(resourcesPath, expectedPin, expectedVersion) {
   const trustPath = path.join(path.resolve(resourcesPath), "release-trust.json");
-  readRegularFile(trustPath, "release trust contract", MAX_MANIFEST_BYTES);
   let trust;
-  try { trust = JSON.parse(fs.readFileSync(trustPath, "utf8")); }
+  try { trust = JSON.parse(readRegularFile(trustPath, "release trust contract", MAX_MANIFEST_BYTES).bytes.toString("utf8")); }
   catch { fail("release trust contract is not valid JSON"); }
-  if (trust?.schemaVersion !== 1 || trust.appIdentifier !== APP_IDENTIFIER
-      || !/^[A-Z0-9]{10}$/.test(String(expectedTeamIdentifier || ""))
-      || trust.teamIdentifier !== expectedTeamIdentifier) {
-    fail("release trust contract has no valid MintVault Team Identifier");
+  const exactKeys = ["appIdentifier", "architecture", "minimumMacOS", "packageMode", "schemaVersion", "teamIdentifier", "updateBaseUrl", "version"];
+  if (!expectedPin || expectedPin.schemaVersion !== 1 || expectedPin.appIdentifier !== APP_IDENTIFIER
+      || !["local", "release"].includes(expectedPin.packageMode)
+      || !/^[A-Z0-9]{10}$/.test(String(expectedPin.teamIdentifier || ""))
+      || trust?.schemaVersion !== 1 || trust.appIdentifier !== APP_IDENTIFIER
+      || JSON.stringify(Object.keys(trust).sort()) !== JSON.stringify(exactKeys)
+      || trust.teamIdentifier !== expectedPin.teamIdentifier || trust.packageMode !== expectedPin.packageMode
+      || trust.architecture !== "arm64" || trust.minimumMacOS !== MINIMUM_MACOS
+      || trust.version !== expectedVersion || !/^\d+\.\d+\.\d+$/.test(String(trust.version || ""))) {
+    fail("release trust contract does not match the independently signed package authority");
   }
-  return Object.freeze({ teamIdentifier: trust.teamIdentifier });
+  let updateBase;
+  try { updateBase = new URL(String(trust.updateBaseUrl || "")); }
+  catch { fail("release trust update origin is invalid"); }
+  if (updateBase.protocol !== "https:" || updateBase.username || updateBase.password || updateBase.search || updateBase.hash
+      || (trust.packageMode === "release" && (updateBase.hostname.endsWith(".invalid") || updateBase.hostname === "localhost"))) {
+    fail("release trust update origin is invalid");
+  }
+  return Object.freeze({ ...trust, updateBaseUrl: updateBase.toString().replace(/\/$/, "") });
 }
 
 function resolvePaths() {
@@ -70,30 +84,42 @@ function resolvePaths() {
 }
 
 function readRegularFile(filePath, description, maxBytes = Number.MAX_SAFE_INTEGER) {
-  let stat;
+  let descriptor;
   try {
-    stat = fs.lstatSync(filePath);
+    descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   } catch {
+    try {
+      if (fs.lstatSync(filePath).isSymbolicLink()) fail(`${description} must be a regular file, not a link`);
+    } catch (error) {
+      if (String(error?.message || "").startsWith("Capture helper integrity check failed:")) throw error;
+    }
     fail(`${description} is missing`);
   }
-  if (stat.isSymbolicLink() || !stat.isFile()) fail(`${description} must be a regular file, not a link`);
-  if (stat.size > maxBytes) fail(`${description} exceeds its size limit`);
-  let real;
   try {
-    real = fs.realpathSync.native(filePath);
-  } catch {
-    fail(`${description} cannot be resolved`);
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.nlink !== 1) fail(`${description} must be a regular file, not a link`);
+    if (stat.size < 1 || stat.size > maxBytes) fail(`${description} exceeds its size limit`);
+    const bytes = Buffer.allocUnsafe(stat.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) fail(`${description} changed while being read`);
+      offset += count;
+    }
+    const after = fs.fstatSync(descriptor);
+    if (after.dev !== stat.dev || after.ino !== stat.ino || after.nlink !== 1 || after.size !== stat.size) {
+      fail(`${description} changed while being read`);
+    }
+    return Object.freeze({ stat, bytes });
+  } finally {
+    fs.closeSync(descriptor);
   }
-  const expectedReal = path.join(fs.realpathSync.native(path.dirname(filePath)), path.basename(filePath));
-  if (real !== expectedReal) fail(`${description} resolved outside its exact packaged path`);
-  return stat;
 }
 
 function readManifest(manifestPath, expected) {
-  readRegularFile(manifestPath, "helper manifest", MAX_MANIFEST_BYTES);
   let manifest;
   try {
-    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(readRegularFile(manifestPath, "helper manifest", MAX_MANIFEST_BYTES).bytes.toString("utf8"));
   } catch {
     fail("helper manifest is not valid JSON");
   }
@@ -103,6 +129,7 @@ function readManifest(manifestPath, expected) {
   }
   if (!/^[a-f0-9]{64}$/.test(String(manifest.sha256 || ""))) fail("helper manifest SHA-256 is invalid");
   if (!/^[a-f0-9]{64}$/.test(String(manifest.sourceSha256 || ""))) fail("helper source SHA-256 is invalid");
+  if (!/^[a-f0-9]{64}$/.test(String(manifest.authoritySourceSha256 || ""))) fail("helper authority source SHA-256 is invalid");
   return Object.freeze({ ...manifest });
 }
 
@@ -140,12 +167,36 @@ function appBundleFromExecutable(execPath) {
   return execPath.slice(0, index + 4);
 }
 
-function verifyHelperAt({ helperPath, manifestPath, runtime, expected = captureExpected(), runTool = defaultRunTool }) {
+function assertImmutablePackagedTree(targets) {
+  const checked = new Set();
+  for (const target of targets) {
+    let current = path.resolve(target);
+    while (!checked.has(current)) {
+      checked.add(current);
+      let stat;
+      try { stat = fs.lstatSync(current); }
+      catch { fail("release application install tree is incomplete"); }
+      if (stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o022) !== 0) {
+        fail("release application install tree must be root-owned and not group/other writable");
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+}
+
+function verifyHelperAt({ helperPath, manifestPath, runtime, expected = captureExpected(), runTool = defaultRunTool, assertImmutableTree = assertImmutablePackagedTree }) {
   if (process.platform !== "darwin") fail("capture is supported only on macOS");
-  const stat = readRegularFile(helperPath, "capture helper", MAX_HELPER_BYTES);
+  const appBundle = runtime.isPackaged ? appBundleFromExecutable(runtime.execPath) : null;
+  if (runtime.isPackaged && runtime.packageMode === "release") {
+    assertImmutableTree([helperPath, manifestPath, runtime.execPath, appBundle]);
+  }
+  const helperFile = readRegularFile(helperPath, "capture helper", MAX_HELPER_BYTES);
+  const stat = helperFile.stat;
   if ((stat.mode & 0o111) === 0) fail("capture helper is not executable");
   const manifest = readManifest(manifestPath, expected);
-  const digest = crypto.createHash("sha256").update(fs.readFileSync(helperPath)).digest("hex");
+  const digest = crypto.createHash("sha256").update(helperFile.bytes).digest("hex");
   if (!crypto.timingSafeEqual(Buffer.from(digest, "hex"), Buffer.from(manifest.sha256, "hex"))) {
     fail("capture helper SHA-256 does not match its sealed manifest");
   }
@@ -172,7 +223,6 @@ function verifyHelperAt({ helperPath, manifestPath, runtime, expected = captureE
     if (path.resolve(helperPath) !== expectedHelper || path.resolve(manifestPath) !== expectedManifest) {
       fail("packaged helper or manifest is outside the sealed resources directory");
     }
-    const appBundle = appBundleFromExecutable(runtime.execPath);
     runChecked(runTool, "/usr/bin/codesign", ["--verify", "--strict", "--verbose=4", appBundle], "application code-signature verification");
     const appSignature = signatureDetails(runTool, appBundle, "application");
     if (appSignature.identifier !== APP_IDENTIFIER) fail("packaged application signing identifier is wrong");
@@ -184,6 +234,10 @@ function verifyHelperAt({ helperPath, manifestPath, runtime, expected = captureE
     if (!helperSignature.teamIdentifier || helperSignature.teamIdentifier !== appSignature.teamIdentifier) {
       fail("capture helper Team Identifier does not match the packaged application");
     }
+  }
+
+  if (runtime.isPackaged && runtime.packageMode === "release") {
+    assertImmutableTree([helperPath, manifestPath, runtime.execPath, appBundle]);
   }
 
   return Object.freeze({ path: path.resolve(helperPath), manifest, helperSignature });
@@ -267,5 +321,5 @@ module.exports = {
   verifiedIdentityHelper,
   assertCompatibleResult,
   assertCompatibleIdentityResult,
-  _private: { verifyHelperAt, appBundleFromExecutable, readManifest, captureExpected, identityExpected },
+  _private: { verifyHelperAt, appBundleFromExecutable, readManifest, readRegularFile, assertImmutablePackagedTree, captureExpected, identityExpected },
 };

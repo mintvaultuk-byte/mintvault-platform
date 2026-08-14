@@ -8,6 +8,7 @@ const test = require("node:test");
 const stationIdentity = require("../lib/station-identity");
 const lockedProfiles = require("../lib/locked-scanner-profile");
 const lide400 = require("../lib/lide400-controller");
+const helperIntegrity = require("../lib/helper-integrity");
 
 function protector(deviceSecret) {
   const wrappingKey = crypto.createHash("sha256").update(deviceSecret).digest();
@@ -57,7 +58,7 @@ function candidate(overrides = {}) {
       widthPx: 4724,
       heightPx: 6142,
       acquisitionRegion: { x: 22, y: 39, width: 100, height: 130 },
-      captureHelperVersion: "1.0.1",
+      captureHelperVersion: helperIntegrity.HELPER_VERSION,
       frameAssessment: {
         accepted: true,
         cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 },
