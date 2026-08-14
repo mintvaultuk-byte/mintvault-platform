@@ -1,7 +1,12 @@
 # Partner Pilot — AT-1…AT-23 release matrix (RTM)
 
-**Commit:** see `git log -1` at the time of reading. **Migration high-water:** 0088.
-**Critical Partner gate:** 36 suites / 690 assertions / 0 failed / **0 skipped**.
+**Commit:** see `git log -1` at the time of reading. **Migration high-water:** 0090
+(0090 is the staging-lineage convergence; see `migrations/lineage-exclusions.json`).
+**Critical Partner gate:** 36 suites / 0 failed / **0 skipped** (assertion count grew past the
+690 baseline with the AT-23 regressions; the runner's exit code is the gate).
+**AT-23 executed 2026-08-14** against TWO live staging Fly Machines (`d8d14d0f34d378`,
+`8d9349be072948`, app `mintvault-v2`) with per-request routing proven via `fly-force-instance-id`
++ per-machine log correlation. Evidence: `.claude/controlled-code-lead/tasks/partner-pilot-at23-staging/`.
 
 Run the gate with:
 
@@ -52,7 +57,7 @@ marked green on the strength of a design argument alone.
 | **AT-20** | NFC retry same certificate; tag ↔ cert 1:1                        | Bind gate on approval; **0088** unique index on `lower(nfc_uid)`; retry costs nothing                                   | **GREEN**   | `partner-card-job-output.test.ts` AT-P11, AT-P11b                                                                  |
 | **AT-21** | Webhook grant under concurrent NEW                                | Capacity 0; a verified grant lands while 4 workers hammer NEW across the boundary; repeated over independent iterations | **GREEN**   | `tests/partner-at21-grant-boundary.test.ts` (5 cases)                                                              |
 | **AT-22** | FIX forensic integrity / abuse measurability                      | Original + replacement evidence, actor, station, reason, timestamps all preserved                                       | **GREEN**   | `partner-scanner-fix.test.ts`                                                                                      |
-| **AT-23** | Multi-Machine state independence (2 Fly Machines, forced pinning) | Requires staging scaled to two Machines — **owner-gated**. I19 subset proven locally                                    | **NOT RUN** | see §Gaps                                                                                                          |
+| **AT-23** | Multi-Machine state independence (2 Fly Machines, forced pinning) | Full §A–§J matrix executed 2026-08-14 against two live staging Machines with proven per-request pinning: session portability, scanner NEW + FRONT/BACK capture cross-machine (real staged-TIFF pipeline), last-credit race exact (201/402, balance 0), webhook grant instantly visible + replay idempotent cross-machine, FIX cross-machine at zero credits, grading lease single-holder/heartbeat/takeover/stale-denial, submit/QA exactly-once, station suspend/revoke identical on both, tenant/location/role hostile probes identical on both, Machine restart losing no session/wallet/job/idempotency state | **GREEN** | AT-23 evidence log (`evidence.jsonl`) + section scripts in the task dir; three composed-runtime defects found and fixed with pinned regressions (catalogue/grading router auth scope; walk-in capture arm gate; station-scoped claim parameter) |
 
 ---
 
@@ -132,8 +137,19 @@ training them to ignore the line that would show a real one. A replay now return
 "nothing to do" case and keeps a Stripe retry a 200. The canonical P5 webhook suite was hardened with
 the same assertion, since that is where a future regression would surface first.
 
-**AT-23 — NOT RUN.** Requires staging scaled to two Fly Machines with forced per-step request
-pinning. Scaling staging is **owner-gated** and was not performed.
+**AT-23 — GREEN (2026-08-14).** Staging was scaled to two Fly Machines under the owner's session
+authorisation and the full §A–§J matrix ran over HTTPS with per-request machine pinning
+(`fly-force-instance-id`, mapping proven by per-machine log correlation of unique probe paths).
+It found — and this pass fixed, with pinned local regressions — three defects that only the
+COMPOSED runtime could show, all masked by per-router / direct-insert test seams:
+
+1. The catalogue and grading routers each applied a PATHLESS `requirePartnerAuth` ahead of the
+   station router, so every cookie-less signed-station request died 401 and the entire
+   scanner-station surface was dead in the composed app (`tests/partner-catalogue-router-scope.test.ts`).
+2. `createScannerCaptureSession`'s binding gates threw before its own walk-in Card-Job branch could
+   run, refusing every Scanner-started certificate at first capture (AT-B1c in the bridge suite).
+3. `claimNextScannerCapture`'s station-scoped query bound a parameter PostgreSQL could not type,
+   so the signed-station claim path had never executed (AT-B1c).
 
 What _is_ proven locally is the I19 subset that AT-23 exists to protect: no authoritative state is
 process-local. Sessions, wallet/availability, Card Job state, idempotency keys and edit leases all
