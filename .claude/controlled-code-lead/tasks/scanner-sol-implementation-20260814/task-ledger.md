@@ -148,8 +148,10 @@
   dependencies. Governance 4/4, TypeScript and production build pass, lint has
   0 errors / 2,767 existing warnings, and diff whitespace is clean. A5's final
   targeted H1-H3 re-review is CLEAN.
-- Credential-independent arm64 package regeneration remains the last WP7
-  checkpoint step after the clean source commit.
+- Clean source `48c843a2` regenerated and independently reopened the local
+  arm64 app, DMG and ZIP: 19 Mach-O files, matching bundle digest
+  `2b6d3058…ef64`, matching helper hashes, and `releaseReady:false`. No Apple
+  credential, external feed, login item or station was used or mutated.
 
 ## Authoritative links
 

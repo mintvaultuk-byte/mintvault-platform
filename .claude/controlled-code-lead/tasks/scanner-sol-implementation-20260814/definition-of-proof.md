@@ -67,7 +67,7 @@ clean target-Mac acceptance run; those remain R-3 and WP7/WP9 gates.
 |---|---|
 | Design | static-feed non-authority, authenticated exact update/rollback policy, candidate/DMG/login/restart contracts frozen pending P14 naming reconciliation |
 | Implementation | Scanner-owned updater, verified reinstall, modal recovery and post-enrolment login startup complete |
-| Verification | Local Proof: pinned-library behavioral fake, feed/policy/tamper/install-quiesce/recovery/resource-bound matrix, two RED→GREEN critical mutations, full Scanner regression and final targeted hostile CLEAN; real arm64 package rebuild pending final checkpoint |
+| Verification | Local Proof: pinned-library behavioral fake, feed/policy/tamper/install-quiesce/recovery/resource-bound matrix, two RED→GREEN critical mutations, full Scanner regression, final targeted hostile CLEAN and independently reopened clean-source arm64 DMG/ZIP |
 | Activation | none; local package is updater-disabled/ad-hoc and no feed, login item, station or external system was changed |
 
 WP7 proves that no local/static feed fact can authorize a release, old cached

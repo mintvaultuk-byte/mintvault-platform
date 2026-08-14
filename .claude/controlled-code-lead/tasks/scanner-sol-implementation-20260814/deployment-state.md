@@ -19,7 +19,9 @@
 - Pushed: no
 - Deployed: nowhere
 - Local package only: arm64 app/DMG/ZIP/update metadata/checksums generated and
-  independently verified; ad-hoc identity, `releaseReady:false`, not uploaded.
+  independently verified from clean source `48c843a2`; both archives contain
+  the same 19-Mach-O app and `2b6d3058…ef64` bundle digest. Ad-hoc identity,
+  `releaseReady:false`, not uploaded.
 - Apple authority: no valid Developer ID identity was installed or used; exact
   owner Team authority remains `OWNER_REQUIRED`; no notary credential accessed.
 - Update authority: implemented locally but inactive in local packages and not
