@@ -105,6 +105,7 @@ interface DbInfo {
 }
 
 import CertificateForm from "@/components/certificate-form";
+import CaptureWizard from "@/components/grading/capture-wizard";
 import { CertificateToolsDrawer, CertificateToolsButton } from "@/components/grading-workflow/CertificateToolsDrawer";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
@@ -510,6 +511,47 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               <GradingWorkstation
                 mode="super-admin"
                 apiBase="/api/admin"
+                scannerControls={
+                  !editingCert.frontImagePath && !editingCert.backImagePath ? (
+                    <CaptureWizard
+                      certId={editingCert.id}
+                      onComplete={() => {
+                        void queryClient.invalidateQueries({
+                          queryKey: ["/api/admin/certificates", editingCert.id, "images"],
+                        });
+                        void queryClient.invalidateQueries({
+                          queryKey: [`/api/admin/certificates/${editingCert.id}/images`],
+                        });
+                        void refetchEditingCert(editingCert.id);
+                      }}
+                    />
+                  ) : (
+                    <details className="rounded-lg border border-[var(--admin-gold)]/20 p-3">
+                      <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-[var(--admin-gold)]/80">
+                        Controlled Canon recapture
+                      </summary>
+                      <p className="mt-2 text-xs text-[var(--admin-ink-dim)]">
+                        Use only when correcting image evidence. This appends a revision and never replaces or deletes
+                        the earlier TIFF master.
+                      </p>
+                      <div className="mt-3">
+                        <CaptureWizard
+                          certId={editingCert.id}
+                          recapture
+                          onComplete={() => {
+                            void queryClient.invalidateQueries({
+                              queryKey: ["/api/admin/certificates", editingCert.id, "images"],
+                            });
+                            void queryClient.invalidateQueries({
+                              queryKey: [`/api/admin/certificates/${editingCert.id}/images`],
+                            });
+                            void refetchEditingCert(editingCert.id);
+                          }}
+                        />
+                      </div>
+                    </details>
+                  )
+                }
                 previewCertificateId={editingCert.id}
                 certId={editingCert.id}
                 certIdStr={editingCert?.certId}

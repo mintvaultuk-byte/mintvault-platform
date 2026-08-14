@@ -430,8 +430,16 @@ type HarnessWindow = Window &
         role: CanonicalHarnessRoleKey,
         movement?: { fromX: number; fromY: number; toX: number; toY: number }
       ) => boolean;
+      geometry: () => Record<CanonicalHarnessRoleKey, Record<string, { width: number; height: number }>>;
     };
   };
+
+type HarnessViewportKey = "1280x800" | "1024x768";
+
+const HARNESS_VIEWPORTS: Record<HarnessViewportKey, { width: number; height: number; label: string }> = {
+  "1280x800": { width: 1280, height: 800, label: "1280 × 800" },
+  "1024x768": { width: 1024, height: 768, label: "1024 × 768" },
+};
 
 interface HarnessMode {
   key: CanonicalHarnessRoleKey;
@@ -467,9 +475,20 @@ const MODES: HarnessMode[] = [
 
 const gold = "bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400]";
 
-function HarnessWorkstation({ mode }: { mode: HarnessMode }) {
+function HarnessWorkstation({
+  mode,
+  viewport,
+}: {
+  mode: HarnessMode;
+  viewport: (typeof HARNESS_VIEWPORTS)[HarnessViewportKey];
+}) {
   return (
-    <div className="mx-auto flex h-[640px] flex-col border border-[var(--admin-line)]" data-harness-mode={mode.key}>
+    <div
+      className="mx-auto flex min-h-0 flex-col border border-[var(--admin-line)]"
+      data-harness-mode={mode.key}
+      data-harness-viewport={`${viewport.width}x${viewport.height}`}
+      style={{ height: viewport.height - 72 }}
+    >
       <GradingWorkstation
         mode={mode.mode}
         apiBase={mode.apiBase}
@@ -497,7 +516,7 @@ function HarnessWorkstation({ mode }: { mode: HarnessMode }) {
 
 export default function DevCanonicalWorkstationHarness() {
   const [ready, setReady] = useState(false);
-  const [width, setWidth] = useState<"desktop" | "macbook13">("desktop");
+  const [viewportKey, setViewportKey] = useState<HarnessViewportKey>("1280x800");
   const queryClient = useMemo(
     () =>
       new QueryClient({
@@ -576,6 +595,28 @@ export default function DevCanonicalWorkstationHarness() {
         );
         return true;
       },
+      geometry: () => {
+        const box = (element: Element | null) => {
+          const { width, height } = element?.getBoundingClientRect() ?? { width: 0, height: 0 };
+          return {
+            width: Math.round(width * 1000) / 1000,
+            height: Math.round(height * 1000) / 1000,
+          };
+        };
+        const geometry = {} as Record<CanonicalHarnessRoleKey, Record<string, { width: number; height: number }>>;
+        for (const { key } of MODES) {
+          const root = document.querySelector(`[data-harness-mode="${key}"]`);
+          geometry[key] = {
+            workspace: box(root?.querySelector('[data-testid="grading-workspace"]') ?? null),
+            leftRail: box(root?.querySelector('[data-testid="grading-preview-panel"]') ?? null),
+            largeCard: box(root?.querySelector('[data-testid="grading-interactive-card-host"]') ?? null),
+            compactPreview: box(root?.querySelector('[data-testid="certificate-preview-frame"]') ?? null),
+            stageHeader: box(root?.querySelector('[data-testid="workstation-strip"]') ?? null),
+            rightPane: box(root?.querySelector('[data-testid="grading-control-panel"]') ?? null),
+          };
+        }
+        return geometry;
+      },
     };
     try {
       window.localStorage.setItem("mv.aiIdentify", "0");
@@ -590,7 +631,7 @@ export default function DevCanonicalWorkstationHarness() {
   }, []);
 
   if (!ready) return null;
-  const px = width === "desktop" ? 1440 : 1280;
+  const viewport = HARNESS_VIEWPORTS[viewportKey];
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -600,25 +641,32 @@ export default function DevCanonicalWorkstationHarness() {
             Canonical Grading Workstation — real dev harness
           </h1>
           <button
-            onClick={() => setWidth("desktop")}
-            className={`rounded border px-2 py-1 text-xs ${width === "desktop" ? gold : "border-[var(--admin-line)]"}`}
+            data-testid="harness-viewport-1280x800"
+            onClick={() => setViewportKey("1280x800")}
+            className={`rounded border px-2 py-1 text-xs ${viewportKey === "1280x800" ? gold : "border-[var(--admin-line)]"}`}
           >
-            Desktop 1440
+            1280 × 800
           </button>
           <button
-            onClick={() => setWidth("macbook13")}
-            className={`rounded border px-2 py-1 text-xs ${width === "macbook13" ? gold : "border-[var(--admin-line)]"}`}
+            data-testid="harness-viewport-1024x768"
+            onClick={() => setViewportKey("1024x768")}
+            className={`rounded border px-2 py-1 text-xs ${viewportKey === "1024x768" ? gold : "border-[var(--admin-line)]"}`}
           >
-            13&quot; 1280
+            1024 × 768
           </button>
         </div>
-        <div className="space-y-6" style={{ width: px, maxWidth: "100%" }}>
+        <div
+          className="space-y-6"
+          data-testid="canonical-harness-viewport"
+          data-harness-viewport={`${viewport.width}x${viewport.height}`}
+          style={{ width: viewport.width, maxWidth: "100%" }}
+        >
           {MODES.map((mode) => (
             <section key={mode.key} data-testid={`canonical-harness-role-${mode.key}`}>
               <div className="mb-1 text-[11px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
                 {mode.label}
               </div>
-              <HarnessWorkstation mode={mode} />
+              <HarnessWorkstation mode={mode} viewport={viewport} />
             </section>
           ))}
         </div>
