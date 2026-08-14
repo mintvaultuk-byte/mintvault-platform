@@ -185,14 +185,6 @@ export function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCo
 }
 
 const SIDES: Side[] = ["front", "back"];
-const VARIANTS: { key: Variant; label: string }[] = [
-  { key: "original", label: "Original" },
-  { key: "greyscale", label: "Greyscale" },
-  { key: "highcontrast", label: "Hi-Contrast" },
-  { key: "edgeenhanced", label: "Edge" },
-  { key: "inverted", label: "Inverted" },
-];
-
 function getUrl(urls: ImageUrls, side: Side, variant: Variant): string | null {
   // Main colour view prefers the 1600px display derivative (front/back only —
   // angled/closeup have no derivative and fall through to cropped/original).
@@ -313,7 +305,11 @@ export default function ImageViewer({
   const [internalSide, setSideRaw] = useState<Side>("front");
   // Controlled when `side` prop supplied; otherwise falls back to internal state.
   const side: Side = controlledSide ?? internalSide;
-  const [variant, setVariant] = useState<Variant>("original");
+  // The processed variants remain part of the image contract for server-side
+  // grading work, but the normal workstation now presents one primary colour
+  // inspection view. Removing the filter row gives the card its vertical space
+  // back; it does not alter derivative generation, storage, or grading maths.
+  const variant: Variant = "original";
 
   // Pin / overlay rendering reference frame: the IMG element's box. Click
   // coords are read from imgElRef.getBoundingClientRect() (see
@@ -851,7 +847,7 @@ export default function ImageViewer({
                       if (!inspectionState) zoomReset();
                     }}
                     disabled={!hasImage}
-                    className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                    className={`flex-shrink-0 rounded-l px-3 py-2 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                       side === s && !showReference
                         ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10"
                         : hasImage
@@ -900,24 +896,6 @@ export default function ImageViewer({
             )}
           </div>
         )}
-        <div className="flex gap-1 overflow-x-auto">
-          {VARIANTS.filter((v) => {
-            // Original is always available (falls back to cropped or original)
-            if (v.key === "original") return true;
-            // Other variants only show if their URL exists for this side
-            const key = `${side}_${v.key}` as keyof ImageUrls;
-            return urls[key] != null;
-          }).map((v) => (
-            <button
-              key={v.key}
-              type="button"
-              onClick={() => setVariant(v.key)}
-              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[var(--admin-gold)] border-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] border-transparent hover:text-[var(--admin-ink-dim)]"}`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
       </div>
     );
   }
@@ -1482,7 +1460,7 @@ export default function ImageViewer({
                 zoomOut();
               }}
               disabled={zoom <= 1}
-              className="w-7 h-7 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
+              className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
             >
               <ZoomOut size={14} />
             </button>
@@ -1497,7 +1475,7 @@ export default function ImageViewer({
                 zoomIn();
               }}
               disabled={zoom >= (inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6)}
-              className="w-7 h-7 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
+              className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
             >
               <ZoomIn size={14} />
             </button>
@@ -1509,7 +1487,7 @@ export default function ImageViewer({
                   e.stopPropagation();
                   zoomReset();
                 }}
-                className="w-7 h-7 flex items-center justify-center text-[var(--admin-ink-dim)] hover:text-white transition-colors rounded-full"
+                className="h-8 w-8 flex items-center justify-center text-[var(--admin-ink-dim)] hover:text-white transition-colors rounded-full"
               >
                 <RotateCcw size={12} />
               </button>
@@ -1703,7 +1681,7 @@ export default function ImageViewer({
       )}
 
       {/* Main image (normal size) */}
-      {!showReference && renderImageArea(500)}
+      {!showReference && renderImageArea(525)}
 
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">

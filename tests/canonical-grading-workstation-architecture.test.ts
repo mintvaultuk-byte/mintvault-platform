@@ -54,7 +54,7 @@ const ROUTE_MOUNTS = { STAFF, GRADER, ADMIN_STAFF, PARTNER, ADMIN_DASH, CERT_FOR
 // a `fixed inset-0 flex flex-col` container. This is what removed the "black bar
 // below the shell" regression (a fixed-calc shell shorter than a taller parent).
 const SHELL_FILL = "flex min-h-0 flex-col h-full";
-const GEOMETRY_ROW = "flex min-h-0 flex-1 flex-col gap-3 md:flex-row";
+const GEOMETRY_ROW = "flex min-h-0 flex-1 flex-col gap-2 md:flex-row";
 const GEOMETRY_COL = 'className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"';
 
 describe("Canonical grading workstation — one shell, capability-only role differences", () => {
@@ -148,7 +148,7 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     // The shell exposes the ONE canonical body scroll class; the adapter wraps
     // the one GradingPanel in exactly that.
     expect(SHELL).toContain(
-      'export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"'
+      'export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1"'
     );
     expect(WORKSTATION).toContain("WORKSTATION_BODY_SCROLL_CLASS");
     expect(WORKSTATION).toContain("<GradingPanel");
@@ -375,7 +375,7 @@ describe("Canonical persistent preview rail", () => {
   });
 
   it("keeps the canonical right body as the desktop scroll owner", () => {
-    expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
+    expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1"');
     expect(PANEL).toContain('className={previewHost ? "block"');
   });
 

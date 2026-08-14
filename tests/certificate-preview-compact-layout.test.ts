@@ -53,9 +53,12 @@ describe("CertificatePreviewPanel compact states", () => {
     let resolvePreview!: (response: Response) => void;
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => new Promise<Response>((resolve) => {
-        resolvePreview = resolve;
-      }))
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolvePreview = resolve;
+          })
+      )
     );
 
     await renderPreview();
@@ -99,7 +102,10 @@ describe("CertificatePreviewPanel compact states", () => {
   });
 
   it("renders the authoritative label as a bare, aspect-correct thumbnail with no preview chrome", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"]), { status: 200 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Blob(["png"]), { status: 200 }))
+    );
 
     await renderPreview();
     await act(async () => vi.advanceTimersByTimeAsync(350));
@@ -110,9 +116,9 @@ describe("CertificatePreviewPanel compact states", () => {
     expect(image).not.toBeNull();
     expect(image?.parentElement).toBe(panel());
     expect(panel()?.children).toHaveLength(1);
-    expect(image?.getAttribute("width")).toBe("266");
-    expect(image?.getAttribute("height")).toBe("76");
-    expect(266 / 76).toBeCloseTo(826 / 236, 2);
+    expect(image?.getAttribute("width")).toBe("231");
+    expect(image?.getAttribute("height")).toBe("66");
+    expect(231 / 66).toBeCloseTo(826 / 236, 2);
     expect(host.textContent).not.toContain("Live label preview");
     expect(host.textContent).not.toContain("Save a grade to prepare Review");
     expect(host.querySelector('[data-testid="certificate-preview-caption"]')).toBeNull();
@@ -121,7 +127,10 @@ describe("CertificatePreviewPanel compact states", () => {
 
 describe("workstation rail composition", () => {
   it("keeps the primary card as the grow allocation before the thumbnail in normal flex flow", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"]), { status: 200 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(new Blob(["png"]), { status: 200 }))
+    );
     await act(async () => {
       root.render(
         React.createElement(WorkstationPreviewAside, {

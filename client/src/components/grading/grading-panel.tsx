@@ -123,7 +123,7 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
           toast({ title: "Reprocess failed", description: e.message, variant: "destructive" });
         }
       }}
-      className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
+      className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-2 py-1 rounded-lg transition-all mt-1 ${
         status === "done"
           ? "border border-[var(--admin-green)]/40 text-[var(--admin-green)] bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)]"
           : status === "loading"
@@ -1687,9 +1687,7 @@ export default function GradingPanel({
           id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
           type: ad.type?.replace(/_/g, " ") || "Unknown",
           severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
-            | "minor"
-            | "moderate"
-            | "significant",
+            "minor" | "moderate" | "significant",
           description: ad.description || "",
           location: ad.location || (ad as any).detected_in || "front",
           image_side: imageSide,
@@ -2704,7 +2702,7 @@ export default function GradingPanel({
 
   return (
     <div
-      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5"
+      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-3 space-y-3"
       data-testid="canonical-grading-panel"
       data-canonical-role={canonicalRole}
       data-section-order={CANONICAL_GRADING_SECTION_ORDER}
@@ -3091,14 +3089,11 @@ export default function GradingPanel({
       >
         {/* LEFT — Image viewer + defect list */}
         <PreviewSurface host={previewHost}>
-          <div className="space-y-4" data-canonical-section="card-images" data-testid="section-card-images">
-            {/* FRONT/BACK chip row — own dedicated row above the absolute-anchor
-              wrapper for TL/T/TR labels. Pulled out of ImageViewer so the
-              wrapper's `top: 0` (anchor for TL/T/TR at top:-28) is the variant
-              tabs row, not the chip row — stops the dropdowns colliding with
-              the chips. ImageViewer is told to omit its own chip row via
-              `omitSideTabs` and to use `viewerSide` as controlled state. */}
-            <div className="px-[60px] mb-2">
+          <div className="space-y-2" data-canonical-section="card-images" data-testid="section-card-images">
+            {/* FRONT/BACK chip row — kept as the compact inspection switcher.
+              ImageViewer omits its duplicate chip row and follows `viewerSide`;
+              there is deliberately no filter-row spacer below this control. */}
+            <div className="px-3 mb-1">
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {(["front", "back"] as const).map((s) => {
                   const count = defects.filter((d) => d.image_side === s).length;
@@ -3156,7 +3151,7 @@ export default function GradingPanel({
               </div>
             </div>
 
-            <div style={{ margin: "32px 60px 0" }}>
+            <div style={{ margin: "8px 12px 0" }}>
               <div className="relative" style={{ overflow: "visible" }}>
                 <ImageViewer
                   apiBase={apiBase}
@@ -3337,7 +3332,7 @@ export default function GradingPanel({
 
         {/* RIGHT — Grading inputs */}
         <div
-          className="space-y-5 overflow-y-auto"
+          className="space-y-3 overflow-y-auto"
           data-canonical-section="grading-controls"
           data-testid="section-grading-controls"
         >
@@ -3383,7 +3378,7 @@ export default function GradingPanel({
                   type="button"
                   onClick={saveEditedGrade}
                   disabled={editSaving}
-                  className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                  className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
                   data-testid="btn-save-edit"
                 >
                   {editSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
@@ -3393,7 +3388,7 @@ export default function GradingPanel({
                   type="button"
                   onClick={cancelEdit}
                   disabled={editSaving}
-                  className="border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)] text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-colors disabled:opacity-40"
+                  className="border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)] text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded transition-colors disabled:opacity-40"
                   data-testid="btn-cancel-edit"
                 >
                   Cancel
@@ -3410,7 +3405,7 @@ export default function GradingPanel({
               auto-save handles persistence as before. */}
           <fieldset
             disabled={approvalInteractionLocked}
-            className="min-w-0 border-none p-0 m-0 space-y-5 disabled:opacity-70"
+            className="min-w-0 border-none p-0 m-0 space-y-3 disabled:opacity-70"
           >
             {/* AI source badges */}
             {aiAnalysis && (
@@ -3457,7 +3452,7 @@ export default function GradingPanel({
 
             {!isNonNumeric && (
               <div
-                className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-3 space-y-3"
+                className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-2 space-y-2"
                 data-testid="mvgs-controls"
                 data-canonical-section="mvgs-score"
               >
@@ -3470,28 +3465,28 @@ export default function GradingPanel({
                 <p className="text-[var(--admin-ink-faint)] text-[10px]">
                   Save observations to receive the server-issued score and deductions.
                 </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
                     <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)]">
                       Dark border
                     </span>
-                    <div className="flex gap-3">
-                      <label className="flex items-center gap-1.5 cursor-pointer">
+                    <div className="flex gap-2">
+                      <label className="flex items-center gap-1 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={darkBorderFront}
                           onChange={() => setDarkBorderFront((v) => !v)}
-                          className="accent-[var(--admin-gold)] h-4 w-4"
+                          className="accent-[var(--admin-gold)] h-3.5 w-3.5"
                           data-testid="check-dark-border-front"
                         />
                         <span className="text-[10px] text-[var(--admin-ink-dim)]">Front</span>
                       </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer">
+                      <label className="flex items-center gap-1 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={darkBorderBack}
                           onChange={() => setDarkBorderBack((v) => !v)}
-                          className="accent-[var(--admin-gold)] h-4 w-4"
+                          className="accent-[var(--admin-gold)] h-3.5 w-3.5"
                           data-testid="check-dark-border-back"
                         />
                         <span className="text-[10px] text-[var(--admin-ink-dim)]">Back</span>
@@ -3572,7 +3567,7 @@ export default function GradingPanel({
                 block below no longer carries duplicates. All identifiers are
                 component-scope, so the move keeps them in scope. */}
             <div
-              className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2 mb-2 border border-[var(--admin-gold)]/30"
+              className="bg-[var(--admin-panel2)] rounded-lg p-2 space-y-1.5 mb-1 border border-[var(--admin-gold)]/30"
               data-canonical-section="d1-d2-d3"
               data-testid="section-d1-d2-d3"
             >
@@ -3650,7 +3645,7 @@ export default function GradingPanel({
             </div>
 
             <div
-              className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2"
+              className="bg-[var(--admin-panel2)] rounded-lg p-2 space-y-1.5"
               data-canonical-section="centering"
               data-testid="section-centering"
             >
@@ -3704,24 +3699,29 @@ export default function GradingPanel({
                 );
 
                 return (
-                  <div className="space-y-1 pt-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] w-10">
-                        Front
-                      </span>
-                      {FRONT_CHIPS.map((c) => (
-                        <Chip key={c.label} label={c.label} grade={c.grade} active={frontHits.has(c.grade)} />
-                      ))}
+                  <details className="group pt-0.5" data-testid="centering-threshold-reference">
+                    <summary className="cursor-pointer text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] marker:text-[var(--admin-gold)]">
+                      Threshold reference
+                    </summary>
+                    <div className="space-y-1 pt-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] w-10">
+                          Front
+                        </span>
+                        {FRONT_CHIPS.map((c) => (
+                          <Chip key={c.label} label={c.label} grade={c.grade} active={frontHits.has(c.grade)} />
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] w-10">
+                          Back
+                        </span>
+                        {BACK_CHIPS.map((c) => (
+                          <Chip key={c.label} label={c.label} grade={c.grade} active={backHits.has(c.grade)} />
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] w-10">
-                        Back
-                      </span>
-                      {BACK_CHIPS.map((c) => (
-                        <Chip key={c.label} label={c.label} grade={c.grade} active={backHits.has(c.grade)} />
-                      ))}
-                    </div>
-                  </div>
+                  </details>
                 );
               })()}
               {(() => {
@@ -3759,7 +3759,7 @@ export default function GradingPanel({
             </div>
 
             {/* Corners — MVGS-driven when locked, override when unlocked */}
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-2">
               <div className="flex items-center justify-between">
                 <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Corners</p>
                 <div className="flex items-center gap-2">
@@ -3772,7 +3772,7 @@ export default function GradingPanel({
             </div>
 
             {/* Edges — MVGS-driven when locked, override when unlocked */}
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-2">
               <div className="flex items-center justify-between">
                 <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Edges</p>
                 <div className="flex items-center gap-2">
@@ -3790,7 +3790,7 @@ export default function GradingPanel({
                 stepper layered on top. Condition checkboxes still drive
                 hasCrease / hasTear caps. */}
             <div
-              className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-3"
+              className="bg-[var(--admin-panel2)] rounded-lg p-2 space-y-2"
               data-canonical-section="surface"
               data-testid="section-surface"
             >
@@ -3943,7 +3943,7 @@ export default function GradingPanel({
                         ? "Set all four subgrades first"
                         : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
                   }
-                  className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-3 py-1.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   data-testid="btn-generate-description"
                 >
                   {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -4022,7 +4022,7 @@ export default function GradingPanel({
               </div>
               {gradingWorkflowLocked ? (
                 <div
-                  className="w-full flex items-center justify-center gap-2 border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold uppercase px-4 py-2.5 rounded"
+                  className="w-full flex items-center justify-center gap-2 border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold uppercase px-3 py-1.5 rounded"
                   data-testid="btn-approve-publish-locked"
                 >
                   {!gradingError && <Loader2 size={13} className="animate-spin" />}
@@ -4068,7 +4068,7 @@ export default function GradingPanel({
                                     : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-3 py-1.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
                 >
                   {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                   {subgradesIncomplete
@@ -4084,7 +4084,7 @@ export default function GradingPanel({
                             : primaryActionCopy}
                 </button>
               ) : (
-                <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">
+                <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-3 py-1.5 rounded">
                   <CheckCircle2 size={13} />
                   Approved & Live · {certIdStr || ""}
                 </div>

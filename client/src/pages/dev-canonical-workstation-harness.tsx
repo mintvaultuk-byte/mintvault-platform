@@ -118,13 +118,7 @@ export interface CanonicalHarnessRequest {
 }
 
 export type CanonicalHarnessOperation =
-  | "asset"
-  | "catalogue"
-  | "images"
-  | "grading-load"
-  | "save"
-  | "preview"
-  | "unknown";
+  "asset" | "catalogue" | "images" | "grading-load" | "save" | "preview" | "unknown";
 
 export interface CanonicalHarnessFixtureState {
   requests: CanonicalHarnessRequest[];
@@ -434,11 +428,13 @@ type HarnessWindow = Window &
     };
   };
 
-type HarnessViewportKey = "1280x800" | "1024x768";
+type HarnessViewportKey = "1440x900" | "1280x800" | "1024x768" | "800x700";
 
 const HARNESS_VIEWPORTS: Record<HarnessViewportKey, { width: number; height: number; label: string }> = {
+  "1440x900": { width: 1440, height: 900, label: "1440 × 900" },
   "1280x800": { width: 1280, height: 800, label: "1280 × 800" },
   "1024x768": { width: 1024, height: 768, label: "1024 × 768" },
+  "800x700": { width: 800, height: 700, label: "800 × 700" },
 };
 
 interface HarnessMode {
@@ -640,20 +636,16 @@ export default function DevCanonicalWorkstationHarness() {
           <h1 className="text-sm font-extrabold text-[var(--admin-gold)]">
             Canonical Grading Workstation — real dev harness
           </h1>
-          <button
-            data-testid="harness-viewport-1280x800"
-            onClick={() => setViewportKey("1280x800")}
-            className={`rounded border px-2 py-1 text-xs ${viewportKey === "1280x800" ? gold : "border-[var(--admin-line)]"}`}
-          >
-            1280 × 800
-          </button>
-          <button
-            data-testid="harness-viewport-1024x768"
-            onClick={() => setViewportKey("1024x768")}
-            className={`rounded border px-2 py-1 text-xs ${viewportKey === "1024x768" ? gold : "border-[var(--admin-line)]"}`}
-          >
-            1024 × 768
-          </button>
+          {(Object.keys(HARNESS_VIEWPORTS) as HarnessViewportKey[]).map((key) => (
+            <button
+              key={key}
+              data-testid={`harness-viewport-${key}`}
+              onClick={() => setViewportKey(key)}
+              className={`rounded border px-2 py-1 text-xs ${viewportKey === key ? gold : "border-[var(--admin-line)]"}`}
+            >
+              {HARNESS_VIEWPORTS[key].label}
+            </button>
+          ))}
         </div>
         <div
           className="space-y-6"
