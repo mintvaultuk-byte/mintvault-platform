@@ -48,6 +48,18 @@ const partnerStationCaptureRateLimit = rateLimit({
   message: { error: "Too many station capture requests. Please wait a minute and try again." },
 });
 
+// This deliberately runs before signature/session validation: authentication itself
+// verifies a signed payload and resolves the operator session, so it must be protected
+// from unauthenticated request floods as well as the authenticated write below.
+const partnerStationCalibrationIngressRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
+
 const partnerStationCalibrationRateLimit = rateLimit({
   windowMs: 60_000,
   max: 10,
@@ -222,6 +234,7 @@ export function partnerStationRouter(): Router {
 
   r.post(
     "/stations/calibrations",
+    partnerStationCalibrationIngressRateLimit,
     requireSignedStation,
     requireSignedStationOperator,
     partnerStationCalibrationRateLimit,

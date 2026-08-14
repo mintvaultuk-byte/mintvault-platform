@@ -39,7 +39,7 @@ describe("release route rate-limit hardening", () => {
       /capture-sessions",\s*requirePartnerAuth,\s*requirePartnerCapability\("partner\.cards\.scan"\),\s*partnerStationCaptureRateLimit/
     );
     expect(stations).toMatch(
-      /stations\/calibrations",\s*requireSignedStation,\s*requireSignedStationOperator,\s*partnerStationCalibrationRateLimit/
+      /stations\/calibrations",\s*partnerStationCalibrationIngressRateLimit,\s*requireSignedStation,\s*requireSignedStationOperator,\s*partnerStationCalibrationRateLimit/
     );
     expect(stations).toMatch(
       /capture-sessions\/:sessionId",\s*requirePartnerAuth,\s*requirePartnerCapability\("partner\.cards\.scan"\),\s*partnerStationReadRateLimit/
