@@ -10571,6 +10571,18 @@ Defects (admin-confirmed): ${defectLines}`;
             recapture: session.recapture,
           }
         );
+        /*
+         * ADVANCE THE PARTNER CARD JOB — the same bridge the R2 staging path gets inside
+         * recordAcceptedScannerEvidence().
+         *
+         * This legacy multipart route does NOT call recordAcceptedScannerEvidence: it inlines its own
+         * audit write. So hooking only the shared helper would have left this transport unable to
+         * promote a Card Job to READY_TO_GRADE — a card captured through the compatibility body would
+         * silently stay ungradeable, which is precisely the defect being closed. A no-op for HQ and
+         * connector-imported certificates, which have no Card Job.
+         */
+        const { advanceCardJobAfterCaptureSafely } = await import("./partner/card-job-lifecycle");
+        await advanceCardJobAfterCaptureSafely(session.certificateId);
         return res.status(201).json({
           ok: true,
           certId: session.certificateNumber,

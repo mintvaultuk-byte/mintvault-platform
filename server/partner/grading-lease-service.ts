@@ -29,6 +29,7 @@
 import type { PoolClient } from "pg";
 import { withPartnerAdminTenantTransaction } from "./db";
 import { writePartnerAudit } from "./audit";
+import { beginCardJobGrading, releaseCardJobGrading } from "./card-job-grading-bridge";
 import type { PartnerPrincipal } from "./session";
 
 export class GradingLeaseError extends Error {
@@ -219,6 +220,9 @@ export async function acquireLease(
             RETURNING card_job_id, holder_user_id, holder_display, acquired_at, expires_at, revision`,
           [principal.tenantId, cardJobId, String(LEASE_TTL_SECONDS)]
         );
+        // Idempotent: a refresh on a card already in GRADING re-stamps the grader and changes no
+        // lifecycle state. See beginCardJobGrading.
+        await beginCardJobGrading(client, principal, cardJobId);
         return { lease: leaseView(renewed.rows[0], principal.userId), reacquired: false };
       }
 
@@ -242,6 +246,18 @@ export async function acquireLease(
           WHERE tenant_id=$1 AND card_job_id=$2 AND released_at IS NOT NULL`,
         [principal.tenantId, cardJobId]
       );
+
+      /*
+       * TAKING THE LEASE IS STARTING TO GRADE.
+       *
+       * READY_TO_GRADE → GRADING happens HERE, in the same transaction as the lease, because the two
+       * facts must never disagree: a card recorded as GRADING with no live lease is a card nobody may
+       * write to, and a lease on a card still recorded READY_TO_GRADE is invisible to every lifecycle
+       * consumer (the queue, the dashboard buckets, the write guard). Before this, nothing in the
+       * repository performed the transition at all, so a Scanner Card Job sat in NEEDS_SCAN or
+       * READY_TO_GRADE for ever.
+       */
+      await beginCardJobGrading(client, principal, cardJobId);
 
       return { lease: leaseView(inserted.rows[0], principal.userId), reacquired: Number(prior.rows[0].n) > 0 };
     }
@@ -290,11 +306,22 @@ export async function releaseLease(principal: PartnerPrincipal, cardJobId: strin
   await withPartnerAdminTenantTransaction(
     { tenantId: principal.tenantId, locationId: principal.locationId ?? null },
     async (client) => {
-      await client.query(
+      const released = await client.query(
         `UPDATE partner_grading_leases SET released_at = now()
           WHERE tenant_id=$1 AND card_job_id=$2 AND holder_user_id=$3 AND released_at IS NULL`,
         [principal.tenantId, cardJobId, principal.userId]
       );
+      /*
+       * Only a caller who genuinely HELD the lease hands the card back.
+       *
+       * Without the rowCount check, anybody with the assess permission could put a colleague's
+       * in-progress card back on the shop floor by calling release on it — the UPDATE above would
+       * match nothing (correctly) while the lifecycle transition below still fired. Displacing
+       * another grader is a TAKEOVER: explicit, org-wide, reasoned and audited.
+       */
+      if (released.rowCount === 1) {
+        await releaseCardJobGrading(client, principal, cardJobId);
+      }
     }
   );
 }
@@ -379,6 +406,11 @@ export async function takeoverLease(
         after: { holderUserId: principal.userId, revision: inserted.rows[0].revision },
         reason: cleanReason,
       });
+
+      // The card stays open for grading; only the holder changed. This re-stamps the certificate's
+      // grader so QA and the return-to-grader path name the person who actually finishes the card,
+      // not the one who was displaced.
+      await beginCardJobGrading(client, principal, cardJobId);
 
       return leaseView(inserted.rows[0], principal.userId);
     }

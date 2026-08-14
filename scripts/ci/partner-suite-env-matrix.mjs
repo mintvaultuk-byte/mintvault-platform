@@ -220,6 +220,33 @@ export const SUITES = [
     isolate: true,
     note: "P9 grading edit lease: one-winner race, expiry, takeover, stale-revision refusal, I19 restart; own cluster.",
   },
+  {
+    /*
+     * THE CARD JOB → CANONICAL GRADING BRIDGE (AT-B1..AT-B23).
+     *
+     * The gap this closes was not a missing test — it was a missing PATH. Partner grading resolved
+     * ownership entirely through partner_connector_imports, which a Scanner-created Card Job matches
+     * zero rows in, and nothing in the repository drove partner_card_jobs.status beyond FIX_REQUIRED.
+     * So a card a shop had already paid a Grading Credit for could be captured and then never graded,
+     * never submitted, never reviewed and never printed.
+     *
+     * Every case runs against real PostgreSQL because every guarantee is a database one: the connector
+     * JOIN chain that must NOT match, the Card Job EXISTS arm that must, 0080's ENABLE ALWAYS
+     * transition trigger, RLS tenant isolation, FOR UPDATE serialisation and the credit engine's
+     * idempotency uniqueness. The two properties that matter most — no double submit and no double
+     * settlement on retry — are exactly the ones a mocked database would pass with the protection
+     * deleted, so the concurrent cases run genuinely in parallel on separate pool connections.
+     *
+     * `isolate: true` for the same reason as every suite above it: this one self-provisions a
+     * PostgreSQL 17 container and assigns MINTVAULT_DATABASE_URL in its own beforeAll, so sharing a
+     * vitest worker is the documented process.env race.
+     */
+    file: "tests/partner-card-job-grading-bridge.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "Card Job → grading bridge: Scanner NEW reaches Ready to Grade, lease-as-assignment, write guard, submit→QA, exactly-once credit settlement, RETURN/APPROVE, lineage-split print eligibility; own cluster.",
+  },
 
   // ------------------------------------------------- env-gated suites nothing was setting up
   //

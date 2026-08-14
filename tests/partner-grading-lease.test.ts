@@ -53,9 +53,32 @@ async function seedMintVaultTables(): Promise<void> {
     id serial primary key, entity_type text not null, entity_id text not null, action text not null,
     admin_user text, details jsonb, created_at timestamptz not null default now()
   )`);
+  /*
+   * The certificates stub carries the GRADING columns, not merely the identity ones.
+   *
+   * It previously held only (id, certificate_number, card_id, submission_item_id, deleted_at), which
+   * was sufficient while the lease was a pure Partner-side mechanism that never touched the HQ
+   * record. Taking the lease now also stamps the certificate with the grader who holds the card
+   * (card-job-grading-bridge.ts), so a stub missing `grader_status` / `assigned_grader_id` /
+   * `grade_approved_at` no longer models the database this code runs against — it models one that
+   * cannot exist. Widening it is what keeps the proof honest rather than skipping the stamp.
+   */
   await admin.query(`CREATE TABLE certificates (
     id serial primary key, certificate_number text not null unique,
-    card_id integer, submission_item_id integer, deleted_at timestamptz
+    card_id integer, submission_item_id integer, deleted_at timestamptz,
+    origin_type text, origin_partner_id uuid, origin_location_id uuid,
+    assigned_grader_id varchar, assigned_at timestamptz,
+    grader_status varchar(20) not null default 'unassigned',
+    graded_at timestamptz, graded_by varchar,
+    grade_approved_at timestamptz, grade_approved_by varchar,
+    review_required boolean, rejection_reason text,
+    redo_count integer not null default 0,
+    grading_revision integer not null default 1,
+    grade numeric, grade_type text,
+    centering_score numeric, corners_score numeric, edges_score numeric, surface_score numeric,
+    operator_grade numeric, operator_subgrades jsonb,
+    print_state varchar(24) not null default 'awaiting_approval',
+    updated_at timestamptz not null default now()
   )`);
   for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);

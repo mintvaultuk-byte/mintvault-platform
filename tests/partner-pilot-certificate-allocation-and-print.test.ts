@@ -94,19 +94,44 @@ describe("Partner Pilot physical evidence and output gate", () => {
     expect(grading).toContain("station.status = 'ACTIVE'");
   });
 
-  it("does not expose an imported assignment as Ready to Grade before both captured TIFF sides exist", () => {
+  /**
+   * UPDATED FOR THE CARD JOB BRIDGE, and deliberately made STRONGER rather than merely made to pass.
+   *
+   * The queue now serves two lineages, so the capture predicate is a parameterised helper applied
+   * FOUR times — front and back, for Card Job lineage (scoped to `job.*`) and connector lineage
+   * (scoped to `pci.*`). The literal `evidence.side = 'front'` no longer appears because the side is
+   * the helper's argument.
+   *
+   * What this must keep proving is the property, not the spelling: neither lineage may present a
+   * card as Ready to Grade without CURRENT immutable TIFF masters for BOTH sides, each accepted by a
+   * terminal capture session on an ACTIVE station in that card's own tenant AND location. So the
+   * assertions below check the helper's contract once, and then check it is genuinely applied to
+   * both sides on both lineages — which the previous version could not have caught at all.
+   */
+  it("does not expose either lineage as Ready to Grade before both captured TIFF sides exist", () => {
     const queue = grading.slice(
       grading.indexOf('r.get("/grading/queue"'),
       grading.indexOf('r.get("/grading/certificates/:id/images"')
     );
-    expect(queue).toContain("evidence.side = 'front'");
-    expect(queue).toContain("evidence.side = 'back'");
+    // The shared predicate, defined once.
+    expect(queue).toContain("evidence.side = '${side}'");
     expect(queue).toContain("session.state = 'captured'");
     expect(queue).toContain("evidence.is_current = true");
     expect(queue).toContain("evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'");
     expect(queue).toContain("evidence.format = 'tiff'");
-    expect(queue).toContain("station.tenant_id = pci.partner_organisation_id");
-    expect(queue).toContain("station.location_id = pci.partner_location_id");
+    expect(queue).toContain("station.status = 'ACTIVE'");
+    expect(queue).toContain("station.tenant_id = ${tenantExpr}");
+    expect(queue).toContain("station.location_id = ${locationExpr}");
+
+    // Applied to BOTH sides on BOTH lineages — four call sites, none optional.
+    for (const side of ["front", "back"]) {
+      expect(queue).toContain(`capturedSide("${side}", "job.tenant_id", "job.location_id")`);
+      expect(queue).toContain(`capturedSide("${side}", "pci.partner_organisation_id", "pci.partner_location_id")`);
+    }
+
+    // The Card Job arm may only ever offer a job that is genuinely open for grading.
+    expect(queue).toContain("job.status IN ('READY_TO_GRADE', 'GRADING')");
+    expect(queue).toContain("job.cancelled_at IS NULL");
   });
 
   it("uses one Partner-specific authority for QA, settlement, mapping, and capture proof", () => {
