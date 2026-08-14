@@ -57,6 +57,8 @@ const USERS_DDL = `CREATE TABLE IF NOT EXISTS users (
   can_edit_sets boolean NOT NULL DEFAULT false, review_rate integer NOT NULL DEFAULT 100)`;
 
 let admin: Client;
+/** userId → the plaintext TOTP secret its seeded authenticator holds, so logins can complete MFA. */
+const totpSecrets = new Map<string, string>();
 let adminServer: http.Server;
 let partnerServer: http.Server;
 let adminBase: string;
@@ -122,11 +124,53 @@ let ADMIN_USER_ID: string;
       [A, B]
     );
     const pw = await bcrypt.hash("correct-horse-battery", 12);
+    /*
+     * `password_set_at` is REQUIRED for a login to succeed, and this fixture predates it.
+     *
+     * 0077 (credential lifecycle hardening) made partner_auth_lookup project password_set_at, and
+     * auth.ts refuses any account without it — a password_hash alone now describes an invited user
+     * who has never chosen their own password, which must not be able to sign in. The fixture set
+     * the hash and nothing else, so EVERY login here returned "invalid credentials" and every
+     * partner cookie was the empty string. The suite then read as five broken Super Admin controls.
+     *
+     * Setting it is not a relaxation: it states the fact the test needs to be true — these three
+     * users really do have a self-set password — using the column the product now requires.
+     */
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status) VALUES
-       ($1,'ua1',$4,$4,'owner@a.com',$6,'ACTIVE'),($2,'ua2',$4,$4,'tech@a.com',$6,'ACTIVE'),($3,'ub1',$5,$5,'owner@b.com',$6,'ACTIVE')`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status) VALUES
+       ($1,'ua1',$4,$4,'owner@a.com',$6,now(),'ACTIVE'),($2,'ua2',$4,$4,'tech@a.com',$6,now(),'ACTIVE'),($3,'ub1',$5,$5,'owner@b.com',$6,now(),'ACTIVE')`,
       [UA_OWNER, UA_TECH, UB_OWNER, A, B, pw]
     );
+    /*
+     * MFA IS MANDATORY NOW, so the fixture must actually hold an authenticator.
+     *
+     * This suite was written before P2 made partner MFA fail-closed and was skipped for env reasons
+     * throughout, so nobody saw it rot. Every user here logged in, received a cookie, and then got
+     * 401 "mfa required" on the first authenticated call — which read as five broken Super Admin
+     * controls when the truth was a fixture that had stopped resembling the product.
+     *
+     * Seeding an ACTIVE totp method with a secret the test KEEPS is what lets `partnerLogin` finish
+     * the real /auth/mfa step below. The alternative — clearing mfa_required, or flipping
+     * mfa_passed straight in the table — would make the suite green by removing the mandate it is
+     * supposed to be running behind, which is how a suspension proof ends up proving nothing.
+     */
+    const { encryptSecret, generateTotpSecret } = await import("../server/partner/mfa");
+    for (const [tenant, userId] of [
+      [A, UA_OWNER],
+      [A, UA_TECH],
+      [B, UB_OWNER],
+    ] as const) {
+      const secret = generateTotpSecret();
+      totpSecrets.set(userId, secret);
+      await admin.query(
+        "INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status) VALUES ($1,$2,'totp',$3,'ACTIVE')",
+        [tenant, userId, encryptSecret(secret)]
+      );
+    }
+    await admin.query("UPDATE partner_users SET mfa_enabled=true WHERE id = ANY($1::uuid[])", [
+      [UA_OWNER, UA_TECH, UB_OWNER],
+    ]);
+
     const roleId = async (c: string) =>
       (await admin.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [c])).rows[0].id;
     const owner = await roleId("PARTNER_OWNER");
@@ -174,6 +218,22 @@ let ADMIN_USER_ID: string;
       s.authRole = "admin";
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
+      /*
+       * AG-3b step-up. This suite drives destructive Super Admin routes — emergency stop among
+       * them — which now require a recent proof, and its test-only login stamped isAdmin without
+       * one, so those calls correctly returned 403.
+       *
+       * The same repair was applied to partner-management-integration and
+       * partner-dashboard-integration in 0cf568cb. This suite needed it too and did not get it,
+       * because it was skipping for want of its database URLs and nobody could see it was red —
+       * the same silent-skip trap, one suite further along.
+       *
+       * The real console obtains this from POST /api/admin/step-up after re-entering the passphrase
+       * and PIN; stamping the equivalent lets the suite exercise the ROUTES rather than re-prove
+       * that the guard refuses, which tests/partner-admin-step-up.test.ts already proves directly —
+       * including that a missing stamp, an expired one and a partner session are all refused.
+       */
+      s.adminStepUpAt = new Date().toISOString();
       req.session.save(() => res.json({ ok: true }));
     });
     registerSuperAdminPartnerRoutes(app);
@@ -214,13 +274,52 @@ let ADMIN_USER_ID: string;
       headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
       body: JSON.stringify(body),
     });
+  /**
+   * Log a partner user all the way in — password AND the mandatory second factor.
+   *
+   * A cookie from /auth/login alone is an MFA-PENDING session: auth.ts mints it with
+   * mfa_passed=false whenever the user has an active authenticator, and requirePartnerAuth answers
+   * 401 "mfa required" to every authenticated surface until /auth/mfa succeeds. Returning that
+   * half-session was what made five Super Admin controls look broken.
+   *
+   * The TOTP is computed from the seeded secret and posted to the REAL route, so this exercises the
+   * production login lifecycle rather than asserting a shortcut into the session table.
+   *
+   * Returns "" when the login itself is refused — several tests rely on that to prove a suspended
+   * organisation or user can no longer get in, so a refusal must stay distinguishable from success.
+   */
   async function partnerLogin(email: string): Promise<string> {
     const r = await fetch(`${partnerBase}/api/partner/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email, password: "correct-horse-battery" }),
     });
-    return r.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const cookie = r.headers.get("set-cookie")?.split(";")[0] ?? "";
+    if (!cookie) return "";
+
+    const { rows } = await admin.query<{ id: string }>("SELECT id FROM partner_users WHERE email=$1", [email]);
+    const secret = rows[0] ? totpSecrets.get(rows[0].id) : undefined;
+    if (!secret) return cookie; // no authenticator seeded → the session is already mfa_passed
+
+    /*
+     * Clear the accepted-counter watermark first. This is a FIXTURE reset standing in for the clock
+     * advancing, not a relaxation of replay protection: these tests sign the same users in several
+     * times inside one 30-second step, and `verifyActiveTotpNoReplay` correctly refuses the second
+     * code as a replay. Every code below is still computed from the real secret and verified by the
+     * real route; the replay guard itself is proven in partner-mfa-factor-hardening, which uses this
+     * same reset for the same reason.
+     */
+    await admin.query("UPDATE partner_mfa_methods SET last_totp_counter=NULL WHERE user_id=$1", [rows[0].id]);
+    const { currentTotp } = await import("../server/partner/mfa");
+    const mfa = await fetch(`${partnerBase}/api/partner/auth/mfa`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ code: currentTotp(secret, Date.now()) }),
+    });
+    // A rejected second factor leaves an unusable session; returning it would produce a confusing
+    // downstream 401 far from the cause.
+    if (mfa.status !== 200) return "";
+    return cookie;
   }
   const psession = (cookie: string) => fetch(`${partnerBase}/api/partner/session`, { headers: { cookie } });
   const SA = "/api/super-admin/grading-partners";
@@ -327,8 +426,21 @@ let ADMIN_USER_ID: string;
     expect(await partnerLogin("tech@a.com")).toBe("");
     // owner@a unaffected
     expect((await partnerLogin("owner@a.com")) !== "").toBe(true);
+    /*
+     * The audit lives in partner_management_audit, not partner_audit_events.
+     *
+     * This route no longer has its own implementation: it DELEGATES to setPartnerUserStatus, the
+     * canonical service, because keeping two implementations meant the hardened path could be
+     * bypassed by using the older URL. That consolidation moved the audit onto the canonical
+     * append-only table, and this assertion was left pointing at the old one — invisibly, because
+     * the suite was skipping.
+     *
+     * Asserting the terminal SUCCEEDED row specifically: recordAttempt writes a row before the work
+     * happens, so a bare action match would also be satisfied by an attempt that then failed.
+     */
     const au = await admin.query(
-      "SELECT 1 FROM partner_audit_events WHERE action='partner_user_suspended' AND record_id=$1",
+      `SELECT 1 FROM partner_management_audit
+        WHERE action_type='partner_user_suspended' AND entity_id=$1 AND result='succeeded'`,
       [UA_TECH]
     );
     expect(au.rowCount).toBe(1);
@@ -414,12 +526,10 @@ let ADMIN_USER_ID: string;
   // ── super-admin MFA reset ──
   it("MFA reset: reason required; disables method + recovery + revokes sessions; secrets never in response/audit; B unchanged", async () => {
     const ac = await adminCookie();
-    // give owner@a an active MFA method + recovery codes + a live session
-    const { encryptSecret, generateTotpSecret, recoveryHash } = await import("../server/partner/mfa");
-    await admin.query(
-      "INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status) VALUES ($1,$2,'totp',$3,'ACTIVE')",
-      [A, UA_OWNER, encryptSecret(generateTotpSecret())]
-    );
+    // owner@a already has the ACTIVE authenticator every fixture user now carries (uq_partner_mfa
+    // _one_active permits exactly one, and inserting a second here is what this test used to do
+    // back when the fixture seeded none). It still needs recovery codes and a live session.
+    const { recoveryHash } = await import("../server/partner/mfa");
     await admin.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [
       A,
       UA_OWNER,

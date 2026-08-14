@@ -251,30 +251,17 @@ export const SUITES = [
     runtimeVars: ["PARTNER_ADMIN_TEST_RUNTIME"],
     runtimeLogin: { user: "partner_app_test_shell", password: "synthetic" },
     /*
-     * NOT critical YET, and that is a recorded decision rather than a convenience.
-     *
-     * Supplying the env this suite has always wanted makes it RUN for the first time in this
-     * programme, and it fails 5 of 11 — partner suspend, location suspend, user suspend, session
-     * revocation and emergency stop. Verified pre-existing: the identical 5 fail at the clean
-     * checkpoint 3f775f13 on a freshly created database with the role dropped first, so nothing in
-     * this pass caused them.
-     *
-     * The cause is a STALE FIXTURE, not a product regression. Every failure is the same shape —
-     * `GET /api/partner/session` answering 401 straight after a successful login — because P2 made
-     * partner MFA mandatory and fail-closed (session.ts: 401 "mfa required"), while this suite
-     * still logs its fixture users in without completing MFA. It seeds partner_mfa_methods only for
-     * the MFA-reset test. So those five behaviours are currently UNPROVEN, which is materially
-     * different from broken, and the repair is to the fixture.
-     *
-     * Marking it critical today would leave the gate permanently red on a defect that predates the
-     * work being gated, which teaches everyone to ignore the gate. Leaving it OUT of the matrix is
-     * what hid it for the whole programme. It is therefore listed, runnable by name, and documented
-     * — visible rather than silent. Restoring `critical: true` is the follow-up once the fixture
-     * completes MFA the way the other partner integration suites do.
+     * CRITICAL. Supplying the env this suite always wanted made it run for the first time in this
+     * programme, and it failed 5 of 11 — partner suspend, location suspend, user suspend, session
+     * revocation and emergency stop, all release-critical controls. Verified pre-existing: the
+     * identical five failed at the clean checkpoint 3f775f13. Three separate pieces of fixture rot
+     * had accumulated behind the skip, each from a real hardening the fixture never caught up with:
+     * 0077's password_set_at credential-provenance rule, P2's mandatory MFA, and AG-3b's step-up.
+     * All three are repaired in the suite; it is now 11/11 and gates the rest of the work.
      */
-    critical: false,
+    critical: true,
     isolate: true,
-    note: "Gated on PARTNER_ADMIN_TEST + PARTNER_ADMIN_TEST_RUNTIME. RUNS but fails 5/11 at 3f775f13 (pre-existing stale fixture: logs in without the now-mandatory MFA). Repair the fixture, then mark critical.",
+    note: "Gated on PARTNER_ADMIN_TEST + PARTNER_ADMIN_TEST_RUNTIME; real requireAdmin over the real app. Partner/location/user suspension, session revocation, emergency stop and MFA reset.",
   },
 
   // ---------------------------------------------------------------- admin-only (migration proofs)
