@@ -106,6 +106,10 @@ function load() {
     // Force MANUAL on every launch. AUTO must be re-armed by the operator
     // each session so a crash-restart can't silently resume runaway minting.
     mem.mode = "MANUAL";
+    // Hardware/profile readiness is a live fact. Never resurrect a prior
+    // process's READY result across reboot, unplug, profile replacement, or
+    // application update; physical work remains closed until a fresh probe.
+    mem.scannerHealth = { status: "checking" };
     // confirmCard is transient UI state — never resurrect a stale confirmation
     // (a left-over would gate the watcher / block startup drain forever).
     if (mem.confirmCard) {

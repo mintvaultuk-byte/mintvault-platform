@@ -1,4 +1,4 @@
-# Deployment state — Scanner SOL campaign / through WP7
+# Deployment state — Scanner SOL campaign / through WP8 implementation
 
 ## Production
 
@@ -18,10 +18,11 @@
 - Configured origin: `git@github.com:mintvaultuk-byte/mintvault-platform.git`
 - Pushed: no
 - Deployed: nowhere
-- Local package only: arm64 app/DMG/ZIP/update metadata/checksums generated and
-  independently verified from clean source `48c843a2`; both archives contain
-  the same 19-Mach-O app and `2b6d3058…ef64` bundle digest. Ad-hoc identity,
-  `releaseReady:false`, not uploaded.
+- Prior local package only: arm64 app/DMG/ZIP/update metadata/checksums were
+  independently verified from clean WP7 source `48c843a2`; WP8 changes the
+  native capture helper/profile runtime, so those artifacts are explicitly
+  stale and will be regenerated from the clean WP8 checkpoint. Ad-hoc identity,
+  `releaseReady:false`, never uploaded.
 - Apple authority: no valid Developer ID identity was installed or used; exact
   owner Team authority remains `OWNER_REQUIRED`; no notary credential accessed.
 - Update authority: implemented locally but inactive in local packages and not
@@ -31,6 +32,9 @@
   remote feed or native updater installation was invoked.
 - Login item: implemented/tested locally; no workstation login state was
   mutated by this campaign.
+- Locked Scanner profile: implemented/tested only in isolated local stores and
+  fake helper namespaces. No production Keychain, Canon device, station,
+  Partner API, credit, Card Job or evidence endpoint was accessed.
 
 ## Known divergence
 

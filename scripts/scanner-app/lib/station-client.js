@@ -75,6 +75,25 @@ async function signedJson(method, apiPath, payload) {
   });
 }
 
+async function signedJsonV2(method, apiPath, payload, semanticOperationId) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(semanticOperationId || ""))) {
+    throw new Error("Signed station mutation needs a valid semantic operation ID");
+  }
+  return stationRequestQueue.run(async () => {
+    const fetch = await getFetch();
+    const serialized = Buffer.from(JSON.stringify(payload || {}));
+    const headers = stationIdentity.signStoredRequestV2({
+      method, path: apiPath, body: serialized, semanticOperationId,
+    });
+    const response = await fetch(`${baseUrl()}${apiPath}`, {
+      method,
+      headers: { ...headers, "content-type": "application/json" },
+      body: serialized,
+    });
+    return stationAuthorityLatch.observe({ ok: response.ok, status: response.status, body: await readJson(response) });
+  });
+}
+
 async function signIn(email, password) {
   const fetch = await getFetch();
   const response = await fetch(`${baseUrl()}/api/partner/auth/login`, {
@@ -166,7 +185,12 @@ async function heartbeat(payload) {
 }
 
 async function saveCalibration(payload) {
-  return signedJson("POST", "/api/partner/stations/calibrations", payload);
+  return signedJsonV2(
+    "POST",
+    "/api/partner/stations/calibrations",
+    payload,
+    payload?.semanticOperationId,
+  );
 }
 
 module.exports = {
@@ -181,5 +205,5 @@ module.exports = {
   registerThisMac,
   heartbeat,
   saveCalibration,
-  _private: { cookieTokenFrom, baseUrl, signOutWith },
+  _private: { cookieTokenFrom, baseUrl, signOutWith, signedJsonV2 },
 };

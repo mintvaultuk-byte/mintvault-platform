@@ -269,3 +269,26 @@ No Partner server/schema, active Partner worktree, Apple credential, external
 feed, user login item, staging/production system, migration or remote Git state
 was changed. Final `scannerUpdatePolicy` server persistence/response is a frozen
 P14 semantic-reconciliation dependency, not fabricated on this moving seed.
+
+## WP8 actual changes
+
+- Added a private, atomic, AES-GCM locked-profile store whose wrapping key uses
+  the sealed identity helper's UUID contract and whose station/revision routing
+  is authenticated as AAD. Pending profile acceptance is durable before I/O and
+  replays one exact semantic operation after response loss or restart.
+- Replaced legacy calibration acknowledgement with an exact V2 response binding
+  operation, candidate digest, immutable revision, profile digest and the full
+  canonical profile. ACTIVE and every packaged capture require the same live
+  local/server revision and digest.
+- Aligned controller and native helper on the exact 100×130 mm ROI, advanced the
+  sealed capture helper to 1.0.1, and require 1200-DPI ±2-pixel TIFF geometry,
+  matching hardware/helper, nonblank complete card and four-side margin. Setup
+  proof plaintext is disposable and restart-swept.
+- Reworked the renderer as a guided locked appliance. The ordinary surface is
+  inert during Account/MFA/Station/Profile/Update/failure states; SHIFT CHANGE
+  remains reachable, and only a current service-capable human can re-prove a
+  mismatched profile while physical capture remains denied.
+
+No Partner source, Apple credential, production Keychain, Canon device,
+external endpoint, login item, staging/production system or remote Git state
+was touched in WP8.

@@ -1,4 +1,4 @@
-# Reviewer status — through WP7
+# Reviewer status — through WP8
 
 | Reviewer | State | Isolation | Lead verification |
 |---|---|---|---|
@@ -16,6 +16,7 @@
 | A2 WP6 package compatibility | complete / CLEAN for WP6 scope | Current Scanner WIP and built bundle read-only; no edit/credential/external mutation | Helper layout/preparation freshness/artifact provenance and release-boundary findings repaired; WP7 updater/login work kept separate |
 | A7 WP6 package/CI hostile review | complete / CLEAN | Current Scanner WIP, workflow source and local artifacts read-only; no edit/credential/upload/external mutation | Dependency, action pin, source-ref, Team authority, ASAR hygiene/runtime and independent DMG/ZIP proof findings repaired; final re-review CLEAN |
 | A5 WP7 updater hostile review | complete / CLEAN | Current Scanner updater/main/watcher/tests and pinned library read-only; no edit/credential/feed/external mutation | Five initial HIGHs repaired; final review reproduced install-quiesce, recovery-scratch and bounded-download HIGHs; final targeted H1-H3 re-review found no actionable Scanner-owned BLOCKER/HIGH |
+| A6 WP8 appliance/profile hostile review | complete / CLEAN | Current Scanner WIP and focused local tests read-only; no edit/Keychain/Canon/server/external mutation | Bare profile acknowledgement, false 1200-DPI proof, impossible 100×130 ROI, dead-end profile recovery, native key-ID incompatibility and fixture drift reproduced and repaired; final 61/61 focused review found no Scanner-owned BLOCKER/HIGH |
 
 Reviewer isolation was established by explicit read-only scopes. Only the Lead
 created the worktree, enrolled Engineering OS, built ignored graph artifacts and
@@ -46,3 +47,8 @@ custody failures. Its final review added R-52..R-54 for the asynchronous native
 install window, untracked recovery plaintext and unbounded transport. Lead
 fixed each in the same pass; the final targeted re-review is CLEAN. The exact P14 response schema
 and Apple-signed physical update remain external boundaries, not local excuses.
+WP8 added R-55..R-60 and advanced R-15/R-22. A6 reproduced two real first-run
+BLOCKERs plus profile acceptance, capability proof, recovery and verification
+HIGHs. Lead repaired every Scanner-owned finding in the same pass; the final
+targeted review is CLEAN. Exact Partner profile persistence/acknowledgement,
+real Canon/Keychain execution and signed staging remain explicit later gates.

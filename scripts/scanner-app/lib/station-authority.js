@@ -68,6 +68,61 @@ function stationStage(status) {
   }
 }
 
+function scannerProfileStage({
+  stationStage: resolved,
+  scannerHealth,
+  calibrationStatus,
+  canServiceStation,
+  localProfileRevisionId,
+  localProfileDigestSha256,
+  serverProfileRevisionId,
+  serverProfileDigestSha256,
+}) {
+  if (!resolved || resolved.stage !== "active") return resolved || { stage: "degraded" };
+  const health = String(scannerHealth || "checking");
+  const calibration = String(calibrationStatus || "").toUpperCase();
+  if (["disconnected", "error", "control_unavailable"].includes(health)) {
+    return { stage: "scanner_disconnected", error: "Connect the approved Canon LiDE 400 before profile setup or card capture." };
+  }
+  if (health === "checking") {
+    return { stage: "scanner_checking", error: "MintVault is verifying the connected scanner and locked profile." };
+  }
+  if (!["VALID", "UNPROVISIONED", "INVALID", "EXPIRED"].includes(calibration)) {
+    return { stage: "degraded", error: "MintVault returned an unknown Scanner profile state. New physical work remains paused." };
+  }
+  if (calibration !== "VALID" || ["profile_unprovisioned", "profile_invalid"].includes(health)) {
+    return canServiceStation
+      ? { stage: "profile_setup_required" }
+      : { stage: "profile_setup_locked", error: "A Partner Owner or MintVault Super Admin must verify this station's locked Scanner profile." };
+  }
+  if (!["ready", "busy"].includes(health)) {
+    return { stage: "degraded", error: "MintVault could not prove the locked Scanner profile is ready." };
+  }
+  const localRevision = typeof localProfileRevisionId === "string" ? localProfileRevisionId.trim() : "";
+  const serverRevision = typeof serverProfileRevisionId === "string" ? serverProfileRevisionId.trim() : "";
+  const localDigest = String(localProfileDigestSha256 || "").toLowerCase();
+  const serverDigest = String(serverProfileDigestSha256 || "").toLowerCase();
+  if (!localRevision || !serverRevision || !/^[a-f0-9]{64}$/.test(localDigest) || !/^[a-f0-9]{64}$/.test(serverDigest)) {
+    return { stage: "degraded", error: "MintVault could not prove the current Scanner profile revision and digest. New physical work remains paused." };
+  }
+  if (localRevision !== serverRevision || localDigest !== serverDigest) {
+    return {
+      stage: "profile_check",
+      error: "This Mac's locked Scanner profile does not match MintVault's current profile revision. New physical work remains paused.",
+    };
+  }
+  return resolved;
+}
+
+function profileSetupDenial(setup) {
+  if (setup?.canServiceStation === true && ["profile_setup_required", "profile_check", "active"].includes(setup?.stage)) return null;
+  return {
+    ok: false,
+    code: String(setup?.stage || "profile_setup_denied"),
+    error: setup?.error || "Only an authorised Partner Owner or MintVault Super Admin can change this station's locked Scanner profile.",
+  };
+}
+
 function operationalDenial(setup) {
   if (setup?.stage === "active") return null;
   const stage = String(setup?.stage || "degraded");
@@ -97,6 +152,8 @@ module.exports = Object.freeze({
   sessionStage,
   requiredCapabilityStage,
   stationStage,
+  scannerProfileStage,
   operationalDenial,
+  profileSetupDenial,
   withLocalSession,
 });

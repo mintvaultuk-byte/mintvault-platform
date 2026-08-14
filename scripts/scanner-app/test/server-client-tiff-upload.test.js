@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const sharp = require("sharp");
+const helperIntegrity = require("../lib/helper-integrity");
 
 function listen(server) {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -36,7 +37,7 @@ function completeEvidenceBinding(filePath, overrides = {}) {
     deviceCapturedAt: "2026-08-14T09:03:21.000Z",
     deviceTimestampAuthority: "NON_AUTHORITATIVE",
     appVersion: "1.2.1",
-    captureHelperVersion: "1.0.0",
+    captureHelperVersion: helperIntegrity.HELPER_VERSION,
     identityHelperVersion: "1.1.0",
     expectedSha256: crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex"),
     expectedByteLength: fs.statSync(filePath).size,
@@ -277,7 +278,11 @@ function isolatedTargetedWatcher(t) {
     hasToken: server.hasToken,
     scan: lide.scan,
     positioningPreview: lide.positioningPreview,
+    scanCalibrationRegion: lide.scanCalibrationRegion,
     persistJigOrigin: lide.persistJigOrigin,
+    resumeLockedProfileAcceptance: lide.resumeLockedProfileAcceptance,
+    beginLockedProfileAcceptance: lide.beginLockedProfileAcceptance,
+    finalizeLockedProfileAcceptance: lide.finalizeLockedProfileAcceptance,
     deviceId: lide.deviceId,
     stationId: lide.stationId,
     health: lide.health,
@@ -297,7 +302,11 @@ function isolatedTargetedWatcher(t) {
     });
     lide.scan = originals.scan;
     lide.positioningPreview = originals.positioningPreview;
+    lide.scanCalibrationRegion = originals.scanCalibrationRegion;
     lide.persistJigOrigin = originals.persistJigOrigin;
+    lide.resumeLockedProfileAcceptance = originals.resumeLockedProfileAcceptance;
+    lide.beginLockedProfileAcceptance = originals.beginLockedProfileAcceptance;
+    lide.finalizeLockedProfileAcceptance = originals.finalizeLockedProfileAcceptance;
     lide.deviceId = originals.deviceId;
     lide.stationId = originals.stationId;
     lide.health = originals.health;
@@ -307,6 +316,7 @@ function isolatedTargetedWatcher(t) {
     delete require.cache[statePath];
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
+  lide.resumeLockedProfileAcceptance = () => null;
   const watcher = new Watcher({ captureQueueKeyProtector: testCaptureQueueKeyProtector() });
   // Unit scan fixtures are deliberately tiny synthetic TIFFs. The dedicated
   // card-frame tests cover boundary math; ordinary state-machine tests inject
@@ -347,7 +357,7 @@ function claimedTarget(overrides = {}) {
 }
 
 function captureProvenance(overrides = {}) {
-  return { profileVersion: "mintvault-canon-lide-400-v3", helperVersion: "1.0.0", ...overrides };
+  return { profileVersion: "mintvault-canon-lide-400-v3", helperVersion: helperIntegrity.HELPER_VERSION, ...overrides };
 }
 
 function canonicalAcceptedResponse(sessionId, filePath, binding, body = {}) {
@@ -427,7 +437,7 @@ async function sealedCandidate(fixture, overrides = {}) {
     sessionExpiresAt: capture.expiresAt,
     capturedAtMs: Date.now(),
     appVersion: require("../package.json").version,
-    captureHelperVersion: "1.0.0",
+    captureHelperVersion: helperIntegrity.HELPER_VERSION,
     identityHelperVersion: "1.1.0",
     provenance,
     masterValidation,
@@ -449,6 +459,30 @@ async function writePositioningJpeg(dir, name = "placement-preview.jpg") {
     .jpeg()
     .withMetadata({ density: 300 })
     .toFile(filePath);
+  return filePath;
+}
+
+async function writeCalibrationProof(dir, {
+  name = "capability-proof.tif",
+  width = 4724,
+  height = 6142,
+  blank = false,
+  clipped = false,
+  density = 1200,
+} = {}) {
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, name);
+  const image = sharp({ create: { width, height, channels: 3, background: { r: 238, g: 241, b: 244 } } });
+  const cardWidth = Math.round(width * 0.63);
+  const cardHeight = Math.round(height * (88 / 130));
+  const cardX = clipped ? 0 : Math.round(width * 0.18);
+  const cardY = clipped ? 0 : Math.round(height * (21 / 130));
+  if (!blank) {
+    image.composite([{
+      input: Buffer.from(`<svg width="${width}" height="${height}"><rect x="${cardX}" y="${cardY}" width="${cardWidth}" height="${cardHeight}" rx="24" fill="#174a76"/><path d="M ${cardX + 100} ${cardY + 180} H ${cardX + cardWidth - 100} M ${cardX + 100} ${cardY + 330} H ${cardX + cardWidth - 260}" stroke="#e9d39b" stroke-width="38"/></svg>`),
+    }]);
+  }
+  await image.removeAlpha().tiff({ compression: "none" }).withMetadata({ density }).toFile(filePath);
   return filePath;
 }
 
@@ -600,6 +634,206 @@ test("positioning Preview is single-flight and only an exact safe result can per
   assert.equal(fixture.watcher.applyPositioningPreview(previewId).ok, true);
   assert.deepEqual(persisted, { x: 22, y: 39 });
   assert.equal(fixture.watcher.applyPositioningPreview(previewId).ok, false, "a duplicate save cannot reapply an already consumed Preview");
+});
+
+test("profile setup proves an exact disposable 1200-DPI TIFF before activating the server revision", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  let claims = 0;
+  let uploads = 0;
+  let installed = null;
+  fixture.server.claimNextCapture = async () => { claims++; return { ok: true, body: { capture: null } }; };
+  fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: {} }; };
+  fixture.state.set({ scannerHealth: { status: "profile_unprovisioned" }, activeCapture: null, positioningPreview: null });
+  fixture.lide.positioningPreview = async (dir) => {
+    const pathname = await writePositioningJpeg(dir);
+    return {
+      path: pathname,
+      sizeBytes: fs.statSync(pathname).size,
+      requestedDpi: 300,
+      driverResolutionDpi: 300,
+      appliedRegionMm: { x: 0, y: 0, width: 216, height: 297 },
+      scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null },
+    };
+  };
+  fixture.watcher.analysePositioningPreview = async () => ({
+    image: { width: 900, height: 1200, density: 300, format: "jpeg" },
+    cardCandidate: { cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 }, surroundingBackgroundMm: {} },
+    placement: { ready: true, originMm: { x: 22, y: 39 }, areaMm: { width: 100, height: 130 }, placementToleranceMm: 14 },
+  });
+  fixture.lide.scanCalibrationRegion = async (dir, region) => {
+    const proofPath = await writeCalibrationProof(dir);
+    return {
+      path: proofPath,
+      sizeBytes: fs.statSync(proofPath).size,
+      requestedRegionMm: region,
+      appliedRegionMm: { ...region },
+      requestedDpi: 1200,
+      driverResolutionDpi: 1200,
+      helperVersion: helperIntegrity.HELPER_VERSION,
+      scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null },
+    };
+  };
+  fixture.lide.beginLockedProfileAcceptance = (candidate) => {
+    const semanticOperationId = "12345678-1234-4234-9234-123456789abc";
+    const candidateDigestSha256 = "c".repeat(64);
+    const profile = { ...candidate, semanticOperationId, deviceCreatedAt: "2026-08-14T12:00:00.000Z" };
+    return { semanticOperationId, candidateDigestSha256, request: { ...candidate, semanticOperationId, candidateDigestSha256, profile } };
+  };
+  fixture.lide.finalizeLockedProfileAcceptance = (operation, calibration) => {
+    installed = { operation, calibration };
+    return { profileRevisionId: calibration.profileRevisionId, profileDigestSha256: calibration.profileDigestSha256, originMm: operation.request.profile.acquisitionRegion, areaMm: { width: 100, height: 130 } };
+  };
+
+  const preview = await fixture.watcher.runPositioningPreview();
+  const prepared = await fixture.watcher.preparePositioningCalibration(preview.previewId);
+  assert.equal(prepared.ok, true, prepared.error);
+  assert.equal(prepared.candidate.profile.capabilityProof.requestedDpi, 1200);
+  assert.equal(prepared.candidate.profile.capabilityProof.driverResolutionDpi, 1200);
+  assert.equal(prepared.candidate.profile.capabilityProof.format, "TIFF");
+  assert.equal(prepared.candidate.profile.capabilityProof.widthPx, 4724);
+  assert.equal(prepared.candidate.profile.capabilityProof.heightPx, 6142);
+  assert.equal(prepared.candidate.profile.capabilityProof.frameAssessment.accepted, true);
+  assert.match(prepared.candidate.profile.capabilityProof.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(fs.existsSync(path.join(fixture.tempDir, "positioning-preview", preview.previewId, "profile-proof", "capability-proof.tif")), false);
+  assert.equal(claims, 0);
+  assert.equal(uploads, 0);
+  assert.equal(fixture.watcher.readTargetedQueue().length, 0);
+
+  const committed = fixture.watcher.commitPositioningCalibration(preview.previewId, {
+    profileRevisionId: "server-profile-revision-7",
+    profileDigestSha256: "d".repeat(64),
+  });
+  assert.equal(committed.ok, true);
+  assert.equal(installed.calibration.profileRevisionId, "server-profile-revision-7");
+  assert.equal(installed.operation.request.profile.capabilityProof.sha256, prepared.candidate.profile.capabilityProof.sha256);
+  assert.equal(fixture.watcher.commitPositioningCalibration(preview.previewId, { profileRevisionId: "different-revision" }).ok, false);
+});
+
+test("profile setup rejects wrong DPI and removes the disposable TIFF", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  fixture.state.set({
+    positioningPreview: {
+      id: "preview-proof-failure",
+      status: "detected",
+      capture: { scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null } },
+      cardCandidate: { cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 } },
+      placement: { ready: true, originMm: { x: 22, y: 39 }, areaMm: { width: 100, height: 130 }, placementToleranceMm: 14 },
+    },
+  });
+  let proofPath;
+  fixture.lide.scanCalibrationRegion = async (dir, region) => {
+    fs.mkdirSync(dir, { recursive: true });
+    proofPath = path.join(dir, "wrong-dpi.tif");
+    await sharp({ create: { width: 1200, height: 1560, channels: 3, background: { r: 15, g: 75, b: 130 } } })
+      .tiff({ compression: "none" })
+      .withMetadata({ density: 600 })
+      .toFile(proofPath);
+    return { path: proofPath, appliedRegionMm: region, requestedDpi: 600, driverResolutionDpi: 600, helperVersion: helperIntegrity.HELPER_VERSION, scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null } };
+  };
+  const result = await fixture.watcher.preparePositioningCalibration("preview-proof-failure");
+  assert.equal(result.ok, false);
+  assert.match(result.error, /exact 1200 DPI/);
+  assert.equal(fs.existsSync(proofPath), false);
+  assert.equal(fixture.watcher.isRestartSafeForUpdate(), true);
+});
+
+test("1200-DPI profile proof rejects under-resolution, blank, and clipped TIFF frames", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  fixture.state.set({
+    positioningPreview: {
+      id: "preview-proof-frame",
+      status: "detected",
+      capture: { scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null } },
+      cardCandidate: { cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 } },
+      placement: { ready: true, originMm: { x: 22, y: 39 }, areaMm: { width: 100, height: 130 }, placementToleranceMm: 14 },
+    },
+  });
+  const candidate = fixture.watcher.positioningCalibrationCandidate("preview-proof-frame").candidate;
+  const capture = (proofPath) => ({
+    path: proofPath,
+    appliedRegionMm: { ...candidate.acquisitionRegion },
+    requestedDpi: 1200,
+    driverResolutionDpi: 1200,
+    helperVersion: helperIntegrity.HELPER_VERSION,
+    scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null },
+  });
+  const proofDir = path.join(fixture.tempDir, "proof-negative");
+  const undersized = await writeCalibrationProof(proofDir, { name: "undersized.tif", width: 1200, height: 1560 });
+  await assert.rejects(
+    fixture.watcher.validateCalibrationProof(undersized, capture(undersized), candidate),
+    /not an exact 1200-DPI/,
+  );
+  const blank = await writeCalibrationProof(proofDir, { name: "blank.tif", blank: true });
+  await assert.rejects(
+    fixture.watcher.validateCalibrationProof(blank, capture(blank), candidate),
+    /Card edges could not be safely determined/,
+  );
+  const clipped = await writeCalibrationProof(proofDir, { name: "clipped.tif", clipped: true });
+  await assert.rejects(
+    fixture.watcher.validateCalibrationProof(clipped, capture(clipped), candidate),
+    /too close to the hardware acquisition boundary/,
+  );
+});
+
+test("mutable renderer state cannot forge a prepared capability proof", (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  fixture.state.set({
+    positioningPreview: {
+      id: "forged-preview",
+      status: "detected",
+      capture: { scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null } },
+      cardCandidate: { cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 } },
+      placement: { ready: true, originMm: { x: 22, y: 39 }, areaMm: { width: 100, height: 130 }, placementToleranceMm: 14 },
+      calibrationCandidate: { capabilityProof: { sha256: "a".repeat(64), requestedDpi: 1200 } },
+      verificationStatus: "verified_1200",
+    },
+  });
+  let installed = false;
+  fixture.lide.finalizeLockedProfileAcceptance = () => { installed = true; };
+  const result = fixture.watcher.commitPositioningCalibration("forged-preview", { profileRevisionId: "forged-revision" });
+  assert.equal(result.ok, false);
+  assert.equal(installed, false);
+});
+
+test("profile submission is single-flight and blocks a new Preview until the exact operation returns", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  fixture.state.set({
+    scannerHealth: { status: "profile_unprovisioned" },
+    positioningPreview: {
+      id: "preview-submission",
+      status: "detected",
+      capture: { scanner: { model: "Canon LiDE 400", deviceId: "ica-preview", serial: null } },
+      cardCandidate: { cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 } },
+      placement: { ready: true, originMm: { x: 22, y: 39 }, areaMm: { width: 100, height: 130 }, placementToleranceMm: 14 },
+    },
+  });
+  const operation = {
+    semanticOperationId: "12345678-1234-4234-9234-123456789abc",
+    candidateDigestSha256: "c".repeat(64),
+    request: {
+      semanticOperationId: "12345678-1234-4234-9234-123456789abc",
+      candidateDigestSha256: "c".repeat(64),
+      profile: {
+        deviceCreatedAt: "2026-08-14T12:00:00.000Z",
+        capabilityProof: { sha256: "a".repeat(64), sizeBytes: 87_000_000 },
+      },
+    },
+  };
+  fixture.lide.resumeLockedProfileAcceptance = () => operation;
+  fixture.lide.finalizeLockedProfileAcceptance = () => ({
+    profileRevisionId: "profile-revision-7",
+    profileDigestSha256: "d".repeat(64),
+    originMm: { x: 22, y: 39 },
+    areaMm: { width: 100, height: 130 },
+  });
+  let release;
+  const first = fixture.watcher.submitPositioningCalibration("preview-submission", async () =>
+    new Promise((resolve) => { release = resolve; }));
+  for (let attempt = 0; attempt < 20 && !release; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await fixture.watcher.submitPositioningCalibration("preview-submission", async () => ({ ok: true }))).code, "profile_acceptance_in_flight");
+  assert.equal((await fixture.watcher.runPositioningPreview()).ok, false);
+  release({ ok: true, body: { calibration: { profileRevisionId: "profile-revision-7", profileDigestSha256: "d".repeat(64) } } });
+  assert.equal((await first).ok, true);
 });
 
 test("explicit Scan creates a JPEG derivative preview without uploading the TIFF", async (t) => {
@@ -1200,12 +1434,15 @@ test("LiDE controller requires station jig provisioning before it can request a 
 
 test("LiDE calibration is bounded to a sufficiently large physical platen region", () => {
   const controller = require("../lib/lide400-controller");
+  assert.deepEqual(controller._private.calibrationRegion({ x: 22, y: 39, width: 100, height: 130 }), {
+    x: 22, y: 39, width: 100, height: 130,
+  }, "the shipped locked profile's exact ROI must reach ImageCaptureCore calibration");
   assert.deepEqual(controller._private.calibrationRegion({ x: 12, y: 108, width: 120, height: 160 }), {
     x: 12, y: 108, width: 120, height: 160,
   });
   assert.throws(
-    () => controller._private.calibrationRegion({ x: 12, y: 108, width: 90, height: 120 }),
-    /at least 110 x 140 mm/
+    () => controller._private.calibrationRegion({ x: 12, y: 108, width: 99.9, height: 129.9 }),
+    /at least 100 x 130 mm/
   );
   assert.throws(
     () => controller._private.calibrationRegion({ x: 120, y: 108, width: 120, height: 160 }),

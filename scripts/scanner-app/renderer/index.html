@@ -9,6 +9,7 @@
   <header class="hdr" id="hdr">
     <span class="hdr-title">MintVault Scanner</span>
     <div class="hdr-spacer"></div>
+    <button class="hdr-btn hdr-shift" id="headerShiftChangeBtn" hidden>SHIFT CHANGE</button>
     <span class="hdr-version" id="appVersion" data-tip="Installed app version"></span>
     <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
   </header>
@@ -88,7 +89,9 @@
       <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
       <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
       <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
+      <button class="btn capture-primary" id="orphansBtn">FIX MISSING IMAGES</button>
     </div>
+    <p class="hint">Recovery only. MintVault authorises only the selected Card Job’s exact missing side for the authenticated operator and this station.</p>
     <p class="hint action-hint" id="captureActionHint">Press NEW CARD to start a card, or arm one in MintVault.</p>
     <p class="hint" id="newCardError" hidden></p>
 
@@ -173,10 +176,6 @@
           Use only if the scanner service is unresponsive. It restarts this station service and may briefly interrupt a capture.
         </p>
       </div>
-      <div class="settings-test">
-        <button class="btn" id="orphansBtn">Fix missing images</button>
-        <p class="hint">Recovery only. MintVault authorises only the selected Card Job’s exact missing side for the authenticated operator and this station.</p>
-      </div>
     </div>
   </details>
 
@@ -199,6 +198,13 @@
        Ed25519 private key never enter this renderer. -->
   <div class="modal station-setup-modal" id="stationSetupModal" aria-live="polite">
     <div class="modal-card wide">
+      <ol class="setup-progress" id="stationSetupProgress" aria-label="Station setup progress">
+        <li data-step="account">Account</li>
+        <li data-step="mfa">MFA</li>
+        <li data-step="station">Station</li>
+        <li data-step="profile">Profile</li>
+        <li data-step="ready">Ready</li>
+      </ol>
       <div class="modal-title" id="stationSetupTitle">Sign in to MintVault</div>
       <p class="modal-meta" id="stationSetupText">Use your authorised MintVault account to set up this Mac.</p>
       <form id="stationSignInForm" class="station-setup-form">
@@ -214,6 +220,22 @@
       <div id="stationRegisterPanel" class="station-setup-form" hidden>
         <label class="field" id="stationLocationField"><span>Location</span><select id="stationLocation"></select></label>
         <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
+      </div>
+      <div id="stationProfilePanel" class="profile-setup" hidden>
+        <div class="profile-setup-checklist" aria-label="Locked Scanner profile checks">
+          <span>1. Place a disposable card on the jig</span>
+          <span>2. Preview all edges, corners and clipping</span>
+          <span>3. Verify the exact 1200-DPI TIFF capability</span>
+          <span>4. Save the immutable station profile revision</span>
+        </div>
+        <button class="btn" type="button" id="stationProfilePreviewBtn">RUN LOCAL PLACEMENT PREVIEW</button>
+        <div class="profile-preview-viewport" id="stationProfilePreviewViewport" hidden>
+          <img id="stationProfilePreview" alt="Full scanner bed setup preview; local only and never card evidence" />
+        </div>
+        <strong class="profile-setup-result" id="stationProfileResult">No placement Preview has been verified.</strong>
+        <p class="hint positioning-geometry" id="stationProfileGeometry"></p>
+        <button class="btn primary" type="button" id="stationProfileSaveBtn" hidden>VERIFY 1200 DPI &amp; SAVE LOCKED PROFILE</button>
+        <p class="hint">Setup creates no Card Job, consumes no Grading Credit, assigns no MV number, and uploads no card evidence. The disposable capability TIFF is deleted locally after verification.</p>
       </div>
       <p class="hint station-setup-error" id="stationSetupError"></p>
       <div id="stationUpdatePanel" class="station-setup-form" hidden>

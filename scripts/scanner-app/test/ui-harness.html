@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MintVault Scanner UI harness</title>
+<script>
+  Promise.all([
+    fetch("../renderer/index.html").then((response) => response.text()),
+    fetch("./ui-harness-bridge.js").then((response) => response.text()),
+  ]).then(([html, bridge]) => {
+    const rendered = html
+      .replace("<head>", '<head><base href="../renderer/">')
+      .replace(`<script src="../lib/lide400-preview-transform.js"><${"/"}script>`, `<script>${bridge}<\/script><script src="../lib/lide400-preview-transform.js"><${"/"}script>`);
+    document.open();
+    document.write(rendered);
+    document.close();
+  });
+</script>

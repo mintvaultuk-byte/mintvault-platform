@@ -6,6 +6,7 @@
 
 const els = {
   hideBtn: document.getElementById("hideBtn"),
+  headerShiftChangeBtn: document.getElementById("headerShiftChangeBtn"),
   appVersion: document.getElementById("appVersion"),
   updateBtn: document.getElementById("updateBtn"),
   reinstallBtn: document.getElementById("reinstallBtn"),
@@ -82,6 +83,14 @@ const els = {
   stationLocationField: document.getElementById("stationLocationField"),
   stationLocation: document.getElementById("stationLocation"),
   stationRegisterBtn: document.getElementById("stationRegisterBtn"),
+  stationSetupProgress: document.getElementById("stationSetupProgress"),
+  stationProfilePanel: document.getElementById("stationProfilePanel"),
+  stationProfilePreviewBtn: document.getElementById("stationProfilePreviewBtn"),
+  stationProfilePreviewViewport: document.getElementById("stationProfilePreviewViewport"),
+  stationProfilePreview: document.getElementById("stationProfilePreview"),
+  stationProfileResult: document.getElementById("stationProfileResult"),
+  stationProfileGeometry: document.getElementById("stationProfileGeometry"),
+  stationProfileSaveBtn: document.getElementById("stationProfileSaveBtn"),
   signOutBtn: document.getElementById("signOutBtn"),
   stationModalSignOutBtn: document.getElementById("stationModalSignOutBtn"),
   stationUpdatePanel: document.getElementById("stationUpdatePanel"),
@@ -195,7 +204,9 @@ function renderStationIdentity(setup) {
   // active, but the human can always leave once a sanitised summary proves a
   // current authenticated session.
   els.signOutBtn.hidden = !setup?.canSignOut;
+  els.headerShiftChangeBtn.hidden = !setup?.canSignOut;
   els.stationModalSignOutBtn.hidden = active || !setup?.canSignOut;
+  els.diagnosticsRow.hidden = setup?.canServiceStation !== true;
   if (!active) return;
   const organisation = [setup.summary?.organisationName, setup.summary?.locationName].filter(Boolean).join(" — ");
   els.stationOrganisation.textContent = organisation || "MintVault location";
@@ -291,14 +302,35 @@ function renderStationSetup(next) {
   const active = stage === "active";
   renderStationIdentity(stationSetup);
   els.stationSetupModal.classList.toggle("visible", !active);
+  for (const sibling of document.querySelectorAll("body > :not(#stationSetupModal):not(script)")) {
+    sibling.inert = !active;
+    if (active) sibling.removeAttribute("aria-hidden");
+    else sibling.setAttribute("aria-hidden", "true");
+  }
   els.stationSignInForm.hidden = stage !== "sign_in";
   els.stationMfaForm.hidden = stage !== "mfa";
   els.stationRegisterPanel.hidden = stage !== "register";
+  els.stationProfilePanel.hidden = !(stationSetup.canServiceStation === true && ["profile_setup_required", "profile_check"].includes(stage));
   els.stationUpdatePanel.hidden = stage !== "update_required";
   els.stationSetupError.textContent = stationSetup.error || "";
   els.stationSignInBtn.disabled = stationSetupBusy;
   els.stationMfaBtn.disabled = stationSetupBusy;
   els.stationRegisterBtn.disabled = stationSetupBusy;
+  els.stationProfilePreviewBtn.disabled = stationSetupBusy || actionInFlight;
+  els.stationProfileSaveBtn.disabled = stationSetupBusy || actionInFlight;
+
+  const progressOrder = ["account", "mfa", "station", "profile", "ready"];
+  const currentStep = stage === "sign_in" ? "account"
+    : ["mfa", "mfa_enrolment_required"].includes(stage) ? "mfa"
+      : ["register", "pending", "rejected", "cancelled", "expired", "suspended", "revoked", "station_unavailable", "identity_recovery_required", "no_location"].includes(stage) ? "station"
+        : ["profile_setup_required", "profile_setup_locked", "profile_check", "scanner_disconnected", "scanner_checking"].includes(stage) ? "profile"
+          : stage === "active" ? "ready" : "account";
+  const currentIndex = progressOrder.indexOf(currentStep);
+  for (const item of els.stationSetupProgress.querySelectorAll("li")) {
+    const index = progressOrder.indexOf(item.dataset.step);
+    item.classList.toggle("complete", stage === "active" || index < currentIndex);
+    item.classList.toggle("current", stage !== "active" && index === currentIndex);
+  }
 
   if (stage === "mfa") {
     els.stationSetupTitle.textContent = "Verify your MintVault sign-in";
@@ -347,14 +379,45 @@ function renderStationSetup(next) {
   } else if (stage === "scanner_disconnected") {
     els.stationSetupTitle.textContent = "Scanner disconnected";
     els.stationSetupText.textContent = "Connect the Canon LiDE 400. New physical work remains paused until ImageCaptureCore reports it ready.";
+  } else if (stage === "scanner_checking") {
+    els.stationSetupTitle.textContent = "Checking Scanner profile";
+    els.stationSetupText.textContent = "MintVault is verifying the connected Canon and its device-bound locked profile. No card can start until this live check completes.";
+  } else if (stage === "profile_check") {
+    els.stationSetupTitle.textContent = stationSetup.canServiceStation === true
+      ? "Re-verify this station’s locked Scanner profile"
+      : "Scanner profile recovery required";
+    els.stationSetupText.textContent = stationSetup.canServiceStation === true
+      ? "MintVault's current profile does not match this Mac. Run the service Preview and exact 1200-DPI proof to create one newly accepted immutable revision. Card work remains paused until it matches."
+      : (stationSetup.error || "This Mac's locked profile is not MintVault's current accepted revision. A Partner Owner or MintVault Super Admin must re-verify it.");
+  } else if (stage === "profile_setup_required") {
+    els.stationSetupTitle.textContent = "Verify this station’s locked Scanner profile";
+    els.stationSetupText.textContent = "Service setup only: establish the jig placement, inspect clipping and orientation, then prove the exact 1200-DPI TIFF capability before MintVault accepts a new immutable profile revision.";
+  } else if (stage === "profile_setup_locked") {
+    els.stationSetupTitle.textContent = "Scanner profile setup required";
+    els.stationSetupText.textContent = "This station is closed for card work until a Partner Owner or MintVault Super Admin signs in and verifies its locked Scanner profile.";
   } else if (stage === "degraded" || stage === "replay_state_desync") {
     els.stationSetupTitle.textContent = stage === "replay_state_desync" ? "Station recovery required" : "MintVault temporarily unavailable";
     els.stationSetupText.textContent = stage === "replay_state_desync"
       ? "The station replay state must be securely resynchronised before physical work can continue."
       : "Station authority could not be verified. New physical work is paused.";
-  } else if (["rejected", "cancelled", "expired", "suspended", "revoked", "station_unavailable"].includes(stage)) {
+  } else if (stage === "rejected") {
+    els.stationSetupTitle.textContent = "Station registration rejected";
+    els.stationSetupText.textContent = "This Mac was not approved. A MintVault Super Admin must review the rejection before any replacement registration.";
+  } else if (stage === "cancelled") {
+    els.stationSetupTitle.textContent = "Station registration cancelled";
+    els.stationSetupText.textContent = "This registration was cancelled and cannot scan. Contact a MintVault Super Admin before setting up another station identity.";
+  } else if (stage === "expired") {
+    els.stationSetupTitle.textContent = "Station registration expired";
+    els.stationSetupText.textContent = "The approval window expired. Contact a MintVault Super Admin before registering this Mac again.";
+  } else if (stage === "suspended") {
+    els.stationSetupTitle.textContent = "Station suspended";
+    els.stationSetupText.textContent = "MintVault has temporarily paused this station. Existing evidence remains retained; contact a MintVault Super Admin.";
+  } else if (stage === "revoked") {
+    els.stationSetupTitle.textContent = "Station access revoked";
+    els.stationSetupText.textContent = "This station identity is no longer authorised and cannot be reused. Contact a MintVault Super Admin.";
+  } else if (stage === "station_unavailable") {
     els.stationSetupTitle.textContent = "Station unavailable";
-    els.stationSetupText.textContent = "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
+    els.stationSetupText.textContent = "MintVault could not prove this registered station is available. New physical work remains paused.";
   } else if (active) {
     els.stationSetupTitle.textContent = "Station ready";
     els.stationSetupText.textContent = "This station is authorised. Complete placement setup before its first evidence scan.";
@@ -362,6 +425,7 @@ function renderStationSetup(next) {
     els.stationSetupTitle.textContent = "Sign in to MintVault";
     els.stationSetupText.textContent = "Use your authorised MintVault account to set up this Mac.";
   }
+  renderProfileSetup(lastState?.positioningPreview);
 
   if (stationSetupPoll) clearTimeout(stationSetupPoll);
   if (stage === "pending") {
@@ -504,9 +568,10 @@ function renderPositioningOverlays(entry) {
 }
 
 function renderPositioningPreview(entry, scannerHealth, activeCapture) {
+  renderProfileSetup(entry);
   const evidenceReviewActive = ["scanning", "retrying_scan", "processing_preview", "preview_ready", "preview_error", "upload"].includes(String(activeCapture?.stage || ""));
   const status = String(entry?.status || "");
-  const canStart = ["ready", "profile_unprovisioned"].includes(String(scannerHealth?.status || ""));
+  const canStart = ["ready", "profile_unprovisioned", "profile_invalid"].includes(String(scannerHealth?.status || ""));
   const scanning = status === "scanning";
   setActionButton(els.positioningPreviewBtn, scanning ? "PREVIEWING…" : "PREVIEW", true, actionInFlight || scanning || !canStart);
 
@@ -525,7 +590,7 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
 
   const showImage = ["detected", "reposition", "not_detected", "saved"].includes(status);
   els.positioningPanel.hidden = !showImage && status !== "error";
-  els.fullPlatenDiagnostics.hidden = !showImage;
+  els.fullPlatenDiagnostics.hidden = !showImage || stationSetup?.canServiceStation !== true;
   if (showImage && entry.id !== renderedPositioningPreviewId) {
     renderedPositioningPreviewId = entry.id;
     els.positioningCardPreview.removeAttribute("src");
@@ -540,6 +605,8 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
       };
       els.positioningCardPreview.src = result.dataUrl;
       els.positioningFullPreview.src = result.dataUrl;
+      els.stationProfilePreview.src = result.dataUrl;
+      els.stationProfilePreviewViewport.hidden = false;
     }).catch(() => {});
   }
 
@@ -552,7 +619,7 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
     els.positioningResult.textContent = "CARD DETECTED — PLACEMENT IS READY";
     const placement = entry.placement;
     els.positioningGeometry.textContent = `Card ${formatMm(candidate.x)}, ${formatMm(candidate.y)} · ${formatMm(candidate.width)} × ${formatMm(candidate.height)}. Proposed hardware region ${formatMm(placement.areaMm.width)} × ${formatMm(placement.areaMm.height)} at ${formatMm(placement.originMm.x)}, ${formatMm(placement.originMm.y)}; usable placement tolerance ${formatMm(placement.placementToleranceMm)}.`;
-    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", true, actionInFlight);
+    setActionButton(els.savePlacementBtn, "VERIFY & SAVE LOCKED PROFILE", stationSetup?.canServiceStation === true, actionInFlight);
     els.positioningHint.textContent = "All four edges and corners are visible with scanner background. Saving only enables this local station’s final 1200-DPI capture profile.";
   } else if (status === "reposition") {
     els.positioningResult.textContent = "CARD DETECTED — MOVE SLIGHTLY INWARD, THEN PREVIEW";
@@ -584,6 +651,45 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
     setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
     els.positioningHint.textContent = "No certificate or evidence was changed. Check scanner readiness and Preview again.";
   }
+
+  renderProfileSetup(entry);
+}
+
+function renderProfileSetup(entry) {
+  if (!els.stationProfilePanel || els.stationProfilePanel.hidden) return;
+  const status = String(entry?.status || "");
+  const verification = String(entry?.verificationStatus || "");
+  const ready = status === "detected" && entry?.placement?.ready === true;
+  els.stationProfilePreviewBtn.textContent = status === "scanning" ? "PREVIEWING…" : "RUN LOCAL PLACEMENT PREVIEW";
+  els.stationProfilePreviewBtn.disabled = actionInFlight || status === "scanning";
+  if (entry?.id && els.positioningCardPreview.src && !els.stationProfilePreview.src) {
+    els.stationProfilePreview.src = els.positioningCardPreview.src;
+    els.stationProfilePreviewViewport.hidden = false;
+  }
+  if (verification === "scanning_1200") {
+    els.stationProfileResult.textContent = "VERIFYING EXACT 1200-DPI RGB TIFF CAPABILITY…";
+  } else if (verification === "failed") {
+    els.stationProfileResult.textContent = "1200-DPI PROFILE VERIFICATION FAILED";
+  } else if (ready) {
+    els.stationProfileResult.textContent = "PLACEMENT READY — REVIEW THE FULL CARD AND FINAL CAPTURE BOUNDARY";
+  } else if (status === "reposition") {
+    els.stationProfileResult.textContent = "MOVE THE CARD INWARD, THEN PREVIEW AGAIN";
+  } else if (status === "not_detected") {
+    els.stationProfileResult.textContent = "CARD NOT DETECTED — REPOSITION AND PREVIEW AGAIN";
+  } else {
+    els.stationProfileResult.textContent = entry?.calibrationError || "No placement Preview has been verified.";
+  }
+  const proposal = entry?.placement;
+  const card = entry?.cardCandidate?.cardBoundsMm;
+  els.stationProfileGeometry.textContent = ready
+    ? `Detected card ${formatMm(card?.width)} × ${formatMm(card?.height)} at ${formatMm(card?.x)}, ${formatMm(card?.y)}. Locked 1200-DPI region ${formatMm(proposal.areaMm?.width)} × ${formatMm(proposal.areaMm?.height)} at ${formatMm(proposal.originMm?.x)}, ${formatMm(proposal.originMm?.y)}; placement tolerance ${formatMm(proposal.placementToleranceMm)}.`
+    : entry?.calibrationError || "Preview must show all four card edges and corners without clipping.";
+  setActionButton(
+    els.stationProfileSaveBtn,
+    verification === "scanning_1200" ? "VERIFYING 1200 DPI…" : "VERIFY 1200 DPI & SAVE LOCKED PROFILE",
+    ready,
+    actionInFlight || verification === "scanning_1200",
+  );
 }
 
 function renderPreview(active) {
@@ -851,6 +957,7 @@ async function shiftChange() {
   renderStationSetup(result);
 }
 els.signOutBtn.addEventListener("click", () => void shiftChange());
+els.headerShiftChangeBtn.addEventListener("click", () => void shiftChange());
 els.stationModalSignOutBtn.addEventListener("click", () => void shiftChange());
 
 if (els.appVersion) {
@@ -912,7 +1019,27 @@ els.autoOpenOnError.addEventListener("change", () => window.scanner.setSetting("
 els.soundEnabled.addEventListener("change", () => window.scanner.setSetting("soundEnabled", els.soundEnabled.checked));
 els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.scanTarget()));
 els.positioningPreviewBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.runPositioningPreview()));
+els.stationProfilePreviewBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.runPositioningPreview()));
 els.savePlacementBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.applyPositioningPreview(lastState?.positioningPreview?.id || previewId)));
+els.stationProfileSaveBtn.addEventListener("click", async () => {
+  if (actionInFlight || !lastState?.positioningPreview?.id) return;
+  actionInFlight = true;
+  actionError = null;
+  renderState(lastState);
+  try {
+    const result = await window.scanner.applyPositioningPreview(lastState.positioningPreview.id);
+    if (!result?.ok) {
+      actionError = result?.error || "MintVault did not accept the locked Scanner profile";
+    } else {
+      renderStationSetup(result);
+    }
+  } catch (error) {
+    actionError = error?.message || "Locked Scanner profile verification failed";
+  } finally {
+    actionInFlight = false;
+    renderState(lastState);
+  }
+});
 els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId)));
 els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));

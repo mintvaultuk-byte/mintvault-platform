@@ -1,4 +1,4 @@
-# Definition of Proof — through WP7
+# Definition of Proof — through WP8 implementation
 
 | Dimension | Status |
 |---|---|
@@ -78,3 +78,21 @@ preceded by a non-overwritable Scanner-wide quiesce latch. It does not claim the
 policy endpoint, Developer-ID/notary/Gatekeeper, physical update/reinstall,
 reboot persistence or production activation; those remain explicit WP9-WP13
 and R-3/R-9 gates.
+
+## WP8 proof boundary
+
+| Dimension | Status |
+|---|---|
+| Design | immutable locked-profile, exact 1200-DPI proof, appliance state and service-recovery contracts frozen pending P14 naming reconciliation |
+| Implementation | Scanner-owned encrypted profile, durable acceptance, exact ACTIVE binding and guided locked UI complete |
+| Verification | Local Proof: filesystem/crypto/restart/proof/authority/UI matrices, rebuilt arm64 helper, browser harness and final A6 hostile CLEAN |
+| Activation | none; no Canon, production Keychain, Partner endpoint, station, credit, evidence or external environment was used |
+
+WP8 proves that mutable local setup cannot authorize packaged capture: one
+device-bound profile operation must prove the exact helper/hardware/ROI/raster/card
+frame, obtain an exact server revision/digest/full-profile acknowledgement, and
+match the live server projection before ACTIVE. It also proves every setup and
+recovery state locks the ordinary surface while retaining SHIFT CHANGE and a
+service-only re-verification lane. It does not claim the final P14 endpoint,
+real LiDE capture, signed-package Keychain behavior, or staging activation;
+those remain WP9-WP12 and R-3/R-9 external or physical gates.

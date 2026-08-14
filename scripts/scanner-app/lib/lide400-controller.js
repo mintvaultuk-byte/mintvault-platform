@@ -5,17 +5,32 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const stationIdentity = require("./station-identity");
 const helperIntegrity = require("./helper-integrity");
+const lockedProfileStore = require("./locked-scanner-profile");
 
 const PROFILE_VERSION = "mintvault-canon-lide-400-v3";
 const MODEL = "CanoScan LiDE 400";
-const CALIBRATION_MIN_MM = Object.freeze({ width: 110, height: 140 });
+// The disposable 1200-DPI capability frame must exercise the exact final
+// hardware ROI. Reject anything smaller, but do not require a region larger
+// than the profile the bridge will actually use for card evidence.
+const CALIBRATION_MIN_MM = Object.freeze({ width: 100, height: 130 });
 const PLATEN_MAX_MM = Object.freeze({ width: 216, height: 297 });
 const PROFILE_AREA_MM = Object.freeze({ width: 100, height: 130 });
 const POSITIONING_PREVIEW_DPI = 300;
 const POSITIONING_PREVIEW_COORDINATE_SPACE = "imagecapturecore-scan-area-upright-raster-v1";
+const CALIBRATION_VERSION = "mintvault-lide400-jig-v1";
+let runtime = Object.freeze({ isPackaged: false, appVersion: "development" });
+
+function configureRuntime({ isPackaged, appVersion }) {
+  if (typeof isPackaged !== "boolean" || typeof appVersion !== "string" || !appVersion.trim()) {
+    throw new Error("LiDE runtime configuration is invalid");
+  }
+  runtime = Object.freeze({ isPackaged, appVersion: appVersion.trim() });
+  lockedProfileStore.configureRuntime({ isPackaged });
+}
 
 function stationId() {
   const enrolled = stationIdentity.currentStationCode();
@@ -32,11 +47,58 @@ function deviceId() {
   return `mac-${stationId()}`;
 }
 
-function jigOrigin() {
+function developmentJigOrigin() {
+  if (runtime.isPackaged) return null;
   const x = Number(process.env.MINTVAULT_LIDE_SCAN_X_MM);
   const y = Number(process.env.MINTVAULT_LIDE_SCAN_Y_MM);
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return null;
   return { x, y };
+}
+
+function currentLockedProfile() {
+  const profile = lockedProfileStore.loadCurrent();
+  if (!profile) return null;
+  const currentStation = stationIdentity.currentStationCode();
+  if (!currentStation || profile.stationCode !== currentStation) {
+    throw new Error("Locked scanner profile belongs to another station identity");
+  }
+  if (profile.globalProfileVersion !== PROFILE_VERSION) {
+    throw new Error("Locked scanner profile version is no longer supported");
+  }
+  if (profile.captureHelperVersion !== helperIntegrity.HELPER_VERSION) {
+    throw new Error("Locked scanner profile was proved by a different capture helper version");
+  }
+  if (profile.profileRevisionId.startsWith("PENDING:")) {
+    throw new Error("Pending Scanner profile cannot become capture authority");
+  }
+  return profile;
+}
+
+function profileSelection() {
+  const development = developmentJigOrigin();
+  if (development) return Object.freeze({ originMm: development, profile: null, development: true });
+  const profile = currentLockedProfile();
+  if (!profile) return null;
+  return Object.freeze({
+    originMm: { x: profile.acquisitionRegion.x, y: profile.acquisitionRegion.y },
+    profile,
+    development: false,
+  });
+}
+
+function jigOrigin() {
+  return profileSelection()?.originMm || null;
+}
+
+function scannerMatchesProfile(result, profile) {
+  if (!profile) return true;
+  const expected = profile.scannerHardware;
+  const model = String(result?.model || MODEL).trim();
+  const deviceId = String(result?.deviceId || "").trim();
+  const serial = result?.serial == null ? null : String(result.serial).trim();
+  return model === expected.model
+    && (!expected.deviceId || deviceId === expected.deviceId)
+    && (!expected.serial || serial === expected.serial);
 }
 
 /**
@@ -45,6 +107,9 @@ function jigOrigin() {
  * MINTVAULT_STATION_CONFIG_PATH to its isolated non-secret configuration.
  */
 function persistJigOrigin(origin) {
+  if (runtime.isPackaged) {
+    throw new Error("Packaged Scanner profiles must be accepted by MintVault before local activation");
+  }
   const x = Number(origin?.x);
   const y = Number(origin?.y);
   if (![x, y].every(Number.isFinite) || x < 0 || y < 0) {
@@ -70,7 +135,190 @@ function persistJigOrigin(origin) {
   fs.renameSync(tmpPath, configPath);
   process.env.MINTVAULT_LIDE_SCAN_X_MM = String(Number(x.toFixed(2)));
   process.env.MINTVAULT_LIDE_SCAN_Y_MM = String(Number(y.toFixed(2)));
-  return { configPath, originMm: jigOrigin(), areaMm: PROFILE_AREA_MM, profileVersion: PROFILE_VERSION };
+  return { configPath, originMm: developmentJigOrigin(), areaMm: PROFILE_AREA_MM, profileVersion: PROFILE_VERSION };
+}
+
+function profileInput(candidate, { semanticOperationId, profileRevisionId, deviceCreatedAt }) {
+  if (!candidate || typeof candidate !== "object") throw new Error("Calibration candidate is invalid");
+  return {
+    stationCode: stationId(),
+    semanticOperationId,
+    profileRevisionId,
+    scannerHardware: candidate.scannerHardware,
+    globalProfileVersion: PROFILE_VERSION,
+    calibrationVersion: CALIBRATION_VERSION,
+    acquisitionRegion: candidate.acquisitionRegion,
+    workingRegion: candidate.workingRegion,
+    placementToleranceMm: candidate.placementToleranceMm,
+    requestedDpi: 1200,
+    colourMode: "RGB",
+    bitDepth: 8,
+    outputFormat: "TIFF",
+    presentationRotationDegrees: 180,
+    appVersion: runtime.appVersion,
+    captureHelperVersion: helperIntegrity.HELPER_VERSION,
+    identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
+    capabilityProof: candidate.capabilityProof,
+    deviceCreatedAt,
+    deviceTimestampAuthority: "NON_AUTHORITATIVE",
+  };
+}
+
+function profileCandidate(profile) {
+  return Object.freeze({
+    stationCode: profile.stationCode,
+    semanticOperationId: profile.semanticOperationId,
+    scannerHardware: profile.scannerHardware,
+    globalProfileVersion: profile.globalProfileVersion,
+    calibrationVersion: profile.calibrationVersion,
+    acquisitionRegion: profile.acquisitionRegion,
+    workingRegion: profile.workingRegion,
+    placementToleranceMm: profile.placementToleranceMm,
+    requestedDpi: profile.requestedDpi,
+    colourMode: profile.colourMode,
+    bitDepth: profile.bitDepth,
+    outputFormat: profile.outputFormat,
+    presentationRotationDegrees: profile.presentationRotationDegrees,
+    appVersion: profile.appVersion,
+    captureHelperVersion: profile.captureHelperVersion,
+    identityHelperVersion: profile.identityHelperVersion,
+    capabilityProof: profile.capabilityProof,
+    deviceCreatedAt: profile.deviceCreatedAt,
+    deviceTimestampAuthority: profile.deviceTimestampAuthority,
+  });
+}
+
+function candidateDigest(profile) {
+  return crypto.createHash("sha256")
+    .update(lockedProfileStore._private.canonicalJson(profileCandidate(profile)))
+    .digest("hex");
+}
+
+function calibrationBinding(value) {
+  const rounded = (number) => Number(Number(number).toFixed(3));
+  const region = (input) => Object.fromEntries(["x", "y", "width", "height"].map((key) => [key, rounded(input?.[key])]));
+  const margins = (input) => Object.fromEntries(["left", "right", "top", "bottom"].map((key) => [key, rounded(input?.[key])]));
+  return lockedProfileStore._private.canonicalJson({
+    scannerHardware: {
+      manufacturer: String(value.scannerHardware?.manufacturer || "Canon").trim(),
+      model: String(value.scannerHardware?.model || "").trim(),
+      deviceId: value.scannerHardware?.deviceId == null ? null : String(value.scannerHardware.deviceId).trim() || null,
+      serial: value.scannerHardware?.serial == null ? null : String(value.scannerHardware.serial).trim() || null,
+    },
+    globalProfileVersion: value.globalProfileVersion || value.scannerProfileVersion,
+    calibrationVersion: value.calibrationVersion,
+    acquisitionRegion: region(value.acquisitionRegion),
+    workingRegion: region(value.workingRegion),
+    placementToleranceMm: margins(value.placementToleranceMm),
+    requestedDpi: Number(value.requestedDpi),
+    colourMode: value.colourMode,
+    bitDepth: Number(value.bitDepth),
+    outputFormat: value.outputFormat,
+    presentationRotationDegrees: Number(value.presentationRotationDegrees),
+  });
+}
+
+function acceptanceOperation(profile, { replayed }) {
+  const acceptedCandidate = profileCandidate(profile);
+  const candidateDigestSha256 = candidateDigest(profile);
+  return Object.freeze({
+    semanticOperationId: profile.semanticOperationId,
+    candidateDigestSha256,
+    replayed,
+    request: Object.freeze({
+      schemaVersion: 1,
+      semanticOperationId: profile.semanticOperationId,
+      clientOpId: profile.semanticOperationId,
+      candidateDigestSha256,
+      profile: acceptedCandidate,
+      // Transitional flat fields let the pre-P14 endpoint validate the same
+      // physical tuple. Scanner activation still requires the exact bound
+      // response contract below, so a legacy acknowledgement cannot activate.
+      ...acceptedCandidate,
+      scannerProfileVersion: acceptedCandidate.globalProfileVersion,
+    }),
+  });
+}
+
+function pendingForCandidate(candidate) {
+  const pending = lockedProfileStore.loadPending();
+  if (!pending) return null;
+  const current = lockedProfileStore.loadCurrent();
+  if (current?.semanticOperationId === pending.semanticOperationId) {
+    if (candidateDigest(current) !== candidateDigest(pending)) {
+      throw new Error("Completed and pending Scanner profiles conflict; profile recovery is required");
+    }
+    lockedProfileStore.clearPending();
+    return null;
+  }
+  if (pending.stationCode !== stationId() || !pending.profileRevisionId.startsWith(`PENDING:${pending.semanticOperationId}`)
+      || pending.globalProfileVersion !== PROFILE_VERSION
+      || pending.captureHelperVersion !== helperIntegrity.HELPER_VERSION
+      || pending.identityHelperVersion !== helperIntegrity.IDENTITY_HELPER_VERSION) {
+    throw new Error("Pending Scanner profile does not match this trusted station runtime");
+  }
+  if (candidate && calibrationBinding(candidate) !== calibrationBinding(pending)) {
+    const error = new Error("A different Scanner profile operation is pending; recover it before changing placement");
+    error.code = "IDEMPOTENCY_CONFLICT";
+    throw error;
+  }
+  return pending;
+}
+
+function resumeLockedProfileAcceptance(candidate) {
+  const pending = pendingForCandidate(candidate);
+  return pending ? acceptanceOperation(pending, { replayed: true }) : null;
+}
+
+function beginLockedProfileAcceptance(candidate) {
+  const existing = pendingForCandidate(candidate);
+  if (existing) return acceptanceOperation(existing, { replayed: true });
+  const semanticOperationId = crypto.randomUUID();
+  const pending = lockedProfileStore.savePending(profileInput(candidate, {
+    semanticOperationId,
+    profileRevisionId: `PENDING:${semanticOperationId}`,
+    deviceCreatedAt: new Date().toISOString(),
+  }));
+  return acceptanceOperation(pending, { replayed: false });
+}
+
+function finalizeLockedProfileAcceptance(operation, calibration) {
+  if (!operation || typeof operation !== "object" || !calibration || typeof calibration !== "object") {
+    throw new Error("Scanner profile acceptance response is invalid");
+  }
+  const pending = pendingForCandidate();
+  if (!pending || operation.semanticOperationId !== pending.semanticOperationId
+      || operation.candidateDigestSha256 !== candidateDigest(pending)) {
+    throw new Error("Scanner profile acceptance does not match the durable pending operation");
+  }
+  const revision = typeof calibration.profileRevisionId === "string" ? calibration.profileRevisionId.trim() : "";
+  if (calibration.calibrationStatus !== "VALID"
+      || calibration.semanticOperationId !== operation.semanticOperationId
+      || calibration.candidateDigestSha256 !== operation.candidateDigestSha256
+      || !revision || (calibration.id != null && calibration.id !== revision)
+      || !/^[a-f0-9]{64}$/.test(String(calibration.profileDigestSha256 || ""))
+      || !calibration.profile || typeof calibration.profile !== "object") {
+    throw new Error("MintVault did not return the exact accepted Scanner profile binding");
+  }
+  const locallyDerived = lockedProfileStore._private.normalizedProfile({
+    ...profileCandidate(pending),
+    profileRevisionId: revision,
+    profileDigestSha256: calibration.profileDigestSha256,
+  });
+  const serverProfile = lockedProfileStore._private.normalizedProfile(calibration.profile);
+  if (lockedProfileStore._private.canonicalJson(serverProfile) !== lockedProfileStore._private.canonicalJson(locallyDerived)) {
+    throw new Error("MintVault accepted Scanner profile does not match the durable candidate");
+  }
+  const saved = lockedProfileStore.saveCurrent(serverProfile);
+  lockedProfileStore.clearPending();
+  return Object.freeze({
+    profileRevisionId: saved.profileRevisionId,
+    profileDigestSha256: saved.profileDigestSha256,
+    semanticOperationId: saved.semanticOperationId,
+    originMm: { x: saved.acquisitionRegion.x, y: saved.acquisitionRegion.y },
+    areaMm: { width: saved.acquisitionRegion.width, height: saved.acquisitionRegion.height },
+    profileVersion: saved.globalProfileVersion,
+  });
 }
 
 function calibrationRegion(input) {
@@ -123,21 +371,37 @@ async function ensureBridge() {
 }
 
 async function health() {
-  const origin = jigOrigin();
   try {
     const bridge = await ensureBridge();
     const result = await run(bridge, ["health"], 12_000);
-    if (result.status === "ready" && !origin) {
-      return { ...result, status: "profile_unprovisioned", error: "Canon is connected but the station jig origin is not provisioned", profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
+    let selected;
+    try { selected = profileSelection(); }
+    catch (error) {
+      return { ...result, status: "profile_invalid", error: error.message, profileVersion: PROFILE_VERSION, workstationId: stationId() };
     }
-    return { ...result, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
+    if (["ready", "busy"].includes(result.status) && !selected) {
+      return { ...result, status: "profile_unprovisioned", error: "Canon is connected but the station jig origin is not provisioned", profileVersion: PROFILE_VERSION, workstationId: stationId() };
+    }
+    if (selected?.profile && !scannerMatchesProfile(result, selected.profile)) {
+      return { ...result, status: "profile_invalid", error: "Connected Canon does not match the locked Scanner profile", profileVersion: PROFILE_VERSION, workstationId: stationId() };
+    }
+    return {
+      ...result,
+      profileVersion: PROFILE_VERSION,
+      workstationId: stationId(),
+      ...(selected?.profile ? {
+        profileRevisionId: selected.profile.profileRevisionId,
+        profileDigestSha256: selected.profile.profileDigestSha256,
+      } : {}),
+    };
   } catch (error) {
-    return { status: "control_unavailable", error: error.message, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
+    return { status: "control_unavailable", error: error.message, profileVersion: PROFILE_VERSION, workstationId: stationId() };
   }
 }
 
 async function scan(outputDirectory) {
-  const origin = jigOrigin();
+  const selected = profileSelection();
+  const origin = selected?.originMm;
   if (!origin) throw new Error("Scanner jig origin is not provisioned; run the LiDE station acceptance setup");
   const startedAt = new Date().toISOString();
   const bridge = await ensureBridge();
@@ -150,6 +414,9 @@ async function scan(outputDirectory) {
   }
   const stat = fs.statSync(capturedPath);
   if (!stat.isFile() || stat.size < 4) throw new Error("LiDE bridge returned an empty TIFF");
+  if (selected.profile && !scannerMatchesProfile(result, selected.profile)) {
+    throw new Error("Captured Canon does not match the locked Scanner profile");
+  }
   return {
     path: capturedPath,
     provenance: {
@@ -167,6 +434,8 @@ async function scan(outputDirectory) {
       captureStartedAt: startedAt,
       captureCompletedAt: new Date().toISOString(),
       helperVersion: result.helperVersion,
+      profileRevisionId: selected.profile?.profileRevisionId || null,
+      profileDigestSha256: selected.profile?.profileDigestSha256 || null,
     },
   };
 }
@@ -238,6 +507,7 @@ async function scanCalibrationRegion(outputDirectory, region) {
     appliedRegionMm: result.scanAreaMm,
     requestedDpi: Number(result.requestedDpi),
     driverResolutionDpi: Number(result.driverResolutionDpi),
+    helperVersion: result.helperVersion,
     scanner: {
       model: result.model || MODEL,
       deviceId: result.deviceId || "",
@@ -255,5 +525,11 @@ module.exports = {
   positioningPreview,
   scanCalibrationRegion,
   persistJigOrigin,
-  _private: { jigOrigin, calibrationRegion, ensureBridge, CALIBRATION_MIN_MM, PLATEN_MAX_MM, PROFILE_AREA_MM, POSITIONING_PREVIEW_DPI },
+  resumeLockedProfileAcceptance,
+  beginLockedProfileAcceptance,
+  finalizeLockedProfileAcceptance,
+  currentLockedProfile,
+  configureRuntime,
+  requiresLockedProfile: () => runtime.isPackaged,
+  _private: { jigOrigin, developmentJigOrigin, profileSelection, scannerMatchesProfile, calibrationRegion, ensureBridge, profileInput, profileCandidate, candidateDigest, calibrationBinding, acceptanceOperation, pendingForCandidate, CALIBRATION_MIN_MM, PLATEN_MAX_MM, PROFILE_AREA_MM, POSITIONING_PREVIEW_DPI, CALIBRATION_VERSION },
 };

@@ -84,6 +84,11 @@ body {
   border-color: var(--gold);
   color: var(--fg);
 }
+.hdr-shift {
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.6px;
+}
 
 .row {
   border-bottom: 1px solid var(--border);
@@ -378,7 +383,7 @@ body {
 .action-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 1.25fr;
+  grid-template-columns: 1fr 1fr;
 }
 .capture-primary {
   font-size: 15px;
@@ -611,6 +616,63 @@ body {
   display: flex;
   flex-direction: column;
   gap: 9px;
+}
+.setup-progress {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(5, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.setup-progress li {
+  border-bottom: 2px solid var(--border);
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.45px;
+  padding: 0 0 5px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.setup-progress li.complete {
+  border-color: var(--green);
+  color: var(--green);
+}
+.setup-progress li.current {
+  border-color: var(--gold);
+  color: var(--fg);
+}
+.profile-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.profile-setup-checklist {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  font-size: 10px;
+  gap: 5px;
+  padding: 9px;
+}
+.profile-preview-viewport {
+  background: #000;
+  border: 1px solid var(--blue);
+  border-radius: 7px;
+  height: 260px;
+  overflow: hidden;
+}
+.profile-preview-viewport img {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+.profile-setup-result {
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.3px;
 }
 .station-setup-error {
   color: var(--red);

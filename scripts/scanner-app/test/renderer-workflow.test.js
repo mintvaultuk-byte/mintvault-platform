@@ -35,6 +35,18 @@ test("normal placement Preview is a card-centred display crop while full platen 
   assert.doesNotMatch(main, /popover\.on\("blur"/);
 });
 
+test("profile setup is a service-only guided appliance flow and locks the underlying surface", () => {
+  assert.match(html, /id="stationSetupProgress"/);
+  assert.match(html, /VERIFY 1200 DPI &amp; SAVE LOCKED PROFILE/);
+  assert.match(html, /Setup creates no Card Job, consumes no Grading Credit, assigns no MV number, and uploads no card evidence/);
+  assert.match(renderer, /els\.stationProfilePanel\.hidden = !\(stationSetup\.canServiceStation === true && \["profile_setup_required", "profile_check"\]\.includes\(stage\)\)/);
+  assert.match(renderer, /els\.diagnosticsRow\.hidden = setup\?\.canServiceStation !== true/);
+  assert.match(renderer, /body > :not\(#stationSetupModal\):not\(script\)/);
+  assert.match(renderer, /sibling\.inert = !active/);
+  assert.match(main, /requireLiveProfileSetupAuthority\(\)[\s\S]*submitPositioningCalibration\([\s\S]*saveCalibration\(candidate\)/);
+  assert.match(renderer, /stage === "profile_check"[\s\S]*Scanner profile recovery required/);
+});
+
 test("SHIFT CHANGE immediately clears only the human session and keeps station/evidence custody", () => {
   const identity = fs.readFileSync(path.join(APP, "lib", "station-identity.js"), "utf8");
   const client = fs.readFileSync(path.join(APP, "lib", "station-client.js"), "utf8");

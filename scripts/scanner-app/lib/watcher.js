@@ -97,6 +97,8 @@ const TARGET_KEEPALIVE_MS = 60_000;
 const PREVIEW_MAX_EDGE_PX = 1_400;
 const PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 const POSITIONING_PREVIEW_MAX_EDGE_PX = 1_800;
+const CALIBRATION_PROOF_MIN_BYTES = 64 * 1024;
+const CALIBRATION_PROOF_MAX_BYTES = 512 * 1024 * 1024;
 // Each ImageCaptureCore health probe opens and closes the physical scanner
 // session. AirScan-backed LiDE devices need a short release interval; probing
 // every target-poll tick can make the station report its *own* prior probe as
@@ -191,6 +193,8 @@ class Watcher extends EventEmitter {
     this.targetCaptureInFlight = false;
     this.previewActionInFlight = false;
     this.positioningPreviewInFlight = false;
+    this.profileAcceptanceInFlight = false;
+    this.preparedPositioningCalibration = null;
     this.recoveryPlaintextWork = 0;
     this.updateInstallPending = false;
     this.initialDrainTimer = null;
@@ -256,6 +260,7 @@ class Watcher extends EventEmitter {
       // with legacy inbox recovery.  Reconcile it before accepting another
       // physical capture, so a crash cannot force a side-level rescan.
       await this.resumeTargetedCaptures();
+      await this.sweepPositioningProofPlaintext();
       // Re-render/analyse a retained local setup Preview after an app update.
       // This is image-only local work: it never creates a target, TIFF, upload,
       // or evidence mutation. It lets a corrected display transform be reviewed
@@ -560,6 +565,25 @@ class Watcher extends EventEmitter {
     }
   }
 
+  async sweepPositioningProofPlaintext() {
+    if (!fs.existsSync(POSITIONING_PREVIEW)) return 0;
+    let removed = 0;
+    const walk = (directory) => {
+      for (const dirent of fs.readdirSync(directory, { withFileTypes: true })) {
+        const candidate = path.join(directory, dirent.name);
+        if (dirent.isSymbolicLink()) continue;
+        if (dirent.isDirectory()) walk(candidate);
+        else if (dirent.isFile() && /\.tiff?$/i.test(dirent.name)) {
+          fs.unlinkSync(candidate);
+          removed++;
+        }
+      }
+    };
+    walk(POSITIONING_PREVIEW);
+    if (removed) this.log(`startup: removed ${removed} abandoned setup-only calibration proof TIFF(s)`, "warn");
+    return removed;
+  }
+
   captureStorageStatus() {
     return this.captureQueue.storageStatus();
   }
@@ -742,7 +766,7 @@ class Watcher extends EventEmitter {
     return cardFrame.assessLide400CardFrame(masterPath, provenance?.scanAreaMm);
   }
 
-  async validateCaptureMaster(masterPath, provenance) {
+  async validateCaptureMaster(masterPath, provenance, expectedProfileRevisionId) {
     const stat = fs.lstatSync(masterPath);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 64 * 1024 || stat.size > 512 * 1024 * 1024) {
       throw new Error("LiDE TIFF size or file type is outside the locked capture profile");
@@ -753,6 +777,12 @@ class Watcher extends EventEmitter {
         Number(provenance?.driverResolutionDpi) !== 1200 || !values.every(Number.isFinite) ||
         Math.abs(values[0] - 100) > 0.25 || Math.abs(values[1] - 130) > 0.25) {
       throw new Error("LiDE capture provenance does not match the locked 1200 DPI profile");
+    }
+    if (lide400.requiresLockedProfile() && (
+      provenance?.profileRevisionId !== expectedProfileRevisionId
+      || !/^[a-f0-9]{64}$/.test(String(provenance?.profileDigestSha256 || ""))
+    )) {
+      throw new Error("LiDE capture did not use the exact server-authorised locked profile revision");
     }
     const metadata = await require("sharp")(masterPath, { limitInputPixels: false }).metadata();
     const expectedWidth = Math.round((values[0] / 25.4) * 1200);
@@ -817,7 +847,7 @@ class Watcher extends EventEmitter {
     const scratch = this.captureQueue.scratchPath(entry, ".verify.tif");
     try {
       await this.captureQueue.decryptToFile(entry.artifact, scratch);
-      const masterValidation = await this.validateCaptureMaster(scratch, metadata.captureProvenance);
+      const masterValidation = await this.validateCaptureMaster(scratch, metadata.captureProvenance, metadata.profileRevisionId);
       const frameAssessment = await this.assessCaptureFrame(scratch, metadata.captureProvenance);
       if (canonicalJson(masterValidation) !== canonicalJson(metadata.masterValidation) ||
           canonicalJson(frameAssessment) !== canonicalJson(metadata.frameAssessment)) {
@@ -984,8 +1014,10 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "Positioning preview path is invalid" };
     }
     try {
-      const stat = fs.statSync(previewPath);
-      if (!stat.isFile() || stat.size < 4 || stat.size > PREVIEW_MAX_BYTES) throw new Error("Positioning preview file is unavailable");
+      const stat = fs.lstatSync(previewPath);
+      if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1 || stat.size < 4 || stat.size > PREVIEW_MAX_BYTES) {
+        throw new Error("Positioning preview file is unavailable");
+      }
       return { ok: true, previewId, dataUrl: `data:image/jpeg;base64,${fs.readFileSync(previewPath).toString("base64")}` };
     } catch (error) {
       return { ok: false, error: error.message || "Positioning preview file is unavailable" };
@@ -995,7 +1027,7 @@ class Watcher extends EventEmitter {
   async runPositioningPreview() {
     const updateDenied = this.updateInstallDenial();
     if (updateDenied) return updateDenied;
-    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.profileAcceptanceInFlight) {
       return { ok: false, error: "Preview is unavailable while Scan, Accept, Rescan, or another Preview is in progress" };
     }
     const active = this.activeTargetEntry();
@@ -1003,10 +1035,11 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "Positioning Preview is unavailable while a card TIFF is awaiting Accept or Rescan" };
     }
     const health = stateMod.get().scannerHealth?.status;
-    if (!["ready", "profile_unprovisioned"].includes(health)) {
+    if (!["ready", "profile_unprovisioned", "profile_invalid"].includes(health)) {
       return { ok: false, error: "Canon LiDE 400 is not ready for a positioning Preview" };
     }
     this.positioningPreviewInFlight = true;
+    this.preparedPositioningCalibration = null;
     const id = crypto.randomUUID();
     const directory = path.join(POSITIONING_PREVIEW, id);
     const startedAt = Date.now();
@@ -1078,7 +1111,7 @@ class Watcher extends EventEmitter {
   applyPositioningPreview(previewId) {
     const updateDenied = this.updateInstallDenial();
     if (updateDenied) return updateDenied;
-    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.profileAcceptanceInFlight) {
       return { ok: false, error: "Placement cannot be saved while scanner work is in progress" };
     }
     const entry = stateMod.get().positioningPreview;
@@ -1086,6 +1119,9 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "This positioning preview is stale or not safe enough to establish a placement zone" };
     }
     try {
+      if (lide400.requiresLockedProfile()) {
+        throw new Error("Packaged Scanner placement must pass MintVault's 1200-DPI profile acceptance flow");
+      }
       const persisted = lide400.persistJigOrigin(entry.placement.originMm);
       stateMod.set({
         positioningPreview: { ...entry, status: "saved", savedAt: new Date().toISOString(), persisted },
@@ -1096,6 +1132,252 @@ class Watcher extends EventEmitter {
       return { ok: true, persisted };
     } catch (error) {
       return { ok: false, error: error?.message || String(error) };
+    }
+  }
+
+  positioningCalibrationCandidate(previewId) {
+    const entry = stateMod.get().positioningPreview;
+    if (!entry || entry.id !== previewId || entry.status !== "detected" || !entry.placement?.ready) {
+      return { ok: false, error: "This positioning preview is stale or not safe enough to create a locked profile" };
+    }
+    const tolerance = Number(entry.placement.placementToleranceMm);
+    const scanner = entry.capture?.scanner || {};
+    const card = entry.cardCandidate?.cardBoundsMm;
+    const origin = entry.placement.originMm;
+    const area = entry.placement.areaMm;
+    if (!Number.isFinite(tolerance) || !card || !origin || !area) {
+      return { ok: false, error: "Positioning preview calibration geometry is incomplete" };
+    }
+    return {
+      ok: true,
+      candidate: {
+        scannerHardware: {
+          manufacturer: "Canon",
+          model: String(scanner.model || "CanoScan LiDE 400"),
+          deviceId: String(scanner.deviceId || ""),
+          serial: scanner.serial == null ? null : String(scanner.serial),
+        },
+        scannerProfileVersion: lide400.PROFILE_VERSION,
+        acquisitionRegion: {
+          x: Number(origin.x), y: Number(origin.y), width: Number(area.width), height: Number(area.height),
+        },
+        workingRegion: {
+          x: Number(card.x), y: Number(card.y), width: Number(card.width), height: Number(card.height),
+        },
+        placementToleranceMm: { left: tolerance, right: tolerance, top: tolerance, bottom: tolerance },
+        calibrationVersion: lide400._private.CALIBRATION_VERSION,
+        requestedDpi: 1200,
+        colourMode: "RGB",
+        bitDepth: 8,
+        outputFormat: "TIFF",
+        presentationRotationDegrees: 180,
+      },
+    };
+  }
+
+  async validateCalibrationProof(proofPath, capture, candidate) {
+    const root = path.resolve(path.dirname(proofPath)) + path.sep;
+    const resolved = path.resolve(proofPath);
+    if (!resolved.startsWith(root) || ![".tif", ".tiff"].includes(path.extname(resolved).toLowerCase())) {
+      throw new Error("Calibration proof path is unsafe");
+    }
+    const stat = fs.lstatSync(resolved);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1
+        || stat.size < CALIBRATION_PROOF_MIN_BYTES || stat.size > CALIBRATION_PROOF_MAX_BYTES) {
+      throw new Error("Calibration proof TIFF is missing, unsafe, or outside the accepted size range");
+    }
+    if (capture.requestedDpi !== 1200 || capture.driverResolutionDpi !== 1200) {
+      throw new Error("Calibration capability proof did not use exact 1200 DPI");
+    }
+    if (capture.helperVersion !== helperIntegrity.HELPER_VERSION) {
+      throw new Error("Calibration capability proof did not use the current sealed capture helper");
+    }
+    const expected = candidate.acquisitionRegion;
+    const applied = capture.appliedRegionMm;
+    if (!applied || !["x", "y", "width", "height"].every((key) =>
+      Number.isFinite(Number(applied[key])) && Math.abs(Number(applied[key]) - Number(expected[key])) <= 0.1)) {
+      throw new Error("Calibration capability proof did not use the accepted hardware region");
+    }
+    const expectedHardware = candidate.scannerHardware;
+    if (String(capture.scanner?.model || "") !== expectedHardware.model
+        || (expectedHardware.deviceId && String(capture.scanner?.deviceId || "") !== expectedHardware.deviceId)
+        || (expectedHardware.serial && String(capture.scanner?.serial || "") !== expectedHardware.serial)) {
+      throw new Error("Calibration capability proof came from a different scanner");
+    }
+    const sharp = require("sharp");
+    const metadata = await sharp(resolved, { limitInputPixels: false }).metadata();
+    const expectedWidthPx = Math.round((Number(expected.width) / 25.4) * 1200);
+    const expectedHeightPx = Math.round((Number(expected.height) / 25.4) * 1200);
+    if (metadata.format !== "tiff" || metadata.space !== "srgb" || metadata.channels !== 3
+        || metadata.depth !== "uchar" || Number(metadata.density) !== 1200
+        || !Number.isSafeInteger(metadata.width) || Math.abs(metadata.width - expectedWidthPx) > 2
+        || !Number.isSafeInteger(metadata.height) || Math.abs(metadata.height - expectedHeightPx) > 2) {
+      throw new Error("Calibration capability proof is not an exact 1200-DPI RGB 8-bit TIFF");
+    }
+    const frameAssessment = await cardFrame.assessLide400CardFrame(resolved, expected);
+    if (frameAssessment.accepted !== true) {
+      throw new Error(frameAssessment.reason || "Calibration capability proof did not contain a complete usable card frame");
+    }
+    const hash = crypto.createHash("sha256");
+    await new Promise((resolveHash, rejectHash) => {
+      const input = fs.createReadStream(resolved, { flags: fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) });
+      input.on("data", (chunk) => hash.update(chunk));
+      input.on("error", rejectHash);
+      input.on("end", resolveHash);
+    });
+    return Object.freeze({
+      sha256: hash.digest("hex"),
+      sizeBytes: stat.size,
+      format: "TIFF",
+      requestedDpi: 1200,
+      driverResolutionDpi: 1200,
+      colourMode: "RGB",
+      bitDepth: 8,
+      widthPx: metadata.width,
+      heightPx: metadata.height,
+      acquisitionRegion: { ...expected },
+      captureHelperVersion: capture.helperVersion,
+      frameAssessment: {
+        accepted: true,
+        cardBoundsMm: frameAssessment.cardBoundsMm,
+        evidenceMarginMm: frameAssessment.evidenceMarginMm,
+      },
+    });
+  }
+
+  async preparePositioningCalibration(previewId) {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
+      return { ok: false, error: "Profile verification cannot start while scanner work is in progress" };
+    }
+    const base = this.positioningCalibrationCandidate(previewId);
+    if (!base.ok) return base;
+    const current = stateMod.get().positioningPreview;
+    if (this.preparedPositioningCalibration?.previewId === previewId) {
+      return { ok: true, candidate: this.preparedPositioningCalibration.operation.request, reusedProof: true };
+    }
+    try {
+      const resumed = lide400.resumeLockedProfileAcceptance(base.candidate);
+      if (resumed) {
+        this.preparedPositioningCalibration = Object.freeze({ previewId, operation: resumed });
+        stateMod.set({
+          positioningPreview: {
+            ...current,
+            verificationStatus: "verified_1200",
+            verifiedAt: resumed.request.profile.deviceCreatedAt,
+            capabilityProof: {
+              sha256: resumed.request.profile.capabilityProof.sha256,
+              sizeBytes: resumed.request.profile.capabilityProof.sizeBytes,
+              requestedDpi: 1200,
+              driverResolutionDpi: 1200,
+              format: "TIFF",
+            },
+            calibrationError: null,
+          },
+          lastError: null,
+        });
+        this.emitState();
+        return { ok: true, candidate: resumed.request, reusedProof: true };
+      }
+    } catch (error) {
+      return { ok: false, code: error.code || "profile_recovery_required", error: error.message || String(error) };
+    }
+    this.positioningPreviewInFlight = true;
+    stateMod.set({ positioningPreview: { ...current, verificationStatus: "scanning_1200", calibrationError: null } });
+    this.emitState();
+    const directory = path.join(POSITIONING_PREVIEW, previewId, "profile-proof");
+    ensurePrivateDirectory(directory);
+    let proofPath = null;
+    try {
+      return await this.withRecoveryPlaintextWork(async () => {
+        const capture = await lide400.scanCalibrationRegion(directory, base.candidate.acquisitionRegion);
+        proofPath = capture.path;
+        const capabilityProof = await this.validateCalibrationProof(proofPath, capture, base.candidate);
+        const candidate = Object.freeze({ ...base.candidate, capabilityProof });
+        const entry = stateMod.get().positioningPreview;
+        if (!entry || entry.id !== previewId || entry.status !== "detected") {
+          throw new Error("Positioning Preview changed before profile verification completed");
+        }
+        const operation = lide400.beginLockedProfileAcceptance(candidate);
+        this.preparedPositioningCalibration = Object.freeze({ previewId, operation });
+        stateMod.set({
+          positioningPreview: {
+            ...entry,
+            verificationStatus: "verified_1200",
+            verifiedAt: new Date().toISOString(),
+            capabilityProof: {
+              sha256: capabilityProof.sha256,
+              sizeBytes: capabilityProof.sizeBytes,
+              requestedDpi: capabilityProof.requestedDpi,
+              driverResolutionDpi: capabilityProof.driverResolutionDpi,
+              format: capabilityProof.format,
+            },
+            calibrationError: null,
+          },
+          lastError: null,
+        });
+        this.emitState();
+        return { ok: true, candidate: operation.request };
+      });
+    } catch (error) {
+      this.preparedPositioningCalibration = null;
+      const entry = stateMod.get().positioningPreview;
+      if (entry?.id === previewId) {
+        stateMod.set({ positioningPreview: { ...entry, verificationStatus: "failed", calibrationError: error.message || String(error) } });
+        this.emitState();
+      }
+      return { ok: false, error: error.message || String(error) };
+    } finally {
+      if (proofPath && fs.existsSync(proofPath)) fs.unlinkSync(proofPath);
+      try { fs.rmdirSync(directory); } catch {}
+      this.positioningPreviewInFlight = false;
+    }
+  }
+
+  commitPositioningCalibration(previewId, calibration) {
+    const entry = stateMod.get().positioningPreview;
+    const prepared = this.preparedPositioningCalibration;
+    const candidate = entry?.id === previewId && entry?.status === "detected"
+      && prepared?.previewId === previewId && prepared?.operation?.request?.profile?.capabilityProof
+      ? { ok: true, operation: prepared.operation }
+      : { ok: false, error: "This positioning Preview has no verified 1200-DPI capability proof" };
+    if (!candidate.ok) return candidate;
+    try {
+      const persisted = lide400.finalizeLockedProfileAcceptance(candidate.operation, calibration);
+      this.preparedPositioningCalibration = null;
+      stateMod.set({
+        positioningPreview: { ...entry, status: "saved", savedAt: new Date().toISOString(), persisted },
+        lastError: null,
+      });
+      this.emitState();
+      this.log(`positioning-preview ${JSON.stringify({ id: entry.id, stage: "profile_activated", profileRevisionId: persisted.profileRevisionId, profileDigestSha256: persisted.profileDigestSha256 })}`);
+      return { ok: true, persisted };
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) };
+    }
+  }
+
+  async submitPositioningCalibration(previewId, submitter) {
+    if (this.profileAcceptanceInFlight) {
+      return { ok: false, code: "profile_acceptance_in_flight", error: "This Scanner profile is already awaiting MintVault acceptance" };
+    }
+    if (typeof submitter !== "function") return { ok: false, error: "Scanner profile acceptance transport is unavailable" };
+    this.profileAcceptanceInFlight = true;
+    try {
+      const prepared = await this.preparePositioningCalibration(previewId);
+      if (!prepared.ok) return prepared;
+      const accepted = await submitter(prepared.candidate);
+      if (!accepted?.ok) {
+        return {
+          ok: false,
+          code: accepted?.body?.error?.code || "profile_acceptance_failed",
+          error: accepted?.body?.error?.message || accepted?.body?.error || "MintVault did not accept the verified Scanner profile.",
+        };
+      }
+      return this.commitPositioningCalibration(previewId, accepted.body?.calibration);
+    } finally {
+      this.profileAcceptanceInFlight = false;
     }
   }
 
@@ -1725,7 +2007,7 @@ class Watcher extends EventEmitter {
         captureHelperVersion: direct.provenance.helperVersion,
         identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
       });
-      const masterValidation = await this.validateCaptureMaster(completed.filePath, completed.provenance);
+      const masterValidation = await this.validateCaptureMaster(completed.filePath, completed.provenance, completed.profileRevisionId);
       const processing = this.addTargetedPending({
         ...completed,
         phase: "preview_processing",

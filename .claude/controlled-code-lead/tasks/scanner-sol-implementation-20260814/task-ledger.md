@@ -153,6 +153,33 @@
   `2b6d3058…ef64`, matching helper hashes, and `releaseReady:false`. No Apple
   credential, external feed, login item or station was used or mutated.
 
+## WP8 implementation and regression evidence
+
+- Packaged Scanner no longer accepts a mutable jig coordinate. It encrypts one
+  immutable profile under a helper-wrapped UUID key, authenticates the
+  station/revision envelope, and stages one semantic operation before the first
+  profile-acceptance request. Response loss/restart replays the same bytes;
+  legacy, conflicting, malformed or partial replies cannot activate capture.
+- The native and JavaScript calibration boundaries now agree on the frozen
+  100×130 mm acquisition ROI. Sealed capture helper 1.0.1 was rebuilt arm64 at
+  minOS 12.0 and locally verified. Capability proof requires exact 1200-DPI
+  TIFF geometry within two pixels, RGB/8-bit metadata, current helper/hardware,
+  a nonblank complete card and safe margins; plaintext is deleted and swept.
+- ACTIVE requires server `VALID` plus exact local/server revision and SHA-256
+  digest. Missing binding degrades; mismatch enters recoverable `profile_check`.
+  Only a freshly authorised service user can use that profile-proof lane, while
+  every ordinary physical operation stays closed.
+- The appliance UI guides Account → MFA → Station → Profile → Ready, makes the
+  underlying surface inert in modal states, keeps SHIFT CHANGE reachable, hides
+  privileged setup from normal operators and exposes no job/credit/MV/upload
+  authority during setup. The local browser harness exercised service setup,
+  ordinary lockout, ACTIVE and both `profile_check` roles.
+- Full Scanner suite: 151 passed / 3 explicit Secure-Enclave skips. A6's final
+  focused hostile review: 61/61 and CLEAN. Scanner audit remains zero
+  vulnerabilities; syntax and diff whitespace pass. No Canon, production
+  Keychain, Partner endpoint, credit, Card Job, staging or production system was
+  touched.
+
 ## Authoritative links
 
 - Campaign issues: `../../../../../engineering/ISSUE_REGISTER.md`

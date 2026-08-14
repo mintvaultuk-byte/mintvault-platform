@@ -32,7 +32,7 @@ function fixture(t, { packaged = false, helperTeam = "", appTeam = "", expectedT
   const manifest = {
     schemaVersion: 1,
     helperName: "mv-capture-helper",
-    helperVersion: "1.0.0",
+    helperVersion: "1.0.1",
     protocolVersion: 1,
     bundleIdentifier: "com.mintvault.scanner.capture-helper",
     architecture: "arm64",
@@ -169,11 +169,11 @@ test("packaged runtime accepts only the same non-empty Team ID as the applicatio
 });
 
 test("rejects stale or malformed native response protocol before controller use", () => {
-  assert.deepEqual(integrity.assertCompatibleResult({ helperVersion: "1.0.0", protocolVersion: 1, status: "ready" }), {
-    helperVersion: "1.0.0", protocolVersion: 1, status: "ready",
+  assert.deepEqual(integrity.assertCompatibleResult({ helperVersion: "1.0.1", protocolVersion: 1, status: "ready" }), {
+    helperVersion: "1.0.1", protocolVersion: 1, status: "ready",
   });
   assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "0.9.0", protocolVersion: 1 }), /response protocol\/version/);
-  assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "1.0.0", protocolVersion: 2 }), /response protocol\/version/);
+  assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "1.0.1", protocolVersion: 2 }), /response protocol\/version/);
 });
 
 test("identity helper uses its own sealed manifest and signing identifier contract", (t) => {

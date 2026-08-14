@@ -35,6 +35,42 @@ test("station status and physical action gates fail closed", () => {
   assert.match(authority.operationalDenial({ stage: "offline" }).error, /New physical operations are paused/);
 });
 
+test("ACTIVE is withheld until both server calibration and the device-bound profile are live", () => {
+  const active = { stage: "active" };
+  const binding = {
+    localProfileRevisionId: "profile-a",
+    localProfileDigestSha256: "a".repeat(64),
+    serverProfileRevisionId: "profile-a",
+    serverProfileDigestSha256: "a".repeat(64),
+  };
+  assert.equal(authority.scannerProfileStage({ stationStage: active, scannerHealth: "checking", calibrationStatus: "VALID", canServiceStation: false }).stage, "scanner_checking");
+  assert.equal(authority.scannerProfileStage({ stationStage: active, scannerHealth: "profile_unprovisioned", calibrationStatus: "VALID", canServiceStation: true }).stage, "profile_setup_required");
+  assert.equal(authority.scannerProfileStage({ stationStage: active, scannerHealth: "ready", calibrationStatus: "UNPROVISIONED", canServiceStation: false }).stage, "profile_setup_locked");
+  assert.equal(authority.scannerProfileStage({ stationStage: active, scannerHealth: "disconnected", calibrationStatus: "VALID", canServiceStation: true }).stage, "scanner_disconnected");
+  assert.equal(authority.scannerProfileStage({ stationStage: active, scannerHealth: "ready", calibrationStatus: "ALIEN", canServiceStation: true }).stage, "degraded");
+  assert.deepEqual(authority.scannerProfileStage({ stationStage: active, scannerHealth: "ready", calibrationStatus: "VALID", canServiceStation: false, ...binding }), active);
+  assert.equal(authority.scannerProfileStage({
+    stationStage: active,
+    scannerHealth: "ready",
+    calibrationStatus: "VALID",
+    canServiceStation: false,
+    ...binding,
+    serverProfileRevisionId: "profile-b",
+  }).stage, "profile_check");
+  assert.equal(authority.scannerProfileStage({
+    stationStage: active,
+    scannerHealth: "ready",
+    calibrationStatus: "VALID",
+    canServiceStation: false,
+    ...binding,
+    serverProfileDigestSha256: null,
+  }).stage, "degraded");
+  assert.equal(authority.profileSetupDenial({ stage: "profile_setup_required", canServiceStation: true }), null);
+  assert.equal(authority.profileSetupDenial({ stage: "profile_check", canServiceStation: true }), null);
+  assert.notEqual(authority.operationalDenial({ stage: "profile_check", canServiceStation: true }), null);
+  assert.match(authority.profileSetupDenial({ stage: "profile_setup_locked", canServiceStation: false }).error, /Partner Owner|Super Admin/);
+});
+
 test("shift change remains reachable in every state that still has a local human", () => {
   for (const stage of ["active", "pending", "offline", "mfa", "mfa_enrolment_required", "no_partner_access"]) {
     assert.equal(authority.withLocalSession({ stage }, true).canSignOut, true, stage);
@@ -49,13 +85,22 @@ test("every new physical-operation IPC checks live authority before touching the
     assert.notEqual(start, -1, `${handler} handler exists`);
     const end = main.indexOf("\n  });", start);
     const body = main.slice(start, end);
-    assert.match(body, /requireLiveOperationalAuthority\(\)/, `${handler} performs a fresh gate`);
-    const gate = body.indexOf("requireLiveOperationalAuthority()");
+    assert.match(body, /requireLive(?:Operational|ProfileSetup)Authority\(\)/, `${handler} performs a fresh gate`);
+    const operationalGate = body.indexOf("requireLiveOperationalAuthority()");
+    const profileGate = body.indexOf("requireLiveProfileSetupAuthority()");
+    const gate = operationalGate === -1 ? profileGate : profileGate === -1 ? operationalGate : Math.min(operationalGate, profileGate);
     const watcherUse = body.indexOf("watcher");
     if (watcherUse !== -1) assert.ok(gate < watcherUse, `${handler} gates before watcher access`);
   }
+  const applyStart = main.indexOf('ipcMain.handle("apply-positioning-preview"');
+  const applyBody = main.slice(applyStart, main.indexOf("\n  });", applyStart));
+  assert.match(applyBody, /requireLiveProfileSetupAuthority\(\)/);
+  assert.match(applyBody, /submitPositioningCalibration\([\s\S]*stationClient\.saveCalibration\(candidate\)/);
+  assert.match(main, /serverProfileRevisionId[\s\S]*localProfileRevisionId[\s\S]*serverProfileDigestSha256/);
   assert.match(main, /20_000 \+ Math\.floor\(Math\.random\(\) \* 10_000\)/);
   assert.match(main, /webContents\.send\("station-setup-update", setup\)/);
+  assert.match(main, /scannerHealth\?\.status \|\| "checking"\) === "checking"\) return/);
+  assert.match(main, /lockedHardware = lide400\.currentLockedProfile\(\)\?\.scannerHardware/);
   assert.match(main, /async function stationSetupState\(options\) \{\s*if \(!stationIdentity\.hasOperatorSession\(\)\) \{\s*return stationAuthority\.withLocalSession\(\{ ok: true, stage: "sign_in" \}, false\)/s);
   assert.match(main, /const replay = stationAuthorityLatch\.current\(\);\s*if \(replay\) return stationAuthority\.withLocalSession/s);
 });

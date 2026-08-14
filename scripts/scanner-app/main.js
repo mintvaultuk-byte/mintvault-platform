@@ -28,6 +28,7 @@ const stationIdentity = require("./lib/station-identity");
 const stationAuthority = require("./lib/station-authority");
 const stationAuthorityLatch = require("./lib/station-authority-latch");
 const helperIntegrity = require("./lib/helper-integrity");
+const lide400 = require("./lib/lide400-controller");
 const newCardOperation = require("./lib/new-card-operation");
 const { createUpdateManager } = require("./lib/update-manager");
 const { ensureDefaultAfterEnrolment } = require("./lib/login-item");
@@ -91,6 +92,7 @@ function playSystemSound(filename) {
 const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
 const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
 const APP_VERSION  = (() => { try { return require("./package.json").version; } catch { return "?"; } })();
+lide400.configureRuntime({ isPackaged: app.isPackaged, appVersion: APP_VERSION });
 
 function versionTuple(raw) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(String(raw || "").trim());
@@ -433,19 +435,21 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
   }
   if (refreshCredits) lastKnownAvailableCredits = await availableCreditsOrNull();
   const summary = stationSummary(session.body, lastKnownAvailableCredits);
+  const canServiceStation = human.permissions.has(stationAuthority.ENROL_PERMISSION);
   const identity = stationIdentity.identityStatus();
   if (!["ABSENT_NEW", "READY_V2"].includes(identity.state)) {
     return {
       ok: true,
       stage: "identity_recovery_required",
       summary,
+      canServiceStation,
       error: identity.error || "This Mac's station identity cannot be verified. Contact a MintVault Super Admin; do not register it as a new station.",
     };
   }
   const code = identity.stationCode || null;
   const capability = stationAuthority.requiredCapabilityStage(human, { enrolled: Boolean(code) });
   if (capability.stage !== "authenticated") {
-    return { ok: true, stage: capability.stage, summary, error: capability.error };
+    return { ok: true, stage: capability.stage, summary, canServiceStation, error: capability.error };
   }
   if (!code) {
     const locations = await stationClient.enrolmentLocations();
@@ -454,6 +458,7 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
         ok: true,
         stage: locations.status === 403 ? "no_partner_access" : locations.status === 503 ? "degraded" : "offline",
         summary,
+        canServiceStation,
         error: locations.status === 503
           ? "MintVault station enrolment is temporarily unavailable. Contact a MintVault Super Admin."
           : "MintVault could not confirm this station’s authorised location.",
@@ -463,12 +468,13 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
       id: String(location.id), name: String(location.name),
     })) : [];
     if (permittedLocations.length === 0) {
-      return { ok: true, stage: "no_location", summary, error: "No active authorised location is available for this account." };
+      return { ok: true, stage: "no_location", summary, canServiceStation, error: "No active authorised location is available for this account." };
     }
     return {
       ok: true,
       stage: "register",
       summary,
+      canServiceStation,
       locations: permittedLocations,
     };
   }
@@ -489,6 +495,7 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
               ? "sign_in"
               : "station_unavailable",
       summary,
+      canServiceStation,
       stationCode: code,
       error: status.body?.error?.message || status.body?.error || "MintVault could not verify this station.",
     };
@@ -499,6 +506,7 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
       ok: true,
       stage: "degraded",
       summary,
+      canServiceStation,
       stationCode: code,
       error: "MintVault could not verify the minimum supported Scanner version. New physical work remains paused.",
     };
@@ -509,6 +517,7 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
       ok: true,
       stage: "degraded",
       summary,
+      canServiceStation,
       stationCode: code,
       error: "MintVault returned an invalid minimum Scanner version. New physical work remains paused.",
     };
@@ -520,6 +529,7 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
         ok: true,
         stage: "degraded",
         summary,
+        canServiceStation,
         stationCode: code,
         error: "MintVault returned an invalid Scanner update policy. New physical work remains paused.",
       };
@@ -530,6 +540,7 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
       ok: true,
       stage: "update_required",
       summary,
+      canServiceStation,
       stationCode: code,
       minimumSupportedVersion: station.minimumSupportedVersion,
       error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
@@ -537,17 +548,31 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
   }
   try { stationIdentity.setStationStatus(station.status); } catch {}
   const resolved = stationAuthority.stationStage(station.status);
-  const scannerHealth = String(stateMod.get().scannerHealth?.status || "checking");
-  const stage = resolved.stage === "active" && ["disconnected", "error"].includes(scannerHealth)
-    ? "scanner_disconnected"
-    : resolved.stage;
+  const scannerHealthState = stateMod.get().scannerHealth || {};
+  const scannerHealth = String(scannerHealthState.status || "checking");
+  const calibrationStatus = station.calibrationStatus || "UNPROVISIONED";
+  const serverProfileRevisionId = station.currentProfileRevisionId ?? station.currentCalibrationId ?? null;
+  const serverProfileDigestSha256 = station.currentProfileDigestSha256 ?? station.currentCalibrationProfileDigestSha256 ?? null;
+  const projected = stationAuthority.scannerProfileStage({
+    stationStage: resolved,
+    scannerHealth,
+    calibrationStatus,
+    canServiceStation,
+    localProfileRevisionId: scannerHealthState.profileRevisionId,
+    localProfileDigestSha256: scannerHealthState.profileDigestSha256,
+    serverProfileRevisionId,
+    serverProfileDigestSha256,
+  });
   return {
     ok: true,
-    stage,
+    stage: projected.stage,
     summary,
+    canServiceStation,
     stationCode: code,
-    calibrationStatus: station.calibrationStatus || "UNPROVISIONED",
-    ...(resolved.error ? { error: resolved.error } : {}),
+    calibrationStatus,
+    ...(typeof serverProfileRevisionId === "string" ? { currentProfileRevisionId: serverProfileRevisionId } : {}),
+    ...(typeof serverProfileDigestSha256 === "string" ? { currentProfileDigestSha256: serverProfileDigestSha256 } : {}),
+    ...(projected.error ? { error: projected.error } : {}),
   };
 }
 
@@ -592,6 +617,35 @@ async function requireLiveOperationalAuthority() {
   return updateInstallDenial();
 }
 
+async function requireLiveProfileSetupAuthority() {
+  const updateDeniedAtEntry = updateInstallDenial();
+  if (updateDeniedAtEntry) return updateDeniedAtEntry;
+  const latched = stationAuthorityLatch.current();
+  if (latched) return stationAuthority.profileSetupDenial(latched);
+  const setup = await stationSetupState({ refreshCredits: false });
+  const updateDeniedAfterSetup = updateInstallDenial();
+  if (updateDeniedAfterSetup) return updateDeniedAfterSetup;
+  const setupDenied = stationAuthority.profileSetupDenial(setup);
+  if (setupDenied) return setupDenied;
+  try {
+    const signedStatus = await stationClient.heartbeat(heartbeatPayload());
+    const updateDeniedAfterHeartbeat = updateInstallDenial();
+    if (updateDeniedAfterHeartbeat) return updateDeniedAfterHeartbeat;
+    const replay = stationAuthorityLatch.current();
+    if (replay) return stationAuthority.profileSetupDenial(replay);
+    if (!signedStatus.ok) {
+      return {
+        ok: false,
+        code: signedStatus.body?.error?.code || "station_authority_denied",
+        error: signedStatus.body?.error?.message || "MintVault could not confirm current station setup authority.",
+      };
+    }
+  } catch {
+    return stationAuthority.profileSetupDenial({ stage: "offline" });
+  }
+  return updateInstallDenial();
+}
+
 async function publishStationSetupState() {
   const setup = await stationSetupState({ refreshCredits: false });
   if (popover && !popover.isDestroyed()) popover.webContents.send("station-setup-update", setup);
@@ -602,16 +656,23 @@ function heartbeatPayload() {
   const state = stateMod.get();
   const health = state.scannerHealth || {};
   const scannerStatus = String(health.status || "checking");
+  let lockedHardware = null;
+  if (!health.deviceId && !health.serial) {
+    try { lockedHardware = lide400.currentLockedProfile()?.scannerHardware || null; } catch {}
+  }
+  const hardware = health.deviceId || health.serial ? health : lockedHardware || health;
   return {
     appVersion: APP_VERSION,
-    scannerConnected: ["ready", "busy", "profile_unprovisioned"].includes(scannerStatus),
+    scannerConnected: ["ready", "busy", "profile_unprovisioned", "profile_invalid"].includes(scannerStatus),
     scannerHardware: {
       manufacturer: "Canon",
-      model: String(health.model || "CanoScan LiDE 400"),
-      ...(health.serial ? { serial: String(health.serial) } : {}),
-      ...(health.deviceId ? { deviceId: String(health.deviceId) } : {}),
+      model: String(hardware.model || "CanoScan LiDE 400"),
+      ...(hardware.serial ? { serial: String(hardware.serial) } : {}),
+      ...(hardware.deviceId ? { deviceId: String(hardware.deviceId) } : {}),
     },
     scannerProfileVersion: String(health.profileVersion || "mintvault-canon-lide-400-v3"),
+    ...(health.profileRevisionId ? { scannerProfileRevisionId: String(health.profileRevisionId) } : {}),
+    ...(health.profileDigestSha256 ? { scannerProfileDigestSha256: String(health.profileDigestSha256) } : {}),
     pendingUploadCount: watcher ? watcher.targetedPendingUploadCount() : 0,
     captureState: String(state.activeCapture?.stage || state.state || "IDLE").slice(0, 64),
     ...(state.lastError ? { lastFailureCode: String(state.lastError).slice(0, 120) } : {}),
@@ -775,25 +836,36 @@ function setupIpc() {
   // request the one fixed full-platen local JPEG scan, but supplies neither a
   // file path nor any certificate/card/side identity.
   ipcMain.handle("run-positioning-preview", async () => {
-    const denied = await requireLiveOperationalAuthority();
+    const projection = await stationSetupState({ refreshCredits: false });
+    const denied = projection.stage === "active"
+      ? await requireLiveOperationalAuthority()
+      : await requireLiveProfileSetupAuthority();
     if (denied) return denied;
     if (!watcher) return { ok: false, error: "Scanner service is starting" };
     return watcher.runPositioningPreview();
   });
 
   ipcMain.handle("get-positioning-preview", (_event, previewId) => {
+    if (!stationIdentity.hasOperatorSession()) return { ok: false, error: "Sign in before viewing a positioning Preview" };
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
     return watcher.positioningPreviewData(previewId);
   });
 
   ipcMain.handle("apply-positioning-preview", async (_event, previewId) => {
-    const denied = await requireLiveOperationalAuthority();
+    const denied = await requireLiveProfileSetupAuthority();
     if (denied) return denied;
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
-    return watcher.applyPositioningPreview(previewId);
+    const committed = await watcher.submitPositioningCalibration(
+      previewId,
+      (candidate) => stationClient.saveCalibration(candidate),
+    );
+    if (!committed.ok) return committed;
+    await watcher.refreshScannerHealth({ force: true });
+    return stationSetupState({ refreshCredits: false });
   });
 
   ipcMain.handle("get-capture-preview", (_event, previewId) => {
+    if (!stationIdentity.hasOperatorSession()) return { ok: false, error: "Sign in before reviewing a capture" };
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
     return watcher.previewData(previewId);
   });
@@ -990,6 +1062,10 @@ app.whenReady().then(async () => {
   let heartbeatInFlight = false;
   const sendHeartbeat = async () => {
     if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
+    // `checking` contains no live hardware tuple. Publishing its placeholder
+    // before the first ImageCaptureCore probe would look like a hardware swap
+    // and invalidate an otherwise current server calibration.
+    if (String(stateMod.get().scannerHealth?.status || "checking") === "checking") return;
     heartbeatInFlight = true;
     try {
       const result = await stationClient.heartbeat(heartbeatPayload());

@@ -1,6 +1,6 @@
 # Architecture — AFTER — Scanner SOL campaign
 
-**State:** WP1 capture-helper, WP2 identity/client, WP3 live-authority, WP5 encrypted-queue, WP6 credential-independent package and WP7 fail-closed updater/login edges are AS-BUILT locally; real signed release and final server edges remain gated.
+**State:** WP1 capture-helper, WP2 identity/client, WP3 live-authority, WP5 encrypted-queue, WP6 credential-independent package, WP7 fail-closed updater/login and WP8 locked-profile/appliance edges are AS-BUILT locally; real signed release and final server edges remain gated.
 
 ```mermaid
 flowchart LR
@@ -76,3 +76,13 @@ main-app service. Authenticated update bodies are bounded while streaming and
 preserve the capture reserve; one install-quiesce latch spans MacUpdater's
 delayed native quit and every physical/recovery watcher edge. The exact P14 policy response and physical Apple installation remain
 reconciliation/external gates.
+
+WP8 confirms that `API` must return an immutable profile revision, digest and
+full canonical profile for one durable semantic operation before packaged
+capture can become ACTIVE. The AES-GCM profile is device-key wrapped, its
+routing is authenticated, and capture/grant/finalisation provenance carries the
+same revision/digest. The exact 100×130 mm ROI is proved at 1200 DPI with the
+sealed helper and a usable unclipped card frame. Renderer setup is a guided,
+locked appliance surface; only a freshly authorised service user can re-prove a
+mismatched profile, while ordinary physical work stays closed. The final API
+persistence contract and real Canon/signed-Keychain execution remain gated.

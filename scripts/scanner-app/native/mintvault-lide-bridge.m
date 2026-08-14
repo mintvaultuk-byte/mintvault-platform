@@ -15,7 +15,7 @@
 static NSString *const kExpectedFullName = @"CanoScan LiDE 400";
 static NSString *const kExpectedCanonName = @"Canon LiDE 400";
 static NSString *const kExpectedShortName = @"LiDE 400";
-static NSString *const kHelperVersion = @"1.0.0";
+static NSString *const kHelperVersion = @"1.0.1";
 static NSInteger const kHelperProtocolVersion = 1;
 
 @interface MintVaultLideBridge : NSObject <ICDeviceBrowserDelegate, ICScannerDeviceDelegate>
@@ -195,8 +195,8 @@ static NSInteger const kHelperProtocolVersion = 1;
   unit.resolution = requestedResolution;
   unit.scanAreaOrientation = 1; // EXIF orientation 1: deterministic upright capture.
   // This is a physical ImageCaptureCore acquisition rectangle, not a later
-  // Sharp/libvips crop. Profile scans are always 100 x 130 mm; calibration is
-  // deliberately a larger bounded acquisition so the jig can be measured.
+  // Sharp/libvips crop. Profile scans and their disposable capability proof
+  // both exercise the exact 100 x 130 mm ImageCaptureCore hardware ROI.
   if (self.positioningPreview) {
     // Deliberately broad, uncalibrated setup view. We read the active ICA
     // flatbed size in centimetres rather than guessing an X/Y, then request
@@ -314,8 +314,8 @@ int main(int argc, const char * argv[]) {
         printJSON(@{ @"status": @"control_unavailable", @"error": @"LiDE scan area is outside the 216 x 297 mm platen" });
         return 64;
       }
-      if (calibrationScan && (bridge.scanWidthMm < 110.0 || bridge.scanHeightMm < 140.0)) {
-        printJSON(@{ @"status": @"control_unavailable", @"error": @"LiDE calibration area must be at least 110 x 140 mm" });
+      if (calibrationScan && (bridge.scanWidthMm < 100.0 || bridge.scanHeightMm < 130.0)) {
+        printJSON(@{ @"status": @"control_unavailable", @"error": @"LiDE calibration area must be at least 100 x 130 mm" });
         return 64;
       }
     }
