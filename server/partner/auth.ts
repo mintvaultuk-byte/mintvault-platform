@@ -8,6 +8,7 @@
  */
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
+import type { PoolClient } from "pg";
 import { partnerRuntimeQuery, withTenant } from "./db";
 import { writePartnerAudit, writePartnerSecurity } from "./audit";
 import { readEmergencyState } from "./emergency";
@@ -15,6 +16,7 @@ import { readEmergencyState } from "./emergency";
 export const LOCKOUT_THRESHOLD = 5;
 export const LOCKOUT_MINUTES = 15;
 export const SESSION_ABSOLUTE_HOURS = 12;
+export const SCANNER_ACCESS_MINUTES = 15;
 export const MIN_PASSWORD_LEN = 10;
 /** bcrypt considers only the first 72 UTF-8 bytes. */
 export const MAX_PASSWORD_BYTES = 72;
@@ -33,6 +35,29 @@ export async function hashPassword(pw: string): Promise<string> {
 
 function sha256(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+/**
+ * Keep ordinary WEB authentication available during an expand-first rolling
+ * deployment.  Scanner sessions remain fail-closed until migration 0091 is
+ * present; the legacy schema has nowhere safe to bind their station refresh
+ * authority.
+ */
+async function scannerSessionSchema(client: PoolClient): Promise<{
+  refreshTable: boolean;
+  sessionColumns: boolean;
+}> {
+  const result = await client.query<{ refresh_table: boolean; session_columns: boolean }>(`
+    SELECT to_regclass('public.partner_scanner_refresh_sessions') IS NOT NULL AS refresh_table,
+           (SELECT count(*)=3
+              FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='partner_sessions'
+               AND column_name IN ('session_kind','station_id','scanner_refresh_id')) AS session_columns
+  `);
+  return {
+    refreshTable: result.rows[0]?.refresh_table === true,
+    sessionColumns: result.rows[0]?.session_columns === true,
+  };
 }
 
 /** Logged once per process, not per request — same shape as mount.ts's incoherent-env report. */
@@ -55,6 +80,7 @@ export interface LoginResult {
   tenantId?: string;
   partnerId?: string;
   mfaPending?: boolean;
+  sessionKind?: "WEB" | "SCANNER";
 }
 
 interface AuthRow {
@@ -89,7 +115,12 @@ interface AuthRow {
  * existence is never disclosed. On success rotates in a fresh session; if MFA is required, returns
  * an mfa-pending session (mfa_passed=false) that cannot perform sensitive operations.
  */
-export async function partnerLogin(email: string, password: string, ip?: string | null): Promise<LoginResult> {
+export async function partnerLogin(
+  email: string,
+  password: string,
+  ip?: string | null,
+  options: { sessionKind?: "WEB" | "SCANNER" } = {}
+): Promise<LoginResult> {
   const { rows } = await partnerRuntimeQuery<AuthRow>("SELECT * FROM partner_auth_lookup($1)", [email]);
   // Unknown or ambiguous email → generic invalid (constant-ish work: still run a bcrypt compare).
   if (rows.length !== 1) {
@@ -254,26 +285,49 @@ export async function partnerLogin(email: string, password: string, ip?: string 
 
   // success — reset lockout state, rotate a new session
   const mfaPending = u.mfa_required || u.has_active_mfa;
+  const sessionKind = options.sessionKind === "SCANNER" ? "SCANNER" : "WEB";
+  const sessionLifetimeMinutes = sessionKind === "SCANNER" ? SCANNER_ACCESS_MINUTES : SESSION_ABSOLUTE_HOURS * 60;
   const token = crypto.randomBytes(32).toString("base64url");
   await withTenant({ tenantId: u.tenant_id }, async (c) => {
+    const scannerSchema = await scannerSessionSchema(c);
+    if (sessionKind === "SCANNER" && (!scannerSchema.refreshTable || !scannerSchema.sessionColumns)) {
+      throw new Error("Scanner session authority migration 0091 is not installed");
+    }
     await c.query("UPDATE partner_users SET failed_login_count=0, locked_until=NULL, last_login_at=now() WHERE id=$1", [
       u.user_id,
     ]);
     // rotation: any prior live session for this user is revoked before minting a new one.
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [u.user_id]);
-    await c.query(
-      `INSERT INTO partner_sessions (tenant_id, user_id, token_hash, credential_version, mfa_passed, ip, absolute_expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6, now() + ($7 || ' hours')::interval)`,
-      [
-        u.tenant_id,
-        u.user_id,
-        sha256(token),
-        u.credential_version,
-        !mfaPending,
-        ip ?? null,
-        String(SESSION_ABSOLUTE_HOURS),
-      ]
-    );
+    if (scannerSchema.refreshTable) {
+      await c.query(
+        "UPDATE partner_scanner_refresh_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+        [u.user_id]
+      );
+    }
+    if (scannerSchema.sessionColumns) {
+      await c.query(
+        `INSERT INTO partner_sessions
+           (tenant_id,user_id,token_hash,credential_version,mfa_passed,ip,absolute_expires_at,session_kind)
+         VALUES ($1,$2,$3,$4,$5,$6,now() + ($7 || ' minutes')::interval,$8)`,
+        [
+          u.tenant_id,
+          u.user_id,
+          sha256(token),
+          u.credential_version,
+          !mfaPending,
+          ip ?? null,
+          String(sessionLifetimeMinutes),
+          sessionKind,
+        ]
+      );
+    } else {
+      await c.query(
+        `INSERT INTO partner_sessions
+           (tenant_id,user_id,token_hash,credential_version,mfa_passed,ip,absolute_expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,now() + ($7 || ' minutes')::interval)`,
+        [u.tenant_id, u.user_id, sha256(token), u.credential_version, !mfaPending, ip ?? null, String(sessionLifetimeMinutes)]
+      );
+    }
     await writePartnerAudit(c, {
       tenantId: u.tenant_id,
       actorUserId: u.user_id,
@@ -288,6 +342,7 @@ export async function partnerLogin(email: string, password: string, ip?: string 
     tenantId: u.tenant_id,
     partnerId: u.partner_id,
     mfaPending,
+    sessionKind,
   };
 }
 
@@ -351,6 +406,16 @@ export async function markSessionMfaPassed(tenantId: string, sessionId: string, 
 
 export async function partnerLogout(tenantId: string, sessionId: string): Promise<void> {
   await withTenant({ tenantId }, async (c) => {
+    const scannerSchema = await scannerSessionSchema(c);
+    if (scannerSchema.refreshTable && scannerSchema.sessionColumns) {
+      await c.query(
+        `UPDATE partner_scanner_refresh_sessions refresh
+            SET revoked_at=now()
+           FROM partner_sessions session
+          WHERE session.id=$1 AND refresh.id=session.scanner_refresh_id AND refresh.revoked_at IS NULL`,
+        [sessionId]
+      );
+    }
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL", [sessionId]);
     await writePartnerAudit(c, { tenantId, sessionId, action: "partner_logout" });
   });
@@ -358,6 +423,12 @@ export async function partnerLogout(tenantId: string, sessionId: string): Promis
 
 export async function revokeAllSessions(tenantId: string, userId: string, reason = "revoke_all"): Promise<number> {
   return withTenant({ tenantId }, async (c) => {
+    if ((await scannerSessionSchema(c)).refreshTable) {
+      await c.query(
+        "UPDATE partner_scanner_refresh_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+        [userId]
+      );
+    }
     const r = await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [
       userId,
     ]);

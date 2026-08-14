@@ -4,7 +4,7 @@
  * attach a local file, choose a certificate target, or set a profile.
  */
 const { contextBridge, ipcRenderer } = require("electron");
-const BRIDGE_VERSION = 2;
+const BRIDGE_VERSION = 3;
 
 function subscribe(channel, callback) {
   if (typeof callback !== "function") throw new TypeError("Scanner event callback must be a function");
@@ -29,6 +29,7 @@ const bridge = Object.freeze({
   stationSignIn: (payload) => ipcRenderer.invoke("station-sign-in", payload),
   stationCompleteMfa: (payload) => ipcRenderer.invoke("station-complete-mfa", payload),
   registerStation: (payload) => ipcRenderer.invoke("register-station", payload),
+  resyncStationReplay: () => ipcRenderer.invoke("resync-station-replay"),
   stationSignOut: () => ipcRenderer.invoke("station-sign-out"),
   getUpdateStatus: () => ipcRenderer.invoke("get-update-status"),
   updateApp: (payload) => ipcRenderer.invoke("update-app", payload),

@@ -1,5 +1,11 @@
 import { Router, type Express } from "express";
-import { partnerLogin, createPasswordResetToken, consumePasswordResetToken, isValidPartnerPassword } from "./auth";
+import {
+  partnerLogin,
+  createPasswordResetToken,
+  consumePasswordResetToken,
+  isValidPartnerPassword,
+  SCANNER_ACCESS_MINUTES,
+} from "./auth";
 import { setPartnerCookie } from "./session";
 import {
   partnerLoginIpLimiter,
@@ -94,6 +100,34 @@ export function partnerPublicRouter(): Router {
     // RESPONSE SHAPE IS DELIBERATELY UNCHANGED — identical to the shadowed duplicate in routes.ts.
     // "enrolment or code challenge?" is answered by GET /session (`mfaEnrolmentRequired`).
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
+  });
+
+  // Dedicated appliance login: the password/MFA policy is identical to the
+  // Partner portal, but this bearer expires after fifteen minutes.  Once the
+  // Mac is ACTIVE it must exchange this freshly authenticated session for a
+  // refresh family bound to the exact station signature; the ordinary website
+  // never receives that authority and retains its existing cookie contract.
+  r.post("/auth/scanner-login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
+    if (!(await flagEnabled("partner_login_enabled"))) {
+      res.status(503).json({ error: "partner login unavailable" });
+      return;
+    }
+    const { email, password } = req.body ?? {};
+    if (typeof email !== "string" || typeof password !== "string") {
+      res.status(400).json({ error: "invalid request" });
+      return;
+    }
+    const result = await partnerLogin(email, password, req.ip, { sessionKind: "SCANNER" });
+    if (!result.ok) {
+      if (result.reason === "mfa_state_unavailable" || result.reason === "credential_provenance_unavailable") {
+        res.status(503).json({ error: "partner login unavailable" });
+        return;
+      }
+      res.status(401).json({ error: "invalid credentials" });
+      return;
+    }
+    setPartnerCookie(res, result.sessionToken!, SCANNER_ACCESS_MINUTES * 60);
+    res.json({ ok: true, mfaRequired: !!result.mfaPending, accessExpiresInSeconds: SCANNER_ACCESS_MINUTES * 60 });
   });
 
   r.post(

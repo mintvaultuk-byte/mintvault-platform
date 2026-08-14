@@ -48,6 +48,8 @@ export type Lide400CaptureProvenance = {
   scanAreaMm: { x: number; y: number; width: number; height: number };
   captureStartedAt: string;
   captureCompletedAt: string;
+  profileRevisionId: string | null;
+  profileDigestSha256: string | null;
 };
 
 function finiteNumber(value: unknown): value is number {
@@ -96,6 +98,14 @@ export function parseLide400CaptureProvenance(input: unknown): Lide400CapturePro
     scanAreaMm: { x: area.x, y: area.y, width: area.width, height: area.height },
     captureStartedAt: requiredText("captureStartedAt"),
     captureCompletedAt: requiredText("captureCompletedAt"),
+    profileRevisionId:
+      typeof value.profileRevisionId === "string" && value.profileRevisionId.trim()
+        ? value.profileRevisionId.trim()
+        : null,
+    profileDigestSha256:
+      typeof value.profileDigestSha256 === "string" && /^[a-f0-9]{64}$/.test(value.profileDigestSha256)
+        ? value.profileDigestSha256
+        : null,
   };
 }
 

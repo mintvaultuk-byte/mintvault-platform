@@ -216,6 +216,9 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // partner-only harness and failing closed there. See tests/lineage-convergence-0090.test.ts for
   // the real-PostgreSQL proof of its convergence behaviour.
   "0090_lineage_convergence_scanner",
+  // APPLICATION scope: extends core scanner capture/evidence tables and adds
+  // foreign keys to certificates/Card Jobs after 0090 convergence.
+  "0091_scanner_station_v2_authority",
 ] as const;
 
 /**

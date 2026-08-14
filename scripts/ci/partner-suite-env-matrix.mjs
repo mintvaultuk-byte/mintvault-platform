@@ -179,6 +179,13 @@ export const SUITES = [
     note: "P7 Scanner FIX: zero-credit replacement on the same Card Job/MV/certificate lineage; own cluster.",
   },
   {
+    file: "tests/scanner-station-v2-authority.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "WP10 Scanner v2 replay/semantic authority and 0091 additive schema; own disposable cluster.",
+  },
+  {
     file: "tests/partner-multi-location.test.ts",
     topology: TOPOLOGY.SELF,
     critical: true,

@@ -238,7 +238,7 @@ async function makeTenant(label: string): Promise<Fixture> {
       .replace(/[^a-z0-9]/g, "0")
       .padEnd(64, "0")
       .slice(0, 64);
-    return (
+    const stationId = (
       await admin.query<{ id: string }>(
         `INSERT INTO partner_stations
            (tenant_id, location_id, station_code, status, approved_at, public_key_pem, public_key_fingerprint)
@@ -252,6 +252,19 @@ async function makeTenant(label: string): Promise<Fixture> {
         ]
       )
     ).rows[0].id;
+    const profileRevisionId = crypto.randomUUID();
+    await admin.query(
+      `INSERT INTO partner_station_profile_revisions
+         (id,station_id,tenant_id,location_id,semantic_operation_id,candidate_digest_sha256,
+          profile_digest_sha256,profile,created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'{}'::jsonb,$8)`,
+      [profileRevisionId, stationId, tenantId, locationId, crypto.randomUUID(), "a".repeat(64), "b".repeat(64), crypto.randomUUID()]
+    );
+    await admin.query(
+      `UPDATE partner_stations SET current_profile_revision_id=$2 WHERE id=$1`,
+      [stationId, profileRevisionId]
+    );
+    return stationId;
   };
 
   return {
@@ -471,7 +484,11 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     await applyMigrationsRealistic(admin, cluster.url, [
       ...PARTNER_MIGRATIONS_WITH_PER_CARD,
       "0045_partner_stations",
+      "0046_scanner_processing_jobs",
+      "0047_scanner_evidence_staging",
+      "0075_partner_station_single_active_capture",
       "0087_partner_grading_edit_lease",
+      "0091_scanner_station_v2_authority",
     ]);
     savedEnv = {
       MINTVAULT_DATABASE_URL: process.env.MINTVAULT_DATABASE_URL,

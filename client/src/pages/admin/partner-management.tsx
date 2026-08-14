@@ -93,7 +93,8 @@ interface WalletBackfillResult {
   ledgerEntriesCreated: 0;
 }
 
-type FleetStationStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED";
+type FleetStationStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED" | "REJECTED" | "CANCELLED" | "EXPIRED";
+type FleetAction = "active" | "suspended" | "revoked" | "reject" | "cancel" | "replace" | "transfer-location";
 interface FleetStation {
   stationCode: string;
   status: FleetStationStatus;
@@ -153,9 +154,10 @@ export default function PartnerManagementPage() {
   const [walletBackfillResult, setWalletBackfillResult] = useState<WalletBackfillResult | null>(null);
   const [fleetStatus, setFleetStatus] = useState<FleetStationStatus | "ALL">("PENDING");
   const [fleetReason, setFleetReason] = useState("");
+  const [fleetActionTarget, setFleetActionTarget] = useState("");
   const [fleetAction, setFleetAction] = useState<{
     stationCode: string;
-    action: "active" | "suspended" | "revoked" | "reject";
+    action: FleetAction;
   } | null>(null);
 
   const legalNameErr = validateLegalName(legalName);
@@ -253,13 +255,19 @@ export default function PartnerManagementPage() {
       stationCode,
       action,
       reason,
+      actionTarget,
     }: {
       stationCode: string;
-      action: "active" | "suspended" | "revoked" | "reject";
+      action: FleetAction;
       reason: string;
+      actionTarget?: string;
     }) =>
       (
-        await apiRequest("POST", `${FLEET_BASE}/stations/${encodeURIComponent(stationCode)}/${action}`, { reason })
+        await apiRequest("POST", `${FLEET_BASE}/stations/${encodeURIComponent(stationCode)}/${action}`, {
+          reason,
+          ...(action === "replace" ? { replacesStationCode: actionTarget } : {}),
+          ...(action === "transfer-location" ? { targetLocationId: actionTarget } : {}),
+        })
       ).json(),
     onSuccess: async (_data, input) => {
       setBanner(
@@ -267,6 +275,7 @@ export default function PartnerManagementPage() {
       );
       setFleetAction(null);
       setFleetReason("");
+      setFleetActionTarget("");
       await queryClient.invalidateQueries({ queryKey: [FLEET_BASE] });
     },
     onError: (err: unknown) => {
@@ -594,7 +603,7 @@ export default function PartnerManagementPage() {
         <Panel title="Station Fleet" sub="Super Admin approval, rejection and safety state" className="mb-4">
           <div data-testid="pm-station-fleet" style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {(["PENDING", "ACTIVE", "SUSPENDED", "REVOKED", "ALL"] as const).map((status) => (
+              {(["PENDING", "ACTIVE", "SUSPENDED", "REVOKED", "REJECTED", "CANCELLED", "EXPIRED", "ALL"] as const).map((status) => (
                 <Chip
                   key={status}
                   active={fleetStatus === status}
@@ -662,6 +671,20 @@ export default function PartnerManagementPage() {
                               >
                                 Reject
                               </AdminButton>
+                              <AdminButton
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "cancel" })}
+                              >
+                                Cancel request
+                              </AdminButton>
+                              <AdminButton
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "replace" })}
+                              >
+                                Activate replacement
+                              </AdminButton>
                             </>
                           )}
                           {station.status === "ACTIVE" && (
@@ -688,6 +711,13 @@ export default function PartnerManagementPage() {
                                 onClick={() => setFleetAction({ stationCode: station.stationCode, action: "revoked" })}
                               >
                                 Revoke
+                              </AdminButton>
+                              <AdminButton
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setFleetAction({ stationCode: station.stationCode, action: "transfer-location" })}
+                              >
+                                Transfer location
                               </AdminButton>
                             </>
                           )}
@@ -1047,6 +1077,10 @@ export default function PartnerManagementPage() {
                   ? "Approve"
                   : fleetAction.action === "reject"
                     ? "Reject"
+                    : fleetAction.action === "replace"
+                      ? "Activate replacement"
+                      : fleetAction.action === "transfer-location"
+                        ? "Transfer location for"
                     : fleetAction.action}{" "}
                 station
               </h3>
@@ -1071,6 +1105,28 @@ export default function PartnerManagementPage() {
                   }}
                 />
               </label>
+              {fleetAction.action === "replace" && (
+                <label style={{ display: "grid", gap: 5, fontSize: 12, marginTop: 10 }}>
+                  Exact station code being replaced
+                  <input
+                    value={fleetActionTarget}
+                    onChange={(event) => setFleetActionTarget(event.target.value.toUpperCase())}
+                    placeholder="MV-STN-…"
+                    data-testid="pm-fleet-replaces-station"
+                  />
+                </label>
+              )}
+              {fleetAction.action === "transfer-location" && (
+                <label style={{ display: "grid", gap: 5, fontSize: 12, marginTop: 10 }}>
+                  Exact active target location UUID
+                  <input
+                    value={fleetActionTarget}
+                    onChange={(event) => setFleetActionTarget(event.target.value.toLowerCase())}
+                    placeholder="00000000-0000-4000-8000-000000000000"
+                    data-testid="pm-fleet-target-location"
+                  />
+                </label>
+              )}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
                 <AdminButton
                   size="sm"
@@ -1079,6 +1135,7 @@ export default function PartnerManagementPage() {
                   onClick={() => {
                     setFleetAction(null);
                     setFleetReason("");
+                    setFleetActionTarget("");
                   }}
                 >
                   Cancel
@@ -1086,8 +1143,16 @@ export default function PartnerManagementPage() {
                 <AdminButton
                   size="sm"
                   variant={fleetAction.action === "active" ? "gold" : "ghost"}
-                  disabled={fleetReason.trim().length < 3 || fleetMutation.isPending}
-                  onClick={() => fleetMutation.mutate({ ...fleetAction, reason: fleetReason.trim() })}
+                  disabled={
+                    fleetReason.trim().length < 3
+                    || (["replace", "transfer-location"].includes(fleetAction.action) && fleetActionTarget.trim().length < 10)
+                    || fleetMutation.isPending
+                  }
+                  onClick={() => fleetMutation.mutate({
+                    ...fleetAction,
+                    reason: fleetReason.trim(),
+                    actionTarget: fleetActionTarget.trim(),
+                  })}
                   data-testid="pm-fleet-action-submit"
                 >
                   {fleetMutation.isPending ? "Saving…" : "Confirm"}

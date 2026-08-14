@@ -4,10 +4,13 @@ import {
   StationIdentityError,
   assertStationRequestBodyDigest,
   canonicalStationRequest,
+  canonicalStationRequestV2,
   createStationCode,
   parseStationRequestHeaders,
+  parseStationRequestHeadersV2,
   stationPublicKeyFingerprint,
   verifyStationSignature,
+  verifyStationSignatureV2,
 } from "../server/partner/station-identity";
 import { appVersionSatisfies, signedHeartbeatAppVersion } from "../server/partner/station-service";
 
@@ -68,6 +71,40 @@ describe("partner station cryptographic identity", () => {
     expect(() => assertStationRequestBodyDigest(parsed.envelope, Buffer.from('{"scannerConnected":false}'))).toThrow(
       StationIdentityError
     );
+  });
+
+  it("binds protocol v2 credential/request epochs, sequence and semantic operation", () => {
+    const semanticOperationId = "2d5a018e-137f-4d6a-92be-ff09a0b02462";
+    const envelope = {
+      stationCode,
+      credentialEpoch: 1n,
+      requestEpoch: 3n,
+      sequence: 91n,
+      method: "POST",
+      path: "/api/partner/stations/calibrations",
+      timestamp: 1_700_000_000_000,
+      contentSha256: "b".repeat(64),
+      semanticOperationId,
+    };
+    const signature = crypto.sign(null, Buffer.from(canonicalStationRequestV2(envelope)), keyPair.privateKey)
+      .toString("base64url");
+    const parsed = parseStationRequestHeadersV2({
+      "x-mintvault-station-protocol": "2",
+      "x-mintvault-station-id": stationCode,
+      "x-mintvault-station-credential-epoch": "1",
+      "x-mintvault-station-request-epoch": "3",
+      "x-mintvault-station-sequence": "91",
+      "x-mintvault-station-timestamp": String(envelope.timestamp),
+      "x-mintvault-content-sha256": envelope.contentSha256,
+      "x-mintvault-semantic-operation-id": semanticOperationId,
+      "x-mintvault-station-signature": signature,
+    }, envelope.method, envelope.path, envelope.timestamp);
+    expect(verifyStationSignatureV2(publicKey, parsed.envelope, parsed.signature)).toBe(true);
+    expect(verifyStationSignatureV2(publicKey, { ...parsed.envelope, sequence: 92n }, parsed.signature)).toBe(false);
+    expect(verifyStationSignatureV2(publicKey, {
+      ...parsed.envelope,
+      semanticOperationId: "77d411c6-f4dc-4aa6-b057-4628a5d0bf46",
+    }, parsed.signature)).toBe(false);
   });
 
   it("rejects stale timestamps and malformed station headers before DB access", () => {

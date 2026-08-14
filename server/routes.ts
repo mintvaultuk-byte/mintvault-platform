@@ -10306,7 +10306,7 @@ Defects (admin-confirmed): ${defectLines}`;
           station?.code ?? req.query.device_id,
           station?.id ?? null
         );
-        return res.json({ capture });
+        return res.json({ capture, serverNow: new Date().toISOString() });
       } catch (error: any) {
         return res.status(400).json({ error: error?.message || "Unable to claim scanner capture" });
       }
@@ -10327,7 +10327,13 @@ Defects (admin-confirmed): ${defectLines}`;
           String(req.params.sessionId),
           req.scannerStation?.code ?? req.query.device_id
         );
-        return res.json({ capture: result.session, accepted: result.accepted, card_registered: result.cardRegistered });
+        return res.json({
+          capture: result.session,
+          accepted: result.accepted,
+          card_registered: result.cardRegistered,
+          disposition: result.disposition,
+          disposition_binding: result.dispositionBinding,
+        });
       } catch (error: any) {
         return res.status(400).json({ error: error?.message || "Unable to read scanner capture status" });
       }
@@ -10349,7 +10355,7 @@ Defects (admin-confirmed): ${defectLines}`;
           String(req.params.sessionId),
           req.scannerStation?.code ?? req.body?.device_id
         );
-        return res.json({ capture });
+        return res.json({ capture, serverNow: new Date().toISOString() });
       } catch (error: any) {
         return res.status(409).json({ error: error?.message || "Unable to renew scanner capture" });
       }
@@ -10392,6 +10398,27 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   );
 
+  app.post(
+    "/api/admin/scanner/capture-sessions/:sessionId/rescan-authorisation",
+    requireScannerOrAdmin,
+    requireStationCaptureAgent,
+    async (req, res) => {
+      try {
+        const { issueScannerRescanAuthorisation } = await import("./scanner-capture-service");
+        const capture = await issueScannerRescanAuthorisation({
+          sessionId: String(req.params.sessionId),
+          deviceId: req.scannerStation?.code ?? req.body?.device_id,
+          stationId: req.scannerStation?.id ?? null,
+          priorCaptureAuthorisationId: req.body?.prior_capture_authorisation_id,
+          requestOperationId: req.body?.request_operation_id,
+        });
+        return res.status(201).json({ capture, serverNow: new Date().toISOString() });
+      } catch (error: any) {
+        return res.status(409).json({ error: error?.message || "Unable to issue a fresh Rescan authorisation" });
+      }
+    }
+  );
+
   // Direct-staging grant. The station never chooses an R2 key: the server
   // creates one opaque key for this exact claimed session, binds its expected
   // bytes/hash/provenance, and signs a short-lived TIFF-only PUT URL. The
@@ -10413,6 +10440,7 @@ Defects (admin-confirmed): ${defectLines}`;
           expectedSha256: req.body?.sha256,
           expectedBytes: req.body?.byte_length,
           provenance: req.body?.capture_provenance,
+          immutableBinding: req.body,
         });
         const upload = await createScannerEvidenceStagingUpload(grant.staging.objectKey);
         return res.status(201).json({
@@ -10453,9 +10481,21 @@ Defects (admin-confirmed): ${defectLines}`;
           stagingId,
           deviceId: req.scannerStation?.code ?? req.body?.device_id,
           authenticatedStationId: req.scannerStation?.id ?? null,
+          immutableBinding: req.body,
         });
         if (prepared.alreadyAccepted) {
-          return res.json({ ok: true, already_accepted: true });
+          const { getScannerCaptureStatus } = await import("./scanner-capture-service");
+          const status = await getScannerCaptureStatus(
+            sessionId,
+            req.scannerStation?.code ?? req.body?.device_id
+          );
+          return res.json({
+            ok: true,
+            already_accepted: true,
+            disposition: "ACCEPTED",
+            disposition_binding: prepared.staging.immutableBinding,
+            capture: { ...status.session, cardRegistered: status.cardRegistered },
+          });
         }
         const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } =
           await import("./scanner-capture-service");
@@ -10483,6 +10523,7 @@ Defects (admin-confirmed): ${defectLines}`;
             locationId: req.scannerStation?.locationId ?? null,
             actorId: req.scannerOperator?.userId ?? activeSession.actorId,
           },
+          immutableBinding: prepared.staging.immutableBinding,
         });
         evidenceCommitted = true;
         const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
@@ -10498,6 +10539,7 @@ Defects (admin-confirmed): ${defectLines}`;
             locationId: req.scannerStation?.locationId ?? null,
             actorId: req.scannerOperator?.userId ?? activeSession.actorId,
           },
+          immutableBinding: prepared.staging.immutableBinding,
         });
         const { completeScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
         await completeScannerEvidenceFinalisation(stagingId);
@@ -10507,6 +10549,9 @@ Defects (admin-confirmed): ${defectLines}`;
           side: activeSession.side,
           raw_uploaded: true,
           card_registered: cardRegistered,
+          disposition: "ACCEPTED",
+          disposition_binding: prepared.staging.immutableBinding,
+          capture: { ...activeSession, cardRegistered },
         });
       } catch (error: any) {
         const reason = error?.message || "staged scanner capture rejected";

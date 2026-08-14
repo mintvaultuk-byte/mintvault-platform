@@ -97,6 +97,8 @@ const els = {
   stationUpdatePanel: document.getElementById("stationUpdatePanel"),
   stationUpdateBtn: document.getElementById("stationUpdateBtn"),
   stationReinstallBtn: document.getElementById("stationReinstallBtn"),
+  stationReplayPanel: document.getElementById("stationReplayPanel"),
+  stationReplayBtn: document.getElementById("stationReplayBtn"),
   stationUpdateStatus: document.getElementById("stationUpdateStatus"),
 };
 
@@ -314,12 +316,14 @@ function renderStationSetup(next) {
   els.stationRegisterPanel.hidden = stage !== "register";
   els.stationProfilePanel.hidden = !(stationSetup.canServiceStation === true && ["profile_setup_required", "profile_check"].includes(stage));
   els.stationUpdatePanel.hidden = stage !== "update_required";
+  els.stationReplayPanel.hidden = stage !== "replay_state_desync";
   els.stationSetupError.textContent = stationSetup.error || "";
   els.stationSignInBtn.disabled = stationSetupBusy;
   els.stationMfaBtn.disabled = stationSetupBusy;
   els.stationRegisterBtn.disabled = stationSetupBusy;
   els.stationProfilePreviewBtn.disabled = stationSetupBusy || actionInFlight;
   els.stationProfileSaveBtn.disabled = stationSetupBusy || actionInFlight;
+  els.stationReplayBtn.disabled = stationSetupBusy;
 
   const progressOrder = ["account", "mfa", "station", "profile", "ready"];
   const currentStep = stage === "sign_in" ? "account"
@@ -954,6 +958,9 @@ els.stationMfaForm.addEventListener("submit", (event) => {
 els.stationRegisterBtn.addEventListener("click", () => {
   const locationId = els.stationLocation.value || undefined;
   void runStationSetupAction(() => window.scanner.registerStation({ locationId }));
+});
+els.stationReplayBtn.addEventListener("click", () => {
+  void runStationSetupAction(() => window.scanner.resyncStationReplay());
 });
 
 async function shiftChange() {

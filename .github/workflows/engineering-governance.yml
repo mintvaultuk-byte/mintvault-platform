@@ -20,7 +20,7 @@ jobs:
         if: ${{ hashFiles('package-lock.json') != '' }}
         run: npm ci --ignore-scripts
       - name: Verify managed CI gate integrity
-        run: node -e "const fs=require('node:fs'); const crypto=require('node:crypto'); const actual=crypto.createHash('sha256').update(fs.readFileSync('.engineering/cornelius-engineering-os-ci-gate.mjs')).digest('hex'); if (actual !== '23da1e2478439c7412d17463f2828a5a6a3b2824fff51c792256bdf7b860e115') { console.error('managed CI gate drift'); process.exit(1); }"
+        run: node -e "const fs=require('node:fs'); const crypto=require('node:crypto'); const actual=crypto.createHash('sha256').update(fs.readFileSync('.engineering/cornelius-engineering-os-ci-gate.mjs')).digest('hex'); if (actual !== '7ad3231be4c5d17bf91c1260d1605665974b31c7e92974203c07bf4a464288a4') { console.error('managed CI gate drift'); process.exit(1); }"
       - name: Engineering anti-drift gate
         run: node .engineering/cornelius-engineering-os-ci-gate.mjs
 # cornelius-engineering-os:end id=ci-governance

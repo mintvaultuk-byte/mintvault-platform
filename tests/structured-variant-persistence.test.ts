@@ -1038,8 +1038,15 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bresolveDraftGradeAuthority\s*\(cert,\s*body\)/.test(addedJs) &&
           /const\s+overall\s*=\s*authority\.overall/.test(addedJs) &&
           /authority\.subgrades\.(centering|corners|edges|surface)/.test(addedJs);
+        // G) Card Job QA lifecycle hooks — kept identical to the sibling
+        // variant-line-consolidation guard. Both canonical lifecycle calls are
+        // required and the protected calculation-token prohibition below still
+        // applies unchanged, so this admits no scoring or MVGS implementation.
+        const signatureG =
+          /\breturnCardJobToGraderForCertificate\b/.test(addedJs) &&
+          /\bapproveCardJobForCertificate\b/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         const revisionBoundAddedCode = (

@@ -284,6 +284,10 @@ describe("AG-3b integration surfaces", () => {
     const guarded: Array<[string, string]> = [
       [stationAdmin, "/stations/:stationCode/${status.toLowerCase()}"], // approve / suspend / revoke
       [stationAdmin, '"/stations/:stationCode/reject"'],
+      [stationAdmin, '"/stations/:stationCode/cancel"'],
+      [stationAdmin, '"/stations/:stationCode/replace"'],
+      [stationAdmin, '"/stations/:stationCode/transfer-location"'],
+      [stationAdmin, '"/stations/:stationCode/update-policy"'],
       [management, '"/partners/:partnerId/users/:userId/role"'],
       [management, '"/partners/:partnerId/users/:userId/status"'],
       [management, '"/partners/:partnerId/users/:userId/password-reset"'],

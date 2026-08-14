@@ -16,9 +16,26 @@ describe("Super Admin Partner station fleet controls", () => {
   it("makes rejection a pending-only, reasoned, credential-rotating action", () => {
     expect(service).toContain("export async function rejectPendingStation");
     expect(service).toContain("Only a pending station can be rejected");
-    expect(service).toContain("status='REVOKED', credential_epoch=credential_epoch+1");
     expect(service).toContain("'station_rejected'");
-    expect(service).toContain("JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true })");
+    expect(service).toContain("SET status='REJECTED', credential_epoch=credential_epoch+1");
+    expect(service).toContain("JSON.stringify({ reason: cleanReason, previousStatus: row.status, credentialEpochRotated: true })");
+  });
+
+  it("keeps pending cancellation, replacement and same-tenant location transfer explicit and audited", () => {
+    expect(service).toContain("export async function cancelPendingStation");
+    expect(service).toContain("export async function activateReplacementStation");
+    expect(service).toContain("export async function transferStationLocation");
+    expect(service).toContain("Replacement stations must be in the same tenant and location");
+    expect(service).toContain("Station has unresolved capture or evidence state");
+    expect(service).toContain("station_location_transferred_from");
+    expect(service).toContain("station_replacement_activated");
+    for (const path of [
+      '"/stations/:stationCode/cancel"',
+      '"/stations/:stationCode/replace"',
+      '"/stations/:stationCode/transfer-location"',
+    ]) {
+      expect(routes).toContain(path);
+    }
   });
 
   it("exposes the distinct reject route behind the existing Super Admin router", () => {
@@ -33,6 +50,8 @@ describe("Super Admin Partner station fleet controls", () => {
     expect(fleetUi).toContain('data-testid="pm-station-fleet"');
     expect(fleetUi).toContain('station.status === "PENDING"');
     expect(fleetUi).toContain('action: "reject"');
+    expect(fleetUi).toContain('action: "replace"');
+    expect(fleetUi).toContain('action: "transfer-location"');
     expect(fleetUi).toContain("fleetReason.trim().length < 3");
     expect(fleetUi).toContain("credential epoch");
     expect(fleetUi).not.toContain("MINTVAULT_STATION_SECRET");

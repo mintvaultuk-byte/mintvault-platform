@@ -1,7 +1,15 @@
 import { Router, type Express } from "express";
 import { requireAdminStepUp } from "../lib/admin-step-up";
 import { requireSuperAdmin } from "../auth";
-import { listFleetStations, rejectPendingStation, transitionStationStatus } from "./station-service";
+import {
+  activateReplacementStation,
+  cancelPendingStation,
+  listFleetStations,
+  rejectPendingStation,
+  setStationUpdatePolicy,
+  transferStationLocation,
+  transitionStationStatus,
+} from "./station-service";
 
 function actorId(req: import("express").Request): string | null {
   const value = (req.session as any)?.authUserId;
@@ -55,12 +63,76 @@ export function partnerStationAdminRouter(): Router {
     try {
       const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
       await rejectPendingStation(String(req.params.stationCode), actorId(req), reason);
-      res.json({ ok: true, status: "REVOKED", action: "rejected" });
+      res.json({ ok: true, status: "REJECTED", action: "rejected" });
     } catch (error: any) {
       const code = error?.code || "station_change_failed";
       res
         .status(code === "station_not_found" ? 404 : 409)
         .json({ error: { code, message: error?.message || "Station could not be rejected" } });
+    }
+  });
+
+  r.post("/stations/:stationCode/cancel", requireAdminStepUp(), async (req, res) => {
+    try {
+      const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
+      await cancelPendingStation(String(req.params.stationCode), actorId(req), reason);
+      res.json({ ok: true, status: "CANCELLED", action: "cancelled" });
+    } catch (error: any) {
+      const code = error?.code || "station_change_failed";
+      res
+        .status(code === "station_not_found" ? 404 : 409)
+        .json({ error: { code, message: error?.message || "Station could not be cancelled" } });
+    }
+  });
+
+  r.post("/stations/:stationCode/replace", requireAdminStepUp(), async (req, res) => {
+    try {
+      await activateReplacementStation({
+        stationCode: String(req.params.stationCode),
+        replacesStationCode: req.body?.replacesStationCode,
+        actorUserId: actorId(req),
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+      });
+      res.json({ ok: true, status: "ACTIVE", action: "replacement_activated" });
+    } catch (error: any) {
+      const code = error?.code || "station_change_failed";
+      res
+        .status(code === "station_not_found" ? 404 : 409)
+        .json({ error: { code, message: error?.message || "Replacement station could not be activated" } });
+    }
+  });
+
+  r.post("/stations/:stationCode/transfer-location", requireAdminStepUp(), async (req, res) => {
+    try {
+      await transferStationLocation({
+        stationCode: String(req.params.stationCode),
+        targetLocationId: req.body?.targetLocationId,
+        actorUserId: actorId(req),
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+      });
+      res.json({ ok: true, status: "ACTIVE", action: "location_transferred" });
+    } catch (error: any) {
+      const code = error?.code || "station_change_failed";
+      res
+        .status(code === "station_not_found" ? 404 : 409)
+        .json({ error: { code, message: error?.message || "Station location could not be transferred" } });
+    }
+  });
+
+  r.post("/stations/:stationCode/update-policy", requireAdminStepUp(), async (req, res) => {
+    try {
+      await setStationUpdatePolicy({
+        stationCode: String(req.params.stationCode),
+        policy: req.body?.policy,
+        actorUserId: actorId(req),
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+      });
+      res.json({ ok: true, action: "update_policy_issued" });
+    } catch (error: any) {
+      const code = error?.code || "station_change_failed";
+      res
+        .status(code === "station_not_found" ? 404 : 409)
+        .json({ error: { code, message: error?.message || "Scanner update policy could not be issued" } });
     }
   });
   return r;

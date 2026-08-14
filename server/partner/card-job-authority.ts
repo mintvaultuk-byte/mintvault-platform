@@ -106,18 +106,25 @@ function cardReferenceOf(cardId: string, ordinal: number): string {
 
 async function loadExistingOperation(
   client: PoolClient,
-  stationId: string,
   clientOpId: string
-): Promise<{ card_job_id: string; reservation_id: string | null; request_fingerprint: string } | null> {
+): Promise<{
+  tenant_id: string;
+  station_id: string;
+  card_job_id: string;
+  reservation_id: string | null;
+  request_fingerprint: string;
+} | null> {
   const { rows } = await client.query<{
+    tenant_id: string;
+    station_id: string;
     card_job_id: string;
     reservation_id: string | null;
     request_fingerprint: string;
   }>(
-    `SELECT card_job_id, reservation_id, request_fingerprint
+    `SELECT tenant_id, station_id, card_job_id, reservation_id, request_fingerprint
        FROM partner_card_job_op_keys
-      WHERE station_id=$1 AND client_op_id=$2`,
-    [stationId, clientOpId]
+      WHERE client_op_id=$1`,
+    [clientOpId]
   );
   return rows[0] ?? null;
 }
@@ -242,9 +249,13 @@ export async function startNewCardJob(input: StartNewCardJobInput): Promise<Star
     { tenantId: input.tenantId, locationId: input.locationId ?? null },
     async (client) => {
       // ---- 1. REPLAY, answered before anything is spent ------------------------------------
-      const existing = await loadExistingOperation(client, input.stationId, input.clientOpId);
+      const existing = await loadExistingOperation(client, input.clientOpId);
       if (existing) {
-        if (existing.request_fingerprint !== fingerprint) {
+        if (
+          existing.tenant_id !== input.tenantId ||
+          existing.station_id !== input.stationId ||
+          existing.request_fingerprint !== fingerprint
+        ) {
           throw new CardJobAuthorityError(
             "IDEMPOTENCY_CONFLICT",
             "This client operation id was already used for a different NEW request."
@@ -608,9 +619,13 @@ export async function startNewCardJobAtStation(
     { tenantId: input.tenantId, locationId: input.locationId },
     async (client) => {
       // ---- 1. REPLAY, answered before anything is created or spent -------------------------------
-      const existing = await loadExistingOperation(client, input.stationId, input.clientOpId);
+      const existing = await loadExistingOperation(client, input.clientOpId);
       if (existing) {
-        if (existing.request_fingerprint !== fingerprint) {
+        if (
+          existing.tenant_id !== input.tenantId ||
+          existing.station_id !== input.stationId ||
+          existing.request_fingerprint !== fingerprint
+        ) {
           throw new CardJobAuthorityError(
             "IDEMPOTENCY_CONFLICT",
             "This client operation id was already used for a different NEW request."

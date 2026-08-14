@@ -267,6 +267,10 @@ describe("partner schema ↔ migration parity", () => {
       // — the next globally free number — verifies the MFA content and inlines the two idempotent
       // scanner bodies verbatim, so it is a no-op on production and on fresh estates.
       "0090_lineage_convergence_scanner.sql",
+      // 0091 is the additive Scanner SOL/P14 wire authority: station v2
+      // replay state, durable semantic mutations, immutable profile revisions
+      // and exact capture/evidence bindings.
+      "0091_scanner_station_v2_authority.sql",
     ]);
   });
 

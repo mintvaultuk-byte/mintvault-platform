@@ -67,7 +67,7 @@ test("BrowserWindow, preload and document enforce the local renderer boundary", 
   assert.match(main, /will-redirect/);
   assert.match(main, /will-attach-webview/);
   assert.equal((main.match(/ipcMain\.handle\(/g) || []).length, 1, "all channels must use the one authenticated registrar");
-  assert.match(preload, /const BRIDGE_VERSION = 2/);
+  assert.match(preload, /const BRIDGE_VERSION = 3/);
   assert.match(preload, /Object\.freeze\(/);
   assert.match(html, /default-src 'none'/);
   assert.match(html, /connect-src 'none'/);

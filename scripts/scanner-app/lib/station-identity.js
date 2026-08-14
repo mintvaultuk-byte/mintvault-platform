@@ -154,23 +154,40 @@ function readLegacyIdentity() {
   return assertLegacyIdentity(JSON.parse(decoded));
 }
 
-function readOperatorSession() {
+function readOperatorCredentials() {
   if (!fs.existsSync(OPERATOR_SESSION_FILE)) return null;
   try {
     const envelope = readBoundedJson(OPERATOR_SESSION_FILE, { maximumBytes: 64 * 1024, label: "Operator session" });
     if (!envelope || envelope.version !== 1 || typeof envelope.ciphertext !== "string") return null;
     const payload = JSON.parse(getSafeStorage().decryptString(Buffer.from(envelope.ciphertext, "base64")));
-    return typeof payload.token === "string" && payload.token.length >= 20 ? payload.token : null;
+    if (typeof payload.token !== "string" || payload.token.length < 20 || payload.token.length > 2048) return null;
+    if (payload.version === 1 || payload.version == null) {
+      return { version: 2, token: payload.token, accessExpiresAt: null, refresh: null };
+    }
+    if (payload.version !== 2) return null;
+    const accessExpiresAt = payload.accessExpiresAt == null ? null : String(payload.accessExpiresAt);
+    if (accessExpiresAt != null && !Number.isFinite(Date.parse(accessExpiresAt))) return null;
+    let refresh = null;
+    if (payload.refresh != null) {
+      const candidate = payload.refresh;
+      if (!candidate || typeof candidate !== "object"
+          || typeof candidate.token !== "string" || candidate.token.length < 32 || candidate.token.length > 2048
+          || !/^MV-STN-[A-Z2-7]{10,24}$/.test(String(candidate.stationCode || ""))
+          || !Number.isFinite(Date.parse(String(candidate.expiresAt || "")))) return null;
+      refresh = {
+        token: candidate.token,
+        stationCode: candidate.stationCode,
+        expiresAt: new Date(candidate.expiresAt).toISOString(),
+      };
+    }
+    return { version: 2, token: payload.token, accessExpiresAt, refresh };
   } catch {
     return null;
   }
 }
 
-function setOperatorSession(token) {
-  if (token != null && (typeof token !== "string" || token.length < 20 || token.length > 2048)) {
-    throw new Error("Operator session is invalid");
-  }
-  if (!token) {
+function writeOperatorCredentials(credentials) {
+  if (!credentials) {
     let removed = false;
     try { fs.unlinkSync(OPERATOR_SESSION_FILE); removed = true; }
     catch (error) { if (error?.code !== "ENOENT") throw error; }
@@ -182,11 +199,68 @@ function setOperatorSession(token) {
   }
   const safeStorage = getSafeStorage();
   fs.mkdirSync(SUPPORT, { recursive: true, mode: 0o700 });
-  const ciphertext = safeStorage.encryptString(JSON.stringify({ version: 1, token })).toString("base64");
+  const ciphertext = safeStorage.encryptString(JSON.stringify(credentials)).toString("base64");
   const temporary = `${OPERATOR_SESSION_FILE}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify({ version: 1, ciphertext }), { encoding: "utf8", mode: 0o600, flag: "wx" });
   fs.renameSync(temporary, OPERATOR_SESSION_FILE);
   fs.chmodSync(OPERATOR_SESSION_FILE, 0o600);
+}
+
+function readOperatorSession() {
+  return readOperatorCredentials()?.token || null;
+}
+
+function setOperatorSession(token, accessExpiresAt = null) {
+  if (token != null && (typeof token !== "string" || token.length < 20 || token.length > 2048)) {
+    throw new Error("Operator session is invalid");
+  }
+  if (accessExpiresAt != null && !Number.isFinite(Date.parse(String(accessExpiresAt)))) {
+    throw new Error("Operator session expiry is invalid");
+  }
+  writeOperatorCredentials(token ? {
+    version: 2,
+    token,
+    accessExpiresAt: accessExpiresAt == null ? null : new Date(accessExpiresAt).toISOString(),
+    refresh: null,
+  } : null);
+}
+
+function setOperatorRefreshSession({ stationCode, refreshToken, accessExpiresAt, refreshExpiresAt }) {
+  const current = readOperatorCredentials();
+  if (!current || !/^MV-STN-[A-Z2-7]{10,24}$/.test(String(stationCode || ""))
+      || typeof refreshToken !== "string" || refreshToken.length < 32 || refreshToken.length > 2048
+      || !Number.isFinite(Date.parse(String(accessExpiresAt || "")))
+      || !Number.isFinite(Date.parse(String(refreshExpiresAt || "")))) {
+    throw new Error("Station-bound Scanner session is invalid");
+  }
+  writeOperatorCredentials({
+    version: 2,
+    token: current.token,
+    accessExpiresAt: new Date(accessExpiresAt).toISOString(),
+    refresh: {
+      token: refreshToken,
+      stationCode,
+      expiresAt: new Date(refreshExpiresAt).toISOString(),
+    },
+  });
+}
+
+function setOperatorAccessSession(token, accessExpiresAt) {
+  const current = readOperatorCredentials();
+  if (!current?.refresh || typeof token !== "string" || token.length < 20 || token.length > 2048
+      || !Number.isFinite(Date.parse(String(accessExpiresAt || "")))) {
+    throw new Error("Refreshed Scanner access session is invalid");
+  }
+  writeOperatorCredentials({
+    version: 2,
+    token,
+    accessExpiresAt: new Date(accessExpiresAt).toISOString(),
+    refresh: current.refresh,
+  });
+}
+
+function readOperatorRefreshSession() {
+  return readOperatorCredentials()?.refresh || null;
 }
 
 /** Signing out a person never changes this Mac's enrolled station identity. */
@@ -394,6 +468,8 @@ module.exports = {
   saveEnrollment,
   setStationStatus,
   setOperatorSession,
+  setOperatorRefreshSession,
+  setOperatorAccessSession,
   clearOperatorSession,
   signStoredRequest,
   signStoredRequestV2,
@@ -418,6 +494,8 @@ module.exports = {
     installationFingerprint,
     publicKeyFingerprint,
     readOperatorSession,
+    readOperatorCredentials,
+    readOperatorRefreshSession,
     assertLegacyIdentity,
     proveMigration,
     supportPath: SUPPORT,

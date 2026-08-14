@@ -28,6 +28,7 @@ export async function finaliseScannerEvidence(input: {
   mimeType: string;
   provenanceInput: unknown;
   trusted: TrustedCapturePrincipal;
+  immutableBinding?: unknown;
 }): Promise<FinalisedScannerEvidence> {
   const { inspectScannerEvidence, uploadRawScannerSide, markRawUploaded, setScanStatus } =
     await import("./scan-ingest-service");
@@ -58,7 +59,9 @@ export async function finaliseScannerEvidence(input: {
   }
   if (
     provenance.profileVersion !== input.session.scannerProfileVersion ||
-    provenance.workstationId !== input.session.workstationId
+    provenance.workstationId !== input.session.workstationId ||
+    (input.session.profileRevisionId && provenance.profileRevisionId !== input.session.profileRevisionId) ||
+    (input.session.profileDigestSha256 && provenance.profileDigestSha256 !== input.session.profileDigestSha256)
   ) {
     throw new Error("Capture provenance does not match the armed workstation/profile");
   }
@@ -82,6 +85,7 @@ export async function finaliseScannerEvidence(input: {
         tenantId: input.trusted.tenantId,
         locationId: input.trusted.locationId,
         actorId: input.trusted.actorId ?? input.session.actorId,
+        immutableBinding: input.immutableBinding ?? null,
       },
     }
   );
@@ -94,6 +98,7 @@ export async function recordAcceptedScannerEvidence(input: {
   session: ScannerCaptureSession;
   evidence: FinalisedScannerEvidence;
   trusted: TrustedCapturePrincipal;
+  immutableBinding?: unknown;
 }): Promise<void> {
   await storage.writeAuditLog(
     "certificate",
@@ -116,6 +121,7 @@ export async function recordAcceptedScannerEvidence(input: {
       scanner_profile_version: input.evidence.provenance.profileVersion,
       sha256: input.evidence.inspection.sha256,
       recapture: input.session.recapture,
+      immutable_binding: input.immutableBinding ?? null,
     }
   );
 
@@ -132,4 +138,14 @@ export async function recordAcceptedScannerEvidence(input: {
    */
   const { advanceCardJobAfterCaptureSafely } = await import("./partner/card-job-lifecycle");
   await advanceCardJobAfterCaptureSafely(input.session.certificateId);
+  if (input.session.cardJobId && input.session.stationId && input.session.originalOperatorId) {
+    const { ensureNextCardJobCaptureSession } = await import("./scanner-capture-service");
+    await ensureNextCardJobCaptureSession({
+      cardJobId: input.session.cardJobId,
+      stationId: input.session.stationId,
+      actorId: input.session.originalOperatorId,
+      originalOperatorRole: input.session.originalOperatorRole || "SCANNER_OPERATOR",
+      recapture: input.session.recapture,
+    });
+  }
 }

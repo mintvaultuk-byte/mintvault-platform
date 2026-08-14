@@ -8,7 +8,7 @@ project:
     - ecommerce
     - high-security
 engineering:
-  master_version: 1.0.10
+  master_version: 1.0.12
 agents:
   lead: Codex
   hostile_reviewer: Claude Opus High

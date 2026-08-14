@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { pool } from "./db";
 import { hashLockKey } from "./lib/advisory-lock";
-import type { ScannerCaptureSession } from "./scanner-capture-service";
+import { mapScannerCaptureRow, type ScannerCaptureSession } from "./scanner-capture-service";
+import { validateScannerEvidenceBinding, type ScannerEvidenceBinding } from "./scanner-evidence-binding";
 
 const STAGING_TTL_MS = 15 * 60_000;
 const FINALISATION_STALE_MS = 15 * 60_000;
@@ -17,6 +18,7 @@ export type ScannerEvidenceStaging = {
   provenance: unknown;
   state: "granted" | "finalizing" | "accepted" | "failed" | "expired";
   expiresAt: Date;
+  immutableBinding: ScannerEvidenceBinding | null;
 };
 
 type StagingRow = Record<string, unknown>;
@@ -32,6 +34,7 @@ function mapStaging(row: StagingRow): ScannerEvidenceStaging {
     provenance: row.capture_provenance,
     state: row.state as ScannerEvidenceStaging["state"],
     expiresAt: new Date(String(row.expires_at)),
+    immutableBinding: (row.immutable_binding as ScannerEvidenceBinding | null) ?? null,
   };
 }
 
@@ -86,6 +89,7 @@ export async function grantScannerEvidenceStaging(input: {
   expectedSha256: unknown;
   expectedBytes: unknown;
   provenance: unknown;
+  immutableBinding: unknown;
 }): Promise<{ staging: ScannerEvidenceStaging; session: ScannerCaptureSession }> {
   const expected = validExpected({ sha256: input.expectedSha256, byteLength: input.expectedBytes });
   const provenance = stableProvenance(input.provenance);
@@ -103,6 +107,11 @@ export async function grantScannerEvidenceStaging(input: {
       ]);
       throw new Error("Capture session expired");
     }
+    const session = mapScannerCaptureRow(sessionRow);
+    const immutableBinding = validateScannerEvidenceBinding(session, input.immutableBinding);
+    if (immutableBinding.sha256 !== expected.sha256 || immutableBinding.byte_length !== expected.byteLength) {
+      throw new Error("Evidence binding digest or byte length does not match the staged candidate");
+    }
     const existing = await client.query(
       `SELECT * FROM scanner_evidence_staging
         WHERE capture_session_id=$1 AND state='granted' AND expires_at > NOW()
@@ -116,7 +125,8 @@ export async function grantScannerEvidenceStaging(input: {
       if (
         String(stagingRow.expected_sha256) !== expected.sha256 ||
         Number(stagingRow.expected_bytes) !== expected.byteLength ||
-        storedProvenance !== provenance
+        storedProvenance !== provenance ||
+        canonicalJson(stagingRow.immutable_binding) !== canonicalJson(immutableBinding)
       ) {
         throw new Error("A different TIFF candidate cannot reuse this armed capture session");
       }
@@ -126,8 +136,8 @@ export async function grantScannerEvidenceStaging(input: {
       const objectKey = `evidence/staging/${String(sessionRow.station_id ?? "legacy")}/${input.sessionId}/${id}.tif`;
       const inserted = await client.query(
         `INSERT INTO scanner_evidence_staging
-         (id,capture_session_id,station_id,object_key,expected_sha256,expected_bytes,capture_provenance,expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+         (id,capture_session_id,station_id,object_key,expected_sha256,expected_bytes,capture_provenance,expires_at,immutable_binding)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb)
          RETURNING *`,
         [
           id,
@@ -138,6 +148,7 @@ export async function grantScannerEvidenceStaging(input: {
           expected.byteLength,
           provenance,
           expiresAt,
+          canonicalJson(immutableBinding),
         ]
       );
       stagingRow = inserted.rows[0] as StagingRow;
@@ -166,6 +177,7 @@ export async function beginScannerEvidenceFinalisation(input: {
   stagingId: string;
   deviceId: string;
   authenticatedStationId?: string | null;
+  immutableBinding?: unknown;
 }): Promise<{ staging: ScannerEvidenceStaging; alreadyAccepted: boolean }> {
   const client = await pool.connect();
   try {
@@ -181,6 +193,12 @@ export async function beginScannerEvidenceFinalisation(input: {
     );
     const row = found.rows[0] as StagingRow | undefined;
     if (!row) throw new Error("Staged TIFF is not available for this capture session");
+    if (input.immutableBinding != null) {
+      const verified = validateScannerEvidenceBinding(mapScannerCaptureRow(sessionRow), input.immutableBinding);
+      if (canonicalJson(verified) !== canonicalJson(row.immutable_binding)) {
+        throw new Error("Finalisation evidence binding does not match its staged grant");
+      }
+    }
     const evidence = await client.query(
       `SELECT 1 FROM certificate_image_evidence e
         WHERE e.certificate_id=$1 AND e.side=$2

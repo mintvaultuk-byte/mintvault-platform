@@ -11,6 +11,7 @@ const enrolmentOperation = require("./enrolment-operation");
 const { directFetch, boundedResponseText } = require("./http-safety");
 
 let fetchPromise = null;
+let refreshPromise = null;
 function getFetch() {
   if (!fetchPromise) fetchPromise = import("node-fetch").then((m) => m.default);
   return fetchPromise;
@@ -37,17 +38,76 @@ async function readJson(response) {
   try { return JSON.parse(raw); } catch { return { raw }; }
 }
 
-async function operatorJson(method, apiPath, payload) {
+function operatorAuthDenied(result) {
+  const code = String(result?.body?.error?.code || result?.body?.error || "");
+  return result?.status === 401 || (result?.status === 403 && code === "operator_scan_forbidden");
+}
+
+async function refreshStationSession({ force = false } = {}) {
+  const credentials = stationIdentity._private.readOperatorCredentials();
+  const refresh = credentials?.refresh;
+  if (!credentials || !refresh) return { ok: false, status: 401, body: { error: "scanner_refresh_unavailable" } };
+  if (Date.parse(refresh.expiresAt) <= Date.now()) {
+    return { ok: false, status: 401, body: { error: "scanner_refresh_expired" } };
+  }
+  if (!force && credentials.accessExpiresAt && Date.parse(credentials.accessExpiresAt) > Date.now() + 60_000) {
+    return { ok: true, status: 200, body: { unchanged: true } };
+  }
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = stationRequestQueue.run(async () => {
+    const fetch = await getFetch();
+    const apiPath = "/api/partner/stations/session/refresh";
+    const serialized = Buffer.from(JSON.stringify({ refreshToken: refresh.token }));
+    const headers = stationIdentity.signStoredRequest({
+      method: "POST",
+      path: apiPath,
+      body: serialized,
+      includeOperatorSession: false,
+    });
+    const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: serialized,
+    });
+    const body = await readJson(response);
+    if (!response.ok) return { ok: false, status: response.status, body };
+    const token = cookieTokenFrom(response);
+    const session = body?.session;
+    if (!token || session?.stationCode !== refresh.stationCode
+        || !Number.isFinite(Date.parse(String(session?.accessExpiresAt || "")))
+        || new Date(session.refreshExpiresAt).toISOString() !== refresh.expiresAt) {
+      throw new Error("MintVault returned an invalid station-bound Scanner session");
+    }
+    stationIdentity.setOperatorAccessSession(token, session.accessExpiresAt);
+    return { ok: true, status: response.status, body };
+  }).finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
+
+async function operatorJson(method, apiPath, payload, { background = false } = {}) {
+  await refreshStationSession().catch(() => {});
   const fetch = await getFetch();
-  const operatorSession = stationIdentity._private.readOperatorSession();
-  if (!operatorSession) throw new Error("Sign in to MintVault before using this station");
-  const init = {
-    method,
-    headers: { "content-type": "application/json", cookie: `mv.partner.sid=${encodeURIComponent(operatorSession)}` },
+  const request = async () => {
+    const operatorSession = stationIdentity._private.readOperatorSession();
+    if (!operatorSession) throw new Error("Sign in to MintVault before using this station");
+    const init = {
+      method,
+      headers: {
+        "content-type": "application/json",
+        cookie: `mv.partner.sid=${encodeURIComponent(operatorSession)}`,
+        ...(background ? { "x-mintvault-scanner-background": "v1" } : {}),
+      },
+    };
+    if (method !== "GET" && method !== "HEAD") init.body = JSON.stringify(payload || {});
+    const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, init);
+    return { ok: response.ok, status: response.status, body: await readJson(response) };
   };
-  if (method !== "GET" && method !== "HEAD") init.body = JSON.stringify(payload || {});
-  const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, init);
-  return { ok: response.ok, status: response.status, body: await readJson(response) };
+  let result = await request();
+  if (operatorAuthDenied(result) && stationIdentity._private.readOperatorRefreshSession()) {
+    const refreshed = await refreshStationSession({ force: true });
+    if (refreshed.ok) result = await request();
+  }
+  return result;
 }
 
 /**
@@ -63,7 +123,8 @@ async function creditSummary() {
 }
 
 async function signedJson(method, apiPath, payload) {
-  return stationRequestQueue.run(async () => {
+  await refreshStationSession().catch(() => {});
+  const request = () => stationRequestQueue.run(async () => {
     const fetch = await getFetch();
     const serialized = Buffer.from(JSON.stringify(payload || {}));
     const headers = stationIdentity.signStoredRequest({ method, path: apiPath, body: serialized });
@@ -74,13 +135,20 @@ async function signedJson(method, apiPath, payload) {
     });
     return stationAuthorityLatch.observe({ ok: response.ok, status: response.status, body: await readJson(response) });
   });
+  let result = await request();
+  if (operatorAuthDenied(result) && stationIdentity._private.readOperatorRefreshSession()) {
+    const refreshed = await refreshStationSession({ force: true });
+    if (refreshed.ok) result = await request();
+  }
+  return result;
 }
 
 async function signedJsonV2(method, apiPath, payload, semanticOperationId) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(semanticOperationId || ""))) {
     throw new Error("Signed station mutation needs a valid semantic operation ID");
   }
-  return stationRequestQueue.run(async () => {
+  await refreshStationSession().catch(() => {});
+  const request = () => stationRequestQueue.run(async () => {
     const fetch = await getFetch();
     const serialized = Buffer.from(JSON.stringify(payload || {}));
     const headers = stationIdentity.signStoredRequestV2({
@@ -93,11 +161,17 @@ async function signedJsonV2(method, apiPath, payload, semanticOperationId) {
     });
     return stationAuthorityLatch.observe({ ok: response.ok, status: response.status, body: await readJson(response) });
   });
+  let result = await request();
+  if (operatorAuthDenied(result) && stationIdentity._private.readOperatorRefreshSession()) {
+    const refreshed = await refreshStationSession({ force: true });
+    if (refreshed.ok) result = await request();
+  }
+  return result;
 }
 
 async function signIn(email, password) {
   const fetch = await getFetch();
-  const response = await directFetch(fetch, `${baseUrl()}/api/partner/auth/login`, {
+  const response = await directFetch(fetch, `${baseUrl()}/api/partner/auth/scanner-login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -106,7 +180,13 @@ async function signIn(email, password) {
   if (!response.ok) return { ok: false, status: response.status, body };
   const token = cookieTokenFrom(response);
   if (!token) return { ok: false, status: 500, body: { error: "MintVault sign-in did not issue an operator session" } };
-  stationIdentity.setOperatorSession(token);
+  const lifetime = Number(body?.accessExpiresInSeconds);
+  stationIdentity.setOperatorSession(
+    token,
+    Number.isSafeInteger(lifetime) && lifetime > 0 && lifetime <= 15 * 60
+      ? new Date(Date.now() + lifetime * 1000).toISOString()
+      : null,
+  );
   return { ok: true, status: response.status, body };
 }
 
@@ -135,21 +215,41 @@ async function signOutWith({ token, clearSession, fetchImpl, origin }) {
 }
 
 async function signOut() {
-  const token = stationIdentity._private.readOperatorSession();
+  const credentials = stationIdentity._private.readOperatorCredentials();
+  const token = credentials?.token || null;
+  const refresh = credentials?.refresh || null;
   stationIdentity.clearOperatorSession();
   let fetch;
   try { fetch = await getFetch(); }
   catch { return { ok: true, remoteRevoked: false }; }
-  return signOutWith({
+  let stationRevoked = false;
+  if (refresh) {
+    try {
+      const apiPath = "/api/partner/stations/session/logout";
+      const serialized = Buffer.from(JSON.stringify({ refreshToken: refresh.token }));
+      const result = await stationRequestQueue.run(async () => {
+        const headers = stationIdentity.signStoredRequest({
+          method: "POST", path: apiPath, body: serialized, includeOperatorSession: false,
+        });
+        const response = await directFetch(fetch, `${baseUrl()}${apiPath}`, {
+          method: "POST", headers: { ...headers, "content-type": "application/json" }, body: serialized,
+        });
+        return response.ok;
+      });
+      stationRevoked = result === true;
+    } catch { /* local lock is already complete */ }
+  }
+  const ordinary = await signOutWith({
     token,
     clearSession: () => {},
     fetchImpl: fetch,
     origin: baseUrl(),
   });
+  return { ok: true, remoteRevoked: stationRevoked || ordinary.remoteRevoked };
 }
 
 async function stationSession() {
-  return operatorJson("GET", "/api/partner/session");
+  return operatorJson("GET", "/api/partner/session", undefined, { background: true });
 }
 
 async function enrolmentLocations() {
@@ -158,7 +258,24 @@ async function enrolmentLocations() {
 
 async function enrolmentStatus(stationCode) {
   if (typeof stationCode !== "string" || !stationCode) throw new Error("Station code is required");
-  return operatorJson("GET", `/api/partner/stations/${encodeURIComponent(stationCode)}/enrolment-status`);
+  return operatorJson("GET", `/api/partner/stations/${encodeURIComponent(stationCode)}/enrolment-status`, undefined, { background: true });
+}
+
+async function ensureScannerSessionBound(stationCode) {
+  const current = stationIdentity._private.readOperatorRefreshSession();
+  if (current?.stationCode === stationCode && Date.parse(current.expiresAt) > Date.now()) {
+    return { ok: true, status: 200, body: { unchanged: true } };
+  }
+  const result = await signedJson("POST", "/api/partner/stations/session/bind", {});
+  const session = result.body?.session;
+  if (!result.ok || session?.stationCode !== stationCode || typeof session?.refreshToken !== "string") return result;
+  stationIdentity.setOperatorRefreshSession({
+    stationCode,
+    refreshToken: session.refreshToken,
+    accessExpiresAt: session.accessExpiresAt,
+    refreshExpiresAt: session.refreshExpiresAt,
+  });
+  return result;
 }
 
 async function selectLocation(locationId) {
@@ -194,6 +311,35 @@ async function saveCalibration(payload) {
   );
 }
 
+async function resyncReplayState() {
+  const stationCode = stationIdentity.currentStationCode();
+  if (!stationCode) throw new Error("Station identity is unavailable for replay recovery");
+  const issued = await operatorJson("POST", "/api/partner/stations/replay-resync/challenge", { stationCode });
+  const challenge = issued.body?.challenge;
+  if (!issued.ok || challenge?.stationCode !== stationCode || typeof challenge?.challengeId !== "string"
+      || typeof challenge?.challenge !== "string") {
+    return { ok: false, status: issued.status, body: issued.body };
+  }
+  const proof = stationIdentity.signResyncChallenge({
+    stationCode,
+    challengeId: challenge.challengeId,
+    challenge: challenge.challenge,
+  });
+  const completed = await operatorJson("POST", "/api/partner/stations/replay-resync/complete", {
+    stationCode,
+    challengeId: proof.challengeId,
+    signature: proof.signature,
+  });
+  const state = completed.body?.replayState;
+  if (!completed.ok || state?.stationCode !== stationCode || !Number.isSafeInteger(state?.credentialEpoch)
+      || !Number.isSafeInteger(state?.requestEpoch) || !Number.isSafeInteger(state?.requestSequence)) {
+    return { ok: false, status: completed.status, body: completed.body };
+  }
+  stationIdentity.applyReplayState(state);
+  stationAuthorityLatch.clearAfterResync();
+  return { ok: true, status: completed.status, body: completed.body };
+}
+
 module.exports = {
   creditSummary,
   signIn,
@@ -202,9 +348,18 @@ module.exports = {
   stationSession,
   enrolmentLocations,
   enrolmentStatus,
+  ensureScannerSessionBound,
   selectLocation,
   registerThisMac,
   heartbeat,
   saveCalibration,
-  _private: { cookieTokenFrom, baseUrl, signOutWith, signedJsonV2 },
+  resyncReplayState,
+  _private: {
+    cookieTokenFrom,
+    baseUrl,
+    signOutWith,
+    signedJsonV2,
+    operatorAuthDenied,
+    refreshStationSession,
+  },
 };

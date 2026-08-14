@@ -6,6 +6,8 @@ import {
   requirePartnerCapability,
   requireNotViewOnly,
   requireNotSensitiveFrozen,
+  setPartnerCookie,
+  clearPartnerCookie,
 } from "./session";
 import { StationIdentityError } from "./station-identity";
 import {
@@ -24,6 +26,20 @@ import {
 import { authorizePartnerScannerCertificate } from "./grading-routes";
 import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-authority";
 import { FixAuthorityError, authoriseFix, invalidateSide, listFixQueue } from "./fix-authority";
+import { CardJobCancellationError, cancelCardJobBeforeEvidence } from "./card-job-cancellation";
+import { completeStationResync, issueStationResyncChallenge } from "./station-resync-service";
+import {
+  ScannerStationAuthorityError,
+  acceptStationProfileRevision,
+  beginStationSemanticOperation,
+  completeStationSemanticOperation,
+} from "./scanner-station-authority";
+import { SCANNER_ACCESS_MINUTES } from "./auth";
+import {
+  bindScannerRefreshSession,
+  refreshScannerAccessSession,
+  revokeScannerSession,
+} from "./scanner-session-service";
 
 /**
  * FIX failures map to statuses that tell the operator what to do next.
@@ -66,6 +82,16 @@ const partnerStationHeartbeatRateLimit = rateLimit({
   passOnStoreError: false,
   keyGenerator: (req) => `partner-station-heartbeat:${req.station?.id ?? "unknown"}`,
   message: { error: "Too many station heartbeat requests. Please wait a minute and try again." },
+});
+
+const partnerScannerSessionRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-scanner-session:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many Scanner session requests. Sign in again or wait a minute." },
 });
 
 const partnerStationCaptureRateLimit = rateLimit({
@@ -111,6 +137,12 @@ declare global {
 }
 
 function stationError(res: Response, error: unknown): void {
+  if (error instanceof ScannerStationAuthorityError) {
+    res.status(error.code === "IDEMPOTENCY_CONFLICT" ? 409 : 400).json({
+      error: { code: error.code, message: error.message },
+    });
+    return;
+  }
   if (error instanceof StationIdentityError) {
     res
       .status(error.code === "expired_timestamp" ? 401 : 400)
@@ -145,7 +177,12 @@ async function requireSignedStation(req: Request, res: Response, next: NextFunct
   }
 }
 
-async function requireSignedStationOperator(req: Request, res: Response, next: NextFunction): Promise<void> {
+async function resolveSignedStationOperator(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  touchActivity: boolean
+): Promise<void> {
   try {
     if (!req.station) {
       res
@@ -154,7 +191,7 @@ async function requireSignedStationOperator(req: Request, res: Response, next: N
       return;
     }
     const token = req.header("x-mintvault-operator-session") || "";
-    const operator = await resolvePartnerSession(token);
+    const operator = await resolvePartnerSession(token, { touchActivity });
     if (!operator?.mfaPassed || !operator.permissions.has("partner.cards.scan")) {
       res.status(403).json({
         error: { code: "operator_scan_forbidden", message: "An authorised signed-in scanner operator is required" },
@@ -180,6 +217,14 @@ async function requireSignedStationOperator(req: Request, res: Response, next: N
   }
 }
 
+function requireSignedStationOperator(req: Request, res: Response, next: NextFunction): void {
+  void resolveSignedStationOperator(req, res, next, true);
+}
+
+function requireSignedStationOperatorBackground(req: Request, res: Response, next: NextFunction): void {
+  void resolveSignedStationOperator(req, res, next, false);
+}
+
 /** Mounted below the existing Partner portal gates and session middleware. */
 export function partnerStationRouter(): Router {
   const r = Router();
@@ -200,8 +245,10 @@ export function partnerStationRouter(): Router {
         const station = await requestStationEnrollment(req.partner!, {
           locationId: req.body?.locationId,
           publicKeyPem: req.body?.publicKeyPem,
+          publicKeyFingerprint: req.body?.publicKeyFingerprint,
           installationFingerprint: req.body?.installationFingerprint,
           appVersion: req.body?.appVersion,
+          clientOpId: req.body?.clientOpId,
         });
         res.status(201).json({ station });
       } catch (error) {
@@ -312,11 +359,93 @@ export function partnerStationRouter(): Router {
   });
 
   r.post(
-    "/stations/heartbeat",
+    "/stations/replay-resync/challenge",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.cards.scan"),
+    async (req, res) => {
+      try {
+        res.status(201).json({ challenge: await issueStationResyncChallenge(req.partner!, req.body?.stationCode) });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  r.post(
+    "/stations/replay-resync/complete",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.cards.scan"),
+    async (req, res) => {
+      try {
+        res.json({ replayState: await completeStationResync(req.partner!, {
+          stationCode: req.body?.stationCode,
+          challengeId: req.body?.challengeId,
+          signature: req.body?.signature,
+        }) });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  r.post(
+    "/stations/session/bind",
     requireSignedStation,
     requireSignedStationOperator,
-    // From origin/main: a signed station may still flood its own heartbeat. Keyed per
-    // station id, so one noisy Mac cannot exhaust the budget for the whole fleet.
+    partnerScannerSessionRateLimit,
+    async (req, res) => {
+      try {
+        res.status(201).json({
+          session: await bindScannerRefreshSession(req.station!, req.partner!),
+        });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  r.post(
+    "/stations/session/refresh",
+    requireSignedStation,
+    partnerScannerSessionRateLimit,
+    async (req, res) => {
+      try {
+        const refreshed = await refreshScannerAccessSession(req.station!, req.body?.refreshToken);
+        setPartnerCookie(res, refreshed.accessToken, SCANNER_ACCESS_MINUTES * 60);
+        res.json({
+          session: {
+            accessExpiresAt: refreshed.accessExpiresAt,
+            refreshExpiresAt: refreshed.refreshExpiresAt,
+            stationCode: req.station!.code,
+          },
+        });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  r.post(
+    "/stations/session/logout",
+    requireSignedStation,
+    partnerScannerSessionRateLimit,
+    async (req, res) => {
+      try {
+        await revokeScannerSession(req.station!, req.body?.refreshToken);
+        clearPartnerCookie(res);
+        res.json({ ok: true });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
+  // From origin/main: a signed station may still flood its own heartbeat. Keyed per
+  // station id, so one noisy Mac cannot exhaust the budget for the whole fleet.
+  r.post(
+    "/stations/heartbeat",
+    requireSignedStation,
+    requireSignedStationOperatorBackground,
     partnerStationHeartbeatRateLimit,
     async (req, res) => {
     try {
@@ -363,6 +492,13 @@ export function partnerStationRouter(): Router {
         actorUserId: operator.userId,
         actorEmail: req.body?.operatorEmail ?? operator.userId,
         cardName: typeof req.body?.cardName === "string" ? req.body.cardName : null,
+      });
+      const { ensureNextCardJobCaptureSession } = await import("../scanner-capture-service");
+      await ensureNextCardJobCaptureSession({
+        cardJobId: result.cardJobId,
+        stationId: station.id,
+        actorId: operator.userId,
+        originalOperatorRole: "SCANNER_OPERATOR",
       });
       // 200 on replay, 201 on a genuinely new job: a retrying station can tell the difference
       // without having to compare ids, and neither answer costs a second credit.
@@ -433,6 +569,15 @@ export function partnerStationRouter(): Router {
       const station = req.station!;
       const operator = req.partner!;
       try {
+        const endpoint = `/api/partner/card-jobs/${String(req.params.cardJobId)}/fix-authorise`;
+        const replay = await beginStationSemanticOperation({
+          station,
+          actorUserId: operator.userId,
+          operationType: "FIX_AUTHORISE",
+          endpoint,
+          payload: req.body,
+        });
+        if (replay) return res.status(replay.status).json(replay.body);
         const authorisation = await authoriseFix({
           tenantId: station.tenantId,
           locationId: station.locationId,
@@ -441,7 +586,20 @@ export function partnerStationRouter(): Router {
           stationId: station.id,
           actorUserId: operator.userId,
         });
-        res.json({ fix: authorisation });
+        const { ensureNextCardJobCaptureSession } = await import("../scanner-capture-service");
+        await ensureNextCardJobCaptureSession({
+          cardJobId: authorisation.cardJobId,
+          stationId: station.id,
+          actorId: operator.userId,
+          originalOperatorRole: "SCANNER_OPERATOR",
+          recapture: true,
+        });
+        const completed = await completeStationSemanticOperation({
+          station,
+          status: 200,
+          body: { fix: authorisation },
+        });
+        res.status(completed.status).json(completed.body);
       } catch (error) {
         fixError(res, error);
       }
@@ -449,16 +607,88 @@ export function partnerStationRouter(): Router {
   );
 
   r.post(
+    "/card-jobs/:cardJobId/cancel",
+    requireSignedStation,
+    requireSignedStationOperator,
+    async (req, res) => {
+      const station = req.station!;
+      const operator = req.partner!;
+      const cardJobId = String(req.params.cardJobId);
+      const endpoint = `/api/partner/card-jobs/${cardJobId}/cancel`;
+      try {
+        if (req.body?.clientOpId !== station.semanticOperationId) {
+          throw new ScannerStationAuthorityError("IDEMPOTENCY_CONFLICT", "Cancellation operation ID mismatch");
+        }
+        const replay = await beginStationSemanticOperation({
+          station,
+          actorUserId: operator.userId,
+          operationType: "CARD_JOB_CANCEL",
+          endpoint,
+          payload: req.body,
+        });
+        if (replay) return res.status(replay.status).json(replay.body);
+        const cancellation = await cancelCardJobBeforeEvidence({
+          station,
+          actorUserId: operator.userId,
+          cardJobId,
+          clientOpId: station.semanticOperationId!,
+          captureSessionId: String(req.body?.captureSessionId || ""),
+          captureAuthorisationId: String(req.body?.captureAuthorisationId || ""),
+        });
+        const completed = await completeStationSemanticOperation({
+          station,
+          status: 200,
+          body: { cancellation },
+        });
+        return res.status(completed.status).json(completed.body);
+      } catch (error) {
+        if (error instanceof CardJobCancellationError) {
+          const status = error.code === "CARD_JOB_NOT_FOUND" ? 404 : 409;
+          const body = {
+            error: { code: error.code, message: error.message, ...(error.cardJobId ? { cardJobId: error.cardJobId } : {}) },
+          };
+          try {
+            const completed = await completeStationSemanticOperation({ station, status, body, refused: true });
+            return res.status(completed.status).json(completed.body);
+          } catch (completionError) {
+            stationError(res, completionError);
+            return;
+          }
+        }
+        stationError(res, error);
+      }
+    }
+  );
+
+  // From origin/main: this runs BEFORE authentication on purpose. requireSignedStation
+  // verifies a signed payload and resolves the operator session, so the endpoint must be
+  // protected from unauthenticated floods as well as from an authenticated one.
+  r.post(
     "/stations/calibrations",
-    // From origin/main: this runs BEFORE authentication on purpose. requireSignedStation
-    // verifies a signed payload and resolves the operator session, so the endpoint must be
-    // protected from unauthenticated floods as well as from an authenticated one.
     partnerStationCalibrationIngressRateLimit,
     requireSignedStation,
     requireSignedStationOperator,
     partnerStationCalibrationRateLimit,
     async (req, res) => {
     try {
+      const replay = await beginStationSemanticOperation({
+        station: req.station!,
+        actorUserId: req.partner!.userId,
+        operationType: "PROFILE_ACCEPT",
+        endpoint: "/api/partner/stations/calibrations",
+        payload: req.body,
+      });
+      if (replay) return res.status(replay.status).json(replay.body);
+      // Validate and persist the immutable, server-digested profile first.  If
+      // the legacy calibration write later fails the station remains safely
+      // UNPROVISIONED and the service UI can replay the same semantic operation.
+      // The opposite order could leave calibration VALID with no accepted
+      // profile revision, a fail-closed but unrecoverable appliance state.
+      const profile = await acceptStationProfileRevision({
+        station: req.station!,
+        actorUserId: req.partner!.userId,
+        payload: req.body,
+      });
       const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
         scannerHardware: req.body?.scannerHardware,
         scannerProfileVersion: req.body?.scannerProfileVersion,
@@ -467,7 +697,12 @@ export function partnerStationRouter(): Router {
         placementToleranceMm: req.body?.placementToleranceMm,
         calibrationVersion: req.body?.calibrationVersion,
       });
-      res.status(201).json({ calibration });
+      const completed = await completeStationSemanticOperation({
+        station: req.station!,
+        status: 201,
+        body: { calibration: { ...calibration, ...profile } },
+      });
+      res.status(completed.status).json(completed.body);
     } catch (error) {
       stationError(res, error);
     }

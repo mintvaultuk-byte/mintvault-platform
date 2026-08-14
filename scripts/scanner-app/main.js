@@ -783,6 +783,33 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
       error: "MintVault did not re-prove the prepared terminal registration. The credential remains locked and no physical work can start.",
     };
   }
+  if (resolved.stage === "active") {
+    let bound;
+    try { bound = await stationClient.ensureScannerSessionBound(code); }
+    catch (error) {
+      return {
+        ok: true,
+        stage: "offline",
+        summary,
+        canServiceStation,
+        stationCode: code,
+        error: `MintVault could not establish the station-bound operator session: ${error?.message || error}`,
+      };
+    }
+    if (!bound?.ok) {
+      if (bound?.status === 401 || bound?.status === 403) {
+        try { stationIdentity.clearOperatorSession(); } catch {}
+      }
+      return {
+        ok: true,
+        stage: bound?.status === 401 || bound?.status === 403 ? "sign_in" : "degraded",
+        summary,
+        canServiceStation,
+        stationCode: code,
+        error: bound?.body?.error?.message || "Sign in again to bind this human session to the approved Scanner.",
+      };
+    }
+  }
   if (!versionTuple(station.minimumSupportedVersion)) {
     return {
       ok: true,
@@ -1101,6 +1128,17 @@ function setupIpc() {
   }));
 
   registerIpc("get-station-setup", () => stationSetupState());
+  registerIpc("resync-station-replay", async () => {
+    if (!stationAuthorityLatch.current()) return { ok: false, error: "Station replay recovery is not required" };
+    if (!stationIdentity.hasOperatorSession()) return { ok: false, error: "Sign in and complete MFA before replay recovery" };
+    try {
+      const result = await stationClient.resyncReplayState();
+      if (!result.ok) return { ok: false, error: result.body?.error?.message || "MintVault rejected station replay recovery" };
+      return stationSetupState({ refreshCredits: false });
+    } catch (error) {
+      return { ok: false, error: error?.message || "Station replay recovery failed closed" };
+    }
+  });
   registerIpc("station-sign-in", async (_event, payload) => {
     if (!plainObject(payload)) return { ok: false, error: "Email and password are required" };
     const email = boundedInput(payload.email?.trim(), 254, /^[^\s@]+@[^\s@]+\.[^\s@]+$/);

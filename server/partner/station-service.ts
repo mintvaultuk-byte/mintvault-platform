@@ -8,11 +8,21 @@ import {
   createStationCode,
   normalizeStationPublicKey,
   parseStationRequestHeaders,
+  parseStationRequestHeadersV2,
   stationPublicKeyFingerprint,
   verifyStationSignature,
+  verifyStationSignatureV2,
 } from "./station-identity";
 
-export type StationStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED";
+export type StationStatus =
+  | "PENDING"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "REVOKED"
+  | "REJECTED"
+  | "CANCELLED"
+  | "EXPIRED";
+export type StationFleetTransition = "ACTIVE" | "SUSPENDED" | "REVOKED";
 export type CalibrationStatus = "UNPROVISIONED" | "VALID" | "INVALID" | "EXPIRED";
 
 export type StationPrincipal = {
@@ -24,6 +34,9 @@ export type StationPrincipal = {
   scannerProfileVersion: string | null;
   calibrationStatus: CalibrationStatus;
   currentCalibrationId: string | null;
+  currentProfileRevisionId: string | null;
+  protocol: 1 | 2;
+  semanticOperationId: string | null;
 };
 
 /** Credential-free station summary used only to let an authorised Partner
@@ -65,6 +78,9 @@ type StationAuthRow = {
   scanner_profile_version: string | null;
   calibration_status: CalibrationStatus;
   current_calibration_id: string | null;
+  current_profile_revision_id: string | null;
+  credential_epoch: string | number;
+  request_epoch: string | number;
   organisation_status: string;
   location_status: string;
 };
@@ -234,7 +250,14 @@ async function resolvePermittedLocation(
 
 export async function requestStationEnrollment(
   principal: PartnerPrincipal,
-  input: { locationId?: unknown; publicKeyPem: unknown; installationFingerprint?: unknown; appVersion?: unknown }
+  input: {
+    locationId?: unknown;
+    publicKeyPem: unknown;
+    publicKeyFingerprint?: unknown;
+    installationFingerprint?: unknown;
+    appVersion?: unknown;
+    clientOpId?: unknown;
+  }
 ): Promise<{ id: string; stationCode: string; status: "PENDING"; locationId: string }> {
   const publicKeyPem = normalizeStationPublicKey(boundedText(input.publicKeyPem, "publicKeyPem", 8_000));
   const publicKeyFingerprint = stationPublicKeyFingerprint(publicKeyPem);
@@ -246,7 +269,51 @@ export async function requestStationEnrollment(
     throw new StationServiceError("validation", "installationFingerprint is invalid");
   }
   const appVersion = optionalText(input.appVersion, 64);
+  const clientOpId = typeof input.clientOpId === "string" ? input.clientOpId.trim().toLowerCase() : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(clientOpId)) {
+    throw new StationServiceError("validation", "clientOpId is invalid");
+  }
+  if (input.publicKeyFingerprint != null && String(input.publicKeyFingerprint).toLowerCase() !== publicKeyFingerprint) {
+    throw new StationServiceError("validation", "publicKeyFingerprint does not match publicKeyPem");
+  }
+  const enrolmentFingerprint = fingerprint({
+    locationId: input.locationId == null ? null : String(input.locationId),
+    publicKeyPem,
+    publicKeyFingerprint,
+    installationFingerprint: installationFingerprint?.toLowerCase() ?? null,
+    appVersion,
+  });
   return withPartnerAdminTransaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`station-enrol:${clientOpId}`]);
+    const replay = await client.query<{
+      request_fingerprint: string;
+      tenant_id: string;
+      actor_user_id: string;
+      public_key_fingerprint: string;
+      id: string;
+      station_code: string;
+      status: string;
+      location_id: string;
+    }>(
+      `SELECT op.request_fingerprint,op.actor_user_id,op.public_key_fingerprint,op.tenant_id,
+              s.id,s.station_code,s.status,s.location_id
+         FROM partner_station_enrolment_operations op
+         JOIN partner_stations s ON s.id=op.station_id
+        WHERE op.client_op_id=$1`,
+      [clientOpId]
+    );
+    if (replay.rows[0]) {
+      const row = replay.rows[0];
+      if (
+        row.tenant_id !== principal.tenantId ||
+        row.request_fingerprint !== enrolmentFingerprint ||
+        row.actor_user_id !== principal.userId ||
+        row.public_key_fingerprint !== publicKeyFingerprint
+      ) {
+        throw new StationServiceError("validation", "Enrolment idempotency conflict");
+      }
+      return { id: row.id, stationCode: row.station_code, status: "PENDING", locationId: row.location_id };
+    }
     const locationId = await resolvePermittedLocation(client, principal, input.locationId);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const stationCode = createStationCode();
@@ -271,6 +338,12 @@ export async function requestStationEnrollment(
           `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
            VALUES ($1,$2,$3,$4,'station_enrolment_requested',$5::jsonb)`,
           [principal.tenantId, locationId, id, principal.userId, JSON.stringify({ appVersion, publicKeyFingerprint })]
+        );
+        await client.query(
+          `INSERT INTO partner_station_enrolment_operations
+             (tenant_id,actor_user_id,client_op_id,public_key_fingerprint,request_fingerprint,station_id)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [principal.tenantId, principal.userId, clientOpId, publicKeyFingerprint, enrolmentFingerprint, id]
         );
         return { id, stationCode, status: "PENDING", locationId };
       } catch (error: any) {
@@ -319,37 +392,71 @@ export async function getStationEnrollmentStatus(
   calibrationStatus: CalibrationStatus;
   appVersion: string | null;
   minimumSupportedVersion: string | null;
+  publicKeyFingerprint: string;
+  currentProfileRevisionId: string | null;
+  currentProfileDigestSha256: string | null;
+  scannerUpdatePolicy: unknown;
 }> {
   const code = typeof stationCode === "string" ? stationCode.trim().toUpperCase() : "";
   if (!/^MV-STN-[A-Z2-7]{10,24}$/.test(code)) throw new StationServiceError("validation", "stationCode is invalid");
-  const { rows } = await partnerAdminQuery<{
-    station_code: string;
-    status: StationStatus;
-    location_id: string;
-    calibration_status: CalibrationStatus;
-    app_version: string | null;
-    minimum_supported_version: string | null;
-  }>(
-    `SELECT s.station_code, s.status, s.location_id, s.calibration_status,
-            s.app_version, s.minimum_supported_version
-       FROM partner_stations s
-      WHERE s.station_code=$1 AND s.tenant_id=$2
-        AND ($3::boolean OR EXISTS (
-          SELECT 1 FROM partner_user_locations ul WHERE ul.user_id=$4 AND ul.location_id=s.location_id
-        ))
-      LIMIT 1`,
-    [code, principal.tenantId, principal.orgWide, principal.userId]
-  );
-  const station = rows[0];
-  if (!station) throw new StationServiceError("forbidden", "Station is not available to this operator");
-  return {
-    stationCode: station.station_code,
-    status: station.status,
-    locationId: station.location_id,
-    calibrationStatus: station.calibration_status,
-    appVersion: station.app_version,
-    minimumSupportedVersion: station.minimum_supported_version,
-  };
+  return withPartnerAdminTransaction(async (client) => {
+    const { rows } = await client.query<{
+      id: string;
+      station_code: string;
+      status: StationStatus;
+      location_id: string;
+      calibration_status: CalibrationStatus;
+      app_version: string | null;
+      minimum_supported_version: string | null;
+      public_key_fingerprint: string;
+      current_profile_revision_id: string | null;
+      profile_digest_sha256: string | null;
+      scanner_update_policy: unknown;
+      enrolment_expired: boolean;
+    }>(
+      `SELECT s.id,s.station_code,s.status,s.location_id,s.calibration_status,
+              s.app_version,s.minimum_supported_version,s.public_key_fingerprint,
+              s.current_profile_revision_id,profile.profile_digest_sha256,s.scanner_update_policy,
+              (s.enrolment_expires_at <= now()) AS enrolment_expired
+         FROM partner_stations s
+         LEFT JOIN partner_station_profile_revisions profile ON profile.id=s.current_profile_revision_id
+        WHERE s.station_code=$1 AND s.tenant_id=$2
+          AND ($3::boolean OR EXISTS (
+            SELECT 1 FROM partner_user_locations ul WHERE ul.user_id=$4 AND ul.location_id=s.location_id
+          ))
+        LIMIT 1
+        FOR UPDATE OF s`,
+      [code, principal.tenantId, principal.orgWide, principal.userId]
+    );
+    const station = rows[0];
+    if (!station) throw new StationServiceError("forbidden", "Station is not available to this operator");
+    if (station.status === "PENDING" && station.enrolment_expired) {
+      await client.query(
+        `UPDATE partner_stations
+            SET status='EXPIRED',credential_epoch=credential_epoch+1,updated_at=now()
+          WHERE id=$1 AND status='PENDING'`,
+        [station.id]
+      );
+      await client.query(
+        `INSERT INTO partner_station_events (tenant_id,location_id,station_id,event_type,detail)
+         VALUES ($1,$2,$3,'station_expired',$4::jsonb)`,
+        [principal.tenantId, station.location_id, station.id, JSON.stringify({ previousStatus: "PENDING", credentialEpochRotated: true })]
+      );
+      station.status = "EXPIRED";
+    }
+    return {
+      stationCode: station.station_code,
+      status: station.status,
+      locationId: station.location_id,
+      calibrationStatus: station.calibration_status,
+      appVersion: station.app_version,
+      minimumSupportedVersion: station.minimum_supported_version,
+      publicKeyFingerprint: station.public_key_fingerprint,
+      currentProfileRevisionId: station.current_profile_revision_id,
+      currentProfileDigestSha256: station.profile_digest_sha256,
+      scannerUpdatePolicy: station.scanner_update_policy,
+    };
+  });
 }
 
 /** List capture-ready stations in the authenticated Partner's own scope. */
@@ -362,10 +469,11 @@ export async function listPartnerCaptureStations(principal: PartnerPrincipal): P
     minimum_supported_version: string | null;
     calibration_status: CalibrationStatus;
     current_calibration_id: string | null;
+    current_profile_revision_id: string | null;
   }>(
     `SELECT s.station_code, s.location_id, l.name AS location_name,
             s.app_version, s.minimum_supported_version,
-            s.calibration_status, s.current_calibration_id
+            s.calibration_status, s.current_calibration_id, s.current_profile_revision_id
        FROM partner_stations s
        JOIN partner_organisations o ON o.id=s.tenant_id AND o.status='ACTIVE'
        JOIN partner_locations l ON l.id=s.location_id AND l.status='ACTIVE'
@@ -380,6 +488,7 @@ export async function listPartnerCaptureStations(principal: PartnerPrincipal): P
       (station) =>
         station.calibration_status === "VALID" &&
         !!station.current_calibration_id &&
+        !!station.current_profile_revision_id &&
         appVersionSatisfies(station.app_version, station.minimum_supported_version)
     )
     .map((station) => ({
@@ -396,7 +505,8 @@ export async function resolveActiveStationByCode(stationCode: unknown): Promise<
   const { rows } = await partnerAdminQuery<StationAuthRow>(
     `SELECT s.id, s.station_code, s.tenant_id, s.location_id, s.status, s.public_key_pem,
             s.app_version, s.minimum_supported_version, s.scanner_profile_version,
-            s.calibration_status, s.current_calibration_id,
+            s.calibration_status, s.current_calibration_id, s.current_profile_revision_id,
+            s.credential_epoch, s.request_epoch,
             o.status AS organisation_status, l.status AS location_status
        FROM partner_stations s
        JOIN partner_organisations o ON o.id=s.tenant_id
@@ -415,6 +525,9 @@ export async function resolveActiveStationByCode(stationCode: unknown): Promise<
     scannerProfileVersion: station.scanner_profile_version,
     calibrationStatus: station.calibration_status,
     currentCalibrationId: station.current_calibration_id,
+    currentProfileRevisionId: station.current_profile_revision_id,
+    protocol: 1,
+    semanticOperationId: null,
   };
 }
 
@@ -424,12 +537,18 @@ export async function authenticateStationRequest(
   path: string,
   rawBody?: unknown
 ): Promise<StationPrincipal> {
-  const parsed = parseStationRequestHeaders(headers, method, path);
+  const protocol2 = (Array.isArray(headers["x-mintvault-station-protocol"])
+    ? headers["x-mintvault-station-protocol"]?.[0]
+    : headers["x-mintvault-station-protocol"]) === "2";
+  const parsed = protocol2
+    ? parseStationRequestHeadersV2(headers, method, path)
+    : parseStationRequestHeaders(headers, method, path);
   assertStationRequestBodyDigest(parsed.envelope, rawBody);
   const { rows } = await partnerAdminQuery<StationAuthRow>(
     `SELECT s.id, s.station_code, s.tenant_id, s.location_id, s.status, s.public_key_pem,
             s.app_version, s.minimum_supported_version, s.scanner_profile_version,
-            s.calibration_status, s.current_calibration_id,
+            s.calibration_status, s.current_calibration_id, s.current_profile_revision_id,
+            s.credential_epoch, s.request_epoch,
             o.status AS organisation_status, l.status AS location_status
        FROM partner_stations s
        JOIN partner_organisations o ON o.id=s.tenant_id
@@ -439,7 +558,10 @@ export async function authenticateStationRequest(
   );
   const station = rows[0];
   if (!station) throw new StationServiceError("station_not_found", "Station is not enrolled");
-  if (!verifyStationSignature(station.public_key_pem, parsed.envelope, parsed.signature)) {
+  const signatureValid = protocol2
+    ? verifyStationSignatureV2(station.public_key_pem, parsed.envelope as import("./station-identity").StationRequestEnvelopeV2, parsed.signature)
+    : verifyStationSignature(station.public_key_pem, parsed.envelope as import("./station-identity").StationRequestEnvelope, parsed.signature);
+  if (!signatureValid) {
     throw new StationIdentityError("invalid_signature", "Station signature is invalid");
   }
   if (station.status !== "ACTIVE" || station.organisation_status !== "ACTIVE" || station.location_status !== "ACTIVE") {
@@ -460,19 +582,31 @@ export async function authenticateStationRequest(
   // A monotonic signed nonce gives replay resistance without a high-churn
   // nonce table at 5,000 online stations. The conditional update is the
   // global, database-backed acceptance point across every app replica.
+  const replayValue = protocol2
+    ? (parsed.envelope as import("./station-identity").StationRequestEnvelopeV2).sequence.toString()
+    : (parsed.envelope as import("./station-identity").StationRequestEnvelope).nonce.toString();
+  const v2Envelope = protocol2
+    ? (parsed.envelope as import("./station-identity").StationRequestEnvelopeV2)
+    : null;
   const advanced = await partnerAdminQuery<{ id: string; app_version: string | null }>(
     `UPDATE partner_stations s
-        SET last_request_nonce=$2,
+        SET last_request_nonce=CASE WHEN $4::boolean THEN s.last_request_nonce ELSE $2::bigint END,
+            last_request_sequence=CASE WHEN $4::boolean THEN $2::bigint ELSE s.last_request_sequence END,
             app_version=COALESCE($3, s.app_version),
             updated_at=now()
-      WHERE s.id=$1 AND s.status='ACTIVE' AND s.last_request_nonce < $2
+      WHERE s.id=$1 AND s.status='ACTIVE'
+        AND (($4::boolean AND s.credential_epoch=$5::bigint AND s.request_epoch=$6::bigint AND s.last_request_sequence < $2::bigint)
+          OR (NOT $4::boolean AND s.last_request_nonce < $2::bigint))
         AND EXISTS (SELECT 1 FROM partner_organisations o WHERE o.id=s.tenant_id AND o.status='ACTIVE')
         AND EXISTS (SELECT 1 FROM partner_locations l WHERE l.id=s.location_id AND l.status='ACTIVE')
       RETURNING s.id, s.app_version`,
     [
       station.id,
-      parsed.envelope.nonce.toString(),
+      replayValue,
       shouldPersistAttestedVersion(station.app_version, attestedVersion) ? attestedVersion : null,
+      protocol2,
+      v2Envelope?.credentialEpoch.toString() ?? String(station.credential_epoch),
+      v2Envelope?.requestEpoch.toString() ?? String(station.request_epoch),
     ]
   );
   if (advanced.rows.length !== 1)
@@ -486,11 +620,14 @@ export async function authenticateStationRequest(
     scannerProfileVersion: station.scanner_profile_version,
     calibrationStatus: station.calibration_status,
     currentCalibrationId: station.current_calibration_id,
+    currentProfileRevisionId: station.current_profile_revision_id,
+    protocol: protocol2 ? 2 : 1,
+    semanticOperationId: v2Envelope?.semanticOperationId ?? null,
   };
 }
 
 export function assertStationCaptureReady(station: StationPrincipal, requiredProfileVersion: string): void {
-  if (station.calibrationStatus !== "VALID" || !station.currentCalibrationId) {
+  if (station.calibrationStatus !== "VALID" || !station.currentCalibrationId || !station.currentProfileRevisionId) {
     throw new StationServiceError(
       "calibration_required",
       "Station calibration is required before authoritative capture"
@@ -679,13 +816,16 @@ export async function saveStationCalibration(
       ]
     );
     const id = inserted.rows[0].id;
-    await client.query(
+    const stationUpdated = await client.query(
       `UPDATE partner_stations
           SET current_calibration_id=$2, calibration_status='VALID', scanner_hardware=$3::jsonb,
               scanner_hardware_fingerprint=$4, scanner_profile_version=$5, updated_at=now()
         WHERE id=$1 AND status='ACTIVE'`,
       [station.id, id, JSON.stringify(scannerHardware), scannerHardwareFingerprint, scannerProfileVersion]
     );
+    if (stationUpdated.rowCount !== 1) {
+      throw new StationServiceError("station_not_active", "Station authority changed during profile setup");
+    }
     await client.query(
       `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
        VALUES ($1,$2,$3,$4,'station_calibration_saved',$5::jsonb)`,
@@ -703,7 +843,7 @@ export async function saveStationCalibration(
 
 export async function transitionStationStatus(
   stationCode: string,
-  status: Exclude<StationStatus, "PENDING">,
+  status: StationFleetTransition,
   actorUserId: string | null,
   reason: string
 ): Promise<void> {
@@ -716,8 +856,8 @@ export async function transitionStationStatus(
     );
     const row = current.rows[0];
     if (!row) throw new StationServiceError("station_not_found", "Station not found");
-    if (row.status === "REVOKED" && status !== "REVOKED")
-      throw new StationServiceError("validation", "Revoked station cannot be reactivated");
+    if (["REVOKED", "REJECTED", "CANCELLED", "EXPIRED"].includes(row.status) && row.status !== status)
+      throw new StationServiceError("validation", "Terminal station cannot be reactivated");
     await client.query(
       `UPDATE partner_stations
           SET status=$2, credential_epoch=credential_epoch+1,
@@ -740,7 +880,7 @@ export async function transitionStationStatus(
         row.id,
         actorUserId,
         `station_${status.toLowerCase()}`,
-        JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true }),
+        JSON.stringify({ reason: cleanReason, previousStatus: row.status, credentialEpochRotated: true }),
       ]
     );
   });
@@ -767,7 +907,7 @@ export async function rejectPendingStation(
     }
     await client.query(
       `UPDATE partner_stations
-          SET status='REVOKED', credential_epoch=credential_epoch+1,
+          SET status='REJECTED', credential_epoch=credential_epoch+1,
               revoked_at=now(), revoked_by=$2, updated_at=now()
         WHERE id=$1`,
       [row.id, actorUserId]
@@ -780,7 +920,350 @@ export async function rejectPendingStation(
         row.location_id,
         row.id,
         actorUserId,
-        JSON.stringify({ reason, previousStatus: row.status, credentialEpochRotated: true }),
+        JSON.stringify({ reason: cleanReason, previousStatus: row.status, credentialEpochRotated: true }),
+      ]
+    );
+  });
+}
+
+/** Cancel is the owner-supported remedy for a pending enrolment requested at
+ * the wrong location.  It is terminal and fingerprint-bound on the Scanner,
+ * so the old local credential is retired before another request can exist. */
+export async function cancelPendingStation(
+  stationCode: string,
+  actorUserId: string | null,
+  reason: string
+): Promise<void> {
+  const cleanCode = boundedText(stationCode, "stationCode", 40).toUpperCase();
+  const cleanReason = boundedText(reason, "reason", 1000);
+  await withPartnerAdminTransaction(async (client) => {
+    const current = await client.query<{ id: string; tenant_id: string; location_id: string; status: StationStatus }>(
+      `SELECT id,tenant_id,location_id,status FROM partner_stations WHERE station_code=$1 FOR UPDATE`,
+      [cleanCode]
+    );
+    const row = current.rows[0];
+    if (!row) throw new StationServiceError("station_not_found", "Station not found");
+    if (row.status !== "PENDING" && row.status !== "CANCELLED") {
+      throw new StationServiceError("validation", "Only a pending station can be cancelled");
+    }
+    if (row.status === "CANCELLED") return;
+    await client.query(
+      `UPDATE partner_stations
+          SET status='CANCELLED',credential_epoch=credential_epoch+1,updated_at=now()
+        WHERE id=$1 AND status='PENDING'`,
+      [row.id]
+    );
+    await client.query(
+      `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+       VALUES ($1,$2,$3,$4,'station_cancelled',$5::jsonb)`,
+      [
+        row.tenant_id,
+        row.location_id,
+        row.id,
+        actorUserId,
+        JSON.stringify({ reason: cleanReason, previousStatus: row.status, credentialEpochRotated: true }),
+      ]
+    );
+  });
+}
+
+/** A replacement is always a distinct pending credential.  Activation and
+ * old-station revocation are one transaction; no queue, grant, calibration or
+ * profile authority is inherited by the replacement. */
+export async function activateReplacementStation(input: {
+  stationCode: string;
+  replacesStationCode: string;
+  actorUserId: string | null;
+  reason: string;
+}): Promise<void> {
+  const stationCode = boundedText(input.stationCode, "stationCode", 40).toUpperCase();
+  const replacesStationCode = boundedText(input.replacesStationCode, "replacesStationCode", 40).toUpperCase();
+  const reason = boundedText(input.reason, "reason", 1000);
+  if (stationCode === replacesStationCode) throw new StationServiceError("validation", "A station cannot replace itself");
+  await withPartnerAdminTransaction(async (client) => {
+    const selected = await client.query<{
+      id: string;
+      station_code: string;
+      tenant_id: string;
+      location_id: string;
+      status: StationStatus;
+      replaces_station_id: string | null;
+    }>(
+      `SELECT id,station_code,tenant_id,location_id,status,replaces_station_id
+         FROM partner_stations WHERE station_code=ANY($1::text[]) ORDER BY station_code FOR UPDATE`,
+      [[stationCode, replacesStationCode]]
+    );
+    const replacement = selected.rows.find((row) => row.station_code === stationCode);
+    const prior = selected.rows.find((row) => row.station_code === replacesStationCode);
+    if (!replacement || !prior) throw new StationServiceError("station_not_found", "Replacement station not found");
+    if (replacement.tenant_id !== prior.tenant_id || replacement.location_id !== prior.location_id) {
+      throw new StationServiceError("validation", "Replacement stations must be in the same tenant and location");
+    }
+    if (replacement.status === "ACTIVE" && replacement.replaces_station_id === prior.id && prior.status === "REVOKED") return;
+    if (replacement.status !== "PENDING") {
+      throw new StationServiceError("validation", "The replacement must be a pending new station");
+    }
+    if (!["ACTIVE", "SUSPENDED", "REVOKED"].includes(prior.status)) {
+      throw new StationServiceError("validation", "The replaced station must be an existing approved station");
+    }
+    await client.query(
+      `UPDATE scanner_evidence_staging staging
+          SET state='expired',failure_reason='station_replaced',updated_at=now()
+         FROM scanner_capture_sessions capture
+        WHERE staging.capture_session_id=capture.id AND capture.station_id=$1
+          AND staging.state IN ('granted','finalizing')`,
+      [prior.id]
+    );
+    await client.query(
+      `UPDATE scanner_capture_sessions
+          SET state='cancelled',failure_reason='station_replaced'
+        WHERE station_id=$1 AND state IN ('armed','claimed','capturing')`,
+      [prior.id]
+    );
+    if (prior.status !== "REVOKED") {
+      await client.query(
+        `UPDATE partner_stations
+            SET status='REVOKED',credential_epoch=credential_epoch+1,request_epoch=request_epoch+1,
+                last_request_sequence=0,revoked_at=now(),revoked_by=$2,updated_at=now()
+          WHERE id=$1`,
+        [prior.id, input.actorUserId]
+      );
+    }
+    await client.query(
+      `UPDATE partner_stations
+          SET status='ACTIVE',replaces_station_id=$2,credential_epoch=credential_epoch+1,
+              request_epoch=request_epoch+1,last_request_sequence=0,approved_at=now(),approved_by=$3,updated_at=now()
+        WHERE id=$1 AND status='PENDING'`,
+      [replacement.id, prior.id, input.actorUserId]
+    );
+    await client.query(
+      `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+       VALUES ($1,$2,$3,$4,'station_replaced',$5::jsonb),
+              ($1,$2,$6,$4,'station_replacement_activated',$7::jsonb)`,
+      [
+        prior.tenant_id,
+        prior.location_id,
+        prior.id,
+        input.actorUserId,
+        JSON.stringify({ reason, replacementStationId: replacement.id, replacementStationCode: replacement.station_code }),
+        replacement.id,
+        JSON.stringify({ reason, replacesStationId: prior.id, replacesStationCode: prior.station_code }),
+      ]
+    );
+  });
+}
+
+/** Move an existing station only inside its tenant and only from a freshly
+ * observed, suspended, custody-clean state.  Historical captures, evidence,
+ * jobs, events and profiles remain at their original location; the moved
+ * station must establish a new immutable profile before scanning. */
+export async function transferStationLocation(input: {
+  stationCode: string;
+  targetLocationId: string;
+  actorUserId: string | null;
+  reason: string;
+}): Promise<void> {
+  const stationCode = boundedText(input.stationCode, "stationCode", 40).toUpperCase();
+  const targetLocationId = boundedText(input.targetLocationId, "targetLocationId", 64).toLowerCase();
+  const reason = boundedText(input.reason, "reason", 1000);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(targetLocationId)) {
+    throw new StationServiceError("validation", "targetLocationId is invalid");
+  }
+  await withPartnerAdminTransaction(async (client) => {
+    const stationResult = await client.query<{
+      id: string;
+      tenant_id: string;
+      location_id: string;
+      status: StationStatus;
+      pending_upload_count: number;
+      capture_state: string;
+      recently_seen: boolean;
+    }>(
+      `SELECT id,tenant_id,location_id,status,pending_upload_count,capture_state,
+              (last_seen_at >= now() - interval '5 minutes') AS recently_seen
+         FROM partner_stations WHERE station_code=$1 FOR UPDATE`,
+      [stationCode]
+    );
+    const station = stationResult.rows[0];
+    if (!station) throw new StationServiceError("station_not_found", "Station not found");
+    if (station.location_id === targetLocationId && station.status === "ACTIVE") return;
+    if (station.status !== "SUSPENDED") {
+      throw new StationServiceError("validation", "Suspend the station before approving a location transfer");
+    }
+    const location = await client.query<{ id: string }>(
+      `SELECT id FROM partner_locations WHERE id=$1 AND tenant_id=$2 AND status='ACTIVE' FOR UPDATE`,
+      [targetLocationId, station.tenant_id]
+    );
+    if (location.rows.length !== 1) {
+      throw new StationServiceError("validation", "Target location must be active and in the same tenant");
+    }
+    if (!station.recently_seen || station.pending_upload_count !== 0 || station.capture_state !== "IDLE") {
+      throw new StationServiceError("validation", "Station must be recently observed idle with no pending uploads");
+    }
+    const unresolved = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM scanner_capture_sessions capture
+          LEFT JOIN scanner_evidence_staging staging ON staging.capture_session_id=capture.id
+         WHERE capture.station_id=$1
+           AND (capture.state IN ('armed','claimed','capturing') OR staging.state IN ('granted','finalizing'))
+       ) AS exists`,
+      [station.id]
+    );
+    if (unresolved.rows[0]?.exists) {
+      throw new StationServiceError("validation", "Station has unresolved capture or evidence state");
+    }
+    await client.query(
+      `UPDATE partner_stations
+          SET location_id=$2,status='ACTIVE',credential_epoch=credential_epoch+1,
+              request_epoch=request_epoch+1,last_request_nonce=0,last_request_sequence=0,
+              current_calibration_id=NULL,current_profile_revision_id=NULL,
+              calibration_status='UNPROVISIONED',scanner_profile_version=NULL,
+              approved_at=now(),approved_by=$3,updated_at=now()
+        WHERE id=$1 AND status='SUSPENDED'`,
+      [station.id, targetLocationId, input.actorUserId]
+    );
+    await client.query(
+      `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+       VALUES ($1,$2,$3,$4,'station_location_transferred_from',$5::jsonb),
+              ($1,$6,$3,$4,'station_location_transferred_to',$7::jsonb)`,
+      [
+        station.tenant_id,
+        station.location_id,
+        station.id,
+        input.actorUserId,
+        JSON.stringify({ reason, targetLocationId }),
+        targetLocationId,
+        JSON.stringify({ reason, previousLocationId: station.location_id, profileReset: true }),
+      ]
+    );
+  });
+}
+
+function exactKeys(value: unknown, keys: string[]): value is Record<string, unknown> {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      JSON.stringify(Object.keys(value as Record<string, unknown>).sort()) === JSON.stringify([...keys].sort())
+  );
+}
+
+function scannerVersionTuple(value: unknown): number[] | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(value || ""));
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function scannerVersionDirection(left: string, right: string): number {
+  const a = scannerVersionTuple(left);
+  const b = scannerVersionTuple(right);
+  if (!a || !b) throw new StationServiceError("validation", "Scanner update policy version is invalid");
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1;
+  }
+  return 0;
+}
+
+function validateScannerUpdatePolicy(value: unknown, currentVersion: string): Record<string, unknown> {
+  const keys = [
+    "schemaVersion", "authority", "policyId", "operation", "targetVersion", "minimumSupportedVersion",
+    "teamIdentifier", "sourceCommit", "issuedAt", "expiresAt", "reason", "artifacts",
+  ];
+  if (!exactKeys(value, keys)) throw new StationServiceError("validation", "Scanner update policy fields are not exact");
+  const policy = value as Record<string, any>;
+  if (policy.schemaVersion !== 1 || policy.authority !== "MINTVAULT_STATION_POLICY"
+      || !/^[A-Za-z0-9][A-Za-z0-9._:@-]{7,127}$/.test(String(policy.policyId || ""))
+      || !new Set(["UPDATE", "ROLLBACK"]).has(policy.operation)
+      || !scannerVersionTuple(policy.targetVersion) || !scannerVersionTuple(policy.minimumSupportedVersion)
+      || !/^[A-Z0-9]{10}$/.test(String(policy.teamIdentifier || ""))
+      || !/^[a-f0-9]{40}$/.test(String(policy.sourceCommit || ""))
+      || typeof policy.reason !== "string" || policy.reason.trim().length < 3 || policy.reason.length > 240) {
+    throw new StationServiceError("validation", "Scanner update policy authority is invalid");
+  }
+  const direction = scannerVersionDirection(policy.targetVersion, currentVersion);
+  if ((policy.operation === "UPDATE" && direction <= 0) || (policy.operation === "ROLLBACK" && direction >= 0)
+      || scannerVersionDirection(policy.targetVersion, policy.minimumSupportedVersion) < 0) {
+    throw new StationServiceError("validation", "Scanner update policy direction is invalid");
+  }
+  const issuedAt = Date.parse(policy.issuedAt);
+  const expiresAt = Date.parse(policy.expiresAt);
+  const now = Date.now();
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || expiresAt <= issuedAt
+      || expiresAt - issuedAt > 24 * 60 * 60 * 1000 || now < issuedAt - 5 * 60 * 1000 || now >= expiresAt) {
+    throw new StationServiceError("validation", "Scanner update policy lifetime is invalid or expired");
+  }
+  if (!exactKeys(policy.artifacts, ["zip", "dmg", "latest"])) {
+    throw new StationServiceError("validation", "Scanner update policy artifacts are not exact");
+  }
+  const prefix = `MintVault-Scanner-${policy.targetVersion}-arm64`;
+  for (const [kind, filename, maximum, needsSha512] of [
+    ["zip", `${prefix}.zip`, 1024 ** 3, true],
+    ["dmg", `${prefix}.dmg`, 1024 ** 3, false],
+    ["latest", "latest-mac.yml", 1024 ** 2, false],
+  ] as const) {
+    const artifact = policy.artifacts[kind];
+    const artifactKeys = needsSha512 ? ["filename", "size", "sha256", "sha512"] : ["filename", "size", "sha256"];
+    if (!exactKeys(artifact, artifactKeys) || artifact.filename !== filename
+        || typeof artifact.size !== "number" || !Number.isSafeInteger(artifact.size)
+        || artifact.size <= 0 || artifact.size > maximum
+        || !/^[a-f0-9]{64}$/.test(String(artifact.sha256 || ""))
+        || (needsSha512 && !/^[A-Za-z0-9+/]{86}==$/.test(String(artifact.sha512 || "")))) {
+      throw new StationServiceError("validation", `Scanner ${kind} policy artifact is invalid`);
+    }
+  }
+  return JSON.parse(JSON.stringify({ ...policy, reason: policy.reason.trim() }));
+}
+
+/** Super Admin issuance is the authenticated MintVault authority. Static feed
+ * metadata remains evidence only and cannot select UPDATE versus ROLLBACK. */
+export async function setStationUpdatePolicy(input: {
+  stationCode: string;
+  policy: unknown;
+  actorUserId: string | null;
+  reason: string;
+}): Promise<void> {
+  const stationCode = boundedText(input.stationCode, "stationCode", 40).toUpperCase();
+  const reason = boundedText(input.reason, "reason", 240);
+  await withPartnerAdminTransaction(async (client) => {
+    const selected = await client.query<{
+      id: string;
+      tenant_id: string;
+      location_id: string;
+      app_version: string | null;
+    }>(
+      `SELECT id,tenant_id,location_id,app_version FROM partner_stations
+        WHERE station_code=$1 FOR UPDATE`,
+      [stationCode]
+    );
+    const station = selected.rows[0];
+    if (!station) throw new StationServiceError("station_not_found", "Station not found");
+    if (!station.app_version || !scannerVersionTuple(station.app_version)) {
+      throw new StationServiceError("validation", "Station has not attested a valid current Scanner version");
+    }
+    const policy = validateScannerUpdatePolicy(input.policy, station.app_version);
+    await client.query(
+      `UPDATE partner_stations
+          SET scanner_update_policy=$2::jsonb,minimum_supported_version=$3,updated_at=now()
+        WHERE id=$1`,
+      [station.id, JSON.stringify(policy), policy.minimumSupportedVersion]
+    );
+    await client.query(
+      `INSERT INTO partner_station_events
+         (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+       VALUES ($1,$2,$3,$4,'station_update_policy_issued',$5::jsonb)`,
+      [
+        station.tenant_id,
+        station.location_id,
+        station.id,
+        input.actorUserId,
+        JSON.stringify({
+          reason,
+          policyId: policy.policyId,
+          operation: policy.operation,
+          targetVersion: policy.targetVersion,
+          minimumSupportedVersion: policy.minimumSupportedVersion,
+          sourceCommit: policy.sourceCommit,
+          expiresAt: policy.expiresAt,
+        }),
       ]
     );
   });
@@ -796,7 +1279,7 @@ export async function listFleetStations(input: {
   const page = Math.max(1, Math.min(10_000, Number.isInteger(input.page) ? Number(input.page) : 1));
   const pageSize = Math.max(1, Math.min(100, Number.isInteger(input.pageSize) ? Number(input.pageSize) : 25));
   const status =
-    typeof input.status === "string" && ["PENDING", "ACTIVE", "SUSPENDED", "REVOKED"].includes(input.status)
+    typeof input.status === "string" && ["PENDING", "ACTIVE", "SUSPENDED", "REVOKED", "REJECTED", "CANCELLED", "EXPIRED"].includes(input.status)
       ? input.status
       : null;
   const query = typeof input.query === "string" && input.query.trim() ? input.query.trim().slice(0, 100) : null;

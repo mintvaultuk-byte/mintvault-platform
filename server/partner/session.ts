@@ -33,6 +33,8 @@ export interface PartnerPrincipal {
   /** Phase 2: true if the user's role(s) grant organisation-wide visibility rather than
    *  being scoped to their assigned location(s) — see ORG_WIDE_ROLES. */
   orgWide: boolean;
+  sessionKind: "WEB" | "SCANNER";
+  stationId: string | null;
 }
 
 declare global {
@@ -62,10 +64,15 @@ interface SessionRow {
   user_cred_version: number;
   org_status: string;
   location_status: string | null;
+  session_kind: "WEB" | "SCANNER";
+  station_id: string | null;
 }
 
 /** Resolve + validate the current partner session. Returns the principal or null (never throws for a bad cookie). */
-export async function resolvePartnerSession(token: string): Promise<PartnerPrincipal | null> {
+export async function resolvePartnerSession(
+  token: string,
+  options: { touchActivity?: boolean } = {}
+): Promise<PartnerPrincipal | null> {
   if (!token) return null;
   const { rows } = await partnerRuntimeQuery<SessionRow>("SELECT * FROM partner_session_lookup($1)", [sha256(token)]);
   if (rows.length !== 1) return null;
@@ -136,7 +143,9 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
       }
     }
 
-    await c.query("UPDATE partner_sessions SET last_seen_at=now() WHERE id=$1", [s.session_id]);
+    if (options.touchActivity !== false) {
+      await c.query("UPDATE partner_sessions SET last_seen_at=now() WHERE id=$1", [s.session_id]);
+    }
     const permissions = await getUserPermissions(c, s.user_id);
     return {
       sessionId: s.session_id,
@@ -148,6 +157,10 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
       viewOnly: em.viewOnly,
       sensitiveDisabled: em.sensitiveDisabled,
       orgWide,
+      // Expand-first deployment compatibility: the pre-0091 lookup has no
+      // Scanner columns and can represent only an ordinary browser session.
+      sessionKind: s.session_kind === "SCANNER" ? "SCANNER" : "WEB",
+      stationId: s.station_id ?? null,
     } satisfies PartnerPrincipal;
   });
 }
@@ -156,7 +169,16 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
 export async function partnerSessionMiddleware(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const token = readCookie(req, PARTNER_COOKIE);
-    if (token) req.partner = (await resolvePartnerSession(token)) ?? undefined;
+    const pathname = String(req.originalUrl || "").split("?", 1)[0];
+    const scannerBackgroundRead =
+      req.method === "GET" &&
+      req.header("x-mintvault-scanner-background") === "v1" &&
+      (pathname === "/api/partner/session" ||
+        /^\/api\/partner\/stations\/MV-STN-[A-Z2-7]{10,24}\/enrolment-status$/.test(pathname));
+    if (token) {
+      req.partner =
+        (await resolvePartnerSession(token, { touchActivity: !scannerBackgroundRead })) ?? undefined;
+    }
   } catch {
     /* fail closed: no principal */
   }
@@ -219,11 +241,11 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
-export function setPartnerCookie(res: Response, token: string): void {
+export function setPartnerCookie(res: Response, token: string, maxAgeSeconds = 12 * 3600): void {
   const secure = process.env.NODE_ENV === "production";
   res.setHeader(
     "Set-Cookie",
-    `${PARTNER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}${secure ? "; Secure" : ""}`
+    `${PARTNER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure ? "; Secure" : ""}`
   );
 }
 

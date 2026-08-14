@@ -3,7 +3,7 @@
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const BRIDGE_VERSION = 2;
+const BRIDGE_VERSION = 3;
 
 function rendererUrl(appDirectory) {
   return pathToFileURL(path.join(appDirectory, "renderer", "index.html")).href;
