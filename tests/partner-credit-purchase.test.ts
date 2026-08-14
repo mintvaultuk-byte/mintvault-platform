@@ -145,10 +145,21 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     expect(entry.rows[0]).toMatchObject({ entry_type: "purchase", source: "stripe", amount: "10" });
   });
 
-  it("REPLAY: the same event delivered five times grants once", async () => {
+  it("REPLAY: the same event delivered five times grants once, and SAYS so", async () => {
     const tenantId = await makeTenant("replay");
     for (let i = 0; i < 5; i++) {
-      await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_50"), "evt_replay_1");
+      const outcome = await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_50"), "evt_replay_1");
+      /*
+       * THE RETURN VALUE IS PART OF THE CONTRACT, not decoration — added after AT-21 found this.
+       *
+       * The ledger assertions below were always correct and always passed, which is exactly why the
+       * defect hid here: `alreadyApplied` was discarded and EVERY delivery reported `granted: true`.
+       * The webhook handler logs that value, so an ordinary Stripe redelivery storm wrote repeated
+       * "granted" lines for one purchase — poisoning the single signal an operator would use to spot
+       * a real double-grant.
+       */
+      expect(outcome.granted).toBe(i === 0);
+      if (i > 0) expect(outcome.reason).toBe("already_granted");
     }
     expect(await availableFor(tenantId)).toBe(50); // not 250
     const n = await admin.query<{ n: string }>(
@@ -168,6 +179,9 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
       )
     );
     expect(results.some((r) => r.status === "fulfilled")).toBe(true);
+    // EXACTLY ONE delivery may claim the grant, however many raced. See the replay test above.
+    const claimed = results.filter((r) => r.status === "fulfilled" && (r.value as { granted: boolean }).granted);
+    expect(claimed).toHaveLength(1);
     expect(await availableFor(tenantId)).toBe(100); // exactly one grant, never 600
     const n = await admin.query<{ n: string }>(
       `SELECT count(*)::text n FROM partner_credit_ledger WHERE tenant_id=$1`,

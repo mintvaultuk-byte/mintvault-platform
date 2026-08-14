@@ -1286,9 +1286,9 @@
 
 /* ── Canonical grading workstation — THREE-stage content gating ─────────────
    The stage bar (Card Details / Grade / Review) controls WHICH grading content
-   is visible. Applied only inside `.grading-stage-gate[data-ws-stage=N]` (role
-   routes; /admin gates via CertificateForm's own wfStage). hidden-not-unmounted
-   (display:none) so section state / MVGS scoring is preserved.
+   is visible. Applied only inside the shared role-workstation
+   `.grading-stage-gate[data-ws-stage=N]`. hidden-not-unmounted (display:none)
+   so section state / MVGS scoring is preserved.
 
    Consolidated 2026-07-26: the former stage 1 (Rarity) was folded into stage 0.
    `[data-canonical-section="rarity"]` is now VISIBLE on Card Details rather than
@@ -1323,6 +1323,7 @@
    identity, variant, and the submit button ONLY (submit lives on Review). */
 .grading-stage-gate[data-ws-stage="1"]
   :where(
+    [data-canonical-section="scanner-controls"],
     [data-canonical-section="identification"],
     [data-canonical-section="identity-fields"],
     [data-canonical-section="rarity"],
@@ -1337,6 +1338,7 @@
    detailed sub-grade control siblings and the card-setup sections. */
 .grading-stage-gate[data-ws-stage="2"]
   :where(
+    [data-canonical-section="scanner-controls"],
     [data-canonical-section="identification"],
     [data-canonical-section="identity-fields"],
     [data-canonical-section="rarity"],

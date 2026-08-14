@@ -19,8 +19,9 @@ import { createCardInspectionState } from "@/components/grading-workflow/card-in
  *
  * It owns NO layout: all workstation geometry (full width, two-panel columns,
  * internal scroll, sticky actions, responsive breakpoints) comes from the single
- * CanonicalGradingWorkstationShell — the exact same shell /admin CertificateForm
- * renders. Role differences are capabilities + data source only.
+ * CanonicalGradingWorkstationShell — the exact same shell the /admin dashboard
+ * and every focused role route render. Role differences are capabilities + data
+ * source only.
  *
  * HEIGHT CONTRACT: the shell fills its parent (h-full). This adapter's own root
  * is `flex min-h-0 flex-1 flex-col`, so it fills whatever bounded flex slot the
@@ -30,9 +31,10 @@ import { createCardInspectionState } from "@/components/grading-workflow/card-in
  * the shell shorter than its container and left a black band at the bottom. The
  * `--admin-*` tokens are global (:root), so colours work without admin-root.
  *
- * `identityEditor` (Admin Review): rendered INSIDE the workstation — pinned at
- * the top of the scroll body (right column), beside the card preview — never as
- * a detached full-width section above the shell.
+ * `identityEditor` (Admin Review) and `scannerControls` (station-capable roles)
+ * render INSIDE the workstation scroll body. They are capability slots, not
+ * alternate stage or viewer implementations, so every role still shares one
+ * inspection rail, three-stage controller, preview and review barrier.
  */
 export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader" | "partner";
 
@@ -73,6 +75,10 @@ type Props = Omit<
    *  the right column, beside the preview). When present, the preview aside is
    *  forced on so the card sits left / editor right. */
   identityEditor?: ReactNode;
+  /** Scanner/station controls belong to Card Details inside this canonical
+   *  workstation. Routes may provide the existing, capability-authorised
+   *  control, but may not mount an independent scanner/viewer surface. */
+  scannerControls?: ReactNode;
   /** Create mode has no certificate row to grade yet. */
   gradingEnabled?: boolean;
   previewCertificateId?: number | null;
@@ -83,6 +89,7 @@ export function GradingWorkstation({
   queue,
   batch,
   identityEditor,
+  scannerControls,
   gradingEnabled = true,
   previewCertificateId,
   ...panelProps
@@ -360,6 +367,15 @@ export function GradingWorkstation({
           data-testid="grading-workstation-slot"
           data-ws-stage={stage}
         >
+          {/* Scanner/station entry controls share the canonical right-column
+              scroll body and stage owner. CSS makes this Card Details-only;
+              the control itself owns capture-session transport, not another
+              card viewer, inspection state or workflow stage. */}
+          {scannerControls && (
+            <div data-canonical-section="scanner-controls" data-testid="workstation-scanner-controls">
+              {scannerControls}
+            </div>
+          )}
           {/* Admin Review identity editor — inside the workstation body (right
               column), above the grading panel; never a detached section. */}
           {identityEditor && <div data-testid="workstation-identity-editor">{identityEditor}</div>}

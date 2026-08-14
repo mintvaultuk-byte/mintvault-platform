@@ -22,12 +22,12 @@ flowchart LR
 
 ## Evidenced facts
 
-| Fact | Evidence |
-|---|---|
-| Live Partner endpoints fail safely | 503 responses recorded in `deployment-state.md` |
-| Scanner cannot start a card | `scripts/scanner-app/renderer/app.js:537-559` requires an already armed target |
-| Credit reservation occurs after legacy submission | `server/partner/submission-service.ts:894-927` |
-| Current queue is not evidence-derived | `server/partner/grading-routes.ts:417-499` |
+| Fact                                              | Evidence                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Live Partner endpoints fail safely                | 503 responses recorded in `deployment-state.md`                                |
+| Scanner cannot start a card                       | `scripts/scanner-app/renderer/app.js:537-559` requires an already armed target |
+| Credit reservation occurs after legacy submission | `server/partner/submission-service.ts:894-927`                                 |
+| Current queue is not evidence-derived             | `server/partner/grading-routes.ts:417-499`                                     |
 
 ## Constraints
 

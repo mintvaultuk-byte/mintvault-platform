@@ -29,6 +29,7 @@
 import type { PoolClient } from "pg";
 import { withPartnerAdminTenantTransaction } from "./db";
 import { writePartnerAudit } from "./audit";
+import { beginCardJobGrading, releaseCardJobGrading } from "./card-job-grading-bridge";
 import type { PartnerPrincipal } from "./session";
 
 export class GradingLeaseError extends Error {
@@ -219,13 +220,32 @@ export async function acquireLease(
             RETURNING card_job_id, holder_user_id, holder_display, acquired_at, expires_at, revision`,
           [principal.tenantId, cardJobId, String(LEASE_TTL_SECONDS)]
         );
+        // Idempotent: a refresh on a card already in GRADING re-stamps the grader and changes no
+        // lifecycle state. See beginCardJobGrading.
+        await beginCardJobGrading(client, principal, cardJobId);
         return { lease: leaseView(renewed.rows[0], principal.userId), reacquired: false };
       }
 
+      /*
+       * THE REVISION CARRIES OVER FROM ANY PRIOR LEASE ON THIS CARD.
+       *
+       * A new editing session must never reuse a generation number a previous one already had.
+       * Restarting at 1 would make a grader whose lease EXPIRED — laptop closed mid-card, tab
+       * suspended — able to submit their ten-minute-old form the moment somebody else's session
+       * happened to land on the same number. This is the same reasoning takeover already applied;
+       * expiry is simply the other way a session ends, and it was the one left open.
+       */
+      const prior = await client.query<{ n: string; max_revision: number | null }>(
+        `SELECT count(*)::text AS n, max(revision) AS max_revision
+           FROM partner_grading_leases
+          WHERE tenant_id=$1 AND card_job_id=$2 AND released_at IS NOT NULL`,
+        [principal.tenantId, cardJobId]
+      );
+
       const inserted = await client.query<typeof held>(
         `INSERT INTO partner_grading_leases
-           (tenant_id, card_job_id, holder_user_id, holder_display, location_id, expires_at)
-         VALUES ($1,$2,$3,$4,$5, now() + ($6 || ' seconds')::interval)
+           (tenant_id, card_job_id, holder_user_id, holder_display, location_id, expires_at, revision)
+         VALUES ($1,$2,$3,$4,$5, now() + ($6 || ' seconds')::interval, $7)
          RETURNING card_job_id, holder_user_id, holder_display, acquired_at, expires_at, revision`,
         [
           principal.tenantId,
@@ -234,14 +254,21 @@ export async function acquireLease(
           holderDisplay ?? null,
           job.location_id,
           String(LEASE_TTL_SECONDS),
+          (prior.rows[0]?.max_revision ?? 0) + 1,
         ]
       );
 
-      const prior = await client.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM partner_grading_leases
-          WHERE tenant_id=$1 AND card_job_id=$2 AND released_at IS NOT NULL`,
-        [principal.tenantId, cardJobId]
-      );
+      /*
+       * TAKING THE LEASE IS STARTING TO GRADE.
+       *
+       * READY_TO_GRADE → GRADING happens HERE, in the same transaction as the lease, because the two
+       * facts must never disagree: a card recorded as GRADING with no live lease is a card nobody may
+       * write to, and a lease on a card still recorded READY_TO_GRADE is invisible to every lifecycle
+       * consumer (the queue, the dashboard buckets, the write guard). Before this, nothing in the
+       * repository performed the transition at all, so a Scanner Card Job sat in NEEDS_SCAN or
+       * READY_TO_GRADE for ever.
+       */
+      await beginCardJobGrading(client, principal, cardJobId);
 
       return { lease: leaseView(inserted.rows[0], principal.userId), reacquired: Number(prior.rows[0].n) > 0 };
     }
@@ -290,11 +317,22 @@ export async function releaseLease(principal: PartnerPrincipal, cardJobId: strin
   await withPartnerAdminTenantTransaction(
     { tenantId: principal.tenantId, locationId: principal.locationId ?? null },
     async (client) => {
-      await client.query(
+      const released = await client.query(
         `UPDATE partner_grading_leases SET released_at = now()
           WHERE tenant_id=$1 AND card_job_id=$2 AND holder_user_id=$3 AND released_at IS NULL`,
         [principal.tenantId, cardJobId, principal.userId]
       );
+      /*
+       * Only a caller who genuinely HELD the lease hands the card back.
+       *
+       * Without the rowCount check, anybody with the assess permission could put a colleague's
+       * in-progress card back on the shop floor by calling release on it — the UPDATE above would
+       * match nothing (correctly) while the lifecycle transition below still fired. Displacing
+       * another grader is a TAKEOVER: explicit, org-wide, reasoned and audited.
+       */
+      if (released.rowCount === 1) {
+        await releaseCardJobGrading(client, principal, cardJobId);
+      }
     }
   );
 }
@@ -380,6 +418,11 @@ export async function takeoverLease(
         reason: cleanReason,
       });
 
+      // The card stays open for grading; only the holder changed. This re-stamps the certificate's
+      // grader so QA and the return-to-grader path name the person who actually finishes the card,
+      // not the one who was displaced.
+      await beginCardJobGrading(client, principal, cardJobId);
+
       return leaseView(inserted.rows[0], principal.userId);
     }
   );
@@ -389,8 +432,28 @@ export async function takeoverLease(
  * The gate every grading WRITE must pass.
  *
  * Checks both guards in the order that produces the most useful answer: hold the lease, and be
- * looking at the current revision. A caller who passes gets the NEW revision back, which their next
- * write must present — so a form submitted twice cannot land twice.
+ * looking at the current revision.
+ *
+ * THE REVISION IS AN EDITING-SESSION GENERATION, NOT A PER-WRITE COUNTER.
+ *
+ * It was originally bumped on every accepted write, on the reasoning that "a form submitted twice
+ * cannot land twice". Putting the lease on the write path proved that wrong in the most basic way:
+ * the grading workstation AUTOSAVES. A grader who legitimately holds the card writes repeatedly from
+ * one open form, so a per-write bump makes the SECOND autosave — and every one after it — fail
+ * STALE_REVISION for a grader who has done nothing wrong and still holds the card. That is not a
+ * safety property, it is an unusable workstation, and it is why this could not be wired honestly
+ * before.
+ *
+ * 0087's own header states the actual requirement: "a grader who held the lease, LOST IT TO AN
+ * AUTHORISED TAKEOVER, and then submitted a form loaded ten minutes ago must be refused". That is a
+ * change of EDITING SESSION, not a change of keystroke. So the revision advances exactly where the
+ * session changes hands — on takeover, and on a reacquire after expiry — and is stable for as long
+ * as one grader holds one card.
+ *
+ * Nothing is lost on the consequential edge: submit cannot land twice because the Card Job's own
+ * GRADING → SUBMITTED transition is taken FOR UPDATE and the Grading Credit consume carries a
+ * deterministic idempotency key. Replay protection lives where the irreversible act is, rather than
+ * being approximated by a counter on every keystroke.
  *
  * Returns inside the caller's transaction deliberately: a write that is authorised and then
  * separately performed leaves a window in which the lease could be taken between the two.
@@ -425,13 +488,9 @@ export async function assertMayWrite(
     );
   }
 
-  const bumped = await client.query<{ revision: number }>(
-    `UPDATE partner_grading_leases SET revision = revision + 1
-      WHERE tenant_id = $1 AND card_job_id = $2 AND released_at IS NULL
-      RETURNING revision`,
-    [principal.tenantId, cardJobId]
-  );
-  return bumped.rows[0].revision;
+  // Deliberately NOT bumped — see the note above. The caller's next write presents this same
+  // revision, and only a takeover or a reacquire after expiry moves it on.
+  return lease.revision;
 }
 
 /**

@@ -388,10 +388,122 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
   return plan;
 }
 
+/**
+ * LINEAGE EXCLUSION DECLARATIONS (owner-authorised mechanism, 2026-08-14).
+ *
+ * The migration identity guard fails closed when a pending file's number is already
+ * occupied in the journal by a DIFFERENT filename. That is correct — but on a host whose
+ * journal carries another lineage's identity at that number (staging holds its own
+ * 0044/0046/0047 while this release ships production's), the colliding release files can
+ * NEVER legitimately apply there, and the guard's own remedy says to "exclude the
+ * colliding file from this environment". This is that exclusion, made explicit and
+ * fail-closed rather than manual and per-invocation:
+ *
+ *  - A declaration names the EXACT (incoming, occupant) pair. It matches only on a host
+ *    whose journal holds precisely that occupant at the incoming file's number. A new,
+ *    undeclared collision still aborts the whole run, exactly as before.
+ *  - Every declaration must name a `supersededBy` migration that exists in this release —
+ *    the forward-only convergence file that delivers (or verifies) the excluded content
+ *    at a globally free number. A declaration whose superseder is absent is VOID and the
+ *    conflict aborts.
+ *  - An excluded file is never applied and never journalled on that host; it is reported
+ *    loudly instead. Applied history stays immutable everywhere.
+ */
+export interface LineageExclusion {
+  /** Release filename that must not apply where `occupant` holds its number. */
+  incoming: string;
+  /** The journalled filename that immutably occupies the number on that host. */
+  occupant: string;
+  /** Convergence migration (present in this release) that carries/verifies the content. */
+  supersededBy: string;
+  /** Human explanation, printed whenever the exclusion is exercised. */
+  reason: string;
+}
+
+export function loadLineageExclusions(dir: string = MIGRATIONS_DIR): LineageExclusion[] {
+  const path = join(dir, "lineage-exclusions.json");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return []; // no declarations file — every identity conflict aborts, as before
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`migrations/lineage-exclusions.json is not valid JSON: ${(e as Error).message}`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("migrations/lineage-exclusions.json must be a JSON array of declarations.");
+  }
+  const out: LineageExclusion[] = [];
+  for (const [i, entry] of parsed.entries()) {
+    const e = entry as Record<string, unknown>;
+    for (const key of ["incoming", "occupant", "supersededBy", "reason"] as const) {
+      if (typeof e[key] !== "string" || (e[key] as string).trim() === "") {
+        throw new Error(`lineage-exclusions.json entry ${i}: '${key}' must be a non-empty string.`);
+      }
+    }
+    const incoming = e.incoming as string;
+    const occupant = e.occupant as string;
+    if (incoming === occupant) {
+      throw new Error(`lineage-exclusions.json entry ${i}: incoming and occupant must differ (${incoming}).`);
+    }
+    if (!FILE_RE.test(incoming) || !FILE_RE.test(occupant)) {
+      throw new Error(`lineage-exclusions.json entry ${i}: filenames must match NNNN_name.sql.`);
+    }
+    if (incoming.match(FILE_RE)![1] !== occupant.match(FILE_RE)![1]) {
+      throw new Error(
+        `lineage-exclusions.json entry ${i}: incoming and occupant must share one number ` +
+          `(${incoming} vs ${occupant}) — an exclusion only resolves a same-number collision.`
+      );
+    }
+    out.push({ incoming, occupant, supersededBy: e.supersededBy as string, reason: e.reason as string });
+  }
+  return out;
+}
+
+export interface IdentityConflictPartition {
+  /** Conflicts with no valid declaration — these abort the run. */
+  undeclared: { number: string; incoming: string; applied: string }[];
+  /** Declared conflicts — these files are excluded from application on this host. */
+  excluded: { number: string; incoming: string; applied: string; declaration: LineageExclusion }[];
+}
+
+export function partitionIdentityConflicts(
+  pending: string[],
+  journalFilenames: string[],
+  files: MigrationFile[],
+  exclusions: LineageExclusion[]
+): IdentityConflictPartition {
+  const journalByNumber = new Map<number, string>();
+  for (const journalledName of journalFilenames) {
+    const m = journalledName.match(FILE_RE);
+    if (m) journalByNumber.set(Number(m[1]), journalledName);
+  }
+  const partition: IdentityConflictPartition = { undeclared: [], excluded: [] };
+  for (const filename of pending) {
+    const m = filename.match(FILE_RE);
+    if (!m) continue;
+    const occupant = journalByNumber.get(Number(m[1]));
+    if (!occupant || occupant === filename) continue;
+    const conflict = { number: m[1], incoming: filename, applied: occupant };
+    const declaration = exclusions.find((d) => d.incoming === filename && d.occupant === occupant);
+    // A declaration is only valid when its convergence migration ships in THIS release.
+    if (declaration && files.some((f) => f.filename === declaration.supersededBy)) {
+      partition.excluded.push({ ...conflict, declaration });
+    } else {
+      partition.undeclared.push(conflict);
+    }
+  }
+  return partition;
+}
+
 export async function applyMigrations(
   client: PgClientLike,
   files: MigrationFile[],
-  opts: { allowDestructive?: boolean } = {}
+  opts: { allowDestructive?: boolean; exclusions?: LineageExclusion[] } = {}
 ): Promise<{ applied: string[] }> {
   // Serialise concurrent runners: a second runner fails fast instead of double-applying.
   // Capture the backend identity FIRST, so lock ownership can be proven against a specific
@@ -482,29 +594,30 @@ export async function applyMigrations(
      * fix is to converge with a NEW migration at the next globally free number,
      * never to replay a colliding historical one.
      */
-    const journalByNumber = new Map<number, string>();
-    for (const journalledName of plan.journalFilenames) {
-      const m = journalledName.match(FILE_RE);
-      if (m) journalByNumber.set(Number(m[1]), journalledName);
-    }
-    const identityConflicts = plan.pending
-      .map((filename) => {
-        const m = filename.match(FILE_RE);
-        if (!m) return null;
-        const occupant = journalByNumber.get(Number(m[1]));
-        return occupant && occupant !== filename ? { number: m[1], incoming: filename, applied: occupant } : null;
-      })
-      .filter((x): x is { number: string; incoming: string; applied: string } => x !== null);
-    if (identityConflicts.length > 0) {
+    const conflicts = partitionIdentityConflicts(plan.pending, plan.journalFilenames, files, opts.exclusions ?? []);
+    if (conflicts.undeclared.length > 0) {
       throw new Error(
         "Migration identity conflict — this database already applied a DIFFERENT migration at the same number:\n" +
-          identityConflicts
+          conflicts.undeclared
             .map((c) => `  ${c.number}: applied '${c.applied}' vs release '${c.incoming}'`)
             .join("\n") +
           "\nApplying would leave two different migrations sharing one numeric slot. Applied history is immutable: " +
           "do NOT renumber or delete the applied row. Converge with a NEW forward migration at the next globally " +
-          "free number instead, and exclude the colliding file from this environment."
+          "free number instead, and exclude the colliding file from this environment via a declaration in " +
+          "migrations/lineage-exclusions.json naming this exact (incoming, occupant) pair and the convergence " +
+          "migration that supersedes it."
       );
+    }
+    if (conflicts.excluded.length > 0) {
+      const excludedNames = new Set(conflicts.excluded.map((c) => c.incoming));
+      for (const c of conflicts.excluded) {
+        console.log(
+          `[migrate] EXCLUDED on this database: ${c.incoming} — number ${c.number} is immutable history ` +
+            `('${c.applied}'). Superseded by ${c.declaration.supersededBy}. ${c.declaration.reason}`
+        );
+      }
+      plan.pending = plan.pending.filter((n) => !excludedNames.has(n));
+      plan.destructive = plan.destructive.filter((d) => !excludedNames.has(d.filename));
     }
     if (!opts.allowDestructive) {
       const blocking = plan.destructive.filter((d) => hasBlocking(d.findings));
@@ -694,7 +807,8 @@ export async function applyScopedMigration(
 
   // (5)/(2) Destructive-SQL lint, same gate and same opt-in as the normal path.
   const findings = lintSql(target.sql);
-  for (const f of findings) log(`${f.severity === "block" ? "🚫" : "⚠️ "} ${target.filename}:${f.line} [${f.kind}] ${f.match}`);
+  for (const f of findings)
+    log(`${f.severity === "block" ? "🚫" : "⚠️ "} ${target.filename}:${f.line} [${f.kind}] ${f.match}`);
   if (!opts.allowDestructive && hasBlocking(findings)) {
     throw new Error(
       `Destructive SQL detected in '${target.filename}'. Re-run with --allow-destructive only with owner approval.`
@@ -866,11 +980,23 @@ async function main(): Promise<void> {
     }
 
     const files = listMigrationFiles();
+    const exclusions = loadLineageExclusions();
     const plan = await planMigrations(client as unknown as PgClientLike, files);
     console.log(
       `Migrations: ${files.length} total, ${plan.alreadyApplied.length} applied, ${plan.pending.length} pending, ` +
         `${plan.inconsistent.length} inconsistent, ${plan.checksumMismatches.length} checksum-mismatch.`
     );
+    {
+      // Report declared exclusions in BOTH modes so a dry-run tells the truth about what
+      // --apply will and will not run against this specific database.
+      const preview = partitionIdentityConflicts(plan.pending, plan.journalFilenames, files, exclusions);
+      for (const c of preview.excluded) {
+        console.log(
+          `[migrate] will EXCLUDE on this database: ${c.incoming} — number ${c.number} is immutable history ` +
+            `('${c.applied}'). Superseded by ${c.declaration.supersededBy}.`
+        );
+      }
+    }
     if (plan.inconsistent.length > 0) {
       console.error(`🚫 Journal inconsistent: ${plan.inconsistent.map((i) => `${i.filename}=${i.status}`).join(", ")}`);
       process.exit(1);
@@ -887,7 +1013,10 @@ async function main(): Promise<void> {
       console.log(`(dry-run) pending: ${plan.pending.join(", ") || "none"}. Re-run with --apply to execute.`);
       process.exit(0);
     }
-    const { applied } = await applyMigrations(client as unknown as PgClientLike, files, { allowDestructive });
+    const { applied } = await applyMigrations(client as unknown as PgClientLike, files, {
+      allowDestructive,
+      exclusions,
+    });
     console.log(`✓ Applied ${applied.length}: ${applied.join(", ") || "none"}`);
   } finally {
     await client.end();

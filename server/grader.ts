@@ -1218,7 +1218,23 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
     return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
   }
   await storage.writeAuditLog("certificate", String(certId), "grade_reject", adminUser, { reason: reason || null });
-  return { ok: true as const };
+  /*
+   * RETURN TO GRADER, for Partner Card Job lineage — QA_REVIEW → GRADING on the SAME Card Job, MV and
+   * certificate. Without it the job stayed in QA_REVIEW while the certificate went back to
+   * `assigned`, so the grader could not reopen the card they had just been asked to correct.
+   * A no-op for HQ and connector-imported certificates, which have no Card Job.
+   */
+  const { returnCardJobToGraderForCertificate } = await import("./partner/card-job-lifecycle");
+  const returned = await returnCardJobToGraderForCertificate(certId, adminUser, reason).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[partner card job] return-to-grader transition failed for certificate",
+      certId,
+      error instanceof Error ? error.message : error
+    );
+    return "failed" as const;
+  });
+  return { ok: true as const, cardJobReturned: returned === "failed" ? false : returned !== null };
 }
 
 /**
@@ -1330,7 +1346,27 @@ export async function approveGraderCert(certId: number, adminUser: string, expec
       surface: c?.gradeSurface ?? null,
     },
   });
-  return { ok: true as const };
+  /*
+   * QA APPROVED, for Partner Card Job lineage — QA_REVIEW → APPROVED, which is what begins output
+   * eligibility. Runs AFTER the publish CAS so an approval is never recorded on the Card Job for a
+   * grade that did not publish.
+   *
+   * A FAILURE HERE IS REPORTED, NOT SWALLOWED, and it fails closed: `card_job_valid` in
+   * print-eligibility.ts refuses output while the job is still QA_REVIEW, so the card waits rather
+   * than printing early. `cardJobApproved: false` on an otherwise-ok result is the signal that the
+   * transition needs re-running — see the P10 note in card-job-lifecycle.ts.
+   */
+  const { approveCardJobForCertificate } = await import("./partner/card-job-lifecycle");
+  const approved = await approveCardJobForCertificate(certId, adminUser).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[partner card job] QA approval transition failed for certificate",
+      certId,
+      error instanceof Error ? error.message : error
+    );
+    return "failed" as const;
+  });
+  return { ok: true as const, cardJobApproved: approved === "failed" ? false : approved !== null };
 }
 
 /** {overall, subgrades} snapshot of a cert's current grade — for the admin-edit audit. */

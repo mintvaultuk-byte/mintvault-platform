@@ -283,7 +283,7 @@ describe("partner workstation IA has mounted destinations for shell links", () =
       expect(SHELL).toContain(href);
     }
   });
-  it("App mounts the placeholder destinations instead of falling through to dashboard", () => {
+  it("App mounts every shell destination instead of falling through to dashboard", () => {
     for (const route of [
       'path="/partner/certificates"',
       'path="/partner/supplies"',

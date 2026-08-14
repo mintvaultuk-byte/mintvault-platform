@@ -303,7 +303,68 @@ export function superAdminPartnerRouter(): Router {
   return r;
 }
 
+/**
+ * P12 — PARTNER OPERATIONS HEALTH, for Super Admin.
+ *
+ * WHY A SEPARATE ROUTER. The router above is per-partner and capability-gated for tenant management.
+ * This one answers a different question — "is the Partner platform healthy right now, across every
+ * tenant" — which is an estate-wide operational read, not a tenant administration action.
+ *
+ * NO FAKE METRICS. Every number here is a live COUNT over the real tables, computed at request time
+ * by the SAME functions the scheduled reconciliation job runs. Nothing is cached, sampled, estimated
+ * or derived from a counter that something else is responsible for incrementing — a dashboard whose
+ * numbers can drift from the database is worse than no dashboard, because it is believed.
+ *
+ * STRICTLY READ-ONLY. The redrive is deliberately NOT exposed here. It runs on its own schedule with
+ * its own audit trail; a button that silently mutates lifecycle state from a health screen is how an
+ * operator repairs something they have not looked at.
+ */
+export function superAdminPartnerOpsRouter(): Router {
+  const r = Router();
+  r.use(requireSuperAdmin);
+
+  /**
+   * The signals that mean "somebody must do something", in one call.
+   *
+   * `qaDrift` is the documented split-transaction MEDIUM: an approved certificate whose Card Job
+   * never left QA_REVIEW. It is fail-closed (output is refused) and the scheduled job repairs it
+   * within 15 minutes, so a NON-ZERO value here is normal only briefly — a number that stays
+   * non-zero across ticks means the redrive is refusing, and the audit trail says why.
+   */
+  r.get("/health", async (_req, res) => {
+    try {
+      const { detectQaCardJobDrift, detectStuckCardJobs, detectStaleLeases } =
+        await import("./card-job-reconciliation");
+      const [drift, stuck, stale] = await Promise.all([
+        detectQaCardJobDrift(),
+        detectStuckCardJobs(),
+        detectStaleLeases(),
+      ]);
+      res.json({
+        qaDrift: {
+          // `ran: false` is reported rather than silently returning zero — "could not check" and
+          // "nothing wrong" are different answers and must never look the same.
+          checked: drift.ran,
+          skippedReason: drift.skippedReason ?? null,
+          count: drift.items.length,
+          items: drift.items.slice(0, 50),
+        },
+        stuckCardJobs: { count: stuck.items.length, items: stuck.items.slice(0, 50) },
+        staleLeases: { count: stale.items.length },
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("[partner-ops-health] failed:", error instanceof Error ? error.message : error);
+      res.status(503).json({ error: "Partner operations health is unavailable." });
+    }
+  });
+
+  return r;
+}
+
 /** Additive registration into the existing MintVault admin app (Phase 1 super-admin control shell). */
 export function registerSuperAdminPartnerRoutes(app: Express): void {
   app.use("/api/super-admin/grading-partners", superAdminPartnerRouter());
+  // Estate-wide Partner operations health (P12). Read-only; the redrive stays on its schedule.
+  app.use("/api/super-admin/partner-ops", superAdminPartnerOpsRouter());
 }

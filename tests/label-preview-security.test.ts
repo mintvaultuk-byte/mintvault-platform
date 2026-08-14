@@ -182,10 +182,12 @@ describe("server-authorised certificate label preview", () => {
     const preview = read("client/src/components/grading-workflow/CertificatePreviewPanel.tsx");
     expect(panel).toContain("onPreviewSaved?.(readReviewRevision(data))");
     expect(workstation).toContain("revision={previewRevision}");
-    expect(preview).toContain('body: JSON.stringify(body)');
+    expect(preview).toContain("body: JSON.stringify(body)");
     expect(preview).toContain('res.headers.get("X-MintVault-Review-Revision")');
     expect(preview).toContain("authoritativeRevision !== expectedRevision");
-    expect(preview).toContain("[endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]");
+    expect(preview).toMatch(
+      /\[\s*endpoint,\s*expectedRevision,\s*key,\s*requireExpectedRevision,\s*revision,\s*onRevisionComplete,\s*requestTimeoutMs,\s*retryNonce,?\s*\]/
+    );
   });
 
   it("provides Pending Review language and service tier from the authorised queue", () => {

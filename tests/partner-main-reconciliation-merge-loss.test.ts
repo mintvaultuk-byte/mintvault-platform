@@ -88,7 +88,7 @@ describe("no unresolved merge conflict survives in the partner surface", () => {
 
 /** Conflict 1 — server/partner/routes.ts. */
 describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
-  const code = dropCommentLines(routes);
+  const code = stripComments(routes);
   // The handler body was extracted into `const sessionIdentity` so that `/me` (the stable
   // identity contract) and `/session` (the backwards-compatible alias) share ONE implementation.
   // Slicing from the route registration would therefore capture only `r.get(...)` and every

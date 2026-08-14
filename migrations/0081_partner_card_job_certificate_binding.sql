@@ -58,6 +58,22 @@
 -- ROLLBACK / DOWN-PATH: re-apply 0076's function body to restore the previous behaviour. Card Jobs
 -- already stamped keep their identity — which is correct, because an MV number is permanent.
 
+-- 0076 handed this function to partner_credit_lifecycle_definer, and CREATE OR REPLACE requires
+-- OWNERSHIP, not just privileges. A local test cluster applies migrations as a superuser and never
+-- notices; a managed host (Neon) applies them as a plain role and fails with "must be owner of
+-- function". Borrow the definer role for the replace, exactly as 0044 does for partner_definer —
+-- the membership grant is idempotent and the ALTER OWNER below puts ownership straight back.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'partner_credit_lifecycle_definer') THEN
+    BEGIN
+      EXECUTE format('GRANT partner_credit_lifecycle_definer TO %I', current_user);
+    EXCEPTION WHEN insufficient_privilege OR duplicate_object THEN
+      NULL;
+    END;
+  END IF;
+END$$;
+
 CREATE OR REPLACE FUNCTION public.partner_allocate_import_certificates(
   p_connector_id uuid,
   p_destination_submission_id integer

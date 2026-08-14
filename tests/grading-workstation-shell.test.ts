@@ -76,8 +76,8 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     expect(DASH).toMatch(/className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
     // The panels container is a flex row at md+ (column-stack below): 40% preview
     // aside on the left, flex-1 control panel on the right.
-    expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(ASIDE_SRC).toContain("md:w-[40%] md:shrink-0");
+    expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
+    expect(ASIDE_SRC).toContain("md:w-[35%] md:shrink-0");
   });
   it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one flex row", () => {
     // GradingWorkstation passes the preview aside to the canonical shell.
@@ -121,7 +121,7 @@ describe("5-6. fixed-height shell + internal scroll", () => {
   it("the right control panel form scrolls internally (page itself does not grow unbounded)", () => {
     const controlPanel = slice(WORKSTATION_SRC, "className={`${WORKSTATION_BODY_SCROLL_CLASS}", "<GradingPanel");
     expect(controlPanel).toContain("WORKSTATION_BODY_SCROLL_CLASS");
-    expect(SHELL_SRC).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"');
+    expect(SHELL_SRC).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1"');
   });
   it("admin-dashboard renders the grading view in a page-scrollable focus shell", () => {
     expect(DASH).toContain("focus"); // AdminShell focus prop passed

@@ -28,6 +28,8 @@ export const PARTNER_MIGRATIONS = [
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
   "0009_partner_connector_validation",
+  // Runtime authentication now requires the provenance projection this migration
+  // adds. Keep the baseline harness aligned with the deployed login contract.
   "0077_partner_credential_lifecycle_hardening",
 ] as const;
 
@@ -53,6 +55,7 @@ export const PARTNER_MIGRATIONS_WITH_G3F = [
   ...PARTNER_MIGRATIONS_WITH_G3E,
   "0012_partner_connector_import_attempts",
   "0013_partner_connector_claim_index",
+  "0078_partner_connector_flag_read",
 ] as const;
 
 /** G4 — append-only Super-Admin operational-action audit table (0014). */
@@ -189,6 +192,30 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // `certificates`, `submission_items` and `cert_counter`. Same classification as 0076, which owns
   // the original function, and for the same reason.
   "0081_partner_card_job_certificate_binding",
+  // APPLICATION scope, on the migration's own declaration: 0088 carries the banner
+  // `SCOPE: APPLICATION (requires certificates)` in its header. Its ENTIRE payload is a partial
+  // unique index on core `certificates (lower(nfc_uid))`.
+  //
+  // It is guarded by to_regclass, so unlike 0079 it would not FAIL on a partner-only database — it
+  // would no-op. That is precisely why it must be classified here rather than waved through as
+  // partner-scope: a no-op recorded as "applied" is a false negative. It would tell the partner
+  // harness that NFC binding integrity had been exercised when nothing was built and nothing was
+  // asserted. Contrast 0080, which IS partner-scope: its core FK is conditional, but the
+  // partner_card_jobs table it creates is real and partner suites depend on it.
+  //
+  // Consequence, and the reason this is the correct classification rather than bookkeeping: the two
+  // suites that DECLARE 0088 (partner-pilot-concurrency, partner-card-job-output) now get the core
+  // schema provisioned by the harness itself instead of relying on each suite remembering to seed
+  // `certificates` first. The dependency becomes guaranteed rather than incidental.
+  "0088_nfc_binding_integrity",
+  // APPLICATION scope, unambiguously: 0090 opens with hard preconditions that RAISE EXCEPTION when
+  // `certificates` is absent (and likewise for partner_stations and the partner_runtime role), then
+  // its inlined 0047 body does `ALTER TABLE certificates ADD COLUMN ...` and creates tables with
+  // `REFERENCES certificates(id)`. Classifying it partner-scope would reproduce the exact 0073
+  // failure mode this contract exists to prevent — an application-scope migration falling into a
+  // partner-only harness and failing closed there. See tests/lineage-convergence-0090.test.ts for
+  // the real-PostgreSQL proof of its convergence behaviour.
+  "0090_lineage_convergence_scanner",
 ] as const;
 
 /**
@@ -234,13 +261,15 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
   "0077_partner_credential_lifecycle_hardening",
-  // PARTNER scope, deliberately: 0078 creates ONE standalone table
+  // From origin/main: forward-only connector flag-read grant. PARTNER scope.
+  "0078_partner_connector_flag_read",
+  // (0089_partner_shared_rate_limit_buckets — renumbered from 0078 — is appended in numeric order
+  // at the end of this list.) Originally described here: it creates ONE standalone table
   // (partner_rate_limit_buckets) plus an index and a grant to partner_runtime, which migration 0001
   // already creates. It touches no core table, so it is safe on a partner-only disposable database.
   // It carries no tenant_id — the limiters it backs run PRE-AUTHENTICATION, keyed on an IP prefix or
   // a submitted email — so the RLS coverage sweep in partner-rls-isolation.test.ts correctly ignores
   // it (that sweep asserts RLS only for partner_% tables HAVING a tenant_id column).
-  "0078_partner_shared_rate_limit_buckets",
   // PARTNER scope: 0080's foreign key to core `public.certificates` is attached CONDITIONALLY
   // (only where that table exists), so the table itself is creatable on a partner-only disposable
   // database. That matters because submission acceptance now writes a Card Job in the SAME
@@ -263,6 +292,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0086_partner_session_step_up",
   // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
   "0087_partner_grading_edit_lease",
+  // RENUMBERED 0078 -> 0089: main landed a different 0078. Self-contained table, so the later
+  // position changes nothing. PARTNER scope — touches no core table.
+  "0089_partner_shared_rate_limit_buckets",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

@@ -16,7 +16,7 @@ import { CardPreviewPanel } from "./CardPreviewPanel";
 import type { CardInspectionState } from "./card-inspection-state";
 
 /** Single source of truth for the preview column's width + breakpoint. */
-export const WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[40%] md:shrink-0";
+export const WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[35%] md:shrink-0";
 
 export function WorkstationPreviewAside({
   certificateId,
@@ -41,8 +41,8 @@ export function WorkstationPreviewAside({
       This keeps one card surface in the canonical left rail rather than adding
       a read-only duplicate beside GradingPanel's editor. */
   interactiveCardHostRef?: Ref<HTMLDivElement>;
-  inspectionState?: CardInspectionState;
-  onInspectionStateChange?: (state: CardInspectionState) => void;
+  inspectionState: CardInspectionState;
+  onInspectionStateChange: (state: CardInspectionState) => void;
 }) {
   // ONE card-image render site (invariant enforced by the workstation-shell
   // tests). When a `below` panel is present the aside stacks; otherwise the
@@ -76,7 +76,7 @@ export function WorkstationPreviewAside({
   }
   return (
     <aside
-      className={`flex min-h-0 flex-col gap-2 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
+      className={`flex min-h-0 flex-col gap-1.5 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
       data-testid="grading-preview-panel"
     >
       <div className="min-h-0 flex-1">{card}</div>

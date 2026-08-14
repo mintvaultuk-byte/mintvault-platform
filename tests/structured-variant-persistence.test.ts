@@ -1042,9 +1042,8 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           signatureA || signatureB || signatureC || signatureD || signatureE || signatureF,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
-        const revisionBoundAddedCode = (signatureF
-          ? addedCode.replace(/\bauthority\.subgrades\.(centering|corners|edges|surface)\b/g, "")
-          : addedCode
+        const revisionBoundAddedCode = (
+          signatureF ? addedCode.replace(/\bauthority\.subgrades\.(centering|corners|edges|surface)\b/g, "") : addedCode
         )
           .replace(/'(centering|corners|edges|surface)'/g, "")
           .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");

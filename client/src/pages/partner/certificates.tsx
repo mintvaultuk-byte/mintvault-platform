@@ -25,7 +25,8 @@ export default function PartnerCertificatesPage() {
   });
 
   if (query.isLoading) return <PartnerLoadingState label="Loading certificate history…" />;
-  if (query.error) return <PartnerErrorState message={partnerErrorMessage(query.error)} onRetry={() => query.refetch()} />;
+  if (query.error)
+    return <PartnerErrorState message={partnerErrorMessage(query.error)} onRetry={() => query.refetch()} />;
   const certificates = query.data?.certificates ?? [];
 
   return (
@@ -44,47 +45,103 @@ export default function PartnerCertificatesPage() {
               <p className="text-xs font-semibold uppercase text-primary">Partner card detail</p>
               <CardTitle className="mt-1 text-lg">{selectedCertificateNumber}</CardTitle>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedCertificateNumber(null)}>Close</Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedCertificateNumber(null)}>
+              Close
+            </Button>
           </CardHeader>
           <CardContent>
-            {detailQuery.isLoading && <p className="text-sm text-muted-foreground">Loading the authoritative card record…</p>}
-            {detailQuery.error && (
-              <PartnerErrorState message={partnerErrorMessage(detailQuery.error)} onRetry={() => detailQuery.refetch()} />
+            {detailQuery.isLoading && (
+              <p className="text-sm text-muted-foreground">Loading the authoritative card record…</p>
             )}
-            {detailQuery.data?.certificate && (() => {
-              const cert = detailQuery.data.certificate;
-              const subgrades = [
-                ["Centering", cert.gradeCentering],
-                ["Corners", cert.gradeCorners],
-                ["Edges", cert.gradeEdges],
-                ["Surface", cert.gradeSurface],
-              ];
-              return (
-                <div className="space-y-5 text-sm">
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                    <p><span className="text-muted-foreground">Card: </span>{cert.cardName ?? "—"}</p>
-                    <p><span className="text-muted-foreground">Overall: </span>{cert.grade ?? "Awaiting QA"}</p>
-                    <p><span className="text-muted-foreground">QA: </span>{cert.qaClearedAt ? "Cleared" : "Held for review"}</p>
-                    <p><span className="text-muted-foreground">Print: </span>{cert.printState ? statusLabel(cert.printState) : "Awaiting approval"}</p>
-                    <p><span className="text-muted-foreground">Operator: </span>{cert.operatorName ?? "—"}</p>
-                    <p><span className="text-muted-foreground">Station: </span>{cert.stations.join(", ") || "—"}</p>
-                    <p><span className="text-muted-foreground">Corrections: </span>{cert.redoCount}</p>
-                    <p><span className="text-muted-foreground">Capture: </span>{cert.evidenceComplete ? "Front + back saved" : "Incomplete"}</p>
-                  </div>
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Server-authoritative subgrades</p>
-                    <div className="grid gap-2 sm:grid-cols-4">
-                      {subgrades.map(([label, value]) => <p key={label}><span className="text-muted-foreground">{label}: </span>{value ?? "—"}</p>)}
+            {detailQuery.error && (
+              <PartnerErrorState
+                message={partnerErrorMessage(detailQuery.error)}
+                onRetry={() => detailQuery.refetch()}
+              />
+            )}
+            {detailQuery.data?.certificate &&
+              (() => {
+                const cert = detailQuery.data.certificate;
+                const subgrades = [
+                  ["Centering", cert.gradeCentering],
+                  ["Corners", cert.gradeCorners],
+                  ["Edges", cert.gradeEdges],
+                  ["Surface", cert.gradeSurface],
+                ];
+                return (
+                  <div className="space-y-5 text-sm">
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      <p>
+                        <span className="text-muted-foreground">Card: </span>
+                        {cert.cardName ?? "—"}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Overall: </span>
+                        {cert.grade ?? "Awaiting QA"}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">QA: </span>
+                        {cert.qaClearedAt ? "Cleared" : "Held for review"}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Print: </span>
+                        {cert.printState ? statusLabel(cert.printState) : "Awaiting approval"}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Operator: </span>
+                        {cert.operatorName ?? "—"}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Station: </span>
+                        {cert.stations.join(", ") || "—"}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Corrections: </span>
+                        {cert.redoCount}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Capture: </span>
+                        {cert.evidenceComplete ? "Front + back saved" : "Incomplete"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                        Server-authoritative subgrades
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-4">
+                        {subgrades.map(([label, value]) => (
+                          <p key={label}>
+                            <span className="text-muted-foreground">{label}: </span>
+                            {value ?? "—"}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                    {cert.rejectionReason && (
+                      <p>
+                        <span className="text-muted-foreground">Correction reason: </span>
+                        {cert.rejectionReason}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {cert.frontImageUrl && (
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={cert.frontImageUrl} target="_blank" rel="noreferrer">
+                            Open FRONT master
+                          </a>
+                        </Button>
+                      )}
+                      {cert.backImageUrl && (
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={cert.backImageUrl} target="_blank" rel="noreferrer">
+                            Open BACK master
+                          </a>
+                        </Button>
+                      )}
                     </div>
                   </div>
-                  {cert.rejectionReason && <p><span className="text-muted-foreground">Correction reason: </span>{cert.rejectionReason}</p>}
-                  <div className="flex flex-wrap gap-2">
-                    {cert.frontImageUrl && <Button variant="outline" size="sm" asChild><a href={cert.frontImageUrl} target="_blank" rel="noreferrer">Open FRONT master</a></Button>}
-                    {cert.backImageUrl && <Button variant="outline" size="sm" asChild><a href={cert.backImageUrl} target="_blank" rel="noreferrer">Open BACK master</a></Button>}
-                  </div>
-                </div>
-              );
-            })()}
+                );
+              })()}
           </CardContent>
         </Card>
       )}
@@ -106,15 +163,48 @@ export default function PartnerCertificatesPage() {
                 <p className="font-mono text-xs text-muted-foreground">{cert.certificateNumber}</p>
               </CardHeader>
               <CardContent className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                <p><span className="text-muted-foreground">Card: </span>{[cert.setName, cert.cardNumber && `#${cert.cardNumber}`, cert.year].filter(Boolean).join(" · ") || "—"}</p>
-                <p><span className="text-muted-foreground">Grade: </span>{cert.grade ?? "Awaiting QA"}</p>
-                <p><span className="text-muted-foreground">QA: </span>{cert.qaClearedAt ? "Cleared" : "Held for review"}</p>
-                <p><span className="text-muted-foreground">Print: </span>{cert.printState ? statusLabel(cert.printState) : "Awaiting approval"}</p>
-                <p><span className="text-muted-foreground">Location: </span>{cert.locationName ?? "—"}</p>
-                <p><span className="text-muted-foreground">Capture: </span>{cert.evidenceComplete ? "Front + back saved" : "Incomplete"}</p>
-                <p><span className="text-muted-foreground">Station: </span>{cert.stations.join(", ") || "—"}</p>
-                <p><span className="text-muted-foreground">Printed: </span>{cert.printedAt ? new Date(cert.printedAt).toLocaleString() : "Not printed"}</p>
-                <div><Button size="sm" variant="outline" onClick={() => setSelectedCertificateNumber(cert.certificateNumber)}>Open details</Button></div>
+                <p>
+                  <span className="text-muted-foreground">Card: </span>
+                  {[cert.setName, cert.cardNumber && `#${cert.cardNumber}`, cert.year].filter(Boolean).join(" · ") ||
+                    "—"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Grade: </span>
+                  {cert.grade ?? "Awaiting QA"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">QA: </span>
+                  {cert.qaClearedAt ? "Cleared" : "Held for review"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Print: </span>
+                  {cert.printState ? statusLabel(cert.printState) : "Awaiting approval"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Location: </span>
+                  {cert.locationName ?? "—"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Capture: </span>
+                  {cert.evidenceComplete ? "Front + back saved" : "Incomplete"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Station: </span>
+                  {cert.stations.join(", ") || "—"}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Printed: </span>
+                  {cert.printedAt ? new Date(cert.printedAt).toLocaleString() : "Not printed"}
+                </p>
+                <div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedCertificateNumber(cert.certificateNumber)}
+                  >
+                    Open details
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

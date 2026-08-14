@@ -13,24 +13,24 @@
 
 ## Stage progress
 
-| Stage | Status | Date | Notes |
-|---|---|---|---|
-| 0 — Baseline | complete | 2026-08-12 | Candidate, mainline, live safe refusal, protected areas and lock recorded. |
-| 1 — Review plan | complete | 2026-08-12 | Three non-overlapping read-only reviewer scopes assigned. |
-| 2 — Investigation | complete | 2026-08-12 | All three read-only reports received; no reviewer mutated a system. |
-| 3 — Lead verification | complete | 2026-08-12 | F1–F6 accepted from current source/live proof; duplicate reports consolidated. |
-| 4 — Implementation authorisation | complete for local packages A–D | 2026-08-12 | Bounded manifest, architecture snapshot, budget and rollback are recorded. |
-| 5 — Implementation | in progress | 2026-08-12 | Packages A (signed version recovery) and B (evidence-derived Ready queue) implemented and locally checked. |
-| 6 — Regression | pending | | |
-| 7 — Final report | pending | | |
+| Stage                            | Status                          | Date       | Notes                                                                                                      |
+| -------------------------------- | ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------- |
+| 0 — Baseline                     | complete                        | 2026-08-12 | Candidate, mainline, live safe refusal, protected areas and lock recorded.                                 |
+| 1 — Review plan                  | complete                        | 2026-08-12 | Three non-overlapping read-only reviewer scopes assigned.                                                  |
+| 2 — Investigation                | complete                        | 2026-08-12 | All three read-only reports received; no reviewer mutated a system.                                        |
+| 3 — Lead verification            | complete                        | 2026-08-12 | F1–F6 accepted from current source/live proof; duplicate reports consolidated.                             |
+| 4 — Implementation authorisation | complete for local packages A–D | 2026-08-12 | Bounded manifest, architecture snapshot, budget and rollback are recorded.                                 |
+| 5 — Implementation               | in progress                     | 2026-08-12 | Packages A (signed version recovery) and B (evidence-derived Ready queue) implemented and locally checked. |
+| 6 — Regression                   | pending                         |            |                                                                                                            |
+| 7 — Final report                 | pending                         |            |                                                                                                            |
 
 ## Reviewer assignments
 
-| Reviewer | Non-overlapping scope | State |
-|---|---|---|
+| Reviewer            | Non-overlapping scope                                                            | State                 |
+| ------------------- | -------------------------------------------------------------------------------- | --------------------- |
 | `workflow_security` | Credit-to-capture-to-grade-to-QA-to-print reachability and adversarial authority | received and verified |
-| `scanner_scale` | Native Scanner product, version recovery, device/fleet/scale constraints | received and verified |
-| `runtime_migration` | Live release, restricted runtime, RLS and exact migration-journal gate | received and verified |
+| `scanner_scale`     | Native Scanner product, version recovery, device/fleet/scale constraints         | received and verified |
+| `runtime_migration` | Live release, restricted runtime, RLS and exact migration-journal gate           | received and verified |
 
 ## Links
 

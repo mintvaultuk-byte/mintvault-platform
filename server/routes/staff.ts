@@ -81,6 +81,42 @@ const staffSetLibraryMutationLimit = rateLimit({
   message: { error: "Too many set library changes. Please wait a few minutes and try again." },
 });
 
+// Scanner arming creates server-owned capture state and an audit record. Read
+// polling gets a separate, generous budget so it cannot starve capture arming.
+// Both limits run only after the staff capability check and are keyed to the
+// authenticated staff identity rather than a shared office IP address.
+const staffScanCaptureLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `staff-scan-capture:${String((req.session as any).staffId ?? "unknown")}`,
+  message: { error: "Too many scanner capture requests. Please wait a minute and try again." },
+});
+
+const staffScanReadLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `staff-scan-read:${String((req.session as any).staffId ?? "unknown")}`,
+  message: { error: "Too many scanner status requests. Please wait a minute and try again." },
+});
+
+// Apply this before Multer buffers up to 25 MiB. The key is the authenticated
+// scanner, not a shared office IP, and it does not share the capture-arm budget.
+const staffScanUploadLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `staff-scan-upload:${String((req.session as any).staffId ?? "unknown")}`,
+  message: { error: "Too many scanner upload requests. Please wait a minute and try again." },
+});
+
 function sendSetLibraryError(res: Response, err: unknown): void {
   if (err instanceof SetLibraryError) {
     res.status(err.status).json({ error: err.message });
@@ -239,6 +275,7 @@ export function registerStaffRoutes(app: Express): void {
   app.post(
     "/api/staff/scan/certificates/:id/scanner-capture-sessions",
     requireCapability("scan"),
+    staffScanCaptureLimit,
     async (req: Request, res: Response) => {
       try {
         const certificateId = Number.parseInt(String(req.params.id), 10);
@@ -291,6 +328,7 @@ export function registerStaffRoutes(app: Express): void {
   app.get(
     "/api/staff/scan/certificates/:id/scanner-capture-sessions/:sessionId",
     requireCapability("scan"),
+    staffScanReadLimit,
     async (req: Request, res: Response) => {
       try {
         const certificateId = Number.parseInt(String(req.params.id), 10);
@@ -313,6 +351,7 @@ export function registerStaffRoutes(app: Express): void {
   app.post(
     "/api/staff/scan/certificates/:id/upload",
     requireCapability("scan"),
+    staffScanUploadLimit,
     scanUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },

@@ -30,6 +30,7 @@ import {
   APPLICATION_SCOPE_MIGRATIONS,
   PARTNER_SCHEMA_MIGRATIONS,
   PARTNER_MIGRATIONS_WITH_RBAC_SEED,
+  partnerScopeOnly,
   requiresCoreSchema,
 } from "./helpers/partner-realistic-db";
 
@@ -81,6 +82,41 @@ describe("every migration is deliberately classified", () => {
     expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0075_partner_station_single_active_capture");
     expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0076_partner_pilot_certificate_allocation");
     expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0076_partner_pilot_certificate_allocation");
+  });
+
+  it("keeps the NFC binding index application-scoped — the migration says so itself", () => {
+    // 0088 is guarded by to_regclass, so it would NOT fail on a partner-only database; it would
+    // no-op. Classifying it partner-scope is therefore the tempting shortcut, and it is wrong: a
+    // no-op recorded as "applied" claims coverage that does not exist. Pin the classification to
+    // the migration's OWN declared scope so the two cannot drift apart.
+    const SQL = readFileSync(join(process.cwd(), "migrations", "0088_nfc_binding_integrity.sql"), "utf8");
+    expect(SQL, "0088 must keep declaring its own scope").toMatch(/SCOPE: APPLICATION \(requires `certificates`\)/);
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0088_nfc_binding_integrity");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0088_nfc_binding_integrity");
+    // And prove the classification is load-bearing: declaring 0088 must oblige core seeding.
+    expect(requiresCoreSchema(["0088_nfc_binding_integrity"])).toBe(true);
+  });
+
+  it("keeps the 0090 scanner lineage convergence application-scoped", () => {
+    // 0090 fails CLOSED without the core schema. This assertion and the RAISE below are the pair
+    // that stop it being "fixed" into partner scope the next time the contract goes red.
+    const SQL = readFileSync(join(process.cwd(), "migrations", "0090_lineage_convergence_scanner.sql"), "utf8");
+    expect(SQL).toMatch(/RAISE EXCEPTION '0090 precondition failed: certificates table is missing'/);
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0090_lineage_convergence_scanner");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0090_lineage_convergence_scanner");
+    expect(requiresCoreSchema(["0090_lineage_convergence_scanner"])).toBe(true);
+  });
+
+  it("NEGATIVE: neither newly-classified migration leaked into the partner glob", () => {
+    // partnerScopeOnly() is the function that actually decides what a partner-only database runs.
+    // Assert on IT, not just on the lists, so a future refactor that reads a different source
+    // cannot pass these tests while still feeding 0088/0090 to a partner harness.
+    const narrowed = partnerScopeOnly([
+      { filename: "0001_partner_foundation.sql" },
+      { filename: "0088_nfc_binding_integrity.sql" },
+      { filename: "0090_lineage_convergence_scanner.sql" },
+    ]).map((f) => f.filename);
+    expect(narrowed).toEqual(["0001_partner_foundation.sql"]);
   });
 });
 

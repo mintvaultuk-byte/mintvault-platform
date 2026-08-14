@@ -213,7 +213,9 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     });
     await act(async () => vi.advanceTimersByTimeAsync(350));
     expect(acknowledgements).toHaveBeenCalledWith(71, false, JSON.stringify(fields("9")), null);
-    expect(host.textContent).toContain("did not acknowledge");
+    expect(host.querySelector('[data-testid="certificate-preview-status"]')?.textContent).toBe(
+      "Preview unavailable · Retry"
+    );
   });
 
   it("settles the old revision false when an immediate sub-500ms edit supersedes it", async () => {
@@ -277,7 +279,9 @@ describe("mounted CertificatePreviewPanel revision acknowledgement", () => {
     });
     await act(async () => vi.advanceTimersByTimeAsync(400));
     expect(acknowledgements).toHaveBeenCalledWith(13, false, JSON.stringify(fields("9")));
-    expect(host.textContent).toContain("timed out");
+    expect(host.querySelector('[data-testid="certificate-preview-status"]')?.textContent).toBe(
+      "Preview unavailable · Retry"
+    );
   });
 
   it("settles a pending revision false on unmount", async () => {

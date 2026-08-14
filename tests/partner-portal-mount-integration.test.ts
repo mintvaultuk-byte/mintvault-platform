@@ -267,8 +267,8 @@ async function login(
 
     const pw = await bcrypt.hash(OWNER_PASSWORD, 12);
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required)
-       VALUES ($1,'mOwner',$2,$2,$3,$4,'ACTIVE',false)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required)
+       VALUES ($1,'mOwner',$2,$2,$3,$4,now(),'ACTIVE',false)`,
       [OWNER_ID, TENANT, OWNER_EMAIL, pw]
     );
     await admin.query(

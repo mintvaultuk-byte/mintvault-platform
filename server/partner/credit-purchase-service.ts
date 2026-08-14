@@ -161,7 +161,7 @@ export async function fulfilPartnerCreditPurchase(
     return { granted: false, credits: 0, reason: "pack_not_found" };
   }
 
-  await appendFoundationCredit(
+  const { alreadyApplied } = await appendFoundationCredit(
     { actorUserId: null, actorEmail: null },
     {
       tenantId,
@@ -182,6 +182,30 @@ export async function fulfilPartnerCreditPurchase(
       },
     }
   );
+
+  /*
+   * REPORT A REPLAY AS A REPLAY — found by AT-21.
+   *
+   * `alreadyApplied` was previously discarded and this returned `granted: true` unconditionally. The
+   * MONEY was always right: the ledger's (source, idempotency_key) uniqueness refuses the second row,
+   * proven under four-way concurrent delivery. But every delivery of one event reported that IT had
+   * performed the grant.
+   *
+   * That matters because the webhook handler LOGS this value. Stripe retries aggressively and can
+   * deliver the same event to both Fly Machines at once, so an ordinary redelivery storm wrote
+   * `granted=true credits=10` four times into the operational log for a single £-paying purchase.
+   * The one signal an operator would use to spot a genuine double-grant incident was therefore
+   * guaranteed to produce false positives — sending somebody hunting a money bug that does not
+   * exist, and training them to ignore the line that would show a real one.
+   *
+   * `granted: false` here is the function's own documented contract for an ordinary "nothing to do"
+   * case, and it keeps a webhook retry a 200 rather than an error Stripe would retry forever.
+   * `credits` still reports the pack size, because the caller legitimately wants to know what the
+   * event was worth even when this delivery did not apply it.
+   */
+  if (alreadyApplied) {
+    return { granted: false, credits, reason: "already_granted" };
+  }
 
   return { granted: true, credits };
 }

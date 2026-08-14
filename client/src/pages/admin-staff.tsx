@@ -1267,13 +1267,17 @@ export default function AdminStaffPage() {
                   data-testid="partner-qa-provenance"
                 >
                   <span className="font-semibold text-[var(--admin-gold)]">Partner QA</span>
-                  {" · "}{partnerReviewContext.legalName || partnerReviewContext.publicRef || "Partner"}
+                  {" · "}
+                  {partnerReviewContext.legalName || partnerReviewContext.publicRef || "Partner"}
                   {partnerReviewContext.locationName ? ` · ${partnerReviewContext.locationName}` : ""}
                   {partnerReviewContext.operator ? ` · Operator: ${partnerReviewContext.operator}` : ""}
                   {" · "}Station: {partnerReviewContext.stationCodes.join(", ") || "not proven"}
-                  {" · "}{partnerReviewContext.evidenceComplete ? "Front + back evidence saved" : "Evidence incomplete"}
+                  {" · "}
+                  {partnerReviewContext.evidenceComplete ? "Front + back evidence saved" : "Evidence incomplete"}
                   {partnerReviewContext.redoCount > 0 ? ` · Corrections: ${partnerReviewContext.redoCount}` : ""}
-                  {partnerReviewContext.correctionReason ? ` · Last return: ${partnerReviewContext.correctionReason}` : ""}
+                  {partnerReviewContext.correctionReason
+                    ? ` · Last return: ${partnerReviewContext.correctionReason}`
+                    : ""}
                 </div>
               )}
               {/* Manual card-identity override moved INTO the workstation body

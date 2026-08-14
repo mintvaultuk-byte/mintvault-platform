@@ -97,14 +97,14 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     const pw = await bcrypt.hash("correct-horse-battery", 12);
     // owner in A, trainee in A, owner in B, mfa-user in A, manager/grader/staff in A
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES
-       ('11111111-0000-0000-0000-0000000000a1','ua1',$1,$1,'owner@a.com',$3,'ACTIVE',false),
-       ('11111111-0000-0000-0000-0000000000a2','ua2',$1,$1,'trainee@a.com',$3,'ACTIVE',false),
-       ('22222222-0000-0000-0000-0000000000b1','ub1',$2,$2,'owner@b.com',$3,'ACTIVE',false),
-       ('11111111-0000-0000-0000-0000000000a3','ua3',$1,$1,'mfa@a.com',$3,'ACTIVE',true),
-       ('11111111-0000-0000-0000-0000000000a5','ua5',$1,$1,'admin@a.com',$3,'ACTIVE',false),
-       ('11111111-0000-0000-0000-0000000000a6','ua6',$1,$1,'grader@a.com',$3,'ACTIVE',false),
-       ('11111111-0000-0000-0000-0000000000a7','ua7',$1,$1,'staff@a.com',$3,'ACTIVE',false)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required) VALUES
+       ('11111111-0000-0000-0000-0000000000a1','ua1',$1,$1,'owner@a.com',$3,now(),'ACTIVE',false),
+       ('11111111-0000-0000-0000-0000000000a2','ua2',$1,$1,'trainee@a.com',$3,now(),'ACTIVE',false),
+       ('22222222-0000-0000-0000-0000000000b1','ub1',$2,$2,'owner@b.com',$3,now(),'ACTIVE',false),
+       ('11111111-0000-0000-0000-0000000000a3','ua3',$1,$1,'mfa@a.com',$3,now(),'ACTIVE',true),
+       ('11111111-0000-0000-0000-0000000000a5','ua5',$1,$1,'admin@a.com',$3,now(),'ACTIVE',false),
+       ('11111111-0000-0000-0000-0000000000a6','ua6',$1,$1,'grader@a.com',$3,now(),'ACTIVE',false),
+       ('11111111-0000-0000-0000-0000000000a7','ua7',$1,$1,'staff@a.com',$3,now(),'ACTIVE',false)`,
       [A, B, pw]
     );
     const roleId = async (code: string) =>
@@ -127,7 +127,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     );
     // an enrolment user (no MFA required yet, so they authenticate then enrol)
     await admin.query(
-      "INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES ('11111111-0000-0000-0000-0000000000a4','ua4',$1,$1,'enrol@a.com',$2,'ACTIVE',false)",
+      "INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required) VALUES ('11111111-0000-0000-0000-0000000000a4','ua4',$1,$1,'enrol@a.com',$2,now(),'ACTIVE',false)",
       [A, pw]
     );
     await admin.query(

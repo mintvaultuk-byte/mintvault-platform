@@ -71,12 +71,11 @@ describe("stage separation (spec 1-4)", () => {
   it("Variant is presented as OPTIONAL and is not part of any gate", () => {
     expect(VARIANT_BLOCK).toContain("optional");
     expect(FORM).not.toContain("button-continue-to-grade");
-    // SIBLING MERGE: the v1069 lineage gated its own Continue button on
-    // `scannerCaptureRequired`. That button does not exist on this surface — the
-    // canonical workstation owns stage navigation — so the assertion is re-pointed
-    // at the gate that DOES survive here: the capture wizard is mounted, and the
-    // variant block cannot bypass it.
-    expect(FORM).toContain("scannerCaptureRequired");
+    // Scanner controls are also a Card Details capability, but they are mounted
+    // by the same canonical workstation rather than the metadata drawer. The
+    // variant block therefore cannot create a second scanner/stage surface.
+    expect(FORM).not.toContain("scannerCaptureRequired");
+    expect(WORKSTATION).toContain('data-canonical-section="scanner-controls"');
   });
   it("Card Details shows the permanent variant/classification summary below the picker (item 2)", () => {
     expect(VARIANT_BLOCK).toContain("<VariantSummary");
@@ -140,16 +139,16 @@ describe("stage navigation is UI-state only (spec: no save/grade/issue)", () => 
       expect(FORM).not.toContain(id);
     }
   });
-  it("CertificateForm contains no grading-stage gate but keeps the targeted capture surface", () => {
+  it("CertificateForm contains no grading-stage gate or duplicate scanner surface", () => {
     expect(FORM).not.toContain("Continue to Grade");
     expect(FORM).not.toContain("button-continue-to-grade");
-    // MERGE-LOSS SENTINEL. CaptureWizard arrived on the v1069 scanner lineage
-    // hung off a local 3-stage machine this lineage deleted. It was re-hosted on
-    // the Card Details metadata region; without these assertions the component
-    // becomes unreachable dead code again and /admin silently loses Canon capture.
-    expect(FORM).toContain("CaptureWizard");
-    expect(FORM).toContain("scannerCaptureRequired");
-    expect(FORM).toContain("Controlled Canon recapture");
+    // Super Admin capture and recapture are passed through the workstation's
+    // Card Details slot; the metadata drawer can never become a competing
+    // scanner/viewer implementation.
+    expect(FORM).not.toContain("CaptureWizard");
+    expect(DASH).toContain("scannerControls={");
+    expect(DASH).toContain("<CaptureWizard");
+    expect(WORKSTATION).toContain('data-testid="workstation-scanner-controls"');
   });
 });
 
@@ -172,10 +171,10 @@ describe("card preview is read-only (spec 3)", () => {
     // The two-column row lives in the sole canonical GradingWorkstation shell.
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     const shellSrc = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
-    expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
     expect(WORKSTATION).toContain("<WorkstationPreviewAside");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
     expect(asideSrc).toContain("<CardPreviewPanel");
   });

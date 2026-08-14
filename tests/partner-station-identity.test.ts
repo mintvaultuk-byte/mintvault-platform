@@ -109,6 +109,8 @@ describe("partner station cryptographic identity", () => {
     expect(signedHeartbeatAppVersion("POST", "/api/partner/stations/heartbeat", body)).toBe("1.2.1");
     expect(signedHeartbeatAppVersion("POST", "/api/partner/stations/calibrations", body)).toBeNull();
     expect(signedHeartbeatAppVersion("GET", "/api/partner/stations/heartbeat", body)).toBeNull();
-    expect(signedHeartbeatAppVersion("POST", "/api/partner/stations/heartbeat", Buffer.from('{"appVersion":"next"}'))).toBeNull();
+    expect(
+      signedHeartbeatAppVersion("POST", "/api/partner/stations/heartbeat", Buffer.from('{"appVersion":"next"}'))
+    ).toBeNull();
   });
 });

@@ -111,9 +111,9 @@ describe("6. desktop shell is a real two-column layout at desktop breakpoints", 
     // GradingWorkstation is the sole shell owner; CertificateForm is an editor slot.
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     expect(FORM).not.toContain("<CanonicalGradingWorkstationShell");
-    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
     // the old lg-only breakpoint (which collapsed below 1024px) is gone.
     expect(CANON_SHELL).not.toContain("gap-3 lg:flex-row");
   });
@@ -144,9 +144,7 @@ describe("7. the right controls column has accessible vertical overflow where re
     // deliberately has no competing overflow owner.
     const controlPanel = slice(WORKSTATION, "className={`${WORKSTATION_BODY_SCROLL_CLASS}", "<GradingPanel");
     expect(controlPanel).toContain("WORKSTATION_BODY_SCROLL_CLASS");
-    expect(CANON_SHELL).toContain(
-      'WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"'
-    );
+    expect(CANON_SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1"');
     expect(slice(FORM, "onSubmit={handleSubmit}", ">\n")).toContain('className="space-y-2.5"');
   });
 });

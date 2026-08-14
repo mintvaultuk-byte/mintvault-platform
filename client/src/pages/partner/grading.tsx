@@ -3,8 +3,27 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
+import { usePartnerGradingLease } from "@/hooks/use-partner-grading-lease";
+
+/**
+ * ONE QUEUE, TWO LINEAGES.
+ *
+ * `card_job` is the canonical Partner intake spine (Scanner NEW); `connector` is legacy/imported
+ * work. Both open the SAME workstation — there is no second grading UI.
+ *
+ * `openable` and `heldBy` are DERIVED BY THE SERVER. This page used to compute openability itself as
+ * `gradingStatus === "assigned" && assignedToMe`, which is unanswerable for a Card Job: its
+ * certificate is `unassigned` until a grader takes the editing lease, so that rule made every
+ * Scanner card permanently un-openable. Teaching the browser the second rule as well would have put
+ * grading authority in browser state; the server decides and this renders what it is told.
+ */
+type PartnerLineage = "card_job" | "connector";
 
 type GradingCard = {
+  lineage: PartnerLineage;
+  cardJobId: string | null;
+  cardJobStatus: string | null;
+  mvNumber: string | null;
   certId: number;
   certIdStr: string;
   cardGame: string | null;
@@ -20,8 +39,21 @@ type GradingCard = {
   redoCount: number;
   assignedToMe: boolean;
   gradedByMe: boolean;
+  /** Server-derived: may this operator open this card right now? */
+  openable: boolean;
+  /** Display name of another grader currently holding it, or null. Never an email or a user id. */
+  heldBy: string | null;
 };
-type QueueItem = { submissionId: number; submissionRef: string; serviceTier: string | null; cards: GradingCard[] };
+type QueueItem = {
+  groupKey: string;
+  lineage: PartnerLineage;
+  /** Connector lineage only — a walk-in Card Job has no destination submission. */
+  submissionId: number | null;
+  /** The MV number on Card Job lineage; the submission reference on connector lineage. */
+  submissionRef: string | null;
+  serviceTier: string | null;
+  cards: GradingCard[];
+};
 
 type CaptureStation = { stationCode: string; locationId: string; locationName: string };
 type CaptureSide = "front" | "back";
@@ -76,7 +108,9 @@ function PartnerCaptureControls({ certId }: { certId: number }) {
     let cancelled = false;
     const poll = async () => {
       for (const session of active) {
-        const response = await fetch(`/api/partner/stations/capture-sessions/${session.id}`, { credentials: "include" });
+        const response = await fetch(`/api/partner/stations/capture-sessions/${session.id}`, {
+          credentials: "include",
+        });
         const data = await response.json().catch(() => ({}));
         if (cancelled || !response.ok || !data.capture?.side) continue;
         setSessions((current) => ({ ...current, [data.capture.side]: data.capture as CaptureSession }));
@@ -136,10 +170,16 @@ function PartnerCaptureControls({ certId }: { certId: number }) {
           ))}
         </select>
       ) : (
-        <p className="text-xs text-[var(--admin-ink-dim)]">No approved, calibrated station is available for your location.</p>
+        <p className="text-xs text-[var(--admin-ink-dim)]">
+          No approved, calibrated station is available for your location.
+        </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={!stationCode || !!arming || active("front") || frontCaptured} onClick={() => void arm("front")}>
+        <Button
+          size="sm"
+          disabled={!stationCode || !!arming || active("front") || frontCaptured}
+          onClick={() => void arm("front")}
+        >
           {frontCaptured ? "Front captured" : active("front") ? `Front ${sessions.front?.state}` : "Arm front"}
         </Button>
         <Button
@@ -156,6 +196,145 @@ function PartnerCaptureControls({ certId }: { certId: number }) {
         <p className="text-xs text-red-500">{sessions.front?.failureReason || sessions.back?.failureReason}</p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * ONE OPEN CARD, held under a server lease.
+ *
+ * Extracted from the page so the lease hook runs unconditionally: a hook called inside `if (active)`
+ * would violate the rules of hooks the moment a grader closed a card.
+ *
+ * CONNECTOR LINEAGE HAS NO LEASE and never did — those cards are bound by the importer's
+ * assigned-grader model. `cardJobId` is null for them, the hook stays idle, and the workstation
+ * behaves exactly as it always has. Only Card Job lineage is gated.
+ */
+function PartnerGradingSession({
+  item,
+  card,
+  onClose,
+  onFinished,
+}: {
+  item: QueueItem;
+  card: GradingCard;
+  onClose: () => void;
+  onFinished: () => Promise<void>;
+}) {
+  const [takeoverReason, setTakeoverReason] = useState("");
+  const lease = usePartnerGradingLease(card.cardJobId, {
+    displayName: card.cardName,
+    enabled: card.lineage === "card_job",
+  });
+
+  /*
+   * A connector card is editable on the old rules; a Card Job only while its lease is genuinely held.
+   *
+   * `acquiring` counts as editable ON PURPOSE. `gradingEnabled={false}` UNMOUNTS the grading panel,
+   * so treating the brief moment between opening a card and the lease arriving as "not editable"
+   * would mount the panel, unmount it and mount it again — discarding whatever the operator had
+   * already started typing. Nothing is risked by it: there is no lease yet, so the server refuses
+   * every write during that window regardless of what this component believes.
+   *
+   * The workstation is not a read-only VIEWER when occupied — the panel is hidden and the banner
+   * explains why. That is the safe direction, and a genuine read-only projection of somebody else's
+   * in-progress card is a larger piece of work than this closeout.
+   */
+  const editable = card.lineage === "connector" || lease.state === "held" || lease.state === "acquiring";
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-[var(--admin-bg)] text-[var(--admin-ink)]">
+      <header className="shrink-0 border-b border-[var(--admin-line)] px-3 py-2">
+        <button type="button" onClick={onClose} className="text-[var(--admin-gold)] text-xs hover:underline">
+          Back to partner grading
+        </button>
+      </header>
+
+      {card.lineage === "card_job" && lease.state !== "held" ? (
+        <section
+          className="shrink-0 border-b border-[var(--admin-line)] bg-[var(--admin-panel)] px-3 py-2 space-y-2"
+          data-testid="partner-lease-banner"
+          data-lease-state={lease.state}
+        >
+          {lease.state === "acquiring" ? (
+            <p className="text-xs text-[var(--admin-ink-dim)]">Opening this card for editing…</p>
+          ) : lease.state === "occupied" ? (
+            <>
+              <p className="text-xs text-amber-500">
+                {lease.holderDisplay ? `${lease.holderDisplay} is` : "Another grader is"} working on this card. It is
+                read-only until they finish.
+              </p>
+              {/* Taking a card off a colleague is a deliberate, reasoned, audited act — never a
+                  side effect of opening it. The server checks the permission; this only asks. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  aria-label="Reason for taking over this card"
+                  placeholder="Reason for taking over"
+                  value={takeoverReason}
+                  onChange={(event) => setTakeoverReason(event.target.value)}
+                  className="min-w-[16rem] rounded border border-[var(--admin-line)] bg-[var(--admin-bg)] px-2 py-1 text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!takeoverReason.trim()}
+                  onClick={() => void lease.takeover(takeoverReason.trim())}
+                >
+                  Take over
+                </Button>
+              </div>
+            </>
+          ) : lease.state === "lost" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-red-500">{lease.message ?? "Your editing session has ended."}</p>
+              <Button size="sm" onClick={() => void lease.acquire()}>
+                Reopen this card
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-red-500">{lease.message ?? "This card cannot be opened for editing."}</p>
+          )}
+        </section>
+      ) : null}
+
+      <GradingWorkstation
+        mode="partner"
+        apiBase="/api/partner/grading"
+        /*
+         * From origin/main: station capture is now a CAPABILITY SLOT on the canonical workstation
+         * rather than a sibling element. Adopted here so the Partner surface keeps using the one
+         * unified workstation — the whole point of the slot — instead of forking a second layout.
+         */
+        scannerControls={<PartnerCaptureControls certId={card.certId} />}
+        graderMode
+        graderEdit={card.gradingStatus === "pending_review"}
+        gradingEnabled={editable}
+        serviceTier={item.serviceTier}
+        certId={card.certId}
+        certIdStr={card.certIdStr}
+        cardName={card.cardName || ""}
+        cardSet={card.setName || ""}
+        cardNumber={card.cardNumber}
+        cardYear={card.year}
+        cardLanguage={card.language}
+        cardVariant={card.variant}
+        cardGame={card.cardGame || undefined}
+        existingGrade={card.grade}
+        /*
+         * THE LEASE GENERATION TRAVELS WITH EVERY WRITE.
+         *
+         * Read at request-build time, not captured: the server refuses a Card Job write that does not
+         * present the current generation, and it moves on a takeover or an expiry. Connector cards
+         * send nothing, and their guard stays inert.
+         */
+        writeEnvelope={
+          card.lineage === "card_job"
+            ? () => (lease.revision === null ? {} : { leaseRevision: lease.revision })
+            : undefined
+        }
+        onGradeApproved={onFinished}
+        onCertUpdated={() => {}}
+      />
+    </div>
   );
 }
 
@@ -184,42 +363,16 @@ export default function PartnerGradingPage() {
   }, [refresh]);
 
   if (active) {
-    const card = active.card;
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-[var(--admin-bg)] text-[var(--admin-ink)]">
-        <header className="shrink-0 border-b border-[var(--admin-line)] px-3 py-2">
-          <button
-            type="button"
-            onClick={() => setActive(null)}
-            className="text-[var(--admin-gold)] text-xs hover:underline"
-          >
-            Back to partner grading
-          </button>
-        </header>
-        <PartnerCaptureControls certId={card.certId} />
-        <GradingWorkstation
-          mode="partner"
-          apiBase="/api/partner/grading"
-          graderMode
-          graderEdit={card.gradingStatus === "pending_review"}
-          serviceTier={active.item.serviceTier}
-          certId={card.certId}
-          certIdStr={card.certIdStr}
-          cardName={card.cardName || ""}
-          cardSet={card.setName || ""}
-          cardNumber={card.cardNumber}
-          cardYear={card.year}
-          cardLanguage={card.language}
-          cardVariant={card.variant}
-          cardGame={card.cardGame || undefined}
-          existingGrade={card.grade}
-          onGradeApproved={async () => {
-            await refresh();
-            setActive(null);
-          }}
-          onCertUpdated={() => {}}
-        />
-      </div>
+      <PartnerGradingSession
+        item={active.item}
+        card={active.card}
+        onClose={() => setActive(null)}
+        onFinished={async () => {
+          await refresh();
+          setActive(null);
+        }}
+      />
     );
   }
 
@@ -251,22 +404,29 @@ export default function PartnerGradingPage() {
           </Card>
         ) : (
           cards.map(({ item, card }) => {
-            const canGrade = card.gradingStatus === "assigned" && card.assignedToMe;
+            // OPENABILITY COMES FROM THE SERVER. Re-deriving it here is what made every Scanner Card
+            // Job un-openable: its certificate is `unassigned` until a grader takes the lease.
             const canEditSubmitted = card.gradingStatus === "pending_review" && card.gradedByMe;
-            const canOpen = canGrade || canEditSubmitted;
+            // A Card Job shows its OWN lifecycle state; a connector card shows the certificate's.
+            const statusLabel = (card.lineage === "card_job" ? card.cardJobStatus : card.gradingStatus) ?? "unknown";
             return (
-              <Card key={card.certId} data-testid={`partner-grade-card-${card.certId}`}>
+              <Card key={card.certId} data-testid={`partner-grade-card-${card.certId}`} data-lineage={card.lineage}>
                 <CardContent className="p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
-                    <p className="text-xs font-mono text-muted-foreground">{item.submissionRef}</p>
+                    <p className="text-xs font-mono text-muted-foreground">
+                      {item.submissionRef ?? card.mvNumber ?? card.certIdStr}
+                    </p>
                     <p className="font-semibold truncate">{card.cardName || "Unidentified card"}</p>
                     <p className="text-xs text-muted-foreground">
                       {[card.setName, card.cardNumber, card.variant].filter(Boolean).join(" · ")}
                     </p>
+                    {card.heldBy ? (
+                      <p className="text-xs text-amber-500">{card.heldBy} is working on this card</p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge>{card.gradingStatus.replace("_", " ")}</Badge>
-                    <Button disabled={!canOpen} onClick={() => setActive({ item, card })}>
+                    <Badge>{statusLabel.replace(/_/g, " ").toLowerCase()}</Badge>
+                    <Button disabled={!card.openable} onClick={() => setActive({ item, card })}>
                       {canEditSubmitted ? "Edit" : "Open"}
                     </Button>
                   </div>

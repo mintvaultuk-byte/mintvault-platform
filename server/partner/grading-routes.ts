@@ -1,17 +1,30 @@
 /**
- * Partner grading adapter.
+ * Partner grading adapter — ONE workstation, TWO intake lineages.
  *
- * This is deliberately a role/ownership adapter over the existing MVGS certificate
- * workflow. It does not score, publish, create certificates, print labels, settle
- * credits, or duplicate the grader engine. A partner may only grade a certificate
- * that is:
- *   - mapped back to their tenant through partner_connector_imports,
- *   - in their selected/org-wide location scope,
- *   - assigned to their partner user id,
- *   - not already approved or deleted.
+ * This is deliberately a role/ownership adapter over the existing MVGS certificate workflow. It does
+ * not score, publish, create certificates, print labels, or duplicate the grader engine.
+ *
+ * A partner may grade a certificate that is in their selected/org-wide location scope, not already
+ * approved or deleted, and reachable by ONE of two lineages:
+ *
+ *   CARD JOB (canonical — Scanner NEW, P3–P6)
+ *     - owned by a `partner_card_jobs` row in this tenant and location,
+ *     - whose Card Job is in a legal grading state,
+ *     - and, for any WRITE, held under a live grading edit lease at the current revision.
+ *       Deliberately NOT `assigned_grader_id`: Scanner NEW assigns no grader, so requiring one made
+ *       every Scanner Card Job permanently ungradeable. The lease is the assignment authority.
+ *
+ *   CONNECTOR (legacy/imported — preserved unchanged)
+ *     - mapped back to their tenant through partner_connector_imports,
+ *     - and assigned to their partner user id.
+ *
+ * Where a Card Job exists, Card Job lineage is authoritative for that work item. There is no second
+ * queue, no second workstation and no second QA or output system — see card-job-grading-bridge.ts for
+ * the full rationale and the defect this closes.
  */
 import { Router } from "express";
 import type { NextFunction, Response } from "express";
+import rateLimit from "express-rate-limit";
 import type { PoolClient } from "pg";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
@@ -49,6 +62,13 @@ import {
   releaseLease,
   takeoverLease,
 } from "./grading-lease-service";
+import {
+  CardJobGradingError,
+  cardJobErrorStatus,
+  submitCardJobForReview,
+  type PartnerCertLineage,
+} from "./card-job-grading-bridge";
+import { CardJobTransitionError } from "./card-job-lifecycle";
 
 /**
  * Lease failures mapped to statuses a workstation can act on.
@@ -74,7 +94,26 @@ function leaseError(res: import("express").Response, error: unknown): void {
   res.status(500).json({ error: { code: "lease_unavailable", message: "Could not open this card for editing." } });
 }
 
-type PartnerCertAuth = {
+/**
+ * The normalised server authority for ONE Partner work item, whichever road it arrived by.
+ *
+ * ONE SHAPE, TWO LINEAGES — deliberately an extension of the existing type rather than a parallel
+ * grading DTO. A second DTO would mean a second set of call sites, and the two would drift; the
+ * fields that only one lineage can populate are simply nullable, and `lineage` says which is which.
+ *
+ * `card_job`  — Scanner NEW / canonical Partner intake. Identity comes from `partner_card_jobs`;
+ *               there is no connector import and never will be, so `destinationSubmissionId`,
+ *               `submissionRef`, `serviceTier` and `cardIndex` are null.
+ * `connector` — legacy/imported Partner work. Every field is populated exactly as before, and every
+ *               protection on that path is unchanged.
+ */
+export type PartnerCertAuth = {
+  lineage: PartnerCertLineage;
+  /** The Card Job this work item belongs to. Non-null iff lineage is `card_job`. */
+  cardJobId: string | null;
+  /** The Card Job's lifecycle state — the write authority for Card Job lineage. */
+  cardJobStatus: string | null;
+  mvNumber: string | null;
   certId: number;
   certificateNumber: string;
   gradingStatus: string;
@@ -82,8 +121,10 @@ type PartnerCertAuth = {
   gradedBy: string | null;
   tenantId: string;
   locationId: string | null;
+  /** The PARTNER-side submission id. Present on both lineages; the walk-in submission on card_job. */
   partnerSubmissionId: string;
-  destinationSubmissionId: number;
+  /** Connector lineage only — the MintVault destination submission the importer created. */
+  destinationSubmissionId: number | null;
   submissionRef: string | null;
   serviceTier: string | null;
   cardIndex: number | null;
@@ -135,6 +176,95 @@ function expectedReviewRevision(raw: unknown): number | null {
 }
 
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
+
+const partnerGradingEditRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-edit:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many grading edit requests. Please wait a minute and try again." },
+});
+
+// These routes run after the MFA/capability gate, so a per-operator budget
+// limits abusive replay without penalising a partner location that shares an IP.
+// Preview rendering and grade writes are deliberately separate: preview polling
+// must never consume the write budget required to save a legitimate review.
+const partnerGradingReadRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-read:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many grading read requests. Please wait a minute and try again." },
+});
+
+const partnerGradingPreviewRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-grading-preview:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many label preview requests. Please wait a minute and try again." },
+});
+
+/**
+ * May a grading DRAFT be written to this work item right now, by lineage?
+ *
+ * CARD JOB LINEAGE — the CARD JOB's own lifecycle state is the authority, and only GRADING permits a
+ * write. That is deliberately stricter than the connector rule in one respect that matters: a
+ * connector card in `pending_review` may still be edited by whoever submitted it, whereas a Card Job
+ * that has been submitted is in QA_REVIEW and is refused here.
+ *
+ * Refusing is the correct answer for the pilot. QA is 100% Super Admin, and a grader silently
+ * amending a card while a reviewer is looking at it would mean the reviewer approves something other
+ * than what they read. The grader gets the card back through RETURN TO GRADER, which puts the job
+ * back into GRADING with its history preserved — an audited hand-back rather than an invisible edit.
+ *
+ * `certificates.grader_status` is deliberately NOT consulted on this lineage. A Scanner Card Job's
+ * certificate is `unassigned` until a grader takes the lease, so a status gate would refuse the very
+ * first legitimate write. The lease (already proven by `assertMayWriteCertificate`) plus GRADING is
+ * the complete authority.
+ *
+ * CONNECTOR LINEAGE — byte-for-byte the rule that shipped.
+ */
+export function draftEditability(
+  auth: PartnerCertAuth,
+  principal: PartnerPrincipal
+): { ok: true } | { ok: false; status: number; error: string } {
+  if (auth.lineage === "card_job") {
+    if (auth.cardJobStatus !== "GRADING") {
+      return {
+        ok: false,
+        status: 409,
+        error:
+          auth.cardJobStatus === "QA_REVIEW" || auth.cardJobStatus === "SUBMITTED"
+            ? "This card is with Super Admin review and cannot be edited. It must be returned to you first."
+            : `This card is ${auth.cardJobStatus}, so it is not open for editing. Open it for grading first.`,
+      };
+    }
+    return { ok: true };
+  }
+  if (!EDITABLE_STATUSES.has(auth.gradingStatus)) {
+    return { ok: false, status: 409, error: `Card is '${auth.gradingStatus}', not editable` };
+  }
+  if (auth.gradingStatus === "pending_review" && auth.gradedBy && auth.gradedBy !== principal.userId) {
+    return { ok: false, status: 403, error: "Only the partner user who submitted this card can edit it" };
+  }
+  return { ok: true };
+}
+
+/** Map a Card Job bridge/lifecycle failure onto its HTTP answer, or fall through to the generic one. */
+function sendCardJobError(res: Response, err: unknown): boolean {
+  const status = cardJobErrorStatus(err);
+  if (status === null) return false;
+  const error = err as CardJobGradingError | CardJobTransitionError;
+  res.status(status).json({ error: error.message, code: error.code });
+  return true;
+}
 
 function numericId(raw: unknown): number | null {
   const value = String(raw);
@@ -191,11 +321,107 @@ async function requirePartnerGradingEnabled(
   }
 }
 
-async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Promise<PartnerCertAuth | null> {
+/**
+ * CARD JOB LINEAGE — the canonical Partner intake road.
+ *
+ * The tenant AND location predicates are IN THE SQL, not applied afterwards in TypeScript. A job on
+ * another partner's books, or on another shop floor than a location-scoped grader is entitled to,
+ * must never be read at all — so it resolves to "no row", which the caller turns into the same 404 an
+ * absent certificate gets. A distinct refusal would confirm the id is real and belongs to somebody.
+ *
+ * `partner_card_jobs.certificate_id` is uniquely indexed where non-null and immutable once stamped
+ * (0080), so at most one job answers and it cannot drift to another job later.
+ *
+ * The origin columns are re-asserted against the JOB's own tenant/location, which is the Card Job
+ * equivalent of the connector path's provenance check: a certificate whose immutable 0035 origin
+ * snapshot disagrees with the job that owns it is not a card this partner may grade.
+ */
+async function loadPartnerCertByCardJob(principal: PartnerPrincipal, certId: number): Promise<PartnerCertAuth | null> {
+  const scopedLocationId = principal.orgWide ? null : principal.locationId;
+  const { rows } = await withPartnerAdminTransaction((client) =>
+    client.query<PartnerCertAuth>(
+      `SELECT 'card_job'::text AS "lineage",
+              job.id::text AS "cardJobId",
+              job.status AS "cardJobStatus",
+              job.mv_number AS "mvNumber",
+              cert.id AS "certId",
+              cert.certificate_number AS "certificateNumber",
+              cert.grader_status AS "gradingStatus",
+              cert.assigned_grader_id AS "assignedGraderId",
+              cert.graded_by AS "gradedBy",
+              job.tenant_id::text AS "tenantId",
+              job.location_id::text AS "locationId",
+              job.submission_id::text AS "partnerSubmissionId",
+              NULL::int AS "destinationSubmissionId",
+              NULL::text AS "submissionRef",
+              NULL::text AS "serviceTier",
+              NULL::int AS "cardIndex",
+              cert.card_game AS "cardGame",
+              cert.set_name AS "setName",
+              cert.card_name AS "cardName",
+              cert.card_number_display AS "cardNumber",
+              cert.year_text AS "year",
+              cert.language,
+              cert.variant,
+              cert.grade::text,
+              cert.rejection_reason AS "rejectionReason",
+              cert.redo_count::int AS "redoCount",
+              (
+                cert.origin_type = 'PARTNER'
+                AND cert.origin_partner_id = job.tenant_id
+                AND cert.origin_location_id = job.location_id
+              ) AS "provenanceValid"
+         FROM partner_card_jobs job
+         JOIN certificates cert ON cert.id = job.certificate_id
+        WHERE job.certificate_id = $1
+          AND job.tenant_id = $2
+          AND job.cancelled_at IS NULL
+          AND ($3::uuid IS NULL OR job.location_id = $3::uuid)
+          AND cert.deleted_at IS NULL
+          AND cert.origin_type = 'PARTNER'
+          AND cert.origin_partner_id = job.tenant_id
+          AND cert.origin_location_id = job.location_id`,
+      [certId, principal.tenantId, scopedLocationId]
+    )
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Resolve ONE Partner work item, trying Card Job lineage FIRST.
+ *
+ * ORDER MATTERS AND IS THE ARCHITECTURE: where a Card Job exists, Card Job lineage is authoritative
+ * for that work item. The connector query is reached only when no Card Job answers, and it is
+ * unchanged — same five-table JOIN chain, same provenance predicates, same protections. Nothing on
+ * the legacy path is weakened to make the new path work.
+ */
+/*
+ * EXPORTED FOR PROOF, not for reuse. `loadPartnerCert`, `authorizeAssignedPartnerCert`,
+ * `partnerDraftWriteGuard` and `draftEditability` are the four decisions the bridge turns on, and
+ * three of them are SQL that only a real PostgreSQL can evaluate. The hostile bridge suite composes
+ * the guard into the SAME `UPDATE ... WHERE id = ? AND grade_approved_at IS NULL ${guard}` shape
+ * `applyCertGradeDraft` builds, so what is proven is the statement that actually runs — not a
+ * paraphrase of it. Nothing in server/ imports them from here.
+ */
+export async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Promise<PartnerCertAuth | null> {
+  if (!principal.orgWide && !principal.locationId) return null;
+  const cardJob = await loadPartnerCertByCardJob(principal, certId);
+  if (cardJob) return cardJob;
+  return loadPartnerCertByConnector(principal, certId);
+}
+
+async function loadPartnerCertByConnector(
+  principal: PartnerPrincipal,
+  certId: number
+): Promise<PartnerCertAuth | null> {
   if (!principal.orgWide && !principal.locationId) return null;
   const { rows } = await withPartnerAdminTransaction((client) =>
     client.query<PartnerCertAuth>(
-      `SELECT cert.id AS "certId",
+      `SELECT 'connector'::text AS "lineage",
+              NULL::text AS "cardJobId",
+              NULL::text AS "cardJobStatus",
+              NULL::text AS "mvNumber",
+              cert.id AS "certId",
               cert.certificate_number AS "certificateNumber",
               cert.grader_status AS "gradingStatus",
               cert.assigned_grader_id AS "assignedGraderId",
@@ -259,13 +485,36 @@ async function loadPartnerCert(principal: PartnerPrincipal, certId: number): Pro
   return row;
 }
 
-function authorizeAssignedPartnerCert(principal: PartnerPrincipal, auth: PartnerCertAuth | null) {
+/**
+ * READ/LOAD authority for one Partner work item, by lineage.
+ *
+ * CONNECTOR LINEAGE — unchanged. `assigned_grader_id` must equal the caller. That binding is the
+ * legacy path's assignment model and there is no proven defect in it, so it is preserved exactly.
+ *
+ * CARD JOB LINEAGE — the assigned-grader requirement is deliberately NOT applied, and this is the
+ * central change of the bridge. Scanner NEW assigns no grader: a walk-in card is graded by whoever
+ * picks it up next, and there is no step in that flow at which anybody could pre-assign one. Keeping
+ * the check would have made every Scanner Card Job permanently ungradeable — which is exactly the
+ * defect that was found.
+ *
+ * WHAT AUTHORISES A READ INSTEAD. Three facts, all already proven by the time this runs:
+ *   - TENANT and LOCATION — enforced in `loadPartnerCertByCardJob`'s SQL, so a job outside the
+ *     caller's scope produced no row and `auth` is null here;
+ *   - PERMISSION — `requirePartnerCapability("partner.cards.assess")` on every route below, which
+ *     SCANNER_OPERATOR (cards.scan + cards.view, never cards.assess) does not hold;
+ *   - SESSION — `requirePartnerAuth`, plus the view-only/frozen guards on the write routes.
+ *
+ * WRITES need strictly more than this — a live edit lease, the current lease revision and a Card Job
+ * in GRADING. That is `assertMayWriteCertificate` plus `partnerDraftWriteGuard`, not this function.
+ * This gate answers "may you LOOK at this card", and being able to look is not being able to write.
+ */
+export function authorizeAssignedPartnerCert(principal: PartnerPrincipal, auth: PartnerCertAuth | null) {
   if (!auth) return { ok: false as const, status: 404, error: "Not found" };
-  if (auth.assignedGraderId !== principal.userId) {
-    return { ok: false as const, status: 403, error: "This card is not assigned to you" };
-  }
   if (auth.gradingStatus === "approved") {
     return { ok: false as const, status: 403, error: "This card is already approved" };
+  }
+  if (auth.lineage === "connector" && auth.assignedGraderId !== principal.userId) {
+    return { ok: false as const, status: 403, error: "This card is not assigned to you" };
   }
   return { ok: true as const, auth };
 }
@@ -289,7 +538,57 @@ export async function authorizePartnerScannerCertificate(
   return authorised.ok ? authorised.auth : null;
 }
 
-function partnerDraftWriteGuard(principal: PartnerPrincipal) {
+/**
+ * The SQL that must match for a Partner grading draft write to land, by lineage.
+ *
+ * WHY THIS FUNCTION IS THE DEFECT'S EPICENTRE. `applyCertGradeDraft` appends this to its own
+ * `WHERE id = ... AND grade_approved_at IS NULL`, and a zero-row UPDATE is reported to the operator as
+ * "Card status changed; refresh and try again". For a Scanner Card Job the connector EXISTS chain
+ * below matches NOTHING — not because the status changed, but because the card has no connector
+ * lineage and never will. So the honest answer ("this card cannot be graded through the connector
+ * path") arrived as a misleading one that invited the grader to refresh for ever.
+ *
+ * SWITCHED ON THE RESOLVED LINEAGE, not OR-ed across both. Both arms would also work, but OR-ing them
+ * means a connector card gets a second chance to match through the Card Job arm and vice versa — a
+ * strictly wider guard than either lineage needs. The lineage is already known for certain by the
+ * time a write is attempted (the loader resolved it), so each write is held to exactly its own
+ * lineage's rules. The connector arm below is byte-for-byte the guard that shipped.
+ */
+export function partnerDraftWriteGuard(principal: PartnerPrincipal, auth: PartnerCertAuth) {
+  if (auth.lineage === "card_job") {
+    /*
+     * CARD JOB ARM.
+     *
+     * NO `assigned_grader_id` PREDICATE, deliberately — see authorizeAssignedPartnerCert. What
+     * replaces it is stronger, because it is a live, expiring, uniquely-indexed lease rather than a
+     * column comparison:
+     *
+     *   - `assertMayWriteCertificate` has ALREADY run before this SQL is built. It proved the caller
+     *     holds the lease on this exact Card Job, that the lease has not expired, and that the
+     *     revision they presented is current — then bumped it, so this write cannot be replayed.
+     *   - `job.status = 'GRADING'` is asserted HERE, in the UPDATE itself. A card that has been
+     *     submitted, sent to FIX, cancelled or returned to the shop floor between the authorisation
+     *     and the write matches no row and the write is refused.
+     *   - tenant and location are re-asserted in the UPDATE rather than trusted from the load, so a
+     *     scoped grader cannot write to another floor's job even if the loader were ever relaxed.
+     */
+    return sql`
+      AND deleted_at IS NULL
+      AND EXISTS (
+        SELECT 1
+          FROM partner_card_jobs job
+         WHERE job.certificate_id = certificates.id
+           AND job.id = ${auth.cardJobId}::uuid
+           AND job.tenant_id = ${principal.tenantId}::uuid
+           AND job.cancelled_at IS NULL
+           AND job.status = 'GRADING'
+           AND (${principal.orgWide} OR job.location_id = ${principal.locationId}::uuid)
+           AND certificates.origin_type = 'PARTNER'
+           AND certificates.origin_partner_id = job.tenant_id
+           AND certificates.origin_location_id = job.location_id
+      )
+    `;
+  }
   return sql`
     AND assigned_grader_id = ${principal.userId}
     AND deleted_at IS NULL
@@ -392,13 +691,28 @@ export async function partnerCardImagesForCardIndex(
 }
 
 async function partnerImageFallback(auth: PartnerCertAuth): Promise<Record<string, string | null>> {
-  if (!auth.cardIndex) return {};
+  /*
+   * CARD JOB LINEAGE HAS NO INTAKE-PHOTO FALLBACK, and must not fabricate one.
+   *
+   * This fallback exists so a connector-imported card can show the photographs the shop uploaded at
+   * intake while an operator prepares the target. A walk-in card has no intake stage at all — its
+   * `partner_submission_cards` row is created by Scanner NEW with no image keys — so there is nothing
+   * to fall back TO. `cardIndex` and `destinationSubmissionId` are both null on this lineage, which
+   * would make the reconstruction below meaningless rather than merely empty.
+   *
+   * The only images a Card Job ever shows are its own accepted scanner masters, which is the
+   * stricter of the two behaviours.
+   */
+  if (auth.lineage === "card_job") return {};
+  const destinationSubmissionId = auth.destinationSubmissionId;
+  const cardIndex = auth.cardIndex;
+  if (!cardIndex || destinationSubmissionId === null) return {};
   const row = await withPartnerAdminTransaction((client) =>
     partnerCardImagesForCardIndex(client, {
       tenantId: auth.tenantId,
       partnerSubmissionId: auth.partnerSubmissionId,
-      destinationSubmissionId: auth.destinationSubmissionId,
-      cardIndex: auth.cardIndex as number,
+      destinationSubmissionId,
+      cardIndex,
     })
   );
   if (!row) return {};
@@ -468,8 +782,15 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
 
 export function partnerGradingRouter(): Router {
   const r = Router();
-  r.use(requirePartnerAuth);
-  r.use(requirePartnerGradingEnabled);
+  // BOTH gates are /grading-scoped (AT-23 mount-order defect, 2026-08-14). This router is mounted
+  // BEFORE the station router, and a pathless requirePartnerAuth ran for every request that fell
+  // through the earlier routers — so a signed-station request (Ed25519 headers, deliberately no
+  // session cookie) was 401-rejected here and could never reach the station router at all. Every
+  // route this router owns is under /grading, so the scoped guard protects exactly the same
+  // surface; everything else falls through to the next router, each of which carries its own
+  // guards. Same reasoning as the grading kill switch below, and as the catalogue router's guard.
+  r.use("/grading", requirePartnerAuth);
+  r.use("/grading", requirePartnerGradingEnabled);
 
   r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
     res.json({ authenticated: true, userId: req.partner!.userId });
@@ -558,26 +879,156 @@ export function partnerGradingRouter(): Router {
     }
   );
 
+  /* ------------------------------------------------------------------------------------------
+   * THE ONE PARTNER GRADING QUEUE.
+   *
+   * Two lineages, ONE normalised result. There is no second queue and no Dashboard V2: a Scanner
+   * Card Job and a legacy connector-imported card arrive in the same list, in the same shape, and
+   * open the same workstation.
+   *
+   * WHY THE OPENABILITY DECISION IS MADE HERE. The browser used to derive it —
+   * `gradingStatus === "assigned" && assignedToMe`. A Card Job's certificate is `unassigned` until a
+   * grader takes the lease, so that rule renders every Scanner card permanently un-openable, and
+   * "teach the browser the second rule too" would put grading authority in browser state. The server
+   * decides; the client renders what it is told.
+   *
+   * DEDUPLICATION. A certificate could in principle be reachable by BOTH lineages (a historical
+   * import that also acquired a Card Job). Card Job lineage wins, per the locked architecture, and
+   * the card appears exactly once.
+   * ---------------------------------------------------------------------------------------- */
   r.get("/grading/queue", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
     try {
       const principal = req.partner!;
       if (!principal.orgWide && !principal.locationId) return res.json({ items: [] });
-      const params: unknown[] = [principal.tenantId, principal.userId];
-      let locationWhere = "";
-      if (!principal.orgWide && principal.locationId) {
-        params.push(principal.locationId);
-        locationWhere = `AND pci.partner_location_id = $${params.length}`;
-      }
-      const { rows } = await withPartnerAdminTransaction((client) =>
-        client.query(
-          `SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str,
+      const scopedLocationId = principal.orgWide ? null : principal.locationId;
+
+      /*
+       * READY TO GRADE IS A PHYSICAL-CAPTURE STATE, not merely a lifecycle/assignment state.
+       *
+       * Each side must be the CURRENT immutable TIFF master accepted by a terminal capture session on
+       * an ACTIVE station in this exact Partner location. Asserted in SQL on BOTH lineages rather than
+       * trusted from a browser transition or from the Card Job's status alone, so a guessed
+       * certificate id can never make an uncaptured card appear in the operational queue — and so the
+       * queue stays honest even if a lifecycle transition were ever driven incorrectly.
+       */
+      const capturedSide = (side: "front" | "back", tenantExpr: string, locationExpr: string) => `
+              AND EXISTS (
+                SELECT 1
+                  FROM certificate_image_evidence evidence
+                  JOIN scanner_capture_sessions session
+                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
+                   AND session.certificate_id = evidence.certificate_id
+                   AND session.side = evidence.side
+                   AND session.state = 'captured'
+                  JOIN partner_stations station
+                    ON station.id = session.station_id
+                   AND station.status = 'ACTIVE'
+                   AND station.tenant_id = ${tenantExpr}
+                   AND station.location_id = ${locationExpr}
+                 WHERE evidence.certificate_id = cert.id
+                   AND evidence.side = '${side}'
+                   AND evidence.is_current = true
+                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
+                   AND evidence.format = 'tiff'
+              )`;
+
+      type QueueRow = {
+        lineage: PartnerCertLineage;
+        card_job_id: string | null;
+        card_job_status: string | null;
+        mv_number: string | null;
+        cert_id: number;
+        cert_id_str: string;
+        grader_status: string;
+        rejection_reason: string | null;
+        redo_count: number;
+        card_game: string | null;
+        set_name: string | null;
+        card_name: string | null;
+        card_number: string | null;
+        year: string | null;
+        language: string | null;
+        variant: string | null;
+        grade: string | null;
+        graded_by: string | null;
+        assigned_grader_id: string | null;
+        lease_holder: string | null;
+        lease_holder_display: string | null;
+        submission_id: number | null;
+        submission_ref: string | null;
+        service_tier: string | null;
+        group_key: string;
+      };
+
+      const { cardJobRows, connectorRows } = await withPartnerAdminTransaction(async (client) => {
+        /* ---- CARD JOB LINEAGE (canonical) ------------------------------------------------------
+         * Scoped by tenant AND location in the SQL itself. The live lease is joined so the response
+         * can say who is holding a card WITHOUT the client comparing user ids, and without leaking
+         * an email or a user id for somebody else's card — only a display name the shop already
+         * shows its own staff.
+         */
+        const cardJob = await client.query<QueueRow>(
+          `SELECT 'card_job'::text AS lineage,
+                  job.id::text AS card_job_id,
+                  job.status AS card_job_status,
+                  job.mv_number,
+                  cert.id AS cert_id, cert.certificate_number AS cert_id_str,
                   cert.grader_status, cert.rejection_reason, cert.redo_count,
                   cert.card_game, cert.set_name, cert.card_name,
                   cert.card_number_display AS card_number, cert.year_text AS year,
                   cert.language, cert.variant, cert.grade::text, cert.graded_by,
+                  cert.assigned_grader_id,
+                  lease.holder_user_id::text AS lease_holder,
+                  lease.holder_display AS lease_holder_display,
+                  NULL::int AS submission_id,
+                  job.mv_number AS submission_ref,
+                  NULL::text AS service_tier,
+                  'card-job:' || job.id::text AS group_key
+             FROM partner_card_jobs job
+             JOIN certificates cert ON cert.id = job.certificate_id
+             LEFT JOIN partner_grading_leases lease
+               ON lease.tenant_id = job.tenant_id
+              AND lease.card_job_id = job.id
+              AND lease.released_at IS NULL
+              AND lease.expires_at > now()
+            WHERE job.tenant_id = $1
+              AND job.cancelled_at IS NULL
+              AND job.status IN ('READY_TO_GRADE', 'GRADING')
+              AND ($2::uuid IS NULL OR job.location_id = $2::uuid)
+              AND cert.deleted_at IS NULL
+              AND cert.origin_type = 'PARTNER'
+              AND cert.origin_partner_id = job.tenant_id
+              AND cert.origin_location_id = job.location_id
+              ${capturedSide("front", "job.tenant_id", "job.location_id")}
+              ${capturedSide("back", "job.tenant_id", "job.location_id")}
+            ORDER BY job.updated_at DESC, job.id DESC`,
+          [principal.tenantId, scopedLocationId]
+        );
+
+        /* ---- CONNECTOR LINEAGE (legacy) — the query that shipped, unchanged ------------------- */
+        const params: unknown[] = [principal.tenantId, principal.userId];
+        let locationWhere = "";
+        if (!principal.orgWide && principal.locationId) {
+          params.push(principal.locationId);
+          locationWhere = `AND pci.partner_location_id = $${params.length}`;
+        }
+        const connector = await client.query<QueueRow>(
+          `SELECT 'connector'::text AS lineage,
+                  NULL::text AS card_job_id,
+                  NULL::text AS card_job_status,
+                  NULL::text AS mv_number,
+                  cert.id AS cert_id, cert.certificate_number AS cert_id_str,
+                  cert.grader_status, cert.rejection_reason, cert.redo_count,
+                  cert.card_game, cert.set_name, cert.card_name,
+                  cert.card_number_display AS card_number, cert.year_text AS year,
+                  cert.language, cert.variant, cert.grade::text, cert.graded_by,
+                  cert.assigned_grader_id,
+                  NULL::text AS lease_holder,
+                  NULL::text AS lease_holder_display,
                   pci.destination_submission_id AS submission_id,
                   s.tracking_number AS submission_ref,
-                  s.service_tier
+                  s.service_tier,
+                  'submission:' || pci.destination_submission_id::text AS group_key
              FROM certificates cert
              LEFT JOIN cards c ON c.id = cert.card_id
              LEFT JOIN submission_items si ON si.id = cert.submission_item_id
@@ -606,68 +1057,59 @@ export function partnerGradingRouter(): Router {
               AND cert.origin_type = 'PARTNER'
               AND cert.origin_partner_id = pci.partner_organisation_id
               AND cert.origin_location_id = pci.partner_location_id
-              -- Ready to Grade is a physical-capture state, not merely a
-              -- connector-import/assignment state.  Each side must be the
-              -- current immutable TIFF accepted by a terminal session on an
-              -- active station in this exact Partner location.  Keep this
-              -- predicate here (rather than trusting a browser transition) so
-              -- a guessed certificate ID can never make an uncaptured card
-              -- appear in the operational queue.
-              AND EXISTS (
-                SELECT 1
-                  FROM certificate_image_evidence evidence
-                  JOIN scanner_capture_sessions session
-                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
-                   AND session.certificate_id = evidence.certificate_id
-                   AND session.side = evidence.side
-                   AND session.state = 'captured'
-                  JOIN partner_stations station
-                    ON station.id = session.station_id
-                   AND station.status = 'ACTIVE'
-                   AND station.tenant_id = pci.partner_organisation_id
-                   AND station.location_id = pci.partner_location_id
-                 WHERE evidence.certificate_id = cert.id
-                   AND evidence.side = 'front'
-                   AND evidence.is_current = true
-                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
-                   AND evidence.format = 'tiff'
-              )
-              AND EXISTS (
-                SELECT 1
-                  FROM certificate_image_evidence evidence
-                  JOIN scanner_capture_sessions session
-                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
-                   AND session.certificate_id = evidence.certificate_id
-                   AND session.side = evidence.side
-                   AND session.state = 'captured'
-                  JOIN partner_stations station
-                    ON station.id = session.station_id
-                   AND station.status = 'ACTIVE'
-                   AND station.tenant_id = pci.partner_organisation_id
-                   AND station.location_id = pci.partner_location_id
-                 WHERE evidence.certificate_id = cert.id
-                   AND evidence.side = 'back'
-                   AND evidence.is_current = true
-                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
-                   AND evidence.format = 'tiff'
-              )
+              ${capturedSide("front", "pci.partner_organisation_id", "pci.partner_location_id")}
+              ${capturedSide("back", "pci.partner_organisation_id", "pci.partner_location_id")}
               ${locationWhere}
             ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC`,
           params
-        )
-      );
-      const bySub = new Map<string, any>();
-      for (const row of rows as any[]) {
-        const key = String(row.submission_id);
-        if (!bySub.has(key)) {
-          bySub.set(key, {
-            submissionId: Number(row.submission_id),
+        );
+        return { cardJobRows: cardJob.rows, connectorRows: connector.rows };
+      });
+
+      /*
+       * CARD JOB LINEAGE WINS on any certificate both queries can resolve, so the same physical card
+       * is never offered twice under two different sets of rules.
+       */
+      const seen = new Set(cardJobRows.map((row) => Number(row.cert_id)));
+      const rows = [...cardJobRows, ...connectorRows.filter((row) => !seen.has(Number(row.cert_id)))];
+
+      const byGroup = new Map<string, Record<string, unknown>>();
+      for (const row of rows) {
+        const heldByMe = row.lease_holder !== null && row.lease_holder === principal.userId;
+        const heldByAnother = row.lease_holder !== null && row.lease_holder !== principal.userId;
+        const gradedByMe = String(row.graded_by ?? "") === principal.userId;
+        const assignedToMe = String(row.assigned_grader_id ?? "") === principal.userId;
+
+        /*
+         * SERVER-DERIVED OPENABILITY.
+         *
+         * card_job  — READY_TO_GRADE is open to any grader with the permission (the lease decides who
+         *             actually gets it, atomically, when they try). GRADING is open only to the
+         *             holder, or to anyone if the lease has lapsed — reopening then is legitimate and
+         *             the acquire will either succeed or tell them who holds it.
+         * connector — exactly the rule the client used to apply, unchanged, now computed here.
+         */
+        const openable =
+          row.lineage === "card_job"
+            ? row.card_job_status === "READY_TO_GRADE" || (row.card_job_status === "GRADING" && !heldByAnother)
+            : (row.grader_status === "assigned" && assignedToMe) ||
+              (row.grader_status === "pending_review" && gradedByMe);
+
+        if (!byGroup.has(row.group_key)) {
+          byGroup.set(row.group_key, {
+            groupKey: row.group_key,
+            lineage: row.lineage,
+            submissionId: row.submission_id === null ? null : Number(row.submission_id),
             submissionRef: row.submission_ref,
             serviceTier: row.service_tier ?? null,
-            cards: [],
+            cards: [] as unknown[],
           });
         }
-        bySub.get(key).cards.push({
+        (byGroup.get(row.group_key)!.cards as unknown[]).push({
+          lineage: row.lineage,
+          cardJobId: row.card_job_id,
+          cardJobStatus: row.card_job_status,
+          mvNumber: row.mv_number,
           certId: Number(row.cert_id),
           certIdStr: row.cert_id_str,
           cardGame: row.card_game ?? null,
@@ -681,142 +1123,157 @@ export function partnerGradingRouter(): Router {
           gradingStatus: row.grader_status,
           rejectionReason: row.rejection_reason ?? null,
           redoCount: Number(row.redo_count ?? 0),
-          assignedToMe: true,
-          gradedByMe: String(row.graded_by ?? "") === principal.userId,
+          assignedToMe: row.lineage === "card_job" ? heldByMe : assignedToMe,
+          gradedByMe,
+          openable,
+          // A display name the shop already shows its own staff — never an email or a user id.
+          heldBy: heldByAnother ? (row.lease_holder_display ?? "Another grader") : null,
         });
       }
-      res.json({ items: Array.from(bySub.values()) });
+      res.json({ items: Array.from(byGroup.values()) });
     } catch (err) {
       sendPartnerGradingError(res, err);
     }
   });
 
-  r.get("/grading/certificates/:id/images", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
-    try {
-      const certId = numericId(req.params.id);
-      if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-      const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      res.json(await imagesForPartnerCert(auth.auth));
-    } catch (err) {
-      sendPartnerGradingError(res, err);
-    }
-  });
-
-  r.get("/grading/certificates/:id/grading", requirePartnerCapability("partner.cards.assess"), async (req, res) => {
-    try {
-      const certId = numericId(req.params.id);
-      if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-      const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      const payload = await buildCertGradingPayload(certId);
-      if (!payload) return res.status(404).json({ error: "Not found" });
-      res.json(stripGraderPii(payload));
-    } catch (err) {
-      sendPartnerGradingError(res, err);
-    }
-  });
-
-  r.post("/grading/certificates/label/preview", requirePartnerCapability("partner.cards.preview"), async (req, res) => {
-    try {
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const certId = numericId(body.certificateId ?? body.id);
-      if (!certId) return res.status(400).json({ error: "Valid certificateId required" });
-
-      // This is the same tenant/location/provenance lookup and per-user
-      // assignment check used by every other Partner grading read/write.
-      const candidate = await loadPartnerCert(req.partner!, certId);
-      const access = authorizePartnerLabelPreview(req.partner!, candidate);
-      if (!access.ok) return res.status(access.status).json({ error: access.error });
-      const auth = authorizeAssignedPartnerCert(req.partner!, candidate);
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      const partnerBlocks = await getPartnerPrintEligibilityBlocks([auth.auth.certificateNumber]);
-      if (partnerBlocks.length > 0) {
-        return res.status(409).json({ error: partnerBlocks[0].message, code: partnerBlocks[0].code });
-      }
-
-      const saved = await storage.getCertificate(certId);
-      if (!saved) return res.status(404).json({ error: "Not found" });
-      const expected = expectedReviewRevision(body.expectedRevision);
-      if (expected == null) {
-        return res.status(400).json({ error: "A valid expectedRevision is required for certificate preview" });
-      }
-      const actual = Number((saved as CertificateRecord).gradingRevision);
-      if (!Number.isSafeInteger(actual) || actual < 1) {
-        return res.status(500).json({ error: "Certificate has an invalid grading revision" });
-      }
-      if (actual !== expected) {
-        return res.status(409).json({
-          code: "STALE_REVIEW",
-          error: "This card changed after the saved review. Refresh the saved review before approving.",
-        });
-      }
-      const cert = await buildLabelPreviewCertificate(saved as CertificateRecord, body);
-      const verdict = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
-      if (!verdict.printable) {
-        return res.status(422).json({
-          error:
-            verdict.reason === "missing_numeric_grade"
-              ? "Not graded yet — the preview appears once a grade is set."
-              : (verdict.message ?? "This certificate's grade cannot be previewed yet."),
-          code: "UNPRINTABLE_GRADE",
-          reason: verdict.reason,
-        });
-      }
-
-      const png = await generateLabelPreviewPNG(cert);
-      // Detect a mutation that raced the render itself. A pre-render revision
-      // comparison alone would otherwise acknowledge stale pixels as ready.
-      const current = await storage.getCertificate(certId);
-      const currentRevision = Number((current as CertificateRecord | undefined)?.gradingRevision);
-      if (currentRevision !== expected) {
-        return res.status(409).json({
-          code: "STALE_REVIEW",
-          error:
-            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
-        });
-      }
-      res.setHeader("Content-Type", "image/png");
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("X-MintVault-Review-Revision", String(actual));
-      res.setHeader("Access-Control-Expose-Headers", "X-MintVault-Review-Revision");
-      return res.send(png);
-    } catch (err) {
-      if (err instanceof UnprintableGradeError) {
-        return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", reason: err.reason });
-      }
-      sendPartnerGradingError(res, err);
-    }
-  });
-
-  r.put(
-    "/grading/certificates/:id/grade",
+  r.get(
+    "/grading/certificates/:id/images",
     requirePartnerCapability("partner.cards.assess"),
-    requireNotViewOnly,
-    requireNotSensitiveFrozen,
+    partnerGradingReadRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);
         if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
         const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-        if (!EDITABLE_STATUSES.has(auth.auth.gradingStatus)) {
-          return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not editable` });
+        res.json(await imagesForPartnerCert(auth.auth));
+      } catch (err) {
+        sendPartnerGradingError(res, err);
+      }
+    }
+  );
+
+  r.get(
+    "/grading/certificates/:id/grading",
+    requirePartnerCapability("partner.cards.assess"),
+    partnerGradingReadRateLimit,
+    async (req, res) => {
+      try {
+        const certId = numericId(req.params.id);
+        if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        const payload = await buildCertGradingPayload(certId);
+        if (!payload) return res.status(404).json({ error: "Not found" });
+        res.json(stripGraderPii(payload));
+      } catch (err) {
+        sendPartnerGradingError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/grading/certificates/label/preview",
+    requirePartnerCapability("partner.cards.preview"),
+    partnerGradingPreviewRateLimit,
+    async (req, res) => {
+      try {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const certId = numericId(body.certificateId ?? body.id);
+        if (!certId) return res.status(400).json({ error: "Valid certificateId required" });
+
+        // This is the same tenant/location/provenance lookup and per-user
+        // assignment check used by every other Partner grading read/write.
+        const candidate = await loadPartnerCert(req.partner!, certId);
+        const access = authorizePartnerLabelPreview(req.partner!, candidate);
+        if (!access.ok) return res.status(access.status).json({ error: access.error });
+        const auth = authorizeAssignedPartnerCert(req.partner!, candidate);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        const partnerBlocks = await getPartnerPrintEligibilityBlocks([auth.auth.certificateNumber]);
+        if (partnerBlocks.length > 0) {
+          return res.status(409).json({ error: partnerBlocks[0].message, code: partnerBlocks[0].code });
         }
-        if (
-          auth.auth.gradingStatus === "pending_review" &&
-          auth.auth.gradedBy &&
-          auth.auth.gradedBy !== req.partner!.userId
-        ) {
-          return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
+
+        const saved = await storage.getCertificate(certId);
+        if (!saved) return res.status(404).json({ error: "Not found" });
+        const expected = expectedReviewRevision(body.expectedRevision);
+        if (expected == null) {
+          return res.status(400).json({ error: "A valid expectedRevision is required for certificate preview" });
         }
+        const actual = Number((saved as CertificateRecord).gradingRevision);
+        if (!Number.isSafeInteger(actual) || actual < 1) {
+          return res.status(500).json({ error: "Certificate has an invalid grading revision" });
+        }
+        if (actual !== expected) {
+          return res.status(409).json({
+            code: "STALE_REVIEW",
+            error: "This card changed after the saved review. Refresh the saved review before approving.",
+          });
+        }
+        const cert = await buildLabelPreviewCertificate(saved as CertificateRecord, body);
+        const verdict = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
+        if (!verdict.printable) {
+          return res.status(422).json({
+            error:
+              verdict.reason === "missing_numeric_grade"
+                ? "Not graded yet — the preview appears once a grade is set."
+                : (verdict.message ?? "This certificate's grade cannot be previewed yet."),
+            code: "UNPRINTABLE_GRADE",
+            reason: verdict.reason,
+          });
+        }
+
+        const png = await generateLabelPreviewPNG(cert);
+        // Detect a mutation that raced the render itself. A pre-render revision
+        // comparison alone would otherwise acknowledge stale pixels as ready.
+        const current = await storage.getCertificate(certId);
+        const currentRevision = Number((current as CertificateRecord | undefined)?.gradingRevision);
+        if (currentRevision !== expected) {
+          return res.status(409).json({
+            code: "STALE_REVIEW",
+            error:
+              "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          });
+        }
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("X-MintVault-Review-Revision", String(actual));
+        res.setHeader("Access-Control-Expose-Headers", "X-MintVault-Review-Revision");
+        return res.send(png);
+      } catch (err) {
+        if (err instanceof UnprintableGradeError) {
+          return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", reason: err.reason });
+        }
+        sendPartnerGradingError(res, err);
+      }
+    }
+  );
+
+  r.put(
+    "/grading/certificates/:id/grade",
+    requirePartnerCapability("partner.cards.assess"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
+    async (req, res) => {
+      try {
+        const certId = numericId(req.params.id);
+        if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        const editable = draftEditability(auth.auth, req.partner!);
+        if (!editable.ok) return res.status(editable.status).json({ error: editable.error });
         let leaseRevision: number | null;
         try {
           leaseRevision = await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
         } catch (leaseFailure) {
           return leaseError(res, leaseFailure);
         }
-        const saved = await applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!));
+        const saved = await applyCertGradeDraft(
+          certId,
+          req.body || {},
+          partnerDraftWriteGuard(req.partner!, auth.auth)
+        );
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         await auditInOwnTxn({
           tenantId: req.partner!.tenantId,
@@ -844,36 +1301,118 @@ export function partnerGradingRouter(): Router {
     }
   );
 
+  /* ------------------------------------------------------------------------------------------
+   * SUBMIT — the edge past which a grade is a submitted assessment.
+   *
+   * CARD JOB LINEAGE goes through `submitCardJobForReview`, which commits the lifecycle transition,
+   * the certificate hand-off to QA and the Grading Credit settlement in ONE transaction. Migration
+   * 0080 names SUBMITTED "credit consumed exactly once at this edge"; nothing implemented that until
+   * now, because the only settlement path in the repository is keyed on a connector destination
+   * submission a walk-in card does not have.
+   *
+   * CONNECTOR LINEAGE keeps the statement that shipped, unchanged — including its assigned-grader and
+   * connector-mapping predicates.
+   * ---------------------------------------------------------------------------------------- */
   r.post(
     "/grading/certificates/:id/submit",
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);
         if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
         const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-        if (auth.auth.gradingStatus !== "assigned") {
+
+        /*
+         * SUBMITTABILITY, by lineage.
+         *
+         * card_job  — the CARD JOB must be in GRADING, i.e. somebody opened it and holds the lease.
+         *             A job already SUBMITTED/QA_REVIEW is not refused here: it falls through to the
+         *             bridge, which answers it as an idempotent REPLAY rather than a second submit.
+         * connector — `grader_status = 'assigned'`, exactly as before.
+         */
+        if (auth.auth.lineage === "card_job") {
+          const submittable =
+            auth.auth.cardJobStatus === "GRADING" ||
+            auth.auth.cardJobStatus === "SUBMITTED" ||
+            auth.auth.cardJobStatus === "QA_REVIEW";
+          if (!submittable) {
+            return res
+              .status(409)
+              .json({ error: `This card is ${auth.auth.cardJobStatus}, so it cannot be submitted for review.` });
+          }
+        } else if (auth.auth.gradingStatus !== "assigned") {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not submittable` });
         }
+
         if (!(await requireBothImages(auth.auth))) {
           return res
             .status(409)
             .json({ error: "Capture front and back on the approved station before submitting grades." });
         }
-        // SUBMIT is a write like any other, and the most consequential one — it is the edge past
-        // which the grade is a submitted assessment. A stale editor must be refused HERE, not merely
-        // on the incremental saves that preceded it.
+
+        /*
+         * A REPLAY MUST NOT BE REFUSED BY THE LEASE.
+         *
+         * On a genuine retry the first attempt already bumped the lease revision, so presenting the
+         * revision the client still holds would fail STALE_REVISION — turning a safe, idempotent
+         * retry into a dead end for a card that HAS been submitted. So the replay is detected first,
+         * on the locked Card Job row, and answered before the lease is consulted.
+         */
+        if (auth.auth.lineage === "card_job" && auth.auth.cardJobStatus !== "GRADING") {
+          const replay = await submitCardJobForReview(req.partner!, certId);
+          return res.json({
+            ok: true,
+            gradingStatus: "pending_review",
+            reviewRequired: true,
+            lineage: "card_job",
+            cardJobId: replay.cardJobId,
+            cardJobStatus: replay.status,
+            submitted: replay.submitted,
+            creditSettled: replay.creditSettled,
+          });
+        }
+
+        // SUBMIT is a write like any other, and the most consequential one. A stale editor must be
+        // refused HERE, not merely on the incremental saves that preceded it.
         try {
           await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
         } catch (leaseFailure) {
           return leaseError(res, leaseFailure);
         }
         if (req.body && Object.keys(req.body).length) {
-          const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!));
+          const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!, auth.auth));
           if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+
+        if (auth.auth.lineage === "card_job") {
+          let result;
+          try {
+            result = await submitCardJobForReview(req.partner!, certId);
+          } catch (bridgeFailure) {
+            if (sendCardJobError(res, bridgeFailure)) return;
+            throw bridgeFailure;
+          }
+          await storage.writeAuditLog("certificate", String(certId), "partner_grade_submit", req.partner!.userId, {
+            tenant_id: req.partner!.tenantId,
+            partner_card_job_id: result.cardJobId,
+            partner_submission_id: auth.auth.partnerSubmissionId,
+            review_required: true,
+            credit_settled: result.creditSettled,
+          });
+          return res.json({
+            ok: true,
+            gradingStatus: "pending_review",
+            reviewRequired: true,
+            lineage: "card_job",
+            cardJobId: result.cardJobId,
+            cardJobStatus: result.status,
+            submitted: result.submitted,
+            creditSettled: result.creditSettled,
+          });
         }
 
         const submitted = await db.execute(sql`
@@ -944,8 +1483,9 @@ export function partnerGradingRouter(): Router {
           correlationId: auth.auth.partnerSubmissionId,
           after: { gradingStatus: "pending_review", reviewRequired: true },
         });
-        res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
+        res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true, lineage: "connector" });
       } catch (err) {
+        if (sendCardJobError(res, err)) return;
         sendPartnerGradingError(res, err);
       }
     }
@@ -956,12 +1496,32 @@ export function partnerGradingRouter(): Router {
     requirePartnerCapability("partner.cards.assess"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    partnerGradingEditRateLimit,
     async (req, res) => {
       try {
         const certId = numericId(req.params.id);
         if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
         const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        /*
+         * CONNECTOR LINEAGE ONLY, deliberately.
+         *
+         * This route lets the grader who submitted a card amend it while it still sits in
+         * `pending_review` — the legacy path's self-service correction, preserved unchanged.
+         *
+         * A Card Job cannot travel it. Once submitted, a Card Job is in QA_REVIEW, and the pilot is
+         * 100% Super Admin QA: a grader amending the card under review would mean the reviewer
+         * approves something other than what they read. The Card Job correction path is RETURN TO
+         * GRADER, which returns the job to GRADING with its history and revisions preserved and an
+         * audit row saying who returned it and why. Refusing here rather than quietly allowing it is
+         * what keeps that single QA authority real.
+         */
+        if (auth.auth.lineage === "card_job") {
+          return res.status(409).json({
+            code: "CARD_JOB_QA_OWNED",
+            error: "This card is with Super Admin review. It must be returned to you before it can be edited again.",
+          });
+        }
         if (auth.auth.gradingStatus !== "pending_review") {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not editable as submitted` });
         }
@@ -978,7 +1538,11 @@ export function partnerGradingRouter(): Router {
         } catch (leaseFailure) {
           return leaseError(res, leaseFailure);
         }
-        const saved = await applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!));
+        const saved = await applyCertGradeDraft(
+          certId,
+          req.body || {},
+          partnerDraftWriteGuard(req.partner!, auth.auth)
+        );
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         const edited = await db.execute(sql`
           UPDATE certificates SET

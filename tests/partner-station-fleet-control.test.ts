@@ -22,7 +22,7 @@ describe("Super Admin Partner station fleet controls", () => {
   });
 
   it("exposes the distinct reject route behind the existing Super Admin router", () => {
-    expect(routes).toContain('r.use(requireSuperAdmin)');
+    expect(routes).toContain("r.use(requireSuperAdmin)");
     expect(routes).toContain('r.post("/stations/:stationCode/reject"');
     expect(routes).toContain("rejectPendingStation(String(req.params.stationCode), actorId(req), reason)");
     expect(routes).toContain('app.use("/api/super-admin/fleet", partnerStationAdminRouter())');
@@ -33,7 +33,7 @@ describe("Super Admin Partner station fleet controls", () => {
     expect(fleetUi).toContain('data-testid="pm-station-fleet"');
     expect(fleetUi).toContain('station.status === "PENDING"');
     expect(fleetUi).toContain('action: "reject"');
-    expect(fleetUi).toContain('fleetReason.trim().length < 3');
+    expect(fleetUi).toContain("fleetReason.trim().length < 3");
     expect(fleetUi).toContain("credential epoch");
     expect(fleetUi).not.toContain("MINTVAULT_STATION_SECRET");
   });

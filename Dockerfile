@@ -49,6 +49,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/migrations/[0-9][0-9][0-9][0-9]*_*.sql ./migrations/
+# Lineage exclusion declarations — the runner consults these at the identity guard; without
+# them a staging-lineage host fails closed on the three declared collisions.
+COPY --from=builder /app/migrations/lineage-exclusions.json ./migrations/
 
 ENV NODE_ENV=production
 ENV PORT=5000

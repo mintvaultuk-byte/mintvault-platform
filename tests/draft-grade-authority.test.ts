@@ -67,7 +67,10 @@ describe("draft grade authority", () => {
   });
 
   it("preserves a historical authentication-only kind when no replacement finding is submitted", async () => {
-    const authority = await resolveDraftGradeAuthority({ ...pristineObservations, gradeType: "NO", authStatus: null }, {});
+    const authority = await resolveDraftGradeAuthority(
+      { ...pristineObservations, gradeType: "NO", authStatus: null },
+      {}
+    );
     expect(authority).toMatchObject({ overall: "NO", gradeType: "NO", pristine: false });
   });
 

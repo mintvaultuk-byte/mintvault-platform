@@ -133,19 +133,23 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
   // The old workstation used a strict measurement result when all four ratios
   // existed, otherwise its last server-persisted subgrade. Keep that migration
   // behaviour so opening a historical record cannot silently regrade it.
-  const centering = pins.length > 0
-    ? centeringSubgrade(...centeringRatios).subgrade
-    : centeringSubgradeStrict(...centeringRatios)?.subgrade ?? persistedSubgrade(cert.gradeCentering) ?? 10;
-  const corners = pins.length > 0
-    ? remainingToGrade(25 - Math.abs(result.deductions.corners ?? 0))
-    : persistedSubgrade(cert.gradeCorners) ?? selectedZoneMinimum(supplied(body, "corners", cert.cornerValues));
+  const centering =
+    pins.length > 0
+      ? centeringSubgrade(...centeringRatios).subgrade
+      : (centeringSubgradeStrict(...centeringRatios)?.subgrade ?? persistedSubgrade(cert.gradeCentering) ?? 10);
+  const corners =
+    pins.length > 0
+      ? remainingToGrade(25 - Math.abs(result.deductions.corners ?? 0))
+      : (persistedSubgrade(cert.gradeCorners) ?? selectedZoneMinimum(supplied(body, "corners", cert.cornerValues)));
   const pinEdges = remainingToGrade(25 - Math.abs(result.deductions.edges ?? 0));
-  const edges = pins.length > 0
-    ? result.edgesSubgradeFromWhitening == null
-      ? pinEdges
-      : Math.min(pinEdges, result.edgesSubgradeFromWhitening)
-    : persistedSubgrade(cert.gradeEdges) ?? selectedZoneMinimum(supplied(body, "edges", cert.edgeValues));
-  const surfaceGrade = persistedSubgrade(cert.gradeSurface) ?? remainingToGrade(25 - Math.abs(result.deductions.surface ?? 0));
+  const edges =
+    pins.length > 0
+      ? result.edgesSubgradeFromWhitening == null
+        ? pinEdges
+        : Math.min(pinEdges, result.edgesSubgradeFromWhitening)
+      : (persistedSubgrade(cert.gradeEdges) ?? selectedZoneMinimum(supplied(body, "edges", cert.edgeValues)));
+  const surfaceGrade =
+    persistedSubgrade(cert.gradeSurface) ?? remainingToGrade(25 - Math.abs(result.deductions.surface ?? 0));
 
   const authStatus = String(supplied(body, "auth_status", cert.authStatus) || "genuine");
   // Historical records can carry only grade_type, without the newer auth_status
@@ -155,7 +159,9 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
   const resolvedKind =
     authStatus === "authentic_altered" || (body.auth_status === undefined && storedKind === "AA")
       ? "AA"
-      : authStatus === "not_original" || (body.auth_status === undefined && storedKind === "NO") || result.tearForceNotGraded
+      : authStatus === "not_original" ||
+          (body.auth_status === undefined && storedKind === "NO") ||
+          result.tearForceNotGraded
         ? "NO"
         : "numeric";
   if (resolvedKind === "AA") {
@@ -182,9 +188,10 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
   }
 
   const subgrades = { centering, corners, edges, surface: surfaceGrade };
-  const overall = pins.length > 0
-    ? gradeFromMvgsScore(result.score)
-    : legacyOverall(subgrades, Boolean(surface.hasCrease), Boolean(surface.hasTear));
+  const overall =
+    pins.length > 0
+      ? gradeFromMvgsScore(result.score)
+      : legacyOverall(subgrades, Boolean(surface.hasCrease), Boolean(surface.hasTear));
   return {
     overall: String(overall),
     gradeType: "numeric",

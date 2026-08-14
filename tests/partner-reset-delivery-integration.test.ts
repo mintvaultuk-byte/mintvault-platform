@@ -117,8 +117,8 @@ const NEW_PASSWORD = "rotated-partner-password-1";
       [A]
     );
     await admin.query(
-      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash)
-       VALUES ($1,'resetUser',$2,$2,$3,'ACTIVE',$4)`,
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status, password_hash, password_set_at)
+       VALUES ($1,'resetUser',$2,$2,$3,'ACTIVE',$4,now())`,
       [USER, A, USER_EMAIL, await hashPassword(START_PASSWORD)]
     );
     await admin.query(
@@ -242,9 +242,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
 
   it("returns an identical response for unknown and existing accounts, and mints nothing for unknown", async () => {
     delivered = [];
-    const before = await admin.query<{ n: string }>(
-      "SELECT count(*)::text AS n FROM partner_password_reset_tokens"
-    );
+    const before = await admin.query<{ n: string }>("SELECT count(*)::text AS n FROM partner_password_reset_tokens");
 
     const unknown = await post("/auth/password-reset/request", { email: UNKNOWN_EMAIL });
     const known = await post("/auth/password-reset/request", { email: USER_EMAIL });
@@ -254,9 +252,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
     expect(await unknown.json()).toEqual(await known.json());
 
     // Exactly one new token — the known account's. Nothing for the unknown address.
-    const after = await admin.query<{ n: string }>(
-      "SELECT count(*)::text AS n FROM partner_password_reset_tokens"
-    );
+    const after = await admin.query<{ n: string }>("SELECT count(*)::text AS n FROM partner_password_reset_tokens");
     expect(Number(after.rows[0].n) - Number(before.rows[0].n)).toBe(1);
     await deliveredCount(1);
     expect(delivered.map((d) => d.email)).toEqual([USER_EMAIL]);
@@ -265,9 +261,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
   it("stays fail-closed and still generic when no delivery adapter is registered", async () => {
     setResetDeliveryAdapter(null);
     delivered = [];
-    const before = await admin.query<{ n: string }>(
-      "SELECT count(*)::text AS n FROM partner_password_reset_tokens"
-    );
+    const before = await admin.query<{ n: string }>("SELECT count(*)::text AS n FROM partner_password_reset_tokens");
 
     const { resetDeliveryConfigured } = await import("../server/partner/delivery");
     expect(resetDeliveryConfigured()).toBe(false);
@@ -277,9 +271,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
     expect(await res.json()).toEqual({ ok: true });
 
     // No token minted at all — the route short-circuits before createPasswordResetToken.
-    const after = await admin.query<{ n: string }>(
-      "SELECT count(*)::text AS n FROM partner_password_reset_tokens"
-    );
+    const after = await admin.query<{ n: string }>("SELECT count(*)::text AS n FROM partner_password_reset_tokens");
     expect(after.rows[0].n).toBe(before.rows[0].n);
     expect(delivered).toHaveLength(0);
   }, 60_000);

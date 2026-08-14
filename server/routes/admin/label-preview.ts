@@ -120,7 +120,8 @@ async function renderPreview(
       if (currentRevision !== expectedReviewRevision(body.expectedRevision)) {
         res.status(409).json({
           code: "STALE_REVIEW",
-          error: "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          error:
+            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
         });
         return;
       }

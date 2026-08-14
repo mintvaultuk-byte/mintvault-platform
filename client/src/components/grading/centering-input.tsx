@@ -44,9 +44,9 @@ function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: stri
   const bBottom = Math.round(bottom * scale);
 
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex flex-col items-center gap-0.5">
       <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-widest">Front centering</p>
-      <div className="relative w-20 h-28 border border-[var(--admin-line)] rounded bg-[var(--admin-panel2)] flex items-center justify-center">
+      <div className="relative h-24 w-[68px] border border-[var(--admin-line)] rounded bg-[var(--admin-panel2)] flex items-center justify-center">
         <div
           className="absolute rounded-sm"
           style={{
@@ -81,13 +81,7 @@ function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: stri
   );
 }
 
-export default function CenteringInput({
-  frontLR,
-  frontTB,
-  backLR,
-  backTB,
-  subgrade,
-}: Props) {
+export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgrade }: Props) {
   const displayGrade = subgrade;
 
   const fields: { key: "frontLR" | "frontTB" | "backLR" | "backTB"; label: string; value: string }[] = [
@@ -98,7 +92,7 @@ export default function CenteringInput({
   ];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Crosshair size={14} className="text-[var(--admin-gold)]" />
         <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Centering</h3>
@@ -112,7 +106,7 @@ export default function CenteringInput({
                 ONLY from the Card Tool measurement — 100% MVGS auto, no manual
                 entry. */}
             <div
-              className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs font-mono text-[var(--admin-ink)]"
+              className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs font-mono text-[var(--admin-ink)]"
               data-testid={`centering-${f.key}`}
             >
               {f.value || "—"}
@@ -121,11 +115,13 @@ export default function CenteringInput({
         ))}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <CenteringDiagram frontLR={frontLR} frontTB={frontTB} />
         <div className="flex-1">
-          <p className="text-[var(--admin-ink-dim)] text-[10px] mb-1 uppercase tracking-widest">Server-issued subgrade</p>
-          <p className="text-3xl font-black" style={{ color: gradeColor(displayGrade) }}>
+          <p className="text-[var(--admin-ink-dim)] text-[10px] mb-1 uppercase tracking-widest">
+            Server-issued subgrade
+          </p>
+          <p className="text-2xl font-black" style={{ color: gradeColor(displayGrade) }}>
             {displayGrade !== null ? displayGrade : "—"}
           </p>
           <span className="text-[9px] text-[var(--admin-ink-faint)] italic mt-1 block">Issued after save</span>

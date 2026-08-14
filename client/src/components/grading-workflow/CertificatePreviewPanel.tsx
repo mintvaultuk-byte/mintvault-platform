@@ -47,19 +47,6 @@ export interface CertificatePreviewFields {
 export function CertificatePreviewPanel({
   fields,
   endpoint = "/api/admin/certificates/label/preview",
-  /**
-   * Truthfulness of the caption (hostile-review MEDIUM).
-   *
-   * The panel renders CURRENT IN-MEMORY form values, which may not be what is
-   * stored. Saying "this is exactly what will print" is only true once those
-   * values are persisted, so the caption is driven by state rather than
-   * hard-coded:
-   *   • "unsaved"   — there are edits not yet persisted (the default, and the
-   *                   normal state while a grader types).
-   *   • "saved"     — the rendered values match what was last persisted.
-   *   • "conflict"  — a concurrent edit was rejected, so what is on screen is
-   *                   NOT authoritative and must not be presented as such.
-   */
   persistence = "unsaved",
   revision = 0,
   expectedRevision,
@@ -96,6 +83,7 @@ export function CertificatePreviewPanel({
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const urlRef = useRef<string | null>(null);
   const key = JSON.stringify(fields);
 
@@ -180,7 +168,16 @@ export function CertificatePreviewPanel({
       // Without this acknowledgement, the workstation waiter never settles.
       complete(false);
     };
-  }, [endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]);
+  }, [
+    endpoint,
+    expectedRevision,
+    key,
+    requireExpectedRevision,
+    revision,
+    onRevisionComplete,
+    requestTimeoutMs,
+    retryNonce,
+  ]);
 
   // Revoke the last object URL on unmount.
   useEffect(
@@ -191,69 +188,49 @@ export function CertificatePreviewPanel({
   );
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-1.5" data-testid="certificate-preview-panel">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-          Live certificate preview
-        </span>
-        {loading && <span className="text-[10px] text-amber-400">rendering…</span>}
-      </div>
-      {/*
-       * COMPACT, FIXED-ASPECT INSPECTION FRAME (owner repair 2026-08-12).
-       *
-       * The image used to be a bare `w-full` with no ceiling, so in the 40% left
-       * rail it rendered ~500px wide. At the label's real 826x236 ratio that is
-       * ~145px tall before chrome, and because the rail stacks the card on
-       * `flex-1` against this panel on `shrink-0`, every one of those pixels was
-       * taken FROM the card — the preview visually crowded out the thing the
-       * reviewer is actually inspecting.
-       *
-       * Two fixes, both display-only:
-       *   1. `max-w-[360px]` caps it at a thumbnail. This is an inspection
-       *      glance (name / set / grade / cert number / composition), not an
-       *      editing surface, so it does not need rail width.
-       *   2. The frame owns the height via `aspect-[826/236]` and every state
-       *      renders INSIDE it. Previously the empty state was a short line of
-       *      text and the loaded state was a tall image, so the panel jumped and
-       *      shoved the card upward the moment the render arrived.
-       *
-       * 826/236 is read from PX_W/PX_H in server/labels.ts. It is the display
-       * box only — the printed label, its dimensions and its renderer are
-       * untouched.
-       */}
-      <div
-        className="mx-auto grid aspect-[826/236] w-full max-w-[360px] place-items-center overflow-hidden rounded border border-slate-800 bg-slate-950/40"
-        data-testid="certificate-preview-frame"
-      >
-        {error ? (
-          <p className="px-2 text-center text-[11px] text-slate-500">{error}</p>
-        ) : url ? (
-          // The real front slab label (826×236 @300DPI) — read-only, matches print.
-          <img
-            src={url}
-            alt="Front certificate preview"
-            className="h-full w-full bg-white object-contain"
-            data-testid="certificate-preview-image"
-          />
-        ) : (
-          <p className="px-2 text-center text-[11px] text-slate-500">
-            {loading ? "Preparing preview…" : "Preview will appear here."}
+    <div
+      className="mx-auto w-full max-w-[230px]"
+      data-testid="certificate-preview-panel"
+      data-preview-state={error ? "error" : url ? "ready" : loading ? "loading" : "empty"}
+      data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}
+      data-persistence={persistence}
+    >
+      {url ? (
+        /* The real front slab label (826×236 @300DPI), shown as a bare,
+           fixed-ratio visual reference beneath the primary card viewer. */
+        <img
+          src={url}
+          alt="Front certificate preview"
+          width={231}
+          height={66}
+          className="block h-auto w-full object-contain"
+          data-testid="certificate-preview-image"
+        />
+      ) : error ? (
+        <button
+          type="button"
+          className="mx-auto block text-[11px] text-rose-300 underline-offset-2 hover:underline"
+          data-testid="certificate-preview-status"
+          aria-label="Retry certificate preview"
+          onClick={() => {
+            setError(null);
+            setLoading(true);
+            setRetryNonce((nonce) => nonce + 1);
+          }}
+        >
+          Preview unavailable · Retry
+        </button>
+      ) : (
+        loading && (
+          <p
+            className="text-center text-[11px] text-slate-500"
+            data-testid="certificate-preview-status"
+            aria-live="polite"
+          >
+            Preparing preview…
           </p>
-        )}
-      </div>
-      {/* Never claim persisted truth for unsaved state. The panel stays READ-ONLY
-          in every case — it renders an image and persists nothing. */}
-      <p
-        className={`mx-auto mt-1 max-w-[360px] text-[10px] ${persistence === "conflict" ? "text-amber-400" : "text-slate-500"}`}
-        data-testid="certificate-preview-caption"
-        data-persistence={persistence}
-      >
-        {persistence === "saved"
-          ? "Read-only — saved. This is how the certificate will print."
-          : persistence === "conflict"
-            ? "Read-only — NOT saved. This certificate was changed elsewhere; refresh before trusting this preview."
-            : "Live unsaved preview — this is how the current details will print once saved."}
-      </p>
+        )
+      )}
     </div>
   );
 }

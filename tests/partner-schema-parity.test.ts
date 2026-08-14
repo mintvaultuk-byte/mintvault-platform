@@ -168,9 +168,11 @@ describe("partner schema ↔ migration parity", () => {
       // 0077 (partner credential lifecycle hardening) is additive: it adds
       // partner_users.password_set_at, collapses partner_password_reset_tokens to one live
       // link per user (partial unique index), and re-declares partner_auth_lookup() to
-      // project the new column. Production is applied through 0076, so 0077 is the single
-      // outstanding migration for this release.
+      // project the new column. This and the following connector grant are forward-only
+      // migrations; their identities must remain independently pinned.
       "0077_partner_credential_lifecycle_hardening.sql",
+
+      "0078_partner_connector_flag_read.sql",
       // 0078 (shared partner rate-limit buckets) is additive and carries NO tenant data. It supplies
       // the shared store that server/partner/rate-limit.ts has always required but never had: the
       // only implementation was a per-process Map, so on the two-Machine production topology every
@@ -184,7 +186,7 @@ describe("partner schema ↔ migration parity", () => {
       //
       // Safe either side of the deploy: the application probes for the table and falls back to the
       // in-memory store when it is absent, so this may be applied before or after the release.
-      "0078_partner_shared_rate_limit_buckets.sql",
+      // (Pinned at its renumbered position 0089, below.)
       // 0079 (admin password-step lockout) is not a partner migration; this pin covers EVERY
       // numbered migration so any addition is consciously acknowledged. It adds
       // users.password_failed_count / password_locked_until, mirroring the PIN step's long-standing
@@ -244,6 +246,27 @@ describe("partner schema ↔ migration parity", () => {
       // not enforcement — two concurrent acquires interleave between the read and the write.
       // Raw-SQL surface like the other station/scanner tables; deliberately outside Drizzle.
       "0087_partner_grading_edit_lease.sql",
+      // 0088 gives the NFC facility its FIRST migration. Its twelve columns were hand-applied to
+      // production in March 2026 and shared/schema.ts has no index callback at all, so `nfc_uid`
+      // carried no UNIQUE index: "one tag, one certificate" was a read-then-write that two
+      // concurrent binds both pass. Adds a partial unique index on lower(nfc_uid) — lower(), because
+      // the read guard is already case-insensitive while the write is not. Additive; index only.
+      "0088_nfc_binding_integrity.sql",
+      // RENUMBERED 0078 -> 0089 (owner-authorised, 2026-08-14). Concurrent work on origin/main landed
+      // a different migration at 0078 (0078_partner_connector_flag_read.sql), so the release lineage
+      // and main each held a distinct 0078 — the same collision that put two files on 0046. A
+      // read-only journal inspection confirmed NEITHER 0078 was applied on production (highest 0076)
+      // or staging (highest 0073), so the unapplied one was free to move; main's lineage is canonical
+      // and kept the number. Creates one self-contained table, so the later position is order-safe.
+      "0089_partner_shared_rate_limit_buckets.sql",
+      // 0090 is the forward-only convergence for STAGING-lineage hosts (2026-08-14). The absorb of
+      // production v1078 shipped production's immutable scanner trio at 0045/0046/0047 — but
+      // staging's journal holds a DIFFERENT lineage at 0044/0046/0047, so the identity guard
+      // (correctly) refuses those three files there forever. They are excluded per-host via
+      // migrations/lineage-exclusions.json (exact incoming+occupant pairs, fail-closed), and 0090
+      // — the next globally free number — verifies the MFA content and inlines the two idempotent
+      // scanner bodies verbatim, so it is a no-op on production and on fresh estates.
+      "0090_lineage_convergence_scanner.sql",
     ]);
   });
 

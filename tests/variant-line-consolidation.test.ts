@@ -318,8 +318,29 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /\bresolveDraftGradeAuthority\s*\(/.test(addedJs) &&
           /const\s+authority\s*=\s*await\s+resolveDraftGradeAuthority\s*\(/.test(addedJs) &&
           /const\s+overall\s*=\s*authority\.overall\s*;/.test(addedJs);
+        // G) Card Job QA lifecycle hooks — founder-approved 2026-08-14, narrowly, for the ALREADY
+        //    PROVEN additive integration that returns or approves a Partner Card Job through the
+        //    canonical grading/QA flow, and for nothing else.
+        //
+        //    WHY IT WAS NEEDED. The Partner QA hooks previously rode along inside signature C/D/F,
+        //    because the diff against the then-current origin/main still carried the whole Partner
+        //    integration. Once main absorbed that work (PR #297), the remaining delta was just these
+        //    two calls — and this guard correctly refused it, which is the guard doing its job rather
+        //    than a false positive.
+        //
+        //    BOTH identifiers are required, so an incidental edit cannot satisfy it: one names the
+        //    QA_REVIEW -> GRADING return, the other the QA_REVIEW -> APPROVED approval. Both are
+        //    lifecycle transitions on partner_card_jobs; neither reads, writes or derives a grade.
+        //
+        //    THIS AUTHORISES NO MATHS. It does not permit MVGS scoring, centering, weighting,
+        //    thresholds, floors, subgrade logic, pristine/Black Label logic, calibration, or any
+        //    arithmetic. The calculation-token assertion below and the separate "added NO scoring,
+        //    weighting or formula logic" test both still apply to this signature unchanged, so a
+        //    formula bundled alongside these two calls still fails.
+        const signatureG =
+          /\breturnCardJobToGraderForCertificate\b/.test(addedJs) && /\bapproveCardJobForCertificate\b/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
@@ -338,9 +359,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
             .replace(b3Columns, "")
             .replace(authorityOutputFields, "")
             .replace(/'(centering|corners|edges|surface)'/g, "")
-        ).not.toMatch(
-          /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
-        );
+        ).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
         continue;
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);

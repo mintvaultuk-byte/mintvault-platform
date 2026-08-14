@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 import {
   resolvePartnerSession,
   requirePartnerAuth,
@@ -46,6 +47,59 @@ function fixError(res: Response, error: unknown): void {
   }
   stationError(res, error);
 }
+
+const partnerStationReadRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-read:${req.partner?.userId ?? "unknown"}`,
+  message: { error: "Too many station status requests. Please wait a minute and try again." },
+});
+
+const partnerStationHeartbeatRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-heartbeat:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many station heartbeat requests. Please wait a minute and try again." },
+});
+
+const partnerStationCaptureRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) =>
+    `partner-station-capture:${req.partner?.userId ?? "unknown"}|${req.params.stationCode ?? "unknown"}`,
+  message: { error: "Too many station capture requests. Please wait a minute and try again." },
+});
+
+// This deliberately runs before signature/session validation: authentication itself
+// verifies a signed payload and resolves the operator session, so it must be protected
+// from unauthenticated request floods as well as the authenticated write below.
+const partnerStationCalibrationIngressRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
+
+const partnerStationCalibrationRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-calibration:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -188,6 +242,7 @@ export function partnerStationRouter(): Router {
     "/stations/:stationCode/enrolment-status",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationReadRateLimit,
     async (req, res) => {
       try {
         res.json({ station: await getStationEnrollmentStatus(req.partner!, req.params.stationCode) });
@@ -256,7 +311,14 @@ export function partnerStationRouter(): Router {
     }
   });
 
-  r.post("/stations/heartbeat", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+  r.post(
+    "/stations/heartbeat",
+    requireSignedStation,
+    requireSignedStationOperator,
+    // From origin/main: a signed station may still flood its own heartbeat. Keyed per
+    // station id, so one noisy Mac cannot exhaust the budget for the whole fleet.
+    partnerStationHeartbeatRateLimit,
+    async (req, res) => {
     try {
       const result = await recordStationHeartbeat(req.station!, {
         appVersion: req.body?.appVersion,
@@ -271,7 +333,8 @@ export function partnerStationRouter(): Router {
     } catch (error) {
       stationError(res, error);
     }
-  });
+    }
+  );
 
   /**
    * P6 — "NEW CARD": authorise exactly ONE new Card Job against exactly ONE Grading Credit.
@@ -385,7 +448,16 @@ export function partnerStationRouter(): Router {
     }
   );
 
-  r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+  r.post(
+    "/stations/calibrations",
+    // From origin/main: this runs BEFORE authentication on purpose. requireSignedStation
+    // verifies a signed payload and resolves the operator session, so the endpoint must be
+    // protected from unauthenticated floods as well as from an authenticated one.
+    partnerStationCalibrationIngressRateLimit,
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCalibrationRateLimit,
+    async (req, res) => {
     try {
       const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
         scannerHardware: req.body?.scannerHardware,
@@ -399,7 +471,8 @@ export function partnerStationRouter(): Router {
     } catch (error) {
       stationError(res, error);
     }
-  });
+    }
+  );
 
   // A Partner browser arms the exact certificate/card/side only after both
   // its user session and the approved station have been resolved. The scanner
@@ -408,6 +481,7 @@ export function partnerStationRouter(): Router {
     "/stations/:stationCode/capture-sessions",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationCaptureRateLimit,
     async (req, res) => {
       try {
         const station = await resolveActiveStationByCode(req.params.stationCode);
@@ -450,6 +524,7 @@ export function partnerStationRouter(): Router {
     "/stations/capture-sessions/:sessionId",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationReadRateLimit,
     async (req, res) => {
       try {
         const sessionId = String(req.params.sessionId || "");

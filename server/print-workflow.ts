@@ -638,6 +638,21 @@ export async function createBatchAtomic(params: {
     throw err;
   }
 
+  /*
+   * PARTNER CARD JOB LIFECYCLE — APPROVED → PRINTABLE.
+   *
+   * The certificate has been claimed into a finalised batch, so output has genuinely begun. Migration
+   * 0080 defines APPROVED → PRINTABLE → COMPLETED and nothing drove either edge, so a Partner Card
+   * Job stopped dead at APPROVED however far its certificate travelled through this workflow.
+   *
+   * A NO-OP for HQ cards and for any certificate with no Card Job, which is the common case. It runs
+   * AFTER the batch is finalised and never inside its transaction: this is Partner bookkeeping on a
+   * different pool, and a lifecycle hiccup must not release a batch whose PDF genuinely rendered.
+   * Failures are logged and left to P12 reconciliation.
+   */
+  const { advanceCardJobsForOutputSafely } = await import("./partner/card-job-lifecycle");
+  await advanceCardJobsForOutputSafely(reserved, "printable", identity.actor);
+
   const multiSheet = reserved.length > CERTS_PER_PAGE;
   return {
     applied: reserved,
@@ -924,6 +939,17 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
       `);
     }
   });
+
+  /*
+   * PARTNER CARD JOB LIFECYCLE — → COMPLETED, the terminal state.
+   *
+   * Only for certificates whose print state genuinely reached `completed` above (`applied`), never
+   * the rejected ones. Bridges through PRINTABLE where the batch-creation hook did not run — see
+   * markCardJobCompleted. A no-op for HQ cards and any certificate with no Card Job.
+   */
+  const { advanceCardJobsForOutputSafely } = await import("./partner/card-job-lifecycle");
+  await advanceCardJobsForOutputSafely(applied, "completed", identity.actor);
+
   return { applied, rejected };
 }
 

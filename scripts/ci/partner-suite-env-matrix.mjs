@@ -220,6 +220,126 @@ export const SUITES = [
     isolate: true,
     note: "P9 grading edit lease: one-winner race, expiry, takeover, stale-revision refusal, I19 restart; own cluster.",
   },
+  {
+    /*
+     * THE CARD JOB → CANONICAL GRADING BRIDGE (AT-B1..AT-B23).
+     *
+     * The gap this closes was not a missing test — it was a missing PATH. Partner grading resolved
+     * ownership entirely through partner_connector_imports, which a Scanner-created Card Job matches
+     * zero rows in, and nothing in the repository drove partner_card_jobs.status beyond FIX_REQUIRED.
+     * So a card a shop had already paid a Grading Credit for could be captured and then never graded,
+     * never submitted, never reviewed and never printed.
+     *
+     * Every case runs against real PostgreSQL because every guarantee is a database one: the connector
+     * JOIN chain that must NOT match, the Card Job EXISTS arm that must, 0080's ENABLE ALWAYS
+     * transition trigger, RLS tenant isolation, FOR UPDATE serialisation and the credit engine's
+     * idempotency uniqueness. The two properties that matter most — no double submit and no double
+     * settlement on retry — are exactly the ones a mocked database would pass with the protection
+     * deleted, so the concurrent cases run genuinely in parallel on separate pool connections.
+     *
+     * `isolate: true` for the same reason as every suite above it: this one self-provisions a
+     * PostgreSQL 17 container and assigns MINTVAULT_DATABASE_URL in its own beforeAll, so sharing a
+     * vitest worker is the documented process.env race.
+     */
+    file: "tests/partner-card-job-grading-bridge.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "Card Job → grading bridge: Scanner NEW reaches Ready to Grade, lease-as-assignment, write guard, submit→QA, exactly-once credit settlement, RETURN/APPROVE, lineage-split print eligibility; own cluster.",
+  },
+  {
+    /*
+     * AT-21 — WEBHOOK GRANT UNDER CONCURRENT NEW. The grant boundary itself.
+     *
+     * Two halves of AT-21 were already proven and neither was the thing AT-21 asks about:
+     * partner-credit-purchase proves grant idempotency with nothing else happening, and L1 proves the
+     * last-credit race with capacity static throughout. AT-21 is the MOMENT BETWEEN — capacity zero,
+     * stations hammering NEW, and a verified webhook granting ten credits mid-flight.
+     *
+     * FOUND A REAL DEFECT ON FIRST RUN. The money was always right (the ledger's (source,
+     * idempotency_key) uniqueness refuses the second row under four-way concurrent delivery), but
+     * `fulfilPartnerCreditPurchase` discarded `alreadyApplied` and every delivery reported
+     * `granted: true`. The webhook handler LOGS that value, so an ordinary Stripe redelivery storm
+     * wrote repeated "granted" lines for one purchase — poisoning the one signal an operator would
+     * use to spot a genuine double-grant. Fixed, not assertion-weakened.
+     *
+     * The overlap is produced by NEW workers retrying across the boundary, never by a sleep, and the
+     * race is repeated over independent iterations because one lucky ordering proves nothing.
+     */
+    file: "tests/partner-at21-grant-boundary.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "AT-21 grant boundary: concurrent webhook grant + NEW, exactly-once grant, exactly 10 jobs then refusal, live-derived capacity, op-key and webhook replay idempotency, two stations, tenant isolation, cold-start authority; own cluster.",
+  },
+  {
+    /*
+     * P13 — LOAD AND CONCURRENCY. Correctness outranks throughput.
+     *
+     * Every invariant that can only break under contention, driven GENUINELY in parallel through
+     * Promise.all on separate pool connections. Run sequentially every case here would pass with the
+     * locking removed entirely, which is worse than having no test.
+     *
+     * What it measures is whether the contention points serialise: the wallet row lock (12 NEW
+     * presses against 5 credits), the cert_counter row lock (no duplicate MV), the lease's partial
+     * unique index (8 graders, one editor), the Card Job FOR UPDATE plus the credit engine's
+     * idempotency key (10 concurrent submits, one settlement), and RLS/tenant predicates under
+     * simultaneous two-tenant load. A global invariant sweep runs after EVERY case, so a violation
+     * introduced by one is not first detected six cases later.
+     *
+     * Deliberately NOT a throughput benchmark: a latency figure from one laptop against a container
+     * transfers nothing to a shop floor, and tuning to it would be optimising a fiction.
+     */
+    file: "tests/partner-pilot-concurrency.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P13 concurrency: last-credit race, double-click idempotency, lease contention, concurrent submit settlement, cross-tenant/cross-location isolation, concurrent redrive, no premature output, sustained mixed workload; own cluster.",
+  },
+  {
+    /*
+     * P12 — THE ONE DOCUMENTED MEDIUM, PROVEN REPAIRABLE.
+     *
+     * QA approval publishes the certificate on the HQ pool and transitions the Card Job on the
+     * partner-admin pool; those cannot be one transaction without restructuring protected HQ grading
+     * infrastructure. A crash between them leaves an approved grade whose Card Job never left
+     * QA_REVIEW — fail-closed (output is refused), but stuck for ever with nobody told.
+     *
+     * This suite simulates the failure at exactly that seam and proves the whole loop: output stays
+     * blocked, reconciliation detects by the documented predicate, redrive repairs through the
+     * canonical transition authority, a SECOND redrive performs nothing, the wallet never moves, no
+     * certificate or MV is minted, and the repair is audited AS a repair. It also proves the refusal
+     * path: an item whose premise no longer holds is left fail-closed rather than advanced.
+     *
+     * Critical because the release bar requires this MEDIUM to have executable proof before RC.
+     */
+    file: "tests/partner-card-job-reconciliation.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P12 QA/Card Job split-transaction drift: simulated mid-approval failure, fail-closed output, detection, idempotent redrive, zero wallet movement, audited repair, refusal path; own cluster.",
+  },
+  {
+    /*
+     * P11 — OUTPUT: CERTIFICATE / LABEL / PRINT / NFC (AT-P1..AT-P15).
+     *
+     * Proves a Scanner-created Card Job travels the EXISTING MintVault output systems to a finished
+     * physical product carrying ONE identity: same Card Job, same MV, same certificate, before and
+     * after. It drives the REAL `approveGraderCert` (publish gates and CAS included), the REAL
+     * `requestReprint` / `markCompleted`, the REAL `getPartnerPrintEligibilityBlocks` and the REAL
+     * `certificateOrigin` — no second output system was built and none is under test.
+     *
+     * Two release-critical properties here are constraints, not code, and would be vacuous without a
+     * real database: 0035's ENABLE ALWAYS origin-immutability trigger (a partner rename must not
+     * rewrite historical provenance) and 0088's partial unique index on lower(nfc_uid) (one physical
+     * chip must not bind to two graded cards — previously guarded only by a racy read-then-write).
+     */
+    file: "tests/partner-card-job-output.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P11 output: APPROVED→PRINTABLE→COMPLETED, pre-approval refusal, immutable provenance, approved==rendered grade, zero-credit reprint, NFC approval guard + 0088 uniqueness, correction does not fork identity; own cluster.",
+  },
 
   // ------------------------------------------------- env-gated suites nothing was setting up
   //

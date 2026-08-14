@@ -118,4 +118,18 @@ export async function recordAcceptedScannerEvidence(input: {
       recapture: input.session.recapture,
     }
   );
+
+  /*
+   * ADVANCE THE PARTNER CARD JOB — the bridge from capture to grading.
+   *
+   * This is the ONE convergence point for accepted scanner evidence: both the multipart compatibility
+   * body and the R2 staging path arrive here, so the lifecycle is driven once rather than at each
+   * transport. Until this call existed nothing in the repository moved
+   * `partner_card_jobs.status`, so a Scanner card that had been fully captured on both sides stayed
+   * in NEEDS_SCAN and could never be opened for grading.
+   *
+   * A no-op for HQ and connector-imported certificates, which have no Card Job.
+   */
+  const { advanceCardJobAfterCaptureSafely } = await import("./partner/card-job-lifecycle");
+  await advanceCardJobAfterCaptureSafely(input.session.certificateId);
 }

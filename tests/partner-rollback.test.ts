@@ -80,7 +80,26 @@ async function applyAllRealistic(): Promise<void> {
      * applyMigrations is journal-driven and idempotent, so the second call re-reads the journal
      * and applies only what remains.
      */
-    const all = listMigrationFiles();
+    // 0075/0076 are application-scope migrations: each requires the complete
+    // scanner/certificate allocator schema and is exercised by its dedicated
+    // real-Postgres migration proof. This Partner rollback harness owns only
+    // the Partner schema plus the narrow core fixture documented below.
+    /*
+     * 0081 joins 0075/0076 in the exclusion list.
+     *
+     * 0081 does `CREATE OR REPLACE FUNCTION partner_allocate_import_certificates` — it REPLACES the
+     * allocator that 0076 creates. This harness deliberately excludes 0076 (it owns only the Partner
+     * schema plus a narrow core fixture), so applying 0081 here asks PostgreSQL to replace a function
+     * that was never created, under a definer role that never received 0076's schema privileges. It
+     * failed first with "must be able to SET ROLE" and then, once that was granted, with "permission
+     * denied for schema public" — both symptoms of the same missing prerequisite, not of a defect in
+     * 0081.
+     *
+     * origin/main never hit this because 0081 does not exist on main. It appears only when the two
+     * lineages are reconciled, and it aborted beforeAll — which vitest reports as SKIPPED tests, so
+     * the suite that proves rollback safety would have gone silently green.
+     */
+    const all = listMigrationFiles().filter((migration) => !["0075", "0076", "0081"].includes(migration.number));
     const throughG6D = all.filter((f) => Number(f.number) <= 41);
     await applyMigrations(migrator, throughG6D); // populates schema_migrations journal
     // The owner-approved repair, executed by the migrator itself via its ADMIN option — exactly
