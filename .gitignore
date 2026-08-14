@@ -69,3 +69,8 @@ Thumbs.db
 .claude/controlled-code-lead/approvals/*.record.md
 .claude/controlled-code-lead/approvals/*.record.json
 .claude/controlled-code-lead/locks/
+# cornelius-engineering-os:begin id=generated-egress v=1
+# Generated engineering intelligence must never be committed
+graphify-out/
+.graphify/
+# cornelius-engineering-os:end id=generated-egress

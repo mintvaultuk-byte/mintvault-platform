@@ -506,3 +506,17 @@ diagrams plus an implementation budget for risky work. The warning hook is
 still warn-only — the plan for making it blocking (not enabled) is written
 down in `.claude/hooks/HOOK-UPGRADE-ROADMAP.md`. Everything from 1.0 still
 applies unchanged.
+<!-- cornelius-engineering-os:begin id=claude-project v=1 -->
+## Cornelius Engineering OS (managed)
+
+This managed block defines HOW work is performed. The rest of this file defines WHAT this product is; on any conflict the project rules and protected areas win.
+
+Codex is the implementation lead. Claude Opus High is the independent hostile reviewer; it has no implementation ownership of what it reviews.
+
+The project profile, declared protected areas and gate commands live in `.engineering/project.yaml`; read it before answering questions about them.
+
+Read `.engineering/project.yaml` before substantial work. Classify risk and select no weaker execution mode than its floor.
+Use source as authority, record meaningful decisions/incidents, and do not weaken golden regressions to get green.
+Preserve project facts and protected areas.
+Never deploy, publish or release on your own authority; that decision belongs to the owner.
+<!-- cornelius-engineering-os:end id=claude-project -->

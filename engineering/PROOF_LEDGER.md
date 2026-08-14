@@ -1,0 +1,17 @@
+# Engineering proof ledger — MintVault Scanner SOL campaign
+
+| Claim | Source of truth | Proof | SHA | Dependencies / invalidation | Status |
+|---|---|---|---|---|---|
+| WP0 isolated seed is immutable and contains requested lineage through P9 | Git object graph | `git cat-file`, ancestry checks, A9 report; seed `d44a2c5363e702bb5aeb54157d7ad6a2af30546c` | `d44a2c53` | Invalidated if branch base changes | PROVEN |
+| Active Partner worktree was not modified | Partner Git status before/after reviewer inspection | A9 read-only command log; exact dirty inventory retained | `d44a2c53` + dirty WIP | Recheck if Partner HEAD/status moves | PROVEN |
+| Engineering OS is installed and campaign preflight is HOSTILE | Installed OS self-check and preflight JSON | `engineering check --self`; preflight risk `CRITICAL`, mode/required `HOSTILE` | `d44a2c53` + governance WIP | Re-run after manifest/governance change | PROVEN |
+| Graphify repository intelligence matches the seed | Generated code graph metadata | Graphify 0.9.39; 11,275 nodes, 25,295 edges; source commit `d44a2c53` | `d44a2c53` | Any structural source change requires graph update | PROVEN |
+| Existing native capture helper is runtime-compiled | Authoritative scanner source | `lide400-controller.js` `ensureBridge()` invokes `/usr/bin/xcrun clang` | `d44a2c53` | Invalidated when controller/helper packaging changes | PROVEN |
+| Existing station private key can enter Electron main memory and App Support ciphertext | Authoritative scanner source | `station-identity.js` generates/exports PKCS8 Ed25519 and wraps whole identity with `safeStorage` | `d44a2c53` | Invalidated by identity-helper migration | PROVEN |
+| Existing targeted queue is plaintext JSON and TIFF plaintext precedes durable encryption | Authoritative scanner source | `watcher.js` uses `targeted-capture-queue.json` and filesystem TIFF paths | `d44a2c53` | Invalidated by encrypted-queue implementation | PROVEN |
+| P14 is not frozen | Partner source/Git | A9: durable evidence ends P9; 9 modified + 3 untracked P10-style files; required P14 docs absent | `d44a2c53` + dirty WIP | Recheck final Partner HEAD | PROVEN |
+| Partner isolation boundary detects concurrent drift | Partner Git read-only snapshots | Partner moved from `d44a2c53` to `73b2072e` during WP0 and dirty inventory changed; no files copied or modified | `73b2072e` observed | Recheck only at frozen P14 gate | PROVEN |
+| WP0 governance remains loaded and self-protected | Repository governance suite | `.claude/governance-tests/run-all.sh`: 4 suites passed, 0 failed | WP0 WIP | Governance file changes invalidate | PROVEN |
+| WP0 source baseline builds and typechecks | Real repository commands | `npm run check` pass; lint 0 errors; `npm run build` pass | `d44a2c53` + WP0 governance | Application/dependency changes invalidate | PROVEN |
+| Existing protected grading behavior was not changed by WP0 | Real targeted protected tests | MVGS/label targeted set 259 passed / 2 skipped after locked canvas rebuild; cold font rerun 11/11 | `d44a2c53` + WP0 governance | Protected source/dependency/font changes invalidate | PROVEN |
+| Existing Scanner/Partner foundations execute non-vacuously | Real unit and disposable-Postgres tests | 119 passed / 1 skipped plus serial NEW/FIX/per-card-credit 76 passed / 0 failed | `d44a2c53` + WP0 governance | Scanner/Partner source or migrations invalidate | PROVEN |

@@ -1,0 +1,45 @@
+project:
+  name: mintvault-platform
+  type: high-security
+  profiles:
+    - saas
+    - desktop
+    - hardware
+    - ecommerce
+    - high-security
+engineering:
+  master_version: 1.0.10
+agents:
+  lead: Codex
+  hostile_reviewer: Claude Opus High
+graph:
+  enabled: true
+  tool: graphify
+  tool_version: pinned-on-build
+risk:
+  default: MEDIUM
+  protected_areas:
+    - shared/mvgs-scoring.ts
+    - shared/centering.ts
+    - shared/pristine.ts
+    - shared/mvgs-input-builder.ts
+    - server/grader.ts
+    - server/labels.ts
+    - server/r2.ts
+    - server/partner
+    - server/scanner-capture-service.ts
+    - server/scanner-evidence-finalisation.ts
+    - server/scanner-evidence-staging-service.ts
+    - scripts/scanner-app/lib/station-identity.js
+    - scripts/scanner-app/native
+    - migrations
+commands:
+  typecheck: npm run check
+  lint: npm run lint
+  unit_test: npm run test
+  integration_test:
+  build: npm run build
+gates:
+  required: engineering-check
+deployment:
+  agent_deploy_allowed: false

@@ -1,0 +1,9 @@
+{
+  "default": "MEDIUM",
+  "profiles": [
+    "high-security"
+  ],
+  "focus": "threat model, authz, secret handling, audit",
+  "minimum_mode": "HOSTILE",
+  "protected_areas_source": ".engineering/project.yaml"
+}

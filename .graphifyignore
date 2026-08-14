@@ -1,0 +1,41 @@
+# cornelius-engineering-os:begin id=privacy v=1
+# Cornelius Engineering OS shared graph privacy boundary
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+.aws/
+.gcloud/
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+uploads/
+data/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.docx
+*.xlsx
+*.mp4
+*.mp3
+*.md
+*.mdx
+*.qmd
+*.rst
+*.csv
+*.tsv
+*.sql.gz
+*.dump
+*.bak
+*.har
+*.jsonl
+graphify-out/
+.graphify/
+.graphify_root
+# cornelius-engineering-os:end id=privacy

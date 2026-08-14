@@ -17,6 +17,7 @@ Stage 0 (new task) and Stage 7 (final report). Programs group multi-phase work.
 | governance-phase-9            | Governance stabilisation/enforcement/scale           | 9A+9B+9C done (local, unpushed) | `governance-phase-9`      | `6439350`   | (9C commit) | none blocking; restart to fully load ask/deny + non-Bash hook matchers | health report + await owner review                          | `tasks/governance-phase-9/`            |
 | partner-scanner-grading-build | Partner/scanner/grading current build reconciliation | in progress                     | `psp/partner-rbac-hybrid` | `c782a613e` | local WIP   | MV-PGS-001..003 in progress                                            | finish build, prove protected MVGS, commit local checkpoint | `tasks/partner-scanner-grading-build/` |
 | partner-pilot-pass2 | Partner Pilot Pass 2 reconciliation and integration | Stage 1/2 in progress | `codex/partner-pilot-pass2` | `864faded` | `864faded` | PP2-F1, PP2-F2 | verify reviewers; integrate only through reviewed manifest | `tasks/partner-pilot-pass2/` |
+| scanner-sol-implementation-20260814 | Scanner / Partner Mac Station production implementation | WP0 complete; implementation in progress | `codex/scanner-sol-implementation-20260814` | `d44a2c53` | local WIP | R-1..R-32 except intentional R-24 gap; R-3/R-9 external | begin WP1 on isolated Scanner-owned surfaces | `tasks/scanner-sol-implementation-20260814/` |
 
 ## Conventions
 

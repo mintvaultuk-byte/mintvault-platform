@@ -1,0 +1,10 @@
+{
+  "task": "scanner-sol-implementation-20260814",
+  "capturedAt": "2026-08-14T07:28:51Z",
+  "governanceVersion": "1.2",
+  "engineeringOsVersion": "1.0.10",
+  "aggregateSha256": "2b282f5f0cd848da800b02ef8c630219c8af58da86785aefe9f40fbef9597d16",
+  "baseSha": "d44a2c5363e702bb5aeb54157d7ad6a2af30546c",
+  "requiredMode": "HOSTILE",
+  "note": "Hash covers root instructions, both controllers, governance version/changelog, controlled-code-lead skill, protected systems and the enrolled project manifest. Recompute after intentional governance changes."
+}
