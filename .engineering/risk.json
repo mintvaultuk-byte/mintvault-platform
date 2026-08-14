@@ -1,0 +1,7 @@
+{
+  "default": "MEDIUM",
+  "profiles": ["web-app"],
+  "focus": "browser contracts, accessibility, build context",
+  "minimum_mode": "FAST",
+  "protected_areas_source": ".engineering/project.yaml"
+}

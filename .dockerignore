@@ -52,3 +52,8 @@ uploads
 !scripts/run-mvgs-v2-migration.ts
 # Exception: one-off set-designation data repair (dry-run default, see file header)
 !scripts/repair-set-designations.ts
+# cornelius-engineering-os:begin id=generated-egress v=1
+# Generated engineering intelligence must not enter Docker build context
+graphify-out/
+.graphify/
+# cornelius-engineering-os:end id=generated-egress

@@ -1,0 +1,49 @@
+project:
+  name: mintvault-platform
+  type: web-app
+  profiles:
+    - web-app
+engineering:
+  master_version: 1.0.12
+agents:
+  lead: Codex
+  hostile_reviewer: Claude Opus High
+graph:
+  enabled: true
+  tool: graphify
+  tool_version: pinned-on-build
+risk:
+  default: MEDIUM
+  protected_areas:
+    - shared/mvgs-scoring.ts
+    - shared/mvgs-input-builder.ts
+    - shared/centering.ts
+    - shared/pristine.ts
+    - server/grader.ts
+    - server/auth.ts
+    - server/account-auth.ts
+    - server/lib/admin-auth-session.ts
+    - server/partner/
+    - server/stripeClient.ts
+    - server/webhookHandlers.ts
+    - server/storage.ts
+    - shared/schema.ts
+    - migrations/
+    - server/scan-ingest-service.ts
+    - server/scanner-capture-service.ts
+    - server/scanner-evidence-staging-service.ts
+    - server/scanner-evidence-finalisation.ts
+    - server/r2.ts
+    - server/labels.ts
+    - client/src/pages/nfc-redirect.tsx
+    - client/src/components/nfc-section.tsx
+commands:
+  typecheck: npm run check
+  lint: npm run lint
+  unit_test: npm run test
+  integration_test:
+  build: npm run build
+gates:
+  required: engineering-check
+deployment:
+  agent_deploy_allowed: false

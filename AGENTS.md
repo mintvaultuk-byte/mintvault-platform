@@ -34,3 +34,30 @@ Read and obey [`CLAUDE.md`](CLAUDE.md) as the repository's detailed safety, secu
 grading, data, payment and deployment governance. Both controllers supplement
 those rules. Where rules conflict, protected grading, security, payment, production-data,
 deployment and destructive-action rules remain authoritative.
+
+## Graphify-first navigation
+
+For repository navigation, start with the local Graphify code graph and then
+verify every important conclusion against actual source, schemas, routes, and
+tests. Graphify is never authority for MVGS, authentication, tenant isolation,
+payments, credits, migrations, certificates, or security. Its local-only,
+code/AST-first privacy boundary and safe commands are in
+[`docs/engineering/GRAPHIFY.md`](docs/engineering/GRAPHIFY.md).
+
+<!-- cornelius-engineering-os:begin id=codex-project v=1 -->
+
+## Cornelius Engineering OS (managed)
+
+This managed block defines HOW work is performed. The rest of this file defines WHAT this product is; on any conflict the project rules and protected areas win.
+
+Codex is the implementation lead. Claude Opus High is the independent hostile reviewer; it has no implementation ownership of what it reviews.
+
+The project profile, declared protected areas and gate commands live in `.engineering/project.yaml`; read it before answering questions about them.
+
+Before substantial work, read `.engineering/project.yaml`, the issue register, and proof ledger.
+Run `engineering preflight` before significant changes and `engineering postflight` afterwards.
+Preflight classifies risk and sets the execution mode floor; never select a weaker mode than it requires.
+Use graph-first navigation but verify real source for authority. Preserve project facts and protected areas.
+Never deploy, publish or release on your own authority; that decision belongs to the owner.
+
+<!-- cornelius-engineering-os:end id=codex-project -->

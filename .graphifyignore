@@ -1,0 +1,68 @@
+# cornelius-engineering-os:begin id=privacy v=1
+# Cornelius Engineering OS shared graph privacy boundary
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+.aws/
+.gcloud/
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+uploads/
+data/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.docx
+*.xlsx
+*.mp4
+*.mp3
+*.md
+*.mdx
+*.qmd
+*.rst
+*.csv
+*.tsv
+*.sql.gz
+*.dump
+*.bak
+*.har
+*.jsonl
+graphify-out/
+.graphify/
+.graphify_root
+# cornelius-engineering-os:end id=privacy
+
+# MintVault-specific defence in depth: Graphify is local, deterministic and
+# code/AST-first. Agent state, scanner/customer media and generated material
+# must never enter its corpus.
+.git/
+*.crt
+*.cert
+.claude/
+.codex/
+attached_assets/
+scripts/_snapshots/
+scripts/_*/
+tmp/
+temp/
+logs/
+*.webp
+*.gif
+*.tif
+*.tiff
+*.bmp
+*.heic
+*.mov
+*.avi
+*.wav
+*.ttf
+*.otf
+.graphify_python

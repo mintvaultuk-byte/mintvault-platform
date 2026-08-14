@@ -18,6 +18,10 @@
     "db:lint-sql": "tsx scripts/db/lint-destructive-sql.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "graph:build": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify extract . --code-only",
+    "graph:check": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify check-update .",
+    "graph:update": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify extract . --code-only",
+    "graph:architecture": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify export callflow-html",
     "prepare": "husky"
   },
   "lint-staged": {

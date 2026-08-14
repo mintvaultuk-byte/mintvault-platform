@@ -1,0 +1,26 @@
+# cornelius-engineering-os:begin id=ci-governance v=1
+name: engineering-governance
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  engineering-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Node dependencies
+        if: ${{ hashFiles('package-lock.json') != '' }}
+        run: npm ci --ignore-scripts
+      - name: Verify managed CI gate integrity
+        run: node -e "const fs=require('node:fs'); const crypto=require('node:crypto'); const actual=crypto.createHash('sha256').update(fs.readFileSync('.engineering/cornelius-engineering-os-ci-gate.mjs')).digest('hex'); if (actual !== '7ad3231be4c5d17bf91c1260d1605665974b31c7e92974203c07bf4a464288a4') { console.error('managed CI gate drift'); process.exit(1); }"
+      - name: Engineering anti-drift gate
+        run: node .engineering/cornelius-engineering-os-ci-gate.mjs
+# cornelius-engineering-os:end id=ci-governance

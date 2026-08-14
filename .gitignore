@@ -69,8 +69,12 @@ Thumbs.db
 .claude/controlled-code-lead/approvals/*.record.md
 .claude/controlled-code-lead/approvals/*.record.json
 .claude/controlled-code-lead/locks/
-
 # Disposable staging station key minted by scripts/staging/at23-station-reproof.mjs --new-identity.
 # Never commit a station private key.
 at23-station.key
 at23-evidence.json
+# cornelius-engineering-os:begin id=generated-egress v=1
+# Generated engineering intelligence must never be committed
+graphify-out/
+.graphify/
+# cornelius-engineering-os:end id=generated-egress
