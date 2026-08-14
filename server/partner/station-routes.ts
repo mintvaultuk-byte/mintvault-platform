@@ -220,21 +220,27 @@ export function partnerStationRouter(): Router {
     }
   );
 
-  r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, partnerStationCalibrationRateLimit, async (req, res) => {
-    try {
-      const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
-        scannerHardware: req.body?.scannerHardware,
-        scannerProfileVersion: req.body?.scannerProfileVersion,
-        acquisitionRegion: req.body?.acquisitionRegion,
-        workingRegion: req.body?.workingRegion,
-        placementToleranceMm: req.body?.placementToleranceMm,
-        calibrationVersion: req.body?.calibrationVersion,
-      });
-      res.status(201).json({ calibration });
-    } catch (error) {
-      stationError(res, error);
+  r.post(
+    "/stations/calibrations",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCalibrationRateLimit,
+    async (req, res) => {
+      try {
+        const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
+          scannerHardware: req.body?.scannerHardware,
+          scannerProfileVersion: req.body?.scannerProfileVersion,
+          acquisitionRegion: req.body?.acquisitionRegion,
+          workingRegion: req.body?.workingRegion,
+          placementToleranceMm: req.body?.placementToleranceMm,
+          calibrationVersion: req.body?.calibrationVersion,
+        });
+        res.status(201).json({ calibration });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
-  });
+  );
 
   // A Partner browser arms the exact certificate/card/side only after both
   // its user session and the approved station have been resolved. The scanner
