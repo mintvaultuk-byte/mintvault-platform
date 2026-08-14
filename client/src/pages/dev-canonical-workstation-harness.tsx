@@ -610,7 +610,7 @@ export default function DevCanonicalWorkstationHarness() {
             workspace: box(root?.querySelector('[data-testid="grading-workspace"]') ?? null),
             leftRail: box(root?.querySelector('[data-testid="grading-preview-panel"]') ?? null),
             largeCard: box(root?.querySelector('[data-testid="grading-interactive-card-host"]') ?? null),
-            compactPreview: box(root?.querySelector('[data-testid="certificate-preview-frame"]') ?? null),
+            compactPreview: box(root?.querySelector('[data-testid="certificate-preview-image"]') ?? null),
             stageHeader: box(root?.querySelector('[data-testid="workstation-strip"]') ?? null),
             rightPane: box(root?.querySelector('[data-testid="grading-control-panel"]') ?? null),
           };

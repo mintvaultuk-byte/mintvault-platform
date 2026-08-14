@@ -47,19 +47,6 @@ export interface CertificatePreviewFields {
 export function CertificatePreviewPanel({
   fields,
   endpoint = "/api/admin/certificates/label/preview",
-  /**
-   * Truthfulness of the caption (hostile-review MEDIUM).
-   *
-   * The panel renders CURRENT IN-MEMORY form values, which may not be what is
-   * stored. Saying "this is exactly what will print" is only true once those
-   * values are persisted, so the caption is driven by state rather than
-   * hard-coded:
-   *   • "unsaved"   — there are edits not yet persisted (the default, and the
-   *                   normal state while a grader types).
-   *   • "saved"     — the rendered values match what was last persisted.
-   *   • "conflict"  — a concurrent edit was rejected, so what is on screen is
-   *                   NOT authoritative and must not be presented as such.
-   */
   persistence = "unsaved",
   revision = 0,
   expectedRevision,
@@ -96,6 +83,7 @@ export function CertificatePreviewPanel({
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const urlRef = useRef<string | null>(null);
   const key = JSON.stringify(fields);
 
@@ -180,7 +168,7 @@ export function CertificatePreviewPanel({
       // Without this acknowledgement, the workstation waiter never settles.
       complete(false);
     };
-  }, [endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs]);
+  }, [endpoint, expectedRevision, key, requireExpectedRevision, revision, onRevisionComplete, requestTimeoutMs, retryNonce]);
 
   // Revoke the last object URL on unmount.
   useEffect(
@@ -192,51 +180,44 @@ export function CertificatePreviewPanel({
 
   return (
     <div
-      className="mx-auto w-full max-w-[280px] rounded-lg border border-slate-700 bg-slate-900/60 p-1.5"
+      className="mx-auto w-full max-w-[266px]"
       data-testid="certificate-preview-panel"
       data-preview-state={error ? "error" : url ? "ready" : loading ? "loading" : "empty"}
+      data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}
+      data-persistence={persistence}
     >
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-          Live label preview
-        </span>
-        {loading && <span className="text-[10px] text-amber-400">rendering…</span>}
-      </div>
       {url ? (
-        <div
-          className="overflow-hidden rounded border border-slate-800 bg-slate-950/40"
-          data-testid="certificate-preview-frame"
-        >
-          {/* The real front slab label (826×236 @300DPI), displayed at its
-              natural aspect ratio in a compact inspection thumbnail. */}
-          <img
-            src={url}
-            alt="Front certificate preview"
-            className="block h-auto w-full bg-white object-contain"
-            data-testid="certificate-preview-image"
-          />
-        </div>
-      ) : (
-        <p
-          className={`rounded border border-slate-800 px-2 py-1.5 text-center text-[11px] ${error ? "text-rose-300" : "text-slate-500"}`}
+        /* The real front slab label (826×236 @300DPI), shown as a bare,
+           fixed-ratio visual reference beneath the primary card viewer. */
+        <img
+          src={url}
+          alt="Front certificate preview"
+          width={266}
+          height={76}
+          className="block h-auto w-full object-contain"
+          data-testid="certificate-preview-image"
+        />
+      ) : error ? (
+        <button
+          type="button"
+          className="mx-auto block text-[11px] text-rose-300 underline-offset-2 hover:underline"
           data-testid="certificate-preview-status"
+          aria-label="Retry certificate preview"
+          onClick={() => {
+            setError(null);
+            setLoading(true);
+            setRetryNonce((nonce) => nonce + 1);
+          }}
         >
-          {error ?? (loading ? "Preparing preview…" : "Preview unavailable / preparing…")}
-        </p>
+          Preview unavailable · Retry
+        </button>
+      ) : (
+        loading && (
+          <p className="text-center text-[11px] text-slate-500" data-testid="certificate-preview-status" aria-live="polite">
+            Preparing preview…
+          </p>
+        )
       )}
-      {/* Never claim persisted truth for unsaved state. The panel stays READ-ONLY
-          in every case — it renders an image and persists nothing. */}
-      <p
-        className={`mt-1 text-[10px] ${persistence === "conflict" ? "text-amber-400" : "text-slate-500"}`}
-        data-testid="certificate-preview-caption"
-        data-persistence={persistence}
-      >
-        {persistence === "saved"
-          ? "Saved review · authoritative print preview."
-          : persistence === "conflict"
-            ? "Not authoritative — refresh before trusting this preview."
-            : "Save a grade to prepare Review."}
-      </p>
     </div>
   );
 }
