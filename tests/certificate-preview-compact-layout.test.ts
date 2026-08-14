@@ -29,7 +29,6 @@ async function renderPreview() {
 }
 
 const panel = () => host.querySelector<HTMLElement>('[data-testid="certificate-preview-panel"]');
-const frame = () => host.querySelector('[data-testid="certificate-preview-frame"]');
 const status = () => host.querySelector('[data-testid="certificate-preview-status"]');
 
 beforeEach(() => {
@@ -50,7 +49,7 @@ afterEach(() => {
 });
 
 describe("CertificatePreviewPanel compact states", () => {
-  it("uses one compact status row before and during a render instead of reserving label height", async () => {
+  it("uses no empty shell and only one compact neutral line while rendering", async () => {
     let resolvePreview!: (response: Response) => void;
     vi.stubGlobal(
       "fetch",
@@ -61,33 +60,45 @@ describe("CertificatePreviewPanel compact states", () => {
 
     await renderPreview();
     expect(panel()?.dataset.previewState).toBe("empty");
-    expect(status()?.textContent).toContain("Preview unavailable / preparing");
-    expect(frame()).toBeNull();
+    expect(panel()?.children).toHaveLength(0);
+    expect(status()).toBeNull();
 
     await act(async () => vi.advanceTimersByTimeAsync(350));
     expect(panel()?.dataset.previewState).toBe("loading");
     expect(status()?.textContent).toContain("Preparing preview");
-    expect(frame()).toBeNull();
+    expect(status()?.getAttribute("aria-live")).toBe("polite");
+    expect(panel()?.children).toHaveLength(1);
 
     resolvePreview(new Response(new Blob(["png"]), { status: 200 }));
     await act(async () => Promise.resolve());
   });
 
-  it("keeps render failures in the same compact status geometry and preserves the error", async () => {
+  it("keeps render failures as a compact retry control and retries the real request", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ error: "Renderer unavailable" }), { status: 503 }))
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Renderer unavailable" }), { status: 503 }))
+        .mockResolvedValueOnce(new Response(new Blob(["png"]), { status: 200 }))
     );
 
     await renderPreview();
     await act(async () => vi.advanceTimersByTimeAsync(350));
 
     expect(panel()?.dataset.previewState).toBe("error");
-    expect(status()?.textContent).toContain("Renderer unavailable");
-    expect(frame()).toBeNull();
+    expect(status()?.textContent).toBe("Preview unavailable · Retry");
+    expect(status()?.tagName).toBe("BUTTON");
+    await act(async () => (status() as HTMLButtonElement).click());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+      await Promise.resolve();
+    });
+    await act(async () => Promise.resolve());
+    expect(panel()?.dataset.previewState).toBe("ready");
+    expect(host.querySelector('[data-testid="certificate-preview-image"]')).not.toBeNull();
   });
 
-  it("renders the authoritative label as a bounded, undistorted thumbnail", async () => {
+  it("renders the authoritative label as a bare, aspect-correct thumbnail with no preview chrome", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"]), { status: 200 })));
 
     await renderPreview();
@@ -95,19 +106,21 @@ describe("CertificatePreviewPanel compact states", () => {
 
     const image = host.querySelector<HTMLImageElement>('[data-testid="certificate-preview-image"]');
     expect(panel()?.dataset.previewState).toBe("ready");
-    expect(frame()).not.toBeNull();
     expect(status()).toBeNull();
     expect(image).not.toBeNull();
-    // These runtime class assertions describe behavior, while the browser
-    // verification covers their computed desktop geometry.
-    expect(panel()?.className).toContain("max-w-[280px]");
-    expect(image?.className).toContain("h-auto");
-    expect(image?.className).toContain("object-contain");
+    expect(image?.parentElement).toBe(panel());
+    expect(panel()?.children).toHaveLength(1);
+    expect(image?.getAttribute("width")).toBe("266");
+    expect(image?.getAttribute("height")).toBe("76");
+    expect(266 / 76).toBeCloseTo(826 / 236, 2);
+    expect(host.textContent).not.toContain("Live label preview");
+    expect(host.textContent).not.toContain("Save a grade to prepare Review");
+    expect(host.querySelector('[data-testid="certificate-preview-caption"]')).toBeNull();
   });
 });
 
 describe("workstation rail composition", () => {
-  it("keeps the card before the compact preview in normal flex flow", async () => {
+  it("keeps the primary card as the grow allocation before the thumbnail in normal flex flow", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new Blob(["png"]), { status: 200 })));
     await act(async () => {
       root.render(
