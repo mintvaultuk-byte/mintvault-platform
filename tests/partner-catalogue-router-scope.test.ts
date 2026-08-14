@@ -22,8 +22,11 @@ beforeAll(async () => {
   // in this suite — requirePartnerAuth rejects before any DB access.
   process.env.MINTVAULT_DATABASE_URL ??= "postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder";
   const { partnerCatalogueRouter } = await import("../server/partner/catalogue-routes");
+  const { partnerGradingRouter } = await import("../server/partner/grading-routes");
   const app = express();
+  // Same relative order as partnerPortalRouter(): catalogue, then grading, then the station router.
   app.use(partnerCatalogueRouter());
+  app.use(partnerGradingRouter());
   // Stands in for the station router mounted AFTER the catalogue router in mount.ts.
   app.post("/stations/heartbeat", (_req, res) => res.status(418).json({ reached: "station-router" }));
   app.post("/card-jobs", (_req, res) => res.status(418).json({ reached: "station-router" }));
@@ -50,5 +53,12 @@ describe("partner catalogue router auth scope", () => {
     const r = await fetch(base + "/catalogue/snapshot");
     expect(r.status).toBe(401);
     expect(((await r.json()) as { error: string }).error).toBe("authentication required");
+  });
+
+  it("still refuses unauthenticated /grading requests", async () => {
+    for (const path of ["/grading/session", "/grading/queue"]) {
+      const r = await fetch(base + path);
+      expect(r.status, `${path} must stay session-guarded`).toBe(401);
+    }
   });
 });

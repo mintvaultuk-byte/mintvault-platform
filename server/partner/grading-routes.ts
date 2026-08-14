@@ -782,11 +782,14 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
 
 export function partnerGradingRouter(): Router {
   const r = Router();
-  r.use(requirePartnerAuth);
-  // This router is mounted at the portal root so its auth middleware can protect
-  // the grading routes. Scope the grading kill switch to its own prefix: a
-  // router-wide gate would otherwise intercept submissions, customers and every
-  // later portal router before their handlers can run.
+  // BOTH gates are /grading-scoped (AT-23 mount-order defect, 2026-08-14). This router is mounted
+  // BEFORE the station router, and a pathless requirePartnerAuth ran for every request that fell
+  // through the earlier routers — so a signed-station request (Ed25519 headers, deliberately no
+  // session cookie) was 401-rejected here and could never reach the station router at all. Every
+  // route this router owns is under /grading, so the scoped guard protects exactly the same
+  // surface; everything else falls through to the next router, each of which carries its own
+  // guards. Same reasoning as the grading kill switch below, and as the catalogue router's guard.
+  r.use("/grading", requirePartnerAuth);
   r.use("/grading", requirePartnerGradingEnabled);
 
   r.get("/grading/session", requirePartnerCapability("partner.cards.assess"), (req, res) => {
@@ -1133,103 +1136,118 @@ export function partnerGradingRouter(): Router {
     }
   });
 
-  r.get("/grading/certificates/:id/images", requirePartnerCapability("partner.cards.assess"), partnerGradingReadRateLimit, async (req, res) => {
-    try {
-      const certId = numericId(req.params.id);
-      if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-      const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      res.json(await imagesForPartnerCert(auth.auth));
-    } catch (err) {
-      sendPartnerGradingError(res, err);
+  r.get(
+    "/grading/certificates/:id/images",
+    requirePartnerCapability("partner.cards.assess"),
+    partnerGradingReadRateLimit,
+    async (req, res) => {
+      try {
+        const certId = numericId(req.params.id);
+        if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        res.json(await imagesForPartnerCert(auth.auth));
+      } catch (err) {
+        sendPartnerGradingError(res, err);
+      }
     }
-  });
+  );
 
-  r.get("/grading/certificates/:id/grading", requirePartnerCapability("partner.cards.assess"), partnerGradingReadRateLimit, async (req, res) => {
-    try {
-      const certId = numericId(req.params.id);
-      if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
-      const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      const payload = await buildCertGradingPayload(certId);
-      if (!payload) return res.status(404).json({ error: "Not found" });
-      res.json(stripGraderPii(payload));
-    } catch (err) {
-      sendPartnerGradingError(res, err);
+  r.get(
+    "/grading/certificates/:id/grading",
+    requirePartnerCapability("partner.cards.assess"),
+    partnerGradingReadRateLimit,
+    async (req, res) => {
+      try {
+        const certId = numericId(req.params.id);
+        if (!certId) return res.status(400).json({ error: "Invalid certificate id" });
+        const auth = authorizeAssignedPartnerCert(req.partner!, await loadPartnerCert(req.partner!, certId));
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        const payload = await buildCertGradingPayload(certId);
+        if (!payload) return res.status(404).json({ error: "Not found" });
+        res.json(stripGraderPii(payload));
+      } catch (err) {
+        sendPartnerGradingError(res, err);
+      }
     }
-  });
+  );
 
-  r.post("/grading/certificates/label/preview", requirePartnerCapability("partner.cards.preview"), partnerGradingPreviewRateLimit, async (req, res) => {
-    try {
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const certId = numericId(body.certificateId ?? body.id);
-      if (!certId) return res.status(400).json({ error: "Valid certificateId required" });
+  r.post(
+    "/grading/certificates/label/preview",
+    requirePartnerCapability("partner.cards.preview"),
+    partnerGradingPreviewRateLimit,
+    async (req, res) => {
+      try {
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const certId = numericId(body.certificateId ?? body.id);
+        if (!certId) return res.status(400).json({ error: "Valid certificateId required" });
 
-      // This is the same tenant/location/provenance lookup and per-user
-      // assignment check used by every other Partner grading read/write.
-      const candidate = await loadPartnerCert(req.partner!, certId);
-      const access = authorizePartnerLabelPreview(req.partner!, candidate);
-      if (!access.ok) return res.status(access.status).json({ error: access.error });
-      const auth = authorizeAssignedPartnerCert(req.partner!, candidate);
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      const partnerBlocks = await getPartnerPrintEligibilityBlocks([auth.auth.certificateNumber]);
-      if (partnerBlocks.length > 0) {
-        return res.status(409).json({ error: partnerBlocks[0].message, code: partnerBlocks[0].code });
-      }
+        // This is the same tenant/location/provenance lookup and per-user
+        // assignment check used by every other Partner grading read/write.
+        const candidate = await loadPartnerCert(req.partner!, certId);
+        const access = authorizePartnerLabelPreview(req.partner!, candidate);
+        if (!access.ok) return res.status(access.status).json({ error: access.error });
+        const auth = authorizeAssignedPartnerCert(req.partner!, candidate);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        const partnerBlocks = await getPartnerPrintEligibilityBlocks([auth.auth.certificateNumber]);
+        if (partnerBlocks.length > 0) {
+          return res.status(409).json({ error: partnerBlocks[0].message, code: partnerBlocks[0].code });
+        }
 
-      const saved = await storage.getCertificate(certId);
-      if (!saved) return res.status(404).json({ error: "Not found" });
-      const expected = expectedReviewRevision(body.expectedRevision);
-      if (expected == null) {
-        return res.status(400).json({ error: "A valid expectedRevision is required for certificate preview" });
-      }
-      const actual = Number((saved as CertificateRecord).gradingRevision);
-      if (!Number.isSafeInteger(actual) || actual < 1) {
-        return res.status(500).json({ error: "Certificate has an invalid grading revision" });
-      }
-      if (actual !== expected) {
-        return res.status(409).json({
-          code: "STALE_REVIEW",
-          error: "This card changed after the saved review. Refresh the saved review before approving.",
-        });
-      }
-      const cert = await buildLabelPreviewCertificate(saved as CertificateRecord, body);
-      const verdict = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
-      if (!verdict.printable) {
-        return res.status(422).json({
-          error:
-            verdict.reason === "missing_numeric_grade"
-              ? "Not graded yet — the preview appears once a grade is set."
-              : (verdict.message ?? "This certificate's grade cannot be previewed yet."),
-          code: "UNPRINTABLE_GRADE",
-          reason: verdict.reason,
-        });
-      }
+        const saved = await storage.getCertificate(certId);
+        if (!saved) return res.status(404).json({ error: "Not found" });
+        const expected = expectedReviewRevision(body.expectedRevision);
+        if (expected == null) {
+          return res.status(400).json({ error: "A valid expectedRevision is required for certificate preview" });
+        }
+        const actual = Number((saved as CertificateRecord).gradingRevision);
+        if (!Number.isSafeInteger(actual) || actual < 1) {
+          return res.status(500).json({ error: "Certificate has an invalid grading revision" });
+        }
+        if (actual !== expected) {
+          return res.status(409).json({
+            code: "STALE_REVIEW",
+            error: "This card changed after the saved review. Refresh the saved review before approving.",
+          });
+        }
+        const cert = await buildLabelPreviewCertificate(saved as CertificateRecord, body);
+        const verdict = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
+        if (!verdict.printable) {
+          return res.status(422).json({
+            error:
+              verdict.reason === "missing_numeric_grade"
+                ? "Not graded yet — the preview appears once a grade is set."
+                : (verdict.message ?? "This certificate's grade cannot be previewed yet."),
+            code: "UNPRINTABLE_GRADE",
+            reason: verdict.reason,
+          });
+        }
 
-      const png = await generateLabelPreviewPNG(cert);
-      // Detect a mutation that raced the render itself. A pre-render revision
-      // comparison alone would otherwise acknowledge stale pixels as ready.
-      const current = await storage.getCertificate(certId);
-      const currentRevision = Number((current as CertificateRecord | undefined)?.gradingRevision);
-      if (currentRevision !== expected) {
-        return res.status(409).json({
-          code: "STALE_REVIEW",
-          error:
-            "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
-        });
+        const png = await generateLabelPreviewPNG(cert);
+        // Detect a mutation that raced the render itself. A pre-render revision
+        // comparison alone would otherwise acknowledge stale pixels as ready.
+        const current = await storage.getCertificate(certId);
+        const currentRevision = Number((current as CertificateRecord | undefined)?.gradingRevision);
+        if (currentRevision !== expected) {
+          return res.status(409).json({
+            code: "STALE_REVIEW",
+            error:
+              "This card changed while its certificate preview was preparing. Refresh the saved review before approving.",
+          });
+        }
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("X-MintVault-Review-Revision", String(actual));
+        res.setHeader("Access-Control-Expose-Headers", "X-MintVault-Review-Revision");
+        return res.send(png);
+      } catch (err) {
+        if (err instanceof UnprintableGradeError) {
+          return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", reason: err.reason });
+        }
+        sendPartnerGradingError(res, err);
       }
-      res.setHeader("Content-Type", "image/png");
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("X-MintVault-Review-Revision", String(actual));
-      res.setHeader("Access-Control-Expose-Headers", "X-MintVault-Review-Revision");
-      return res.send(png);
-    } catch (err) {
-      if (err instanceof UnprintableGradeError) {
-        return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", reason: err.reason });
-      }
-      sendPartnerGradingError(res, err);
     }
-  });
+  );
 
   r.put(
     "/grading/certificates/:id/grade",
