@@ -14,6 +14,26 @@ function close(server) {
   return new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
 }
 
+test("active signed stations refuse unsigned multipart evidence fallback", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-no-signed-multipart-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const source = path.join(tempDir, "master.tif");
+  fs.writeFileSync(source, Buffer.from([0x49, 0x49, 0x2a, 0x00, 0x08]));
+  const stationIdentity = require("../lib/station-identity");
+  const original = stationIdentity.hasActiveStationSession;
+  stationIdentity.hasActiveStationSession = () => true;
+  t.after(() => { stationIdentity.hasActiveStationSession = original; });
+  const clientPath = require.resolve("../lib/server-client");
+  delete require.cache[clientPath];
+  const client = require("../lib/server-client");
+  t.after(() => { delete require.cache[clientPath]; });
+
+  const result = await client.uploadPair(source, null, "stable-idempotency-key");
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 426);
+  assert.match(result.body.error, /staged upload and finalisation/);
+});
+
 test("scanner client retains exact TIFF bytes in the bounded compatibility path when direct staging is unavailable", async (t) => {
   const requests = [];
   const server = http.createServer((req, res) => {

@@ -19,17 +19,6 @@ const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
 const os    = require("node:os");
-const { randomUUID } = require("node:crypto");
-
-/**
- * The in-flight NEW CARD retry token (P6).
- *
- * Advisory process state only, and safe to lose: if the app restarts mid-press the token is gone
- * and the next press is a genuinely new request — the SERVER's (station, client_op_id) record is
- * the authority on what was already bought, never this variable. That is what invariant I19
- * requires: no process-local state may be authoritative over money.
- */
-let pendingNewCardOpId = null;
 
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
@@ -37,11 +26,14 @@ const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
 const helperIntegrity = require("./lib/helper-integrity");
+const newCardOperation = require("./lib/new-card-operation");
 
+const releaseTrust = app.isPackaged ? helperIntegrity.loadReleaseTrust(process.resourcesPath) : null;
 helperIntegrity.configureRuntime({
   isPackaged: app.isPackaged,
   resourcesPath: process.resourcesPath,
   execPath: process.execPath,
+  expectedTeamIdentifier: releaseTrust?.teamIdentifier || null,
 });
 
 // macOS: this is a menu-bar-only app, no Dock icon.
@@ -413,7 +405,16 @@ async function stationSetupState() {
     return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
   }
   const summary = stationSummary(session.body, await availableCreditsOrNull());
-  const code = stationIdentity.currentStationCode();
+  const identity = stationIdentity.identityStatus();
+  if (!["ABSENT_NEW", "READY_V2"].includes(identity.state)) {
+    return {
+      ok: true,
+      stage: "identity_recovery_required",
+      summary,
+      error: identity.error || "This Mac's station identity cannot be verified. Contact a MintVault Super Admin; do not register it as a new station.",
+    };
+  }
+  const code = identity.stationCode || null;
   if (!code) {
     const locations = await stationClient.enrolmentLocations();
     if (!locations.ok) {
@@ -515,10 +516,9 @@ function setupIpc() {
   /**
    * P6 — NEW CARD.
    *
-   * THE RETRY TOKEN IS MINTED HERE, IN THE MAIN PROCESS, AND HELD UNTIL THE SERVER ANSWERS. A
-   * renderer that generated a fresh id per click would turn an impatient double-click into two
-   * paid cards. Holding it means every retry of the SAME press carries the SAME token, so the
-   * server answers the second one from its idempotency record rather than the wallet.
+   * The exact payload and retry token are durably persisted before first I/O. A renderer-generated
+   * token or process-only variable would turn a crash, response loss or impatient double-click into
+   * two paid cards. Restart resumes the one pending operation and its original payload.
    *
    * The token is cleared only once the server has given a definitive answer — success or a refusal
    * the operator must act on. A network error deliberately KEEPS it, because that is exactly the
@@ -526,24 +526,37 @@ function setupIpc() {
    */
   ipcMain.handle("start-new-card", async (_event, payload) => {
     const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
-    if (!pendingNewCardOpId) pendingNewCardOpId = `new-${randomUUID()}`;
+    let operation;
     let result;
     try {
-      result = await server.startNewCard(pendingNewCardOpId, cardName);
+      operation = newCardOperation.beginOrResume(cardName);
+      result = await server.startNewCard(operation.id, operation.payload.cardName);
     } catch (err) {
       // Outcome unknown — keep the token so a retry replays instead of buying a second card.
       return { ok: false, retryable: true, error: err && err.message ? err.message : "Could not reach MintVault" };
     }
     if (result.ok) {
-      pendingNewCardOpId = null;
       const job = result.body && result.body.cardJob ? result.body.cardJob : {};
+      const cardJobId = newCardOperation.validatedCardJobId(result);
+      if (!cardJobId) {
+        return { ok: false, retryable: true, error: "MintVault returned an incomplete card response; retrying will recover the same paid operation" };
+      }
+      newCardOperation.complete(operation, `card-job:${cardJobId}`);
       return { ok: true, cardJob: job };
     }
-    // A refusal the operator can act on (no credits, suspended, station not approved) is final for
-    // this press: the token is released so their NEXT press is a genuinely new request.
-    pendingNewCardOpId = null;
     const error = (result.body && result.body.error) || {};
-    return { ok: false, retryable: false, code: error.code || "error", error: error.message || "Could not start a new card" };
+    const definitivelyUnspent = newCardOperation.isDefinitivelyUnspent(result);
+    if (definitivelyUnspent) {
+      newCardOperation.complete(operation, "refused:402:INSUFFICIENT_CREDITS");
+    }
+    return {
+      ok: false,
+      retryable: !definitivelyUnspent,
+      code: error.code || "error",
+      error: error.message || (definitivelyUnspent
+        ? "Could not start a new card"
+        : "MintVault could not confirm whether the card was started; retry to recover the same operation"),
+    };
   });
 
   // Recovery opens the exact historic certificate in the authenticated web

@@ -10,7 +10,7 @@ function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
-function fixture(t, { packaged = false, helperTeam = "", appTeam = "", identifier, architectures = "arm64", minos = "12.0" } = {}) {
+function fixture(t, { packaged = false, helperTeam = "", appTeam = "", expectedTeam = "MINTVAULT1", identifier, architectures = "arm64", minos = "12.0" } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-helper-integrity-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const resourcesPath = packaged
@@ -62,7 +62,7 @@ function fixture(t, { packaged = false, helperTeam = "", appTeam = "", identifie
     manifestPath,
     manifest,
     calls,
-    options: { helperPath, manifestPath, runtime: { isPackaged: packaged, resourcesPath, execPath }, runTool },
+    options: { helperPath, manifestPath, runtime: { isPackaged: packaged, resourcesPath, execPath, expectedTeamIdentifier: packaged ? expectedTeam : null }, runTool },
   };
 }
 
@@ -136,7 +136,11 @@ test("packaged runtime accepts only the same non-empty Team ID as the applicatio
   });
   await t.test("wrong team", (st) => {
     const value = fixture(st, { packaged: true, helperTeam: "ATTACKER01", appTeam: "MINTVAULT1" });
-    assert.throws(() => integrity._private.verifyHelperAt(value.options), /Team Identifier does not match/);
+    assert.throws(() => integrity._private.verifyHelperAt(value.options), /pinned MintVault Team Identifier/);
+  });
+  await t.test("same attacker team on app and helper", (st) => {
+    const value = fixture(st, { packaged: true, helperTeam: "ATTACKER01", appTeam: "ATTACKER01" });
+    assert.throws(() => integrity._private.verifyHelperAt(value.options), /pinned MintVault Team Identifier/);
   });
   await t.test("ad-hoc production app", (st) => {
     const value = fixture(st, { packaged: true, helperTeam: "", appTeam: "" });
@@ -150,4 +154,39 @@ test("rejects stale or malformed native response protocol before controller use"
   });
   assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "0.9.0", protocolVersion: 1 }), /response protocol\/version/);
   assert.throws(() => integrity.assertCompatibleResult({ helperVersion: "1.0.0", protocolVersion: 2 }), /response protocol\/version/);
+});
+
+test("identity helper uses its own sealed manifest and signing identifier contract", (t) => {
+  const value = fixture(t);
+  const identityPath = path.join(value.root, "mv-identity-helper");
+  const manifestPath = path.join(value.root, "identity-helper-manifest.json");
+  fs.renameSync(value.helperPath, identityPath);
+  const manifest = {
+    ...value.manifest,
+    helperName: "mv-identity-helper",
+    bundleIdentifier: "com.mintvault.scanner.identity-helper",
+  };
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+  value.options.runTool = (command, args) => {
+    if (command === "/usr/bin/lipo") return { status: 0, stdout: "arm64\n", stderr: "" };
+    if (command === "/usr/bin/otool") return { status: 0, stdout: "      cmd LC_BUILD_VERSION\n    minos 12.0\n", stderr: "" };
+    if (command === "/usr/bin/codesign" && args[0] === "--verify") return { status: 0, stdout: "", stderr: "valid on disk\n" };
+    if (command === "/usr/bin/codesign" && args[0] === "-d") {
+      return { status: 0, stdout: "", stderr: "Identifier=com.mintvault.scanner.identity-helper\nTeamIdentifier=not set\nflags=0x2(adhoc)\n" };
+    }
+    throw new Error(`Unexpected tool call ${command} ${args.join(" ")}`);
+  };
+  const verified = integrity._private.verifyHelperAt({
+    ...value.options,
+    helperPath: identityPath,
+    manifestPath,
+    expected: integrity._private.identityExpected(),
+  });
+  assert.equal(verified.manifest.bundleIdentifier, "com.mintvault.scanner.identity-helper");
+});
+
+test("rejects stale or malformed identity-helper response protocol", () => {
+  assert.equal(integrity.assertCompatibleIdentityResult({ ok: true, helperVersion: "1.0.0", protocolVersion: 1 }).ok, true);
+  assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "0.9.0", protocolVersion: 1 }), /response protocol\/version/);
+  assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "1.0.0", protocolVersion: 2 }), /response protocol\/version/);
 });

@@ -32,13 +32,19 @@ migration plus drift tests; silent second namespaces or identities are forbidden
 | Keychain account | `station-identity-v2` |
 | Keychain access group | `$(AppIdentifierPrefix)com.mintvault.scanner`; release entitlement must resolve to the app Team prefix |
 | Keychain accessibility | device-only, non-sync (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` or stricter compatible setting) |
+| Secure Enclave application tag | `com.mintvault.scanner.identity.se-p256-wrap-v2` |
+| SE wrapping algorithm | Secure Enclave P-256 key agreement + ephemeral P-256, HKDF-SHA256 and AES-256-GCM with identity public key as associated data |
 | Identity schema | v2: public key + SE key reference + wrapped Ed25519 ciphertext + algorithm/namespace metadata; no plaintext private key |
+| Identity helper protocol | `mintvault-identity-helper-v1`; bounded JSON on stdin/stdout, never secrets in argv |
+| Identity creation states | `ABSENT_NEW`, `LEGACY_V1`, `READY_V2`, `LOCKED`, `NAMESPACE_MISMATCH`, `CORRUPT`, `IDENTITY_RECOVERY_REQUIRED`; only an explicit new-enrolment action may create |
 | Legacy identity schema | v1 Electron `safeStorage` envelope; migration only: read → write v2 → unwrap/sign proof → retire v1 |
+| Operator session storage | separate from station identity; helper never stores or receives human access/refresh tokens |
 | Queue namespace/schema | `com.mintvault.scanner.queue`, schema v1; authenticated canonical metadata + encrypted artifact only |
 | Capture profile schema | `mintvault-capture-profile-v1`, immutable server revision/digest |
 | IPC schema | `mintvault-scanner-ipc-v1`; explicit allowlist, request/response validation, no generic invoke/send |
 | Signed request current compatibility | `mintvault-station-request-v1` remains accepted until server/client v2 epoch transition is jointly wired |
 | Signed request target | v2 binds station, epoch, sequence, method, path, body digest and semantic operation ID |
+| Resync signature domain | `mintvault-station-resync-v1`; one-time server challenge, station code/UUID and challenge ID; no business mutation |
 | Semantic operation ID | UUIDv4 generated/persisted before first I/O; never reused across semantic operations |
 | Capture authorisation | opaque server ID; server-time issue/expiry; exact job/side/revision/profile/operator/station/location/tenant/purpose binding |
 | Artifact algorithms | SHA-256 digest; AES-256-GCM queue encryption with unique 96-bit nonce and authenticated metadata |

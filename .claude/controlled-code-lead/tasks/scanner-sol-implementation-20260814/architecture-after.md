@@ -1,6 +1,6 @@
 # Architecture — AFTER — Scanner SOL campaign
 
-**State:** WP1 capture-helper edge AS-BUILT locally; remaining graph PROPOSED until later WPs and final WP9/WP12 confirmation.
+**State:** WP1 capture-helper and WP2 identity/client edges AS-BUILT locally; remaining graph PROPOSED until later WPs and final WP9/WP12 confirmation.
 
 ```mermaid
 flowchart LR
@@ -42,3 +42,12 @@ verification of the capture helper's sealed digest, arm64 architecture, macOS
 floor, signature, identifier, protocol and matching production Team ID before
 every spawn. Identity, queue, server-policy and package edges remain pending
 implementation, behavioural/mutation/hostile proof and final P14 reconciliation.
+
+WP2 confirms helper-owned Ed25519 generation/import/signing, device-only
+SE-P256 wrapping, exact Keychain namespace enforcement, prove-then-retire v1
+migration, separate human session storage, one process-wide signed-request
+queue, durable exact-payload operation IDs and fail-closed identity recovery.
+Production helper calls additionally require a signed parent matching app ID,
+pinned Team and designated requirement. The encrypted evidence queue,
+production entitlements/package execution, server epoch/idempotency/session
+authority and final P14 reconciliation remain later edges and are not claimed.

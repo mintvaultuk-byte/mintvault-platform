@@ -58,3 +58,35 @@ The file-count overrun is diagnosed: the estimate counted the functional WP1
 surface, which landed within range, but omitted five mandatory campaign evidence
 updates and the two-file repair of the known stale Scanner baseline assertion.
 There was no architectural or protected-system scope expansion.
+
+## WP2 budget — device-bound identity and safe client foundations
+
+**Written:** 2026-08-14 before WP2 application-source editing
+
+| Metric | Estimate |
+|---|---|
+| Files expected to change/create | 12-17 functional/test/package files plus mandatory evidence updates |
+| Estimated lines changed | 1,000-1,600 |
+| Estimated commits | 1-2 local checkpoints |
+| Estimated tests | native Keychain/SE create-sign-reload; v1 migration; clone/no-auto-create; client serialization/op-ID/v2 canonical fixtures; Scanner/root gates |
+| Estimated duration | two implementation/regression passes |
+
+Server replay/session/idempotency schemas, migration numbering and routes are
+explicitly excluded from this safe-isolated pass until final P14 reconciliation.
+WP2 will implement the helper-owned identity, preserve v1 wire compatibility,
+serialize current signed requests, and add inactive v2/resync canonical DTOs.
+
+### WP2 actuals
+
+| Metric | Actual | Within 25%? |
+|---|---|---|
+| Functional/test files | 24 changed/created plus evidence updates | no |
+| Lines changed | approximately 1,350 additions / 260 deletions before final evidence notes | yes |
+| Commits | 1 planned WP2 checkpoint | yes |
+| Tests | native build/verify; 3 real SE lifecycle/migration; 70 Scanner; root helper boundary; governance/type/lint/build | yes |
+| Duration | two implementation/hostile-repair passes | yes |
+
+File count exceeded estimate because the hostile pass required separately
+testable caller-authentication, NEW and enrolment coordinators, signed-multipart
+containment and their regression files. The line estimate and protected-system
+boundary remained within budget; no Partner/server authority was modified.

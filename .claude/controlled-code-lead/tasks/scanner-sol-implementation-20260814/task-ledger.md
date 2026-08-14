@@ -33,11 +33,11 @@
 |---|---|---|---|
 | 0 — Baseline | done | 2026-08-14 | Exact source/Partner/tooling facts recorded |
 | 1 — Review plan | done | 2026-08-14 | A9 Partner, A1 Scanner, tooling scopes isolated |
-| 2 — Investigation | done for WP0; done for WP1 | 2026-08-14 | A9/tooling complete; WP1 A1/A2 controlled reviews complete; Lead inspected authoritative Scanner source and local binaries |
-| 3 — Lead verification | done for WP0; done for WP1 | 2026-08-14 | WP1 compiler path, helper trust gap, package absence, Electron architecture and macOS floor verified |
-| 4 — Implementation authorisation | done for WP0; done for WP1 | 2026-08-14 | Owner master prompt authorises isolated WP1 helper/package-boundary work; no credential or external mutation |
-| 5 — Implementation | done for WP0; done for WP1 | 2026-08-14 | WP1 precompiled capture-helper build, exact integrity boundary, versioned protocol and macOS 12.0 floor |
-| 6 — Regression | done for WP0; local WP1 done | 2026-08-14 | WP1 native execution/integrity hostile matrix/Scanner/root gates green; physical Canon and Developer-ID package proof correctly remain later gates |
+| 2 — Investigation | done through WP2 | 2026-08-14 | WP2 A3/A4 controlled reviews complete; Lead graph/source inspected local identity and committed authority |
+| 3 — Lead verification | done through WP2 | 2026-08-14 | Cloneable v1 envelope/main signing, nonce ordering, portal bearer reuse and idempotency gaps verified |
+| 4 — Implementation authorisation | done through safe-isolated WP2 | 2026-08-14 | Owner prompt authorises local native/client work; moving P14 forbids server authority/migration wiring until WP10 reconciliation |
+| 5 — Implementation | done through safe-isolated WP2 | 2026-08-14 | WP1 capture helper; WP2 caller-authenticated SE/Keychain identity, migration, request serialization and durable operation foundations |
+| 6 — Regression | local done through WP2 | 2026-08-14 | WP2 real test-namespace SE lifecycle/migration, hostile repair, Scanner/root/governance/type/lint/build green; signed package/cross-Mac/P14 proofs remain later gates |
 | 7 — Final report | pending | | Only after WP12 or a legitimate external/owner gate |
 
 ## Reviewer assignments
@@ -49,6 +49,10 @@
 | Tooling | Engineering OS/Graphify availability and correct commands, read-only | Complete; `source-verification.md` |
 | A1 WP1 helper | Native helper/controller/targeted tests, read-only | Complete; R-1 compiler and mutable executable reproduced from source; CLI contract preserved |
 | A2 WP1 compatibility | Electron/package/install/signing metadata, read-only | Complete; Electron 42.2.0 arm64, macOS 12.0 candidate floor, no production package/identity |
+| A3 WP2 identity | Scanner station identity/Keychain/helper contract, read-only | Complete; R-4/R-14/R-19/R-21 exact source evidence and migration order |
+| A4 WP2 authority | Committed replay/session/idempotency authority, read-only | Complete; safe client work separated from final-P14 server/schema changes |
+| A3 WP2 hostile | Current identity helper/Keychain/migration trust boundary, read-only | Initial 4 HIGH; all repaired; final re-review CLEAN |
+| A4 WP2 hostile | Current request ordering/op durability/upload auth, read-only | Three review rounds; final 400 key-conflict response-loss edge repaired; final re-review CLEAN |
 
 ## Authoritative links
 
@@ -84,3 +88,23 @@
 - Hostile helper matrix: 15 passed / 0 failed. Root packaged-helper/profile tests: 10 passed / 0 failed. Scanner suite: 50 passed / 0 failed.
 - The one WP0 Scanner baseline failure was an obsolete source assertion. The test and misleading modal copy now pin the existing server-derived Card Job/missing-side FIX flow; no business-authority source changed.
 - Governance 4/4, root TypeScript, lint (0 errors), production build and diff whitespace gates pass.
+
+## WP2 implementation and regression evidence
+
+- Real Secure Enclave test namespaces proved explicit create, duplicate-create
+  refusal, bind, persistent nonce signing, resync signature, strict newer epoch,
+  reload and exact retirement. A second real test preserved an imported legacy
+  key/install ID/nonce and rejected key substitution. All temporary namespaces
+  were retired; the production service was never touched.
+- Production native source uses exact Team access group, actual permanent tagged
+  SE `SecKey`, device-only/non-sync Keychain attributes and authenticated parent
+  code. Ad-hoc helper production access is rejected. Final Developer-ID
+  entitlement expansion and signed-parent execution are WP6/R-3 proof gates.
+- Scanner suite is 67 passed / 3 opt-in skips in the normal 70-test run; the 3
+  opt-in tests pass when enabled. Root Scanner/Partner contract matrix is 76/76.
+  Governance 4/4, TypeScript, lint (0 errors / 2,655 baseline-plus-campaign
+  warnings), production build and diff whitespace gates pass.
+- A3 and A4 hostile re-reviews are CLEAN after repair. A4 local findings were repaired,
+  including retaining enrolment on every non-success until P14 can prove a terminal result;
+  final-P14 server enrolment/replay/session idempotency remains an external
+  authority dependency rather than a hidden local claim.

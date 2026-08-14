@@ -8,12 +8,15 @@ integrity.configureRuntime({
   execPath: process.execPath,
 });
 const verified = integrity.verifiedCaptureHelper();
+const identity = integrity.verifiedIdentityHelper();
 process.stdout.write(`${JSON.stringify({
   ok: true,
-  helper: verified.path,
-  helperVersion: verified.manifest.helperVersion,
-  protocolVersion: verified.manifest.protocolVersion,
-  sha256: verified.manifest.sha256,
-  signingIdentifier: verified.helperSignature.identifier,
-  teamIdentifier: verified.helperSignature.teamIdentifier || null,
+  helpers: [verified, identity].map((entry) => ({
+    helper: entry.path,
+    helperVersion: entry.manifest.helperVersion,
+    protocolVersion: entry.manifest.protocolVersion,
+    sha256: entry.manifest.sha256,
+    signingIdentifier: entry.helperSignature.identifier,
+    teamIdentifier: entry.helperSignature.teamIdentifier || null,
+  })),
 })}\n`);

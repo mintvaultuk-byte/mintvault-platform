@@ -633,6 +633,7 @@ describe("P6 integration surfaces", () => {
   const captureService = readFileSync("server/scanner-capture-service.ts", "utf8");
   const scannerMain = readFileSync("scripts/scanner-app/main.js", "utf8");
   const scannerClient = readFileSync("scripts/scanner-app/lib/server-client.js", "utf8");
+  const scannerNewCardOperation = readFileSync("scripts/scanner-app/lib/new-card-operation.js", "utf8");
   const scannerHtml = readFileSync("scripts/scanner-app/renderer/index.html", "utf8");
   const scannerApp = readFileSync("scripts/scanner-app/renderer/app.js", "utf8");
 
@@ -674,12 +675,14 @@ describe("P6 integration surfaces", () => {
     expect(captureService).toContain("Certificate is not bound to this station's tenant and location");
   });
 
-  it("the Scanner holds ONE retry token across retries of a single press", () => {
-    expect(scannerMain).toContain("pendingNewCardOpId");
-    // Reused when already set — a fresh id per retry is how a shop gets charged twice.
-    expect(scannerMain).toContain("if (!pendingNewCardOpId) pendingNewCardOpId =");
-    // A transport failure keeps the token, because the outcome is unknown.
+  it("the Scanner durably holds ONE retry token and exact payload across restarts", () => {
+    expect(scannerMain).toContain("newCardOperation.beginOrResume(cardName)");
+    expect(scannerNewCardOperation).toContain('store.pending("CARD_JOB_NEW")');
+    expect(scannerNewCardOperation).toContain("if (existing) return existing");
+    expect(scannerNewCardOperation).toContain("payload: { cardName: canonicalName }");
+    // Transport and malformed-success outcomes keep the fsync-backed operation pending.
     expect(scannerMain).toMatch(/catch[\s\S]{0,200}retryable: true/);
+    expect(scannerMain).toContain("newCardOperation.validatedCardJobId(result)");
     expect(scannerClient).toContain("startNewCard");
     expect(scannerClient).toContain('postJson("/api/partner/card-jobs"');
   });

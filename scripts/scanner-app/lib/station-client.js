@@ -5,6 +5,8 @@
  * signed user+station path.
  */
 const stationIdentity = require("./station-identity");
+const stationRequestQueue = require("./station-request-queue");
+const enrolmentOperation = require("./enrolment-operation");
 
 let fetchPromise = null;
 function getFetch() {
@@ -59,15 +61,17 @@ async function creditSummary() {
 }
 
 async function signedJson(method, apiPath, payload) {
-  const fetch = await getFetch();
-  const serialized = Buffer.from(JSON.stringify(payload || {}));
-  const headers = stationIdentity.signStoredRequest({ method, path: apiPath, body: serialized });
-  const response = await fetch(`${baseUrl()}${apiPath}`, {
-    method,
-    headers: { ...headers, "content-type": "application/json" },
-    body: serialized,
+  return stationRequestQueue.run(async () => {
+    const fetch = await getFetch();
+    const serialized = Buffer.from(JSON.stringify(payload || {}));
+    const headers = stationIdentity.signStoredRequest({ method, path: apiPath, body: serialized });
+    const response = await fetch(`${baseUrl()}${apiPath}`, {
+      method,
+      headers: { ...headers, "content-type": "application/json" },
+      body: serialized,
+    });
+    return { ok: response.ok, status: response.status, body: await readJson(response) };
   });
-  return { ok: response.ok, status: response.status, body: await readJson(response) };
 }
 
 async function signIn(email, password) {
@@ -108,13 +112,16 @@ async function selectLocation(locationId) {
 
 async function registerThisMac({ locationId, appVersion }) {
   const payload = { ...stationIdentity.enrolmentPublicPayload(appVersion), ...(locationId ? { locationId } : {}) };
-  const result = await operatorJson("POST", "/api/partner/stations/enrol", payload);
+  const operation = enrolmentOperation.beginOrResume(payload);
+  const durablePayload = operation.payload;
+  const result = await operatorJson("POST", "/api/partner/stations/enrol", { ...durablePayload, clientOpId: operation.id });
   if (result.ok && result.body?.station?.stationCode) {
     stationIdentity.saveEnrollment({
       stationCode: result.body.station.stationCode,
-      publicKeyFingerprint: payload.publicKeyFingerprint,
+      publicKeyFingerprint: durablePayload.publicKeyFingerprint,
       status: result.body.station.status || "PENDING",
     });
+    enrolmentOperation.complete(operation, `station:${result.body.station.stationCode}`);
   }
   return result;
 }

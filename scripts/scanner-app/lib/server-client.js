@@ -15,6 +15,7 @@ const crypto    = require("node:crypto");
 const { Transform } = require("node:stream");
 const FormData  = require("form-data");
 const stationIdentity = require("./station-identity");
+const stationRequestQueue = require("./station-request-queue");
 // node-fetch v3 is ESM-only. Lazy-load via dynamic import; cache the promise.
 let _fetchPromise = null;
 function getFetch() {
@@ -135,6 +136,17 @@ async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
 const RESPONSE_TIMEOUT_MS = 5 * 60_000;
 
 async function postForm(url, form, extraHeaders = {}) {
+  if (stationIdentity.hasActiveStationSession()) {
+    return {
+      ok: false,
+      status: 426,
+      body: { error: "Signed stations require digest-bound staged upload and finalisation; multipart fallback is disabled" },
+    };
+  }
+  return stationRequestQueue.run(() => postFormNow(url, form, extraHeaders));
+}
+
+async function postFormNow(url, form, extraHeaders = {}) {
   const fetch = await getFetch();
 
   let contentLength;
@@ -145,7 +157,7 @@ async function postForm(url, form, extraHeaders = {}) {
   // become evidence; the signed envelope binds the station, method and exact
   // route without materialising a 1200-DPI TIFF in Electron memory.
   const headers = {
-    ...requestAuthHeaders("POST", `${requestUrl.pathname}${requestUrl.search}`, Buffer.alloc(0)),
+    ...(process.env.NODE_ENV !== "production" && process.env.MINTVAULT_ALLOW_LEGACY_SCANNER_TOKEN === "1" ? legacyAuthHeaders() : {}),
     ...form.getHeaders(),
     ...extraHeaders,
   };
@@ -287,43 +299,49 @@ function requestAuthHeaders(method, urlPath, body) {
 }
 
 async function getJson(urlPath) {
-  const fetch = await getFetch();
-  const res = await fetch(`${API_BASE}${urlPath}`, {
-    method: "GET",
-    headers: requestAuthHeaders("GET", urlPath, Buffer.alloc(0)),
+  return stationRequestQueue.run(async () => {
+    const fetch = await getFetch();
+    const res = await fetch(`${API_BASE}${urlPath}`, {
+      method: "GET",
+      headers: requestAuthHeaders("GET", urlPath, Buffer.alloc(0)),
+    });
+    const text = await res.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    return { ok: res.ok, status: res.status, body };
   });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  return { ok: res.ok, status: res.status, body };
 }
 
 async function postJson(urlPath, payload) {
-  const fetch = await getFetch();
-  const requestBody = JSON.stringify(payload || {});
-  const res = await fetch(`${API_BASE}${urlPath}`, {
-    method: "POST",
-    headers: { ...requestAuthHeaders("POST", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
-    body: requestBody,
+  return stationRequestQueue.run(async () => {
+    const fetch = await getFetch();
+    const requestBody = JSON.stringify(payload || {});
+    const res = await fetch(`${API_BASE}${urlPath}`, {
+      method: "POST",
+      headers: { ...requestAuthHeaders("POST", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
+      body: requestBody,
+    });
+    const text = await res.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    return { ok: res.ok, status: res.status, body };
   });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  return { ok: res.ok, status: res.status, body };
 }
 
 async function deleteJson(urlPath, payload) {
-  const fetch = await getFetch();
-  const requestBody = JSON.stringify(payload || {});
-  const res = await fetch(`${API_BASE}${urlPath}`, {
-    method: "DELETE",
-    headers: { ...requestAuthHeaders("DELETE", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
-    body: requestBody,
+  return stationRequestQueue.run(async () => {
+    const fetch = await getFetch();
+    const requestBody = JSON.stringify(payload || {});
+    const res = await fetch(`${API_BASE}${urlPath}`, {
+      method: "DELETE",
+      headers: { ...requestAuthHeaders("DELETE", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
+      body: requestBody,
+    });
+    const text = await res.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    return { ok: res.ok, status: res.status, body };
   });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  return { ok: res.ok, status: res.status, body };
 }
 
 // ── Specific server calls ─────────────────────────────────────────────────

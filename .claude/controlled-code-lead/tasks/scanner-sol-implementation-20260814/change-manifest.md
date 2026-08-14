@@ -76,3 +76,49 @@ helper contract without claiming external-credential proof.
 
 Protected systems untouched: MVGS math/labels, payments, migrations, production
 data, active Partner pass2, staging/production, credentials, remote Git.
+
+## WP2 planned change manifest (before application edits)
+
+| Finding | Planned safe-isolated surface | Repair class |
+|---|---|---|
+| R-4/R-14/R-19 | signed arm64 Swift identity helper; SE-P256 wrapping; explicit device-only non-sync Keychain; helper-owned Ed25519 signing | D |
+| R-21 | explicit identity state machine; v1→v2 prove-then-retire migration; namespace/schema drift tests | D |
+| R-6/R-13/R-20 | inactive v2 request/resync canonical contracts and tests; no authority route wiring before P14 | B |
+| R-12/R-26 | persisted UUIDv4 semantic-operation store/client framework; final universal server registry deferred | A/B |
+| Request ordering | one main-process station-signed request queue | A |
+| R-27 | separate operator-session envelope and binding-ready client DTO; final access/refresh authority deferred | B |
+
+No Partner auth/RBAC/location/station/Card Job/credit schema, route or migration
+will be authored in this pass. That is the explicit A4/Lead response to the
+moving-P14 isolation rule, not a downgrade of the registered HIGH findings.
+
+## WP2 actual changes
+
+- Added a dependency-free arm64 Swift identity helper. Production identity
+  access requires the release-signed helper plus an authenticated dynamic
+  parent matching the exact Scanner app ID, pinned Team and designated
+  requirement. Ad-hoc builds are constrained to bounded test namespaces.
+- Production v2 identity uses a permanent application-tagged Secure Enclave
+  P-256 key in the frozen Team access group to wrap Ed25519 under
+  HKDF-SHA256/AES-256-GCM. The generic Keychain envelope is exact-access-group,
+  `AfterFirstUnlockThisDeviceOnly` and non-sync. Missing entitlement, alternate
+  attributes, missing SE key, schema drift and corruption fail closed.
+- Migrates the legacy v1 key through bounded stdin, verifies pair/fingerprint
+  and possession, converges same-key retries, then retires v1. Human session is
+  a separate safeStorage envelope and never enters the helper.
+- Preserved signed-request v1 while adding inactive v2/resync domains and
+  strict-newer-epoch state. All current station-signed exchanges share one
+  queue from signature allocation through response consumption.
+- Added a durable exact-payload semantic-operation store and restart-safe NEW
+  and enrolment coordinators. Ambiguous NEW outcomes retain the same operation;
+  completed history compacts without deleting unresolved work.
+- Disabled multipart evidence fallback for active signed stations because its
+  bytes were not signature-bound. Production must use staged digest-bound
+  grant/finalisation; explicit local legacy-token proof remains isolated.
+- Added explicit identity-recovery UI state; missing/corrupt identity can no
+  longer be presented as a new-station registration.
+
+Hostile A3/A4 findings were repaired in the same pass. Final server enrolment
+idempotency, replay/resync and station-bound refresh remain deliberately
+inactive until frozen P14 reconciliation; no server authority or migration was
+changed in WP2.

@@ -284,6 +284,9 @@ function renderStationSetup(next) {
     els.stationSetupText.textContent = stationSetup.minimumSupportedVersion
       ? `This Mac must run MintVault Scanner ${stationSetup.minimumSupportedVersion} or later. Install the current signed MintVault Scanner release, then reopen the app.`
       : "Install the current signed MintVault Scanner release, then reopen the app.";
+  } else if (stage === "identity_recovery_required") {
+    els.stationSetupTitle.textContent = "Station identity recovery required";
+    els.stationSetupText.textContent = "MintVault cannot prove this Mac's enrolled identity. Scanning and re-registration are paused. Contact a MintVault Super Admin.";
   } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
     els.stationSetupTitle.textContent = "Station unavailable";
     els.stationSetupText.textContent = "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
