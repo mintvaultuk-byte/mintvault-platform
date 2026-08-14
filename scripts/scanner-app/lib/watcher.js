@@ -24,6 +24,14 @@ const server     = require("./server-client");
 const backDetect = require("./back-detect");
 const lide400    = require("./lide400-controller");
 const cardFrame  = require("./lide400-card-frame");
+const helperIntegrity = require("./helper-integrity");
+const scannerPackage = require("../package.json");
+const {
+  EncryptedCaptureQueue,
+  QueueCorruptionError,
+  DISPOSITIONS: QUEUE_DISPOSITIONS,
+  _private: { canonicalJson },
+} = require("./encrypted-capture-queue");
 const { detectCardBounds, derivePlacementProposal } = require("./lide400-card-detection");
 const { COORDINATE_SPACE, assertUprightOrientation } = require("./lide400-preview-transform");
 
@@ -40,10 +48,9 @@ const CAPTURE_STAGING = path.join(BASE, "capture-staging");
 // Local-only setup Preview JPEGs. This directory is never watched by the
 // retired hot-folder path and never appears in a server/evidence request.
 const POSITIONING_PREVIEW = path.join(BASE, "positioning-preview");
-// Direct ImageCaptureCore output is intentionally kept outside the legacy
-// hot-folder queue.  A completed physical scan is valuable evidence even when
-// the app or network dies before the server's acknowledgement arrives.
-const TARGETED_QUEUE = path.join(BASE, "targeted-capture-queue.json");
+// One-time migration source for pre-WP5 targeted queues. It is removed only
+// after every record is durably represented by capture-queue/index.v1.json.
+const LEGACY_TARGETED_QUEUE = path.join(BASE, "targeted-capture-queue.json");
 // Crash-recovery queue: records every upload that's in flight so an
 // interrupted upload (app killed / machine slept mid-POST) can be re-driven
 // on the next startup. Written when an upload starts, cleared on success or
@@ -96,6 +103,66 @@ const POSITIONING_PREVIEW_MAX_EDGE_PX = 1_800;
 // `busy`. Server target polling remains fast, while physical readiness is
 // intentionally sampled at a bounded operator-safe cadence.
 const SCANNER_HEALTH_MIN_INTERVAL_MS = 15_000;
+const AUTHORITATIVE_CAPTURE_PURPOSE = "AUTHORITATIVE_CARD_CAPTURE";
+
+function ensurePrivateDirectory(directory) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(directory, 0o700);
+}
+
+function requiredAuthorityString(value, label) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text || text.length > 256) throw new Error(`Capture authorisation is missing ${label}`);
+  return text;
+}
+
+function requiredAuthorityIdentifier(value, label) {
+  const text = requiredAuthorityString(value, label);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:@-]{2,255}$/.test(text)) {
+    throw new Error(`Capture authorisation has an invalid ${label}`);
+  }
+  return text;
+}
+
+function parseServerTimestamp(value, label) {
+  const text = requiredAuthorityString(value, label);
+  const millis = Date.parse(text);
+  if (!Number.isFinite(millis)) throw new Error(`Capture authorisation has an invalid ${label}`);
+  return { text, millis };
+}
+
+function captureEntryFromAuthorisation(capture) {
+  if (!capture || typeof capture !== "object") throw new Error("Server did not return a capture authorisation");
+  const side = capture.side;
+  if (side !== "front" && side !== "back") throw new Error("Capture authorisation has an invalid side");
+  const revision = Number(capture.revision);
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("Capture authorisation has an invalid evidence revision");
+  const issued = parseServerTimestamp(capture.authorisationIssuedAt, "server issued-at timestamp");
+  const expires = parseServerTimestamp(capture.authorisationExpiresAt, "server expiry timestamp");
+  if (expires.millis <= issued.millis) throw new Error("Capture authorisation expiry must follow server issuance");
+  if (capture.capturePurpose !== AUTHORITATIVE_CAPTURE_PURPOSE) throw new Error("Capture authorisation purpose is not authoritative card capture");
+  if (capture.originalOperatorRole !== "SCANNER_OPERATOR") throw new Error("Capture authorisation is not bound to a SCANNER_OPERATOR");
+  return {
+    sessionId: requiredAuthorityIdentifier(capture.id, "capture session ID"),
+    captureAuthorisationId: requiredAuthorityIdentifier(capture.captureAuthorisationId, "capture authorisation ID"),
+    semanticOperationId: requiredAuthorityIdentifier(capture.semanticOperationId, "semantic operation ID"),
+    cardJobId: requiredAuthorityIdentifier(capture.cardJobId, "Card Job ID"),
+    certId: requiredAuthorityIdentifier(capture.certificateNumber, "certificate number"),
+    side,
+    revision,
+    profileRevisionId: requiredAuthorityIdentifier(capture.profileRevisionId, "capture profile revision ID"),
+    tenantId: requiredAuthorityIdentifier(capture.tenantId, "tenant ID"),
+    locationId: requiredAuthorityIdentifier(capture.locationId, "location ID"),
+    stationCredentialId: requiredAuthorityIdentifier(capture.stationId, "station ID"),
+    workstationId: requiredAuthorityIdentifier(capture.workstationId, "workstation ID"),
+    originalOperatorId: requiredAuthorityIdentifier(capture.originalOperatorId, "original operator ID"),
+    originalOperatorRole: capture.originalOperatorRole,
+    capturePurpose: capture.capturePurpose,
+    authorisationIssuedAt: issued.text,
+    authorisationExpiresAt: expires.text,
+    sessionExpiresAt: capture.expiresAt || null,
+  };
+}
 
 // AUTO-mode mint throttle: refuse to mint a new cert if one was created less
 // than this long ago. Guards against a runaway AUTO batch minting a flood of
@@ -103,8 +170,13 @@ const SCANNER_HEALTH_MIN_INTERVAL_MS = 15_000;
 // clears.
 const AUTO_THROTTLE_MS = 20_000;
 
+function fsyncParent(directory) {
+  const handle = fs.openSync(directory, fs.constants.O_RDONLY);
+  try { fs.fsyncSync(handle); } finally { fs.closeSync(handle); }
+}
+
 class Watcher extends EventEmitter {
-  constructor() {
+  constructor({ captureQueueKeyProtector = null } = {}) {
     super();
     this.chokidar = null;
     this.bufferedFront = null;       // absolute path
@@ -121,12 +193,17 @@ class Watcher extends EventEmitter {
     this.positioningPreviewInFlight = false;
     this.lastScannerHealthAt = 0;
     this.scannerHealthPromise = null;
+    this.captureQueue = new EncryptedCaptureQueue({ baseDir: BASE, keyProtector: captureQueueKeyProtector });
+  }
+
+  prepareCaptureDirectories() {
+    for (const directory of [BASE, INBOX, PROCESSED, FAILED, REJECTED, DISCARDED, CAPTURE_STAGING, POSITIONING_PREVIEW]) {
+      ensurePrivateDirectory(directory);
+    }
   }
 
   async start() {
-    for (const dir of [BASE, INBOX, PROCESSED, FAILED, REJECTED, DISCARDED, CAPTURE_STAGING, POSITIONING_PREVIEW]) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    this.prepareCaptureDirectories();
 
     if (!server.hasToken()) {
       // A fresh production Mac is intentionally not a scanner credential yet.
@@ -143,6 +220,17 @@ class Watcher extends EventEmitter {
     try { chokidar = require("chokidar"); }
     catch (err) { this.log(`chokidar load failed: ${err.message}`, "error"); return; }
 
+    // WP5 recovery runs before any polling or new physical work. A corrupt
+    // index or an unencryptable orphan is a fail-closed startup error, never an
+    // empty queue. Verified upload scratch duplicates are unlinked; all other
+    // abandoned capture bytes are encrypted into QUARANTINED records.
+    const recoveredCiphertexts = this.captureQueue.recoverOrphanCiphertexts();
+    if (recoveredCiphertexts) this.log(`startup: recovered ${recoveredCiphertexts} unindexed encrypted capture artifact(s) into quarantine`, "warn");
+    const resolvedAccepted = this.finalizeAcceptedCaptures();
+    if (resolvedAccepted) this.log(`startup: completed ${resolvedAccepted} accepted encrypted capture resolution(s)`, "info");
+    this.captureQueue.assertReferencedArtifactsPresent();
+    await this.migrateLegacyTargetedQueue();
+
     // Crash recovery: re-drive any uploads that were in flight when the app
     // last died, BEFORE we start watching. Awaited sequentially so each
     // interrupted upload finishes (success → moved to processed, or fail →
@@ -150,6 +238,9 @@ class Watcher extends EventEmitter {
     // scan runs — that prevents the initial scan from double-processing the
     // same files.
     await this.requeuePending();
+    // The legacy queue migration may have surfaced paths in inbox/rejected.
+    // Sweep last so no legacy recovery step can recreate retained plaintext.
+    await this.sweepAbandonedCapturePlaintext();
     // A direct TIFF is tied to a specific server session and is never mixed
     // with legacy inbox recovery.  Reconcile it before accepting another
     // physical capture, so a crash cannot force a side-level rescan.
@@ -309,14 +400,15 @@ class Watcher extends EventEmitter {
     for (const entry of pending) {
       try {
         const candidates = [entry.frontPath, entry.backPath, entry.filePath].filter(Boolean);
-        const rejectedDir = this.dateFolder(REJECTED);
         for (const candidate of candidates) {
           if (!fs.existsSync(candidate)) continue;
-          const moved = this.moveFile(candidate, rejectedDir);
-          if (moved) this.writeError(moved, "Legacy pending hot-folder upload quarantined at Canon LiDE target-session cutover.");
+          await this.quarantinePlaintext(
+            candidate,
+            "Legacy pending hot-folder upload quarantined at Canon LiDE target-session cutover.",
+          );
         }
-        // The local files are retained for forensic recovery, but the old queue
-        // can never be re-driven because it has no target-session evidence.
+        // The encrypted artifacts remain for forensic recovery, but the old
+        // unbound queue can never be re-driven as authoritative evidence.
         this.removePending(entry.key);
       } catch (err) {
         this.log(`reconcile failed for ${entry.key}: ${err.message}`, "error");
@@ -327,35 +419,131 @@ class Watcher extends EventEmitter {
   // ── Targeted capture: arm → explicit scan → local preview → accept ─────
 
   readTargetedQueue() {
-    try {
-      const entries = JSON.parse(fs.readFileSync(TARGETED_QUEUE, "utf8"));
-      return Array.isArray(entries) ? entries : [];
-    } catch { return []; }
+    return this.captureQueue.entries().filter((entry) =>
+      !["QUARANTINED", "ACCEPTED", "RESOLVED"].includes(String(entry.lifecycleState || ""))
+    );
   }
 
   /** Count retained TIFFs that still need a server upload acknowledgement. */
   targetedPendingUploadCount() {
-    return this.readTargetedQueue().filter((entry) => ["upload", "upload_retry"].includes(String(entry?.phase))).length;
+    return this.captureQueue.entries().filter((entry) =>
+      entry.lifecycleState !== "RESOLVED" && Boolean(entry.artifact || entry.previewArtifact)
+    ).length;
   }
 
   writeTargetedQueue(entries) {
-    const temp = `${TARGETED_QUEUE}.tmp`;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(entries, null, 2));
-      fs.renameSync(temp, TARGETED_QUEUE);
-    } catch (error) {
-      this.log(`targeted capture queue write failed: ${error.message}`, "warn");
-    }
+    this.captureQueue.writeEntries(entries);
   }
 
   addTargetedPending(entry) {
-    const queue = this.readTargetedQueue().filter((item) => item.sessionId !== entry.sessionId);
-    queue.push({ ...entry, updatedAt: new Date().toISOString() });
-    this.writeTargetedQueue(queue);
+    const existing = entry.queueEntryId
+      ? null
+      : this.readTargetedQueue().find((item) => item.sessionId === entry.sessionId);
+    const phase = String(entry.phase || existing?.phase || "awaiting_scan");
+    const lifecycleState = entry.lifecycleState || existing?.lifecycleState || (
+      phase === "upload_retry" ? "RETRYING" : phase === "needs_reconciliation" ? "NEEDS_RECONCILIATION" : "PENDING_UPLOAD"
+    );
+    return this.captureQueue.upsert({
+      ...existing,
+      ...entry,
+      queueEntryId: entry.queueEntryId || existing?.queueEntryId || crypto.randomUUID(),
+      semanticOperationId: entry.semanticOperationId || existing?.semanticOperationId || crypto.randomUUID(),
+      lifecycleState,
+    });
   }
 
   removeTargetedPending(sessionId) {
-    this.writeTargetedQueue(this.readTargetedQueue().filter((item) => item.sessionId !== sessionId));
+    for (const entry of this.readTargetedQueue().filter((item) => item.sessionId === sessionId)) {
+      this.captureQueue.remove(entry.queueEntryId);
+    }
+  }
+
+  async migrateLegacyTargetedQueue() {
+    if (!fs.existsSync(LEGACY_TARGETED_QUEUE)) return;
+    let entries;
+    try { entries = JSON.parse(fs.readFileSync(LEGACY_TARGETED_QUEUE, "utf8")); }
+    catch { throw new QueueCorruptionError("Legacy targeted capture queue is corrupt and requires recovery"); }
+    if (!Array.isArray(entries)) throw new QueueCorruptionError("Legacy targeted capture queue schema is invalid");
+    for (const entry of entries) {
+      for (const candidate of [entry?.filePath, entry?.previewPath].filter(Boolean)) {
+        if (fs.existsSync(candidate)) {
+          await this.quarantinePlaintext(candidate, "Pre-WP5 targeted queue evidence lacks the complete authenticated authorisation tuple");
+        }
+      }
+    }
+    fs.unlinkSync(LEGACY_TARGETED_QUEUE);
+    fsyncParent(BASE);
+  }
+
+  capturePlaintextPaths() {
+    const paths = [];
+    const walk = (directory) => {
+      if (!fs.existsSync(directory)) return;
+      for (const dirent of fs.readdirSync(directory, { withFileTypes: true })) {
+        const candidate = path.join(directory, dirent.name);
+        if (dirent.isSymbolicLink()) continue;
+        if (dirent.isDirectory()) walk(candidate);
+        else if (dirent.isFile() && /\.(?:tiff?|jpe?g)$/i.test(dirent.name)) paths.push(candidate);
+      }
+    };
+    for (const directory of [INBOX, REJECTED, CAPTURE_STAGING, this.captureQueue.scratchDir, PROCESSED, FAILED, DISCARDED]) walk(directory);
+    return paths;
+  }
+
+  async quarantinePlaintext(plaintextPath, reason) {
+    if (!fs.existsSync(plaintextPath)) return null;
+    const ext = path.extname(plaintextPath).toLowerCase();
+    const isPreview = ext === ".jpg" || ext === ".jpeg";
+    const quarantined = this.addTargetedPending({
+      queueEntryId: crypto.randomUUID(),
+      semanticOperationId: crypto.randomUUID(),
+      phase: "quarantined",
+      lifecycleState: "QUARANTINED",
+      disposition: null,
+      localOutcome: "UNBOUND_PLAINTEXT_QUARANTINED",
+      quarantineReason: reason,
+      originalRelativePath: path.relative(BASE, plaintextPath),
+    });
+    return this.captureQueue.attachFile(quarantined, plaintextPath, {
+      kind: isPreview ? "PREVIEW_JPEG" : "TIFF_MASTER",
+      mimeType: isPreview ? "image/jpeg" : "image/tiff",
+      quarantine: true,
+    });
+  }
+
+  async sweepAbandonedCapturePlaintext() {
+    // First attach paths named by a durable target record. The index update is
+    // committed and fsynced before attachFile unlinks the plaintext.
+    for (const original of this.readTargetedQueue()) {
+      let entry = original;
+      if (entry.filePath && fs.existsSync(entry.filePath) && !entry.artifact) {
+        entry = await this.captureQueue.attachFile(entry, entry.filePath, { kind: "TIFF_MASTER", mimeType: "image/tiff" });
+        entry = this.addTargetedPending({ ...entry, filePath: null });
+      }
+      if (entry.previewPath && fs.existsSync(entry.previewPath) && !entry.previewArtifact) {
+        entry = await this.captureQueue.attachFile(entry, entry.previewPath, { kind: "PREVIEW_JPEG", mimeType: "image/jpeg" });
+        this.addTargetedPending({ ...entry, previewPath: null });
+      }
+    }
+
+    const knownDigests = new Set();
+    for (const entry of this.captureQueue.entries()) {
+      if (entry.artifact?.sha256) knownDigests.add(entry.artifact.sha256);
+      if (entry.previewArtifact?.sha256) knownDigests.add(entry.previewArtifact.sha256);
+    }
+    for (const plaintextPath of this.capturePlaintextPaths()) {
+      const digest = await this.sha256File(plaintextPath);
+      const insideScratch = path.resolve(plaintextPath).startsWith(path.resolve(this.captureQueue.scratchDir) + path.sep);
+      if (insideScratch && digest && knownDigests.has(digest)) {
+        fs.unlinkSync(plaintextPath);
+        continue;
+      }
+      await this.quarantinePlaintext(plaintextPath, "Abandoned or unmatched plaintext recovered during startup sweep");
+    }
+  }
+
+  captureStorageStatus() {
+    return this.captureQueue.storageStatus();
   }
 
   activeTargetEntry() {
@@ -393,23 +581,63 @@ class Watcher extends EventEmitter {
 
   async reconcileTargetedCapture(entry) {
     let status;
+    let sessionId;
+    try { sessionId = entry.artifact ? this.authenticatedMasterMetadata(entry).captureSessionId : entry.sessionId; }
+    catch (error) { return { legacyAccepted: false, state: null, unavailable: false, integrityError: error.message }; }
     try {
-      status = await server.getCaptureStatus(entry.sessionId, lide400.deviceId());
+      status = await server.getCaptureStatus(sessionId, lide400.deviceId());
     } catch (error) {
-      this.log(`targeted status check failed for ${entry.sessionId}: ${error.message}`, "warn");
-      return { accepted: false, state: null, unavailable: true };
+      this.log(`targeted status check failed for ${sessionId}: ${error.message}`, "warn");
+      return { legacyAccepted: false, state: null, unavailable: true };
     }
     if (!status.ok) {
-      this.log(`targeted status check rejected for ${entry.sessionId}: ${status.body?.error || `HTTP ${status.status}`}`, "warn");
-      return { accepted: false, state: null, unavailable: true };
+      this.log(`targeted status check rejected for ${sessionId}: ${status.body?.error || `HTTP ${status.status}`}`, "warn");
+      return { legacyAccepted: false, state: null, unavailable: true };
     }
     return {
-      accepted: status.body?.accepted === true,
+      legacyAccepted: status.body?.accepted === true,
       state: status.body?.capture?.state || null,
+      disposition: typeof status.body?.disposition === "string"
+        ? status.body.disposition.toUpperCase()
+        : null,
+      dispositionBinding: status.body?.disposition_binding || null,
       capture: status.body?.capture
         ? { ...status.body.capture, cardRegistered: status.body?.card_registered === true }
         : null,
     };
+  }
+
+  applyServerDisposition(entry, result) {
+    const disposition = result?.disposition;
+    if (!disposition) return null;
+    if (!QUEUE_DISPOSITIONS.has(disposition)) {
+      const reason = "Server returned an unknown evidence disposition; encrypted evidence remains unresolved";
+      this.addTargetedPending({ ...entry, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", disposition: null, serverDispositionObserved: disposition, reconciliationReason: reason });
+      return { ok: false, retryPending: true, error: reason };
+    }
+    let expected;
+    try { expected = this.dispositionBinding(entry); }
+    catch (error) { return { ok: false, retryPending: true, error: error.message }; }
+    if (canonicalJson(result.dispositionBinding) !== canonicalJson(expected)) {
+      const reason = "Server evidence disposition did not match the complete authenticated capture tuple";
+      this.addTargetedPending({ ...entry, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", disposition: null, serverDispositionObserved: disposition, reconciliationReason: reason });
+      return { ok: false, retryPending: true, error: reason };
+    }
+    if (disposition === "STILL_REQUIRED") {
+      this.addTargetedPending({ ...entry, disposition, serverDispositionAt: new Date().toISOString() });
+      return null;
+    }
+    if (disposition === "ACCEPTED") {
+      return this.completeTargetedCapture(entry, result.capture, { authoritativeDispositionVerified: true });
+    }
+    if (["SUPERSEDED", "CANCELLED", "INVALID_TARGET", "REQUIRES_FIX"].includes(disposition)) {
+      const reason = `Server disposition ${disposition} ended this queued candidate; encrypted evidence is retained for audit`;
+      this.archivePreviewCandidate(entry, reason, { disposition, localOutcome: null });
+      stateMod.set({ state: "error", activeCapture: null, lastError: reason });
+      this.emitState();
+      return { ok: false, disposition, error: reason };
+    }
+    return null;
   }
 
   async keepTargetAlive(entry) {
@@ -431,7 +659,7 @@ class Watcher extends EventEmitter {
     const next = {
       ...entry,
       lastKeepaliveAt: Date.now(),
-      expiresAt: renewed.body?.capture?.expiresAt || entry.expiresAt,
+      sessionExpiresAt: renewed.body?.capture?.expiresAt || entry.sessionExpiresAt,
     };
     this.addTargetedPending(next);
     return { ok: true, entry: next };
@@ -456,6 +684,133 @@ class Watcher extends EventEmitter {
 
   async assessCaptureFrame(masterPath, provenance) {
     return cardFrame.assessLide400CardFrame(masterPath, provenance?.scanAreaMm);
+  }
+
+  async validateCaptureMaster(masterPath, provenance) {
+    const stat = fs.lstatSync(masterPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 64 * 1024 || stat.size > 512 * 1024 * 1024) {
+      throw new Error("LiDE TIFF size or file type is outside the locked capture profile");
+    }
+    const area = provenance?.scanAreaMm;
+    const values = [area?.width, area?.height].map(Number);
+    if (provenance?.profileVersion !== lide400.PROFILE_VERSION || Number(provenance?.requestedDpi) !== 1200 ||
+        Number(provenance?.driverResolutionDpi) !== 1200 || !values.every(Number.isFinite) ||
+        Math.abs(values[0] - 100) > 0.25 || Math.abs(values[1] - 130) > 0.25) {
+      throw new Error("LiDE capture provenance does not match the locked 1200 DPI profile");
+    }
+    const metadata = await require("sharp")(masterPath, { limitInputPixels: false }).metadata();
+    const expectedWidth = Math.round((values[0] / 25.4) * 1200);
+    const expectedHeight = Math.round((values[1] / 25.4) * 1200);
+    const within = (actual, expected) => Number.isInteger(actual) && Math.abs(actual - expected) <= Math.ceil(expected * 0.02);
+    if (metadata.format !== "tiff" || metadata.channels !== 3 || metadata.depth !== "uchar" ||
+        !within(metadata.width, expectedWidth) || !within(metadata.height, expectedHeight)) {
+      throw new Error("LiDE TIFF format, colour depth, or raster dimensions do not match the locked profile");
+    }
+    return {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      channels: metadata.channels,
+      depth: metadata.depth,
+      requestedDpi: 1200,
+      driverResolutionDpi: 1200,
+      byteLength: stat.size,
+    };
+  }
+
+  authenticatedMasterMetadata(entry) {
+    if (!entry?.artifact) throw new QueueCorruptionError("Encrypted TIFF metadata is unavailable");
+    this.captureQueue.assertEntryBinding(entry, entry.artifact);
+    const metadata = entry.artifact.authenticatedMetadata;
+    if (metadata.kind !== "TIFF_MASTER" || metadata.mimeType !== "image/tiff") {
+      throw new QueueCorruptionError("Queued capture is not an authenticated TIFF master");
+    }
+    const authority = captureEntryFromAuthorisation({
+      id: metadata.captureSessionId,
+      captureAuthorisationId: metadata.captureAuthorisationId,
+      semanticOperationId: metadata.semanticOperationId,
+      cardJobId: metadata.cardJobId,
+      certificateNumber: metadata.certificateNumber,
+      side: metadata.side,
+      revision: metadata.revision,
+      profileRevisionId: metadata.profileRevisionId,
+      tenantId: metadata.tenantId,
+      locationId: metadata.locationId,
+      stationId: metadata.stationId,
+      workstationId: metadata.workstationId,
+      originalOperatorId: metadata.originalOperatorId,
+      originalOperatorRole: metadata.originalOperatorRole,
+      capturePurpose: metadata.capturePurpose,
+      authorisationIssuedAt: metadata.authorisationIssuedAt,
+      authorisationExpiresAt: metadata.authorisationExpiresAt,
+    });
+    if (authority.workstationId !== lide400.stationId()) throw new QueueCorruptionError("Queued capture belongs to another workstation");
+    if (metadata.appVersion !== scannerPackage.version || metadata.captureHelperVersion !== helperIntegrity.HELPER_VERSION ||
+        metadata.identityHelperVersion !== helperIntegrity.IDENTITY_HELPER_VERSION ||
+        metadata.captureProvenance?.helperVersion !== helperIntegrity.HELPER_VERSION) {
+      throw new QueueCorruptionError("Queued capture app/helper provenance does not match the trusted runtime");
+    }
+    if (!metadata.masterValidation || !metadata.frameAssessment || !metadata.captureProvenance) {
+      throw new QueueCorruptionError("Queued capture validation provenance is incomplete");
+    }
+    return metadata;
+  }
+
+  async verifyEncryptedCandidate(entry) {
+    const metadata = this.authenticatedMasterMetadata(entry);
+    const scratch = this.captureQueue.scratchPath(entry, ".verify.tif");
+    try {
+      await this.captureQueue.decryptToFile(entry.artifact, scratch);
+      const masterValidation = await this.validateCaptureMaster(scratch, metadata.captureProvenance);
+      const frameAssessment = await this.assessCaptureFrame(scratch, metadata.captureProvenance);
+      if (canonicalJson(masterValidation) !== canonicalJson(metadata.masterValidation) ||
+          canonicalJson(frameAssessment) !== canonicalJson(metadata.frameAssessment)) {
+        throw new QueueCorruptionError("Queued TIFF validation or frame assessment no longer reproduces");
+      }
+      if (frameAssessment.accepted !== true) throw new QueueCorruptionError("Queued TIFF does not pass the authenticated frame gate");
+      return metadata;
+    } finally {
+      try { fs.unlinkSync(scratch); } catch (error) { if (error?.code !== "ENOENT") this.log("verification scratch cleanup will be retried at startup", "warn"); }
+    }
+  }
+
+  dispositionBinding(entry) {
+    const metadata = this.authenticatedMasterMetadata(entry);
+    return Object.freeze({
+      capture_session_id: metadata.captureSessionId,
+      capture_authorisation_id: metadata.captureAuthorisationId,
+      semantic_operation_id: metadata.semanticOperationId,
+      card_job_id: metadata.cardJobId,
+      certificate_number: metadata.certificateNumber,
+      side: metadata.side,
+      revision: metadata.revision,
+      profile_revision_id: metadata.profileRevisionId,
+      tenant_id: metadata.tenantId,
+      location_id: metadata.locationId,
+      station_id: metadata.stationId,
+      workstation_id: metadata.workstationId,
+      original_operator_id: metadata.originalOperatorId,
+      original_operator_role: metadata.originalOperatorRole,
+      purpose: metadata.capturePurpose,
+      authorisation_issued_at: metadata.authorisationIssuedAt,
+      authorisation_expires_at: metadata.authorisationExpiresAt,
+      device_captured_at: metadata.deviceCapturedAt,
+      device_timestamp_authority: metadata.deviceTimestampAuthority,
+      sha256: metadata.sha256,
+      byte_length: metadata.byteLength,
+      mime_type: metadata.mimeType,
+      app_version: metadata.appVersion,
+      capture_helper_version: metadata.captureHelperVersion,
+      identity_helper_version: metadata.identityHelperVersion,
+    });
+  }
+
+  resultFromDispositionBody(body, capture = null) {
+    return {
+      disposition: typeof body?.disposition === "string" ? body.disposition.toUpperCase() : null,
+      dispositionBinding: body?.disposition_binding || null,
+      capture: capture || body?.capture || null,
+    };
   }
 
   async createPositioningPreviewDisplay(sourcePath, previewPath) {
@@ -597,7 +952,7 @@ class Watcher extends EventEmitter {
     const id = crypto.randomUUID();
     const directory = path.join(POSITIONING_PREVIEW, id);
     const startedAt = Date.now();
-    fs.mkdirSync(directory, { recursive: true });
+    ensurePrivateDirectory(directory);
     stateMod.set({
       state: "positioning_preview_scanning",
       positioningPreview: { id, status: "scanning", startedAt: new Date().toISOString() },
@@ -689,70 +1044,80 @@ class Watcher extends EventEmitter {
     if (!entry || !["preview_ready", "preview_error"].includes(entry.phase) || entry.previewId !== previewId) {
       return { ok: false, error: "Preview is stale or no longer awaiting acceptance" };
     }
-    const root = path.resolve(CAPTURE_STAGING) + path.sep;
-    const previewPath = path.resolve(String(entry.previewPath || ""));
-    if (!previewPath.startsWith(root) || path.extname(previewPath).toLowerCase() !== ".jpg") {
-      return { ok: false, error: "Preview path is invalid" };
-    }
     try {
-      const stat = fs.statSync(previewPath);
-      if (!stat.isFile() || stat.size < 4 || stat.size > PREVIEW_MAX_BYTES) throw new Error("Preview file is unavailable");
-      return { ok: true, previewId, dataUrl: `data:image/jpeg;base64,${fs.readFileSync(previewPath).toString("base64")}` };
+      if (!entry.previewArtifact) throw new Error("Encrypted preview is unavailable");
+      const bytes = this.captureQueue.readArtifactSync(entry.previewArtifact, PREVIEW_MAX_BYTES);
+      return { ok: true, previewId, dataUrl: `data:image/jpeg;base64,${bytes.toString("base64")}` };
     } catch (error) {
       return { ok: false, error: error.message || "Preview file is unavailable" };
     }
   }
 
-  archivePreviewCandidate(entry, reason) {
-    const archiveDir = this.dateFolder(DISCARDED);
-    const files = [...new Set([entry.filePath, entry.previewPath].filter(Boolean))];
-    for (const filePath of files) {
-      if (!fs.existsSync(filePath)) continue;
-      const moved = this.moveFile(filePath, archiveDir);
-      if (moved && filePath === entry.filePath) this.writeError(moved, reason);
-    }
+  archivePreviewCandidate(entry, reason, { disposition = null, localOutcome = "LOCAL_QUARANTINE" } = {}) {
+    return this.captureQueue.upsert({
+      ...entry,
+      phase: "quarantined",
+      lifecycleState: "QUARANTINED",
+      disposition,
+      localOutcome,
+      quarantineReason: reason,
+      quarantinedAt: new Date().toISOString(),
+    });
   }
 
   expireTargetedCapture(entry, reason) {
     // An expired/cancelled session can no longer authorize this TIFF. Keep it
     // outside the live queue for audit/recovery, then release the station so
     // MintVault can arm a fresh card-side target.
-    this.archivePreviewCandidate(entry, `Capture target expired or changed before acceptance. ${reason}`);
-    this.removeTargetedPending(entry.sessionId);
+    this.archivePreviewCandidate(entry, `Capture target expired or changed before acceptance. ${reason}`, {
+      localOutcome: "SERVER_SESSION_TERMINAL_WITHOUT_DISPOSITION",
+    });
     stateMod.set({ state: "error", activeCapture: null, lastError: reason });
     this.emitState();
     this.logCaptureStage(entry, "expired", { reason });
     return { ok: false, error: reason };
   }
 
-  completeTargetedCapture(entry, capture) {
-    const moved = this.moveFile(entry.filePath, this.dateFolder(PROCESSED));
-    if (!moved && fs.existsSync(entry.filePath)) {
-      // Acceptance is already server-authoritative. Keep the queue entry so
-      // local archival can retry without another upload or physical scan.
-      stateMod.set({ state: "error", activeCapture: null, lastError: "Image accepted — retaining local archive for retry" });
-      this.emitState();
-      return { ok: false, retryPending: true };
+  completeTargetedCapture(entry, capture, { authoritativeDispositionVerified = false } = {}) {
+    if (!authoritativeDispositionVerified) {
+      const reason = "Encrypted evidence cannot resolve without a verified canonical ACCEPTED disposition";
+      this.addTargetedPending({ ...entry, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", disposition: null, reconciliationReason: reason });
+      return { ok: false, retryPending: true, error: reason };
     }
-    if (entry.previewPath && fs.existsSync(entry.previewPath)) this.moveFile(entry.previewPath, this.dateFolder(PROCESSED));
-    this.removeTargetedPending(entry.sessionId);
-    const certId = capture?.certificateNumber || entry.certId;
+    const metadata = this.authenticatedMasterMetadata(entry);
+    const certId = metadata.certificateNumber;
+    // A successful finalisation is the server's authoritative ACCEPTED
+    // disposition. Only then may the redundant local ciphertext be resolved.
+    const accepted = this.captureQueue.upsert({
+      ...entry,
+      phase: "accepted",
+      lifecycleState: "ACCEPTED",
+      disposition: "ACCEPTED",
+      serverAcceptedAt: new Date().toISOString(),
+    });
+    try {
+      this.finalizeAcceptedCapture(accepted);
+    } catch (error) {
+      stateMod.set({ state: "error", activeCapture: null, lastError: "Image accepted — encrypted local resolution remains pending" });
+      this.emitState();
+      return { ok: false, retryPending: true, error: error.message };
+    }
     stateMod.set({
       state: "success",
       activeCapture: null,
       lastUploadedCert: certId,
       lastAcceptedCapture: {
         certId,
-        side: entry.side,
+        side: metadata.side,
         cardRegistered: capture?.cardRegistered === true,
         acceptedAt: new Date().toISOString(),
       },
       lastError: null,
     });
-    stateMod.pushRecent({ certId, side: entry.side, source: "targeted-lide" });
+    stateMod.pushRecent({ certId, side: metadata.side, source: "targeted-lide" });
     this.emitState();
     this.logCaptureStage(entry, "accepted", { certId, elapsedMs: entry.capturedAtMs ? Date.now() - entry.capturedAtMs : null });
-    this.log(`targeted ${entry.side} capture accepted for ${certId} (session ${entry.sessionId})`);
+    this.log(`targeted ${metadata.side} capture accepted for ${certId} (session ${metadata.captureSessionId})`);
     setTimeout(() => {
       if (stateMod.get().state === "success") {
         stateMod.set({ state: "idle" });
@@ -762,16 +1127,41 @@ class Watcher extends EventEmitter {
     return { ok: true, certId };
   }
 
+  finalizeAcceptedCapture(entry) {
+    if (entry.lifecycleState !== "ACCEPTED" || entry.disposition !== "ACCEPTED") {
+      throw new QueueCorruptionError("Only a canonical ACCEPTED queue record may be resolved locally");
+    }
+    // ACCEPTED is the durable deletion-authorisation journal state. Delete
+    // ciphertext first; then commit RESOLVED. If the process dies between
+    // those operations, startup sees ACCEPTED and safely retries both steps.
+    if (entry.artifact) this.captureQueue.destroyArtifact(entry.artifact);
+    if (entry.previewArtifact) this.captureQueue.destroyArtifact(entry.previewArtifact);
+    return this.captureQueue.upsert({
+      ...entry,
+      phase: "resolved",
+      lifecycleState: "RESOLVED",
+      artifact: null,
+      previewArtifact: null,
+      resolvedAt: new Date().toISOString(),
+    });
+  }
+
+  finalizeAcceptedCaptures() {
+    let resolved = 0;
+    for (const entry of this.captureQueue.entries().filter((candidate) => candidate.lifecycleState === "ACCEPTED")) {
+      this.finalizeAcceptedCapture(entry);
+      resolved++;
+    }
+    return resolved;
+  }
+
   failTargetedCapture(entry, reason, { notifyServer = false } = {}) {
     if (notifyServer) {
       void server.failCapture(entry.sessionId, lide400.deviceId(), reason).catch((error) => {
         this.log(`could not mark physical capture failed: ${error.message}`, "warn");
       });
     }
-    const moved = entry.filePath && fs.existsSync(entry.filePath) ? this.moveFile(entry.filePath, this.dateFolder(FAILED)) : null;
-    if (moved) this.writeError(moved, reason);
-    if (entry.previewPath && fs.existsSync(entry.previewPath)) this.moveFile(entry.previewPath, this.dateFolder(FAILED));
-    this.removeTargetedPending(entry.sessionId);
+    this.archivePreviewCandidate(entry, reason, { localOutcome: "LOCAL_CAPTURE_FAILURE" });
     stateMod.set({ state: "error", activeCapture: null, lastError: reason });
     this.emitState();
     this.logCaptureStage(entry, "failed", { reason });
@@ -779,49 +1169,102 @@ class Watcher extends EventEmitter {
   }
 
   async uploadTargetedCapture(entry) {
-    if (!(await this.waitForStable(entry.filePath))) {
-      this.setTargetState(entry, "uploading", "uploading", "TIFF still processing — retrying completed-write check");
+    let durable = entry;
+    if (!durable.artifact) return this.failTargetedCapture(durable, "Authenticated encrypted TIFF is unavailable; capture is quarantined for recovery");
+    let metadata;
+    try { metadata = await this.verifyEncryptedCandidate(durable); }
+    catch (error) { return this.failTargetedCapture(durable, error.message || "Encrypted TIFF validation failed"); }
+
+    const initial = await this.reconcileTargetedCapture(durable);
+    const initialDisposition = this.applyServerDisposition(durable, initial);
+    if (initialDisposition) return initialDisposition;
+    if (initial.unavailable) {
+      this.addTargetedPending({ ...durable, phase: "upload_retry", lifecycleState: "RETRYING", retryAfter: Date.now() + 60_000 });
       return { ok: false, retryPending: true };
     }
-    const initial = await this.reconcileTargetedCapture(entry);
-    if (initial.accepted) return this.completeTargetedCapture(entry, initial.capture);
-    if (initial.unavailable) return { ok: false, retryPending: true };
     if (["failed", "expired", "cancelled"].includes(initial.state)) {
-      return this.failTargetedCapture(entry, initial.capture?.failureReason || "Capture expired or was rejected — restart this side");
+      return this.failTargetedCapture(durable, initial.capture?.failureReason || "Capture expired or was rejected — restart this side");
     }
     if (initial.state === "capturing") {
-      this.setTargetState(entry, "uploading", "uploading", "Server is finalising the image — checking again shortly");
+      this.setTargetState(durable, "uploading", "uploading", "Server is finalising the image — checking again shortly");
       return { ok: false, retryPending: true };
     }
-    if (initial.state !== "claimed") return this.failTargetedCapture(entry, "Capture session is no longer available — restart this side");
+    if (initial.state === "captured" || initial.legacyAccepted) {
+      this.addTargetedPending({ ...durable, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", reconciliationReason: "Legacy accepted state lacks a canonical tuple-bound disposition" });
+      return { ok: false, retryPending: true };
+    }
+    if (initial.state !== "claimed") return this.failTargetedCapture(durable, "Capture session is no longer available — restart this side");
 
-    for (let attempt = Number(entry.uploadAttempts || 0); attempt <= TARGETED_RETRY_DELAYS_MS.length; attempt++) {
-      this.setTargetState({ ...entry, attempt: attempt + 1 }, "uploading", "uploading", attempt ? `Upload interrupted — retrying ${attempt}/${TARGETED_RETRY_DELAYS_MS.length}` : null);
+    for (let attempt = Number(durable.uploadAttempts || 0); attempt <= TARGETED_RETRY_DELAYS_MS.length; attempt++) {
+      const lifecycleState = attempt === 0 && durable.lifecycleState === "PENDING_UPLOAD" ? "PENDING_UPLOAD" : "RETRYING";
+      durable = this.addTargetedPending({ ...durable, phase: attempt ? "upload_retry" : "upload", lifecycleState, uploadAttempts: attempt });
+      this.setTargetState({ ...durable, attempt: attempt + 1 }, "uploading", "uploading", attempt ? `Upload interrupted — retrying ${attempt}/${TARGETED_RETRY_DELAYS_MS.length}` : null);
       let uploaded;
       const uploadStartedAt = Date.now();
-      this.logCaptureStage(entry, "upload_started", { attempt: attempt + 1 });
+      this.logCaptureStage(durable, "upload_started", { attempt: attempt + 1 });
+      const uploadPath = this.captureQueue.scratchPath(durable, ".tif");
       try {
-        uploaded = await server.uploadCaptureEvidence(entry.sessionId, lide400.deviceId(), entry.filePath, entry.provenance);
+        await this.captureQueue.decryptToFile(durable.artifact, uploadPath);
+        // uploadCaptureEvidence requests a fresh short-lived grant internally
+        // on every invocation; no grant is ever persisted in this queue.
+        uploaded = await server.uploadCaptureEvidence(metadata.captureSessionId, lide400.deviceId(), uploadPath, metadata.captureProvenance, {
+          captureAuthorisationId: metadata.captureAuthorisationId,
+          semanticOperationId: metadata.semanticOperationId,
+          cardJobId: metadata.cardJobId,
+          certificateNumber: metadata.certificateNumber,
+          side: metadata.side,
+          revision: metadata.revision,
+          profileRevisionId: metadata.profileRevisionId,
+          tenantId: metadata.tenantId,
+          locationId: metadata.locationId,
+          stationId: metadata.stationId,
+          workstationId: metadata.workstationId,
+          originalOperatorId: metadata.originalOperatorId,
+          originalOperatorRole: metadata.originalOperatorRole,
+          capturePurpose: metadata.capturePurpose,
+          authorisationIssuedAt: metadata.authorisationIssuedAt,
+          authorisationExpiresAt: metadata.authorisationExpiresAt,
+          deviceCapturedAt: metadata.deviceCapturedAt,
+          deviceTimestampAuthority: metadata.deviceTimestampAuthority,
+          appVersion: metadata.appVersion,
+          captureHelperVersion: metadata.captureHelperVersion,
+          identityHelperVersion: metadata.identityHelperVersion,
+          expectedSha256: metadata.sha256,
+          expectedByteLength: metadata.byteLength,
+          expectedMimeType: metadata.mimeType,
+        });
       } catch (error) {
         uploaded = { ok: false, status: 0, body: { error: error.message || String(error) } };
+      } finally {
+        try { fs.unlinkSync(uploadPath); } catch (error) { if (error?.code !== "ENOENT") this.log("upload scratch cleanup will be retried at startup", "warn"); }
       }
       if (uploaded.ok) {
-        return this.completeTargetedCapture(entry, {
-          certificateNumber: uploaded.body?.certId || entry.certId,
+        durable = this.addTargetedPending({ ...durable, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", uploadAttempts: attempt + 1 });
+        const responseDisposition = this.applyServerDisposition(durable, this.resultFromDispositionBody(uploaded.body, {
           cardRegistered: uploaded.body?.card_registered === true,
-        });
+        }));
+        if (responseDisposition) return responseDisposition;
+        const reconciled = await this.reconcileTargetedCapture(durable);
+        const reconciledDisposition = this.applyServerDisposition(durable, reconciled);
+        if (reconciledDisposition) return reconciledDisposition;
+        this.addTargetedPending({ ...durable, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", disposition: null, reconciliationReason: "Successful upload transport lacks a canonical tuple-bound server disposition" });
+        return { ok: false, retryPending: true };
       }
-      this.logCaptureStage(entry, "upload_response_lost_or_rejected", { attempt: attempt + 1, status: uploaded.status, elapsedMs: Date.now() - uploadStartedAt });
-      const reconciled = await this.reconcileTargetedCapture(entry);
-      if (reconciled.accepted) return this.completeTargetedCapture(entry, reconciled.capture);
-      if (!this.isTransientCaptureFailure(uploaded)) return this.failTargetedCapture(entry, uploaded.body?.error || `Image rejected — HTTP ${uploaded.status}`);
-      if (["failed", "expired", "cancelled"].includes(reconciled.state)) return this.failTargetedCapture(entry, reconciled.capture?.failureReason || "Capture rejected — restart this side");
-      if (reconciled.state === "capturing" || reconciled.unavailable) {
-        this.addTargetedPending({ ...entry, phase: "upload", uploadAttempts: attempt + 1 });
+      this.logCaptureStage(durable, "upload_response_lost_or_rejected", { attempt: attempt + 1, status: uploaded.status, elapsedMs: Date.now() - uploadStartedAt });
+      durable = this.addTargetedPending({ ...durable, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", uploadAttempts: attempt + 1 });
+      const responseDisposition = this.applyServerDisposition(durable, this.resultFromDispositionBody(uploaded.body));
+      if (responseDisposition) return responseDisposition;
+      const reconciled = await this.reconcileTargetedCapture(durable);
+      const reconciledDisposition = this.applyServerDisposition(durable, reconciled);
+      if (reconciledDisposition) return reconciledDisposition;
+      if (!this.isTransientCaptureFailure(uploaded)) return this.failTargetedCapture(durable, uploaded.body?.error || `Image rejected — HTTP ${uploaded.status}`);
+      if (["failed", "expired", "cancelled"].includes(reconciled.state)) return this.failTargetedCapture(durable, reconciled.capture?.failureReason || "Capture rejected — restart this side");
+      if (reconciled.state === "capturing" || reconciled.state === "captured" || reconciled.legacyAccepted || reconciled.unavailable) {
+        this.addTargetedPending({ ...durable, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", uploadAttempts: attempt + 1 });
         return { ok: false, retryPending: true };
       }
       if (attempt === TARGETED_RETRY_DELAYS_MS.length) {
-        this.addTargetedPending({ ...entry, phase: "upload", uploadAttempts: 0, retryAfter: Date.now() + 60_000 });
+        this.addTargetedPending({ ...durable, phase: "upload_retry", lifecycleState: "RETRYING", uploadAttempts: 0, retryAfter: Date.now() + 60_000 });
         stateMod.set({ state: "error", activeCapture: null, lastError: "Upload interrupted — keeping this accepted side for safe retry" });
         this.emitState();
         return { ok: false, retryPending: true };
@@ -832,19 +1275,27 @@ class Watcher extends EventEmitter {
   }
 
   async restorePreviewCandidate(entry) {
-    if (!entry.filePath || !fs.existsSync(entry.filePath)) {
+    if (!entry.artifact) {
       const waiting = { ...entry, phase: "awaiting_scan", previewId: null, previewPath: null, filePath: null, provenance: null };
       this.addTargetedPending(waiting);
       this.setTargetState(waiting, "awaiting_scan", "awaiting_scan", "Previous scan was interrupted before a preview was ready — press Scan to try again");
       return waiting;
     }
     let restored = entry;
-    if (!restored.previewPath || !fs.existsSync(restored.previewPath)) {
+    if (!restored.previewArtifact) {
       const previewId = restored.previewId || crypto.randomUUID();
-      const previewPath = path.join(path.dirname(restored.filePath), `${previewId}.preview.jpg`);
-      await this.createPreviewDerivative(restored.filePath, previewPath);
-      restored = { ...restored, phase: "preview_ready", previewId, previewPath };
-      this.addTargetedPending(restored);
+      const masterPath = this.captureQueue.scratchPath(restored, ".tif");
+      const previewPath = this.captureQueue.scratchPath(restored, ".jpg");
+      try {
+        await this.captureQueue.decryptToFile(restored.artifact, masterPath);
+        await this.createPreviewDerivative(masterPath, previewPath);
+        restored = await this.captureQueue.attachFile({ ...restored, phase: "preview_ready", previewId }, previewPath, { kind: "PREVIEW_JPEG", mimeType: "image/jpeg" });
+        restored = this.addTargetedPending({ ...restored, previewPath: null });
+      } finally {
+        for (const candidate of [masterPath, previewPath]) {
+          try { fs.unlinkSync(candidate); } catch (error) { if (error?.code !== "ENOENT") this.log("preview scratch cleanup will be retried at startup", "warn"); }
+        }
+      }
     }
     if (!restored.frameAssessment?.accepted) {
       const unsafe = {
@@ -868,11 +1319,8 @@ class Watcher extends EventEmitter {
         this.removeTargetedPending(entry?.sessionId);
         continue;
       }
-      if (entry.phase === "upload") {
-        if (!entry.filePath || !fs.existsSync(entry.filePath)) {
-          this.removeTargetedPending(entry.sessionId);
-          continue;
-        }
+      if (["upload", "upload_retry", "needs_reconciliation"].includes(entry.phase)) {
+        if (!entry.artifact) return this.failTargetedCapture(entry, "Encrypted TIFF is missing; capture is quarantined for recovery");
         if (Number(entry.retryAfter || 0) > Date.now()) return true;
         this.targetCaptureInFlight = true;
         try { await this.uploadTargetedCapture(entry); } finally { this.targetCaptureInFlight = false; }
@@ -1070,10 +1518,20 @@ class Watcher extends EventEmitter {
    * after the operator has positioned the card and pressed Scan.
    */
   async pollTargetedCapture() {
-    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.uploading || !server.hasToken()) {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.uploading) {
       return { ok: false, skipped: true };
     }
     if (await this.resumeTargetedCaptures()) return { ok: true, resumed: true };
+    // Already-authorised delivery may recover with station-only signatures,
+    // but claiming or physically scanning a new target always needs a live
+    // operator session as well as the ACTIVE station.
+    if (!server.hasToken()) return { ok: false, skipped: true, humanRequired: true };
+    const storage = this.captureStorageStatus();
+    if (!storage.ok) {
+      stateMod.set({ state: "storage_pressure", lastError: "Capture paused: free disk capacity is below the encrypted-queue safety floor" });
+      this.emitState();
+      return { ok: false, storagePressure: true, storage };
+    }
     const health = stateMod.get().scannerHealth;
     if (health?.status !== "ready") {
       return { ok: false, waitingForDevice: true, health: health?.status || "checking" };
@@ -1091,13 +1549,21 @@ class Watcher extends EventEmitter {
     }
     const capture = claim.body?.capture;
     if (!capture) return { ok: true, idle: true };
+    let authority;
+    try {
+      authority = captureEntryFromAuthorisation(capture);
+      if (authority.workstationId !== lide400.stationId()) throw new Error("Capture authorisation is bound to another workstation");
+    } catch (error) {
+      this.log(`capture authorisation rejected before scan: ${error.message}`, "error");
+      stateMod.set({ state: "error", activeCapture: null, lastError: error.message });
+      this.emitState();
+      return { ok: false, error: error.message, authorisationRejected: true };
+    }
     const entry = {
+      queueEntryId: crypto.randomUUID(),
       phase: "awaiting_scan",
-      sessionId: capture.id,
-      certId: capture.certificateNumber,
-      side: capture.side === "back" ? "back" : "front",
-      workstationId: capture.workstationId,
-      expiresAt: capture.expiresAt || null,
+      lifecycleState: "PENDING_UPLOAD",
+      ...authority,
       lastKeepaliveAt: Date.now(),
       previewId: null,
       previewPath: null,
@@ -1124,6 +1590,8 @@ class Watcher extends EventEmitter {
     if (stateMod.get().scannerHealth?.status !== "ready") {
       return { ok: false, error: "Canon LiDE 400 is not ready for a locked-profile scan" };
     }
+    const storage = this.captureStorageStatus();
+    if (!storage.ok) return { ok: false, error: "Capture paused: free disk capacity is below the encrypted-queue safety floor", storagePressure: true };
     // Claim the local single-flight guard before the first await. Otherwise
     // two rapid IPC clicks can both observe `awaiting_scan` and start two
     // physical scans while the device-bound keepalive resolves.
@@ -1135,7 +1603,8 @@ class Watcher extends EventEmitter {
       const captureDir = path.join(CAPTURE_STAGING, current.sessionId, previewId);
       const scanning = { ...kept.entry, phase: "scanning", previewId, captureDir, attempt: 1 };
       this.addTargetedPending(scanning); // durable before a physical scan begins
-      fs.mkdirSync(captureDir, { recursive: true });
+      ensurePrivateDirectory(path.dirname(captureDir));
+      ensurePrivateDirectory(captureDir);
       this.setTargetState(scanning, "scanning", current.side === "front" ? "scanning_front" : "scanning_back");
       this.logCaptureStage(scanning, "scan_started");
       let direct;
@@ -1158,20 +1627,48 @@ class Watcher extends EventEmitter {
         }
       }
       if (!direct) throw lastScanError || new Error("Scanner did not produce a TIFF");
+      if (direct.provenance?.helperVersion !== helperIntegrity.HELPER_VERSION) {
+        throw new Error("LiDE capture helper version does not match the trusted application manifest");
+      }
+      fs.chmodSync(direct.path, 0o600);
       const previewPath = path.join(captureDir, `${previewId}.preview.jpg`);
-      const processing = {
+      const completed = this.addTargetedPending({
         ...scanning,
-        phase: "preview_processing",
+        phase: "validating_master",
         filePath: direct.path,
         previewPath,
         provenance: direct.provenance,
         capturedAtMs: Date.now(),
-      };
-      this.addTargetedPending(processing);
+        appVersion: scannerPackage.version,
+        captureHelperVersion: direct.provenance.helperVersion,
+        identityHelperVersion: helperIntegrity.IDENTITY_HELPER_VERSION,
+      });
+      const masterValidation = await this.validateCaptureMaster(completed.filePath, completed.provenance);
+      const processing = this.addTargetedPending({
+        ...completed,
+        phase: "preview_processing",
+        masterValidation,
+      });
       this.setTargetState(processing, "processing_preview", "finalising", "Generating non-authoritative preview from the 1200 DPI TIFF");
       await this.createPreviewDerivative(processing.filePath, previewPath);
+      fs.chmodSync(previewPath, 0o600);
       const frameAssessment = await this.assessCaptureFrame(processing.filePath, processing.provenance);
-      const assessed = { ...processing, frameAssessment };
+      // Both master and derivative are encrypted and indexed before the
+      // operator can Accept (the first point at which network ambiguity is
+      // possible). attachFile fsyncs ciphertext + index before unlinking each
+      // plaintext source.
+      let assessed = await this.captureQueue.attachFile({ ...processing, frameAssessment }, processing.filePath, {
+        kind: "TIFF_MASTER", mimeType: "image/tiff",
+      });
+      assessed = this.addTargetedPending({
+        ...assessed,
+        filePath: null,
+        evidenceDigest: assessed.artifact.sha256,
+        evidenceSize: assessed.artifact.byteLength,
+        evidenceMime: assessed.artifact.mimeType,
+      });
+      assessed = await this.captureQueue.attachFile(assessed, previewPath, { kind: "PREVIEW_JPEG", mimeType: "image/jpeg" });
+      assessed = this.addTargetedPending({ ...assessed, previewPath: null });
       if (!frameAssessment?.accepted) {
         const reason = frameAssessment?.reason || "Card-boundary safety check rejected this TIFF";
         const unsafe = { ...assessed, phase: "preview_error", previewError: reason };
@@ -1187,8 +1684,24 @@ class Watcher extends EventEmitter {
       return { ok: true, previewId };
     } catch (error) {
       const reason = error?.message || String(error);
-      const staged = this.activeTargetEntry();
-      if (staged?.filePath && fs.existsSync(staged.filePath)) {
+      let staged = this.activeTargetEntry();
+      if (staged?.filePath && fs.existsSync(staged.filePath) && !staged.artifact) {
+        try {
+          staged = await this.captureQueue.attachFile(staged, staged.filePath, { kind: "TIFF_MASTER", mimeType: "image/tiff", quarantine: true });
+          staged = this.addTargetedPending({ ...staged, filePath: null });
+        } catch (encryptionError) {
+          this.log(`capture quarantine failed closed: ${encryptionError.message}`, "error");
+        }
+      }
+      if (staged?.previewPath && fs.existsSync(staged.previewPath) && !staged.previewArtifact) {
+        try {
+          staged = await this.captureQueue.attachFile(staged, staged.previewPath, { kind: "PREVIEW_JPEG", mimeType: "image/jpeg", quarantine: true });
+          staged = this.addTargetedPending({ ...staged, previewPath: null });
+        } catch (encryptionError) {
+          this.log(`preview quarantine failed closed: ${encryptionError.message}`, "error");
+        }
+      }
+      if (staged?.artifact || (staged?.filePath && fs.existsSync(staged.filePath))) {
         const previewError = { ...staged, phase: "preview_error", previewError: reason };
         this.addTargetedPending(previewError);
         this.setTargetState(previewError, "preview_error", "preview_error", `${reason} — Rescan this side; the TIFF has not been uploaded`);
@@ -1212,23 +1725,27 @@ class Watcher extends EventEmitter {
     if (!current || current.phase !== "preview_ready" || current.previewId !== previewId) {
       return { ok: false, error: "This preview is stale and cannot be accepted" };
     }
-    if (!current.filePath || !fs.existsSync(current.filePath)) {
-      return { ok: false, error: "The preview TIFF is no longer available; rescan this side" };
-    }
-    if (!current.frameAssessment?.accepted) {
-      return { ok: false, error: "This TIFF did not pass the four-side card-boundary safety check and cannot be accepted" };
+    if (!current.artifact) {
+      return { ok: false, error: "The encrypted preview TIFF is no longer available; rescan this side" };
     }
     this.previewActionInFlight = true;
     try {
+      try { await this.verifyEncryptedCandidate(current); }
+      catch (error) { return { ok: false, error: error.message || "Encrypted TIFF failed validation" }; }
       const truth = await this.reconcileTargetedCapture(current);
-      if (truth.accepted) return this.completeTargetedCapture(current, truth.capture);
+      const disposition = this.applyServerDisposition(current, truth);
+      if (disposition) return disposition;
       if (truth.unavailable) return { ok: false, error: "Unable to verify capture target; TIFF remains staged and no upload was attempted" };
+      if (truth.state === "captured" || truth.legacyAccepted) {
+        this.addTargetedPending({ ...current, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", reconciliationReason: "Legacy accepted state lacks a canonical tuple-bound disposition" });
+        return { ok: false, retryPending: true, error: "Server acceptance is awaiting canonical reconciliation" };
+      }
       if (truth.state !== "claimed") {
         return this.expireTargetedCapture(current, "Capture target expired or changed before Accept — TIFF was not uploaded");
       }
       const kept = await this.keepTargetAlive(current);
       if (!kept.ok) return { ok: false, error: kept.error || "Capture target is no longer valid" };
-      const upload = { ...kept.entry, phase: "upload", uploadAttempts: 0, retryAfter: null };
+      const upload = { ...kept.entry, phase: "upload", lifecycleState: "PENDING_UPLOAD", uploadAttempts: 0, retryAfter: null };
       this.addTargetedPending(upload); // durable before the only authoritative POST
       this.targetCaptureInFlight = true;
       return await this.uploadTargetedCapture(upload);
@@ -1249,16 +1766,69 @@ class Watcher extends EventEmitter {
     this.previewActionInFlight = true;
     try {
       const truth = await this.reconcileTargetedCapture(current);
-      if (truth.accepted) return this.completeTargetedCapture(current, truth.capture);
+      const disposition = this.applyServerDisposition(current, truth);
+      if (disposition) return disposition;
       if (truth.unavailable) return { ok: false, error: "Unable to verify capture target; Rescan is held to prevent a target crossover" };
+      if (truth.state === "captured" || truth.legacyAccepted) {
+        this.addTargetedPending({ ...current, phase: "needs_reconciliation", lifecycleState: "NEEDS_RECONCILIATION", reconciliationReason: "Legacy accepted state lacks a canonical tuple-bound disposition" });
+        return { ok: false, retryPending: true, error: "Server acceptance is awaiting canonical reconciliation" };
+      }
       if (truth.state !== "claimed") {
         return this.expireTargetedCapture(current, "Capture target expired or changed — Rescan was blocked");
       }
       const kept = await this.keepTargetAlive(current);
       if (!kept.ok) return { ok: false, error: kept.error || "Capture target is no longer valid" };
-      this.archivePreviewCandidate(kept.entry, "Operator chose Rescan before acceptance; this TIFF was never uploaded as card evidence.");
-      const waiting = { ...kept.entry, phase: "awaiting_scan", previewId: null, previewPath: null, filePath: null, provenance: null, frameAssessment: null, capturedAtMs: null };
-      this.addTargetedPending(waiting);
+      const rescanRequestOperationId = kept.entry.rescanRequestOperationId || crypto.randomUUID();
+      const requesting = this.addTargetedPending({ ...kept.entry, rescanRequestOperationId });
+      let response;
+      try {
+        response = await server.requestRescanAuthorisation(
+          requesting.sessionId,
+          lide400.deviceId(),
+          requesting.captureAuthorisationId,
+          rescanRequestOperationId,
+        );
+      } catch (error) {
+        return { ok: false, error: `Fresh Rescan authorisation is unavailable: ${error.message}` };
+      }
+      if (!response.ok) return { ok: false, error: response.body?.error || `Fresh Rescan authorisation was rejected — HTTP ${response.status}` };
+      let fresh;
+      try { fresh = captureEntryFromAuthorisation(response.body?.capture); }
+      catch (error) { return { ok: false, error: error.message }; }
+      const pinned = ["cardJobId", "certId", "side", "profileRevisionId", "tenantId", "locationId", "stationCredentialId", "workstationId"];
+      if (pinned.some((field) => fresh[field] !== requesting[field]) || fresh.workstationId !== lide400.stationId()) {
+        return { ok: false, error: "Fresh Rescan authorisation changed the pinned card-side/station tuple" };
+      }
+      if (fresh.captureAuthorisationId === requesting.captureAuthorisationId || fresh.semanticOperationId === requesting.semanticOperationId || fresh.revision <= requesting.revision) {
+        return { ok: false, error: "Fresh Rescan authorisation did not advance authorisation, operation, and evidence revision" };
+      }
+      const replacement = {
+        ...fresh,
+        queueEntryId: crypto.randomUUID(),
+        phase: "awaiting_scan",
+        lifecycleState: "PENDING_UPLOAD",
+        disposition: null,
+        previewId: null,
+        previewPath: null,
+        previewArtifact: null,
+        filePath: null,
+        artifact: null,
+        provenance: null,
+        frameAssessment: null,
+        masterValidation: null,
+        capturedAtMs: null,
+        appVersion: null,
+        captureHelperVersion: null,
+        identityHelperVersion: null,
+        quarantineReason: null,
+        quarantinedAt: null,
+        rescanRequestOperationId: null,
+        lastKeepaliveAt: Date.now(),
+        uploadAttempts: 0,
+      };
+      const { next: waiting } = this.captureQueue.replaceForRescan(requesting.queueEntryId, replacement, {
+        reason: "Operator chose Rescan before acceptance; this TIFF was never uploaded as card evidence.",
+      });
       this.setTargetState(waiting, "awaiting_scan", "awaiting_scan");
       this.logCaptureStage(waiting, "rescan_requested");
       return { ok: true };
@@ -1280,7 +1850,8 @@ class Watcher extends EventEmitter {
     // blank/mismatched cert. Skip them entirely — checked before the
     // extension filter so it catches the file regardless of how it's named.
     if (filename.startsWith("test-scan-")) {
-      this.log(`ignored test-scan file (not a real scan): ${filename}`);
+      await this.quarantinePlaintext(filePath, "Local test-scan TIFF is not authoritative card evidence");
+      this.log(`encrypted test-scan file into non-authoritative quarantine: ${filename}`);
       return;
     }
     if (IGNORED.has(ext)) {
@@ -1296,10 +1867,8 @@ class Watcher extends EventEmitter {
     // certificate/card/side session.  Do not ever turn it into a certificate
     // or attach it to an arbitrary existing one.  Preserve it for review with
     // an explicit reason, rather than silently deleting it.
-    const rejectedDir = this.dateFolder(REJECTED);
     const reason = "Unbound hot-folder TIFF refused. Start a target-bound Canon LiDE capture from the MintVault workstation.";
-    const moved = this.moveFile(filePath, rejectedDir);
-    if (moved) this.writeError(moved, reason);
+    await this.quarantinePlaintext(filePath, reason);
     this.log(`${reason} ${filename}`, "warn");
     stateMod.set({ state: "error", lastError: reason });
     this.emitState();
@@ -1931,14 +2500,20 @@ class Watcher extends EventEmitter {
   dateFolder(parent) {
     const today = new Date().toISOString().slice(0, 10);
     const dir = path.join(parent, today);
-    fs.mkdirSync(dir, { recursive: true });
+    ensurePrivateDirectory(parent);
+    ensurePrivateDirectory(dir);
     return dir;
   }
 
   moveFile(srcPath, destDir) {
     if (!srcPath || !fs.existsSync(srcPath)) return null;
     const dest = path.join(destDir, path.basename(srcPath));
-    try { fs.renameSync(srcPath, dest); return dest; }
+    try {
+      ensurePrivateDirectory(destDir);
+      fs.renameSync(srcPath, dest);
+      fs.chmodSync(dest, 0o600);
+      return dest;
+    }
     catch (err) {
       this.log(`move failed ${srcPath} → ${destDir}: ${err.message}`, "error");
       return null;
@@ -1947,7 +2522,7 @@ class Watcher extends EventEmitter {
 
   writeError(filePath, reason) {
     try {
-      fs.writeFileSync(`${filePath}.error.txt`, `${new Date().toISOString()}\n${reason}\n`);
+      fs.writeFileSync(`${filePath}.error.txt`, `${new Date().toISOString()}\n${reason}\n`, { mode: 0o600 });
     } catch {}
   }
 }

@@ -343,7 +343,8 @@ body {
   animation: pulse 1.2s ease-in-out infinite;
   background: var(--blue);
 }
-.dot.error {
+.dot.error,
+.dot.storage_pressure {
   background: var(--red);
 }
 @keyframes pulse {

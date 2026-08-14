@@ -102,6 +102,7 @@ const STATE_LABELS = {
   expired: "Capture target expired",
   success: "Capture accepted",
   error: "Capture needs attention",
+  storage_pressure: "Capture paused — free disk space is too low",
 };
 
 let lastState = null;
@@ -172,9 +173,11 @@ function renderTarget(state) {
 
   els.targetCert.textContent = "No card ready";
   els.targetSide.textContent = "—";
-  els.targetHint.textContent = state.state === "error"
-    ? "Retry this side from the MintVault card record. This app cannot retarget a capture."
-    : "Arm a card side in MintVault. This station will only scan that server-owned target.";
+  els.targetHint.textContent = state.state === "storage_pressure"
+    ? "Free disk space on this Mac before starting another card. Existing encrypted evidence remains retained."
+    : state.state === "error"
+      ? "Retry this side from the MintVault card record. This app cannot retarget a capture."
+      : "Arm a card side in MintVault. This station will only scan that server-owned target.";
 }
 
 function renderStationIdentity(setup) {
@@ -684,7 +687,7 @@ function renderState(state) {
   const activeState = String(lastState.state || "idle");
   els.dot.className = `dot ${activeState}`;
   els.statusText.textContent = STATE_LABELS[activeState] || toTitle(activeState);
-  els.statusSub.textContent = actionError || (activeState === "error"
+  els.statusSub.textContent = actionError || (["error", "storage_pressure"].includes(activeState)
     ? explainFailure(lastState.lastError)
     : activeState === "success"
       ? "The original TIFF was accepted for the selected card side."

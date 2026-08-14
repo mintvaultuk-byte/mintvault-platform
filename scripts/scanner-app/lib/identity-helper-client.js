@@ -50,6 +50,8 @@ module.exports = {
   signRequestV2: (payload) => call("sign-request-v2", payload),
   signResyncChallenge: (payload) => call("sign-resync-challenge", payload),
   applyReplayState: (payload) => call("apply-replay-state", payload),
+  wrapQueueKey: (payload) => call("wrap-queue-key", payload),
+  unwrapQueueKey: (payload) => call("unwrap-queue-key", payload),
   retire: (expectedFingerprint) => call("retire", { expectedFingerprint }),
   _private: { call, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES },
 };

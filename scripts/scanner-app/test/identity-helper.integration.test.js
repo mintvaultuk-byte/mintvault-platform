@@ -66,6 +66,27 @@ test("real Secure Enclave identity is explicit, persistent, monotonic and retire
   assert.equal(created.keychainSynchronizable, false);
   assert.equal(invoke(testService, "create", {}, { allowFailure: true }).result.error.code, "IDENTITY_EXISTS");
 
+  const queueKeyRaw = crypto.randomBytes(32);
+  const queueKeyId = crypto.randomUUID();
+  const wrappedQueueKey = invoke(testService, "wrap-queue-key", {
+    queueKeyId, queueKeyRaw: queueKeyRaw.toString("base64url"),
+  }).result;
+  assert.equal(wrappedQueueKey.queueKeyId, queueKeyId);
+  assert.equal(invoke(testService, "unwrap-queue-key", {
+    queueKeyId, wrappedQueueKey: wrappedQueueKey.wrappedQueueKey,
+  }).result.queueKeyRaw, queueKeyRaw.toString("base64url"));
+  const tampered = `${wrappedQueueKey.wrappedQueueKey.slice(0, -1)}${wrappedQueueKey.wrappedQueueKey.endsWith("A") ? "B" : "A"}`;
+  assert.notEqual(invoke(testService, "unwrap-queue-key", {
+    queueKeyId, wrappedQueueKey: tampered,
+  }, { allowFailure: true }).status, 0, "tampered wrapped DEKs fail closed");
+
+  const cloneService = namespace("clone");
+  t.after(() => cleanup(cloneService));
+  invoke(cloneService, "create");
+  assert.notEqual(invoke(cloneService, "unwrap-queue-key", {
+    queueKeyId, wrappedQueueKey: wrappedQueueKey.wrappedQueueKey,
+  }, { allowFailure: true }).status, 0, "another Secure Enclave identity cannot unwrap a copied queue");
+
   const stationCode = "MV-STN-ABCDEFGHJK";
   invoke(testService, "bind-station", {
     stationCode, expectedFingerprint: created.publicKeyFingerprint, stationStatus: "ACTIVE",

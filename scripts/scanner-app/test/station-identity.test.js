@@ -89,6 +89,8 @@ test("Electron main delegates signing and never directly signs with migrated pri
   assert.doesNotMatch(source, /crypto\.sign\s*\(/);
   assert.match(source, /helper\.signRequestV1/);
   assert.match(source, /helper\.migrateV1/);
+  assert.match(source, /helper\.wrapQueueKey/);
+  assert.match(source, /helper\.unwrapQueueKey/);
   assert.match(source, /fs\.unlinkSync\(LEGACY_IDENTITY_FILE\)/);
   assert.match(source, /OPERATOR_SESSION_FILE/);
 });

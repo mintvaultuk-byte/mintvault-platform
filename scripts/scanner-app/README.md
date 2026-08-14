@@ -9,7 +9,7 @@ The MintVault Electron menu-bar app is the single workstation-side process for t
 3. This app claims only that session and displays the exact card and required side. **It does not scan automatically.** Position the card and press **SCAN FRONT** or **SCAN BACK** in the scanner app.
 4. For initial placement setup only, press **PREVIEW**. The app physically acquires the full platen at 300 DPI as a local JPEG, detects the card, and shows a compact card-centred display crop with visible surrounding scanner background. The broad source image, geometry, and acquisition boundary are under **Service & diagnostics**. Preview has no target, TIFF, upload, certificate mutation, or evidence capability. Save only a visibly detected, safe zone.
 5. The normal target-bound flow then makes one locked 1200 DPI RGB TIFF capture using that station's fixed 100 × 130 mm hardware acquisition region, then generates a fast JPEG preview from that same TIFF. It does not perform a second low-resolution scan during normal card capture. Card-edge detection must prove visible scanner background around all four sides before Accept is offered.
-6. Review the explicitly labelled non-authoritative preview. **ACCEPT FRONT/BACK** uploads that exact TIFF to the session-aware evidence branch; **RESCAN FRONT/BACK** archives the candidate locally and retains the same server-owned card-side target.
+6. Review the explicitly labelled non-authoritative preview. Before Accept is exposed, both the TIFF and JPEG derivative are already in the device-bound encrypted queue and their plaintext staging files are gone. **ACCEPT FRONT/BACK** uploads that exact TIFF to the session-aware evidence branch; **RESCAN FRONT/BACK** quarantines the encrypted candidate and requires the server to issue a fresh authorisation, operation ID, and later evidence revision for the same pinned card side before another physical scan.
 7. The server verifies TIFF identity, 1200 DPI, geometry, profile provenance, station, selected side, and immutable storage before it marks the accepted capture authoritative. Flip only after an accepted front. Grading uses derivatives only; the master TIFF remains immutable evidence.
 
 The browser never reads the scanner filesystem or controls a physical scanner. The scanner never supplies a free-form certificate, card, or side with a TIFF.
@@ -58,9 +58,40 @@ The popover's Canon LiDE status is device/profile health, not merely server reac
 
 ## Retired hot-folder path
 
-`~/mintvault-scans/inbox` is quarantined for forensic recovery only. Any TIFF placed there is moved to `rejected/` with a reason; it cannot mint a certificate or attach/rewrite evidence. AUTO pairing, one-shot attachment, SilverFast export, synthetic test scans, and unbound TIFF attachment are retired because they cannot establish target binding.
+`~/mintvault-scans/inbox` is quarantined for forensic recovery only. Any TIFF placed there is encrypted directly into the non-authoritative queue with a reason; it cannot mint a certificate or attach/rewrite evidence. AUTO pairing, one-shot attachment, SilverFast export, synthetic test scans, and unbound TIFF attachment are retired because they cannot establish target binding.
 
-The app preserves `processed/`, `failed/`, `rejected/`, and `capture-staging/` locally. It does not delete evidence.
+Legacy `processed/`, `failed/`, `discarded/`, and `capture-staging/` capture
+plaintext is swept at startup into encrypted quarantine. It is never described
+as securely overwritten on SSD storage.
+
+## Encrypted offline custody
+
+Capture evidence uses `capture-queue/index.v1.json` plus `.mvq` containers with
+AES-256-GCM, a unique 96-bit nonce and authenticated immutable metadata. The
+32-byte queue DEK is wrapped by the station identity helper using this Mac's
+Secure Enclave key; copying Application Support and the scans directory to a
+different Mac does not make the queue decryptable. Index corruption, missing
+artifacts, AEAD failure and unmatched encrypted containers fail closed or enter
+`QUARANTINED`; unresolved evidence is never timer-deleted.
+
+Every delivery attempt decrypts into a private scratch file, obtains a fresh
+short-lived server grant, streams the exact digest-bound TIFF, and unlinks the
+scratch file in `finally`. A startup sweep removes verified scratch duplicates
+and encrypts/quarantines any other abandoned TIFF/JPEG. Queue delivery may
+continue after Shift Change with station-only signing, but it retains the
+original operator from the capture authorisation and cannot claim or physically
+scan new work without a current authorised human. Low disk capacity pauses NEW
+and target claims while existing encrypted delivery remains available.
+
+The queue index is authenticated in full with a domain-separated HMAC derived
+from the wrapped DEK. Artifact AAD also binds the capture session,
+authorisation, semantic operation, Card Job, side/revision, profile revision,
+tenant/location/station, original operator/role, purpose, server timestamps,
+validation results, provenance, app/helper versions, digest, size, and MIME.
+Accept and recovery decrypt and reproduce the locked-master and frame checks.
+Only an explicit server disposition carrying that exact full binding can move
+evidence through `ACCEPTED` to `RESOLVED`; an empty or legacy-success response
+remains `NEEDS_RECONCILIATION` with ciphertext intact.
 
 ## Operations
 
@@ -78,4 +109,9 @@ Do not load a legacy scanner watcher alongside `com.mintvault.scanner`.
 npm test
 ```
 
-The scanner-client tests prove that claiming never scans, a Scan creates only a non-authoritative derivative preview, only Accept posts the original TIFF, and stale/double/expired preview actions cannot duplicate or cross card sides.
+The Scanner tests also prove device-clone resistance, nonce uniqueness,
+metadata/ciphertext tamper rejection, corrupt/missing/orphan recovery,
+plaintext sweep, exact disposition handling, station-only queued delivery,
+original-operator preservation, full grant/finalisation tuples and disk-pressure
+gating. Secure Enclave integration is opt-in with
+`MINTVAULT_RUN_SECURE_ENCLAVE_TESTS=1 npm test`.

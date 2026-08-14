@@ -30,3 +30,17 @@ WP1 proves that runtime capture no longer requires or trusts a compiler/source
 cache. It does not claim a Canon physical scan, Developer-ID signature,
 notarised package, Gatekeeper result, clean macOS 12 endpoint, or production
 activation. Those remain WP6/WP9/WP11/WP12 external or physical gates.
+
+## WP5 proof boundary
+
+| Dimension | Status |
+|---|---|
+| Design | local encrypted queue, lifecycle, grant and disposition contract frozen pending P14 reconciliation |
+| Implementation | Scanner-owned custody, tuple binding, restart finalisation and plaintext sweep complete |
+| Verification | Local Proof: real filesystem encryption/decryption plus corruption, clone and injected-crash tests |
+| Activation | none; legacy server cannot satisfy the strict final contract and the branch is not packaged/deployed |
+
+WP5 proves local confidentiality, durable lifecycle convergence and fail-closed
+server acknowledgement handling. It does not claim final Partner server
+enforcement, a signed package, cross-Mac clone rejection, Pilot hardware or
+production activation; those remain explicit later work-package gates.

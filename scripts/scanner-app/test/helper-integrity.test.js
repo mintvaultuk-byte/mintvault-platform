@@ -165,6 +165,7 @@ test("identity helper uses its own sealed manifest and signing identifier contra
     ...value.manifest,
     helperName: "mv-identity-helper",
     bundleIdentifier: "com.mintvault.scanner.identity-helper",
+    helperVersion: "1.1.0",
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
   value.options.runTool = (command, args) => {
@@ -186,7 +187,7 @@ test("identity helper uses its own sealed manifest and signing identifier contra
 });
 
 test("rejects stale or malformed identity-helper response protocol", () => {
-  assert.equal(integrity.assertCompatibleIdentityResult({ ok: true, helperVersion: "1.0.0", protocolVersion: 1 }).ok, true);
+  assert.equal(integrity.assertCompatibleIdentityResult({ ok: true, helperVersion: "1.1.0", protocolVersion: 1 }).ok, true);
   assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "0.9.0", protocolVersion: 1 }), /response protocol\/version/);
-  assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "1.0.0", protocolVersion: 2 }), /response protocol\/version/);
+  assert.throws(() => integrity.assertCompatibleIdentityResult({ helperVersion: "1.1.0", protocolVersion: 2 }), /response protocol\/version/);
 });

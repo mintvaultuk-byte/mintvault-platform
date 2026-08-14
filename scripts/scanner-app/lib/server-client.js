@@ -137,7 +137,7 @@ async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
 const RESPONSE_TIMEOUT_MS = 5 * 60_000;
 
 async function postForm(url, form, extraHeaders = {}) {
-  if (stationIdentity.hasActiveStationSession()) {
+  if (stationIdentity.hasActiveStationSession() || stationIdentity.hasActiveStationIdentity()) {
     return {
       ok: false,
       status: 426,
@@ -288,9 +288,16 @@ function legacyAuthHeaders() {
   return headers;
 }
 
-function requestAuthHeaders(method, urlPath, body) {
-  if (stationIdentity.hasActiveStationSession()) {
-    return stationIdentity.signStoredRequest({ method, path: urlPath, body: Buffer.isBuffer(body) ? body : Buffer.from(body || "") });
+function requestAuthHeaders(method, urlPath, body, { allowStationOnly = false } = {}) {
+  if (stationIdentity.hasActiveStationSession() || (allowStationOnly && stationIdentity.hasActiveStationIdentity())) {
+    return stationIdentity.signStoredRequest({
+      method,
+      path: urlPath,
+      body: Buffer.isBuffer(body) ? body : Buffer.from(body || ""),
+      // An already-authorised capture belongs to the actor frozen into that
+      // authorisation. Never attach whoever happens to be on shift at retry.
+      includeOperatorSession: !allowStationOnly,
+    });
   }
   // Old shared-token stations remain usable only for the isolated local/dev
   // proof flow.  The server independently rejects this path in production.
@@ -299,12 +306,12 @@ function requestAuthHeaders(method, urlPath, body) {
     : {};
 }
 
-async function getJson(urlPath) {
+async function getJson(urlPath, options = {}) {
   return stationRequestQueue.run(async () => {
     const fetch = await getFetch();
     const res = await fetch(`${API_BASE}${urlPath}`, {
       method: "GET",
-      headers: requestAuthHeaders("GET", urlPath, Buffer.alloc(0)),
+      headers: requestAuthHeaders("GET", urlPath, Buffer.alloc(0), options),
     });
     const text = await res.text();
     let body;
@@ -313,13 +320,13 @@ async function getJson(urlPath) {
   });
 }
 
-async function postJson(urlPath, payload) {
+async function postJson(urlPath, payload, options = {}) {
   return stationRequestQueue.run(async () => {
     const fetch = await getFetch();
     const requestBody = JSON.stringify(payload || {});
     const res = await fetch(`${API_BASE}${urlPath}`, {
       method: "POST",
-      headers: { ...requestAuthHeaders("POST", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
+      headers: { ...requestAuthHeaders("POST", urlPath, Buffer.from(requestBody), options), "content-type": "application/json" },
       body: requestBody,
     });
     const text = await res.text();
@@ -454,37 +461,79 @@ async function claimNextCapture(workstationId, deviceId) {
   );
 }
 
+async function requestRescanAuthorisation(sessionId, deviceId, priorCaptureAuthorisationId, requestOperationId) {
+  return postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/rescan-authorisation`, {
+    device_id: deviceId,
+    prior_capture_authorisation_id: priorCaptureAuthorisationId,
+    request_operation_id: requestOperationId,
+  });
+}
+
 /**
  * Upload to a server-owned R2 staging key, then ask the server to validate and
- * promote that exact object. Older/local development servers retain the
- * bounded multipart route as a compatibility fallback only.
+ * promote that exact object. Authoritative capture has no multipart or static
+ * token fallback: every attempt must first obtain a fresh bounded grant.
  */
-async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) {
+async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance, evidenceBinding = {}) {
   const expected = await fingerprintTiffMaster(filePath);
-  const grant = await postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload`, {
-    device_id: deviceId,
+  const required = (key) => {
+    const value = evidenceBinding[key];
+    if (typeof value !== "string" || !value) throw new Error(`Evidence binding is missing ${key}`);
+    return value;
+  };
+  if (expected.sha256 !== evidenceBinding.expectedSha256 || expected.byteLength !== evidenceBinding.expectedByteLength ||
+      evidenceBinding.expectedMimeType !== "image/tiff") {
+    throw new Error("Decrypted TIFF does not match the authenticated queue digest, size, or MIME type");
+  }
+  if (!Number.isSafeInteger(evidenceBinding.revision) || evidenceBinding.revision < 1) {
+    throw new Error("Evidence binding is missing a valid revision");
+  }
+  const immutableBinding = {
+    capture_session_id: sessionId,
+    capture_authorisation_id: required("captureAuthorisationId"),
+    semantic_operation_id: required("semanticOperationId"),
+    card_job_id: required("cardJobId"),
+    certificate_number: required("certificateNumber"),
+    side: required("side"),
+    revision: evidenceBinding.revision,
+    profile_revision_id: required("profileRevisionId"),
+    tenant_id: required("tenantId"),
+    location_id: required("locationId"),
+    station_id: required("stationId"),
+    workstation_id: required("workstationId"),
+    original_operator_id: required("originalOperatorId"),
+    original_operator_role: required("originalOperatorRole"),
+    purpose: required("capturePurpose"),
+    authorisation_issued_at: required("authorisationIssuedAt"),
+    authorisation_expires_at: required("authorisationExpiresAt"),
+    device_captured_at: required("deviceCapturedAt"),
+    device_timestamp_authority: required("deviceTimestampAuthority"),
     sha256: expected.sha256,
     byte_length: expected.byteLength,
+    mime_type: "image/tiff",
+    app_version: required("appVersion"),
+    capture_helper_version: required("captureHelperVersion"),
+    identity_helper_version: required("identityHelperVersion"),
+  };
+  if (immutableBinding.device_timestamp_authority !== "NON_AUTHORITATIVE") {
+    throw new Error("Device timestamp authority must be NON_AUTHORITATIVE");
+  }
+  const grant = await postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload`, {
+    device_id: deviceId,
+    ...immutableBinding,
     capture_provenance: provenance,
-  });
-  // A local proof adapter intentionally has no presigned R2 endpoint, and a
-  // rolling server can briefly lack migration 0047/routes. Both fall back to
-  // the existing bounded receive path; production rejects static-token use and
-  // the current route always chooses direct staging.
+  }, { allowStationOnly: true });
   if (grant.ok && grant.body?.transport === "direct" && grant.body?.upload_url && grant.body?.staging_id) {
     const staged = await putStagedTiff(grant.body.upload_url, grant.body.headers || {}, filePath, expected.byteLength);
     if (!staged.ok) return staged;
     return postJson(
       `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload/${encodeURIComponent(grant.body.staging_id)}/finalise`,
-      { device_id: deviceId }
+      { device_id: deviceId, staging_id: grant.body.staging_id, ...immutableBinding },
+      { allowStationOnly: true }
     );
   }
-  if (!grant.ok && ![404, 405, 501].includes(grant.status)) return grant;
-  const form = new FormData();
-  appendTiffMaster(form, "image", filePath);
-  form.append("device_id", deviceId);
-  form.append("capture_provenance", JSON.stringify(provenance));
-  return postForm(`${API_BASE}/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/evidence`, form);
+  if (!grant.ok) return grant;
+  return { ok: false, status: 502, body: { error: "Server did not return a valid direct evidence-upload grant" } };
 }
 
 /**
@@ -494,7 +543,8 @@ async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) 
  */
 async function getCaptureStatus(sessionId, deviceId) {
   return getJson(
-    `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}?device_id=${encodeURIComponent(deviceId)}`
+    `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}?device_id=${encodeURIComponent(deviceId)}`,
+    { allowStationOnly: true },
   );
 }
 
@@ -520,6 +570,7 @@ module.exports = {
     return stationIdentity.hasActiveStationSession() ||
       (process.env.NODE_ENV !== "production" && process.env.MINTVAULT_ALLOW_LEGACY_SCANNER_TOKEN === "1" && !!(vals.SCANNER_API_TOKEN || process.env.SCANNER_API_TOKEN));
   },
+  hasActiveStationIdentity: () => stationIdentity.hasActiveStationIdentity(),
   getNextCertId,
   getOrphans,
   getFixQueue,
@@ -530,6 +581,7 @@ module.exports = {
   uploadPair,
   attachImage,
   claimNextCapture,
+  requestRescanAuthorisation,
   uploadCaptureEvidence,
   getCaptureStatus,
   renewCapture,

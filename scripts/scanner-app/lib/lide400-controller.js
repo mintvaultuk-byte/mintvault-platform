@@ -166,6 +166,7 @@ async function scan(outputDirectory) {
       scanAreaMm: result.scanAreaMm,
       captureStartedAt: startedAt,
       captureCompletedAt: new Date().toISOString(),
+      helperVersion: result.helperVersion,
     },
   };
 }

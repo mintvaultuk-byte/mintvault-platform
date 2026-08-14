@@ -213,7 +213,7 @@ function setStationStatus(status) {
   return helper.setStatus(status);
 }
 
-function signStoredRequest({ method, path: requestPath, body }) {
+function signStoredRequest({ method, path: requestPath, body, includeOperatorSession = true }) {
   const contentSha256 = crypto.createHash("sha256").update(body).digest("hex");
   const signed = helper.signRequestV1({ method, path: requestPath, timestamp: Date.now(), contentSha256 });
   const operatorSession = readOperatorSession();
@@ -223,11 +223,11 @@ function signStoredRequest({ method, path: requestPath, body }) {
     "x-mintvault-station-nonce": String(signed.nonce),
     "x-mintvault-content-sha256": signed.contentSha256,
     "x-mintvault-station-signature": signed.signature,
-    ...(operatorSession ? { "x-mintvault-operator-session": operatorSession } : {}),
+    ...(includeOperatorSession && operatorSession ? { "x-mintvault-operator-session": operatorSession } : {}),
   };
 }
 
-function signStoredRequestV2({ method, path: requestPath, body, semanticOperationId }) {
+function signStoredRequestV2({ method, path: requestPath, body, semanticOperationId, includeOperatorSession = true }) {
   const contentSha256 = crypto.createHash("sha256").update(body).digest("hex");
   const signed = helper.signRequestV2({
     method, path: requestPath, timestamp: Date.now(), contentSha256, semanticOperationId,
@@ -243,7 +243,7 @@ function signStoredRequestV2({ method, path: requestPath, body, semanticOperatio
     "x-mintvault-content-sha256": signed.contentSha256,
     "x-mintvault-semantic-operation-id": signed.semanticOperationId,
     "x-mintvault-station-signature": signed.signature,
-    ...(operatorSession ? { "x-mintvault-operator-session": operatorSession } : {}),
+    ...(includeOperatorSession && operatorSession ? { "x-mintvault-operator-session": operatorSession } : {}),
   };
 }
 
@@ -253,6 +253,27 @@ function signResyncChallenge(payload) {
 
 function applyReplayState(payload) {
   return helper.applyReplayState(payload);
+}
+
+function wrapQueueKey(queueKeyRaw, queueKeyId) {
+  if (!Buffer.isBuffer(queueKeyRaw) || queueKeyRaw.length !== 32 || typeof queueKeyId !== "string") {
+    throw new Error("Capture queue key is invalid");
+  }
+  const result = helper.wrapQueueKey({ queueKeyRaw: queueKeyRaw.toString("base64url"), queueKeyId });
+  return {
+    queueKeyId: result.queueKeyId,
+    stationPublicKeyFingerprint: result.stationPublicKeyFingerprint,
+    wrappedQueueKey: result.wrappedQueueKey,
+  };
+}
+
+function unwrapQueueKey(wrappedQueueKey, queueKeyId) {
+  const result = helper.unwrapQueueKey({ wrappedQueueKey, queueKeyId });
+  const raw = Buffer.from(String(result.queueKeyRaw || ""), "base64url");
+  if (raw.length !== 32 || result.queueKeyId !== queueKeyId) {
+    throw new Error("Identity helper returned an invalid capture queue key");
+  }
+  return raw;
 }
 
 function retireIdentity(expectedFingerprint) {
@@ -280,6 +301,11 @@ function hasActiveStationSession() {
   return Boolean(identity.stationCode && identity.stationStatus === "ACTIVE" && readOperatorSession());
 }
 
+function hasActiveStationIdentity() {
+  const identity = identityStatus();
+  return Boolean(identity.stationCode && identity.stationStatus === "ACTIVE");
+}
+
 function hasOperatorSession() {
   return Boolean(readOperatorSession());
 }
@@ -294,10 +320,13 @@ module.exports = {
   signStoredRequestV2,
   signResyncChallenge,
   applyReplayState,
+  wrapQueueKey,
+  unwrapQueueKey,
   retireIdentity,
   identityStatus,
   currentStationCode,
   hasActiveStationSession,
+  hasActiveStationIdentity,
   hasOperatorSession,
   _private: {
     canonicalRequest,

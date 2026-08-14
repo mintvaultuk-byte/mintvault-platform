@@ -154,3 +154,36 @@ changed in WP2.
 No Partner server, migration or active Partner worktree file was changed.
 The 15-minute station-bound Scanner token family, machine-traffic idle semantics
 and terminal pre-approval enrolment dispositions remain P14 reconciliation work.
+
+## WP5 planned change manifest
+
+| Finding | Safe-isolated surface | Repair class |
+|---|---|---|
+| R-5/R-28 crash custody | Authenticated encrypted queue, device-bound DEK, plaintext sweep and explicit lifecycle | D |
+| R-18 grant lifetime | Fresh direct grant per attempt; no durable URL or multipart fallback | A/D |
+| R-30 evidence substitution | One immutable tuple across AAD, grant, finalise and canonical disposition | A/B |
+| Restart/Rescan ambiguity | Atomic replacement and durable ACCEPTED finalizer | D |
+
+## WP5 actual changes
+
+- Replaced targeted plaintext JSON/path custody with an AES-256-GCM container,
+  unique 96-bit nonce, complete AAD and HKDF/HMAC-authenticated index. The queue
+  DEK is wrapped by the integrity-checked Secure Enclave identity helper; a
+  missing or unwrappable key fails closed instead of creating a replacement.
+- Encrypts TIFF masters and Preview derivatives before unlinking plaintext.
+  Startup sweeps every Scanner-owned plaintext location into authenticated
+  quarantine and repairs directories/files to app-private permissions.
+- Enforces the explicit lifecycle `PENDING_UPLOAD`, `RETRYING`,
+  `NEEDS_RECONCILIATION`, `QUARANTINED`, `ACCEPTED`, `RESOLVED`. Only an exact
+  canonical server disposition can advance acceptance; ambiguous 2xx responses
+  retain ciphertext and local outcomes never impersonate server dispositions.
+- Binds the full authorisation/provenance/digest tuple, including original
+  operator and the explicitly non-authoritative device timestamp, through the
+  encrypted artifact, fresh upload grant, finalisation and disposition match.
+- Makes Rescan old/new replacement one atomic signed-index commit. Treats
+  ACCEPTED as a durable deletion-authorisation journal state that startup
+  converges to RESOLVED after an interrupted local cleanup.
+
+No Partner server, migration, active Partner worktree, external environment,
+credential or remote Git state was changed. Strict server-side disposition and
+authorisation enforcement remains a frozen-P14 reconciliation dependency.

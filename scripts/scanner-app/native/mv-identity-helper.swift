@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Security
 
-private let helperVersion = "1.0.0"
+private let helperVersion = "1.1.0"
 private let protocolVersion = 1
 private let schemaVersion = 2
 private let service = "com.mintvault.scanner.identity"
@@ -11,6 +11,7 @@ private let account = "station-identity-v2"
 private let accessGroupContract = "$(AppIdentifierPrefix)com.mintvault.scanner"
 private let secureEnclaveTag = "com.mintvault.scanner.identity.se-p256-wrap-v2"
 private let wrappingAlgorithm = "SE-P256-ECDH-HKDF-SHA256-AES-256-GCM"
+private let queueKeyNamespace = "mintvault-scanner-queue-key-v1"
 private let maximumInputBytes = 64 * 1024
 
 private struct HelperRequest: Codable {
@@ -34,6 +35,19 @@ private struct HelperRequest: Codable {
   let proofChallenge: String?
   let challengeId: String?
   let challenge: String?
+  let queueKeyRaw: String?
+  let queueKeyId: String?
+  let wrappedQueueKey: String?
+}
+
+private struct QueueKeyEnvelope: Codable {
+  let schemaVersion: Int
+  let namespace: String
+  let keyId: String
+  let stationPublicKeyFingerprint: String
+  let ephemeralPublicKey: String
+  let wrappedKey: String
+  let wrappingAlgorithm: String
 }
 
 private struct IdentityEnvelope: Codable {
@@ -400,6 +414,60 @@ private func developmentWrappingKey(
   )
 }
 
+private func queueKeyAAD(keyId: String, stationFingerprint: String) -> Data {
+  Data([queueKeyNamespace, keyId.lowercased(), stationFingerprint].joined(separator: "\n").utf8)
+}
+
+private func queueWrappingKey(
+  envelope: IdentityEnvelope,
+  namespace: IdentityNamespace,
+  ephemeralPublic: Data,
+  keyId: String,
+  stationFingerprint: String
+) throws -> SymmetricKey {
+  let shared: Data
+  if namespace.accessGroup == nil {
+    guard let encoded = envelope.developmentSecureEnclaveKeyRepresentation,
+          let representation = Data(base64URL: encoded) else {
+      throw IdentityError(code: "CORRUPT", message: "Development Secure Enclave representation is missing")
+    }
+    let secure = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: representation)
+    let peer = try P256.KeyAgreement.PublicKey(x963Representation: ephemeralPublic)
+    let secret = try secure.sharedSecretFromKeyAgreement(with: peer)
+    return secret.hkdfDerivedSymmetricKey(
+      using: SHA256.self,
+      salt: Data(queueKeyNamespace.utf8),
+      sharedInfo: queueKeyAAD(keyId: keyId, stationFingerprint: stationFingerprint),
+      outputByteCount: 32
+    )
+  }
+  guard envelope.developmentSecureEnclaveKeyRepresentation == nil,
+        let secure = try readSecureEnclaveKey(namespace) else {
+    throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Secure Enclave station key is missing")
+  }
+  var error: Unmanaged<CFError>?
+  let peerAttributes: [String: Any] = [
+    kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
+    kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
+    kSecAttrKeySizeInBits as String: 256,
+  ]
+  guard let peer = SecKeyCreateWithData(ephemeralPublic as CFData, peerAttributes as CFDictionary, &error),
+        SecKeyIsAlgorithmSupported(secure, .keyExchange, .ecdhKeyExchangeStandard),
+        let result = SecKeyCopyKeyExchangeResult(
+          secure, .ecdhKeyExchangeStandard, peer,
+          [SecKeyKeyExchangeParameter.requestedSize: 32] as CFDictionary, &error
+        ) as Data? else {
+    throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Secure Enclave queue-key agreement failed")
+  }
+  shared = result
+  return HKDF<SHA256>.deriveKey(
+    inputKeyMaterial: SymmetricKey(data: shared),
+    salt: Data(queueKeyNamespace.utf8),
+    info: queueKeyAAD(keyId: keyId, stationFingerprint: stationFingerprint),
+    outputByteCount: 32
+  )
+}
+
 private func makeEnvelope(privateKey: Curve25519.Signing.PrivateKey, installationId: String, namespace: IdentityNamespace) throws -> IdentityEnvelope {
   let ephemeral = P256.KeyAgreement.PrivateKey()
   let publicRaw = privateKey.publicKey.rawRepresentation
@@ -679,6 +747,86 @@ private enum IdentityHelper {
           "contentSha256": digest, "semanticOperationId": operationId.lowercased(),
           "signature": signature.base64URL,
         ])
+
+      case "wrap-queue-key":
+        let envelope = try requireEnvelope(keychain)
+        guard let encoded = request.queueKeyRaw, let raw = Data(base64URL: encoded), raw.count == 32,
+              let requestedId = request.queueKeyId?.lowercased(), UUID(uuidString: requestedId) != nil,
+              let publicRaw = Data(base64URL: envelope.publicKeyRaw) else {
+          throw IdentityError(code: "INVALID_QUEUE_KEY", message: "Queue-key wrapping payload is invalid")
+        }
+        let fingerprint = sha256Hex(spkiData(publicRaw: publicRaw))
+        let ephemeral = P256.KeyAgreement.PrivateKey()
+        let key = try queueWrappingKey(
+          envelope: envelope,
+          namespace: keychain,
+          ephemeralPublic: ephemeral.publicKey.x963Representation,
+          keyId: requestedId,
+          stationFingerprint: fingerprint
+        )
+        let aad = queueKeyAAD(keyId: requestedId, stationFingerprint: fingerprint)
+        let sealed = try AES.GCM.seal(raw, using: key, authenticating: aad)
+        guard let combined = sealed.combined else {
+          throw IdentityError(code: "WRAP_FAILED", message: "Queue key wrapping failed")
+        }
+        let wrapped = QueueKeyEnvelope(
+          schemaVersion: 1,
+          namespace: queueKeyNamespace,
+          keyId: requestedId,
+          stationPublicKeyFingerprint: fingerprint,
+          ephemeralPublicKey: ephemeral.publicKey.x963Representation.base64URL,
+          wrappedKey: combined.base64URL,
+          wrappingAlgorithm: wrappingAlgorithm
+        )
+        response([
+          "ok": true,
+          "queueKeyId": requestedId,
+          "stationPublicKeyFingerprint": fingerprint,
+          "wrappedQueueKey": try JSONEncoder().encode(wrapped).base64URL,
+        ])
+
+      case "unwrap-queue-key":
+        let envelope = try requireEnvelope(keychain)
+        guard let requestedId = request.queueKeyId?.lowercased(), UUID(uuidString: requestedId) != nil,
+              let encoded = request.wrappedQueueKey, let encodedEnvelope = Data(base64URL: encoded),
+              let wrapped = try? JSONDecoder().decode(QueueKeyEnvelope.self, from: encodedEnvelope),
+              wrapped.schemaVersion == 1, wrapped.namespace == queueKeyNamespace,
+              wrapped.keyId == requestedId, wrapped.wrappingAlgorithm == wrappingAlgorithm,
+              let publicRaw = Data(base64URL: envelope.publicKeyRaw),
+              let ephemeral = Data(base64URL: wrapped.ephemeralPublicKey),
+              let sealedData = Data(base64URL: wrapped.wrappedKey) else {
+          throw IdentityError(code: "INVALID_QUEUE_KEY", message: "Wrapped queue key is invalid")
+        }
+        let fingerprint = sha256Hex(spkiData(publicRaw: publicRaw))
+        guard wrapped.stationPublicKeyFingerprint == fingerprint else {
+          throw IdentityError(code: "IDENTITY_MISMATCH", message: "Wrapped queue key belongs to another station identity")
+        }
+        do {
+          let key = try queueWrappingKey(
+            envelope: envelope,
+            namespace: keychain,
+            ephemeralPublic: ephemeral,
+            keyId: requestedId,
+            stationFingerprint: fingerprint
+          )
+          let sealed = try AES.GCM.SealedBox(combined: sealedData)
+          let raw = try AES.GCM.open(
+            sealed,
+            using: key,
+            authenticating: queueKeyAAD(keyId: requestedId, stationFingerprint: fingerprint)
+          )
+          guard raw.count == 32 else { throw IdentityError(code: "CORRUPT", message: "Unwrapped queue key has an invalid length") }
+          response([
+            "ok": true,
+            "queueKeyId": requestedId,
+            "stationPublicKeyFingerprint": fingerprint,
+            "queueKeyRaw": raw.base64URL,
+          ])
+        } catch let error as IdentityError {
+          throw error
+        } catch {
+          throw IdentityError(code: "IDENTITY_RECOVERY_REQUIRED", message: "Secure Enclave could not unlock this capture queue")
+        }
 
       case "retire":
         guard let envelope = try readEnvelope(keychain),

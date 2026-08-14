@@ -708,7 +708,8 @@ describe("P6 integration surfaces", () => {
     expect(scannerMain).toContain("availableCreditsOrNull");
     expect(scannerMain).toContain("availableCredits:");
     // The summary the renderer reads is built WITH the credits value.
-    expect(scannerMain).toContain("stationSummary(session.body, await availableCreditsOrNull())");
+    expect(scannerMain).toContain("lastKnownAvailableCredits = await availableCreditsOrNull()");
+    expect(scannerMain).toContain("stationSummary(session.body, lastKnownAvailableCredits)");
     // A failed read degrades to null, never to 0, and never blocks setup.
     expect(scannerMain).toMatch(/catch \{\s*return null;/);
   });

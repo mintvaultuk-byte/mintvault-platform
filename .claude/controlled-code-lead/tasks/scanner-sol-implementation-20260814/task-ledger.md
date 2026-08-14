@@ -33,11 +33,11 @@
 |---|---|---|---|
 | 0 — Baseline | done | 2026-08-14 | Exact source/Partner/tooling facts recorded |
 | 1 — Review plan | done | 2026-08-14 | A9 Partner, A1 Scanner, tooling scopes isolated |
-| 2 — Investigation | done through WP3; WP5 inventory complete | 2026-08-14 | WP2 A3/A4, WP3 A4 and WP5 A5 controlled reviews complete |
-| 3 — Lead verification | done through WP3 | 2026-08-14 | Human/station live-gate, shift, MFA-enrolment and remaining P14 token/lifecycle gaps verified |
-| 4 — Implementation authorisation | done through safe-isolated WP3 | 2026-08-14 | Owner prompt authorises local native/client work; moving P14 forbids server authority/migration wiring until semantic reconciliation |
-| 5 — Implementation | done through safe-isolated WP3 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority, immediate shift and first-run MFA states |
-| 6 — Regression | local done through WP3 | 2026-08-14 | Scanner 74 pass/3 opt-in skips, root WP3 contracts 21/21, governance/type/build green; A4 hostile re-review CLEAN; lint checkpoint follows commit prep |
+| 2 — Investigation | done through WP5 | 2026-08-14 | WP2 A3/A4, WP3 A4 and WP5 A5 controlled reviews complete |
+| 3 — Lead verification | done through WP5 | 2026-08-14 | Queue custody, grants, tuple binding, dispositions and fault boundaries reproduced and verified |
+| 4 — Implementation authorisation | done through safe-isolated WP5 | 2026-08-14 | Owner prompt authorises local Scanner work; moving P14 forbids server authority/migration wiring until semantic reconciliation |
+| 5 — Implementation | done through safe-isolated WP5 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority; WP5 encrypted queue and canonical local disposition boundary |
+| 6 — Regression | local done through WP5 | 2026-08-14 | Scanner 99 pass/3 normal skips plus 3/3 opt-in SE; root focused 96 pass/3 environment skips; governance/type/build green; lint 0 errors; A5 CLEAN |
 | 7 — Final report | pending | | Only after WP12 or a legitimate external/owner gate |
 
 ## Reviewer assignments
@@ -54,7 +54,7 @@
 | A3 WP2 hostile | Current identity helper/Keychain/migration trust boundary, read-only | Initial 4 HIGH; all repaired; final re-review CLEAN |
 | A4 WP2 hostile | Current request ordering/op durability/upload auth, read-only | Three review rounds; final 400 key-conflict response-loss edge repaired; final re-review CLEAN |
 | A4 WP3 auth | Human/session/MFA/RBAC/enrolment/live authority, read-only | Six HIGHs; Scanner-owned shift/live-gate/MFA first-run repaired; P14-owned token/idle/terminal lifecycle registered |
-| A5 WP5 queue | Queue/encryption/custody/grant/finalisation/provenance inventory, read-only | Six actionable BLOCKER/HIGH; implementation follows after WP3 checkpoint |
+| A5 WP5 queue | Queue/encryption/custody/grant/finalisation/provenance review, read-only | Initial custody/disposition defects plus tuple and crash-boundary follow-ups repaired; final re-review CLEAN |
 
 ## WP3 implementation and regression evidence
 
@@ -68,6 +68,26 @@
   The direct MFA runtime suites require their dedicated
   environment and were not falsely counted when the broad Vitest command
   reported skips; server MFA authority itself was unchanged in this WP.
+
+## WP5 implementation and regression evidence
+
+- A5 reproduced the initial plaintext/custody/disposition issues and then found
+  record/AAD, device-timestamp and two crash-boundary gaps. Lead repaired each
+  actionable Scanner-owned finding in the same pass; final A5 re-review CLEAN.
+- Full Scanner suite: 99 passed / 3 opt-in Secure Enclave tests skipped. The
+  real opt-in Secure Enclave lifecycle/migration run passed 3/3. The final
+  queue/disposition two-file slice passed 50/50 after orphan pair recovery was
+  added.
+- Root Scanner/Partner contract matrix: 96 passed / 3 integration-environment
+  skips across 11 files. Governance: 4/4. TypeScript and production build pass;
+  lint exits zero with 0 errors / 2,685 baseline-plus-campaign warnings.
+- The broad root run executed 4,283 passing tests and 1,227 skips. Its seven
+  failed tests are the existing five certificate-preview runtime assertions
+  plus two branch-wide protected-grader signature guards; thirteen failed
+  suites require absent/conflicting disposable PostgreSQL or database URLs.
+  No WP5 Scanner path failed, and protected grader/server files were untouched.
+- Native helpers rebuilt and verified arm64/minOS 12.0: capture helper 1.0.0,
+  identity helper 1.1.0. These remain ad-hoc local artifacts, not release proof.
 
 ## Authoritative links
 

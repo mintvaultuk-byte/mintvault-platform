@@ -210,6 +210,7 @@ function trayImageForState(s) {
     retrying:        "tray-busy.png",
     success:         "tray-idle.png",
     error:           "tray-error.png",
+    storage_pressure:"tray-error.png",
   };
   const file = map[s] || "tray-idle.png";
   const img = loadTrayPng(file);
@@ -233,6 +234,7 @@ function trayTooltipForState(s) {
     retrying:       "Retrying current side…",
     success:        "Capture accepted",
     error:          "Capture needs attention",
+    storage_pressure:"Capture paused — free disk space is too low",
   };
   const label = stateLabels[s.state] || s.state;
   return `MintVault Scanner — ${label}`;
@@ -601,6 +603,15 @@ function setupIpc() {
   ipcMain.handle("start-new-card", async (_event, payload) => {
     const denied = await requireLiveOperationalAuthority();
     if (denied) return denied;
+    const storage = watcher?.captureStorageStatus();
+    if (storage && !storage.ok) {
+      return {
+        ok: false,
+        retryable: false,
+        code: "SCANNER_STORAGE_PRESSURE",
+        error: "New cards are paused until this Mac has enough free space for the encrypted evidence queue",
+      };
+    }
     const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
     let operation;
     let result;
@@ -816,7 +827,7 @@ app.whenReady().then(async () => {
   watcher.on("state-changed", () => {
     pushStateToRenderer();
     const s = stateMod.get();
-    const isError   = s.state === "error";
+    const isError   = ["error", "storage_pressure"].includes(s.state);
     const isSuccess = s.state === "success";
     // Auto-open popover on error transition (idle→error edge only).
     if (isError && !lastErrorState && s.autoOpenOnError && popover && !popover.isVisible()) {

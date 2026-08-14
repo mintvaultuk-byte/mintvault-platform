@@ -14,6 +14,7 @@ const IDENTITY_OUTPUT = path.join(OUTPUT_DIRECTORY, "mv-identity-helper");
 const IDENTITY_MANIFEST = path.join(OUTPUT_DIRECTORY, "identity-helper-manifest.json");
 const IDENTIFIER = "com.mintvault.scanner.capture-helper";
 const HELPER_VERSION = "1.0.0";
+const IDENTITY_HELPER_VERSION = "1.1.0";
 const PROTOCOL_VERSION = 1;
 const MINIMUM_MACOS = "12.0";
 
@@ -87,7 +88,7 @@ function main() {
     const identityManifest = {
       schemaVersion: 1,
       helperName: "mv-identity-helper",
-      helperVersion: HELPER_VERSION,
+      helperVersion: IDENTITY_HELPER_VERSION,
       protocolVersion: PROTOCOL_VERSION,
       bundleIdentifier: "com.mintvault.scanner.identity-helper",
       architecture: "arm64",
