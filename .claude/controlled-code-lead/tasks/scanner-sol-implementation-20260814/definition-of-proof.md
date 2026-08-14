@@ -1,4 +1,4 @@
-# Definition of Proof — through WP6
+# Definition of Proof — through WP7
 
 | Dimension | Status |
 |---|---|
@@ -60,3 +60,21 @@ clean, runtime imports succeed from ASAR, and DMG/ZIP independently bind the
 same app, helpers and source. It does not claim the owner Team value,
 Developer-ID signature, notarisation, staple/Gatekeeper, update deployment or a
 clean target-Mac acceptance run; those remain R-3 and WP7/WP9 gates.
+
+## WP7 proof boundary
+
+| Dimension | Status |
+|---|---|
+| Design | static-feed non-authority, authenticated exact update/rollback policy, candidate/DMG/login/restart contracts frozen pending P14 naming reconciliation |
+| Implementation | Scanner-owned updater, verified reinstall, modal recovery and post-enrolment login startup complete |
+| Verification | Local Proof: pinned-library behavioral fake, feed/policy/tamper/install-quiesce/recovery/resource-bound matrix, two RED→GREEN critical mutations, full Scanner regression and final targeted hostile CLEAN; real arm64 package rebuild pending final checkpoint |
+| Activation | none; local package is updater-disabled/ad-hoc and no feed, login item, station or external system was changed |
+
+WP7 proves that no local/static feed fact can authorize a release, old cached
+candidate or unverified DMG, and that updater failure cannot obtain restart
+authority during plaintext/live watcher work. It also proves authenticated
+sizes are enforced while reading and that MacUpdater's delayed native quit is
+preceded by a non-overwritable Scanner-wide quiesce latch. It does not claim the final P14
+policy endpoint, Developer-ID/notary/Gatekeeper, physical update/reinstall,
+reboot persistence or production activation; those remain explicit WP9-WP13
+and R-3/R-9 gates.

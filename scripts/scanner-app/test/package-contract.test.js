@@ -83,6 +83,8 @@ function artifactFixture(t) {
 }
 
 test("builder freezes the product identity, arm64 floor and Contents/Helpers layout", () => {
+  const packageMetadata = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  assert.equal(packageMetadata.dependencies["electron-updater"], "6.8.9");
   assert.equal(builder.appId, "com.mintvault.scanner");
   assert.equal(builder.productName, "MintVault Scanner");
   assert.equal(builder.mac.minimumSystemVersion, "12.0");

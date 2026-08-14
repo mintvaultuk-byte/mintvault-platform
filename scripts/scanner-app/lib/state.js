@@ -2,8 +2,8 @@
  * Persisted state for the scanner-app.
  *
  * Lives at ~/Library/Application Support/MintVaultScanner/state.json so the
- * tray icon, last-scan history, and mode survive a crash + LaunchAgent
- * restart. The watcher writes on every transition; renderer reads via IPC.
+ * tray icon, last-scan history, and mode survive a crash or application
+ * relaunch. The watcher writes on every transition; renderer reads via IPC.
  *
  * Schema:
  *   {
@@ -72,6 +72,10 @@ const DEFAULT = Object.freeze({
   // Audible feedback. Plays Glass.aiff on success, Sosumi.aiff on error
   // via macOS afplay. No-op on non-darwin.
   soundEnabled:     true,
+  // One-time default only. After enrolment the packaged app enables the
+  // modern macOS main-app login item, then never overrides a later user or
+  // System Settings choice.
+  loginItemConfigured: false,
   // Direct ImageCaptureCore device/profile state, refreshed by the existing
   // scanner process. This is intentionally distinct from HTTP health.
   scannerHealth:    { status: "checking" },

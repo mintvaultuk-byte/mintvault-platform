@@ -191,6 +191,10 @@ class Watcher extends EventEmitter {
     this.targetCaptureInFlight = false;
     this.previewActionInFlight = false;
     this.positioningPreviewInFlight = false;
+    this.recoveryPlaintextWork = 0;
+    this.updateInstallPending = false;
+    this.initialDrainTimer = null;
+    this.initialDrainPromise = null;
     this.lastScannerHealthAt = 0;
     this.scannerHealthPromise = null;
     this.captureQueue = new EncryptedCaptureQueue({ baseDir: BASE, keyProtector: captureQueueKeyProtector });
@@ -203,6 +207,12 @@ class Watcher extends EventEmitter {
   }
 
   async start() {
+    if (this.updateInstallPending) throw new Error("Scanner service cannot restart during signed update installation");
+    if (this.recoveryPlaintextWork !== 0 || this.initialDrainPromise) {
+      throw new Error("Scanner recovery is already in progress");
+    }
+    this.ready = false;
+    this.initialFiles = [];
     this.prepareCaptureDirectories();
 
     if (!server.hasToken()) {
@@ -224,32 +234,34 @@ class Watcher extends EventEmitter {
     // index or an unencryptable orphan is a fail-closed startup error, never an
     // empty queue. Verified upload scratch duplicates are unlinked; all other
     // abandoned capture bytes are encrypted into QUARANTINED records.
-    const recoveredCiphertexts = this.captureQueue.recoverOrphanCiphertexts();
-    if (recoveredCiphertexts) this.log(`startup: recovered ${recoveredCiphertexts} unindexed encrypted capture artifact(s) into quarantine`, "warn");
-    const resolvedAccepted = this.finalizeAcceptedCaptures();
-    if (resolvedAccepted) this.log(`startup: completed ${resolvedAccepted} accepted encrypted capture resolution(s)`, "info");
-    this.captureQueue.assertReferencedArtifactsPresent();
-    await this.migrateLegacyTargetedQueue();
+    await this.withRecoveryPlaintextWork(async () => {
+      const recoveredCiphertexts = this.captureQueue.recoverOrphanCiphertexts();
+      if (recoveredCiphertexts) this.log(`startup: recovered ${recoveredCiphertexts} unindexed encrypted capture artifact(s) into quarantine`, "warn");
+      const resolvedAccepted = this.finalizeAcceptedCaptures();
+      if (resolvedAccepted) this.log(`startup: completed ${resolvedAccepted} accepted encrypted capture resolution(s)`, "info");
+      this.captureQueue.assertReferencedArtifactsPresent();
+      await this.migrateLegacyTargetedQueue();
 
-    // Crash recovery: re-drive any uploads that were in flight when the app
-    // last died, BEFORE we start watching. Awaited sequentially so each
-    // interrupted upload finishes (success → moved to processed, or fail →
-    // moved to failed) and is out of the inbox before chokidar's initial
-    // scan runs — that prevents the initial scan from double-processing the
-    // same files.
-    await this.requeuePending();
-    // The legacy queue migration may have surfaced paths in inbox/rejected.
-    // Sweep last so no legacy recovery step can recreate retained plaintext.
-    await this.sweepAbandonedCapturePlaintext();
-    // A direct TIFF is tied to a specific server session and is never mixed
-    // with legacy inbox recovery.  Reconcile it before accepting another
-    // physical capture, so a crash cannot force a side-level rescan.
-    await this.resumeTargetedCaptures();
-    // Re-render/analyse a retained local setup Preview after an app update.
-    // This is image-only local work: it never creates a target, TIFF, upload,
-    // or evidence mutation. It lets a corrected display transform be reviewed
-    // against the exact Preview that produced an older state record.
-    await this.reanalyseStoredPositioningPreview();
+      // Crash recovery: re-drive any uploads that were in flight when the app
+      // last died, BEFORE we start watching. Awaited sequentially so each
+      // interrupted upload finishes (success → moved to processed, or fail →
+      // moved to failed) and is out of the inbox before chokidar's initial
+      // scan runs — that prevents the initial scan from double-processing the
+      // same files.
+      await this.requeuePending();
+      // The legacy queue migration may have surfaced paths in inbox/rejected.
+      // Sweep last so no legacy recovery step can recreate retained plaintext.
+      await this.sweepAbandonedCapturePlaintext();
+      // A direct TIFF is tied to a specific server session and is never mixed
+      // with legacy inbox recovery.  Reconcile it before accepting another
+      // physical capture, so a crash cannot force a side-level rescan.
+      await this.resumeTargetedCaptures();
+      // Re-render/analyse a retained local setup Preview after an app update.
+      // This is image-only local work: it never creates a target, TIFF, upload,
+      // or evidence mutation. It lets a corrected display transform be reviewed
+      // against the exact Preview that produced an older state record.
+      await this.reanalyseStoredPositioningPreview();
+    });
 
     this.chokidar = chokidar.watch(INBOX, {
       ignoreInitial: false,
@@ -270,15 +282,20 @@ class Watcher extends EventEmitter {
     this.chokidar.on("ready", () => {
       // Let the initial scan settle, then drain pre-existing files one at a
       // time (await each) so we never fire a burst of concurrent uploads.
-      setTimeout(async () => {
-        const queued = this.initialFiles.splice(0);
-        this.ready = true;
-        if (queued.length) {
-          this.log(`startup: draining ${queued.length} pre-existing inbox file(s) after ${STARTUP_DEBOUNCE_MS}ms debounce`);
-          for (const p of queued) {
-            await this.handleNewFile(p);
+      this.initialDrainTimer = setTimeout(() => {
+        this.initialDrainTimer = null;
+        this.initialDrainPromise = this.withRecoveryPlaintextWork(async () => {
+          const queued = this.initialFiles.splice(0);
+          this.ready = true;
+          if (queued.length) {
+            this.log(`startup: draining ${queued.length} pre-existing inbox file(s) after ${STARTUP_DEBOUNCE_MS}ms debounce`);
+            for (const p of queued) {
+              await this.handleNewFile(p);
+            }
           }
-        }
+        }).catch((error) => {
+          this.log(`startup inbox recovery failed: ${error.message || String(error)}`, "error");
+        }).finally(() => { this.initialDrainPromise = null; });
       }, STARTUP_DEBOUNCE_MS);
     });
 
@@ -356,6 +373,7 @@ class Watcher extends EventEmitter {
    *  preserving scan-one-write-one. Files are never lost — a restart's startup
    *  drain re-runs this if an ack's drain didn't finish. */
   async drainInbox() {
+    if (this.updateInstallPending) return this.updateInstallDenial();
     let files;
     try {
       files = fs
@@ -544,6 +562,44 @@ class Watcher extends EventEmitter {
 
   captureStorageStatus() {
     return this.captureQueue.storageStatus();
+  }
+
+  beginRecoveryPlaintextWork() {
+    this.recoveryPlaintextWork += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.recoveryPlaintextWork = Math.max(0, this.recoveryPlaintextWork - 1);
+    };
+  }
+
+  async withRecoveryPlaintextWork(operation) {
+    const release = this.beginRecoveryPlaintextWork();
+    try { return await operation(); }
+    finally { release(); }
+  }
+
+  setUpdateInstallPending(value) {
+    this.updateInstallPending = value === true;
+  }
+
+  updateInstallDenial() {
+    return this.updateInstallPending
+      ? { ok: false, code: "update_install_pending", error: "MintVault Scanner is quiesced while the signed update is installed." }
+      : null;
+  }
+
+  isRestartSafeForUpdate() {
+    return !this.uploading
+      && !this.targetCaptureInFlight
+      && !this.previewActionInFlight
+      && !this.positioningPreviewInFlight
+      && !this.scannerHealthPromise
+      && this.recoveryPlaintextWork === 0
+      && !this.initialDrainTimer
+      && !this.initialDrainPromise
+      && !this.updateInstallPending;
   }
 
   activeTargetEntry() {
@@ -937,6 +993,8 @@ class Watcher extends EventEmitter {
   }
 
   async runPositioningPreview() {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
     if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
       return { ok: false, error: "Preview is unavailable while Scan, Accept, Rescan, or another Preview is in progress" };
     }
@@ -1018,6 +1076,8 @@ class Watcher extends EventEmitter {
   }
 
   applyPositioningPreview(previewId) {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
     if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
       return { ok: false, error: "Placement cannot be saved while scanner work is in progress" };
     }
@@ -1283,6 +1343,7 @@ class Watcher extends EventEmitter {
     }
     let restored = entry;
     if (!restored.previewArtifact) {
+      const releaseRecovery = this.beginRecoveryPlaintextWork();
       const previewId = restored.previewId || crypto.randomUUID();
       const masterPath = this.captureQueue.scratchPath(restored, ".tif");
       const previewPath = this.captureQueue.scratchPath(restored, ".jpg");
@@ -1295,6 +1356,7 @@ class Watcher extends EventEmitter {
         for (const candidate of [masterPath, previewPath]) {
           try { fs.unlinkSync(candidate); } catch (error) { if (error?.code !== "ENOENT") this.log("preview scratch cleanup will be retried at startup", "warn"); }
         }
+        releaseRecovery();
       }
     }
     if (!restored.frameAssessment?.accepted) {
@@ -1312,6 +1374,8 @@ class Watcher extends EventEmitter {
   }
 
   async resumeTargetedCaptures() {
+    const updateDeniedAtEntry = this.updateInstallDenial();
+    if (updateDeniedAtEntry) return false;
     const queue = this.readTargetedQueue();
     if (!queue.length || this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) return false;
     for (const entry of queue) {
@@ -1327,6 +1391,7 @@ class Watcher extends EventEmitter {
         return true;
       }
       const kept = await this.keepTargetAlive(entry);
+      if (this.updateInstallPending) return false;
       if (!kept.ok) return true;
       if (entry.phase === "preview_ready") {
         try { await this.restorePreviewCandidate(kept.entry); }
@@ -1388,10 +1453,17 @@ class Watcher extends EventEmitter {
   }
 
   async stop() {
+    if (this.initialDrainTimer) {
+      clearTimeout(this.initialDrainTimer);
+      this.initialDrainTimer = null;
+      this.initialFiles = [];
+      this.ready = false;
+    }
     if (this.chokidar) {
       await this.chokidar.close();
       this.chokidar = null;
     }
+    if (this.initialDrainPromise) await this.initialDrainPromise;
   }
 
   log(msg, level = "info") {
@@ -1488,6 +1560,8 @@ class Watcher extends EventEmitter {
 
   /** Refresh genuine ImageCaptureCore + locked-profile readiness for the tray. */
   async refreshScannerHealth({ force = false } = {}) {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return { status: "paused_for_update", ...updateDenied };
     // ImageCaptureCore health opens a scanner session. Never let the periodic
     // tray poll contend with an operator-initiated Scan or an in-flight Accept
     // on the same station process.
@@ -1518,10 +1592,14 @@ class Watcher extends EventEmitter {
    * after the operator has positioned the card and pressed Scan.
    */
   async pollTargetedCapture() {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
     if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.uploading) {
       return { ok: false, skipped: true };
     }
     if (await this.resumeTargetedCaptures()) return { ok: true, resumed: true };
+    const updateDeniedAfterResume = this.updateInstallDenial();
+    if (updateDeniedAfterResume) return updateDeniedAfterResume;
     // Already-authorised delivery may recover with station-only signatures,
     // but claiming or physically scanning a new target always needs a live
     // operator session as well as the ACTIVE station.
@@ -1543,6 +1621,8 @@ class Watcher extends EventEmitter {
       this.log(`capture-session poll failed: ${error.message}`, "warn");
       return { ok: false, error: error.message };
     }
+    const updateDeniedAfterClaim = this.updateInstallDenial();
+    if (updateDeniedAfterClaim) return updateDeniedAfterClaim;
     if (!claim.ok) {
       this.log(`capture-session poll rejected: ${claim.body?.error || `HTTP ${claim.status}`}`, "warn");
       return { ok: false, error: claim.body?.error || `HTTP ${claim.status}` };
@@ -1580,6 +1660,8 @@ class Watcher extends EventEmitter {
   }
 
   async scanActiveTarget() {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
     if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
       return { ok: false, error: "A scan, Accept, Rescan, or positioning Preview action is already in progress" };
     }
@@ -1718,6 +1800,8 @@ class Watcher extends EventEmitter {
   }
 
   async acceptPreview(previewId) {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
     if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
       return { ok: false, error: "A scan, Accept, Rescan, or positioning Preview action is already in progress" };
     }
@@ -1756,6 +1840,8 @@ class Watcher extends EventEmitter {
   }
 
   async rescanPreview(previewId) {
+    const updateDenied = this.updateInstallDenial();
+    if (updateDenied) return updateDenied;
     if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
       return { ok: false, error: "Rescan is unavailable while Scan, Accept, or positioning Preview is in progress" };
     }
@@ -1840,6 +1926,11 @@ class Watcher extends EventEmitter {
   // ── File handling ────────────────────────────────────────────────────
 
   async handleNewFile(filePath) {
+    if (this.updateInstallPending) return this.updateInstallDenial();
+    return this.withRecoveryPlaintextWork(() => this.handleNewFileImpl(filePath));
+  }
+
+  async handleNewFileImpl(filePath) {
     const filename = path.basename(filePath);
     const ext = path.extname(filename).toLowerCase();
 

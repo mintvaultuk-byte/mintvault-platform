@@ -8,6 +8,8 @@ const els = {
   hideBtn: document.getElementById("hideBtn"),
   appVersion: document.getElementById("appVersion"),
   updateBtn: document.getElementById("updateBtn"),
+  reinstallBtn: document.getElementById("reinstallBtn"),
+  updateStatus: document.getElementById("updateStatus"),
   scannerHealth: document.getElementById("scannerHealth"),
   stationIdentityRow: document.getElementById("stationIdentityRow"),
   stationOrganisation: document.getElementById("stationOrganisation"),
@@ -82,6 +84,10 @@ const els = {
   stationRegisterBtn: document.getElementById("stationRegisterBtn"),
   signOutBtn: document.getElementById("signOutBtn"),
   stationModalSignOutBtn: document.getElementById("stationModalSignOutBtn"),
+  stationUpdatePanel: document.getElementById("stationUpdatePanel"),
+  stationUpdateBtn: document.getElementById("stationUpdateBtn"),
+  stationReinstallBtn: document.getElementById("stationReinstallBtn"),
+  stationUpdateStatus: document.getElementById("stationUpdateStatus"),
 };
 
 const STATE_LABELS = {
@@ -113,6 +119,7 @@ let actionError = null;
 let stationSetup = null;
 let stationSetupBusy = false;
 let stationSetupPoll = null;
+let updateStatus = { status: "idle" };
 
 function openModal(modal) {
   modal?.classList.add("visible");
@@ -203,6 +210,34 @@ function renderStationIdentity(setup) {
   els.stationCredits.textContent = typeof credits === "number" ? String(credits) : "—";
 }
 
+function renderUpdateStatus(next) {
+  updateStatus = next || { status: "idle" };
+  const status = String(updateStatus.status || "idle");
+  const version = updateStatus.version ? ` ${updateStatus.version}` : "";
+  const messages = {
+    idle: "Ready to check the approved MintVault release channel.",
+    checking: "Checking the approved MintVault release set…",
+    up_to_date: "This Mac already has the current approved MintVault Scanner release.",
+    update_available: `Approved MintVault Scanner${version} is available.`,
+    downloading: `Downloading approved MintVault Scanner${version}${Number.isFinite(updateStatus.percent) ? ` — ${updateStatus.percent}%` : ""}…`,
+    downloading_dmg: `Downloading and verifying approved MintVault Scanner${version} DMG…`,
+    dmg_ready: `Approved MintVault Scanner${version} DMG is verified and opening in macOS.`,
+    ready_to_restart: `Approved MintVault Scanner${version} is verified and ready to restart.`,
+    restart_deferred: updateStatus.error || "Finish the current physical capture before restarting.",
+    installing: `Installing approved MintVault Scanner${version}…`,
+    disabled: updateStatus.error || "Automatic update is available only in a signed MintVault release.",
+    error: updateStatus.error || "MintVault could not verify the signed update set. Use DMG Reinstall or contact support.",
+  };
+  const message = messages[status] || "MintVault update status is unavailable.";
+  els.updateStatus.textContent = message;
+  els.stationUpdateStatus.textContent = message;
+  const busy = ["checking", "downloading", "downloading_dmg", "installing"].includes(status);
+  els.updateBtn.disabled = busy;
+  els.stationUpdateBtn.disabled = busy;
+  els.reinstallBtn.disabled = status === "installing";
+  els.stationReinstallBtn.disabled = status === "installing";
+}
+
 function renderWorkflowGuide(state) {
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
@@ -259,6 +294,7 @@ function renderStationSetup(next) {
   els.stationSignInForm.hidden = stage !== "sign_in";
   els.stationMfaForm.hidden = stage !== "mfa";
   els.stationRegisterPanel.hidden = stage !== "register";
+  els.stationUpdatePanel.hidden = stage !== "update_required";
   els.stationSetupError.textContent = stationSetup.error || "";
   els.stationSignInBtn.disabled = stationSetupBusy;
   els.stationMfaBtn.disabled = stationSetupBusy;
@@ -291,8 +327,8 @@ function renderStationSetup(next) {
   } else if (stage === "update_required") {
     els.stationSetupTitle.textContent = "UPDATE REQUIRED";
     els.stationSetupText.textContent = stationSetup.minimumSupportedVersion
-      ? `This Mac must run MintVault Scanner ${stationSetup.minimumSupportedVersion} or later. Install the current signed MintVault Scanner release, then reopen the app.`
-      : "Install the current signed MintVault Scanner release, then reopen the app.";
+      ? `This Mac must run MintVault Scanner ${stationSetup.minimumSupportedVersion} or later. Update now or reinstall the signed DMG.`
+      : "Update now or reinstall the current signed MintVault Scanner DMG.";
   } else if (stage === "identity_recovery_required") {
     els.stationSetupTitle.textContent = "Station identity recovery required";
     els.stationSetupText.textContent = "MintVault cannot prove this Mac's enrolled identity. Scanning and re-registration are paused. Contact a MintVault Super Admin.";
@@ -823,11 +859,30 @@ if (els.appVersion) {
   }).catch(() => {});
 }
 
-els.updateBtn.addEventListener("click", async () => {
-  if (!confirm("Scanner updates are installed only from an approved signed MintVault package. Open the release instructions?")) return;
-  const result = await window.scanner.updateApp();
-  alert(result?.error || "Install the current signed MintVault Scanner package through the approved release channel.");
-});
+async function updateAndRestart() {
+  if (!confirm("Download the newer approved MintVault Scanner release, verify it, then restart this app?\n\nAn active physical scan must finish first.")) return;
+  try {
+    const result = await window.scanner.updateApp({ action: "update_and_restart" });
+    renderUpdateStatus(result);
+  } catch {
+    renderUpdateStatus({ status: "error", error: "MintVault could not start the approved update. Use DMG Reinstall or contact support." });
+  }
+}
+
+async function openDmgReinstall() {
+  if (!confirm("Open the pinned MintVault release channel to reinstall the signed, notarized DMG?\n\nYour station identity and queued evidence stay in Application Support and Keychain.")) return;
+  try {
+    const result = await window.scanner.openDmgReinstall();
+    if (!result?.ok) renderUpdateStatus({ status: "error", error: result?.error || "MintVault could not open the approved DMG reinstall option." });
+  } catch {
+    renderUpdateStatus({ status: "error", error: "MintVault could not open the approved DMG reinstall option." });
+  }
+}
+
+els.updateBtn.addEventListener("click", () => void updateAndRestart());
+els.stationUpdateBtn.addEventListener("click", () => void updateAndRestart());
+els.reinstallBtn.addEventListener("click", () => void openDmgReinstall());
+els.stationReinstallBtn.addEventListener("click", () => void openDmgReinstall());
 
 els.orphansBtn.addEventListener("click", async () => {
   els.orphanList.textContent = "Loading…";
@@ -922,7 +977,9 @@ els.restartServiceBtn.addEventListener("click", async () => {
 
 window.scanner.onStateUpdate(renderState);
 window.scanner.onStationSetupUpdate?.(renderStationSetup);
+window.scanner.onUpdateStatus?.(renderUpdateStatus);
 window.scanner.getState().then(renderState);
+window.scanner.getUpdateStatus?.().then(renderUpdateStatus).catch(() => {});
 void refreshStationSetup();
 window.addEventListener("resize", () => {
   if (!lastState?.positioningPreview) return;

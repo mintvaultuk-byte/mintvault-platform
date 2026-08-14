@@ -1,4 +1,4 @@
-# Reviewer status — through WP6
+# Reviewer status — through WP7
 
 | Reviewer | State | Isolation | Lead verification |
 |---|---|---|---|
@@ -15,6 +15,7 @@
 | A5 WP5 queue review | complete / CLEAN | Committed baseline and current WIP read-only; local focused tests only; no edit/Keychain/DB/external mutation | Initial custody/disposition findings plus timestamp binding, atomic Rescan and ACCEPTED restart gaps repaired; 49/49 final focused tests |
 | A2 WP6 package compatibility | complete / CLEAN for WP6 scope | Current Scanner WIP and built bundle read-only; no edit/credential/external mutation | Helper layout/preparation freshness/artifact provenance and release-boundary findings repaired; WP7 updater/login work kept separate |
 | A7 WP6 package/CI hostile review | complete / CLEAN | Current Scanner WIP, workflow source and local artifacts read-only; no edit/credential/upload/external mutation | Dependency, action pin, source-ref, Team authority, ASAR hygiene/runtime and independent DMG/ZIP proof findings repaired; final re-review CLEAN |
+| A5 WP7 updater hostile review | complete / CLEAN | Current Scanner updater/main/watcher/tests and pinned library read-only; no edit/credential/feed/external mutation | Five initial HIGHs repaired; final review reproduced install-quiesce, recovery-scratch and bounded-download HIGHs; final targeted H1-H3 re-review found no actionable Scanner-owned BLOCKER/HIGH |
 
 Reviewer isolation was established by explicit read-only scopes. Only the Lead
 created the worktree, enrolled Engineering OS, built ignored graph artifacts and
@@ -39,3 +40,9 @@ workflow/source authority, runtime package hygiene, artifact provenance and
 helper layout. Lead reproduced and repaired every actionable finding; A7's
 final hostile review is CLEAN. Developer-ID signing, notarisation and the exact
 owner Team value remain the explicit R-3 external gate, not a local green claim.
+WP7 added R-47..R-51 and advanced R-17. The first A5 repair review invalidated
+the fake download-path assumption and reproduced four adjacent authorization /
+custody failures. Its final review added R-52..R-54 for the asynchronous native
+install window, untracked recovery plaintext and unbounded transport. Lead
+fixed each in the same pass; the final targeted re-review is CLEAN. The exact P14 response schema
+and Apple-signed physical update remain external boundaries, not local excuses.

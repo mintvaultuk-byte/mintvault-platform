@@ -10,8 +10,8 @@
  *
  * Why one process: three processes was the bug. Watcher dying without the
  * tray noticing meant 20-minute "is it broken?" debug sessions. Now: if
- * anything dies, LaunchAgent restarts the whole thing and either the tray
- * icon reappears or it doesn't — no silent drift.
+ * anything dies, the whole app fails visibly and the operator can relaunch
+ * one signed application — no silent split-process drift.
  */
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, powerMonitor } = require("electron");
@@ -29,6 +29,8 @@ const stationAuthority = require("./lib/station-authority");
 const stationAuthorityLatch = require("./lib/station-authority-latch");
 const helperIntegrity = require("./lib/helper-integrity");
 const newCardOperation = require("./lib/new-card-operation");
+const { createUpdateManager } = require("./lib/update-manager");
+const { ensureDefaultAfterEnrolment } = require("./lib/login-item");
 
 const packagedTeamPin = app.isPackaged ? require("./generated/release-team-pin") : null;
 const releaseTrust = app.isPackaged
@@ -44,18 +46,20 @@ helperIntegrity.configureRuntime({
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
 
-// Prevent multiple instances stacking up if launchd misbehaves.
+// Prevent multiple instances stacking up after login or a manual relaunch.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) { app.quit(); }
 
 // Force the GPU off in this process — tray-only Electron apps
-// occasionally hang on GPU init under launchd.
+// occasionally hang on GPU init in a menu-bar-only process.
 app.disableHardwareAcceleration();
 
 let tray         = null;
 let popover      = null;
 let watcher      = null;
+let updateManager = null;
 let isQuitting   = false;
+let updateInstallPending = false;
 
 const ASSETS = path.join(__dirname, "assets");
 
@@ -80,18 +84,10 @@ function playSystemSound(filename) {
 }
 
 // ── Reset / recovery ───────────────────────────────────────────────────────
-// The scanner IS the com.mintvault.scanner LaunchAgent (this Electron app).
-// Recovery escalates: Soft (in-process watcher restart, handled in the
-// reset-scanner IPC) → Reload/Repair (reset-agent.sh, spawned DETACHED because
-// the launchctl tiers kill+relaunch this very process). Single source of truth
-// for the plist is lib/agent-plist.js. The legacy com.mintvault.scanner-watcher
-// daemon is decommissioned and NEVER touched here.
+// Production is one signed application using the modern macOS main-app login
+// item. Recovery never shells out to an external service manager, package
+// manager, or mutable source checkout.
 
-const RESET_HELPER = path.join(__dirname, "reset-agent.sh");
-// Reset-log + last-reset marker also respect MINTVAULT_SCANS_DIR so a TEST
-// instance keeps its own log/marker in its isolated dir, not the live scanner's.
-// agent-plist is intentionally left alone — it drives the LIVE launchd agent's
-// plist (don't run "Reset scanner" on a test instance; it targets the prod agent).
 const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
 const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
 const APP_VERSION  = (() => { try { return require("./package.json").version; } catch { return "?"; } })();
@@ -102,14 +98,11 @@ function versionTuple(raw) {
 }
 
 function versionSatisfies(installed, minimum) {
-  if (!minimum) return true;
   const a = versionTuple(installed);
   const b = versionTuple(minimum);
   if (!a || !b) return false;
   return a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2])));
 }
-const LAST_RESET   = path.join(SCANS_BASE, "last-reset.json");
-
 // Append a timestamped line to the operator log (tray "Show logs" target).
 function logToFile(msg) {
   try {
@@ -119,38 +112,21 @@ function logToFile(msg) {
   }
 }
 
-// Spawn the detached Reload/Repair escalation. It outlives this process being
-// killed by kickstart; the agent's KeepAlive relaunches us and we surface the
-// outcome from last-reset.json on boot.
-function spawnResetAgent(reason) {
-  logToFile(`escalating to reload/repair (reason: ${reason})`);
-  const child = spawn("/bin/bash", [RESET_HELPER, reason], { stdio: "ignore", detached: true });
-  child.on("error", (e) => logToFile(`reset-agent spawn failed: ${e.message}`));
-  child.unref();
-}
-
-// On boot, surface the plain-English outcome of a prior Reload/Repair (the app
-// was killed mid-reset by kickstart — this is how the operator learns it worked).
-function surfacePriorResetStatus() {
-  try {
-    if (!fs.existsSync(LAST_RESET)) return;
-    const st = JSON.parse(fs.readFileSync(LAST_RESET, "utf8"));
-    fs.unlinkSync(LAST_RESET); // one-shot
-    if (st && st.status) {
-      const { Notification } = require("electron");
-      new Notification({ title: "MintVault Scanner", body: st.status }).show();
-      logToFile(`prior reset outcome: ${st.status}${st.reason ? ` (${st.reason})` : ""}`);
-    }
-  } catch (err) {
-    console.warn(`[reset] could not read ${LAST_RESET}: ${err.message}`);
-  }
-}
-
-// "Reboot scanner" tray item → full reload/repair of the LIVE agent.
-function rebootScanner() {
+function scheduleApplicationRelaunch(reason) {
+  if (isQuitting) return;
+  isQuitting = true;
+  logToFile(`relaunching signed application (reason: ${reason})`);
   const { Notification } = require("electron");
-  new Notification({ title: "MintVault Scanner", body: "Reloading agent…" }).show();
-  setTimeout(() => spawnResetAgent("tray: Reboot scanner"), 500);
+  new Notification({ title: "MintVault Scanner", body: "Restarting Scanner…" }).show();
+  setTimeout(() => {
+    app.relaunch();
+    app.exit(0);
+  }, 500);
+}
+
+// "Reboot scanner" tray item → relaunch the one signed application.
+function rebootScanner() {
+  scheduleApplicationRelaunch("tray: Reboot scanner");
 }
 
 // ── Tray ─────────────────────────────────────────────────────────────────
@@ -368,6 +344,49 @@ function pushStateToRenderer() {
   refreshTray();
 }
 
+function publishUpdateStatus(status) {
+  if (popover && !popover.isDestroyed()) popover.webContents.send("update-status", status);
+}
+
+function restartIsSafe() {
+  const current = stateMod.get();
+  return !updateInstallPending
+    && !["scanning_front", "scanning_back", "finalising", "uploading", "validating", "retrying", "positioning_preview_scanning", "processing_preview"].includes(current.state)
+    && !["SCANNING_FRONT", "SCANNING_BACK", "FINALISING", "UPLOADING", "VALIDATING", "RETRYING", "PROCESSING_PREVIEW"].includes(current.activeCapture?.stage)
+    && (watcher?.isRestartSafeForUpdate?.() ?? true);
+}
+
+function updateInstallDenial() {
+  return updateInstallPending
+    ? { ok: false, code: "update_install_pending", error: "MintVault Scanner is quiesced while the signed update is installed." }
+    : null;
+}
+
+function beginUpdateInstall() {
+  if (!restartIsSafe()) return null;
+  updateInstallPending = true;
+  watcher?.setUpdateInstallPending(true);
+  isQuitting = true;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    updateInstallPending = false;
+    watcher?.setUpdateInstallPending(false);
+    isQuitting = false;
+  };
+}
+
+function ensurePostEnrolmentLoginItem() {
+  const local = stateMod.get();
+  return ensureDefaultAfterEnrolment({
+    app,
+    enrolled: true,
+    alreadyConfigured: local.loginItemConfigured === true,
+    persistConfigured: () => stateMod.set({ loginItemConfigured: true }),
+  });
+}
+
 function stationSummary(sessionBody, availableCredits) {
   if (!sessionBody || typeof sessionBody !== "object") return null;
   return {
@@ -453,6 +472,8 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
       locations: permittedLocations,
     };
   }
+  try { ensurePostEnrolmentLoginItem(); }
+  catch (error) { console.warn(`[login-item] post-enrolment default failed: ${error?.message || error}`); }
   const status = await stationClient.enrolmentStatus(code);
   if (!status.ok || !status.body?.station) {
     const errorCode = status.body?.error?.code;
@@ -473,6 +494,37 @@ async function computeStationSetupState({ refreshCredits = true } = {}) {
     };
   }
   const station = status.body.station;
+  if (!versionTuple(station.minimumSupportedVersion)) {
+    return {
+      ok: true,
+      stage: "degraded",
+      summary,
+      stationCode: code,
+      error: "MintVault could not verify the minimum supported Scanner version. New physical work remains paused.",
+    };
+  }
+  try { updateManager?.setMinimumVersion(station.minimumSupportedVersion); }
+  catch {
+    return {
+      ok: true,
+      stage: "degraded",
+      summary,
+      stationCode: code,
+      error: "MintVault returned an invalid minimum Scanner version. New physical work remains paused.",
+    };
+  }
+  if (updateManager?.enabled) {
+    try { updateManager.setPolicy(station.scannerUpdatePolicy ?? null); }
+    catch {
+      return {
+        ok: true,
+        stage: "degraded",
+        summary,
+        stationCode: code,
+        error: "MintVault returned an invalid Scanner update policy. New physical work remains paused.",
+      };
+    }
+  }
   if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
     return {
       ok: true,
@@ -510,13 +562,19 @@ async function stationSetupState(options) {
 }
 
 async function requireLiveOperationalAuthority() {
+  const updateDeniedAtEntry = updateInstallDenial();
+  if (updateDeniedAtEntry) return updateDeniedAtEntry;
   const latched = stationAuthorityLatch.current();
   if (latched) return stationAuthority.operationalDenial(latched);
   const setup = await stationSetupState({ refreshCredits: false });
+  const updateDeniedAfterSetup = updateInstallDenial();
+  if (updateDeniedAfterSetup) return updateDeniedAfterSetup;
   const setupDenied = stationAuthority.operationalDenial(setup);
   if (setupDenied) return setupDenied;
   try {
     const signedStatus = await stationClient.heartbeat(heartbeatPayload());
+    const updateDeniedAfterHeartbeat = updateInstallDenial();
+    if (updateDeniedAfterHeartbeat) return updateDeniedAfterHeartbeat;
     const replay = stationAuthorityLatch.current();
     if (replay) return stationAuthority.operationalDenial(replay);
     if (!signedStatus.ok) {
@@ -527,9 +585,11 @@ async function requireLiveOperationalAuthority() {
       };
     }
   } catch {
+    const updateDeniedAfterFailure = updateInstallDenial();
+    if (updateDeniedAfterFailure) return updateDeniedAfterFailure;
     return stationAuthority.operationalDenial({ stage: "offline" });
   }
-  return null;
+  return updateInstallDenial();
 }
 
 async function publishStationSetupState() {
@@ -661,6 +721,11 @@ function setupIpc() {
   });
 
   ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
+  ipcMain.handle("get-update-status", () => updateManager?.status() || {
+    status: "disabled",
+    currentVersion: APP_VERSION,
+    error: "Automatic update is available only in a signed MintVault release.",
+  });
 
   ipcMain.handle("get-station-setup", () => stationSetupState());
   ipcMain.handle("station-sign-in", async (_event, payload) => {
@@ -747,25 +812,31 @@ function setupIpc() {
     return watcher.rescanPreview(previewId);
   });
 
-  // Scanner software is released only as an owner-approved, signed package.
-  // Never turn a physical station into a mutable Git checkout or run npm on
-  // an operator's Mac: that would make dependency resolution part of capture
-  // authority. The UI sends the operator to the controlled release channel.
-  ipcMain.handle("update-app", async () => {
-    return {
-      ok: false,
-      code: "signed_release_required",
-      error: "Install the current signed MintVault Scanner package through the approved release channel. This station will not self-update from Git.",
-    };
+  // Signed-package update only. The manager separately verifies the newer-only
+  // metadata, MintVault release ledger, exact checksum set and downloaded ZIP
+  // before electron-updater may install anything.
+  ipcMain.handle("update-app", async (_event, payload) => {
+    if (!updateManager?.enabled) {
+      return { ok: false, code: "signed_release_required", error: "Use an approved signed MintVault Scanner package." };
+    }
+    const action = payload?.action;
+    if (action === "check") return { ok: true, ...(await updateManager.check({ download: false })) };
+    if (action === "update_and_restart") return updateManager.updateAndRestart();
+    return { ok: false, code: "invalid_update_action", error: "Choose Update & Restart or DMG Reinstall." };
   });
 
-  // Reset the scanner — 3-tier escalation against the LIVE com.mintvault.scanner
-  // agent (this app), never the decommissioned scanner-watcher. Tier 1 (Soft)
-  // restarts the in-process station service here; if that can't recover, we
-  // hand off to reset-agent.sh (Reload/Repair) which outlives this process
-  // being killed by kickstart. The operator gets a plain-English status, never
-  // a raw exit code.
+  ipcMain.handle("open-dmg-reinstall", async () => {
+    if (!updateManager?.enabled) {
+      return { ok: false, code: "signed_release_required", error: "Use an approved signed MintVault Scanner DMG." };
+    }
+    return updateManager.openReinstallDmg((verifiedPath) => shell.openPath(verifiedPath));
+  });
+
+  // Reset the in-process service. If it cannot recover, relaunch this same
+  // signed application; production never depends on an external service helper.
   ipcMain.handle("reset-scanner", async () => {
+    const updateDenied = updateInstallDenial();
+    if (updateDenied) return updateDenied;
     // Tier 1 — Soft: restart the in-process station service.
     try {
       logToFile("Soft: in-process scanner service restart");
@@ -781,9 +852,8 @@ function setupIpc() {
     } catch (err) {
       logToFile(`Soft failed: ${err.message} → escalating`);
     }
-    // Tier 2/3 — Reload/Repair via the detached helper (kills+relaunches us).
-    spawnResetAgent("in-app Soft tier insufficient");
-    return { ok: true, tier: "reload", status: "Reloading agent…", escalated: true };
+    scheduleApplicationRelaunch("in-app scanner service restart insufficient");
+    return { ok: true, tier: "application", status: "Restarting Scanner…", escalated: true };
   });
 
   ipcMain.handle("hide-popover", () => { if (popover) popover.hide(); return { ok: true }; });
@@ -823,6 +893,21 @@ app.on("second-instance", () => showPopover());
 app.whenReady().then(async () => {
   stateMod.load();
 
+  updateManager = createUpdateManager({
+    autoUpdater: releaseTrust?.packageMode === "release" ? require("electron-updater").autoUpdater : null,
+    appVersion: APP_VERSION,
+    releaseTrust,
+    resourcesPath: process.resourcesPath,
+    downloadDirectory: path.join(app.getPath("cache"), "MintVaultScanner", "verified-dmg"),
+    fetchImpl: async (...args) => {
+      const { default: fetch } = await import("node-fetch");
+      return fetch(...args);
+    },
+    onStatus: publishUpdateStatus,
+    isRestartSafe: restartIsSafe,
+    beforeInstall: beginUpdateInstall,
+  });
+
   watcher = new Watcher();
   let lastErrorState = false;
   let lastSuccessState = false;
@@ -860,18 +945,20 @@ app.whenReady().then(async () => {
   });
 
   setupTray();
-  createPopover();
-  setupIpc();
-
   await watcher.start();
+  // Recovery can decrypt legacy/retry material into private scratch. Do not
+  // expose renderer IPC until that startup recovery has completely quiesced.
+  setupIpc();
+  createPopover();
   // Session polling is deliberately inside the one existing scanner process.
   // It never watches a staging folder or calls the legacy unbound ingest.
   let targetedCapturePollInFlight = false;
   const pollTargetedCapture = async () => {
-    if (targetedCapturePollInFlight) return;
+    if (targetedCapturePollInFlight || updateInstallPending) return;
     targetedCapturePollInFlight = true;
     try {
       await watcher.refreshScannerHealth();
+      if (updateInstallPending) return;
       await watcher.pollTargetedCapture();
     } catch (err) {
       console.error(`[targeted-capture] poll failed: ${err?.message || err}`);
@@ -951,6 +1038,18 @@ app.whenReady().then(async () => {
   void publishStationSetupState();
   scheduleAuthorityPoll();
 
+  // A signed release checks after boot and then on a restrained cadence. The
+  // download remains operator-controlled; a failed check cannot mutate local
+  // identity, capture state, or the encrypted queue.
+  if (updateManager.enabled) {
+    const checkForUpdate = () => updateManager.check({ download: false })
+      .catch((error) => console.warn(`[update] check failed: ${error?.message || error}`));
+    const initialUpdateCheck = setTimeout(checkForUpdate, 30_000);
+    initialUpdateCheck.unref?.();
+    const updateCheckInterval = setInterval(checkForUpdate, 6 * 60 * 60 * 1000);
+    updateCheckInterval.unref?.();
+  }
+
   // ── Maintenance (scanner ops pack) ────────────────────────────────────
   // Log rotation: launchd holds the log fd, so rotate copy-truncate style.
   const rotateLogIfNeeded = () => {
@@ -997,15 +1096,17 @@ app.whenReady().then(async () => {
   // Wake-from-sleep recovery: FSEvents subscriptions can go stale across a
   // long sleep — restart the folder watcher and immediately sweep the inbox.
   powerMonitor.on("resume", async () => {
+    if (updateInstallPending) return;
     console.log("[maintenance] system resumed from sleep — restarting watcher + sweeping inbox");
     try { await watcher.stop(); await watcher.start(); } catch (err) { console.error(`[maintenance] resume restart failed: ${err?.message}`); }
     watcher.drainInbox().catch(() => {});
   });
   // Belt-and-braces: sweep the inbox every 10 min for anything chokidar
   // missed. drainInbox is idempotent and respects the confirm/pause gates.
-  setInterval(() => watcher.drainInbox().catch(() => {}), 10 * 60 * 1000);
+  setInterval(() => {
+    if (!updateInstallPending) watcher.drainInbox().catch(() => {});
+  }, 10 * 60 * 1000);
   refreshTray();
-  surfacePriorResetStatus();
 });
 
 app.on("window-all-closed", (e) => {

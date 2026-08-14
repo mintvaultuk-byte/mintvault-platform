@@ -44,6 +44,35 @@ macOS, signature, signing identifier, and production Team ID before every
 spawn. Production stations need no Xcode, command-line tools, source checkout,
 Git, npm, or separately installed Node runtime.
 
+## Login startup, update and reinstall
+
+The installed application is off at login until this Mac has completed
+device-bound station enrolment. It then enables the modern macOS main-app login
+item once by default and never overrides a later user/System Settings choice.
+Production does not ship or depend on a service plist, keep-alive helper or
+shell repair script; in-app recovery relaunches the same signed application.
+
+Updates are owner-built signed/notarised ZIPs discovered through
+`latest-mac.yml`, but that mutable feed is never update authority. Authenticated
+station status must supply a short-lived exact release policy matching the
+minimum version, Team, source commit, artifact names/sizes/hashes and update or
+explicit rollback direction. **UPDATE & RESTART** downloads and verifies that
+one ZIP and refuses to restart during any physical/Preview/upload operation.
+**DMG REINSTALL** downloads and hashes the exact policy-bound signed DMG before
+opening it in macOS; it never falls back to a generic release page.
+
+Update metadata/evidence bodies and ZIP/DMG streams are bounded while they are
+read, have timeouts, and must preserve the encrypted-capture disk reserve. Once
+installation begins, the app synchronously quiesces scanner IPC, target/health
+polling, inbox handling and recovery scratch until native MacUpdater exits or
+reports an explicit failure; its delayed macOS quit cannot race a new scan.
+
+Identity/session state remains under Application Support/Keychain and encrypted
+evidence under `~/mintvault-scans`, outside the replaceable `.app`. A failed or
+interrupted update therefore cannot substitute release authority or erase local
+custody; physical signed-update/reinstall persistence is still a clean-Mac
+release-acceptance gate.
+
 The source-only `setup-new-mac.sh`/LaunchAgent path is retained temporarily for
 development and legacy recovery and is not the production installation path.
 Build the helper only on the controlled Apple Silicon build host with

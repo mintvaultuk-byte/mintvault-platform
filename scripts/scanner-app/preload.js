@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld("scanner", {
     ipcRenderer.on("station-setup-update", wrapped);
     return () => ipcRenderer.removeListener("station-setup-update", wrapped);
   },
+  onUpdateStatus: (callback) => {
+    const wrapped = (_event, payload) => callback(payload);
+    ipcRenderer.on("update-status", wrapped);
+    return () => ipcRenderer.removeListener("update-status", wrapped);
+  },
   fetchOrphans: () => ipcRenderer.invoke("fetch-orphans"),
   startNewCard: (payload) => ipcRenderer.invoke("start-new-card", payload),
   authoriseFix: (payload) => ipcRenderer.invoke("authorise-fix", payload),
@@ -27,7 +32,9 @@ contextBridge.exposeInMainWorld("scanner", {
   stationCompleteMfa: (payload) => ipcRenderer.invoke("station-complete-mfa", payload),
   registerStation: (payload) => ipcRenderer.invoke("register-station", payload),
   stationSignOut: () => ipcRenderer.invoke("station-sign-out"),
-  updateApp: () => ipcRenderer.invoke("update-app"),
+  getUpdateStatus: () => ipcRenderer.invoke("get-update-status"),
+  updateApp: (payload) => ipcRenderer.invoke("update-app", payload),
+  openDmgReinstall: () => ipcRenderer.invoke("open-dmg-reinstall"),
   resetScanner: () => ipcRenderer.invoke("reset-scanner"),
   hidePopover: () => ipcRenderer.invoke("hide-popover"),
   openLogs: () => ipcRenderer.invoke("open-logs"),

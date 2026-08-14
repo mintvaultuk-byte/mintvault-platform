@@ -33,11 +33,11 @@
 |---|---|---|---|
 | 0 — Baseline | done | 2026-08-14 | Exact source/Partner/tooling facts recorded |
 | 1 — Review plan | done | 2026-08-14 | A9 Partner, A1 Scanner, tooling scopes isolated |
-| 2 — Investigation | done through WP6 | 2026-08-14 | WP2 A3/A4, WP3 A4, WP5 A5 and WP6 A2/A7 controlled reviews complete |
-| 3 — Lead verification | done through WP6 | 2026-08-14 | Package dependencies, nested signing order, source/Team authority, ASAR runtime and both artifact copies reproduced and verified |
-| 4 — Implementation authorisation | done through safe-isolated WP6 | 2026-08-14 | Owner prompt authorises local Scanner work; moving P14 forbids server authority/migration wiring until semantic reconciliation |
-| 5 — Implementation | done through safe-isolated WP6 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority; WP5 encrypted queue; WP6 deterministic arm64 package/release pipeline |
-| 6 — Regression | local done through WP6 | 2026-08-14 | Scanner 112 pass/3 opt-in SE skips; package/helper 30/30; zero Scanner audit vulnerabilities; local app/DMG/ZIP independently verified; A7 CLEAN |
+| 2 — Investigation | done through WP7 | 2026-08-14 | WP2 A3/A4, WP3 A4, WP5 A5, WP6 A2/A7 and WP7 A5 controlled reviews complete; final targeted WP7 review CLEAN |
+| 3 — Lead verification | done through WP7 | 2026-08-14 | Pinned MacUpdater event behavior, exact authenticated policy, candidate/cache mutation, install-quiesce/recovery races, bounded static/update transport, verified DMG and login boundaries reproduced |
+| 4 — Implementation authorisation | done through safe-isolated WP7 | 2026-08-14 | Owner prompt authorises local Scanner work; moving P14 forbids final server policy/authority wiring until semantic reconciliation |
+| 5 — Implementation | done through safe-isolated WP7 | 2026-08-14 | WP1 helper; WP2 SE identity/operations; WP3 live authority; WP5 encrypted queue; WP6 package/release; WP7 updater/login/reinstall |
+| 6 — Regression | local done through WP7 | 2026-08-14 | Scanner 136 pass/3 opt-in SE skips; focused updater/login 24/24; zero Scanner audit vulnerabilities; two critical mutations RED→GREEN; final A5 targeted re-review CLEAN |
 | 7 — Final report | pending | | Only after WP12 or a legitimate external/owner gate |
 
 ## Reviewer assignments
@@ -57,6 +57,7 @@
 | A5 WP5 queue | Queue/encryption/custody/grant/finalisation/provenance review, read-only | Initial custody/disposition defects plus tuple and crash-boundary follow-ups repaired; final re-review CLEAN |
 | A2 WP6 compatibility | Package/helper layout, preparation freshness, artifact/release boundary, read-only | Findings repaired; WP6 package scope CLEAN; updater/login items assigned to WP7 |
 | A7 WP6 package/CI | Dependency, workflow, Team trust, package hygiene and independent artifacts, read-only | Six hostile rounds; every Scanner-owned BLOCKER/HIGH repaired; final re-review CLEAN |
+| A5 WP7 updater | electron-updater/minimum/rollback policy/login item/reinstall, read-only | Five initial and three final-review HIGHs reproduced; all locally repaired; final targeted H1-H3 re-review CLEAN |
 
 ## WP3 implementation and regression evidence
 
@@ -113,6 +114,42 @@
 - No Apple credential was accessed. Exact owner Team pin, Developer-ID signing,
   notarisation, stapling/Gatekeeper on a real RC and clean-machine acceptance
   remain R-3/WP9 external proof; the local package is explicitly non-release.
+
+## WP7 implementation and regression evidence
+
+- Added exact-pinned `electron-updater` with a strict packaged
+  `app-update.yml`, but made the static feed discovery/transport only. The app
+  requires one authenticated short-lived station policy for one exact update or
+  explicit rollback, source commit, Team, minimum and complete artifact set.
+- Reproduced pinned MacUpdater 6.8.9 returning `[]` for manual Mac download and
+  now obtains the real regular ZIP path from `update-downloaded`. One immutable
+  policy-fingerprinted candidate is hashed after download and immediately before
+  install; checks/policy/minimum changes invalidate it.
+- DMG reinstall streams the exact authorised DMG into a private cache, verifies
+  size/SHA-256 and rechecks policy/bytes at the open boundary. It has no feed-root
+  or verification-error fallback.
+- A second targeted hostile review reproduced an asynchronous native-install
+  race, untracked recovery scratch and unbounded response consumption. The app
+  now enters one synchronous install-quiesce latch before MacUpdater, accounts
+  for startup/preview/inbox plaintext lifetimes, and enforces exact/max byte,
+  timeout, exclusive-path and capture-reserve limits during every update fetch.
+- Minimum-version absence/malformed values fail closed. UPDATE_REQUIRED owns
+  accessible modal Update/DMG controls. Restart is denied during every watcher
+  operation that can expose plaintext or live physical state.
+- The modern macOS main-app login item is attempted once only after enrolment,
+  defaults on, and never overrides a later user choice. Production runtime no
+  longer calls a shell repair/service helper.
+- Removing the exact streaming-size ceiling made the new direct limiter test
+  RED; restoring it made GREEN. Removing recovery-work participation from
+  restart safety made the two held-open recovery tests RED; restoring it made
+  GREEN.
+- Full Scanner suite: 136 passed / 3 explicit Secure-Enclave skips. Focused
+  updater/login suite: 24/24. Scanner audit: zero vulnerabilities across 327
+  dependencies. Governance 4/4, TypeScript and production build pass, lint has
+  0 errors / 2,767 existing warnings, and diff whitespace is clean. A5's final
+  targeted H1-H3 re-review is CLEAN.
+- Credential-independent arm64 package regeneration remains the last WP7
+  checkpoint step after the clean source commit.
 
 ## Authoritative links
 

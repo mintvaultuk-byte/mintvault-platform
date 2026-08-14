@@ -151,8 +151,9 @@
         <p class="hint">Signs out the current person. This Mac stays registered as the same MintVault station.</p>
       </div>
       <div class="settings-test">
-        <button class="btn" id="updateBtn">Signed release instructions</button>
-        <p class="hint">Scanner updates are installed only from an approved signed MintVault package. This Mac never pulls Git or installs dependencies during capture operations.</p>
+        <button class="btn" id="updateBtn">UPDATE &amp; RESTART</button>
+        <button class="btn ghost" id="reinstallBtn">DMG REINSTALL</button>
+        <p class="hint" id="updateStatus">Only a newer, signed, notarized MintVault release can be installed. This Mac never pulls Git or installs dependencies during capture operations.</p>
       </div>
       <div class="settings-test">
         <button class="btn" id="logsBtn">Show service logs</button>
@@ -215,6 +216,11 @@
         <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
       </div>
       <p class="hint station-setup-error" id="stationSetupError"></p>
+      <div id="stationUpdatePanel" class="station-setup-form" hidden>
+        <button class="btn primary" type="button" id="stationUpdateBtn">UPDATE &amp; RESTART</button>
+        <button class="btn ghost" type="button" id="stationReinstallBtn">DMG REINSTALL</button>
+        <p class="hint" id="stationUpdateStatus">MintVault will verify the signed release set before downloading or restarting.</p>
+      </div>
       <button class="btn ghost" type="button" id="stationModalSignOutBtn" hidden>SIGN OUT / SWITCH USER</button>
     </div>
   </div>

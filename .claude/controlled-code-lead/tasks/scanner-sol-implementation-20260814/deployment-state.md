@@ -1,4 +1,4 @@
-# Deployment state — Scanner SOL campaign / through WP6
+# Deployment state — Scanner SOL campaign / through WP7
 
 ## Production
 
@@ -22,6 +22,13 @@
   independently verified; ad-hoc identity, `releaseReady:false`, not uploaded.
 - Apple authority: no valid Developer ID identity was installed or used; exact
   owner Team authority remains `OWNER_REQUIRED`; no notary credential accessed.
+- Update authority: implemented locally but inactive in local packages and not
+  deployed. A release package requires authenticated final-P14
+  `scannerUpdatePolicy`; static metadata alone is deliberately powerless. Local
+  proof now includes bounded transport and asynchronous install quiescence; no
+  remote feed or native updater installation was invoked.
+- Login item: implemented/tested locally; no workstation login state was
+  mutated by this campaign.
 
 ## Known divergence
 

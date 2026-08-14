@@ -8,6 +8,8 @@ native executables in `Contents/Helpers`, their sealed manifests under
 `Contents/Resources/helper-manifests`, and `release-trust.json`. Native source,
 tests, package/build scripts, npm, Git, Node, Xcode, compiler tools, environment
 files, API keys, database URLs and LaunchAgent/install scripts are excluded.
+`electron-updater` is a production dependency, but its static generic feed is
+discovery/transport only and has no release-selection or rollback authority.
 
 ## Credential-independent structural proof
 
@@ -75,6 +77,52 @@ The release order is fail-closed:
 The workflow uploads an immutable release-candidate evidence artifact. It does
 not publish a GitHub Release, update a live feed, deploy, install, or cut over a
 station. Those remain separate owner-authorised gates.
+
+## Runtime update and reinstall authority
+
+An enrolled signed app accepts an update only after authenticated MintVault
+station status supplies one short-lived `MINTVAULT_STATION_POLICY` for one exact
+target. The policy binds its ID/lifetime/reason, normal `UPDATE` or explicit
+`ROLLBACK` direction, minimum supported version, MintVault Team ID, source
+commit, and the exact ZIP/DMG/`latest-mac.yml` names, sizes and SHA-256 values;
+the ZIP also carries the expected SHA-512. A mutable static feed cannot select
+a different older or newer release and cannot authorise a downgrade.
+
+The app then cross-checks the policy against `latest-mac.yml`, the exact
+MintVault release manifest and `SHA256SUMS`. On macOS it obtains the actual ZIP
+path from electron-updater's `update-downloaded` event, because the pinned
+MacUpdater intentionally returns an empty path array when auto-install-on-quit
+is disabled. The path is regular/non-symlink, candidate-bound and hashed after
+download and again immediately before install. Any new check or policy/minimum
+change invalidates the prior candidate.
+
+The authenticated sizes are enforced during transfer, not after consuming an
+unbounded response. `latest-mac.yml`, ZIP and DMG are streamed through exact
+size/hash limits; the release manifest and checksum ledger have fixed small
+ceilings. Downloads abort on overflow, cancellation or timeout, refuse
+pre-existing/symlink destinations, disable differential transport, and must
+leave at least 2 GiB or 5% of the volume (whichever is larger) for encrypted
+capture custody.
+
+**DMG REINSTALL** does not open a feed page. It downloads the exact
+policy-authorised DMG into a private cache, validates size and SHA-256, rechecks
+the current policy and bytes immediately before asking macOS to open it, and
+otherwise remains visibly failed closed. Update restart is refused during scan,
+Preview, positioning, TIFF decryption/upload, validation, finalisation or retry.
+Failed checks/downloads receive no quit/install authority and do not touch the
+Keychain identity, Application Support state or encrypted evidence queue.
+
+On macOS the final native install call is asynchronous. The app therefore
+enters one synchronous install-quiesce state before calling MacUpdater. That
+state refuses new physical IPC after every authority await, target/health poll,
+maintenance restart, inbox event and recovery/decryption entry point. It stays
+latched until the process exits for installation and is released only when the
+updater explicitly reports failure.
+
+The production macOS login item uses `app.setLoginItemSettings()`. It is off at
+install and attempted once, default-on, only after device-bound enrolment; the
+app records that the default was offered and never overwrites a later user or
+System Settings choice. No production service plist or keep-alive agent ships.
 
 ## Final external and physical gates
 

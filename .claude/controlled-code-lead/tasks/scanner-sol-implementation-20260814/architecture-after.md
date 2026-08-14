@@ -1,6 +1,6 @@
 # Architecture — AFTER — Scanner SOL campaign
 
-**State:** WP1 capture-helper, WP2 identity/client, WP3 live-authority, WP5 encrypted-queue and WP6 credential-independent package edges are AS-BUILT locally; signed-release, updater and server edges remain gated on later work.
+**State:** WP1 capture-helper, WP2 identity/client, WP3 live-authority, WP5 encrypted-queue, WP6 credential-independent package and WP7 fail-closed updater/login edges are AS-BUILT locally; real signed release and final server edges remain gated.
 
 ```mermaid
 flowchart LR
@@ -65,3 +65,14 @@ Team pins prevent a candidate trust file from choosing its own authority.
 Local app, ZIP and DMG copies are independently verified and share one bundle
 digest/source/helper set. The `PKG` edge remains only locally AS-BUILT: its real
 Developer-ID/notary authority and deployed update feed are R-3/WP7/WP9 gates.
+
+WP7 confirms that `POLICY`, not `PKG`, selects a release. Authenticated station
+status supplies one short-lived exact target/direction/minimum/Team/source and
+artifact set; static metadata is cross-checked but cannot choose any older or
+newer candidate. The ZIP path comes from the real MacUpdater event and is
+rehash-bound immediately before install. Reinstall privately downloads and
+hashes the exact DMG before local open. Login startup uses the post-enrolment
+main-app service. Authenticated update bodies are bounded while streaming and
+preserve the capture reserve; one install-quiesce latch spans MacUpdater's
+delayed native quit and every physical/recovery watcher edge. The exact P14 policy response and physical Apple installation remain
+reconciliation/external gates.

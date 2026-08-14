@@ -223,3 +223,49 @@ authorisation enforcement remains a frozen-P14 reconciliation dependency.
 
 No Apple authority, release upload, deployment, migration, active Partner
 worktree or production/staging system was touched in WP6.
+
+## WP7 planned change manifest
+
+| Finding | Safe-isolated surface | Repair class |
+|---|---|---|
+| R-10/R-17 updater/login/rollback | `electron-updater`, exact authenticated station policy, modern macOS login item | B/D/F |
+| R-47/R-48 minimum fail-open and inaccessible recovery | main authority projection plus modal/preload renderer controls | A/B |
+| R-49 pinned MacUpdater path behavior | real `update-downloaded` event and behavioral fake | D |
+| R-50 stale candidate/DMG bypass | immutable candidate fingerprint, pre-install rehash and verified local DMG download/open | D/F |
+| R-51 plaintext upload restart | watcher operation-state barrier | D |
+| R-52/R-53 delayed native install and recovery scratch races | synchronous install quiesce plus startup/restore/inbox work accounting | D |
+| R-54 unbounded update transport | bounded exact/max streaming, timeout/cancel, exclusive paths and disk reserve | D/F |
+
+## WP7 actual changes
+
+- Added exact `electron-updater` 6.8.9 and packaged-config verification. The
+  static feed is discovery-only and every candidate must equal one authenticated
+  short-lived station policy binding operation direction, exact target/minimum,
+  Team, source commit and complete artifact names/sizes/hashes.
+- Added explicit authenticated rollback support without enabling generic
+  downgrade. Missing policy, a different newer release, old signed release,
+  expired/wrong policy, checksum or cache mutation all fail before install.
+- Corrected the real Mac-specific library contract by consuming
+  `update-downloaded.downloadedFile` while the fake returns `[]`. New checks and
+  policy/minimum changes clear the prior candidate; bytes are rehashed at the
+  quit boundary.
+- Replaced feed-page DMG recovery with private exact DMG download, size/hash
+  validation and an immediate policy/byte recheck before `shell.openPath`.
+- Replaced post-download size checks with bounded transport: exact policy bytes
+  and digests are enforced while reading updater metadata/ZIP/DMG, evidence
+  bodies have fixed maxima, timeouts/cancellation abort, destination creation is
+  exclusive and a 2 GiB/5% encrypted-capture reserve is preserved.
+- Added accessible Update & Restart / DMG Reinstall controls inside
+  UPDATE_REQUIRED, sanitized status IPC, strict missing-minimum degradation and
+  restart denial across live/decrypted watcher work.
+- Added a synchronous install-quiesce latch before MacUpdater's delayed native
+  quit. Physical authority awaits, polls, maintenance, every watcher entry and
+  startup/preview/inbox plaintext recovery are gated until exit or explicit
+  updater failure.
+- Added the post-enrolment one-time default macOS main-app login item and removed
+  packaged shell/service-manager recovery in favour of `app.relaunch()`.
+
+No Partner server/schema, active Partner worktree, Apple credential, external
+feed, user login item, staging/production system, migration or remote Git state
+was changed. Final `scannerUpdatePolicy` server persistence/response is a frozen
+P14 semantic-reconciliation dependency, not fabricated on this moving seed.

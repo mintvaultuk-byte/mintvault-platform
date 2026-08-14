@@ -5,6 +5,7 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const asar = require("@electron/asar");
 const contract = require("./package-contract");
+const { validatePackagedUpdateConfig } = require("../lib/update-manager");
 
 const MAX_TEXT_SCAN_BYTES = 4 * 1024 * 1024;
 const REQUIRED_HELPER_FILES = Object.freeze([
@@ -229,6 +230,9 @@ function verifyPackagedApp({ appPath, mode = contract.packageMode() }) {
   }
   const expectedTeam = release ? contract.releaseTeamAuthority() : contract.LOCAL_TEAM_IDENTIFIER;
   if (trust.teamIdentifier !== expectedTeam) throw new Error("release trust Team ID is wrong");
+  const updateConfigPath = path.join(resources, "app-update.yml");
+  regularFile(updateConfigPath, "app-update.yml");
+  validatePackagedUpdateConfig(fs.readFileSync(updateConfigPath, "utf8"), trust);
 
   const helperEntries = fs.readdirSync(helperRoot).sort();
   if (JSON.stringify(helperEntries) !== JSON.stringify([...REQUIRED_HELPER_FILES].sort())) {
