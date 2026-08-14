@@ -249,6 +249,30 @@ export const SUITES = [
   },
   {
     /*
+     * P13 — LOAD AND CONCURRENCY. Correctness outranks throughput.
+     *
+     * Every invariant that can only break under contention, driven GENUINELY in parallel through
+     * Promise.all on separate pool connections. Run sequentially every case here would pass with the
+     * locking removed entirely, which is worse than having no test.
+     *
+     * What it measures is whether the contention points serialise: the wallet row lock (12 NEW
+     * presses against 5 credits), the cert_counter row lock (no duplicate MV), the lease's partial
+     * unique index (8 graders, one editor), the Card Job FOR UPDATE plus the credit engine's
+     * idempotency key (10 concurrent submits, one settlement), and RLS/tenant predicates under
+     * simultaneous two-tenant load. A global invariant sweep runs after EVERY case, so a violation
+     * introduced by one is not first detected six cases later.
+     *
+     * Deliberately NOT a throughput benchmark: a latency figure from one laptop against a container
+     * transfers nothing to a shop floor, and tuning to it would be optimising a fiction.
+     */
+    file: "tests/partner-pilot-concurrency.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P13 concurrency: last-credit race, double-click idempotency, lease contention, concurrent submit settlement, cross-tenant/cross-location isolation, concurrent redrive, no premature output, sustained mixed workload; own cluster.",
+  },
+  {
+    /*
      * P12 — THE ONE DOCUMENTED MEDIUM, PROVEN REPAIRABLE.
      *
      * QA approval publishes the certificate on the HQ pool and transitions the Card Job on the
