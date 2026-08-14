@@ -133,14 +133,32 @@ Neither hazard is live on staging — verified read-only, see below.
 | `git diff --check` | clean |
 | Density-pass scope guard (de-drifted) | **8 / 8** |
 
-### A note on bare `vitest run` in this environment
+| Scanner / direct-route boundary (8 files, post-merge) | **62 / 62, 0 skipped** |
+
+### A note on bare `vitest run` in this environment — it is NOT a usable signal here
 
 `docs/partner/RELEASE_MATRIX_AT1_AT23.md` already states bare `npx vitest run` is not trusted for
-judging this gate. That held here, emphatically: one full-suite run during this pass reported 29
-failing files while the machine sat at **load average 60–93**. Every one of those extra failures —
-including a protected MVGS guard — **passed on re-run in isolation** (MVGS 243/243; a five-file
-sample of the "new" failures 41/41). This is the documented parallel-contention pattern, not a
-regression. The authoritative gates are the serialized, isolated ones above.
+judging this gate. That held emphatically. Three full-suite runs during this pass produced **three
+different failure sets**:
+
+| Run | Machine load | Failing files |
+| --- | --- | --- |
+| A (pre-merge) | moderate | **7** — exactly the documented pre-existing set |
+| B (post-merge) | 60–93 | 29 |
+| C (post-merge) | 10 at start, 87 during | 31 — **a different set again** |
+
+Three different sets from the same tree is the definition of non-determinism, not regression. Every
+failure sampled from B and C **passed on re-run in isolation**: protected MVGS 243/243, a five-file
+sample 41/41, a seven-file sample 160/163 (the one straggler,
+`scanner-station-capture-boundary`, then passed **12/12 completely alone**).
+
+Root cause is documented in the partner matrix header: vitest shares `process.env` between files in
+one worker, and several partner suites assign `MINTVAULT_/PARTNER_*_DATABASE_URL` in their own
+`beforeAll`, so two in one worker race each other. That is precisely why every `isolate: true` suite
+must be launched as its own vitest invocation — which is what `scripts/ci/run-partner-suite.mjs`
+does, and it returned **36/36, 691/0/0** both before and after the merge.
+
+**The authoritative gates are the serialized, isolated ones in the table above.**
 
 ### Strict regression comparison (full `vitest run`, both directions)
 
