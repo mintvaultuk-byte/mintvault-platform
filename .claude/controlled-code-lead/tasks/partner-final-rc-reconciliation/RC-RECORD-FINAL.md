@@ -41,11 +41,26 @@ all, not a scope expansion. Merged clean as `7919edab`; MVGS 243/243 re-verified
 `fly releases` and `/api/version` immediately before deploying — the RC's containment of live prod
 is true as of ~16:1x UTC and the next concurrent deploy can invalidate it.
 
-**Runtime artifact is byte-unchanged from `e6fd6c5f`.** This pass touches only `tests/`. The four
-build entrypoints are `server/index.ts`, `scripts/run-mvgs-v2-migration.ts`,
-`scripts/repair-set-designations.ts`, `scripts/db/migrate.ts`, and no build-reachable file imports
-from `tests/` (verified by grep across `server/ client/src/ shared/ script/ scripts/`). The AT-23
-staging evidence gathered at `e6fd6c5f` therefore carries forward unchanged.
+### What the AT-23 evidence does and does not cover — read this before deploying
+
+**My own M-1 work cannot change the runtime artifact.** It touches only `tests/`, and no
+build-reachable file imports from `tests/` (verified by grep across `server/ client/src/ shared/
+script/ scripts/`; the four build entrypoints are `server/index.ts`,
+`scripts/run-mvgs-v2-migration.ts`, `scripts/repair-set-designations.ts`, `scripts/db/migrate.ts`).
+
+**But the reconciliation merge DOES change it.** Absorbing PR #299 brings in real client changes to
+the grading workstation UI. So:
+
+- AT-1…AT-23 were validated against **`e6fd6c5f`**, and staging still serves `e6fd6c5f`.
+- The final RC = `e6fd6c5f` + my test-only M-1 work + **PR #299's UI changes**.
+- PR #299 was separately reviewed, merged to main, and is **live on production** under its own task
+  (`canonical-compact-workstation-density-20260814`), with its own acceptance guard — now de-drifted
+  and green.
+
+**Therefore: the AT-23 matrix does NOT cover the final RC's client bundle.** The delta is exactly
+PR #299, which carries its own production-proven evidence. If you want AT-23 to hold end-to-end on
+the exact final RC, redeploy staging to it and re-run the UI-touching sections. That is a judgement
+call, not a defect — but do not claim "AT-23 green on the final RC" without it.
 
 ## Terra M-1 — RESOLVED
 
