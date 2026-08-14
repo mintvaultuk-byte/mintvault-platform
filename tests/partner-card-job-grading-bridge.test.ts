@@ -589,6 +589,13 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     });
     expect(session.state).toBe("armed");
     expect(session.certificateId).toBe(card.certificateId);
+
+    // The signed-station claim path must actually execute (its station-scoped query previously
+    // bound a parameter PostgreSQL could not type, so it had never run) and must return THIS
+    // station's armed session.
+    const claimed = await captures.claimNextScannerCapture("MV-STN-B1CTESTAA22", "MV-STN-B1CTESTAA22", shopA.stationA);
+    expect(claimed?.id).toBe(session.id);
+    expect(claimed?.state).toBe("claimed");
     await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [session.id]);
 
     // Another location's station: refused — the walk-in path is scoped, not open.

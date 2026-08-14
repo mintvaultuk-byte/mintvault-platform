@@ -329,8 +329,15 @@ export async function claimNextScannerCapture(
         [workstationId]
       );
     }
-    const stationWhere = stationIdInput ? "AND s.station_id = $2" : "AND s.workstation_id = $1";
-    const params = stationIdInput ? [workstationId, stationIdInput] : [workstationId];
+    /*
+     * Station-scoped claim binds ONE parameter (AT-23 §B, 2026-08-14). The previous shape put the
+     * station id at $2 while nothing referenced $1, so PostgreSQL refused the query outright
+     * ("could not determine data type of parameter $1") — the signed-station claim path had never
+     * executed. The station principal supersedes the client-supplied workstation string entirely,
+     * exactly as the route comment promises.
+     */
+    const stationWhere = stationIdInput ? "AND s.station_id = $1" : "AND s.workstation_id = $1";
+    const params = stationIdInput ? [stationIdInput] : [workstationId];
     const selected = await client.query(
       `SELECT s.*, c.certificate_number
          FROM scanner_capture_sessions s
