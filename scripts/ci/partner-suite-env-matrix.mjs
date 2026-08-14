@@ -247,6 +247,27 @@ export const SUITES = [
     isolate: true,
     note: "Card Job → grading bridge: Scanner NEW reaches Ready to Grade, lease-as-assignment, write guard, submit→QA, exactly-once credit settlement, RETURN/APPROVE, lineage-split print eligibility; own cluster.",
   },
+  {
+    /*
+     * P11 — OUTPUT: CERTIFICATE / LABEL / PRINT / NFC (AT-P1..AT-P15).
+     *
+     * Proves a Scanner-created Card Job travels the EXISTING MintVault output systems to a finished
+     * physical product carrying ONE identity: same Card Job, same MV, same certificate, before and
+     * after. It drives the REAL `approveGraderCert` (publish gates and CAS included), the REAL
+     * `requestReprint` / `markCompleted`, the REAL `getPartnerPrintEligibilityBlocks` and the REAL
+     * `certificateOrigin` — no second output system was built and none is under test.
+     *
+     * Two release-critical properties here are constraints, not code, and would be vacuous without a
+     * real database: 0035's ENABLE ALWAYS origin-immutability trigger (a partner rename must not
+     * rewrite historical provenance) and 0088's partial unique index on lower(nfc_uid) (one physical
+     * chip must not bind to two graded cards — previously guarded only by a racy read-then-write).
+     */
+    file: "tests/partner-card-job-output.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P11 output: APPROVED→PRINTABLE→COMPLETED, pre-approval refusal, immutable provenance, approved==rendered grade, zero-credit reprint, NFC approval guard + 0088 uniqueness, correction does not fork identity; own cluster.",
+  },
 
   // ------------------------------------------------- env-gated suites nothing was setting up
   //

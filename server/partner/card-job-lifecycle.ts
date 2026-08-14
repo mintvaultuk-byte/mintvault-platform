@@ -606,6 +606,116 @@ export async function returnCardJobToGraderForCertificate(
   });
 }
 
+/* =================================================================================================
+ * P11 — OUTPUT: APPROVED → PRINTABLE → COMPLETED.
+ *
+ * THE GAP. 0080's graph ends APPROVED → PRINTABLE → COMPLETED and nothing drove either edge, so a
+ * Partner Card Job stopped dead at APPROVED however far its certificate travelled through the HQ
+ * print workflow. The dashboard's "completed" bucket, the FIX authority's post-approval exclusion and
+ * every lifecycle consumer therefore read a card as merely approved after it had been physically
+ * printed and handed back to a customer.
+ *
+ * NO SECOND OUTPUT SYSTEM. These do not print, render, batch or decide eligibility. The HQ print
+ * workflow (server/print-workflow.ts) owns all of that and is untouched; this only keeps the Card Job
+ * lifecycle honest about what the certificate has already done.
+ *
+ * KEYED ON `mv_number`, NOT certificate id. The print workflow speaks in `certificates.certificate_number`
+ * throughout, and `partner_card_jobs.mv_number` IS that same string — stamped from it in the same
+ * transaction that mints it (card-job-authority.ts) and immutable thereafter (0080 PART 3). Resolving
+ * on it needs no join, so these remain callable on a partner-only database with no `certificates`
+ * table at all.
+ *
+ * NEVER THROWS INTO THE PRINT PATH. A label that has genuinely been produced must not be reported as
+ * a failure because a lifecycle row lagged; the state is recoverable and re-derivable, and P12's
+ * reconciliation owns the drift.
+ * ============================================================================================== */
+
+/** Advance one Card Job by MV number, discovering its tenant. Null when no Card Job carries that MV. */
+async function transitionCardJobByMvAsSystem(
+  mvNumber: string,
+  input: Omit<TransitionInput, "tenantId" | "cardJobId">
+): Promise<TransitionResult | null> {
+  if (typeof mvNumber !== "string" || mvNumber.trim() === "") return null;
+  return withPartnerAdminTransaction(async (client) => {
+    const found = await client.query<RawJobRow>(
+      `SELECT ${JOB_COLUMNS} FROM partner_card_jobs
+        WHERE mv_number = $1 AND cancelled_at IS NULL`,
+      [mvNumber]
+    );
+    if (!found.rows[0]) return null;
+    const job = mapJob(found.rows[0]);
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [job.tenantId]);
+    await client.query("SELECT set_config('app.location_id', $1, true)", [job.locationId ?? ""]);
+    return transitionCardJob(client, { ...input, tenantId: job.tenantId, cardJobId: job.id });
+  });
+}
+
+/**
+ * The certificate has entered a print batch — APPROVED → PRINTABLE.
+ *
+ * Idempotent: a reprint of an already-PRINTABLE (or COMPLETED) card changes nothing, which is what
+ * makes it safe to call from every batch creation regardless of how many times a card is printed.
+ */
+export async function markCardJobPrintable(mvNumber: string, actor: string): Promise<TransitionResult | null> {
+  return transitionCardJobByMvAsSystem(mvNumber, {
+    from: [CARD_JOB_STATUS.APPROVED],
+    to: CARD_JOB_STATUS.PRINTABLE,
+    idempotent: true,
+    action: "partner_card_job_printable",
+    reason: "The approved certificate entered a print batch.",
+    audit: { actor },
+  });
+}
+
+/**
+ * The certificate's output is finished — → COMPLETED, the terminal state.
+ *
+ * BRIDGES THROUGH PRINTABLE WHEN NEEDED. 0080 has no APPROVED → COMPLETED edge, and a card can reach
+ * the print workflow's `completed` without this module having seen the batch creation (a card printed
+ * before this hook existed, a reconciliation redrive, a batch created while the partner pool was
+ * briefly unavailable). Stepping through PRINTABLE rather than refusing means a genuinely finished
+ * card finishes, and the legal graph is still respected edge by edge.
+ */
+export async function markCardJobCompleted(mvNumber: string, actor: string): Promise<TransitionResult | null> {
+  const printable = await markCardJobPrintable(mvNumber, actor);
+  if (printable === null) return null;
+  return transitionCardJobByMvAsSystem(mvNumber, {
+    from: [CARD_JOB_STATUS.PRINTABLE],
+    to: CARD_JOB_STATUS.COMPLETED,
+    idempotent: true,
+    action: "partner_card_job_completed",
+    reason: "Output for this card is complete.",
+    audit: { actor },
+  });
+}
+
+/**
+ * Advance a batch of certificate numbers through an output edge, swallowing failures.
+ *
+ * Called from the HQ print workflow, which is transport for BOTH lineages and for HQ cards that have
+ * no Card Job at all — so a null result is the common, correct case and never an error.
+ */
+export async function advanceCardJobsForOutputSafely(
+  mvNumbers: readonly string[],
+  edge: "printable" | "completed",
+  actor: string
+): Promise<void> {
+  for (const mvNumber of mvNumbers) {
+    try {
+      if (edge === "printable") await markCardJobPrintable(mvNumber, actor);
+      else await markCardJobCompleted(mvNumber, actor);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[partner card job] output lifecycle advance failed",
+        edge,
+        mvNumber,
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+}
+
 /**
  * Read the transition graph the DATABASE is actually enforcing, by asking it.
  *

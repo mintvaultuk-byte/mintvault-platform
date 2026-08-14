@@ -185,6 +185,61 @@ describe("Partner Pilot physical evidence and output gate", () => {
     expect(historyUi).toContain("Server-authoritative subgrades");
   });
 
+  /*
+   * P11 — NFC BINDING INTEGRITY.
+   *
+   * The NFC facility has no migration of its own and its twelve columns were hand-applied to
+   * production, so "one tag, one certificate" was enforced ONLY by a read-then-write that two
+   * concurrent binds both pass. And nothing checked the certificate's state at all, so a chip could
+   * be written for a card the PUBLIC scan route already refuses to resolve — a physical object in a
+   * customer's hand that taps to "not found".
+   */
+  it("binds an NFC tag only to an approved certificate, under a real database constraint, and audits it", () => {
+    const nfcGuard = read("shared/nfc-binding.ts");
+    const migration = read("migrations/0088_nfc_binding_integrity.sql");
+
+    // The bind gate is the SAME fact the public scan route uses, so the two cannot drift apart.
+    expect(nfcGuard).toContain("cert.gradeApprovedAt == null");
+    expect(nfcGuard).toContain("not_approved");
+    expect(legacyRoutes).toContain("checkNfcBindable(target)");
+
+    // The real authority is the index, not the read: the loser of a race gets a 409, not a 500.
+    expect(migration).toContain("CREATE UNIQUE INDEX IF NOT EXISTS uq_certificates_nfc_uid");
+    expect(migration).toContain("ON certificates (lower(nfc_uid))");
+    expect(migration).toContain("WHERE nfc_uid IS NOT NULL");
+    // Pre-existing damage must be surfaced to a human, never resolved by whichever row an index
+    // build happened to reject.
+    expect(migration).toContain("RAISE EXCEPTION");
+    expect(legacyRoutes).toContain('code: "NFC_UID_TAKEN"');
+
+    // Binding, overwriting and clearing were entirely unlogged, and nfc_written_by was always NULL
+    // because no client ever sent it. Attribution now comes from the authenticated admin.
+    expect(legacyRoutes).toContain('"nfc_bound"');
+    expect(legacyRoutes).toContain('"nfc_cleared"');
+    expect(legacyRoutes).toContain("renderAdminUser(req)");
+  });
+
+  /*
+   * P11 — the Card Job output lifecycle. 0080 ends APPROVED → PRINTABLE → COMPLETED and nothing drove
+   * either edge, so a Partner Card Job stopped dead at APPROVED however far its certificate travelled
+   * through the HQ print workflow.
+   */
+  it("drives the Partner Card Job output lifecycle from the EXISTING print workflow, not a second one", () => {
+    const workflowSrc = read("server/print-workflow.ts");
+    const cardJobLifecycle = read("server/partner/card-job-lifecycle.ts");
+
+    expect(workflowSrc).toContain('advanceCardJobsForOutputSafely(reserved, "printable"');
+    expect(workflowSrc).toContain('advanceCardJobsForOutputSafely(applied, "completed"');
+    expect(cardJobLifecycle).toContain("markCardJobPrintable");
+    expect(cardJobLifecycle).toContain("markCardJobCompleted");
+    // Keyed on mv_number because the print workflow speaks in certificate_number throughout.
+    expect(cardJobLifecycle).toContain("WHERE mv_number = $1 AND cancelled_at IS NULL");
+    // A lifecycle hiccup must never report a genuinely produced label as a failure.
+    expect(cardJobLifecycle).toContain("advanceCardJobsForOutputSafely");
+    // And no Partner-specific renderer, batcher or eligibility engine was introduced.
+    expect(cardJobLifecycle).not.toMatch(/generateLabelPNG|generateLabelPDF|createBatch/);
+  });
+
   it("keeps unsupported scanner releases fail-closed and retires mutable Git/npm updates", () => {
     const main = read("scripts/scanner-app/main.js");
     const update = read("scripts/scanner-app/update.sh");

@@ -101,7 +101,7 @@ import {
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
-import { reconcileStuckPrintBatches } from "./print-workflow";
+import { reconcileStuckPrintBatches, renderAdminUser } from "./print-workflow";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -181,6 +181,7 @@ import {
 } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
 import { checkPrintableGrade, UnprintableGradeError } from "@shared/printable-grade";
+import { checkNfcBindable } from "@shared/nfc-binding";
 import { fileTypeFromBuffer } from "file-type";
 import path from "path";
 import fs from "fs";
@@ -6292,7 +6293,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Guard: cert already has a different UID unless overwrite is explicitly confirmed
       const target = await storage.getCertificate(id);
-      if (target?.nfcUid && target.nfcUid !== uid && !req.body.overwrite) {
+      if (!target) return res.status(404).json({ error: "Certificate not found" });
+      if (target.nfcUid && target.nfcUid !== uid && !req.body.overwrite) {
         return res.status(409).json({
           error: "Certificate already has an NFC tag",
           code: "ALREADY_ASSIGNED",
@@ -6300,8 +6302,58 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
-      const cert = await storage.saveNfcData(id, { uid, chipType, url, writtenBy });
+      /*
+       * A TAG MAY ONLY BE BOUND TO AN APPROVED CERTIFICATE.
+       *
+       * This route previously read `status`, `print_state`, `grade_approved_at` and `deleted_at` not
+       * at all, so a chip could be written for a draft, ungraded, unapproved, voided or soft-deleted
+       * card. The public scan route already refuses to resolve an unapproved certificate
+       * (`gradeApprovedAt == null` → 404), so every such tag was a physical object in a customer's
+       * hand that resolved to nothing — the failure only became visible after the card had shipped.
+       *
+       * The gate is the SAME fact the public route uses, applied at the point of binding instead of
+       * the point of embarrassment. It is also what makes the P11 contract true for Partner Card Job
+       * lineage: an NFC tag exists only for a card that cleared Super Admin QA.
+       */
+      const bindable = checkNfcBindable(target);
+      if (!bindable.ok) {
+        return res
+          .status(bindable.status)
+          .json({
+            error: bindable.error,
+            ...(bindable.refusal === "not_approved" ? { code: "NFC_NOT_APPROVED" } : {}),
+          });
+      }
+
+      // Operator attribution. `writtenBy` arrived from the request body and NO client ever sent it,
+      // so `nfc_written_by` was always NULL and no NFC action had an author. The authenticated admin
+      // is the truthful answer and cannot be spoofed by the body.
+      const nfcActor = renderAdminUser(req) || (typeof writtenBy === "string" ? writtenBy : null);
+      const previousUid = target.nfcUid ?? null;
+
+      let cert;
+      try {
+        cert = await storage.saveNfcData(id, { uid, chipType, url, writtenBy: nfcActor ?? undefined });
+      } catch (bindErr: any) {
+        // 0088's partial unique index on lower(nfc_uid) is the REAL "one tag, one certificate"
+        // authority — the read guard above races and two concurrent binds both pass it. Translate the
+        // constraint into the same 409 the guard returns, so the loser of a race gets an answer it
+        // can act on rather than a 500.
+        if (bindErr?.code === "23505" || bindErr?.cause?.code === "23505") {
+          return res.status(409).json({ error: "UID already registered", code: "NFC_UID_TAKEN" });
+        }
+        throw bindErr;
+      }
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      // NFC binding was entirely unlogged: no audit row on bind, overwrite, lock or clear. A
+      // tamper-evident chip whose binding cannot be reconstructed afterwards is not evidence.
+      await storage.writeAuditLog("certificate", String(id), "nfc_bound", nfcActor ?? "admin", {
+        uid,
+        chip_type: chipType ?? null,
+        previous_uid: previousUid,
+        overwrite: Boolean(req.body.overwrite),
+      });
       res.json(cert);
     } catch (err: any) {
       console.error("NFC save error:", err.message);
@@ -6334,8 +6386,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/admin/certificates/:id/nfc", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
+      // Read the outgoing UID BEFORE clearing it: `clearNfc` nulls all twelve columns, so afterwards
+      // there is nothing left to say which tag was removed. A failed/replaced tag whose identity was
+      // destroyed with no record is exactly the history a replacement workflow needs.
+      const before = await storage.getCertificate(id);
       const cert = await storage.clearNfc(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      await storage.writeAuditLog("certificate", String(id), "nfc_cleared", renderAdminUser(req) || "admin", {
+        previous_uid: before?.nfcUid ?? null,
+        previous_scan_count: before?.nfcScanCount ?? null,
+        reason: typeof req.body?.reason === "string" ? req.body.reason.slice(0, 1000) : null,
+      });
       res.json(cert);
     } catch (err: any) {
       console.error("NFC clear error:", err.message);
