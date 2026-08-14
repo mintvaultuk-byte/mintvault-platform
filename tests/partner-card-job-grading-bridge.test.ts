@@ -560,6 +560,65 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
   });
 
   /* ============================================================================================
+   * AT-B1c — the REAL arm gate accepts a walk-in Card Job certificate (AT-23 §B regression).
+   *
+   * captureSide() above inserts terminal sessions directly, so createScannerCaptureSession()'s own
+   * gates were never exercised here — and on staging its card/submission binding gate threw before
+   * the walk-in Card-Job branch could run, refusing every Scanner-started card at first capture.
+   * This drives the real service: a station-scoped walk-in certificate (card_id NULL) must arm, a
+   * station in another location must be refused, and a stationless arm of an unbound certificate
+   * must stay refused exactly as before.
+   * ========================================================================================== */
+  it("AT-B1c: createScannerCaptureSession arms a walk-in Card Job certificate on its own station only", async () => {
+    // 0075's one-active-per-station invariant, which the service verifies before arming.
+    await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
+      ON scanner_capture_sessions (station_id)
+      WHERE station_id IS NOT NULL AND state IN ('armed', 'claimed', 'capturing')`);
+    const captures = await import("../server/scanner-capture-service");
+    const card = await scannerNew(shopA);
+
+    // Own station, own location: arms.
+    const session = await captures.createScannerCaptureSession({
+      certificateId: card.certificateId,
+      side: "front",
+      workstationId: "MV-STN-B1CTESTAA22",
+      stationId: shopA.stationA,
+      actorId: shopA.graderOne,
+      recapture: false,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+    });
+    expect(session.state).toBe("armed");
+    expect(session.certificateId).toBe(card.certificateId);
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [session.id]);
+
+    // Another location's station: refused — the walk-in path is scoped, not open.
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "front",
+        workstationId: "MV-STN-B1CTESTAA22",
+        stationId: shopA.stationB,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/must be bound|not bound/i);
+
+    // No station principal at all: the legacy binding gate stands untouched.
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "front",
+        workstationId: "LEGACY-DESK",
+        stationId: null,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/must be bound/i);
+  });
+
+  /* ============================================================================================
    * AT-B2 / AT-B6 — a Partner grader can open a Scanner Card Job at all.
    * ========================================================================================== */
   it("AT-B2/AT-B6: a grader opens a Scanner Card Job — the lease is granted and the job enters GRADING", async () => {

@@ -157,13 +157,42 @@ export async function createScannerCaptureSession(input: {
     );
     const row = cert.rows[0] as Record<string, unknown> | undefined;
     if (!row) throw new Error("Certificate not found or inactive");
-    if (row.card_id == null && row.submission_item_id == null) {
-      throw new Error("Certificate must be bound to a selected card or submission item before scanner capture");
+    /*
+     * WALK-IN (P6) CARD JOB PATH, checked FIRST (AT-23 §B, 2026-08-14). A counter-started
+     * certificate is minted directly inside the NEW transaction — it has no legacy cards /
+     * submission_items rows, so the card/submission binding gates below can never hold for it.
+     * The walk-in branch further down was written for exactly this case, but those gates threw
+     * before it could run, so on a real host every Scanner-started card was refused at the moment
+     * the operator tried to capture the card that had just been paid for. The walk-in binding is
+     * equally strict, just through the Card Job: the certificate must belong to a job whose
+     * tenant_id AND location_id equal this ACTIVE station's. Partner A's station still cannot arm
+     * Partner B's certificate, and a station cannot reach another location's job.
+     */
+    let walkInStationBound = false;
+    if (input.stationId && row.card_id == null && row.submission_item_id == null) {
+      const walkInScope = await client.query(
+        `SELECT 1
+           FROM partner_stations station
+           JOIN partner_card_jobs job
+             ON job.tenant_id=station.tenant_id
+            AND job.location_id=station.location_id
+            AND job.certificate_id=$2
+          WHERE station.id=$1
+            AND station.status='ACTIVE'
+          LIMIT 1`,
+        [input.stationId, input.certificateId]
+      );
+      walkInStationBound = walkInScope.rows.length === 1;
     }
-    if (row.submission_id == null) {
-      throw new Error("Selected card has no submission binding; scanner capture is refused");
+    if (!walkInStationBound) {
+      if (row.card_id == null && row.submission_item_id == null) {
+        throw new Error("Certificate must be bound to a selected card or submission item before scanner capture");
+      }
+      if (row.submission_id == null) {
+        throw new Error("Selected card has no submission binding; scanner capture is refused");
+      }
     }
-    if (input.stationId) {
+    if (input.stationId && !walkInStationBound) {
       // A station is scoped to a Partner tenant/location. A matching legacy
       // submission must have crossed the connector bridge for this exact
       // station scope; a caller cannot attach an otherwise-valid card to an
