@@ -249,6 +249,31 @@ export const SUITES = [
   },
   {
     /*
+     * AT-21 — WEBHOOK GRANT UNDER CONCURRENT NEW. The grant boundary itself.
+     *
+     * Two halves of AT-21 were already proven and neither was the thing AT-21 asks about:
+     * partner-credit-purchase proves grant idempotency with nothing else happening, and L1 proves the
+     * last-credit race with capacity static throughout. AT-21 is the MOMENT BETWEEN — capacity zero,
+     * stations hammering NEW, and a verified webhook granting ten credits mid-flight.
+     *
+     * FOUND A REAL DEFECT ON FIRST RUN. The money was always right (the ledger's (source,
+     * idempotency_key) uniqueness refuses the second row under four-way concurrent delivery), but
+     * `fulfilPartnerCreditPurchase` discarded `alreadyApplied` and every delivery reported
+     * `granted: true`. The webhook handler LOGS that value, so an ordinary Stripe redelivery storm
+     * wrote repeated "granted" lines for one purchase — poisoning the one signal an operator would
+     * use to spot a genuine double-grant. Fixed, not assertion-weakened.
+     *
+     * The overlap is produced by NEW workers retrying across the boundary, never by a sleep, and the
+     * race is repeated over independent iterations because one lucky ordering proves nothing.
+     */
+    file: "tests/partner-at21-grant-boundary.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "AT-21 grant boundary: concurrent webhook grant + NEW, exactly-once grant, exactly 10 jobs then refusal, live-derived capacity, op-key and webhook replay idempotency, two stations, tenant isolation, cold-start authority; own cluster.",
+  },
+  {
+    /*
      * P13 — LOAD AND CONCURRENCY. Correctness outranks throughput.
      *
      * Every invariant that can only break under contention, driven GENUINELY in parallel through
