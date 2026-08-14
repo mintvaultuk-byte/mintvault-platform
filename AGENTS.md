@@ -45,7 +45,6 @@ code/AST-first privacy boundary and safe commands are in
 [`docs/engineering/GRAPHIFY.md`](docs/engineering/GRAPHIFY.md).
 
 <!-- cornelius-engineering-os:begin id=codex-project v=1 -->
-
 ## Cornelius Engineering OS (managed)
 
 This managed block defines HOW work is performed. The rest of this file defines WHAT this product is; on any conflict the project rules and protected areas win.
@@ -59,5 +58,4 @@ Run `engineering preflight` before significant changes and `engineering postflig
 Preflight classifies risk and sets the execution mode floor; never select a weaker mode than it requires.
 Use graph-first navigation but verify real source for authority. Preserve project facts and protected areas.
 Never deploy, publish or release on your own authority; that decision belongs to the owner.
-
 <!-- cornelius-engineering-os:end id=codex-project -->

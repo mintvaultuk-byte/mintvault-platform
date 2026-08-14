@@ -508,7 +508,6 @@ down in `.claude/hooks/HOOK-UPGRADE-ROADMAP.md`. Everything from 1.0 still
 applies unchanged.
 
 <!-- cornelius-engineering-os:begin id=claude-project v=1 -->
-
 ## Cornelius Engineering OS (managed)
 
 This managed block defines HOW work is performed. The rest of this file defines WHAT this product is; on any conflict the project rules and protected areas win.
@@ -521,7 +520,6 @@ Read `.engineering/project.yaml` before substantial work. Classify risk and sele
 Use source as authority, record meaningful decisions/incidents, and do not weaken golden regressions to get green.
 Preserve project facts and protected areas.
 Never deploy, publish or release on your own authority; that decision belongs to the owner.
-
 <!-- cornelius-engineering-os:end id=claude-project -->
 
 ## Graphify-first navigation
