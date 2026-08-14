@@ -130,3 +130,31 @@ Dockerfile/build/path-resolution all check out, but nobody has observed
 - 8d9349be072948: lineage-exclusions.json sha256 = f2a1c051ff397e0b5898c5e5418e327f9b1cd5e97ca66eaa3dce0f84bd3fa920
   — BYTE-IDENTICAL to the repo file at the RC (`shasum -a 256 migrations/lineage-exclusions.json`).
 Proof level for "exclusions ship in the release image" is now STAGING VERIFIED, not static inference.
+
+## LATE EVENT — origin/main MOVED during the pass (2026-08-14 ~16:01 UTC)
+Caught by the closing verification sweep, NOT by the opening baseline: at Stage 0 and through the
+whole pass `origin/main` was 839edd9c and prod served 839edd9c. At the final sweep prod served
+067ed0c6 and origin/main had advanced to 067ed0c6.
+
+Delta = PR #299 (`067ed0c6` merge, `144fffa8 ui: compact canonical grading workstation`).
+Inspected before any action, per the owner prompt's "do not blindly merge" clause:
+- Touches: client/src/components/grading/{centering-input,grade-display,grading-panel,image-viewer}.tsx,
+  client/src/components/grading-workflow/*, one dev harness page, 11 test files, governance docs.
+- Does NOT touch the protected MVGS ENGINE: shared/mvgs-scoring.ts, shared/centering.ts,
+  shared/pristine.ts, shared/mvgs-input-builder.ts, server/grader.ts, server/routes/grader.ts,
+  server/mvgs-scoring.ts, server/grading-prompt.ts, server/lib/cert-pristine.ts are ALL absent from
+  the diff (verified by name-only grep). No server route, no migration, no shared logic.
+
+DECISION: RECONCILE, not document-and-skip. An RC that does not contain live production cannot be
+deployed without clobbering it — that is the v1070-over-v1069 incident pattern, and safe-deploy
+GUARD 1L would (correctly) block the deploy. Containing live prod is a precondition for being a
+release candidate at all. Merged locally as 7919edab; clean merge, no conflicts.
+
+POST-MERGE RE-GATE: origin/main 067ed0c6 CONTAINED; tsc clean; MVGS protected 243/243 (engine
+intact); migration family 126/126; eslint 0 errors; build green incl. dist/migrate.cjs;
+git diff --check clean.
+
+NOTE FOR THE OWNER: production was deployed TWICE by concurrent sessions during this single pass
+(839edd9c at ~14:16, then 067ed0c6 at ~15:5x). Any production plan written against this RC must
+re-read `fly releases` and `/api/version` immediately before deploying — the RC's containment of
+live prod is true as of 16:0x UTC and can be invalidated by the next concurrent deploy.

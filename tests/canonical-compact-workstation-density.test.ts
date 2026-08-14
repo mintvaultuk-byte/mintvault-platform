@@ -93,7 +93,33 @@ describe("five-role and protected-boundary negative proof", () => {
     }
   });
 
-  it("changes only the explicitly owner-approved presentation and evidence surfaces in this branch", () => {
+  /**
+   * DE-DRIFTED to the density pass's OWN immutable commit range (2026-08-14).
+   *
+   * This guard originally compared `git diff --name-only origin/main`. On the density topic branch
+   * that range WAS exactly this pass's changes, so the check was correct — but the moment the test
+   * merged into main it began running on every branch, where the same expression means "whatever
+   * this branch changed". On a release branch carrying the Partner programme it therefore tripped
+   * on unrelated files (`.claude/…/tasks/partner-auth-onboarding/…`, `server/`, `migrations/`),
+   * and on main itself it passed VACUOUSLY because the diff is empty — i.e. it protected nothing
+   * exactly where it was meant to keep protecting.
+   *
+   * That is the identical bug tests/helpers/grading-release-scope.ts was written to fix for PR #214
+   * ("once PR #214 merged these tests into main… any unrelated future feature that legitimately
+   * touches server/ or migrations/ then falsely tripped them"). The established repair is to pin
+   * the scope proof to the task's own fixed range, making it a stable historical fact rather than a
+   * moving window. `839edd9c..144fffa8` contains ONLY this pass's files.
+   *
+   * The ONGOING protection is unchanged and lives in the seven current-code assertions above (plus
+   * the MVGS regression suite) — this test answers "did the density pass stay in its lane?", not
+   * "is grading safe right now".
+   */
+  const DENSITY_PASS = {
+    base: "839edd9c", // main immediately BEFORE the compact-workstation density pass
+    final: "144fffa8", // the density pass's own commit
+  } as const;
+
+  it("changed only the explicitly owner-approved presentation and evidence surfaces", () => {
     const allowed = new Set([
       "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx",
       "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
@@ -105,7 +131,14 @@ describe("five-role and protected-boundary negative proof", () => {
       "client/src/components/grading/grading-panel.tsx",
       "client/src/pages/dev-canonical-workstation-harness.tsx",
     ]);
-    const changed = execSync("git diff --name-only origin/main", { encoding: "utf8" }).split("\n").filter(Boolean);
+    // FAIL-CLOSED, as grading-release-scope.ts requires: a scope proof that cannot be evaluated
+    // must error rather than silently pass on a shallow clone.
+    const changed = execSync(`git diff --name-only ${DENSITY_PASS.base} ${DENSITY_PASS.final}`, {
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean);
+    expect(changed.length, "density-pass scope range resolved to nothing — the pin has rotted").toBeGreaterThan(0);
     for (const path of changed) {
       if (
         path.startsWith("tests/") ||
