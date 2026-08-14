@@ -249,6 +249,29 @@ export const SUITES = [
   },
   {
     /*
+     * P12 — THE ONE DOCUMENTED MEDIUM, PROVEN REPAIRABLE.
+     *
+     * QA approval publishes the certificate on the HQ pool and transitions the Card Job on the
+     * partner-admin pool; those cannot be one transaction without restructuring protected HQ grading
+     * infrastructure. A crash between them leaves an approved grade whose Card Job never left
+     * QA_REVIEW — fail-closed (output is refused), but stuck for ever with nobody told.
+     *
+     * This suite simulates the failure at exactly that seam and proves the whole loop: output stays
+     * blocked, reconciliation detects by the documented predicate, redrive repairs through the
+     * canonical transition authority, a SECOND redrive performs nothing, the wallet never moves, no
+     * certificate or MV is minted, and the repair is audited AS a repair. It also proves the refusal
+     * path: an item whose premise no longer holds is left fail-closed rather than advanced.
+     *
+     * Critical because the release bar requires this MEDIUM to have executable proof before RC.
+     */
+    file: "tests/partner-card-job-reconciliation.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "P12 QA/Card Job split-transaction drift: simulated mid-approval failure, fail-closed output, detection, idempotent redrive, zero wallet movement, audited repair, refusal path; own cluster.",
+  },
+  {
+    /*
      * P11 — OUTPUT: CERTIFICATE / LABEL / PRINT / NFC (AT-P1..AT-P15).
      *
      * Proves a Scanner-created Card Job travels the EXISTING MintVault output systems to a finished
