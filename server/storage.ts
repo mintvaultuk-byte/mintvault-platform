@@ -1841,10 +1841,7 @@ export class DatabaseStorage implements IStorage {
 
   private _generateRandomCode(length = 12): string {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    const bytes = crypto.randomBytes(length);
-    return Array.from(bytes)
-      .map((b) => chars[b % chars.length])
-      .join("");
+    return Array.from({ length }, () => chars[crypto.randomInt(chars.length)]).join("");
   }
 
   async generateClaimCode(certId: string): Promise<string> {

@@ -48,6 +48,28 @@ const partnerStationCaptureRateLimit = rateLimit({
   message: { error: "Too many station capture requests. Please wait a minute and try again." },
 });
 
+// This deliberately runs before signature/session validation: authentication itself
+// verifies a signed payload and resolves the operator session, so it must be protected
+// from unauthenticated request floods as well as the authenticated write below.
+const partnerStationCalibrationIngressRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
+
+const partnerStationCalibrationRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-calibration:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -210,21 +232,28 @@ export function partnerStationRouter(): Router {
     }
   );
 
-  r.post("/stations/calibrations", requireSignedStation, requireSignedStationOperator, async (req, res) => {
-    try {
-      const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
-        scannerHardware: req.body?.scannerHardware,
-        scannerProfileVersion: req.body?.scannerProfileVersion,
-        acquisitionRegion: req.body?.acquisitionRegion,
-        workingRegion: req.body?.workingRegion,
-        placementToleranceMm: req.body?.placementToleranceMm,
-        calibrationVersion: req.body?.calibrationVersion,
-      });
-      res.status(201).json({ calibration });
-    } catch (error) {
-      stationError(res, error);
+  r.post(
+    "/stations/calibrations",
+    partnerStationCalibrationIngressRateLimit,
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCalibrationRateLimit,
+    async (req, res) => {
+      try {
+        const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
+          scannerHardware: req.body?.scannerHardware,
+          scannerProfileVersion: req.body?.scannerProfileVersion,
+          acquisitionRegion: req.body?.acquisitionRegion,
+          workingRegion: req.body?.workingRegion,
+          placementToleranceMm: req.body?.placementToleranceMm,
+          calibrationVersion: req.body?.calibrationVersion,
+        });
+        res.status(201).json({ calibration });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
-  });
+  );
 
   // A Partner browser arms the exact certificate/card/side only after both
   // its user session and the approved station have been resolved. The scanner
@@ -276,6 +305,7 @@ export function partnerStationRouter(): Router {
     "/stations/capture-sessions/:sessionId",
     requirePartnerAuth,
     requirePartnerCapability("partner.cards.scan"),
+    partnerStationReadRateLimit,
     async (req, res) => {
       try {
         const sessionId = String(req.params.sessionId || "");

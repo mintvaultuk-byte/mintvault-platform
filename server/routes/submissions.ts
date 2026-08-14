@@ -363,6 +363,17 @@ const submissionLookupRateLimit = rateLimit({
   message: { error: "Too many requests. Limit: 60 per minute per IP." },
 });
 
+// A valid document token is necessary but does not bound replay. PDF rendering
+// is CPU-intensive, so keep a separate modest per-client budget for these two
+// token-gated document routes.
+const submissionPdfRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many document requests. Please wait a minute and try again." },
+});
+
 export function registerSubmissionRoutes(app: Express): void {
   // Authoritative grading quote — the SAME computeGradingQuote() the PaymentIntent
   // uses, so the wizard can display the exact charged total without doing any money
@@ -1042,15 +1053,19 @@ export function registerSubmissionRoutes(app: Express): void {
   });
 
   // ── Public packing slip (token-gated) ─────────────────────────────────────
-  app.get("/api/submissions/:submissionId/packing-slip", async (req, res) => {
+  app.get("/api/submissions/:submissionId/packing-slip", submissionPdfRateLimit, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      const submissionId = req.params.submissionId;
+      if (typeof submissionId !== "string") {
+        return res.status(400).json({ error: "Valid submission id required" });
+      }
+      const submission = await storage.getSubmissionBySubmissionId(submissionId);
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
 
       const token = req.query.token;
-      if (!verifyPdfToken(req.params.submissionId, token)) {
+      if (!verifyPdfToken(submissionId, token)) {
         return res.status(403).json({ error: "Invalid or expired token" });
       }
 
@@ -1104,15 +1119,19 @@ export function registerSubmissionRoutes(app: Express): void {
   });
 
   // ── Public shipping label (token-gated) ───────────────────────────────────
-  app.get("/api/submissions/:submissionId/shipping-label", async (req, res) => {
+  app.get("/api/submissions/:submissionId/shipping-label", submissionPdfRateLimit, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      const submissionId = req.params.submissionId;
+      if (typeof submissionId !== "string") {
+        return res.status(400).json({ error: "Valid submission id required" });
+      }
+      const submission = await storage.getSubmissionBySubmissionId(submissionId);
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
 
       const token = req.query.token;
-      if (!verifyPdfToken(req.params.submissionId, token)) {
+      if (!verifyPdfToken(submissionId, token)) {
         return res.status(403).json({ error: "Invalid or expired token" });
       }
 

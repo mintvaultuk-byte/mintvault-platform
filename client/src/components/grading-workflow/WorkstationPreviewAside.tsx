@@ -41,8 +41,8 @@ export function WorkstationPreviewAside({
       This keeps one card surface in the canonical left rail rather than adding
       a read-only duplicate beside GradingPanel's editor. */
   interactiveCardHostRef?: Ref<HTMLDivElement>;
-  inspectionState?: CardInspectionState;
-  onInspectionStateChange?: (state: CardInspectionState) => void;
+  inspectionState: CardInspectionState;
+  onInspectionStateChange: (state: CardInspectionState) => void;
 }) {
   // ONE card-image render site (invariant enforced by the workstation-shell
   // tests). When a `below` panel is present the aside stacks; otherwise the

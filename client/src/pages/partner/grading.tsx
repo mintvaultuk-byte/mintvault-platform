@@ -204,10 +204,10 @@ export default function PartnerGradingPage() {
             Back to partner grading
           </button>
         </header>
-        <PartnerCaptureControls certId={card.certId} />
         <GradingWorkstation
           mode="partner"
           apiBase="/api/partner/grading"
+          scannerControls={<PartnerCaptureControls certId={card.certId} />}
           graderMode
           graderEdit={card.gradingStatus === "pending_review"}
           serviceTier={active.item.serviceTier}

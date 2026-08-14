@@ -44,6 +44,9 @@ describe("canonical workstation dev harness", () => {
     expect(source).not.toContain("HarnessCardDetails");
     expect(source).not.toContain("WorkstationEditorContext");
     expect(source).not.toContain("editor={");
+    expect(source).toContain('"1280x800"');
+    expect(source).toContain('"1024x768"');
+    expect(source).toContain("geometry: () =>");
     for (const role of ["super-admin", "staff", "grader", "partner", "admin-review"]) {
       expect(source).toContain(`key: "${role}"`);
     }
@@ -108,7 +111,11 @@ describe("canonical workstation dev harness", () => {
     const preview = () =>
       fixture.fetch("/api/grader/certificates/label/preview", {
         method: "POST",
-        body: JSON.stringify({ certificateId: 102, gradeOverall: "hostile-client-override", expectedRevision: reviewRevision }),
+        body: JSON.stringify({
+          certificateId: 102,
+          gradeOverall: "hostile-client-override",
+          expectedRevision: reviewRevision,
+        }),
       });
 
     reviewRevision = ((await (await save("8")).json()) as { reviewRevision: number }).reviewRevision;
@@ -184,6 +191,21 @@ describe("canonical workstation dev harness", () => {
     expect(typeof hook?.failNext).toBe("function");
     expect(typeof hook?.staleNextPreview).toBe("function");
     expect(typeof hook?.dragInspection).toBe("function");
+    expect(typeof hook?.geometry).toBe("function");
+    const geometry = (
+      hook?.geometry as (() => Record<string, Record<string, { width: number; height: number }>>) | undefined
+    )?.();
+    expect(Object.keys(geometry ?? {})).toEqual(["super-admin", "staff", "grader", "partner", "admin-review"]);
+    for (const role of Object.values(geometry ?? {})) {
+      expect(Object.keys(role)).toEqual([
+        "workspace",
+        "leftRail",
+        "largeCard",
+        "compactPreview",
+        "stageHeader",
+        "rightPane",
+      ]);
+    }
     expect(consoleError).not.toHaveBeenCalled();
   });
 });

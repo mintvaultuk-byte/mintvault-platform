@@ -191,68 +191,51 @@ export function CertificatePreviewPanel({
   );
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-1.5" data-testid="certificate-preview-panel">
+    <div
+      className="mx-auto w-full max-w-[280px] rounded-lg border border-slate-700 bg-slate-900/60 p-1.5"
+      data-testid="certificate-preview-panel"
+      data-preview-state={error ? "error" : url ? "ready" : loading ? "loading" : "empty"}
+    >
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-          Live certificate preview
+          Live label preview
         </span>
         {loading && <span className="text-[10px] text-amber-400">rendering…</span>}
       </div>
-      {/*
-       * COMPACT, FIXED-ASPECT INSPECTION FRAME (owner repair 2026-08-12).
-       *
-       * The image used to be a bare `w-full` with no ceiling, so in the 40% left
-       * rail it rendered ~500px wide. At the label's real 826x236 ratio that is
-       * ~145px tall before chrome, and because the rail stacks the card on
-       * `flex-1` against this panel on `shrink-0`, every one of those pixels was
-       * taken FROM the card — the preview visually crowded out the thing the
-       * reviewer is actually inspecting.
-       *
-       * Two fixes, both display-only:
-       *   1. `max-w-[360px]` caps it at a thumbnail. This is an inspection
-       *      glance (name / set / grade / cert number / composition), not an
-       *      editing surface, so it does not need rail width.
-       *   2. The frame owns the height via `aspect-[826/236]` and every state
-       *      renders INSIDE it. Previously the empty state was a short line of
-       *      text and the loaded state was a tall image, so the panel jumped and
-       *      shoved the card upward the moment the render arrived.
-       *
-       * 826/236 is read from PX_W/PX_H in server/labels.ts. It is the display
-       * box only — the printed label, its dimensions and its renderer are
-       * untouched.
-       */}
-      <div
-        className="mx-auto grid aspect-[826/236] w-full max-w-[360px] place-items-center overflow-hidden rounded border border-slate-800 bg-slate-950/40"
-        data-testid="certificate-preview-frame"
-      >
-        {error ? (
-          <p className="px-2 text-center text-[11px] text-slate-500">{error}</p>
-        ) : url ? (
-          // The real front slab label (826×236 @300DPI) — read-only, matches print.
+      {url ? (
+        <div
+          className="overflow-hidden rounded border border-slate-800 bg-slate-950/40"
+          data-testid="certificate-preview-frame"
+        >
+          {/* The real front slab label (826×236 @300DPI), displayed at its
+              natural aspect ratio in a compact inspection thumbnail. */}
           <img
             src={url}
             alt="Front certificate preview"
-            className="h-full w-full bg-white object-contain"
+            className="block h-auto w-full bg-white object-contain"
             data-testid="certificate-preview-image"
           />
-        ) : (
-          <p className="px-2 text-center text-[11px] text-slate-500">
-            {loading ? "Preparing preview…" : "Preview will appear here."}
-          </p>
-        )}
-      </div>
+        </div>
+      ) : (
+        <p
+          className={`rounded border border-slate-800 px-2 py-1.5 text-center text-[11px] ${error ? "text-rose-300" : "text-slate-500"}`}
+          data-testid="certificate-preview-status"
+        >
+          {error ?? (loading ? "Preparing preview…" : "Preview unavailable / preparing…")}
+        </p>
+      )}
       {/* Never claim persisted truth for unsaved state. The panel stays READ-ONLY
           in every case — it renders an image and persists nothing. */}
       <p
-        className={`mx-auto mt-1 max-w-[360px] text-[10px] ${persistence === "conflict" ? "text-amber-400" : "text-slate-500"}`}
+        className={`mt-1 text-[10px] ${persistence === "conflict" ? "text-amber-400" : "text-slate-500"}`}
         data-testid="certificate-preview-caption"
         data-persistence={persistence}
       >
         {persistence === "saved"
-          ? "Read-only — saved. This is how the certificate will print."
+          ? "Saved review · authoritative print preview."
           : persistence === "conflict"
-            ? "Read-only — NOT saved. This certificate was changed elsewhere; refresh before trusting this preview."
-            : "Live unsaved preview — this is how the current details will print once saved."}
+            ? "Not authoritative — refresh before trusting this preview."
+            : "Save a grade to prepare Review."}
       </p>
     </div>
   );
