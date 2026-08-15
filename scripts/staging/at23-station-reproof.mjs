@@ -65,6 +65,54 @@ function assertStaging(url) {
 }
 assertStaging(BASE);
 
+/**
+ * `--new-identity` — mint a DEDICATED, DISPOSABLE staging station identity for this re-proof.
+ *
+ * WHY NOT REUSE THE SCANNER MAC'S IDENTITY. The scanner app deliberately stores its station key
+ * encrypted through the macOS Keychain and refuses any plaintext fallback
+ * (scripts/scanner-app/lib/station-identity.js). Exporting that key to run a test would defeat a
+ * security decision the product made on purpose. So this mints a throwaway identity instead: the
+ * PRIVATE key goes straight to a 0600 file the owner controls, and only the PUBLIC key — which is
+ * not a secret and is exactly what enrolment expects — is printed.
+ *
+ * Revoke the station in staging admin when the re-proof is done and delete the key file.
+ */
+async function newIdentity() {
+  const { generateKeyPairSync, createHash: sha } = await import("node:crypto");
+  const { writeFileSync: write, chmodSync } = await import("node:fs");
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+  const file = "at23-station.key";
+  write(file, privateKey.export({ format: "pem", type: "pkcs8" }).toString(), { mode: 0o600 });
+  chmodSync(file, 0o600);
+  const fingerprint = sha("sha256")
+    .update(publicKey.export({ format: "der", type: "spki" }))
+    .digest("hex");
+  console.log(`private key -> ./${file}  (mode 0600, NOT printed, NOT committed — add to .gitignore or delete after)`);
+  console.log("\nEnrol this station on STAGING with an authenticated partner session holding");
+  console.log("partner.stations.enrol, then approve it in staging admin:\n");
+  console.log("POST /api/partner/stations/enrol");
+  console.log(
+    JSON.stringify(
+      {
+        locationId: "<your staging location id>",
+        publicKeyPem,
+        installationFingerprint: fingerprint,
+        appVersion: "at23-reproof",
+      },
+      null,
+      2
+    )
+  );
+  console.log("\nThen: export STAGING_STATION_CODE=<code from the response>");
+  console.log(`       export STAGING_STATION_KEY_FILE=${process.cwd()}/${file}`);
+}
+
+if (args.includes("--new-identity")) {
+  await newIdentity();
+  process.exit(0);
+}
+
 function need(name) {
   const v = process.env[name];
   if (!v) throw new Error(`missing ${name} — see the header of this file for what to set`);
