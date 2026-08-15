@@ -102,6 +102,15 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT = [
 export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
   "0032_partner_final_owner_invariant",
+  // AG-3 step-up stamp (RC-F9). EVERY user-management route this list exists to exercise — invite,
+  // role change, status change, session revocation — is now behind requireRecentAuth(), and the
+  // step-up route stamps partner_sessions.last_step_up_at. Without 0086 that column does not exist,
+  // so `recordStepUp` throws and the route answers 500 step_up_failed. The suites then fail in a way
+  // that looks like broken team management rather than a missing fixture column, which is exactly
+  // how this was first mis-read. Additive nullable column; harmless in the descendant lists that
+  // never exercise step-up, and neither PARTNER_SCHEMA_MIGRATIONS nor
+  // PARTNER_MIGRATIONS_WITH_LIFECYCLE derives from this list, so it is not applied twice anywhere.
+  "0086_partner_session_step_up",
 ] as const;
 
 /**

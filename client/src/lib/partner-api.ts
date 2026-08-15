@@ -74,7 +74,39 @@ export const partnerAuth = {
   switchLocation: (locationId: string) =>
     req<{ ok: boolean; locationId: string }>("POST", "/api/partner/session/location", { locationId }),
   revokeAll: () => req<{ ok: boolean; revoked: number }>("POST", "/api/partner/auth/revoke-all"),
+  /**
+   * AG-3 STEP-UP — re-prove the human behind this session (server/partner/step-up.ts).
+   *
+   * Maps exactly onto the EXISTING contract; this invents no second authentication mechanism:
+   *   POST /api/partner/auth/step-up { password, code?, recoveryCode? }
+   *     200 { ok, windowMinutes }        proof recorded on partner_sessions.last_step_up_at
+   *     400 { code: second_factor_required }
+   *     403 { code: unauthorised }       wrong password
+   *
+   * It returns NO token and NO new session — it raises the privilege of the session already in
+   * hand — so there is nothing here for a caller to persist, and nothing that MAY be persisted.
+   * The password never leaves the request: see partner-step-up.tsx.
+   */
+  stepUp: (password: string, secondFactor?: { code?: string; recoveryCode?: string }) =>
+    req<{ ok: boolean; windowMinutes: number }>("POST", "/api/partner/auth/step-up", {
+      password,
+      ...(secondFactor?.code ? { code: secondFactor.code } : {}),
+      ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
+    }),
 };
+
+/**
+ * The server's distinct, actionable "prove yourself again" code (STEP_UP_REQUIRED_CODE).
+ *
+ * It is deliberately 403 and not 401: the session is valid and the user must NOT be logged out.
+ * Anything that treats this as a sign-out turns a confirmation prompt into a lost task.
+ */
+export const STEP_UP_REQUIRED_CODE = "step_up_required";
+
+/** True when a rejected call is asking for a fresh proof rather than refusing the action outright. */
+export function isStepUpRequired(err: unknown): boolean {
+  return err instanceof PartnerApiError && err.status === 403 && err.code === STEP_UP_REQUIRED_CODE;
+}
 
 export type PartnerCertificateHistoryRow = {
   certificateId: number;

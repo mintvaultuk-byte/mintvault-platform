@@ -317,7 +317,19 @@ async function partnerTeamInvite(
 async function partnerLoginCookie(email: string, password = OWNER_PASSWORD): Promise<string> {
   const r = await req("POST", "/api/partner/auth/login", { body: { email, password } });
   expect(r.status, `partner login for ${email} must succeed`).toBe(200);
-  return (r.setCookie ?? "").split(";")[0];
+  const cookie = (r.setCookie ?? "").split(";")[0];
+  /*
+   * AG-3 STEP-UP. Inviting a team member is behind `requireRecentAuth()`, so a freshly logged-in
+   * session is answered 403 `step_up_required` until it re-proves the human. This performs the REAL
+   * proof against the REAL endpoint — deliberately not an UPDATE of last_step_up_at, which would
+   * keep passing even if the step-up route stopped checking the password.
+   *
+   * It lives in the login helper because every caller here is exercising onboarding, not step-up:
+   * the step-up challenge/prove/retry cycle itself is proven in partner-runtime-integration.
+   */
+  const proof = await req("POST", "/api/partner/auth/step-up", { body: { password }, cookie });
+  expect(proof.status, `partner step-up for ${email} must succeed`).toBe(200);
+  return cookie;
 }
 
 /** Pull the invitation URL out of a captured Resend HTML payload (production-built, HTML-escaped). */

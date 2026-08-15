@@ -14,6 +14,7 @@ import {
   PartnerUnavailableState,
   PartnerSessionExpiredState,
 } from "./partner-shell";
+import { PartnerStepUpProvider } from "./partner-step-up";
 
 export function PartnerRouteGuard({
   children,
@@ -63,5 +64,12 @@ export function PartnerRouteGuard({
     );
   }
 
-  return <PartnerShell>{children}</PartnerShell>;
+  // AG-3: the step-up prompt is mounted HERE, at the single place that decides "can this render",
+  // so every authenticated partner page inherits one canonical confirmation flow rather than each
+  // protected surface growing its own. It renders nothing until the server issues a challenge.
+  return (
+    <PartnerShell>
+      <PartnerStepUpProvider>{children}</PartnerStepUpProvider>
+    </PartnerShell>
+  );
 }

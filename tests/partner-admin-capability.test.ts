@@ -159,6 +159,41 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
         );
       }
     }
+    /*
+     * SCHEMA CONTRACT (invariant I18). The readiness endpoint now reports THREE preconditions, not
+     * two: the BYPASSRLS capability, the RBAC catalogue, and `checkPartnerSchemaContract()`. This
+     * suite hand-rolls a deliberately minimal schema to isolate the capability gate, and that
+     * minimal schema does not satisfy the contract — so readiness would 503 for a reason this file
+     * is not about, and the capability assertion it exists to make would never be reached.
+     *
+     * These three artefacts are what migrations/0077_partner_credential_lifecycle_hardening.sql
+     * supplies, hand-rolled here in the same style as the partner_roles/partner_permissions tables
+     * above (which mirror 0001). They are shaped to satisfy the REAL probes, not to bypass them:
+     * the column must exist on partner_users, the function must DECLARE password_set_at as an
+     * output argument (a column-only fake would still fail), and the index name must match.
+     */
+    await admin.query(`CREATE TABLE IF NOT EXISTS partner_users (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      email text NOT NULL,
+      password_set_at timestamptz
+    )`);
+    await admin.query(`CREATE TABLE IF NOT EXISTS partner_password_resets (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id uuid NOT NULL,
+      consumed_at timestamptz
+    )`);
+    await admin.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_password_reset_one_live
+         ON partner_password_resets (user_id) WHERE consumed_at IS NULL`
+    );
+    await admin.query(
+      `CREATE OR REPLACE FUNCTION partner_auth_lookup(p_email text)
+         RETURNS TABLE (id uuid, email text, password_set_at timestamptz)
+         LANGUAGE sql STABLE AS $fn$
+           SELECT u.id, u.email, u.password_set_at FROM partner_users u WHERE u.email = p_email
+         $fn$;`
+    );
+
     await admin.query(`CREATE TABLE users (
       id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
       email varchar UNIQUE,
@@ -195,11 +230,29 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     await admin.query(
       "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO partner_admin_bypass_test, partner_admin_plain_test"
     );
+    /*
+     * The schema-contract column probe runs on the RUNTIME pool (partner_app_test_cap), and
+     * `information_schema.columns` is PRIVILEGE-FILTERED: a role with no grant on partner_users sees
+     * no rows for it and the probe reports the column missing even though it exists. The index and
+     * function probes read pg_indexes / pg_proc, which are not filtered — which is exactly why those
+     * two passed while this one did not, and why the readiness body named only this requirement.
+     * SELECT is all the probe needs.
+     */
+    await admin.query("GRANT USAGE ON SCHEMA public TO partner_app_test_cap");
+    await admin.query("GRANT SELECT ON partner_users, partner_password_resets TO partner_app_test_cap");
 
     process.env.MINTVAULT_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_admin_plain_test", "synthetic-plain");
     process.env.PARTNER_ADMIN_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_admin_plain_test", "synthetic-plain");
     process.env.PARTNER_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_app_test_cap", "synthetic");
     process.env.SESSION_SECRET = "synthetic-test-session-secret-not-committed";
+    // The Super-Admin partner-management router is mounted behind `requireSuperAdmin`, which checks
+    // the session's adminEmail against SUPER_ADMIN_EMAILS (falling back to the single hard-coded
+    // ADMIN_EMAIL). Without this, the synthetic admin below is a plain admin, every route on the
+    // router answers 403 "Super Admin required", and NOTHING in this file reaches the BYPASSRLS
+    // capability gate it exists to test — the 403 merely looks like the 503 the suite is asserting.
+    // Declaring the synthetic admin as a super admin does not weaken the guard: it still runs, in
+    // full, on every request; it is the fixture that is being told who the test's operator is.
+    process.env.SUPER_ADMIN_EMAILS = "admin@example.test";
     resetPartnerAdminCapabilityCache();
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
@@ -256,11 +309,20 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
   it("fails Super Admin routes closed with a non-BYPASSRLS admin role and writes no success audit", async () => {
     const c = await cookie();
     const ready = await fetch(`${base}/api/super-admin/partner-management/readiness`, { headers: { cookie: c } });
-    expect(ready.status).toBe(403);
-    expect(await ready.json()).toMatchObject({ error: "Forbidden: Super Admin required" });
+    // RESTORED to 503. These assertions were changed to 403 "Super Admin required" when the router
+    // moved from requireAdmin to requireSuperAdmin — which made the file pass while proving nothing:
+    // a 403 at the email check never reaches requirePartnerAdminCapability, so the BYPASSRLS
+    // fail-closed behaviour this test is named after went entirely unexercised. With the fixture's
+    // operator now a real super admin, the capability gate is reached again and 503s as designed.
+    expect(ready.status).toBe(503);
+    expect(await ready.json()).toMatchObject({
+      checked: true,
+      ready: false,
+      failureCode: "PARTNER_ADMIN_BYPASSRLS_REQUIRED",
+    });
 
     const list = await fetch(`${base}/api/super-admin/partner-management/partners`, { headers: { cookie: c } });
-    expect(list.status).toBe(403);
+    expect(list.status).toBe(503);
     const invite = await fetch(`${base}/api/super-admin/partner-management/partners/p/users`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie: c },
@@ -272,7 +334,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
         reason: "blocked by capability",
       }),
     });
-    expect(invite.status).toBe(403);
+    expect(invite.status).toBe(503);
     const audit = await admin.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM partner_management_audit WHERE result='succeeded'"
     );
@@ -283,8 +345,11 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     const c = await cookie();
     await fetch(`${base}/__test/use-bypass`, { method: "POST", headers: { cookie: c } });
     const ready = await fetch(`${base}/api/super-admin/partner-management/readiness`, { headers: { cookie: c } });
-    expect(ready.status).toBe(200);
-    expect(await ready.json()).toMatchObject({ checked: true, ready: true, failureCode: null });
+    // Readiness reports three independent dimensions; carrying the body into the assertion message
+    // means a failure names WHICH one broke instead of only "expected 503 to be 200".
+    const readyBody = await ready.json();
+    expect(ready.status, JSON.stringify(readyBody)).toBe(200);
+    expect(readyBody).toMatchObject({ checked: true, ready: true, failureCode: null });
     expect(await getPartnerRuntimeCapability()).toMatchObject({ ok: true });
   });
   /**

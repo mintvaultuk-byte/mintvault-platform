@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { partnerCredits, partnerErrorMessage, type PartnerCreditLedgerEntry } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
+import { usePartnerStepUp, isStepUpCancelled } from "@/components/partner/partner-step-up";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { ArrowRight, Loader2, Lock } from "lucide-react";
 
@@ -46,6 +47,7 @@ export default function PartnerBillingPage() {
 
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [pendingPack, setPendingPack] = useState<string | null>(null);
+  const { runProtected } = usePartnerStepUp();
 
   /**
    * Hands the operator to Stripe. The server decides the price and the quantity; this mutation's
@@ -53,7 +55,10 @@ export default function PartnerBillingPage() {
    * the wallet — a client that could "apply" a purchase locally would be a second balance authority.
    */
   const checkout = useMutation({
-    mutationFn: (packCode: string) => partnerCredits.checkout(packCode),
+    // AG-3: spending the shop's money is step-up protected server-side. `runProtected` performs the
+    // call, and ONLY if the server answers 403 step_up_required does it prompt and retry this exact
+    // checkout once. A cancelled prompt leaves no charge started and no Stripe session created.
+    mutationFn: (packCode: string) => runProtected(() => partnerCredits.checkout(packCode)),
     onMutate: (packCode: string) => {
       setCheckoutError(null);
       setPendingPack(packCode);
@@ -71,6 +76,9 @@ export default function PartnerBillingPage() {
     },
     onError: (err) => {
       setPendingPack(null);
+      // Dismissing the confirmation is not a failure — nothing was bought and nothing was charged,
+      // so the operator is returned to the page silently rather than shown an error they caused.
+      if (isStepUpCancelled(err)) return;
       setCheckoutError(partnerErrorMessage(err));
     },
   });

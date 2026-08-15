@@ -17,6 +17,7 @@ import {
   type PartnerTeamMember,
   type PartnerTeamRole,
 } from "@/lib/partner-api";
+import { usePartnerStepUp } from "@/components/partner/partner-step-up";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 
 const ROLES: Array<{ value: PartnerTeamRole; label: string }> = [
@@ -77,9 +78,14 @@ export default function PartnerUsersPage() {
   const isOwner = currentUser?.role === "OWNER";
   const permittedRoles = isOwner ? ROLES : ROLES.filter((r) => r.value !== "OWNER");
 
+  const { runProtected } = usePartnerStepUp();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["/api/partner/users"] });
+  // AG-3: invite, role change, status change and session revocation are step-up protected
+  // server-side. Each goes through `runProtected`, which prompts and retries ONCE only when the
+  // server issues the challenge. `resend` and `revoke-invite` are not protected; routing them
+  // through the same helper is harmless (no challenge, no prompt) and keeps one code path.
   const inviteMutation = useMutation({
-    mutationFn: () => partnerTeam.invite({ ...form, reason: "Partner portal team invitation" }),
+    mutationFn: () => runProtected(() => partnerTeam.invite({ ...form, reason: "Partner portal team invitation" })),
     onSuccess: async () => {
       setInviteOpen(false);
       setForm({ firstName: "", lastName: "", email: "", role: "STAFF" });
@@ -89,12 +95,14 @@ export default function PartnerUsersPage() {
   const actionMutation = useMutation({
     mutationFn: async () => {
       if (!action) return;
-      if (action.kind === "resend") return partnerTeam.resend(action.user.id, "Partner portal invitation resent");
-      if (action.kind === "revoke-invite") return partnerTeam.revokeInvitation(action.user.id, reason);
-      if (action.kind === "suspend") return partnerTeam.setStatus(action.user.id, "SUSPENDED", reason);
-      if (action.kind === "reactivate") return partnerTeam.setStatus(action.user.id, "ACTIVE", reason);
-      if (action.kind === "remove") return partnerTeam.setStatus(action.user.id, "REVOKED", reason);
-      return partnerTeam.revokeSessions(action.user.id, "Partner portal sessions revoked");
+      return runProtected(() => {
+        if (action.kind === "resend") return partnerTeam.resend(action.user.id, "Partner portal invitation resent");
+        if (action.kind === "revoke-invite") return partnerTeam.revokeInvitation(action.user.id, reason);
+        if (action.kind === "suspend") return partnerTeam.setStatus(action.user.id, "SUSPENDED", reason);
+        if (action.kind === "reactivate") return partnerTeam.setStatus(action.user.id, "ACTIVE", reason);
+        if (action.kind === "remove") return partnerTeam.setStatus(action.user.id, "REVOKED", reason);
+        return partnerTeam.revokeSessions(action.user.id, "Partner portal sessions revoked");
+      });
     },
     onSuccess: async () => {
       setAction(null);
@@ -103,7 +111,7 @@ export default function PartnerUsersPage() {
     },
   });
   const roleMutation = useMutation({
-    mutationFn: () => partnerTeam.changeRole(roleEdit!.user.id, roleEdit!.role, reason),
+    mutationFn: () => runProtected(() => partnerTeam.changeRole(roleEdit!.user.id, roleEdit!.role, reason)),
     onSuccess: async () => {
       setRoleEdit(null);
       setReason("");
