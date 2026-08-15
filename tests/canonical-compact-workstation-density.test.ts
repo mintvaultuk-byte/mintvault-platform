@@ -94,7 +94,11 @@ describe("five-role and protected-boundary negative proof", () => {
   });
 
   it("changes only the explicitly owner-approved presentation and evidence surfaces in this branch", () => {
+    // Kept as a UNION of owner-authorised surfaces rather than replacing one set with
+    // another, so an earlier authorisation is never silently dropped — the same
+    // convention the variant-line consolidation guard uses for its signatures.
     const allowed = new Set([
+      // ── Compact canonical workstation density pass (PR #299, commit 144fffa8) ──
       "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx",
       "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
       "client/src/components/grading-workflow/CertificatePreviewPanel.tsx",
@@ -104,6 +108,17 @@ describe("five-role and protected-boundary negative proof", () => {
       "client/src/components/grading/centering-input.tsx",
       "client/src/components/grading/grading-panel.tsx",
       "client/src/pages/dev-canonical-workstation-harness.tsx",
+      // ── Gold Star classification-safety repair (owner-commissioned) ────────────
+      // A vintage EX-era card could be classified as a MODERN Illustration Rare,
+      // because rarity search carried no card context and the EX Gold Star had no
+      // structured value at all. The repair is confined to the rarity catalogue data
+      // and the single canonical picker that reads it. Neither file is a scoring,
+      // authority or transport surface, so this widens the presentation allowlist
+      // WITHOUT relaxing the hard prohibition asserted immediately below — that
+      // prohibition still bars shared/mvgs-scoring.ts, shared/centering.ts,
+      // shared/pristine.ts, shared/schema.ts, server/ and migrations/ outright.
+      "shared/pokemon-rarity-catalogue.ts",
+      "client/src/components/rarity-picker/RarityVariantPicker.tsx",
     ]);
     const changed = execSync("git diff --name-only origin/main", { encoding: "utf8" }).split("\n").filter(Boolean);
     for (const path of changed) {

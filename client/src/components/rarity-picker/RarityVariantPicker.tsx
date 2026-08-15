@@ -318,7 +318,12 @@ export function RarityVariantPicker({
     return [...inRegion, ...otherRegion];
   }, [base, quickRarities, cat]);
 
-  const search = query.trim() ? searchCatalogue(query, cat) : null;
+  // Search is given the SAME language/era context (and the same "Show all
+  // compatible" override) as the browse lists above, so a searched chip can never
+  // be selectable when the equivalent browsed chip would have been filtered out.
+  const search = query.trim()
+    ? searchCatalogue(query, cat, { language, era: era || null, showAll })
+    : null;
 
   const structured = useMemo(
     () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }, cat),

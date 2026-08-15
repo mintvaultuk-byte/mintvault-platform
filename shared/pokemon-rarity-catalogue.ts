@@ -111,6 +111,21 @@ export const POKEMON_RARITIES: readonly PokemonRarity[] = [
   r({ value: "ace_spec", label: "ACE SPEC", description: "ACE SPEC rare — a red 'ACE SPEC' marker.", symbol: { shape: "text", colour: "black", glyph: "ACE" }, codes: ["ACE"], regions: ["western", "japan"], eras: ["sv", "bw-xy"], aliases: ["ace spec", "ace", "acespec"] }),
   // ── Older / cross-era English ─────────────────────────────────────────────────
   r({ value: "rare_holo", label: "Rare Holo (classic)", description: "Classic single-star rare (holo finish tracked separately).", symbol: { shape: "star", count: 1, colour: "black", glyph: "★" }, codes: ["R"], regions: ["western"], eras: ["vintage", "ex-dp", "bw-xy", "sm"], aliases: ["rare holo", "classic rare"] }),
+  // ── EX-era Gold Star ──────────────────────────────────────────────────────────
+  // The classic ☆ Gold Star chase card (EX Team Rocket Returns → EX Power Keepers).
+  //
+  // WHY THIS ENTRY EXISTS. Every other legacy rarity in client/src/lib/rarityOptions.ts
+  // already has a structured counterpart (RARE_HOLO↔rare_holo, HYPER_RARE↔hyper_rare,
+  // and so on). GOLD_STAR was the ONLY printed rarity with no structured value, which
+  // left a grader on a vintage card with nothing correct to pick — searching
+  // "gold star" surfaced the MODERN one/two/three-gold-star rarities instead. This
+  // completes the existing pattern; it does NOT introduce a second rarity model.
+  //
+  // It is deliberately scoped to the EX era. Its symbol is a single GOLD star, which
+  // is visually identical to Illustration Rare (Scarlet & Violet) — the ERA is what
+  // separates them, which is why search must apply era eligibility rather than
+  // matching on symbol or alias text alone.
+  r({ value: "gold_star", label: "Gold Star (EX era)", description: "The classic ☆ Gold Star chase card (EX Team Rocket Returns – EX Power Keepers). One GOLD star, vintage EX era — NOT the modern Illustration Rare.", symbol: { shape: "star", count: 1, colour: "gold", glyph: "☆" }, codes: [], regions: ["western", "japan"], eras: ["ex-dp"], aliases: ["gold star", "goldstar", "ex gold star", "gold star pokemon", "shining gold star"] }),
   r({ value: "amazing_rare", label: "Amazing Rare", description: "Amazing Rare (rainbow 'A' rarity, SwSh).", symbol: { shape: "text", colour: "rainbow", glyph: "A" }, codes: ["A", "AR"], regions: ["western", "japan"], eras: ["swsh"], aliases: ["amazing rare", "amazing", "a rare"] }),
   r({ value: "radiant_rare", label: "Radiant Rare", description: "Radiant Pokémon (K) — etched shiny rare.", symbol: { shape: "shiny", colour: "gold", glyph: "◈" }, codes: ["K"], regions: ["western", "japan"], eras: ["swsh"], aliases: ["radiant", "radiant rare", "k rare"] }),
   r({ value: "prism_star", label: "Prism Star", description: "Prism Star (♢) — one-per-deck prism card (Sun & Moon).", symbol: { shape: "diamond", colour: "white", glyph: "♢" }, codes: [], regions: ["western", "japan"], eras: ["sm"], aliases: ["prism star", "prism", "prism rare"] }),
@@ -337,18 +352,59 @@ export interface CatalogueSearchResult {
 }
 
 /** Fuzzy alias/label/code search across ALL four classifications. */
+/**
+ * Optional card context. When supplied, RARITY results are restricted to the
+ * rarities actually printed for that language/region and era — the SAME
+ * eligibility rule the browse lists apply via {@link filterRarities}.
+ *
+ * WHY. Search previously took no context at all, so its results bypassed the era
+ * gate that the browse lists enforce, and every hit rendered as a directly
+ * selectable chip. On a vintage card, searching "gold star" offered Illustration
+ * Rare / Special Illustration Rare / Hyper Rare — all Scarlet & Violet rarities
+ * the era filter would otherwise have hidden. Passing context closes that bypass.
+ *
+ * `showAll` mirrors the picker's existing "Show all compatible options" override,
+ * so nothing is ever permanently unreachable when set data is incomplete.
+ */
+export interface CatalogueSearchContext {
+  language?: string | null;
+  era?: PokemonEra | null;
+  showAll?: boolean;
+}
+
 export function searchCatalogue(
   query: string,
   cat: CatalogueSnapshot = SEED_CATALOGUE,
+  context?: CatalogueSearchContext,
 ): CatalogueSearchResult {
   const q = norm(query);
   if (!q) return { rarities: [], finishes: [], promos: [] };
   const hit = (label: string, aliases: string[], codes: string[] = []) =>
     norm(label).includes(q) ||
     codes.some((c) => norm(c) === q || norm(c).includes(q)) ||
-    aliases.some((a) => norm(a).includes(q) || q.includes(norm(a)));
+    aliases.some((a) => {
+      const na = norm(a);
+      // Forward: the alias contains what was typed ("one gold star" ⊃ "gold star").
+      if (na.includes(q)) return true;
+      // Reverse: what was typed contains the alias, so a longer phrase still finds
+      // its rarity ("reverse holo foil" → "reverse holo"). Restricted to MULTI-WORD
+      // aliases: a bare one-word alias such as "star" would otherwise match every
+      // query containing that word, which is exactly how a "gold star" search came
+      // to offer plain Rare. An exact match is always honoured.
+      if (na === q) return true;
+      return na.includes(" ") && q.includes(na);
+    });
+  const rarityEligible = (x: PokemonRarity): boolean => {
+    if (!context) return true;
+    const lang = languageByValue(context.language ?? "en", cat);
+    const region = lang?.region ?? "western";
+    if (!scopeIncludesRegion(x.regions, region)) return false;
+    if (context.showAll) return true;
+    if (context.era && x.eras !== "all" && !x.eras.includes(context.era)) return false;
+    return true;
+  };
   return {
-    rarities: cat.rarities.filter((x) => hit(x.label, x.aliases, x.codes)),
+    rarities: cat.rarities.filter((x) => hit(x.label, x.aliases, x.codes) && rarityEligible(x)),
     finishes: cat.finishes.filter((x) => hit(x.label, x.aliases)),
     promos: cat.promos.filter((x) => hit(x.label, x.aliases)),
   };
