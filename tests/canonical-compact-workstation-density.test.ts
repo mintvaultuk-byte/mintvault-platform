@@ -119,6 +119,14 @@ describe("five-role and protected-boundary negative proof", () => {
       // shared/pristine.ts, shared/schema.ts, server/ and migrations/ outright.
       "shared/pokemon-rarity-catalogue.ts",
       "client/src/components/rarity-picker/RarityVariantPicker.tsx",
+      // ── Certificate label-snapshot authority (owner-commissioned) ──────────────
+      // A rarity published through the Catalogue Manager — i.e. everything the Partner
+      // contribution approval workflow will create — printed a humanised CODE instead of
+      // the label Super Admin approved, because this formatter only resolved against the
+      // compiled-in seed. The repair makes it prefer the immutable `rarity_label` snapshot
+      // already persisted on the certificate. Pure display resolution: no scoring, no
+      // authority, no transport. The hard prohibition asserted below is unchanged.
+      "shared/variant-line.ts",
     ]);
     const changed = execSync("git diff --name-only origin/main", { encoding: "utf8" }).split("\n").filter(Boolean);
     for (const path of changed) {
