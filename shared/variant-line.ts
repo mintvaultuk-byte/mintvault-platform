@@ -106,6 +106,27 @@ function legacyDisplayLabel(code: string): string {
 
 /** Catalogue label → clean public label: apply the override, else strip any
  *  trailing "(…)" qualifier the catalogue uses for disambiguation. */
+/**
+ * Drop a single trailing "(…)" disambiguation qualifier from a catalogue label.
+ *
+ * Deliberately NOT a regex. The obvious pattern — /\s*\([^)]*\)\s*$/ — backtracks
+ * polynomially on labels with long runs of spaces or "(", and both inputs here are
+ * uncontrolled: the catalogue label is Super-Admin free text and the snapshot is
+ * whatever was persisted on the certificate. CodeQL flags it as js/polynomial-redos.
+ * This scan is linear and has identical behaviour for a well-formed label.
+ */
+function stripTrailingQualifier(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed.endsWith(")")) return trimmed;
+  const open = trimmed.lastIndexOf("(");
+  // No opener, or the label is ONLY a qualifier — leave it alone rather than
+  // returning an empty variant line.
+  if (open <= 0) return trimmed;
+  // A ")" before the final character means this is not a simple trailing group.
+  if (trimmed.indexOf(")", open) !== trimmed.length - 1) return trimmed;
+  return trimmed.slice(0, open).trim();
+}
+
 function publicLabel(
   code: string | null | undefined,
   catalogueLabel: string | undefined,
@@ -118,8 +139,8 @@ function publicLabel(
   if (!code) return "";
   if (PUBLIC_LABEL_OVERRIDES[code]) return PUBLIC_LABEL_OVERRIDES[code];
   const pinned = typeof snapshotLabel === "string" ? snapshotLabel.trim() : "";
-  if (pinned) return pinned.replace(/\s*\([^)]*\)\s*$/, "").trim();
-  if (catalogueLabel) return catalogueLabel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (pinned) return stripTrailingQualifier(pinned);
+  if (catalogueLabel) return stripTrailingQualifier(catalogueLabel);
   // The code is SET but this process cannot resolve it. That happens for a code
   // added through the Catalogue Manager (validated against the LIVE catalogue_items
   // table) while this pure formatter only ever resolves against SEED_CATALOGUE.
