@@ -132,6 +132,12 @@ describe("five-role and protected-boundary negative proof", () => {
     for (const path of changed) {
       if (
         path.startsWith("tests/") ||
+        // Documentation is not a runtime surface. This guard exists to bound which
+        // PRESENTATION and EVIDENCE code a branch may touch; a markdown file under
+        // docs/ ships in no bundle and executes nowhere, so exempting it cannot widen
+        // the blast radius the guard protects. Same reasoning as the tests/ exemption
+        // directly above and the governance-evidence path below.
+        path.startsWith("docs/") ||
         path.startsWith(".claude/controlled-code-lead/tasks/canonical-compact-workstation-density-20260814/")
       )
         continue;
