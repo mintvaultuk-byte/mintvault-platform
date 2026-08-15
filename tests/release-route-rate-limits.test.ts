@@ -55,6 +55,14 @@ describe("release route rate-limit hardening", () => {
     expect(stations).toMatch(
       /card-jobs\/:cardJobId\/fix-authorise",\s*requireSignedStation,\s*requireSignedStationOperator,\s*partnerStationFixAuthoriseRateLimit/
     );
+    // RC-F11: these three must stay on `partnerRateLimit`, whose store mount.ts swaps for the
+    // shared PostgreSQL one (invariant I19). express-rate-limit's default store is PER-PROCESS —
+    // measured on staging 2026-08-15, Machine A returned 429 while Machine B still served, i.e. a
+    // 2x fleet ceiling. Reverting any of these to `rateLimit(` would silently restore that.
+    for (const name of ["partner-station-card-job", "partner-station-fix-queue", "partner-station-fix-authorise"]) {
+      expect(stations).toMatch(new RegExp(`partnerRateLimit\\(\\{\\s*name:\\s*"${name}"`));
+    }
+    expect(stations).toMatch(/name:\s*"partner-station-card-job",[\s\S]{0,400}?failClosed:\s*true/);
     expect(staff).toMatch(/scanner-capture-sessions",\s*requireCapability\("scan"\),\s*staffScanCaptureLimit/);
     expect(staff).toMatch(/scanner-capture-sessions\/:sessionId",\s*requireCapability\("scan"\),\s*staffScanReadLimit/);
     expect(staff).toMatch(

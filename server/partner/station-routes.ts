@@ -7,6 +7,7 @@ import {
   requireNotViewOnly,
   requireNotSensitiveFrozen,
 } from "./session";
+import { partnerRateLimit } from "./rate-limit";
 import { StationIdentityError } from "./station-identity";
 import {
   StationServiceError,
@@ -119,49 +120,51 @@ const partnerStationCalibrationRateLimit = rateLimit({
  *
  * KEYED PER STATION, so one shop's Mac can never consume another tenant's allowance — a station
  * belongs to exactly one tenant and one location, which makes the station id the tightest correct
- * key. `passOnStoreError: false` matches every other limiter in this file: if the counter cannot be
- * consulted the request is refused rather than waved through.
+ * key.
  *
- * KNOWN LIMIT, DELIBERATELY NOT FIXED HERE: like every existing limiter in this file, the store is
- * per-process, so across the two production Machines the effective ceiling is 2x. That is a
- * pre-existing, already-documented production prerequisite (server/partner/rate-limit.ts) and
- * introducing a shared store is infrastructure work, not a release repair. It does not weaken the
- * property that matters here — a runaway station is still bounded, and still bounded per station.
+ * FLEET-WIDE, NOT PER-PROCESS. These three deliberately use `partnerRateLimit` (the pluggable-store
+ * limiter) rather than `rateLimit` from express-rate-limit like their neighbours above. Production
+ * runs two Fly Machines, and express-rate-limit's default store is per-process — MEASURED on staging
+ * 2026-08-15: Machine A returned 429 while Machine B, hit immediately after, still served, so the
+ * effective ceiling was 2x with no shared state. `partnerRateLimit` goes through the store that
+ * mount.ts swaps for the shared PostgreSQL one at boot (invariant I19), so a runaway station is
+ * bounded across the FLEET rather than per Machine.
+ *
+ * `failClosed: true` denies if the counter cannot be read. That costs nothing real: every one of
+ * these routes needs the same database to do its work, so a store outage would have failed the
+ * request anyway — it never turns a working scan into a refused one.
+ *
+ * The four limiters above stay on express-rate-limit deliberately: they are pre-existing, outside
+ * this repair's scope, and changing them would be an unreviewed behavioural change to shipped paths.
  */
-const partnerStationCardJobStartRateLimit = rateLimit({
+const partnerStationCardJobStartRateLimit = partnerRateLimit({
+  name: "partner-station-card-job",
   windowMs: 60_000,
-  // 120/min = two card starts per second, sustained, per station. Unreachable by hand; a loop hits
-  // it immediately. Deliberately far above partnerStationCaptureRateLimit (20/min), which bounds
-  // capture SESSIONS rather than the cards a bench can start.
+  // 120/min = two card starts per second, sustained, per station. Unreachable by hand; a runaway
+  // loop hits it immediately. Deliberately far above partnerStationCaptureRateLimit (20/min), which
+  // bounds capture SESSIONS rather than the cards a bench can start.
   max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  passOnStoreError: false,
-  keyGenerator: (req) => `partner-station-card-job:${req.station?.id ?? "unknown"}`,
-  message: { error: "Too many new-card requests from this station. Please wait a minute and try again." },
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
 });
 
-const partnerStationFixQueueRateLimit = rateLimit({
+const partnerStationFixQueueRateLimit = partnerRateLimit({
+  name: "partner-station-fix-queue",
   windowMs: 60_000,
-  // A read, and the queue is polled by the shop-floor app; matches the established read budget.
+  // A read, and the shop-floor app polls it; matches the established read budget.
   max: 120,
-  standardHeaders: true,
-  legacyHeaders: false,
-  passOnStoreError: false,
-  keyGenerator: (req) => `partner-station-fix-queue:${req.station?.id ?? "unknown"}`,
-  message: { error: "Too many fix-queue requests from this station. Please wait a minute and try again." },
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
 });
 
-const partnerStationFixAuthoriseRateLimit = rateLimit({
+const partnerStationFixAuthoriseRateLimit = partnerRateLimit({
+  name: "partner-station-fix-authorise",
   windowMs: 60_000,
   // Authorising a FIX is rarer than starting a card and is a lineage decision, so it is tighter —
   // still one per second, which no operator reaches.
   max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  passOnStoreError: false,
-  keyGenerator: (req) => `partner-station-fix-authorise:${req.station?.id ?? "unknown"}`,
-  message: { error: "Too many fix authorisations from this station. Please wait a minute and try again." },
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
 });
 
 declare global {
