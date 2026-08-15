@@ -480,6 +480,7 @@ export const SUITES = [
   // ---------------------------------------------------------------- management
   {
     file: "tests/partner-management-migration.test.ts",
+    seedCoreStubs: true,
     topology: TOPOLOGY.MANAGEMENT,
     cluster: "pg17",
     database: "mintvault_partner_mgmt_mig",
@@ -608,6 +609,7 @@ export const SUITES = [
   },
   {
     file: "tests/partner-connector-admin-migration.test.ts",
+    seedCoreStubs: true,
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
     database: "mintvault_connector_admin_mig",
@@ -642,6 +644,7 @@ export const SUITES = [
   },
   {
     file: "tests/partner-connector-import-migration.test.ts",
+    seedCoreStubs: true,
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
     database: "mintvault_connector_import_mig",
@@ -664,6 +667,7 @@ export const SUITES = [
   },
   {
     file: "tests/partner-connector-migration.test.ts",
+    seedCoreStubs: true,
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
     database: "mintvault_connector_migration",
@@ -674,6 +678,7 @@ export const SUITES = [
   },
   {
     file: "tests/partner-connector-query-plan.test.ts",
+    seedCoreStubs: true,
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
     database: "mintvault_connector_plan",
@@ -744,6 +749,7 @@ export const SUITES = [
   },
   {
     file: "tests/partner-connector-validation-migration.test.ts",
+    seedCoreStubs: true,
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
     database: "mintvault_connector_val_mig",

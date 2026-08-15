@@ -94,6 +94,41 @@ function recreateDatabase(suite) {
   if (drop.status !== 0) throw new Error(`drop ${suite.database} failed: ${drop.stderr || drop.stdout}`);
   const create = psql(`CREATE DATABASE "${suite.database}"`);
   if (create.status !== 0) throw new Error(`create ${suite.database} failed: ${create.stderr || create.stdout}`);
+  if (suite.seedCoreStubs) seedCoreStubs(suite);
+}
+
+/**
+ * The MINIMAL core-table precondition for suites that apply the FULL repository migration set.
+ *
+ * 0018_correction_audit_index builds a partial index ON audit_log, and 0022_print_workflow_lifecycle
+ * ALTERs certificates. No PARTNER migration creates either table and these suites do not seed them,
+ * so on a freshly created database they die in beforeAll with `relation "audit_log" does not exist`.
+ *
+ * .github/workflows/ci.yml has done this for six suites all along; this runner did NOT, because it
+ * DROPs and recreates each database and so discards anything seeded beforehand. That asymmetry is
+ * why these suites passed in CI and environment-aborted here the moment they were added to the gate.
+ *
+ * DELIBERATELY a minimal stub pair, not a real schema push: the real `certificates` has no `secret`
+ * column, and these suites insert cert_id/secret and assert the row survives a rollback. Both tables
+ * are owned by pn_migrator because the migrations are applied as that non-superuser role. Kept
+ * byte-equivalent to the CI step so the two environments cannot drift.
+ */
+function seedCoreStubs(suite) {
+  const url = urlFor(suite.cluster, suite.database);
+  assertDisposable(url, `${suite.file} core-stub seed`);
+  const run = (sql) => {
+    const r = spawnSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`core-stub seed failed for ${suite.database}: ${r.stderr || r.stdout}`);
+  };
+  run(
+    "DO $$ BEGIN CREATE ROLE pn_migrator LOGIN PASSWORD 'realistic-migrator-pw' NOSUPERUSER CREATEROLE NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END$$;"
+  );
+  run(
+    "CREATE TABLE IF NOT EXISTS audit_log (id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL, admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now())"
+  );
+  run("ALTER TABLE audit_log OWNER TO pn_migrator");
+  run("CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)");
+  run("ALTER TABLE certificates OWNER TO pn_migrator");
 }
 
 const results = [];

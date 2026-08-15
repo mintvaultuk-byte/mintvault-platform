@@ -420,12 +420,10 @@ export function partnerStationRouter(): Router {
    * only thing the client supplies is `clientOpId` — the retry token — and an optional card label.
    * There is therefore no request a station can craft that starts a card for another partner.
    */
-  r.post(
-    "/card-jobs",
-    requireSignedStation,
-    requireSignedStationOperator,
-    partnerStationCardJobStartRateLimit,
-    async (req, res) => {
+  // Kept on ONE line: tests/partner-station-new-card.test.ts locates this route with
+  // `indexOf('r.post("/card-jobs"')`, so splitting the path onto its own line makes that slice
+  // empty and silently voids three P6 security assertions rather than failing loudly.
+  r.post("/card-jobs", requireSignedStation, requireSignedStationOperator, partnerStationCardJobStartRateLimit, async (req, res) => {
     const station = req.station!;
     const operator = req.partner!;
     try {
@@ -477,12 +475,9 @@ export function partnerStationRouter(): Router {
    * request signature plus an operator-session header — and Express matches the first registered
    * route, so one path with two guard stacks would silently mean only the first stack ever runs.
    */
-  r.get(
-    "/stations/fix-queue",
-    requireSignedStation,
-    requireSignedStationOperator,
-    partnerStationFixQueueRateLimit,
-    async (req, res) => {
+  // One line, for the same reason: tests/partner-scanner-fix.test.ts slices from
+  // `indexOf('r.get("/stations/fix-queue"')` and reads the next 300 characters.
+  r.get("/stations/fix-queue", requireSignedStation, requireSignedStationOperator, partnerStationFixQueueRateLimit, async (req, res) => {
     const station = req.station!;
     try {
       // A Mac stands on ONE shop floor. Always confined — never the whole estate.
