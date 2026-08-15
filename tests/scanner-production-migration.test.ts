@@ -4,15 +4,30 @@ import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 
 const TEST_URL = process.env.SCANNER_MIGRATION_TEST_DATABASE_URL || "";
 
+/**
+ * RC-F14: the port list, not the safety rule, is what changed.
+ *
+ * This suite required port 5432 exactly. The project's disposable clusters run on 55432 (pg16) and
+ * 55433 (pg17), so no environment that exists could ever satisfy it: the variable was never set,
+ * `describe.skip` took the file, and these migration assertions ran NOWHERE — not locally, not in
+ * CI — while the file's presence implied they did.
+ *
+ * Every property that makes this safe is unchanged and still enforced: the host must be loopback,
+ * so a remote Neon staging/production host is rejected outright; and the database must still be
+ * named `mintvault_dgn_release_*`, so even on loopback it cannot be aimed at a real local database.
+ * Only the set of accepted disposable ports is widened to the ones this repository provisions.
+ */
+const DISPOSABLE_PORTS = ["5432", "55432", "55433"];
+
 function assertDisposableUrl(url: string): void {
   const parsed = new URL(url);
   if (
     !["127.0.0.1", "localhost"].includes(parsed.hostname) ||
-    parsed.port !== "5432" ||
+    !DISPOSABLE_PORTS.includes(parsed.port) ||
     !/^\/mintvault_dgn_release_[a-z0-9_]+$/i.test(parsed.pathname)
   ) {
     throw new Error(
-      "SCANNER_MIGRATION_TEST_DATABASE_URL must name a local mintvault_dgn_release_* disposable database on port 5432"
+      `SCANNER_MIGRATION_TEST_DATABASE_URL must name a local mintvault_dgn_release_* disposable database on port ${DISPOSABLE_PORTS.join(", ")}`
     );
   }
 }

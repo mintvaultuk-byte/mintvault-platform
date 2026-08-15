@@ -44,11 +44,26 @@ describe("release route rate-limit hardening", () => {
     expect(stations).toMatch(
       /capture-sessions\/:sessionId",\s*requirePartnerAuth,\s*requirePartnerCapability\("partner\.cards\.scan"\),\s*partnerStationReadRateLimit/
     );
+    // RC-F11: the three signed-station hot paths CodeQL reported as js/missing-rate-limiting. Each
+    // limiter sits AFTER both station guards so its per-station key can read req.station.
+    expect(stations).toMatch(
+      /card-jobs",\s*requireSignedStation,\s*requireSignedStationOperator,\s*partnerStationCardJobStartRateLimit/
+    );
+    expect(stations).toMatch(
+      /stations\/fix-queue",\s*requireSignedStation,\s*requireSignedStationOperator,\s*partnerStationFixQueueRateLimit/
+    );
+    expect(stations).toMatch(
+      /card-jobs\/:cardJobId\/fix-authorise",\s*requireSignedStation,\s*requireSignedStationOperator,\s*partnerStationFixAuthoriseRateLimit/
+    );
     expect(staff).toMatch(/scanner-capture-sessions",\s*requireCapability\("scan"\),\s*staffScanCaptureLimit/);
     expect(staff).toMatch(/scanner-capture-sessions\/:sessionId",\s*requireCapability\("scan"\),\s*staffScanReadLimit/);
-    expect(staff).toMatch(/scan\/certificates\/:id\/upload",\s*requireCapability\("scan"\),\s*staffScanUploadLimit,\s*scanUpload\.fields/);
+    expect(staff).toMatch(
+      /scan\/certificates\/:id\/upload",\s*requireCapability\("scan"\),\s*staffScanUploadLimit,\s*scanUpload\.fields/
+    );
     expect(grader).toMatch(/certificates\/:id\/grade",\s*requireCapability\("grade"\),\s*graderGradeMutationRateLimit/);
-    expect(grader).toMatch(/certificates\/:id\/submit",\s*requireCapability\("grade"\),\s*graderGradeMutationRateLimit/);
+    expect(grader).toMatch(
+      /certificates\/:id\/submit",\s*requireCapability\("grade"\),\s*graderGradeMutationRateLimit/
+    );
     expect(submissions).toMatch(/packing-slip",\s*submissionPdfRateLimit/);
     expect(submissions).toMatch(/shipping-label",\s*submissionPdfRateLimit/);
     for (const source of [grading, stations, staff, grader]) {

@@ -83,6 +83,10 @@ jobs:
       PARTNER_FINAL_OWNER_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_final_owner
       PARTNER_PUBLIC_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_public
       PARTNER_PUBLIC_RT_RUNTIME: postgres://partner_app_test_public:synthetic@127.0.0.1:55433/mintvault_partner_public
+      # RC-F14: both scanner suites were gated on variables set NOWHERE, so they ran in no
+      # environment at all while their presence in tests/ implied coverage.
+      SCANNER_MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55433/mintvault_dgn_release_scanner
+      SCANNER_STAGING_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_dgn_evidence
       PARTNER_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_runtime
       PARTNER_RT_RUNTIME: postgres://partner_app_test_rt:synthetic@127.0.0.1:55433/mintvault_partner_runtime
 
@@ -443,6 +447,7 @@ jobs:
                             mintvault_partner_ux_rt mintvault_partner_rls mintvault_partner_cert_origin \
                             mintvault_partner_definer mintvault_partner_mgmt_mig \
                             mintvault_partner_admin_shell \
+                            mintvault_dgn_release_scanner \
                             mintvault_correction_test; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
@@ -451,6 +456,15 @@ jobs:
             fi
             echo "[ci-db] partner suite database ready: $partner_db"
           done
+          # RC-F14: the scanner evidence-staging suite guards its URL to ports 5432/55432, so its
+          # database must live on the pg16 cluster rather than with the partner databases above.
+          # Without it the suite skips — which is precisely how it came to run in no environment.
+          evidence_present="$(psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT 1 FROM pg_database WHERE datname = 'mintvault_dgn_evidence'")"
+          if [ "$evidence_present" != "1" ]; then
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE mintvault_dgn_evidence"
+          fi
+          echo "[ci-db] scanner evidence database ready: mintvault_dgn_evidence"
           # The capability suite creates and ALTERs roles (BYPASSRLS / NOBYPASSRLS), so the admin
           # role must carry CREATEROLE — otherwise its two route-gating tests would fail deep
           # inside beforeAll instead of reporting a clear precondition failure here.

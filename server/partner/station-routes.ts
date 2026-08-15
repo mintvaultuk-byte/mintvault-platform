@@ -101,6 +101,69 @@ const partnerStationCalibrationRateLimit = rateLimit({
   message: { error: "Too many station calibration requests. Please wait a minute and try again." },
 });
 
+/*
+ * RC-F11 — the three signed-station hot paths that carried NO rate limit at all.
+ *
+ * CodeQL reported these as `js/missing-rate-limiting` and it was right: `POST /card-jobs`,
+ * `GET /stations/fix-queue` and `POST /card-jobs/:cardJobId/fix-authorise` reached the database and
+ * the credit authority with only the Ed25519 station signature and the operator session in front of
+ * them. Those two proofs establish WHO is calling; they place no bound on HOW OFTEN, so a
+ * compromised or simply malfunctioning shop Mac in a retry loop could exhaust the estate.
+ *
+ * BUDGETS ARE SET FROM THE PHYSICAL WORKFLOW, NOT FROM A GENERIC WEB-FORM DEFAULT. Scanning is the
+ * high-frequency path and a shift must stay fast — this is a locked product requirement, and a limit
+ * that interrupts a real batch would be worked around by staff, which is strictly worse than the
+ * abuse it prevents. An operator physically places a card, scans it, and moves on; even a fast bench
+ * doing continuous batch work is nowhere near one card per second. So the ceilings below are set far
+ * above any achievable human rate and act only as a runaway/abuse stop.
+ *
+ * KEYED PER STATION, so one shop's Mac can never consume another tenant's allowance — a station
+ * belongs to exactly one tenant and one location, which makes the station id the tightest correct
+ * key. `passOnStoreError: false` matches every other limiter in this file: if the counter cannot be
+ * consulted the request is refused rather than waved through.
+ *
+ * KNOWN LIMIT, DELIBERATELY NOT FIXED HERE: like every existing limiter in this file, the store is
+ * per-process, so across the two production Machines the effective ceiling is 2x. That is a
+ * pre-existing, already-documented production prerequisite (server/partner/rate-limit.ts) and
+ * introducing a shared store is infrastructure work, not a release repair. It does not weaken the
+ * property that matters here — a runaway station is still bounded, and still bounded per station.
+ */
+const partnerStationCardJobStartRateLimit = rateLimit({
+  windowMs: 60_000,
+  // 120/min = two card starts per second, sustained, per station. Unreachable by hand; a loop hits
+  // it immediately. Deliberately far above partnerStationCaptureRateLimit (20/min), which bounds
+  // capture SESSIONS rather than the cards a bench can start.
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-card-job:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many new-card requests from this station. Please wait a minute and try again." },
+});
+
+const partnerStationFixQueueRateLimit = rateLimit({
+  windowMs: 60_000,
+  // A read, and the queue is polled by the shop-floor app; matches the established read budget.
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-fix-queue:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many fix-queue requests from this station. Please wait a minute and try again." },
+});
+
+const partnerStationFixAuthoriseRateLimit = rateLimit({
+  windowMs: 60_000,
+  // Authorising a FIX is rarer than starting a card and is a lineage decision, so it is tighter —
+  // still one per second, which no operator reaches.
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  passOnStoreError: false,
+  keyGenerator: (req) => `partner-station-fix-authorise:${req.station?.id ?? "unknown"}`,
+  message: { error: "Too many fix authorisations from this station. Please wait a minute and try again." },
+});
+
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -357,7 +420,12 @@ export function partnerStationRouter(): Router {
    * only thing the client supplies is `clientOpId` — the retry token — and an optional card label.
    * There is therefore no request a station can craft that starts a card for another partner.
    */
-  r.post("/card-jobs", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+  r.post(
+    "/card-jobs",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCardJobStartRateLimit,
+    async (req, res) => {
     const station = req.station!;
     const operator = req.partner!;
     try {
@@ -409,7 +477,12 @@ export function partnerStationRouter(): Router {
    * request signature plus an operator-session header — and Express matches the first registered
    * route, so one path with two guard stacks would silently mean only the first stack ever runs.
    */
-  r.get("/stations/fix-queue", requireSignedStation, requireSignedStationOperator, async (req, res) => {
+  r.get(
+    "/stations/fix-queue",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationFixQueueRateLimit,
+    async (req, res) => {
     const station = req.station!;
     try {
       // A Mac stands on ONE shop floor. Always confined — never the whole estate.
@@ -435,6 +508,7 @@ export function partnerStationRouter(): Router {
     "/card-jobs/:cardJobId/fix-authorise",
     requireSignedStation,
     requireSignedStationOperator,
+    partnerStationFixAuthoriseRateLimit,
     async (req, res) => {
       const station = req.station!;
       const operator = req.partner!;
