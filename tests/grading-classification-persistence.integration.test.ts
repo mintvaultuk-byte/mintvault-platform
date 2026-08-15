@@ -154,11 +154,35 @@ describeDb("classification persists through the REAL save → DB → reload path
     expect(reloaded?.rarityCode).toBe("silver_star_rare");
   });
 
-  it("'Gold Star' is NOT a structured rarity — it is carried by the LEGACY rarity field", async () => {
-    // Documents the real asymmetry between the two rarity systems so nobody "fixes" this
-    // by inventing a structured gold_star value.
-    expect([...rarityValues].some((v) => v.includes("gold"))).toBe(false);
-    const { reloaded, raw } = await saveAndReload({ rarity: "GOLD_STAR" });
+  it("EX-era 'Gold Star' is its OWN structured rarity and persists (not folded into Illustration Rare)", async () => {
+    // This assertion previously recorded the ANOMALY — that gold_star had no structured
+    // value at all, which is what let a vintage card be classified as a modern
+    // Illustration Rare. gold_star now completes the legacy<->structured pattern that
+    // every other printed rarity already followed, so the assertion is inverted and
+    // strengthened rather than dropped.
+    expect(rarityValues.has("gold_star")).toBe(true);
+    expect(rarityValues.has("illustration_rare")).toBe(true);
+    const { reloaded, raw } = await saveAndReload({ rarityCode: "gold_star" });
+    expect(raw.rarity_code).toBe("gold_star");
+    expect(reloaded?.rarityCode).toBe("gold_star");
+    // It must never be stored as, or silently coerced into, a modern gold-star rarity.
+    expect(raw.rarity_code).not.toBe("illustration_rare");
+    expect(raw.rarity_code).not.toBe("special_illustration_rare");
+    expect(raw.rarity_code).not.toBe("hyper_rare");
+  });
+
+  it("clearing Gold Star clears ONLY the rarity, leaving finish and promo intact", async () => {
+    await saveAndReload({ rarityCode: "gold_star", finishVariant: "holo", promoType: "mcdonalds" });
+    const { reloaded, raw } = await saveAndReload({ rarityCode: null });
+    expect(raw.rarity_code).toBeNull();
+    expect(raw.finish_variant).toBe("holo");
+    expect(raw.promo_type).toBe("mcdonalds");
+    expect(reloaded?.rarityCode).toBeNull();
+  });
+
+  it("the LEGACY GOLD_STAR column value is still accepted and untouched by the structured value", async () => {
+    // Historical certificates keep their legacy value; nothing is migrated.
+    const { reloaded, raw } = await saveAndReload({ rarity: "GOLD_STAR", rarityCode: null });
     expect(raw.rarity).toBe("GOLD_STAR");
     expect(reloaded?.rarity).toBe("GOLD_STAR");
   });

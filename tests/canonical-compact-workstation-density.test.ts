@@ -120,7 +120,19 @@ describe("five-role and protected-boundary negative proof", () => {
   } as const;
 
   it("changed only the explicitly owner-approved presentation and evidence surfaces", () => {
+    // UNION, not replacement (origin/main's convention, preserved): the allowlist below carries the
+    // density pass's surfaces AND the Gold Star classification-safety surfaces, so an earlier
+    // owner authorisation is never silently dropped by a later one.
+    //
+    // MERGE RESOLUTION (2026-08-15). origin/main still compared `git diff --name-only origin/main`;
+    // this side had already de-drifted that to the fixed range above (RC-F8). The fixed range is
+    // kept, because the branch-relative form is what rots: on main it evaluates an EMPTY diff and
+    // passes vacuously, and on any release branch it trips on unrelated files. The Gold Star entries
+    // main added stay in the allowlist as the record of that authorisation; the Gold Star change has
+    // its own scope proof in tests/gold-star-classification-safety.test.ts, so nothing is left
+    // unguarded by preferring the pinned range here.
     const allowed = new Set([
+      // ── Compact canonical workstation density pass (PR #299, commit 144fffa8) ──
       "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx",
       "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
       "client/src/components/grading-workflow/CertificatePreviewPanel.tsx",
@@ -130,6 +142,17 @@ describe("five-role and protected-boundary negative proof", () => {
       "client/src/components/grading/centering-input.tsx",
       "client/src/components/grading/grading-panel.tsx",
       "client/src/pages/dev-canonical-workstation-harness.tsx",
+      // ── Gold Star classification-safety repair (owner-commissioned) ────────────
+      // A vintage EX-era card could be classified as a MODERN Illustration Rare,
+      // because rarity search carried no card context and the EX Gold Star had no
+      // structured value at all. The repair is confined to the rarity catalogue data
+      // and the single canonical picker that reads it. Neither file is a scoring,
+      // authority or transport surface, so this widens the presentation allowlist
+      // WITHOUT relaxing the hard prohibition asserted immediately below — that
+      // prohibition still bars shared/mvgs-scoring.ts, shared/centering.ts,
+      // shared/pristine.ts, shared/schema.ts, server/ and migrations/ outright.
+      "shared/pokemon-rarity-catalogue.ts",
+      "client/src/components/rarity-picker/RarityVariantPicker.tsx",
     ]);
     // FAIL-CLOSED, as grading-release-scope.ts requires: a scope proof that cannot be evaluated
     // must error rather than silently pass on a shallow clone.
