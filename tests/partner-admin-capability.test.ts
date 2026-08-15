@@ -95,6 +95,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
   let admin: Client;
   let server: http.Server;
   let base = "";
+  let priorSuperAdminEmails: string | undefined;
 
   beforeAll(async () => {
     admin = new Client({ connectionString: ADMIN });
@@ -252,6 +253,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     // capability gate it exists to test — the 403 merely looks like the 503 the suite is asserting.
     // Declaring the synthetic admin as a super admin does not weaken the guard: it still runs, in
     // full, on every request; it is the fixture that is being told who the test's operator is.
+    priorSuperAdminEmails = process.env.SUPER_ADMIN_EMAILS;
     process.env.SUPER_ADMIN_EMAILS = "admin@example.test";
     resetPartnerAdminCapabilityCache();
     const { closePartnerPools } = await import("../server/partner/db");
@@ -295,6 +297,10 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
   });
 
   afterAll(async () => {
+    // vitest shares process.env between files in one worker, and this repository has been bitten by
+    // exactly that before. Restore rather than leak a super-admin allowlist into whatever runs next.
+    if (priorSuperAdminEmails === undefined) delete process.env.SUPER_ADMIN_EMAILS;
+    else process.env.SUPER_ADMIN_EMAILS = priorSuperAdminEmails;
     await new Promise<void>((r) => server?.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools().catch(() => {});
