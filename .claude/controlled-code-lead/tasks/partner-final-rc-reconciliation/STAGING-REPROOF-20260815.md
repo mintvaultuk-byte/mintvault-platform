@@ -151,3 +151,82 @@ perform a PostgreSQL upsert per request and fail closed if the counter cannot be
 **What would close it:** someone holding the staging partner/station credentials runs AT-23 §Scanner
 NEW, §FIX, §last-credit race and §station authority against `d683eb98` on both Machines. That is a
 credential-gated step, not an engineering one.
+
+---
+
+# ADDENDUM — secret separation and the credential handoff (same day)
+
+## 1. Staging secret separation — 2 of 3 done, 1 owner-gated by necessity
+
+| Secret | Staging | Production | |
+| --- | --- | --- | --- |
+| `SESSION_SECRET` | `84768065c806ccbc` | `ba522bdfdf5f3ab2` | **SEPARATED** |
+| `SIGNED_URL_SECRET` | `327f24432425f26a` | `dc424a4806920f3b` | **SEPARATED** |
+| `ADMIN_PASSWORD` | `ee91aa784f02314e` | `ee91aa784f02314e` | **STILL SHARED — owner must set** |
+
+Rotated with `flyctl secrets import` reading from stdin, so no value appeared in a command argument,
+in output, or anywhere in this repository. Confirmed **only** by digest comparison. No production
+secret was read or changed.
+
+**`ADMIN_PASSWORD` was deliberately not rotated by me, and this is not deference — it is a
+dependency.** Staging station approval runs through `requireSuperAdmin` + `requireAdminStepUp`, i.e.
+the admin password. Rotating it to a value I am instructed never to print would lock the owner out of
+staging admin and make sections 3–7 of this very task impossible. The owner has to know it, so the
+owner has to choose it:
+
+```bash
+read -rs -p "New staging-only ADMIN_PASSWORD: " P && \
+  printf 'ADMIN_PASSWORD=%s\n' "$P" | flyctl secrets import --app mintvault-v2 && unset P
+```
+
+(`read -rs` keeps it off the screen; piping keeps it out of shell history and out of the process list.)
+
+**Staging after rotation:** v484 → both Machines on `d683eb98`, `/health` 200, `/ready` 200, partner
+surface mounted (401, so the schema contract is satisfied), shared PostgreSQL rate-limit store
+re-installed on both.
+
+## 2. The credential-gated sections — made runnable, not hand-waved
+
+`scripts/staging/at23-station-reproof.mjs` drives §3, §6 and §7 against both Machines with
+`fly-force-instance-id` pinning. **The owner runs it**; credentials come from the owner's own
+environment and are never printed, logged or persisted, and the evidence file records outcomes only.
+
+Two safety properties, both verified rather than asserted:
+
+- **It refuses any non-staging host.** Pointing it at `mintvaultuk.com` throws.
+- **Its envelope construction is proven correct against LIVE staging** using a throwaway key: both
+  Machines answered `invalid_station_code`, meaning the server parsed every header and the canonical
+  string and failed only at station lookup. A malformed envelope fails differently.
+
+### Why it mints a disposable station rather than using the scanner Mac's
+
+The scanner app stores its station key encrypted through the macOS Keychain and **refuses any
+plaintext fallback** (`scripts/scanner-app/lib/station-identity.js`), and that module cannot load
+outside Electron. Exporting that key to run a test would defeat a deliberate security decision. So
+`--new-identity` mints a throwaway identity: the private key goes straight to a `0600` file the owner
+controls and is never printed; only the public key and fingerprint are shown, which are not secrets
+and are exactly what `POST /api/partner/stations/enrol` expects. Both artefacts are gitignored.
+
+### What the owner does
+
+1. `node scripts/staging/at23-station-reproof.mjs --new-identity`
+2. Enrol the printed public key on **staging** (`POST /api/partner/stations/enrol`, partner session
+   with `partner.stations.enrol`), then approve the station in staging admin.
+3. Export `STAGING_STATION_CODE`, `STAGING_STATION_KEY_FILE`, `STAGING_OPERATOR_SESSION`
+   (an MFA-passed partner session token holding `partner.cards.scan`), plus the two Machine IDs.
+4. `node scripts/staging/at23-station-reproof.mjs --sections 3,6,7 --out at23-evidence.json`
+5. Send back `at23-evidence.json` — it contains outcomes only, no secrets.
+6. Revoke the disposable station and delete the key file.
+
+§4 (last-credit race), §5 (Scanner FIX) and §8 (restart continuity) additionally need an admin
+session for credit adjustment, side invalidation and machine restart. The harness reports them
+**NOT AUTOMATED** rather than pretending to cover them.
+
+## 3. Final local gates on this tree
+
+Partner gate **70 / 1284 / 0 / 0** · protected grading **587** · migrations + rollback **119** ·
+rate-limit + runner integrity **24** · typecheck clean · lint 0 errors · build green ·
+`git diff --check` clean.
+
+The commits added after the staging deploy (`d683eb98`) touch only `.claude/`, `.gitignore` and
+`scripts/staging/` — **none is build-reachable**, so staging's artifact is byte-equivalent to HEAD.
