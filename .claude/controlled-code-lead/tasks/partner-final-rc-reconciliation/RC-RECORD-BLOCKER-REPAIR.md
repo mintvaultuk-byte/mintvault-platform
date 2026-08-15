@@ -120,8 +120,29 @@ Verified **executing**, not merely present: **1/1** and **2/2**, matching their 
 | `station-routes.ts` `POST /card-jobs` | **genuine** | 120/min per station |
 | `station-routes.ts` `GET /stations/fix-queue` | **genuine** | 120/min per station |
 | `station-routes.ts` `POST /card-jobs/:id/fix-authorise` | **genuine** | 60/min per station |
-| `routes.ts` `POST /auth/step-up` | **FALSE POSITIVE** | the route IS limited, by `partnerMfaLimiter`; CodeQL does not trace this repo's `partnerRateLimit` factory the way it traces `express-rate-limit`. Verified by reading the route. No change, no suppression. |
+| `routes.ts` `POST /auth/step-up` | **FALSE POSITIVE** | the route IS limited, by `partnerMfaLimiter`. Verified by reading the route. No change, no suppression. |
 | `index.ts` `js/missing-token-validation` (CSRF) | **PRE-EXISTING** | equally present on `origin/main`; out of scope for a release repair and unchanged by it |
+
+### CodeQL still reports the three station routes after they were limited — with evidence why
+
+The `CodeQL` alert check remains red, reporting `js/missing-rate-limiting` on the three routes that
+now carry per-station limiters. That is **not** evidence the fix did not land, and it was checked
+rather than assumed:
+
+- The limiters are present in source, pinned in guard ORDER by
+  `tests/release-route-rate-limits.test.ts`, and proven behaviourally (429s, per-station isolation)
+  by `tests/partner-station-rate-limit-budgets.test.ts`.
+- **The decisive evidence:** on `origin/main`, this same query flags
+  `server/partner/station-routes.ts:214` — which is `/stations/heartbeat`, a route that demonstrably
+  HAS `partnerStationHeartbeatRateLimit` applied. So the query flags routes with working
+  `express-rate-limit` middleware in this codebase. The message it emits ("This route handler
+  performs authorization, but is not rate-limited") is therefore not reliable here.
+- **The branch strictly improves on main for this rule: 11 open alerts on `main`, 4 on this PR.**
+- Repo policy (`.github/workflows/ci.yml`) states the security scans "do NOT gate the Fly deploy …
+  they are a signal, not a blocker", and `main` itself ships with the CSRF HIGH open.
+
+Nothing is suppressed and no alert is dismissed. **Verdict: CODEQL HIGH = REMAINING**, with the
+mitigation in place and independently proven.
 
 Budgets come from the physical workflow, not a generic web-form default: scanning is the
 high-frequency path, a shift must stay fast, and a limit that interrupts a real batch gets worked
@@ -200,6 +221,25 @@ re-run on staging against this candidate before production. The remaining delta 
 step-up, grading-workstation UI) is client-side and category B, needing a staging UI smoke.
 
 Do **not** claim AT-23 equivalence for the station paths on this SHA.
+
+## origin/main moved AGAIN mid-pass — reconciled
+
+`origin/main` advanced from `067ed0c6` to `5a8ff407` (PR #301) while this pass was running — the
+third concurrent-session move under this programme. Delta inspected before any action:
+
+- **One file: `tests/grading-classification-persistence.integration.test.ts`.** Test-only. No
+  server, shared, client or migration file; no protected grading source.
+- Live production remained `067ed0c6`, which this RC already contained, so there was never a
+  clobber risk in the important direction.
+
+**Merged anyway**, because containing `origin/main` is a precondition for being a deployable
+candidate: `safe-deploy` GUARD 1 compares against `origin/main`, not against the live release, so an
+RC behind main is refused by the existing guard. Grading guards and the full pinned gate were re-run
+after the merge.
+
+**Anyone acting on this record must re-read `fly releases` and `/api/version` immediately before
+deploying.** Main and production have each moved repeatedly during this programme, and a written SHA
+here is true only as of the timestamp on it.
 
 ## Owner-gated, NOT performed
 
