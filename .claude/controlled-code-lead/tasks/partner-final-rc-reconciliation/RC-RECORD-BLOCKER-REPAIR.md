@@ -190,6 +190,19 @@ byte-equivalent to the CI step, behind an explicit `seedCoreStubs` flag rather t
 Deliberately a minimal stub, not a schema push: the real `certificates` has no `secret` column and
 these suites insert `cert_id`/`secret` then assert the row survives a rollback.
 
+### A note on how the gate itself must be run
+
+The first post-#302 gate run reported 2 suites red (`partner-rbac-bootstrap`,
+`partner-runtime-integration`, 13 failed assertions). **That run was invalid, and the cause was
+mine:** a migration-family vitest run was executing concurrently, and the failures were
+`Test timed out in 5000ms` — contention, not logic. Both suites passed in isolation at their full
+counts (27 and 47), and the gate was then re-run clean.
+
+This is the same non-determinism `docs/partner/RELEASE_MATRIX_AT1_AT23.md` documents. **Run the
+pinned gate with nothing else running, and re-run a failing suite in isolation before classifying
+it** — a red result under load is not evidence of a defect, and reporting one as such is as
+misleading as reporting a false green.
+
 ## Local gate results
 
 | Gate | Result |
@@ -237,9 +250,37 @@ candidate: `safe-deploy` GUARD 1 compares against `origin/main`, not against the
 RC behind main is refused by the existing guard. Grading guards and the full pinned gate were re-run
 after the merge.
 
+### …and again: PR #302 (RUNTIME), reconciled properly
+
+`origin/main` then advanced to `36699531` — the **fourth** move. Unlike #301 this one **touches
+runtime**, so it got controlled reconciliation rather than a note:
+
+| File | |
+| --- | --- |
+| `shared/pokemon-rarity-catalogue.ts` | RUNTIME, +60/−3 |
+| `client/src/components/rarity-picker/RarityVariantPicker.tsx` | RUNTIME, +7/−1 |
+| `tests/gold-star-classification-safety.test.ts` | new |
+| `tests/canonical-compact-workstation-density.test.ts` | updated — **conflicted** |
+| `tests/grading-classification-persistence.integration.test.ts` | updated |
+
+The protected MVGS engine is **not** touched: no `mvgs`/`centering`/`pristine`/`grader`/`labels`/
+`certificate-document` file appears in the delta. Rarity feeds the variant/rarity label line, whose
+guards are in the re-run set below.
+
+**The conflict was real and both sides mattered.** `canonical-compact-workstation-density.test.ts`:
+this side had de-drifted the scope guard to the fixed range `839edd9c..144fffa8` (RC-F8); main still
+used `git diff --name-only origin/main` and had added the two Gold Star files to the allowlist.
+
+Resolved as a **union**, the convention the file itself documents: the **fixed range is kept**
+(the branch-relative form is what rots — on main it evaluates an empty diff and passes vacuously,
+on a release branch it trips on unrelated files), and main's Gold Star allowlist entries and its
+"union, not replacement" comment are **kept**. Nothing is left unguarded by that choice: the Gold
+Star change carries its own scope proof in `tests/gold-star-classification-safety.test.ts`.
+
 **Anyone acting on this record must re-read `fly releases` and `/api/version` immediately before
-deploying.** Main and production have each moved repeatedly during this programme, and a written SHA
-here is true only as of the timestamp on it.
+deploying.** Main moved FOUR times during this programme, twice while this single pass was running,
+always via concurrent sessions. A written SHA here is true only as of the timestamp on it, and the
+RC's containment of main can be invalidated by the next merge at any moment.
 
 ## Owner-gated, NOT performed
 
