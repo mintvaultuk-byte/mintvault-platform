@@ -311,12 +311,18 @@ export function partnerStationRouter(): Router {
     }
   });
 
+  // From origin/main: a signed station may still flood its own heartbeat. Keyed per
+  // station id, so one noisy Mac cannot exhaust the budget for the whole fleet.
+  //
+  // KEEP THIS COMMENT ABOVE THE ROUTE, NOT INSIDE THE MIDDLEWARE CHAIN. The release guard in
+  // tests/release-route-rate-limits.test.ts asserts the authentication -> capability ->
+  // rate-limit ORDER by matching the argument list with `\s*` between the middleware names,
+  // and `\s*` cannot span a comment. Sitting between `requireSignedStationOperator` and
+  // `partnerStationHeartbeatRateLimit` it broke that assertion while changing no behaviour.
   r.post(
     "/stations/heartbeat",
     requireSignedStation,
     requireSignedStationOperator,
-    // From origin/main: a signed station may still flood its own heartbeat. Keyed per
-    // station id, so one noisy Mac cannot exhaust the budget for the whole fleet.
     partnerStationHeartbeatRateLimit,
     async (req, res) => {
     try {
@@ -448,11 +454,16 @@ export function partnerStationRouter(): Router {
     }
   );
 
+  // From origin/main: `partnerStationCalibrationIngressRateLimit` runs BEFORE authentication on
+  // purpose. requireSignedStation verifies a signed payload and resolves the operator session, so
+  // the endpoint must be protected from unauthenticated floods as well as from an authenticated one.
+  //
+  // KEEP THIS COMMENT ABOVE THE ROUTE, NOT INSIDE THE MIDDLEWARE CHAIN — see the note on
+  // /stations/heartbeat above. tests/release-route-rate-limits.test.ts pins this exact
+  // ingress-limit -> authentication -> operator -> per-station-limit ORDER with `\s*` between the
+  // middleware names, and `\s*` cannot span a comment.
   r.post(
     "/stations/calibrations",
-    // From origin/main: this runs BEFORE authentication on purpose. requireSignedStation
-    // verifies a signed payload and resolves the operator session, so the endpoint must be
-    // protected from unauthenticated floods as well as from an authenticated one.
     partnerStationCalibrationIngressRateLimit,
     requireSignedStation,
     requireSignedStationOperator,
