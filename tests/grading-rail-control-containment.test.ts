@@ -46,10 +46,15 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
 
   it("the card frame absorbs ONLY the leftover height (flex-1 min-h-0)", () => {
     // Without min-h-0 a flex item refuses to shrink below its content, which is exactly how the
-    // controls got pushed out of the clipped host.
-    expect(VIEWER).toMatch(
-      /<div className="flex min-h-0 flex-1 items-center justify-center">\{renderImageArea\("100%"\)\}/
-    );
+    // controls got pushed out of the clipped host. Unchanged requirement.
+    //
+    // The region became a COLUMN when the zoom toolbar was stacked beneath the card
+    // instead of beside it (it was taking ~110px out of the rail's width). The
+    // containment contract this test exists to protect — `min-h-0 flex-1`, so the card
+    // area takes the leftover and never pushes the controls out — is identical.
+    expect(VIEWER).toMatch(/<div className="flex min-h-0 flex-1 flex-col">\{renderImageArea\("100%"\)\}/);
+    // Centring now belongs to the measured inspection viewport inside that region.
+    expect(VIEWER).toMatch(/className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"/);
   });
 
   it("the controls row never shrinks and is a real in-flow sibling", () => {
