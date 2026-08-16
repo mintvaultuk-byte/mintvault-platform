@@ -3,6 +3,7 @@ import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { AdminStepUpHost } from "@/components/admin/admin-step-up";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
 import ErrorBoundary from "@/components/error-boundary";
@@ -257,102 +258,114 @@ function PageLoader() {
  */
 function PartnerPortalRoutes() {
   return (
-    <PartnerSessionProvider>
-      <Switch>
-        <Route path="/partner/login">
-          <PartnerLoginPage />
-        </Route>
-        <Route path="/partner/invite">
-          <PartnerInvitePage />
-        </Route>
-        {/* Both reset pages are PUBLIC by design — a user who cannot sign in must be able to
+    /*
+     * PARTNER-SCOPED ERROR BOUNDARY. The only other boundary is at the application root (around
+     * QueryClientProvider→Router), so before this a single throw inside any /partner/* page — for
+     * example an unguarded readiness deref during a rolling deploy's mixed-version window — took
+     * down the ENTIRE SPA, admin surfaces included, with window.location.reload() as its sole
+     * recovery. If the bad response shape persists, that is an unrecoverable reload loop.
+     *
+     * Containing partner failures here means a broken partner page can never black out HQ grading,
+     * which is the surface that must stay up during a shop pilot.
+     */
+    <ErrorBoundary>
+      <PartnerSessionProvider>
+        <Switch>
+          <Route path="/partner/login">
+            <PartnerLoginPage />
+          </Route>
+          <Route path="/partner/invite">
+            <PartnerInvitePage />
+          </Route>
+          {/* Both reset pages are PUBLIC by design — a user who cannot sign in must be able to
             reach them, so they sit outside PartnerRouteGuard alongside login and invite. */}
-        <Route path="/partner/forgot-password">
-          <PartnerPasswordResetRequestPage />
-        </Route>
-        <Route path="/partner/reset">
-          <PartnerPasswordResetPage />
-        </Route>
-        <Route path="/partner/dashboard">
-          <PartnerRouteGuard>
-            <PartnerDashboardPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/submissions/new">
-          <PartnerRouteGuard>
-            <PartnerSubmissionWizardPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/submissions/:id">
-          <PartnerRouteGuard>
-            <PartnerSubmissionDetailPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/submissions">
-          <PartnerRouteGuard>
-            <PartnerSubmissionsPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/customers">
-          <PartnerRouteGuard>
-            <PartnerCustomersPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/grading">
-          <PartnerRouteGuard requiredPermission="partner.cards.assess">
-            <PartnerGradingPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/users">
-          <PartnerRouteGuard>
-            <PartnerUsersPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/locations">
-          <PartnerRouteGuard>
-            <PartnerLocationsPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/billing">
-          <PartnerRouteGuard>
-            <PartnerBillingPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/certificates">
-          <PartnerRouteGuard requiredPermission="partner.orders.view">
-            <PartnerCertificatesPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/supplies">
-          <PartnerRouteGuard>
-            <PartnerWorkflowPlaceholderPage kind="supplies" />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/orders">
-          <PartnerRouteGuard requiredPermission="partner.orders.view">
-            <PartnerWorkflowPlaceholderPage kind="orders" />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/public-profile">
-          <PartnerRouteGuard requiredPermission="partner.location.view">
-            <PartnerWorkflowPlaceholderPage kind="public-profile" />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/help">
-          <PartnerRouteGuard>
-            <PartnerHelpPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route path="/partner/security">
-          <PartnerRouteGuard>
-            <PartnerSecurityPage />
-          </PartnerRouteGuard>
-        </Route>
-        <Route>
-          <Redirect to="/partner/dashboard" />
-        </Route>
-      </Switch>
-    </PartnerSessionProvider>
+          <Route path="/partner/forgot-password">
+            <PartnerPasswordResetRequestPage />
+          </Route>
+          <Route path="/partner/reset">
+            <PartnerPasswordResetPage />
+          </Route>
+          <Route path="/partner/dashboard">
+            <PartnerRouteGuard>
+              <PartnerDashboardPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/submissions/new">
+            <PartnerRouteGuard>
+              <PartnerSubmissionWizardPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/submissions/:id">
+            <PartnerRouteGuard>
+              <PartnerSubmissionDetailPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/submissions">
+            <PartnerRouteGuard>
+              <PartnerSubmissionsPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/customers">
+            <PartnerRouteGuard>
+              <PartnerCustomersPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/grading">
+            <PartnerRouteGuard requiredPermission="partner.cards.assess">
+              <PartnerGradingPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/users">
+            <PartnerRouteGuard>
+              <PartnerUsersPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/locations">
+            <PartnerRouteGuard>
+              <PartnerLocationsPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/billing">
+            <PartnerRouteGuard>
+              <PartnerBillingPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/certificates">
+            <PartnerRouteGuard requiredPermission="partner.orders.view">
+              <PartnerCertificatesPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/supplies">
+            <PartnerRouteGuard>
+              <PartnerWorkflowPlaceholderPage kind="supplies" />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/orders">
+            <PartnerRouteGuard requiredPermission="partner.orders.view">
+              <PartnerWorkflowPlaceholderPage kind="orders" />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/public-profile">
+            <PartnerRouteGuard requiredPermission="partner.location.view">
+              <PartnerWorkflowPlaceholderPage kind="public-profile" />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/help">
+            <PartnerRouteGuard>
+              <PartnerHelpPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/security">
+            <PartnerRouteGuard>
+              <PartnerSecurityPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route>
+            <Redirect to="/partner/dashboard" />
+          </Route>
+        </Switch>
+      </PartnerSessionProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -541,6 +554,13 @@ function App() {
           <TooltipProvider>
             <GoldBurstEffect />
             <Toaster />
+            {/*
+              Super Admin step-up prompt. Mounted ONCE, at the root, because the high-risk admin
+              mutations are declared inside the page components themselves — a context provider would
+              have to sit above each page and force those pages to be restructured. It renders
+              nothing until the server issues a challenge.
+            */}
+            <AdminStepUpHost />
             <Router />
             <CookieBanner />
           </TooltipProvider>

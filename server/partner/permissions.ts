@@ -21,6 +21,17 @@ export const PARTNER_PERMISSIONS = [
   "partner.documents.view",
   "partner.training.view",
   "partner.credits.view",
+  /*
+   * Seeded by migration 0083 and enforced by POST /credits/checkout since P5, but it was missing
+   * from this catalogue — so validatePartnerRbac() reported it as an UNEXPECTED permission against
+   * every correctly-migrated database, and seedPartnerRbac() (test fixtures) could never grant it,
+   * making the purchase route unreachable under test for reasons unrelated to the code under test.
+   *
+   * PARTNER_OWNER spreads this whole array, and every other role enumerates its grants explicitly,
+   * so listing it here reproduces 0083's grant exactly: OWNER yes, MANAGER only if an owner grants
+   * it (plan OD-5 default: off), GRADER never.
+   */
+  "partner.credits.purchase",
   "partner.orders.view",
   "partner.orders.create",
   "partner.orders.edit",
@@ -29,6 +40,13 @@ export const PARTNER_PERMISSIONS = [
   "partner.cards.view",
   "partner.cards.receive",
   "partner.cards.scan",
+  /*
+   * AG-2 split these two OUT of partner.cards.scan so a least-privilege scanner role is
+   * expressible at all. Granted (migration 0085) to exactly the three roles that already held
+   * partner.cards.scan, so no existing role gained or lost any real-world ability.
+   */
+  "partner.stations.enrol",
+  "partner.cards.fix",
   "partner.cards.assess",
   "partner.cards.preview",
   "partner.support.view",
@@ -40,6 +58,8 @@ export type PartnerPermission = (typeof PARTNER_PERMISSIONS)[number];
 export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
   PARTNER_OWNER: [...PARTNER_PERMISSIONS],
   PARTNER_MANAGER: [
+    "partner.stations.enrol",
+    "partner.cards.fix",
     "partner.dashboard.view",
     "partner.organisation.view",
     "partner.location.view",
@@ -63,6 +83,8 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.support.create",
   ],
   MVGS_ASSESSMENT_TECHNICIAN: [
+    "partner.stations.enrol",
+    "partner.cards.fix",
     "partner.dashboard.view",
     "partner.location.view",
     "partner.documents.view",
@@ -93,6 +115,18 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.credits.view",
     "partner.orders.view",
   ],
+  /*
+   * AG-2 — SCANNER_OPERATOR. Deliberately the shortest list in this map.
+   *
+   * location.view  the Scanner shows which shop floor it operates under
+   * cards.view     the minimum operational Card Job information (the FIX queue)
+   * cards.scan     operate an APPROVED station: NEW capture and FIX capture
+   *
+   * NOT cards.assess (no grading), NOT credits.* (cannot buy or even see the wallet), NOT users.*
+   * (no staff management), NOT stations.enrol (cannot bring a new Mac into service), NOT cards.fix
+   * (cannot decide an image is unusable — that is a dashboard judgement, not a capture action).
+   */
+  SCANNER_OPERATOR: ["partner.location.view", "partner.cards.view", "partner.cards.scan"],
   PARTNER_TRAINEE: [
     "partner.dashboard.view",
     "partner.location.view",
@@ -115,6 +149,8 @@ export const ROLE_LABELS: Record<PartnerRoleCode, string> = {
   PARTNER_RECEPTION: "Reception",
   PARTNER_FINANCE_VIEWER: "Finance Viewer",
   PARTNER_TRAINEE: "Trainee",
+  // Must match migration 0085's label exactly — partner-rbac-parity.test.ts compares both ways.
+  SCANNER_OPERATOR: "Scanner Operator",
 };
 
 /**

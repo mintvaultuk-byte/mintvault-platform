@@ -477,6 +477,85 @@ async function runTransferV2Sweep() {
   guardedPartnerCreditReservationExpiry();
   trackInterval(guardedPartnerCreditReservationExpiry, 60 * 60 * 1000);
 
+  // Grading Credit reconciliation — hourly, advisory-locked, STRICTLY READ-ONLY.
+  //
+  // reconcileCreditReservations() has existed and been tested for some time but was never wired to
+  // anything, so wallet-vs-ledger drift could occur in production with nobody informed. Drift in the
+  // credit ledger is a money-correctness fault: it must raise an alert, and must NEVER be silently
+  // repaired, because an automatic correction destroys the evidence needed to explain what happened.
+  // Remediation is an audited Super Admin adjustment.
+  //
+  // An `error`-severity issue means an invariant is already broken (balance mismatch, negative
+  // balance, missing consume evidence, duplicate terminal transition, cross-tenant reference), so it
+  // is logged at error level with a bounded sample. Expected steady state is exactly zero.
+  const guardedPartnerCreditReconciliation = guard("partner-credit-reconciliation", async () => {
+    const { runPartnerCreditReconciliation } = await import("./jobs/partner-credit-reconciliation");
+    const result = await runPartnerCreditReconciliation();
+    if (!result.ran) {
+      log(`skipped: ${result.skippedReason}`, "partner-credit-reconciliation");
+      return;
+    }
+    if (result.errors === 0 && result.warnings === 0) return; // silent when clean — zero is the norm
+    const summary = Object.entries(result.byCode)
+      .map(([code, n]) => `${code}=${n}`)
+      .join(" ");
+    // eslint-disable-next-line no-console
+    console.error(
+      `[partner-credit-reconciliation] LEDGER DRIFT DETECTED errors=${result.errors} ` +
+        `warnings=${result.warnings} ${summary}\n  ${result.sample.join("\n  ")}`
+    );
+  });
+  guardedPartnerCreditReconciliation();
+  trackInterval(guardedPartnerCreditReconciliation, 60 * 60 * 1000);
+
+  /*
+   * Partner Card Job reconciliation — every 15 minutes, advisory-locked.
+   *
+   * THE ONE DOCUMENTED MEDIUM IN THE PARTNER PILOT. QA approval publishes the certificate on the HQ
+   * pool and then transitions the Card Job on the partner-admin pool; a crash or deploy between them
+   * leaves an approved grade whose Card Job never left QA_REVIEW. Output is fail-closed in that
+   * state, so nothing publishes early — but the card is stuck for ever and nobody is told.
+   *
+   * Fifteen minutes rather than hourly BECAUSE it is fail-closed: the cost of the drift is a real
+   * shop waiting on a card it has already paid for and had approved, so the window in which that can
+   * go unnoticed should be a coffee break, not a working session.
+   *
+   * Unlike the credit reconciliation above, this one REPAIRS — the cause is known exactly and the
+   * fix is a single legal transition the approval should have made. It settles nothing, mints
+   * nothing, touches no grade, re-proves every invariant on a locked row, and audits the repair as a
+   * repair. A REFUSED item means the premise did not hold and a human is needed; that is logged at
+   * error level, because a card that cannot be repaired automatically is the one that matters.
+   */
+  const guardedPartnerCardJobReconciliation = guard("partner-card-job-reconciliation", async () => {
+    const { runPartnerCardJobReconciliation } = await import("./jobs/partner-card-job-reconciliation");
+    const result = await runPartnerCardJobReconciliation();
+    if (!result.ran) {
+      log(`skipped: ${result.skippedReason}`, "partner-card-job-reconciliation");
+      return;
+    }
+    if (result.drift.repaired > 0 || result.drift.alreadyAdvanced > 0) {
+      log(
+        `qa drift repaired=${result.drift.repaired} already_advanced=${result.drift.alreadyAdvanced}`,
+        "partner-card-job-reconciliation"
+      );
+    }
+    if (result.drift.refused > 0) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[partner-card-job-reconciliation] DRIFT COULD NOT BE REPAIRED refused=${result.drift.refused}\n  ` +
+          result.sample.filter((s) => s.startsWith("REFUSED")).join("\n  ")
+      );
+    }
+    if (result.stuckCardJobs > 0 || result.staleLeases > 0) {
+      log(
+        `stuck_card_jobs=${result.stuckCardJobs} stale_leases=${result.staleLeases}`,
+        "partner-card-job-reconciliation"
+      );
+    }
+  });
+  guardedPartnerCardJobReconciliation();
+  trackInterval(guardedPartnerCardJobReconciliation, 15 * 60 * 1000);
+
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
   // hour. Job fail-softs if the migration hasn't run yet, so it's safe

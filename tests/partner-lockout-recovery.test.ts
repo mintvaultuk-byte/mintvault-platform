@@ -299,13 +299,29 @@ describe("P0-F lockout recovery coverage is wired up", () => {
     expect(rows[0].token_hash).toBe(crypto.createHash("sha256").update(token).digest("hex"));
     // The raw token is nowhere at rest.
     expect(rows[0].token_hash).not.toBe(token);
+    // CLOCK-SKEW TOLERANCE. `expires_at` is computed by PostgreSQL (`now() + 30 minutes`) but
+    // compared against the TEST PROCESS's clock. Those are different machines here — Postgres runs
+    // in the Colima VM — and the VM clock was measured running 79-210 ms AHEAD of the host, so a
+    // strict `<= 30` fails by a few milliseconds on a genuinely correct 30-minute TTL. That is a
+    // property of the two clocks, not of the token.
+    //
+    // The assertion's intent is "the TTL is 30 minutes, not 5 and not 300". A one-minute band
+    // preserves that intent exactly while no longer depending on two clocks agreeing to the
+    // millisecond. The lower bound is deliberately left tight.
     const ttlMinutes = (new Date(rows[0].expires_at).getTime() - Date.now()) / 60_000;
     expect(ttlMinutes).toBeGreaterThan(28);
-    expect(ttlMinutes).toBeLessThanOrEqual(30);
+    expect(ttlMinutes).toBeLessThanOrEqual(31);
     expect(rows[0].used_at).toBeNull();
   });
 
   it("does not disclose account existence for an unknown address", async () => {
+    // Retire any link the PRECEDING test left live. Issuance now applies a reissue cooldown (the
+    // denial-of-recovery guard: a fresh live link is preserved rather than replaced), so without
+    // this the "known address" request below would legitimately mint and deliver NOTHING and the
+    // delivery assertion would fail for a reason that has nothing to do with account disclosure.
+    await admin.query("UPDATE partner_password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL", [
+      VICTIM,
+    ]);
     const before = delivered.length;
     const unknown = await post("/api/partner/auth/password-reset/request", { email: "nobody@example.test" });
     const known = await post("/api/partner/auth/password-reset/request", { email: VICTIM_EMAIL });
@@ -436,5 +452,51 @@ describe("P0-F lockout recovery coverage is wired up", () => {
     // Suspended attempts are no longer counted towards lockout, but they ARE still audited.
     expect(byReason.suspended).toBeGreaterThanOrEqual(6);
     expect(byReason.invalid).toBeGreaterThanOrEqual(5);
+  });
+
+  /**
+   * Deliberately LAST in this file. The tests above share one victim account and run in sequence,
+   * consuming reset tokens as they go; this case mints and consumes a link of its own, so placing it
+   * anywhere earlier shifts the state the later tests depend on.
+   */
+  it("DENIAL-OF-RECOVERY: repeated unauthenticated requests cannot invalidate a live link", async () => {
+    // Start from a clean slate and mint one link, exactly as a victim would receive it.
+    await admin.query("UPDATE partner_password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL", [
+      VICTIM,
+    ]);
+    await post("/api/partner/auth/password-reset/request", { email: VICTIM_EMAIL });
+    await new Promise((r) => setTimeout(r, 50));
+    const victimsToken = delivered[delivered.length - 1].token;
+    const deliveriesAfterMint = delivered.length;
+
+    // The attack: an unauthenticated caller floods the public endpoint for someone else's address.
+    // Two independent defences may answer — the per-account rate limiter (429) or the reissue
+    // cooldown (200 + no mint). Either is acceptable; what must NEVER happen is the victim's live
+    // link being invalidated. Neither response may disclose whether the account exists.
+    for (let i = 0; i < 5; i++) {
+      const flood = await post("/api/partner/auth/password-reset/request", { email: VICTIM_EMAIL });
+      expect([200, 429]).toContain(flood.status);
+      if (flood.status === 200) expect(flood.json).toEqual({ ok: true });
+    }
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Nothing new was minted or sent...
+    expect(delivered.length).toBe(deliveriesAfterMint);
+    // ...and crucially the victim's link is STILL LIVE. Before the fix each flood request committed
+    // `used_at=now()` on the outstanding token while its replacement mail was silently dropped, so
+    // the victim was permanently locked out of recovery by an unauthenticated attacker.
+    const live = await admin.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM partner_password_reset_tokens WHERE user_id=$1 AND used_at IS NULL AND expires_at > now()",
+      [VICTIM]
+    );
+    expect(live.rows[0].n).toBe("1");
+
+    // The proof that matters: the link the victim actually holds still works.
+    const consumed = await post("/api/partner/auth/password-reset/consume", {
+      token: victimsToken,
+      newPassword: NEW_PASSWORD,
+    });
+    expect(consumed.status).toBe(200);
+    expect(consumed.json).toEqual({ ok: true });
   });
 });

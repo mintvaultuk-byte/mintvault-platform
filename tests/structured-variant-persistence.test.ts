@@ -1038,8 +1038,34 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /\bresolveDraftGradeAuthority\s*\(cert,\s*body\)/.test(addedJs) &&
           /const\s+overall\s*=\s*authority\.overall/.test(addedJs) &&
           /authority\.subgrades\.(centering|corners|edges|surface)/.test(addedJs);
+        // G) Card Job QA lifecycle hooks — founder-approved 2026-08-14, narrowly, for the ALREADY
+        //    PROVEN additive integration that returns or approves a Partner Card Job through the
+        //    canonical grading/QA flow, and for nothing else.
+        //
+        //    WHY IT IS BEING ADDED HERE. This repository carries TWO equivalent founder-signature
+        //    guards over server/grader.ts — this one and the copy in
+        //    tests/variant-line-consolidation.test.ts. Signature G was registered in that copy only,
+        //    so the same founder-authorised change passed one guard and was rejected by the other.
+        //    A protected guard that disagrees with its own twin is a release defect in the guard
+        //    pair, not an authorisation to widen either: the fix is to make the SECOND guard state
+        //    the SAME narrow rule, verbatim, so neither can be satisfied by something the other
+        //    would refuse.
+        //
+        //    BOTH identifiers are required, so an incidental edit cannot satisfy it: one names the
+        //    QA_REVIEW -> GRADING return, the other the QA_REVIEW -> APPROVED approval. Both are
+        //    lifecycle transitions on partner_card_jobs; neither reads, writes or derives a grade.
+        //
+        //    THIS AUTHORISES NO MATHS. It does not permit MVGS scoring, centering, weighting,
+        //    thresholds, floors, subgrade logic, pristine/Black Label logic, calibration, or any
+        //    arithmetic. The calculation-token assertion below is UNCHANGED and still applies to
+        //    this signature exactly as it applies to A-F — including this file's stricter
+        //    `cert_id|certificate_number` prohibition, which is deliberately NOT relaxed for G. A
+        //    formula, or a certificate-numbering change, bundled alongside these two calls still
+        //    fails here.
+        const signatureG =
+          /\breturnCardJobToGraderForCertificate\b/.test(addedJs) && /\bapproveCardJobForCertificate\b/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         const revisionBoundAddedCode = (

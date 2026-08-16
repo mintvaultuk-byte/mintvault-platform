@@ -56,7 +56,11 @@ import {
   mfaDisable,
   verifyActiveTotpNoReplay,
   getMfaStatus,
+  verifyStepUp,
 } from "./mfa-service";
+import { recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
+import { canPurchaseCredits, listCreditPacks, resolvePackForCheckout } from "./credit-purchase-service";
+import { getPartnerOperations } from "./dashboard-operations-service";
 import {
   getPartnerCreditView,
   getPartnerPortalContext,
@@ -130,6 +134,27 @@ function denyTeamAction(
 
 export function partnerApiRouter(): Router {
   const r = Router();
+
+  /**
+   * TENANT-SCOPED RESPONSES ARE NEVER CACHEABLE — applied by construction, for every route on this
+   * router, rather than remembered per handler.
+   *
+   * `noStore()` was called by hand in only five places (/me, /session and the MFA secret/recovery
+   * responses), while `GET /credits` (wallet balance + ledger), `/sessions` (session ids, IPs),
+   * `/dashboard` (org legal name, status, accreditation), `/users` (full team roster) and
+   * `/locations` carried NO Cache-Control and no Vary at all. With neither header present, RFC 9111
+   * §4.2.2 permits a shared cache to apply heuristic freshness — and the deployment shape here is
+   * literally "a Mac behind a shop's network", where a corporate proxy or any CDN placed in front
+   * could serve one tenant's credit ledger to another.
+   *
+   * `Vary: Cookie` is set alongside as the second line of defence: no-store already forbids storage,
+   * but any cache that mishandles it must still key on the session cookie rather than the URL.
+   */
+  r.use((_req, res, next) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Vary", "Cookie");
+    next();
+  });
 
   // ---- auth ----
   // SHADOWED DUPLICATE — the served implementation is server/partner/public-routes.ts, kept ahead of
@@ -239,7 +264,10 @@ export function partnerApiRouter(): Router {
           resetDeliveryConfigured()
         ) {
           const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
-          await deliverResetToken(email, token); // out-of-band; token never returned in the response
+          // NULL means a fresh link already exists and was preserved (denial-of-recovery guard).
+          if (token !== null) {
+            await deliverResetToken(email, token); // out-of-band; token never returned in the response
+          }
         }
       } catch {
         /* swallow — response stays generic regardless */
@@ -332,6 +360,159 @@ export function partnerApiRouter(): Router {
     }
   });
 
+  /**
+   * The Grading Credit pack catalogue.
+   *
+   * Readable by anyone who can see credits, so the dashboard can show what is available and, when
+   * pricing is not yet configured, say so honestly instead of hiding the feature. `purchasable` is
+   * false for every pack until the owner records a Stripe Price id — the UI must gate the buy
+   * control on that flag, not on the pack merely existing.
+   */
+  r.get("/credits/packs", requirePartnerCapability("partner.credits.view"), async (_req, res) => {
+    try {
+      res.json({ packs: await listCreditPacks() });
+    } catch (err) {
+      console.error("[partner credits] pack catalogue failed:", (err as Error).message);
+      res.status(500).json({ error: { code: "credit_packs_unavailable", message: "Credit packs are unavailable." } });
+    }
+  });
+
+  /**
+   * Begin a Grading Credit purchase.
+   *
+   * THIS ROUTE GRANTS NOTHING. It creates a Stripe Checkout Session and returns its URL. Credits
+   * appear only when the verified webhook fulfils the payment — so a user who abandons checkout,
+   * loses connectivity, or replays the success page a hundred times receives exactly what they paid
+   * for and nothing more.
+   *
+   * The pack CODE is the only client input, and the credit quantity is looked up server-side from
+   * it; quantity is never taken from the request, and never from session metadata on the way back.
+   *
+   * requireNotViewOnly / requireNotSensitiveFrozen are applied because spending money is a sensitive
+   * mutation: a view-only or emergency-frozen principal must not be able to start one.
+   */
+  r.post(
+    "/credits/checkout",
+    requirePartnerCapability("partner.credits.purchase"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    // AG-3: spending the shop's money is the single most consequential thing a partner session can
+    // do, and it is irreversible once Stripe has the payment. Placed AFTER the capability guard so
+    // a role that may never buy is told that, rather than asked for a password that would not help.
+    requireRecentAuth(),
+    async (req, res) => {
+      const principal = req.partner!;
+      try {
+        /*
+         * A grading role never buys, even if the purchase permission was granted by mistake.
+         * The permission gate above is the primary control; this is the deliberate second one,
+         * because "GRADER cannot buy" is a business rule rather than a configuration choice.
+         */
+        const roles = await withTenant({ tenantId: principal.tenantId }, async (c) => {
+          const { rows } = await c.query<{ code: string }>(
+            `SELECT r.code FROM partner_user_roles ur
+               JOIN partner_roles r ON r.id = ur.role_id
+              WHERE ur.tenant_id=$1 AND ur.user_id=$2`,
+            [principal.tenantId, principal.userId]
+          );
+          return rows.map((x) => x.code);
+        });
+        if (!roles.some((role) => canPurchaseCredits(role, principal.permissions))) {
+          res.status(403).json({
+            error: { code: "forbidden", message: "Your role cannot buy Grading Credits." },
+          });
+          return;
+        }
+
+        const packCode = typeof req.body?.packCode === "string" ? req.body.packCode : "";
+        const pack = await resolvePackForCheckout(packCode);
+
+        const { getUncachableStripeClient } = await import("../stripeClient");
+        const stripe = await getUncachableStripeClient();
+        const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+          line_items: [{ price: pack.stripePriceId!, quantity: 1 }],
+          // The webhook reads ONLY these keys to attribute the payment. The credit quantity is
+          // deliberately absent: it is resolved from partner_credit_packs by pack code at grant
+          // time, so tampered metadata cannot mint capacity.
+          metadata: {
+            partner_tenant_id: principal.tenantId,
+            partner_pack_code: pack.code,
+            partner_initiating_user_id: principal.userId,
+          },
+          // MUST match a real client route. `/partner/credits` is not registered in App.tsx, so the
+          // partner catch-all route silently redirected the returning buyer to the dashboard and
+          // threw the `?purchase=` signal away — the one moment the shop most needs to be told
+          // "paid, processing, credits appear shortly". The wallet page is `/partner/billing`.
+          //
+          // NB: that catch-all's path pattern is deliberately NOT written out here. A slash-star
+          // sequence inside a comment opens a block comment as far as a naive stripper is
+          // concerned, and tests/partner-main-reconciliation-merge-loss.test.ts strips comments
+          // before asserting that routes still exist — so writing it literally silently swallowed
+          // every route below this point and failed a merge-loss sentinel.
+          success_url: `${appUrl}/partner/billing?purchase=processing`,
+          cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
+        });
+
+        res.json({ url: session.url, packCode: pack.code, credits: pack.credits });
+      } catch (err) {
+        const code = (err as { code?: string })?.code;
+        if (code === "PACK_NOT_FOUND" || code === "PACK_NOT_PURCHASABLE") {
+          res.status(400).json({ error: { code, message: (err as Error).message } });
+          return;
+        }
+        console.error("[partner credits] checkout failed:", (err as Error).message);
+        res
+          .status(502)
+          .json({ error: { code: "checkout_unavailable", message: "Could not start checkout. Try again." } });
+      }
+    }
+  );
+
+  /**
+   * P8 — the operational read behind the EXISTING Partner Dashboard.
+   *
+   * One tenant-scoped call returning the lifecycle counts, the station fleet and the shop floors.
+   * Gated on `partner.dashboard.view`, which every operational role holds and the view-only ones
+   * hold too — this is a READ, and read-only navigation is deliberately never step-up guarded.
+   *
+   * The principal supplies tenant and location; the request supplies nothing. There is no parameter
+   * by which a caller can widen their own scope, which is what makes the negative tests meaningful
+   * rather than decorative.
+   */
+  r.get("/dashboard/operations", requirePartnerCapability("partner.dashboard.view"), async (req, res) => {
+    try {
+      res.json(await getPartnerOperations(req.partner!));
+    } catch (err) {
+      console.error("[partner dashboard] operations read failed:", (err as Error).message);
+      res.status(500).json({
+        error: { code: "operations_unavailable", message: "Operational summary is unavailable right now." },
+      });
+    }
+  });
+
+  /**
+   * P8 — this organisation's OWN onboarding readiness.
+   *
+   * Reuses getPartnerOnboardingReadiness, the same computation the Super Admin console reads, called
+   * with the tenant id from the SESSION. That is deliberate: a second readiness implementation would
+   * be a second definition of "is this shop set up", and the two would drift — which is precisely
+   * the "READY because rows exist" failure the original was written to end.
+   */
+  r.get("/onboarding-readiness", requirePartnerCapability("partner.dashboard.view"), async (req, res) => {
+    try {
+      const { getPartnerOnboardingReadiness } = await import("./partner-management-service");
+      const readiness = await getPartnerOnboardingReadiness(req.partner!.tenantId);
+      res.json(readiness);
+    } catch (err) {
+      console.error("[partner dashboard] readiness read failed:", (err as Error).message);
+      res
+        .status(500)
+        .json({ error: { code: "readiness_unavailable", message: "Setup status is unavailable right now." } });
+    }
+  });
+
   r.get("/sessions", requirePartnerAuth, async (req, res) => {
     try {
       res.json({ sessions: await listOwnPartnerSessions(req.partner!) });
@@ -383,6 +564,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: an invitation mints a credential that can become a login.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const reason = optionalReason(req.body?.reason, "Partner team member invited");
@@ -444,6 +627,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: changing a colleague's role hands over or takes away authority.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const role = requirePortalTeamRole(req.body?.role);
@@ -464,6 +649,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: suspending or removing someone ends their access immediately.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const status = req.body?.status;
@@ -519,6 +706,50 @@ export function partnerApiRouter(): Router {
 
   // ---- MFA enrolment (Item 3) ----
   // enrol/confirm are reachable by an mfa-pending session (a user with mfa_required but no method yet).
+  /**
+   * AG-3 — STEP-UP: re-prove the human behind this session.
+   *
+   * Rate-limited with the MFA limiter because it accepts a password and a second factor, and is
+   * therefore exactly as brute-forceable as the MFA routes it borrows its standard from.
+   *
+   * On success it stamps the session and says how long the proof lasts, so the client can avoid
+   * asking again inside the window. It returns NO new session and NO token: this raises the
+   * privilege of the session already in hand rather than issuing anything new.
+   */
+  r.post("/auth/step-up", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+    const principal = req.partner!;
+    try {
+      const result = await verifyStepUp(
+        { tenantId: principal.tenantId, userId: principal.userId },
+        req.body?.password,
+        {
+          code: typeof req.body?.code === "string" ? req.body.code : undefined,
+          recoveryCode: typeof req.body?.recoveryCode === "string" ? req.body.recoveryCode : undefined,
+        }
+      );
+      if (!result.ok) {
+        // A wrong password and a missing second factor are told apart, because the user can act on
+        // the difference. Neither answer reveals whether the ACCOUNT exists — the session already
+        // proves that, so there is nothing left to enumerate here.
+        res.status(result.reason === "second_factor_required" ? 400 : 403).json({
+          error: {
+            code: result.reason === "second_factor_required" ? "second_factor_required" : "unauthorised",
+            message:
+              result.reason === "second_factor_required"
+                ? "Enter the code from your authenticator app."
+                : "That password was not correct.",
+          },
+        });
+        return;
+      }
+      await recordStepUp(principal.sessionId);
+      res.json({ ok: true, windowMinutes: STEP_UP_WINDOW_MINUTES });
+    } catch (err) {
+      console.error("[partner step-up] failed:", (err as Error).message);
+      res.status(500).json({ error: { code: "step_up_failed", message: "Could not confirm your password." } });
+    }
+  });
+
   r.post("/mfa/enrol", partnerMfaLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
@@ -705,6 +936,8 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.sessions.revoke"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
+    // AG-3: signing someone out of everything is a security action.
+    requireRecentAuth(),
     async (req, res) => {
       try {
         const reason = optionalReason(req.body?.reason, "Partner team member sessions revoked");

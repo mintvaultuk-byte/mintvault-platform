@@ -31,6 +31,15 @@
       <span class="identity-key">SIGNED IN</span>
       <span class="identity-value" id="stationUser">—</span>
     </div>
+    <!--
+      Server-reported capacity. Deliberately shows an em dash rather than 0 until the server has
+      actually answered: "0 Grading Credits" and "we have not asked yet" are different facts, and a
+      shop that reads the second as the first stops working for no reason.
+    -->
+    <div class="station-identity-cell">
+      <span class="identity-key">GRADING CREDITS</span>
+      <span class="identity-value" id="stationCredits">—</span>
+    </div>
   </section>
 
   <section class="row capture-target" id="captureTargetRow">
@@ -68,12 +77,27 @@
     <div class="status-sub" id="statusSub"></div>
   </section>
 
+  <!--
+    P6 — NEW CARD. Pressing this asks the SERVER to authorise one new Card Job against one Grading
+    Credit. The station never invents a card, never chooses an MV number and never decides whether
+    it can afford one: it sends a retry token and renders whatever the server returns, including a
+    refusal. The credit line below is a read-out of the server's answer, not a local balance.
+  -->
   <section class="row capture-actions" id="captureActionsRow">
     <div class="action-grid" aria-label="Scanner actions">
+      <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
       <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
       <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
     </div>
-    <p class="hint action-hint" id="captureActionHint">Open or arm a card in MintVault to enable final scanning.</p>
+    <p class="hint action-hint" id="captureActionHint">Press NEW CARD to start a card, or arm one in MintVault.</p>
+    <p class="hint" id="newCardError" hidden></p>
+
+    <!-- Shown once BOTH sides are accepted. The MV number is the server's, echoed back verbatim. -->
+    <div class="card-complete" id="cardCompletePanel" hidden>
+      <strong class="card-complete-title" id="cardCompleteTitle">MV— COMPLETE</strong>
+      <p class="card-complete-instruction" id="cardCompleteInstruction">MARK CARD MV—</p>
+      <button class="btn primary" id="completeNextCardBtn">NEXT CARD</button>
+    </div>
     <div class="positioning-panel" id="positioningPanel" hidden>
       <div class="positioning-card-preview-viewport" id="positioningCardPreviewViewport">
         <img class="positioning-card-preview" id="positioningCardPreview" alt="Detected card with surrounding scanner background" />

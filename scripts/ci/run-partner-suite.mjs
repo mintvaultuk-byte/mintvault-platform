@@ -13,8 +13,9 @@
  * Exit code is non-zero if ANY critical suite failed, was skipped, or aborted on environment.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   CRITICAL_SUITES,
   SUITES,
@@ -23,6 +24,7 @@ import {
   urlFor,
   assertDisposable,
 } from "./partner-suite-env-matrix.mjs";
+import { classifyReport, GREEN_VERDICTS } from "./partner-suite-verdict.mjs";
 
 const args = process.argv.slice(2);
 const all = args.includes("--all");
@@ -36,46 +38,43 @@ if (targets.length === 0) {
   console.error(`known suites:\n${SUITES.map((s) => "  " + s.file).join("\n")}`);
   process.exit(1);
 }
-if (jsonDir) mkdirSync(jsonDir, { recursive: true });
+// An unknown suite name is a MISTAKE, not an empty selection. Without this, a typo'd path silently
+// narrowed the run — and if every name were typo'd the usage branch above would at least catch it,
+// but one bad name among several would quietly drop that suite and still print green.
+const unknown = explicit.filter((f) => !findSuite(f));
+if (unknown.length) {
+  console.error(`unknown suite(s), not present in the matrix: ${unknown.join(", ")}`);
+  process.exit(1);
+}
+
+/*
+ * JSON EVIDENCE IS MANDATORY (RC-F12).
+ *
+ * `--json` used to be optional, and without it `classify()` fell back to the vitest EXIT CODE alone:
+ * every suite reported `passed=0` and the run still printed "All 36 suite(s) green". A suite that
+ * executed nothing was indistinguishable from one that proved everything. There is now no path
+ * through this script that reports a verdict it has not counted: when the caller does not ask for
+ * reports we still collect them, into a temporary directory that is removed on the way out.
+ */
+const ephemeralJsonDir = jsonDir ? null : mkdtempSync(join(tmpdir(), "partner-suite-"));
+const reportDir = jsonDir ?? ephemeralJsonDir;
+mkdirSync(reportDir, { recursive: true });
 
 /**
- * Classify one suite result from its vitest JSON report.
+ * Read one suite's report from disk and classify it. The RULE itself lives in
+ * scripts/ci/partner-suite-verdict.mjs so it can be tested; this only does the I/O.
  *
- * `status` (the vitest exit code) is load-bearing and must be consulted FIRST. A suite whose
- * beforeAll throws produces a FILE-level failure with an empty assertionResults array and every
- * test marked skipped — which, read from assertions alone, is indistinguishable from a suite that
- * was never gated on. Reporting that as "skipped" is precisely the silent-green failure mode this
- * matrix exists to eliminate, so a non-zero exit with no failed assertion is an environment abort.
+ * A missing or unparseable report is an ENVIRONMENT ABORT, never a pass — see RC-F12 in that file.
  */
 function classify(reportPath, file, status) {
-  if (!reportPath || !existsSync(reportPath)) {
-    return { passed: 0, failed: 0, skipped: 0, verdict: status === 0 ? "passed" : "environment_abort" };
-  }
+  if (!reportPath || !existsSync(reportPath)) return classifyReport(null, file, status);
   let report;
   try {
     report = JSON.parse(readFileSync(reportPath, "utf8"));
   } catch {
-    return { passed: 0, failed: 0, skipped: 0, verdict: "environment_abort" };
+    return classifyReport(null, file, status);
   }
-  const result = (report.testResults ?? []).find((f) =>
-    String(f.name).replace(/\\/g, "/").replace(/^.*?(tests\/)/, "$1") === file
-  );
-  const assertions = result?.assertionResults ?? [];
-  const passed = assertions.filter((a) => a.status === "passed").length;
-  const failed = assertions.filter((a) => a.status === "failed").length;
-  const skipped = assertions.filter((a) => a.status === "skipped" || a.status === "pending").length;
-  let verdict = "passed";
-  if (failed > 0) verdict = "failed";
-  else if (status !== 0) verdict = "environment_abort"; // file-level throw (beforeAll, import, gate)
-  else if (passed === 0 && skipped > 0) verdict = "skipped";
-  else if (passed === 0) verdict = "environment_abort";
-  // ANY skip in a critical suite is a failure, not a pass (hardened 2026-08-03).
-  // Previously `skipped` only mattered when `passed === 0`, so a suite whose env gate hard-skipped
-  // every real test still reported "passed" on the strength of its one out-of-gate CI-wiring guard,
-  // and the printed "skipped=N" was an eyeball check rather than an enforced gate. A partial skip
-  // is exactly how evidence goes missing silently, so it now reddens the run.
-  else if (skipped > 0) verdict = "partially_skipped";
-  return { passed, failed, skipped, verdict };
+  return classifyReport(report, file, status);
 }
 
 /**
@@ -90,12 +89,46 @@ function recreateDatabase(suite) {
   if (!suite.cluster || !suite.database) return;
   const maintenance = urlFor(suite.cluster, "postgres");
   assertDisposable(maintenance, `${suite.file} maintenance connection`);
-  const psql = (sql) =>
-    spawnSync("psql", [maintenance, "-v", "ON_ERROR_STOP=1", "-Atc", sql], { encoding: "utf8" });
+  const psql = (sql) => spawnSync("psql", [maintenance, "-v", "ON_ERROR_STOP=1", "-Atc", sql], { encoding: "utf8" });
   const drop = psql(`DROP DATABASE IF EXISTS "${suite.database}" WITH (FORCE)`);
   if (drop.status !== 0) throw new Error(`drop ${suite.database} failed: ${drop.stderr || drop.stdout}`);
   const create = psql(`CREATE DATABASE "${suite.database}"`);
   if (create.status !== 0) throw new Error(`create ${suite.database} failed: ${create.stderr || create.stdout}`);
+  if (suite.seedCoreStubs) seedCoreStubs(suite);
+}
+
+/**
+ * The MINIMAL core-table precondition for suites that apply the FULL repository migration set.
+ *
+ * 0018_correction_audit_index builds a partial index ON audit_log, and 0022_print_workflow_lifecycle
+ * ALTERs certificates. No PARTNER migration creates either table and these suites do not seed them,
+ * so on a freshly created database they die in beforeAll with `relation "audit_log" does not exist`.
+ *
+ * .github/workflows/ci.yml has done this for six suites all along; this runner did NOT, because it
+ * DROPs and recreates each database and so discards anything seeded beforehand. That asymmetry is
+ * why these suites passed in CI and environment-aborted here the moment they were added to the gate.
+ *
+ * DELIBERATELY a minimal stub pair, not a real schema push: the real `certificates` has no `secret`
+ * column, and these suites insert cert_id/secret and assert the row survives a rollback. Both tables
+ * are owned by pn_migrator because the migrations are applied as that non-superuser role. Kept
+ * byte-equivalent to the CI step so the two environments cannot drift.
+ */
+function seedCoreStubs(suite) {
+  const url = urlFor(suite.cluster, suite.database);
+  assertDisposable(url, `${suite.file} core-stub seed`);
+  const run = (sql) => {
+    const r = spawnSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-c", sql], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`core-stub seed failed for ${suite.database}: ${r.stderr || r.stdout}`);
+  };
+  run(
+    "DO $$ BEGIN CREATE ROLE pn_migrator LOGIN PASSWORD 'realistic-migrator-pw' NOSUPERUSER CREATEROLE NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END$$;"
+  );
+  run(
+    "CREATE TABLE IF NOT EXISTS audit_log (id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL, admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now())"
+  );
+  run("ALTER TABLE audit_log OWNER TO pn_migrator");
+  run("CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)");
+  run("ALTER TABLE certificates OWNER TO pn_migrator");
 }
 
 const results = [];
@@ -109,16 +142,25 @@ for (const suite of targets) {
     delete env.PARTNER_DATABASE_URL;
     delete env.PARTNER_CONNECTOR_DATABASE_URL;
   }
-  const reportPath = jsonDir ? join(jsonDir, suite.file.replace(/\//g, "_") + ".json") : null;
-  const vitestArgs = ["vitest", "run", suite.file];
-  if (reportPath) vitestArgs.push("--reporter=json", "--outputFile", reportPath);
+  const reportPath = join(reportDir, suite.file.replace(/\//g, "_") + ".json");
+  // Always emit the machine-readable report: it is the ONLY thing this runner is allowed to
+  // conclude "green" from. `--reporter=default` is kept so a human still sees the failure output.
+  const vitestArgs = ["vitest", "run", suite.file, "--reporter=default", "--reporter=json", "--outputFile", reportPath];
 
   process.stdout.write(`\n=== ${suite.file}  [${suite.topology}]\n`);
   try {
     recreateDatabase(suite);
   } catch (err) {
     console.error(`[env] ${err.message}`);
-    results.push({ file: suite.file, critical: !!suite.critical, ms: 0, passed: 0, failed: 0, skipped: 0, verdict: "environment_abort" });
+    results.push({
+      file: suite.file,
+      critical: !!suite.critical,
+      ms: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      verdict: "environment_abort",
+    });
     continue;
   }
   const started = process.hrtime.bigint();
@@ -135,9 +177,40 @@ for (const r of results) {
       `passed=${r.passed} failed=${r.failed} skipped=${r.skipped} (${r.ms}ms)`
   );
 }
-const bad = results.filter((r) => r.critical && r.verdict !== "passed");
+if (ephemeralJsonDir) rmSync(ephemeralJsonDir, { recursive: true, force: true });
+
+const bad = results.filter((r) => r.critical && !GREEN_VERDICTS.includes(r.verdict));
 if (bad.length) {
   console.error(`\n${bad.length} critical Partner suite(s) not green: ${bad.map((b) => b.file).join(", ")}`);
   process.exit(1);
 }
-console.log(`\nAll ${results.length} suite(s) green.`);
+// Belt and braces: "green" over an empty result set is not green, it is a run that did nothing.
+if (results.length === 0) {
+  console.error("\nno suites executed — refusing to report green");
+  process.exit(1);
+}
+/*
+ * DID WE ACTUALLY RUN EVERY TARGET WE WERE GIVEN?
+ *
+ * Observed for real on 2026-08-16: a run selected all 70 critical suites, executed only the first
+ * 37, and exited 0 printing "All 37 suite(s) green" — a truncated run reporting success, with the
+ * 33 unexecuted suites recorded nowhere. Every other fail-closed rule in this runner judges the
+ * suites it OBSERVED; none of them noticed that a third of the gate never ran at all.
+ *
+ * The count is the cheapest possible check and it closes the last way this script can report green
+ * over missing evidence: a verdict is only valid for the exact set of targets it was asked to cover.
+ */
+if (results.length !== targets.length) {
+  console.error(
+    `\nTRUNCATED RUN: ${results.length} of ${targets.length} selected suite(s) executed. ` +
+      `Refusing to report green — the remaining ${targets.length - results.length} were never run, ` +
+      `so nothing is known about them.`
+  );
+  process.exit(1);
+}
+const observed = results.reduce((n, r) => n + r.passed, 0);
+if (observed === 0) {
+  console.error("\nzero tests observed across every suite — refusing to report green");
+  process.exit(1);
+}
+console.log(`\nAll ${results.length} suite(s) green — ${observed} assertions observed.`);

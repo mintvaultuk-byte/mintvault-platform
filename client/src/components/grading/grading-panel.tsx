@@ -244,6 +244,21 @@ interface Props {
    *  audits) instead of /submit — so an edit can NEVER publish or auto-approve.
    *  Only meaningful with graderMode. */
   graderEdit?: boolean;
+  /**
+   * Extra fields merged into EVERY grading write this panel makes (`/grade`, `/submit`,
+   * `/edit-submission`, and the approve payload) — read at call time, never captured.
+   *
+   * WHY IT EXISTS. Partner Card Job grading is protected by a server-side EDIT LEASE, and the server
+   * refuses any Card Job write that does not present the CURRENT lease revision. That revision
+   * changes on every accepted write, so it cannot be a static prop and it cannot live in a closure
+   * captured at mount — it must be read at the moment the request is built.
+   *
+   * WHY IT IS ONE PROP RATHER THAN SEVEN CALL SITES. Every write here already funnels through
+   * `buildPayload()`. Merging there covers all of them at once, and an omission becomes impossible
+   * rather than merely unlikely. Absent (HQ admin, staff, Super Admin review) nothing is merged and
+   * the payload is byte-identical to what it always was.
+   */
+  writeEnvelope?: () => Record<string, unknown>;
   correctionMode?: boolean;
   onCorrectionGradingReady?: (getPayload: () => Record<string, unknown>) => void;
   correctionFeedback?: {
@@ -380,6 +395,7 @@ export default function GradingPanel({
   graderMode = false,
   adminReview = false,
   graderEdit = false,
+  writeEnvelope,
   correctionMode = false,
   onCorrectionGradingReady,
   correctionFeedback,
@@ -2003,6 +2019,10 @@ export default function GradingPanel({
     // This payload contains observations and operator notes only. The server
     // derives and persists all grade outputs from these fields.
     const out: Record<string, unknown> = {
+      // Write-authority fields (e.g. the Partner Card Job lease revision) go FIRST, so a stray
+      // observation field can never shadow one. They are read here, at request-build time, because
+      // the lease revision changes on every accepted write.
+      ...(writeEnvelope?.() ?? {}),
       auth_status: authStatus,
       auth_notes: authNotes,
       grade_explanation: gradeExplanation,

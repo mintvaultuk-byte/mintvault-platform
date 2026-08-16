@@ -6,6 +6,9 @@ import {
   verifyAdminPassword,
   requireAdmin,
   isLoginRateLimited,
+  isAdminPasswordLockedOut,
+  registerAdminPasswordFailure,
+  clearAdminPasswordFailures,
   isPinRateLimited,
   recordFailedLogin,
   recordFailedPin,
@@ -16,7 +19,9 @@ import {
   ADMIN_EMAIL,
   FAILED_LOGIN_DELAY_MS,
   isSuperAdminEmail,
+  requireSuperAdmin,
 } from "../auth";
+import { recordAdminStepUp, clearAdminStepUp, ADMIN_STEP_UP_WINDOW_MINUTES } from "../lib/admin-step-up";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "../customer-auth";
 import { sendMagicLink, sendPinResetLink } from "../email";
 import {
@@ -83,6 +88,12 @@ export function registerAuthRoutes(app: Express): void {
       if (isLoginRateLimited(req)) {
         return res.status(429).json({ error: "Too many login attempts, please try again later" });
       }
+      // Durable, fleet-wide lockout (invariant I19). The in-memory check above is per-process, so on
+      // the two-Machine topology it only ever bounded half the traffic and reset on every deploy.
+      const durableLock = await isAdminPasswordLockedOut();
+      if (durableLock.locked) {
+        return res.status(429).json({ error: "Too many login attempts, please try again later" });
+      }
 
       const { password } = req.body;
       if (!password) {
@@ -92,11 +103,13 @@ export function registerAuthRoutes(app: Express): void {
       const verification = await verifyAdminPassword(password);
       if (!verification.valid) {
         recordFailedLogin(req);
+        await registerAdminPasswordFailure();
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
       clearLoginAttempts(req);
+      await clearAdminPasswordFailures();
       req.session.pendingAdmin = true;
       req.session.pendingAdminAt = Date.now();
       req.session.pinFailures = 0;
@@ -114,6 +127,12 @@ export function registerAuthRoutes(app: Express): void {
       if (isLoginRateLimited(req)) {
         return res.status(429).json({ error: "Too many login attempts, please try again later" });
       }
+      // Durable, fleet-wide lockout (invariant I19). The in-memory check above is per-process, so on
+      // the two-Machine topology it only ever bounded half the traffic and reset on every deploy.
+      const durableLock = await isAdminPasswordLockedOut();
+      if (durableLock.locked) {
+        return res.status(429).json({ error: "Too many login attempts, please try again later" });
+      }
 
       const { password } = req.body;
       if (!password) {
@@ -123,11 +142,13 @@ export function registerAuthRoutes(app: Express): void {
       const verification = await verifyAdminPassword(password);
       if (!verification.valid) {
         recordFailedLogin(req);
+        await registerAdminPasswordFailure();
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
       clearLoginAttempts(req);
+      await clearAdminPasswordFailures();
       req.session.pendingAdmin = true;
       req.session.pendingAdminAt = Date.now();
       req.session.pinFailures = 0;
@@ -137,6 +158,63 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error: any) {
       console.error("Login error:", error.message);
       res.status(500).json({ error: "Invalid credentials" });
+    }
+  });
+
+  /**
+   * AG-3b — SUPER ADMIN STEP-UP: re-prove the human behind an existing admin session.
+   *
+   * NOT A SECOND LOGIN. It issues no session, regenerates nothing and changes no privilege — it
+   * stamps the session already in hand. `requireSuperAdmin` still decides WHO may act; this decides
+   * whether they have proved themselves RECENTLY enough for a destructive action.
+   *
+   * Demands the SAME two factors the admin login does — passphrase and PIN — verified through the
+   * same helpers, so there is one definition of "this is the administrator" rather than a weaker
+   * copy. Rate-limited with the same limiter for the same reason.
+   *
+   * The lockout counters are deliberately shared with login: an attacker who has stolen a session
+   * cookie and is guessing the PIN to unlock destructive actions must burn the same budget as one
+   * guessing at the front door, and must trip the same lockout.
+   */
+  app.post("/api/admin/step-up", adminCredentialRateLimit, requireSuperAdmin, async (req, res) => {
+    try {
+      const { password, pin } = req.body ?? {};
+      if (typeof password !== "string" || typeof pin !== "string" || !password || !pin) {
+        return res.status(400).json({ error: "Password and PIN are required" });
+      }
+
+      const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp } = await import("../pin");
+      const ipH = hashIp(req.ip || "unknown");
+      const adminEmail = String((req.session as { adminEmail?: string }).adminEmail || ADMIN_EMAIL);
+
+      const lockState = await checkLockout(adminEmail);
+      if (lockState.locked) {
+        await logPinEvent(adminEmail, false, "locked", ipH);
+        return res.status(423).json({ error: "Account locked. Try again later." });
+      }
+
+      const adminUser = await storage.getUserByEmail(adminEmail);
+      if (!adminUser || !(adminUser as { pinHash?: string }).pinHash) {
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const passwordCheck = await verifyAdminPassword(password, adminUser);
+      const pinValid = passwordCheck.valid && (await verifyPin(pin, (adminUser as { pinHash: string }).pinHash));
+      if (!passwordCheck.valid || !pinValid) {
+        const post = await registerFailure(adminEmail);
+        await logPinEvent(adminEmail, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        return res.status(post.locked ? 423 : 401).json({ error: "Invalid credentials" });
+      }
+
+      await resetFailures(adminEmail);
+      await logPinEvent(adminEmail, true, "admin_step_up", ipH);
+      await recordAdminStepUp(req);
+      return res.json({ ok: true, windowMinutes: ADMIN_STEP_UP_WINDOW_MINUTES });
+    } catch (err) {
+      console.error("[admin step-up] failed:", (err as Error).message);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 
@@ -1374,11 +1452,48 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "Reset link has expired. Please request a new one." });
       }
       const resetUserId = (consumed.rows[0] as any).user_id as string;
-      await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${resetUserId}`);
+      // A password reset is the ONLY remediation a customer has after a session theft, so it must
+      // actually end the attacker's access. Previously this wrote password_hash and nothing else:
+      // credential_version was not bumped and no session row was deleted, while the session cookie
+      // carries a 30-day rolling maxAge (server/index.ts) and requireAuth
+      // (server/middleware/auth.ts) checks only `req.session.userId`. A stolen `mv.sid` therefore
+      // kept full account access for up to 30 days AFTER the victim reset their password.
+      //
+      // credential_version is bumped for parity with every other credential change in this file
+      // (:361, :417, :459) and so any version-aware check is correct from here on.
+      await db.execute(
+        sql`UPDATE users
+               SET password_hash = ${hash},
+                   credential_version = COALESCE(credential_version, 1) + 1,
+                   updated_at = NOW()
+             WHERE id = ${resetUserId}`
+      );
+      // Revoke every live session for this user. connect-pg-simple stores the serialised session in
+      // `session.sess`, and customer login sets `req.session.userId` (:1019), so that JSON field is
+      // the user key. Deleting the row is authoritative and immediate: the store finds no sid, a
+      // fresh empty session is created, and requireAuth 401s.
+      //
+      // TWO-MACHINE SAFE (invariant I19): the session store is shared PostgreSQL, not per-process
+      // memory, so this revocation is visible to BOTH Fly Machines the instant it commits — there is
+      // no per-Machine cache to miss.
+      let revokedSessions = 0;
+      try {
+        const revoked = await db.execute(
+          sql`DELETE FROM session WHERE sess ->> 'userId' = ${resetUserId} RETURNING sid`
+        );
+        revokedSessions = revoked.rows.length;
+      } catch (revokeErr: any) {
+        // Never let a revocation failure strand the user with a consumed token and an unchanged
+        // password — the password IS already updated at this point. Surface it loudly instead.
+        console.error("[auth] reset-password: session revocation FAILED:", revokeErr?.message);
+      }
       const user = await findUserById(resetUserId);
       if (user) {
         await sendPasswordChangedEmail(user.email as string);
-        await writeAuthAudit("auth.password_reset", user.id as string, getClientIpForAuth(req), { email: user.email });
+        await writeAuthAudit("auth.password_reset", user.id as string, getClientIpForAuth(req), {
+          email: user.email,
+          revokedSessions,
+        });
       }
       return res.json({ ok: true });
     } catch (err: any) {

@@ -84,7 +84,22 @@ async function applyAllRealistic(): Promise<void> {
     // scanner/certificate allocator schema and is exercised by its dedicated
     // real-Postgres migration proof. This Partner rollback harness owns only
     // the Partner schema plus the narrow core fixture documented below.
-    const all = listMigrationFiles().filter((migration) => !["0075", "0076"].includes(migration.number));
+    /*
+     * 0081 joins 0075/0076 in the exclusion list.
+     *
+     * 0081 does `CREATE OR REPLACE FUNCTION partner_allocate_import_certificates` — it REPLACES the
+     * allocator that 0076 creates. This harness deliberately excludes 0076 (it owns only the Partner
+     * schema plus a narrow core fixture), so applying 0081 here asks PostgreSQL to replace a function
+     * that was never created, under a definer role that never received 0076's schema privileges. It
+     * failed first with "must be able to SET ROLE" and then, once that was granted, with "permission
+     * denied for schema public" — both symptoms of the same missing prerequisite, not of a defect in
+     * 0081.
+     *
+     * origin/main never hit this because 0081 does not exist on main. It appears only when the two
+     * lineages are reconciled, and it aborted beforeAll — which vitest reports as SKIPPED tests, so
+     * the suite that proves rollback safety would have gone silently green.
+     */
+    const all = listMigrationFiles().filter((migration) => !["0075", "0076", "0081"].includes(migration.number));
     const throughG6D = all.filter((f) => Number(f.number) <= 41);
     await applyMigrations(migrator, throughG6D); // populates schema_migrations journal
     // The owner-approved repair, executed by the migrator itself via its ADMIN option — exactly
@@ -103,6 +118,23 @@ async function applyAllRealistic(): Promise<void> {
      * NOT safe by default anywhere else: applying 0043 to staging or production requires explicit
      * owner approval and `--allow-destructive`, and that gate must stay in the operator's hands.
      */
+    /**
+     * SECOND REPAIR GRANT — 0076 does to itself exactly what 0041 does.
+     *
+     * 0076 self-elevates (`GRANT ... WITH SET TRUE` to current_user), creates the allocator owned
+     * by partner_credit_lifecycle_definer, and then REVOKEs both the membership AND the admin
+     * option from current_user as its final act. 0081 subsequently does a plain
+     * `CREATE OR REPLACE FUNCTION partner_allocate_import_certificates`, which PostgreSQL permits
+     * only to the owner — so without a membership restored in between it fails with
+     * "must be owner of function partner_allocate_import_certificates".
+     *
+     * The grant must come from the SUPERUSER client, not the migrator: 0076 revoked the admin
+     * option too, so the migrator can no longer grant this to itself. That is the same
+     * owner-approved repair 0042 documents, applied at the second place the chain needs it.
+     */
+    const through76 = all.filter((f) => Number(f.number) <= 76);
+    await applyMigrations(migrator, through76, { allowDestructive: true });
+    await admin.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
     await applyMigrations(migrator, all, { allowDestructive: true });
   } finally {
     await migrator.end();
@@ -152,6 +184,48 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
         " ADD COLUMN IF NOT EXISTS status text," +
         " ADD COLUMN IF NOT EXISTS certificate_number text"
     );
+    /**
+     * Columns 0076 and 0081 address on `certificates`.
+     *
+     * 0076's allocator SELECTs `submission_item_id` (and `deleted_at`) to prove no live certificate
+     * already exists for a destination item; 0081 replaces that routine and INSERTs the full
+     * identity + origin-snapshot column set. The stub above carries only what 0022/0048 needed, so
+     * without these the run fails at 0076 with `column "submission_item_id" does not exist` —
+     * further along than the missing cert_counter, but the same class of fixture gap.
+     *
+     * Stubbed, not faked: these are the real column names and types, so the migrations exercise the
+     * statements they actually ship rather than a weakened variant.
+     */
+    await admin.query(
+      "ALTER TABLE certificates" +
+        " ADD COLUMN IF NOT EXISTS submission_item_id integer," +
+        " ADD COLUMN IF NOT EXISTS card_id integer," +
+        " ADD COLUMN IF NOT EXISTS label_type text," +
+        " ADD COLUMN IF NOT EXISTS grade_type text," +
+        " ADD COLUMN IF NOT EXISTS language text," +
+        " ADD COLUMN IF NOT EXISTS card_game text," +
+        " ADD COLUMN IF NOT EXISTS set_name text," +
+        " ADD COLUMN IF NOT EXISTS card_name text," +
+        " ADD COLUMN IF NOT EXISTS card_number_display text," +
+        " ADD COLUMN IF NOT EXISTS year_text text," +
+        " ADD COLUMN IF NOT EXISTS created_by text," +
+        " ADD COLUMN IF NOT EXISTS issued_at timestamptz," +
+        " ADD COLUMN IF NOT EXISTS updated_at timestamptz," +
+        " ADD COLUMN IF NOT EXISTS assigned_grader_id varchar," +
+        " ADD COLUMN IF NOT EXISTS grader_status text," +
+        " ADD COLUMN IF NOT EXISTS assigned_at timestamptz," +
+        " ADD COLUMN IF NOT EXISTS origin_type text," +
+        " ADD COLUMN IF NOT EXISTS origin_partner_id uuid," +
+        " ADD COLUMN IF NOT EXISTS origin_partner_public_ref text," +
+        " ADD COLUMN IF NOT EXISTS origin_partner_legal_name text," +
+        " ADD COLUMN IF NOT EXISTS origin_partner_trading_name text," +
+        " ADD COLUMN IF NOT EXISTS origin_location_id uuid," +
+        " ADD COLUMN IF NOT EXISTS origin_location_public_ref text," +
+        " ADD COLUMN IF NOT EXISTS origin_location_name text," +
+        " ADD COLUMN IF NOT EXISTS origin_location_address text," +
+        " ADD COLUMN IF NOT EXISTS origin_captured_at timestamptz," +
+        " ADD COLUMN IF NOT EXISTS origin_snapshot_version integer"
+    );
     await admin.query(CERTIFICATES_PROTECTED_COLUMNS_SQL);
     await admin.query("ALTER TABLE certificates OWNER TO pn_migrator").catch(() => {}); // owned by migrator too (after roles exist)
     /**
@@ -187,18 +261,43 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
       // fixture now reaches (see the certificates stub above).
       "CREATE TABLE IF NOT EXISTS label_prints (id serial primary key, certificate_id integer, cert_id text, printed_at timestamptz, created_at timestamptz not null default now())"
     );
+    /**
+     * THE CORE CERTIFICATE ALLOCATOR.
+     *
+     * 0076 and 0081 both open with an unconditional precondition — certificates, cert_counter,
+     * submission_items and the partner connector schema must all exist — and RAISE otherwise:
+     * "0076 requires the core certificate allocator and complete Partner connector schema".
+     * This fixture stubbed certificates and submission_items but never cert_counter, so this
+     * critical suite aborted in beforeAll and reported as skipped rather than failed. A rollback
+     * proof that cannot execute is not a rollback proof, and carrying it into a release as
+     * "pre-existing" would have meant shipping with no rollback coverage at all.
+     *
+     * A LOCKED ROW, not a sequence — the shape that makes MV numbers gapless on rollback.
+     */
+    await admin.query(`CREATE TABLE IF NOT EXISTS cert_counter (
+      id integer primary key, last_issued bigint not null default 0, updated_at timestamptz not null default now()
+    )`);
+    await admin.query("INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING");
     // 0018 builds a correction index on the MintVault audit log.
     await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
       id serial primary key, entity_type text not null, entity_id text not null, action text not null,
       admin_user text, details jsonb, created_at timestamptz not null default now()
     )`);
-    for (const t of ["users", "submissions", "submission_items", "label_prints", "audit_log", "certificates"]) {
+    for (const t of [
+      "users",
+      "submissions",
+      "submission_items",
+      "label_prints",
+      "audit_log",
+      "certificates",
+      "cert_counter",
+    ]) {
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }
     await applyAllRealistic();
     // ensure certificates exists+owned even though roles are created inside applyAllRealistic
     await admin.query("ALTER TABLE certificates OWNER TO pn_migrator").catch(() => {});
-  }, 40_000);
+  }, 180_000);
 
   afterAll(async () => {
     await admin?.end().catch(() => {});

@@ -1,0 +1,14 @@
+-- ============================================================================================
+-- ROLLBACK 0087 — GRADING EDIT LEASE
+--
+-- Drops partner_grading_leases. This FAILS OPEN to the pre-0087 behaviour: without the table there
+-- is no concurrency protection, and two graders can once again overwrite each other silently. It
+-- does not block grading, which is why it is safe to roll back in an incident — but it must be
+-- paired with reverting the application, or the lease service will query a table that is gone and
+-- the grading routes will 500 instead of degrading.
+--
+-- Lease rows are evidence of who was editing what and when, so this is a genuine data loss. It is
+-- acceptable only because the authoritative grade history lives elsewhere; the lease is a
+-- concurrency control, not the record of the grade.
+-- ============================================================================================
+DROP TABLE IF EXISTS partner_grading_leases;

@@ -78,6 +78,18 @@ export const PARTNER_MIGRATIONS_WITH_G6A = [...PARTNER_MIGRATIONS_WITH_G5, "0016
 export const PARTNER_MIGRATIONS_WITH_G6B = [
   ...PARTNER_MIGRATIONS_WITH_G6A,
   "0017_partner_credit_reservations",
+  // Submission acceptance now writes a canonical Card Job in the SAME transaction as the credit
+  // reservation, so any suite that SUBMITS needs this table or the insert fails and the whole
+  // acceptance rolls back. Added here, immediately after the reservations migration it depends on,
+  // so every descendant list (USER_MANAGEMENT*, AUDIT_PRECISION, RBAC_SEED, G6D, PER_CARD,
+  // LIFECYCLE) inherits it exactly once rather than each repeating it.
+  "0080_partner_card_jobs",
+  // The (station_id, client_op_id) idempotency contract for NEW starts. Inherited by every
+  // descendant list so any suite exercising a station-initiated NEW has it.
+  "0082_partner_card_job_op_keys",
+  // The Grading Credit pack catalogue. Needed by any suite exercising a purchase, and harmless
+  // elsewhere — it is global reference data with no tenant column.
+  "0083_partner_credit_packs",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -90,6 +102,15 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT = [
 export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
   "0032_partner_final_owner_invariant",
+  // AG-3 step-up stamp (RC-F9). EVERY user-management route this list exists to exercise — invite,
+  // role change, status change, session revocation — is now behind requireRecentAuth(), and the
+  // step-up route stamps partner_sessions.last_step_up_at. Without 0086 that column does not exist,
+  // so `recordStepUp` throws and the route answers 500 step_up_failed. The suites then fail in a way
+  // that looks like broken team management rather than a missing fixture column, which is exactly
+  // how this was first mis-read. Additive nullable column; harmless in the descendant lists that
+  // never exercise step-up, and neither PARTNER_SCHEMA_MIGRATIONS nor
+  // PARTNER_MIGRATIONS_WITH_LIFECYCLE derives from this list, so it is not applied twice anywhere.
+  "0086_partner_session_step_up",
 ] as const;
 
 /**
@@ -171,6 +192,39 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // Allocates into core certificates/cert_counter while deriving the immutable
   // Partner mapping. It must never be pulled into the Partner-only harness.
   "0076_partner_pilot_certificate_allocation",
+  // APPLICATION scope, deliberately: 0079 ALTERs the CORE `users` table (adding the durable admin
+  // password-step lockout columns). A partner-only disposable database has no `users` table at all,
+  // so pulling this into the Partner harness would fail — it is classified here on what it TOUCHES,
+  // not on which feature motivated it.
+  "0079_admin_password_lockout",
+  // APPLICATION scope: 0081 replaces the SECURITY DEFINER allocator, which reads and writes core
+  // `certificates`, `submission_items` and `cert_counter`. Same classification as 0076, which owns
+  // the original function, and for the same reason.
+  "0081_partner_card_job_certificate_binding",
+  // APPLICATION scope, on the migration's own declaration: 0088 carries the banner
+  // `SCOPE: APPLICATION (requires certificates)` in its header. Its ENTIRE payload is a partial
+  // unique index on core `certificates (lower(nfc_uid))`.
+  //
+  // It is guarded by to_regclass, so unlike 0079 it would not FAIL on a partner-only database — it
+  // would no-op. That is precisely why it must be classified here rather than waved through as
+  // partner-scope: a no-op recorded as "applied" is a false negative. It would tell the partner
+  // harness that NFC binding integrity had been exercised when nothing was built and nothing was
+  // asserted. Contrast 0080, which IS partner-scope: its core FK is conditional, but the
+  // partner_card_jobs table it creates is real and partner suites depend on it.
+  //
+  // Consequence, and the reason this is the correct classification rather than bookkeeping: the two
+  // suites that DECLARE 0088 (partner-pilot-concurrency, partner-card-job-output) now get the core
+  // schema provisioned by the harness itself instead of relying on each suite remembering to seed
+  // `certificates` first. The dependency becomes guaranteed rather than incidental.
+  "0088_nfc_binding_integrity",
+  // APPLICATION scope, unambiguously: 0090 opens with hard preconditions that RAISE EXCEPTION when
+  // `certificates` is absent (and likewise for partner_stations and the partner_runtime role), then
+  // its inlined 0047 body does `ALTER TABLE certificates ADD COLUMN ...` and creates tables with
+  // `REFERENCES certificates(id)`. Classifying it partner-scope would reproduce the exact 0073
+  // failure mode this contract exists to prevent — an application-scope migration falling into a
+  // partner-only harness and failing closed there. See tests/lineage-convergence-0090.test.ts for
+  // the real-PostgreSQL proof of its convergence behaviour.
+  "0090_lineage_convergence_scanner",
 ] as const;
 
 /**
@@ -216,7 +270,40 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0047_scanner_evidence_staging",
   "0074_partner_submission_lifecycle_and_location_snapshot",
   "0077_partner_credential_lifecycle_hardening",
+  // From origin/main: forward-only connector flag-read grant. PARTNER scope.
   "0078_partner_connector_flag_read",
+  // (0089_partner_shared_rate_limit_buckets — renumbered from 0078 — is appended in numeric order
+  // at the end of this list.) Originally described here: it creates ONE standalone table
+  // (partner_rate_limit_buckets) plus an index and a grant to partner_runtime, which migration 0001
+  // already creates. It touches no core table, so it is safe on a partner-only disposable database.
+  // It carries no tenant_id — the limiters it backs run PRE-AUTHENTICATION, keyed on an IP prefix or
+  // a submitted email — so the RLS coverage sweep in partner-rls-isolation.test.ts correctly ignores
+  // it (that sweep asserts RLS only for partner_% tables HAVING a tenant_id column).
+  // PARTNER scope: 0080's foreign key to core `public.certificates` is attached CONDITIONALLY
+  // (only where that table exists), so the table itself is creatable on a partner-only disposable
+  // database. That matters because submission acceptance now writes a Card Job in the SAME
+  // transaction as the credit reservation — without this table every partner suite that submits
+  // fails. Production and every application-scope harness still get the full FK.
+  "0080_partner_card_jobs",
+  // PARTNER scope: depends only on partner_organisations and partner_card_jobs, and deliberately
+  // carries NO foreign key to partner_stations (0045), which some partner-only databases lack.
+  "0082_partner_card_job_op_keys",
+  // PARTNER scope: global reference data (no tenant_id, correctly no RLS) plus an RBAC permission
+  // seed. Depends on nothing outside the partner chain.
+  "0083_partner_credit_packs",
+  // PARTNER scope: widens the partner_management_audit action vocabulary and indexes
+  // partner_locations. Touches no core table, so it is safe on a partner-only disposable database.
+  "0084_partner_location_management",
+  // PARTNER scope: seeds one role and two permissions into the RBAC catalogue 0034 established.
+  // Touches no core table.
+  "0085_partner_scanner_operator_role",
+  // PARTNER scope: one nullable column on partner_sessions. Touches no core table.
+  "0086_partner_session_step_up",
+  // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
+  "0087_partner_grading_edit_lease",
+  // RENUMBERED 0078 -> 0089: main landed a different 0078. Self-contained table, so the later
+  // position changes nothing. PARTNER scope — touches no core table.
+  "0089_partner_shared_rate_limit_buckets",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -330,6 +417,14 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   // (0044_partner_mfa_pending_lifecycle), and the migration runner rejects duplicate NUMBERS
   // before it runs anything. The applied file could not move, so this unapplied one did.
   "0074_partner_submission_lifecycle_and_location_snapshot",
+  // AG-1. MUST follow 0074: both rewrite chk_partner_management_audit_action, and 0084 preserves
+  // 0074's vocabulary verbatim while widening it. Applying them out of order would silently drop
+  // 'partner_wallet_backfilled'.
+  "0084_partner_location_management",
+  // AG-3 step-up stamp. Additive nullable column; harmless where step-up is never exercised.
+  "0086_partner_session_step_up",
+  // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
+  "0087_partner_grading_edit_lease",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only

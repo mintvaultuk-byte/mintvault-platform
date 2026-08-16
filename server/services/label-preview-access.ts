@@ -54,6 +54,19 @@ export function authorizePartnerLabelPreview(
   if (!principal.orgWide && (!principal.locationId || candidate.locationId !== principal.locationId)) {
     return { ok: false, status: 404, error: "Not found" };
   }
+  /*
+   * BOTH LINEAGES ARE CORRECTLY SERVED BY THIS ONE CHECK — worth stating, because the Card Job
+   * bridge deliberately removed the assigned-grader requirement everywhere else.
+   *
+   * Connector lineage: `assigned_grader_id` is the importer's assignment, as it always was.
+   *
+   * Card Job lineage: `assigned_grader_id` is stamped on the certificate when a grader takes the
+   * editing LEASE (see stampGraderOnCertificate), so it names whoever currently has the card open.
+   * A card nobody has opened is still `NULL` and is refused here — you cannot render a label for a
+   * card you have not picked up — and a grader displaced by an expiry or an audited takeover loses
+   * the preview at the same moment they lose the right to write. That is the intended behaviour on
+   * this route, so the check is kept rather than made lineage-aware.
+   */
   if (candidate.assignedGraderId !== principal.userId) {
     return { ok: false, status: 403, error: "This card is not assigned to you" };
   }

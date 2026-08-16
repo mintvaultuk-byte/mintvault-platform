@@ -6,6 +6,8 @@ import { sql } from "drizzle-orm";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, quarterKey } from "./vault-club-tiers";
 import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } from "./vault-club";
 import { writeAuthAudit } from "./account-auth";
+// Partner Grading Credit packs: the webhook is the ONLY grant authority (P5).
+import { fulfilPartnerCreditPurchase, recordPurchaseException } from "./partner/credit-purchase-service";
 import { auditLog } from "@shared/schema";
 import { fulfilPaidSubmission } from "./routes/submissions";
 import { sendVaultClubWelcomeEmail, sendVaultClubCancelledEmail, sendVaultClubPaymentFailedEmail } from "./email";
@@ -248,6 +250,56 @@ export class WebhookHandlers {
       if (meta.type === "estimate_credits") {
         await fulfilEstimateCreditsPurchase(event.id, event.type, session);
       }
+
+      /*
+       * PARTNER Grading Credit pack purchase — the ONLY path that may grant a Partner credit.
+       * The success page the buyer is redirected to grants nothing, in any environment.
+       *
+       * DELIBERATELY NOT PRE-CLAIMED VIA claimStripeEvent(), unlike the estimate path above.
+       * That path can claim safely because its claim and its grant happen in ONE transaction on
+       * the SAME connection. A partner grant does not: `stripe_webhook_events` is written through
+       * the main `db`, while the credit ledger is written through the separate partner ADMIN pool,
+       * so the two cannot share a transaction. Claiming first would then create the one failure
+       * mode that actually loses money — the event marked processed, a transient error on the
+       * grant, and Stripe's retry skipped as "already processed", so the partner pays and never
+       * receives the credits.
+       *
+       * Exactly-once is instead carried by `uq_partner_credit_ledger_idem (source,
+       * idempotency_key)` with idempotency_key = this event id. That guard lives in the SAME
+       * database as the grant, so it cannot disagree with it, and it is proven against replay (x5)
+       * and concurrent delivery (x6) in tests/partner-credit-purchase.test.ts. A retry after a
+       * transient failure correctly grants; a retry after success correctly does not.
+       */
+      if (meta.partner_tenant_id && meta.partner_pack_code) {
+        const outcome = await fulfilPartnerCreditPurchase(
+          { id: session.id, payment_status: session.payment_status, metadata: meta },
+          event.id
+        );
+        console.log(
+          `[webhook] partner credit purchase event=${event.id} tenant=${meta.partner_tenant_id} ` +
+            `pack=${meta.partner_pack_code} granted=${outcome.granted} credits=${outcome.credits}` +
+            (outcome.reason ? ` reason=${outcome.reason}` : "")
+        );
+      }
+    }
+
+    /*
+     * Refunds and disputes NEVER silently reduce Grading Credit capacity. Capacity may already be
+     * reserved against cards mid-grade or already printed, so a debit would strand them — and the
+     * ledger's preserve-active-reservations trigger would refuse it anyway. Record an audited
+     * exception for a human to resolve with a Super Admin adjustment.
+     */
+    if (event.type === "charge.refunded" || event.type === "charge.dispute.created") {
+      const charge = event.data.object as { id?: string; metadata?: Record<string, string> | null };
+      const tenantId = charge.metadata?.partner_tenant_id ?? null;
+      if (tenantId) {
+        await recordPurchaseException(event.id, {
+          tenantId,
+          sessionId: charge.id ?? null,
+          kind: event.type === "charge.refunded" ? "refund" : "chargeback",
+        });
+        console.log(`[webhook] partner credit ${event.type} recorded as an accounting exception`);
+      }
     }
 
     // ── Vault Club subscription events ────────────────────────────────────────
@@ -458,8 +510,8 @@ export class WebhookHandlers {
     if (userRow?.email) {
       // Same visibility fix as the welcome email above — a failed send must
       // not fail the webhook, but must not vanish silently either.
-      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(
-        (e: any) => writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
+      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch((e: any) =>
+        writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
       );
     }
 

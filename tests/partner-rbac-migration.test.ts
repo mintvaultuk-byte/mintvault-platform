@@ -108,15 +108,40 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     await applyMigrationsRealistic(admin, ADMIN_DB!, upTo);
   };
 
-  /** Apply the immutable seed and its additive preview-permission upgrade through the real runner. */
+  /**
+   * Apply the immutable seed and its additive permission upgrades through the real runner.
+   *
+   * The canonical RBAC catalogue is CUMULATIVE across migrations, and the parity assertions below
+   * compare the database against the whole TypeScript map — so every migration that adds a canonical
+   * permission has to be in this batch or the comparison fails for a reason that has nothing to do
+   * with the code under test:
+   *   0034 — the seed itself
+   *   0073 — adds partner.cards.preview
+   *   0083 — adds partner.credits.purchase (P5 Grading Credit packs)
+   *   0085 — adds the SCANNER_OPERATOR role plus partner.stations.enrol / partner.cards.fix (AG-2)
+   *
+   * ORDER IS LOAD-BEARING. 0083's permission seed is guarded by
+   * `IF to_regclass('public.partner_permissions') IS NOT NULL`, so applying it BEFORE 0034 would
+   * silently no-op and leave the catalogue one permission short — a false negative that looks
+   * exactly like a missing grant. listMigrationFiles returns numeric filename order, which puts
+   * 0034 first, and the assertion below pins that.
+   */
   const runRealRunnerFor0034 = async () => {
     const files = listMigrationFiles(join(process.cwd(), "migrations")).filter(
       (f) =>
-        f.filename === "0034_partner_rbac_seed.sql" || f.filename === "0073_lineage_convergence.sql"
+        f.filename === "0034_partner_rbac_seed.sql" ||
+        f.filename === "0073_lineage_convergence.sql" ||
+        f.filename === "0083_partner_credit_packs.sql" ||
+        f.filename === "0085_partner_scanner_operator_role.sql"
     );
-    expect(files.map((f) => f.filename), "both cumulative RBAC migrations must be visible to the real runner").toEqual([
+    expect(
+      files.map((f) => f.filename),
+      "every cumulative RBAC migration must be visible to the real runner, seed first"
+    ).toEqual([
       "0034_partner_rbac_seed.sql",
       "0073_lineage_convergence.sql",
+      "0083_partner_credit_packs.sql",
+      "0085_partner_scanner_operator_role.sql",
     ]);
     return applyMigrations(admin as never, files);
   };
@@ -256,6 +281,8 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     expect(first.applied).toEqual([
       "0034_partner_rbac_seed.sql",
       "0073_lineage_convergence.sql",
+      "0083_partner_credit_packs.sql",
+      "0085_partner_scanner_operator_role.sql",
     ]);
     const afterFirst = await counts();
 

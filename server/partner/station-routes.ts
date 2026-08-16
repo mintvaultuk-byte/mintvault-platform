@@ -1,6 +1,13 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import rateLimit from "express-rate-limit";
-import { resolvePartnerSession, requirePartnerAuth, requirePartnerCapability } from "./session";
+import {
+  resolvePartnerSession,
+  requirePartnerAuth,
+  requirePartnerCapability,
+  requireNotViewOnly,
+  requireNotSensitiveFrozen,
+} from "./session";
+import { partnerRateLimit } from "./rate-limit";
 import { StationIdentityError } from "./station-identity";
 import {
   StationServiceError,
@@ -16,6 +23,31 @@ import {
   type StationPrincipal,
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
+import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-authority";
+import { FixAuthorityError, authoriseFix, invalidateSide, listFixQueue } from "./fix-authority";
+
+/**
+ * FIX failures map to statuses that tell the operator what to do next.
+ *
+ * A cross-tenant or forged Card Job id resolves to CARD_JOB_NOT_FOUND -> 404, deliberately the same
+ * answer a genuinely absent id gets: a distinct 403 would confirm that the id is real and belongs to
+ * somebody, which is exactly the fact an attacker is probing for.
+ */
+function fixError(res: Response, error: unknown): void {
+  if (error instanceof FixAuthorityError) {
+    const status =
+      error.code === "CARD_JOB_NOT_FOUND"
+        ? 404
+        : error.code === "STATION_NOT_ACTIVE" || error.code === "ORGANISATION_NOT_ACTIVE"
+          ? 403
+          : error.code === "JOB_NOT_FIXABLE"
+            ? 409
+            : 400;
+    res.status(status).json({ error: { code: error.code, message: error.message } });
+    return;
+  }
+  stationError(res, error);
+}
 
 const partnerStationReadRateLimit = rateLimit({
   windowMs: 60_000,
@@ -68,6 +100,71 @@ const partnerStationCalibrationRateLimit = rateLimit({
   passOnStoreError: false,
   keyGenerator: (req) => `partner-station-calibration:${req.station?.id ?? "unknown"}`,
   message: { error: "Too many station calibration requests. Please wait a minute and try again." },
+});
+
+/*
+ * RC-F11 — the three signed-station hot paths that carried NO rate limit at all.
+ *
+ * CodeQL reported these as `js/missing-rate-limiting` and it was right: `POST /card-jobs`,
+ * `GET /stations/fix-queue` and `POST /card-jobs/:cardJobId/fix-authorise` reached the database and
+ * the credit authority with only the Ed25519 station signature and the operator session in front of
+ * them. Those two proofs establish WHO is calling; they place no bound on HOW OFTEN, so a
+ * compromised or simply malfunctioning shop Mac in a retry loop could exhaust the estate.
+ *
+ * BUDGETS ARE SET FROM THE PHYSICAL WORKFLOW, NOT FROM A GENERIC WEB-FORM DEFAULT. Scanning is the
+ * high-frequency path and a shift must stay fast — this is a locked product requirement, and a limit
+ * that interrupts a real batch would be worked around by staff, which is strictly worse than the
+ * abuse it prevents. An operator physically places a card, scans it, and moves on; even a fast bench
+ * doing continuous batch work is nowhere near one card per second. So the ceilings below are set far
+ * above any achievable human rate and act only as a runaway/abuse stop.
+ *
+ * KEYED PER STATION, so one shop's Mac can never consume another tenant's allowance — a station
+ * belongs to exactly one tenant and one location, which makes the station id the tightest correct
+ * key.
+ *
+ * FLEET-WIDE, NOT PER-PROCESS. These three deliberately use `partnerRateLimit` (the pluggable-store
+ * limiter) rather than `rateLimit` from express-rate-limit like their neighbours above. Production
+ * runs two Fly Machines, and express-rate-limit's default store is per-process — MEASURED on staging
+ * 2026-08-15: Machine A returned 429 while Machine B, hit immediately after, still served, so the
+ * effective ceiling was 2x with no shared state. `partnerRateLimit` goes through the store that
+ * mount.ts swaps for the shared PostgreSQL one at boot (invariant I19), so a runaway station is
+ * bounded across the FLEET rather than per Machine.
+ *
+ * `failClosed: true` denies if the counter cannot be read. That costs nothing real: every one of
+ * these routes needs the same database to do its work, so a store outage would have failed the
+ * request anyway — it never turns a working scan into a refused one.
+ *
+ * The four limiters above stay on express-rate-limit deliberately: they are pre-existing, outside
+ * this repair's scope, and changing them would be an unreviewed behavioural change to shipped paths.
+ */
+const partnerStationCardJobStartRateLimit = partnerRateLimit({
+  name: "partner-station-card-job",
+  windowMs: 60_000,
+  // 120/min = two card starts per second, sustained, per station. Unreachable by hand; a runaway
+  // loop hits it immediately. Deliberately far above partnerStationCaptureRateLimit (20/min), which
+  // bounds capture SESSIONS rather than the cards a bench can start.
+  max: 120,
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
+});
+
+const partnerStationFixQueueRateLimit = partnerRateLimit({
+  name: "partner-station-fix-queue",
+  windowMs: 60_000,
+  // A read, and the shop-floor app polls it; matches the established read budget.
+  max: 120,
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
+});
+
+const partnerStationFixAuthoriseRateLimit = partnerRateLimit({
+  name: "partner-station-fix-authorise",
+  windowMs: 60_000,
+  // Authorising a FIX is rarer than starting a card and is a lineage decision, so it is tighter —
+  // still one per second, which no operator reaches.
+  max: 60,
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
 });
 
 declare global {
@@ -153,24 +250,36 @@ async function requireSignedStationOperator(req: Request, res: Response, next: N
 export function partnerStationRouter(): Router {
   const r = Router();
 
-  r.post("/stations/enrol", requirePartnerAuth, requirePartnerCapability("partner.cards.scan"), async (req, res) => {
-    try {
-      const station = await requestStationEnrollment(req.partner!, {
-        locationId: req.body?.locationId,
-        publicKeyPem: req.body?.publicKeyPem,
-        installationFingerprint: req.body?.installationFingerprint,
-        appVersion: req.body?.appVersion,
-      });
-      res.status(201).json({ station });
-    } catch (error) {
-      stationError(res, error);
+  /*
+   * AG-2: bringing a NEW Mac into service is station management, not station operation, so it is
+   * gated on partner.stations.enrol rather than partner.cards.scan. Migration 0085 grants that to
+   * exactly the three roles that already held cards.scan, so nobody who could enrol before has
+   * lost the ability — but SCANNER_OPERATOR, which can operate an approved station, cannot bring a
+   * new one into service.
+   */
+  r.post(
+    "/stations/enrol",
+    requirePartnerAuth,
+    requirePartnerCapability("partner.stations.enrol"),
+    async (req, res) => {
+      try {
+        const station = await requestStationEnrollment(req.partner!, {
+          locationId: req.body?.locationId,
+          publicKeyPem: req.body?.publicKeyPem,
+          installationFingerprint: req.body?.installationFingerprint,
+          appVersion: req.body?.appVersion,
+        });
+        res.status(201).json({ station });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
-  });
+  );
 
   r.get(
     "/stations/enrolment-locations",
     requirePartnerAuth,
-    requirePartnerCapability("partner.cards.scan"),
+    requirePartnerCapability("partner.stations.enrol"),
     async (req, res) => {
       try {
         res.json({ locations: await listPermittedStationLocations(req.partner!) });
@@ -209,29 +318,222 @@ export function partnerStationRouter(): Router {
     }
   );
 
+  /**
+   * P7 — the dashboard's "remove this image from grading".
+   *
+   * A BROWSER action, so it is guarded by the partner session rather than a station signature: the
+   * person deciding an image is unusable is looking at it on the dashboard, not standing at the Mac.
+   * `requireNotViewOnly` and `requireNotSensitiveFrozen` apply because retiring evidence is a
+   * mutation with forensic consequences.
+   *
+   * Nothing is deleted. The image is superseded, the card moves to FIX_REQUIRED, and the MV, the
+   * certificate, the reservation and the original master all stay exactly where they are.
+   */
+  r.post(
+    "/card-jobs/:cardJobId/invalidate-side",
+    requirePartnerAuth,
+    // AG-2: taking an image OUT of grading is a judgement, not a capture. SCANNER_OPERATOR captures
+    // the replacement but does not decide that a replacement is needed.
+    requirePartnerCapability("partner.cards.fix"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      const principal = req.partner!;
+      try {
+        const result = await invalidateSide({
+          tenantId: principal.tenantId,
+          locationId: principal.locationId,
+          cardJobId: String(req.params.cardJobId),
+          side: req.body?.side,
+          actorUserId: principal.userId,
+          reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+        });
+        res.json({ invalidated: result });
+      } catch (error) {
+        fixError(res, error);
+      }
+    }
+  );
+
+  /** The same server-derived FIX queue, for the dashboard. Identical tenant scoping. */
+  r.get("/fix-queue", requirePartnerAuth, requirePartnerCapability("partner.cards.view"), async (req, res) => {
+    const principal = req.partner!;
+    try {
+      /*
+       * Org-wide roles (OWNER / MANAGER / FINANCE_VIEWER) are entitled to the whole estate; everyone
+       * else sees only the shop floor they are assigned to. `orgWide` is resolved server-side from
+       * the user's roles on every request — the same rule switchLocation applies — so this is not a
+       * client-supplied scope.
+       */
+      res.json({
+        items: await listFixQueue({
+          tenantId: principal.tenantId,
+          locationId: principal.locationId,
+          restrictToLocation: !principal.orgWide,
+        }),
+      });
+    } catch (error) {
+      fixError(res, error);
+    }
+  });
+
+  // From origin/main: a signed station may still flood its own heartbeat. Keyed per
+  // station id, so one noisy Mac cannot exhaust the budget for the whole fleet.
+  //
+  // KEEP THIS COMMENT ABOVE THE ROUTE, NOT INSIDE THE MIDDLEWARE CHAIN. The release guard in
+  // tests/release-route-rate-limits.test.ts asserts the authentication -> capability ->
+  // rate-limit ORDER by matching the argument list with `\s*` between the middleware names,
+  // and `\s*` cannot span a comment. Sitting between `requireSignedStationOperator` and
+  // `partnerStationHeartbeatRateLimit` it broke that assertion while changing no behaviour.
   r.post(
     "/stations/heartbeat",
     requireSignedStation,
     requireSignedStationOperator,
     partnerStationHeartbeatRateLimit,
     async (req, res) => {
+    try {
+      const result = await recordStationHeartbeat(req.station!, {
+        appVersion: req.body?.appVersion,
+        scannerConnected: req.body?.scannerConnected,
+        scannerHardware: req.body?.scannerHardware,
+        scannerProfileVersion: req.body?.scannerProfileVersion,
+        pendingUploadCount: req.body?.pendingUploadCount,
+        captureState: req.body?.captureState,
+        lastFailureCode: req.body?.lastFailureCode,
+      });
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      stationError(res, error);
+    }
+    }
+  );
+
+  /**
+   * P6 — "NEW CARD": authorise exactly ONE new Card Job against exactly ONE Grading Credit.
+   *
+   * BOTH identities are required and neither substitutes for the other (locked station rule):
+   *   requireSignedStation          the approved Mac, proven by its Ed25519 request signature
+   *   requireSignedStationOperator  the human, proven by an MFA-passed partner session holding
+   *                                 partner.cards.scan, with tenant/location matching the station
+   *
+   * A stolen laptop with no operator session cannot start work, and a valid operator on an
+   * unenrolled Mac cannot either.
+   *
+   * TENANT, LOCATION AND OPERATOR ARE TAKEN FROM THE AUTHENTICATED PRINCIPALS, NEVER THE BODY. The
+   * only thing the client supplies is `clientOpId` — the retry token — and an optional card label.
+   * There is therefore no request a station can craft that starts a card for another partner.
+   */
+  // Kept on ONE line: tests/partner-station-new-card.test.ts locates this route with
+  // `indexOf('r.post("/card-jobs"')`, so splitting the path onto its own line makes that slice
+  // empty and silently voids three P6 security assertions rather than failing loudly.
+  r.post("/card-jobs", requireSignedStation, requireSignedStationOperator, partnerStationCardJobStartRateLimit, async (req, res) => {
+    const station = req.station!;
+    const operator = req.partner!;
+    try {
+      const result = await startNewCardJobAtStation({
+        tenantId: station.tenantId,
+        locationId: station.locationId,
+        stationId: station.id,
+        clientOpId: typeof req.body?.clientOpId === "string" ? req.body.clientOpId : "",
+        actorUserId: operator.userId,
+        actorEmail: req.body?.operatorEmail ?? operator.userId,
+        cardName: typeof req.body?.cardName === "string" ? req.body.cardName : null,
+      });
+      // 200 on replay, 201 on a genuinely new job: a retrying station can tell the difference
+      // without having to compare ids, and neither answer costs a second credit.
+      res.status(result.replayed ? 200 : 201).json({ cardJob: result });
+    } catch (error) {
+      if (error instanceof CardJobAuthorityError) {
+        const status =
+          error.code === "INSUFFICIENT_CREDITS"
+            ? 402
+            : error.code === "IDEMPOTENCY_CONFLICT"
+              ? 409
+              : error.code === "CARD_UNIT_INVALID"
+                ? 400
+                : error.code === "IDENTITY_UNAVAILABLE"
+                  ? 503
+                  : 403;
+        res.status(status).json({ error: { code: error.code, message: error.message } });
+        return;
+      }
+      stationError(res, error);
+    }
+  });
+
+  /**
+   * P7 — the FIX queue, for the Scanner.
+   *
+   * THIS IS THE ROUTE THAT REPLACES THE DEAD "Fix missing images" BUTTON. That button called
+   * `/api/admin/orphan-certs`, which addresses certificates with no tenant predicate and therefore
+   * correctly refuses a signed station. Rather than weakening it, this returns the same operator
+   * affordance derived from THIS partner's own Card Jobs.
+   *
+   * Because the list is server-derived and tenant-scoped, the normal FIX flow never asks anyone to
+   * type an MV number — which is what removes the opportunity to type someone else's.
+   */
+  /*
+   * A DISTINCT PATH from the dashboard's `/fix-queue`, not a shared one. The two callers prove
+   * themselves completely differently — the dashboard by session cookie, the station by Ed25519
+   * request signature plus an operator-session header — and Express matches the first registered
+   * route, so one path with two guard stacks would silently mean only the first stack ever runs.
+   */
+  // One line, for the same reason: tests/partner-scanner-fix.test.ts slices from
+  // `indexOf('r.get("/stations/fix-queue"')` and reads the next 300 characters.
+  r.get("/stations/fix-queue", requireSignedStation, requireSignedStationOperator, partnerStationFixQueueRateLimit, async (req, res) => {
+    const station = req.station!;
+    try {
+      // A Mac stands on ONE shop floor. Always confined — never the whole estate.
+      const items = await listFixQueue({
+        tenantId: station.tenantId,
+        locationId: station.locationId,
+        restrictToLocation: true,
+      });
+      res.json({ items });
+    } catch (error) {
+      fixError(res, error);
+    }
+  });
+
+  /**
+   * P7 — authorise the replacement capture. COSTS ZERO GRADING CREDITS.
+   *
+   * Same Card Job, same MV, same certificate, same reservation. The service contains no wallet call
+   * at all, so this works identically when the shop's balance is zero — which is the point: a card
+   * already paid for must always be finishable.
+   */
+  r.post(
+    "/card-jobs/:cardJobId/fix-authorise",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationFixAuthoriseRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      const operator = req.partner!;
       try {
-        const result = await recordStationHeartbeat(req.station!, {
-          appVersion: req.body?.appVersion,
-          scannerConnected: req.body?.scannerConnected,
-          scannerHardware: req.body?.scannerHardware,
-          scannerProfileVersion: req.body?.scannerProfileVersion,
-          pendingUploadCount: req.body?.pendingUploadCount,
-          captureState: req.body?.captureState,
-          lastFailureCode: req.body?.lastFailureCode,
+        const authorisation = await authoriseFix({
+          tenantId: station.tenantId,
+          locationId: station.locationId,
+          cardJobId: String(req.params.cardJobId),
+          requestedSides: req.body?.sides,
+          stationId: station.id,
+          actorUserId: operator.userId,
         });
-        res.json({ ok: true, ...result });
+        res.json({ fix: authorisation });
       } catch (error) {
-        stationError(res, error);
+        fixError(res, error);
       }
     }
   );
 
+  // From origin/main: `partnerStationCalibrationIngressRateLimit` runs BEFORE authentication on
+  // purpose. requireSignedStation verifies a signed payload and resolves the operator session, so
+  // the endpoint must be protected from unauthenticated floods as well as from an authenticated one.
+  //
+  // KEEP THIS COMMENT ABOVE THE ROUTE, NOT INSIDE THE MIDDLEWARE CHAIN — see the note on
+  // /stations/heartbeat above. tests/release-route-rate-limits.test.ts pins this exact
+  // ingress-limit -> authentication -> operator -> per-station-limit ORDER with `\s*` between the
+  // middleware names, and `\s*` cannot span a comment.
   r.post(
     "/stations/calibrations",
     partnerStationCalibrationIngressRateLimit,
@@ -239,19 +541,19 @@ export function partnerStationRouter(): Router {
     requireSignedStationOperator,
     partnerStationCalibrationRateLimit,
     async (req, res) => {
-      try {
-        const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
-          scannerHardware: req.body?.scannerHardware,
-          scannerProfileVersion: req.body?.scannerProfileVersion,
-          acquisitionRegion: req.body?.acquisitionRegion,
-          workingRegion: req.body?.workingRegion,
-          placementToleranceMm: req.body?.placementToleranceMm,
-          calibrationVersion: req.body?.calibrationVersion,
-        });
-        res.status(201).json({ calibration });
-      } catch (error) {
-        stationError(res, error);
-      }
+    try {
+      const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
+        scannerHardware: req.body?.scannerHardware,
+        scannerProfileVersion: req.body?.scannerProfileVersion,
+        acquisitionRegion: req.body?.acquisitionRegion,
+        workingRegion: req.body?.workingRegion,
+        placementToleranceMm: req.body?.placementToleranceMm,
+        calibrationVersion: req.body?.calibrationVersion,
+      });
+      res.status(201).json({ calibration });
+    } catch (error) {
+      stationError(res, error);
+    }
     }
   );
 

@@ -382,10 +382,172 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
       body: JSON.stringify(body),
     });
 
+  /**
+   * AG-3 STEP-UP — perform the REAL proof against the REAL endpoint.
+   *
+   * Deliberately NOT `UPDATE partner_sessions SET last_step_up_at = now()`. Seeding the column
+   * would prove only that the guard reads a timestamp; it would keep passing if the step-up route
+   * stopped verifying the password, which is the one thing that must never silently break. These
+   * tests therefore drive the same HTTP call the browser makes.
+   */
+  const stepUp = (cookie: string, password = "correct-horse-battery", second?: { code?: string; recoveryCode?: string }) =>
+    post("/api/partner/auth/step-up", { password, ...(second ?? {}) }, cookie);
+
+  /** Sign in and immediately satisfy the step-up challenge — for tests whose subject is not step-up. */
+  async function loginStepped(email: string, password = "correct-horse-battery") {
+    const { cookie, res, body } = await login(email, password);
+    const proof = await stepUp(cookie, password);
+    expect(proof.status, `step-up for ${email} should succeed`).toBe(200);
+    return { cookie, res, body };
+  }
+
+  // ============ AG-3 step-up: the real challenge -> prove -> retry cycle ============
+  it("step-up: a protected action is refused, then succeeds after the real proof, and the proof is session-scoped", async () => {
+    const { cookie } = await login("owner@a.com");
+
+    // 1. The action is refused with the distinct, actionable code — NOT 401. A 401 would make the
+    //    browser discard a perfectly good session and turn a prompt into an unexpected sign-out.
+    const refused = await post(
+      "/api/partner/users",
+      { firstName: "Step", lastName: "Up", email: "step-up-flow@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error.code).toBe("step_up_required");
+
+    // 2. Nothing was performed by the refused attempt.
+    const afterRefusal = await admin.query("SELECT 1 FROM partner_users WHERE email='step-up-flow@a.com'");
+    expect(afterRefusal.rowCount).toBe(0);
+
+    // 3. The real proof.
+    const proof = await stepUp(cookie);
+    expect(proof.status).toBe(200);
+    expect((await proof.json()).windowMinutes).toBe(15);
+
+    // 4. The ORIGINAL action, retried unchanged, now succeeds.
+    const retried = await post(
+      "/api/partner/users",
+      { firstName: "Step", lastName: "Up", email: "step-up-flow@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(retried.status).toBe(200);
+
+    // 5. The proof belongs to THIS session only. A different session of the SAME user is still
+    //    challenged — otherwise one stepped-up tab would silently privilege every other login.
+    const other = await login("owner@a.com");
+    const otherAttempt = await post(
+      "/api/partner/users",
+      { firstName: "Other", lastName: "Session", email: "other-session@a.com", role: "STAFF" },
+      other.cookie
+    );
+    expect(otherAttempt.status).toBe(403);
+    expect((await otherAttempt.json()).error.code).toBe("step_up_required");
+  });
+
+  it("step-up: a wrong password is refused and grants nothing", async () => {
+    const { cookie } = await login("owner@a.com");
+    const bad = await stepUp(cookie, "not-the-password");
+    expect(bad.status).toBe(403);
+    expect((await bad.json()).error.code).toBe("unauthorised");
+
+    // The failed proof must not have stamped the session.
+    const still = await post(
+      "/api/partner/users",
+      { firstName: "No", lastName: "Proof", email: "no-proof@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(still.status).toBe(403);
+    expect((await still.json()).error.code).toBe("step_up_required");
+  });
+
+  it("step-up: an EXPIRED proof is challenged again, and replay after expiry does not resurrect it", async () => {
+    const { cookie } = await login("owner@a.com");
+    expect((await stepUp(cookie)).status).toBe(200);
+
+    // Age the stamp past the 15-minute window. The guard compares against the DATABASE clock, so
+    // moving the stored timestamp is the honest way to expire it — no application clock is involved.
+    await admin.query(
+      `UPDATE partner_sessions SET last_step_up_at = now() - interval '16 minutes' WHERE revoked_at IS NULL`
+    );
+
+    const expired = await post(
+      "/api/partner/users",
+      { firstName: "Expired", lastName: "Proof", email: "expired-proof@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(expired.status).toBe(403);
+    expect((await expired.json()).error.code).toBe("step_up_required");
+
+    // And a fresh proof on the same session works again.
+    expect((await stepUp(cookie)).status).toBe(200);
+    const afterFresh = await post(
+      "/api/partner/users",
+      { firstName: "Expired", lastName: "Proof", email: "expired-proof@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(afterFresh.status).toBe(200);
+  });
+
+  it("step-up proves identity freshness, NOT permission: a GRADER is refused by capability, never challenged", async () => {
+    // The guard sits AFTER the capability checks precisely so a user who may never perform the
+    // action is told that, rather than being asked for a password that would not have helped.
+    const { cookie } = await login("trainee@a.com");
+    const denied = await post(
+      "/api/partner/users",
+      { firstName: "Nope", lastName: "Nope", email: "nope@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error?.code).not.toBe("step_up_required");
+
+    // Even after a VALID proof, the answer is unchanged — step-up escalates nothing.
+    const proof = await stepUp(cookie);
+    expect(proof.status).toBe(200);
+    const stillDenied = await post(
+      "/api/partner/users",
+      { firstName: "Nope", lastName: "Nope", email: "nope@a.com", role: "STAFF" },
+      cookie
+    );
+    expect(stillDenied.status).toBe(403);
+    expect((await stillDenied.json()).error?.code).not.toBe("step_up_required");
+    const created = await admin.query("SELECT 1 FROM partner_users WHERE email='nope@a.com'");
+    expect(created.rowCount).toBe(0);
+  });
+
+  it("step-up: a revoked session cannot step up, because the proof is written to a live row only", async () => {
+    const { cookie } = await login("owner@a.com");
+    await admin.query(`UPDATE partner_sessions SET revoked_at = now() WHERE revoked_at IS NULL`);
+    const proof = await stepUp(cookie);
+    // The session no longer authenticates at all, so this never reaches the step-up verifier.
+    expect(proof.status).toBe(401);
+  });
+
+  it("step-up: the proof is shared session state, so it holds across independent app processes", async () => {
+    // MULTI-MACHINE PROOF. Production runs two Fly Machines. `recordStepUp` writes
+    // partner_sessions.last_step_up_at and `hasRecentStepUp` reads it back through the database, so
+    // there is no process-local "recently authenticated" map to diverge. This asserts that
+    // property directly: the proof is visible to a reader that never saw the step-up request.
+    const { cookie } = await login("owner@a.com");
+    expect((await stepUp(cookie)).status).toBe(200);
+
+    // The cookie carries an opaque token, NOT the primary key, so the row is located the way a
+    // second Machine would: by the account, over a connection that never saw the step-up request.
+    const seen = await admin.query<{ fresh: boolean }>(
+      `SELECT (s.last_step_up_at IS NOT NULL
+               AND s.last_step_up_at > now() - interval '15 minutes') AS fresh
+         FROM partner_sessions s
+         JOIN partner_users u ON u.id = s.user_id
+        WHERE u.email = 'owner@a.com' AND s.revoked_at IS NULL
+        ORDER BY s.last_step_up_at DESC NULLS LAST
+        LIMIT 1`
+    );
+    expect(seen.rows[0]?.fresh).toBe(true);
+  });
+
   // ============ partner team management ============
   it("team management: OWNER lists, invites, resends, revokes invitation, changes roles, status and sessions", async () => {
     capturedInvites.length = 0;
-    const { cookie } = await login("owner@a.com");
+    const { cookie } = await loginStepped("owner@a.com");
     const invited = await post(
       "/api/partner/users",
       { firstName: "New", lastName: "User", email: "new-user@a.com", role: "STAFF" },
@@ -449,7 +611,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("team management: ADMIN can manage operational users but cannot grant or modify OWNERs or self-promote", async () => {
-    const { cookie } = await login("admin@a.com");
+    const { cookie } = await loginStepped("admin@a.com");
     expect(
       (
         await post(
@@ -489,7 +651,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("team management: prototype-key role payloads are rejected and preserve existing roles", async () => {
-    const { cookie } = await login("owner@a.com");
+    const { cookie } = await loginStepped("owner@a.com");
     for (const role of ["constructor", "toString", "__proto__", "valueOf", "hasOwnProperty"]) {
       const before = await admin.query<{ codes: string[] }>(
         `SELECT array_agg(r.code ORDER BY r.code) AS codes
@@ -528,7 +690,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("team management: tenant isolation fails closed for cross-tenant list and mutations", async () => {
-    const { cookie } = await login("owner@a.com");
+    const { cookie } = await loginStepped("owner@a.com");
     const listed = (await (await get("/api/partner/users", cookie)).json()).users;
     expect(listed.some((u: { email: string }) => u.email === "owner@b.com")).toBe(false);
     const bUser = "22222222-0000-0000-0000-0000000000b1";
@@ -552,7 +714,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("team management: final active owner cannot be suspended, demoted, revoked, or removed", async () => {
-    const { cookie } = await login("owner@b.com");
+    const { cookie } = await loginStepped("owner@b.com");
     const ownerId = "22222222-0000-0000-0000-0000000000b1";
     expect(
       (await post(`/api/partner/users/${ownerId}/status`, { status: "SUSPENDED", reason: "no" }, cookie)).status
@@ -567,7 +729,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
 
   it("team invitation acceptance is single-use, expiry-aware, supersession-safe, partner-bound, role-bound and email-bound", async () => {
     capturedInvites.length = 0;
-    const { cookie } = await login("owner@a.com");
+    const { cookie } = await loginStepped("owner@a.com");
     const invited = await post(
       "/api/partner/users",
       { firstName: "Bound", lastName: "Invite", email: "bound@a.com", role: "GRADER" },
@@ -619,7 +781,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   it("team sessions: suspension, role change, membership revocation and explicit revocation invalidate access", async () => {
-    const owner = await login("owner@a.com");
+    const owner = await loginStepped("owner@a.com");
     const staffLogin = await login("staff@a.com");
     expect((await get("/api/partner/session", staffLogin.cookie)).status).toBe(200);
     expect(

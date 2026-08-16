@@ -44,6 +44,13 @@ const els = {
   rescanPreviewBtn: document.getElementById("rescanPreviewBtn"),
   rescanErrorBtn: document.getElementById("rescanErrorBtn"),
   nextCardBtn: document.getElementById("nextCardBtn"),
+  newCardBtn: document.getElementById("newCardBtn"),
+  newCardError: document.getElementById("newCardError"),
+  cardCompletePanel: document.getElementById("cardCompletePanel"),
+  cardCompleteTitle: document.getElementById("cardCompleteTitle"),
+  cardCompleteInstruction: document.getElementById("cardCompleteInstruction"),
+  completeNextCardBtn: document.getElementById("completeNextCardBtn"),
+  stationCredits: document.getElementById("stationCredits"),
   captureActionHint: document.getElementById("captureActionHint"),
   positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
   positioningHint: document.getElementById("positioningHint"),
@@ -178,6 +185,13 @@ function renderStationIdentity(setup) {
   els.stationOrganisation.textContent = organisation || "MintVault location";
   els.stationIdentity.textContent = setup.stationCode || "Station";
   els.stationUser.textContent = setup.summary?.displayName || "Authorised user";
+  /*
+   * Server-reported capacity, or an em dash. Never 0 as a stand-in for "not answered yet": the two
+   * mean completely different things to a shop, and showing an unasked question as an empty wallet
+   * would stop a station that is perfectly able to work.
+   */
+  const credits = setup.summary?.availableCredits;
+  els.stationCredits.textContent = typeof credits === "number" ? String(credits) : "—";
 }
 
 function renderWorkflowGuide(state) {
@@ -539,6 +553,26 @@ function renderCaptureActions(state) {
   const scanEnabled = awaitingScan && state.scannerHealth?.status === "ready" && !actionInFlight;
   const cardRegistered = state.lastAcceptedCapture?.cardRegistered === true && !active;
 
+  /*
+   * P6 completion screen: MVxxx COMPLETE / MARK CARD MVxxx / NEXT CARD.
+   *
+   * The MV shown is the server's certificate number, echoed back exactly as received. The station
+   * never derives, increments or guesses it — "last cert + 1" is precisely the client-side identity
+   * assignment the model forbids, because two stations would reach the same answer.
+   *
+   * MARK CARD is the physical instruction that keeps the paper trail honest: the operator writes
+   * this number on the sleeve before the card leaves the station, so a card can always be matched
+   * back to its certificate.
+   */
+  const completedCert = cardRegistered ? state.lastAcceptedCapture?.certId : null;
+  els.cardCompletePanel.hidden = !completedCert;
+  if (completedCert) {
+    els.cardCompleteTitle.textContent = `${completedCert} COMPLETE`;
+    els.cardCompleteInstruction.textContent = `MARK CARD ${completedCert}`;
+  }
+  // NEW CARD is only sensible when this station is not mid-card.
+  els.newCardBtn.disabled = Boolean(active) || actionInFlight;
+
   // Keep the final evidence action visible in every state. A disabled,
   // explained SCAN CARD makes the target-bound rule clear without implying
   // Preview itself can become an authoritative capture.
@@ -665,42 +699,53 @@ function createText(className, value) {
   return element;
 }
 
-function renderMissingImages(orphans) {
+/**
+ * P7 — the FIX queue.
+ *
+ * The server sends entries already shaped as the operator reads them aloud:
+ *   MV421 — FRONT MISSING
+ * The list is derived from THIS partner's own Card Jobs, so there is no MV number to type and no
+ * way to name a card belonging to anybody else. Selecting one asks the server to authorise exactly
+ * the missing side(s); it costs no Grading Credits and works at a zero balance.
+ */
+function renderMissingImages(items) {
   els.orphanList.replaceChildren();
-  if (!orphans.length) {
-    els.orphanList.textContent = "No certificates are missing images.";
+  if (!items || !items.length) {
+    els.orphanList.textContent = "No cards are waiting for a replacement image.";
     return;
   }
 
-  for (const orphan of orphans) {
-    const missing = orphan.missingFront && orphan.missingBack
-      ? "missing front and back"
-      : orphan.missingFront
-        ? "missing front"
-        : orphan.missingBack
-          ? "missing back"
-          : "complete";
+  for (const item of items) {
     const row = document.createElement("div");
     row.className = "orphan-row";
     const info = document.createElement("div");
     info.className = "orphan-info";
     info.append(
-      createText("orphan-id", orphan.certId || "Unknown certificate"),
-      createText("orphan-meta", `${orphan.cardName || "(unnamed card)"}${orphan.set ? ` · ${orphan.set}` : ""} — ${missing}`),
+      createText("orphan-id", `${item.mvNumber} — ${item.missingLabel}`),
+      createText("orphan-meta", item.cardName || "(unnamed card)"),
     );
     const actions = document.createElement("div");
     actions.className = "orphan-actions";
-    if (orphan.missingFront || orphan.missingBack) {
-      const recover = document.createElement("button");
-      recover.className = "btn primary";
-      recover.textContent = "Open in MintVault";
-      recover.addEventListener("click", async () => {
-        const result = await window.scanner.openGradeCert(orphan.certId);
-        if (!result?.ok) return alert(`Couldn't open MintVault: ${result?.error || "unknown error"}`);
+    const fixBtn = document.createElement("button");
+    fixBtn.className = "btn primary";
+    fixBtn.textContent = "FIX THIS CARD";
+    fixBtn.addEventListener("click", async () => {
+      fixBtn.disabled = true;
+      try {
+        const result = await window.scanner.authoriseFix({
+          cardJobId: item.cardJobId,
+          sides: item.missingSides,
+        });
+        if (!result?.ok) {
+          alert(result?.error || "Could not start the fix");
+          return;
+        }
         closeModal(els.orphanModal);
-      });
-      actions.append(recover);
-    }
+      } finally {
+        fixBtn.disabled = false;
+      }
+    });
+    actions.append(fixBtn);
     row.append(info, actions);
     els.orphanList.append(row);
   }
@@ -758,7 +803,7 @@ els.orphansBtn.addEventListener("click", async () => {
     els.orphanList.textContent = `Could not load missing images: ${result?.body?.error || result?.status || "unknown error"}`;
     return;
   }
-  renderMissingImages(result.body?.orphans || []);
+  renderMissingImages((result.body && result.body.items) || result.body?.orphans || []);
 });
 
 els.orphanClose.addEventListener("click", () => closeModal(els.orphanModal));
@@ -783,6 +828,50 @@ els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((prev
 els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.nextCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.acknowledgeCardRegistered()));
+
+/**
+ * P6 — NEW CARD.
+ *
+ * The button is disabled for the duration of the request so one press is one request. The retry
+ * token itself lives in the main process, so even if a press slipped through twice the server would
+ * answer the second from its idempotency record rather than the wallet — this is the convenience
+ * guard, not the correctness one.
+ *
+ * Nothing here decides whether the shop can afford a card. The server answers, and a refusal is
+ * shown verbatim: at zero credits the operator is told to buy more, not shown a broken button.
+ */
+async function startNewCard() {
+  if (els.newCardBtn.disabled) return;
+  els.newCardBtn.disabled = true;
+  els.newCardError.hidden = true;
+  const previousLabel = els.newCardBtn.textContent;
+  els.newCardBtn.textContent = "STARTING…";
+  try {
+    const result = await window.scanner.startNewCard({});
+    if (!result?.ok) {
+      els.newCardError.textContent = result?.error || "Could not start a new card";
+      els.newCardError.hidden = false;
+      return;
+    }
+    els.cardCompletePanel.hidden = true;
+  } catch (err) {
+    els.newCardError.textContent = err?.message || "Could not reach MintVault";
+    els.newCardError.hidden = false;
+  } finally {
+    els.newCardBtn.textContent = previousLabel;
+    els.newCardBtn.disabled = false;
+  }
+}
+
+els.newCardBtn.addEventListener("click", () => void startNewCard());
+
+// NEXT CARD on the completion panel does BOTH: clears the finished card, then starts the next one,
+// so the operator's loop is a single press per card rather than two.
+els.completeNextCardBtn.addEventListener("click", async () => {
+  els.cardCompletePanel.hidden = true;
+  await runCaptureAction(() => window.scanner.acknowledgeCardRegistered());
+  await startNewCard();
+});
 
 els.restartServiceBtn.addEventListener("click", async () => {
   if (!confirm("Restart the scanner service?\n\nUse this only when the service is unresponsive. An active capture may be interrupted.")) return;

@@ -164,6 +164,19 @@ export function partnerRateLimit(opts: LimiterOpts) {
 // distinct value it submits. See partnerLoginIpLimiter and partnerResetRequestLimiter.
 const acct = (req: Request): string => `${(req.body?.email ?? "").toString().toLowerCase()}|${req.ip}`;
 /**
+ * TRULY per-account key — the identifier ONLY, with no IP component.
+ *
+ * `acct` above mixes in `req.ip`, which makes it per-(account, IP): an attacker rotating source
+ * addresses mints a fresh budget for every address and the targeted account is not protected at all.
+ * That defeated the stated purpose of the reset-request account bucket, whose whole job is to stop
+ * ONE account being flooded FROM ROTATING IPs (the denial-of-recovery defect).
+ *
+ * Keying on a request-body value alone is only safe as an ADDITIONAL bucket sitting BEHIND an
+ * IP-only limiter — otherwise a caller earns a fresh budget per submitted value. That precondition
+ * holds here: partnerResetRequestLimiter (IP-only, normalised to a /56) is always mounted in front.
+ */
+const acctOnly = (req: Request): string => (req.body?.email ?? "").toString().toLowerCase();
+/**
  * Login, IP bucket. ALWAYS applied, and mounted IN FRONT of partnerLoginLimiter (see
  * public-routes.ts) — this is the bucket that actually bounds password spraying.
  *
@@ -251,7 +264,10 @@ export const partnerResetRequestAccountLimiter = partnerRateLimit({
   windowMs: 15 * 60_000,
   max: 5,
   failClosed: true,
-  keyFn: acct,
+  // acctOnly, NOT acct: keying on (account, IP) meant rotating source addresses each earned a fresh
+  // 5-request budget against the SAME account — precisely the flood this bucket is documented to
+  // prevent. The IP-only limiter above still bounds per-source abuse.
+  keyFn: acctOnly,
 });
 export const partnerLocationSwitchLimiter = partnerRateLimit({
   name: "partner_locswitch",

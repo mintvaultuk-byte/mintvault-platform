@@ -12,8 +12,9 @@
  * follow-up, consistent with the existing admin/staff in-process counters.
  */
 import { Router, type Express, type Request, type Response } from "express";
+import { requireAdminStepUp } from "../lib/admin-step-up";
 import rateLimit from "express-rate-limit";
-import { requireAdmin, requireSuperAdmin } from "../auth";
+import { requireSuperAdmin } from "../auth";
 import {
   toG5Error,
   g5StatusFor,
@@ -33,6 +34,7 @@ import * as svc from "./partner-management-service";
 import type { ActorContext } from "./partner-management-service";
 import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admin-capability";
 import { validatePartnerRbac, partnerRbacBlocksReadiness } from "./permissions";
+import { checkPartnerSchemaContract } from "./schema-contract";
 import { resolveGlobalFlag } from "./flags";
 
 /**
@@ -102,7 +104,7 @@ function requirePartnerUserRole(raw: unknown): svc.AdminPartnerRole {
 
 export function partnerManagementRouter(): Router {
   const r = Router();
-  r.use(requireAdmin);
+  r.use(requireSuperAdmin);
 
   /**
    * Partner-management readiness.
@@ -148,7 +150,16 @@ export function partnerManagementRouter(): Router {
     }
 
     const rbacBlocks = partnerRbacBlocksReadiness(rbac.state, partnerSurfaceEnabled);
-    const ready = current.ok && !rbacBlocks;
+
+    /*
+     * Schema contract (invariant I18). This is the surface an operator actually looks at, so a
+     * version deployed ahead of its migration must say so HERE rather than being inferred from a
+     * scatter of unrelated 401s and 500s across login, password reset and invitation accept.
+     * Read-only and cached-on-success; it can never seed or repair anything.
+     */
+    const schema = await checkPartnerSchemaContract();
+
+    const ready = current.ok && !rbacBlocks && schema.ok;
 
     /*
      * failureCode is always a FIXED enum and remedy is always a STATIC string. No raw database error
@@ -170,6 +181,13 @@ export function partnerManagementRouter(): Router {
         remedy: rbacBlocks ? (rbac.remedy ?? REMEDY_APPLY_RBAC_MIGRATION) : null,
         missing: rbac.missing,
         unexpected: rbac.unexpected,
+      },
+      schemaContract: {
+        ok: schema.ok,
+        // Each entry names the requirement AND the migration file that supplies it. This is
+        // deployment configuration, never tenant data, so it is safe on this Super-Admin surface.
+        missing: schema.missing,
+        probeError: schema.error ?? null,
       },
     });
   });
@@ -327,7 +345,7 @@ export function partnerManagementRouter(): Router {
         actor.requestId,
         await svc.invitePartnerUser(
           actor,
-          req.params.partnerId,
+          String(req.params.partnerId),
           {
             firstName: requireNonEmpty(req.body?.firstName, "firstName"),
             lastName: requireNonEmpty(req.body?.lastName, "lastName"),
@@ -410,7 +428,8 @@ export function partnerManagementRouter(): Router {
     }
   });
 
-  r.post("/partners/:partnerId/users/:userId/role", async (req, res) => {
+  // AG-3b: changing a partner user's role hands over or removes authority inside that shop.
+  r.post("/partners/:partnerId/users/:userId/role", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
@@ -419,8 +438,8 @@ export function partnerManagementRouter(): Router {
         actor.requestId,
         await svc.changePartnerUserRole(
           actor,
-          req.params.partnerId,
-          req.params.userId,
+          String(req.params.partnerId),
+          String(req.params.userId),
           requirePartnerUserRole(req.body?.role),
           reason
         )
@@ -430,7 +449,8 @@ export function partnerManagementRouter(): Router {
     }
   });
 
-  r.post("/partners/:partnerId/users/:userId/status", async (req, res) => {
+  // AG-3b: suspending or removing a partner user ends their access immediately.
+  r.post("/partners/:partnerId/users/:userId/status", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
@@ -441,7 +461,7 @@ export function partnerManagementRouter(): Router {
       mutationResponse(
         res,
         actor.requestId,
-        await svc.setPartnerUserStatus(actor, req.params.partnerId, req.params.userId, status, reason)
+        await svc.setPartnerUserStatus(actor, String(req.params.partnerId), String(req.params.userId), status, reason)
       );
     } catch (err) {
       sendError(res, err);
@@ -449,14 +469,15 @@ export function partnerManagementRouter(): Router {
   });
 
   /** Email the user a password-reset link. No password is ever set, shown or stored by the admin. */
-  r.post("/partners/:partnerId/users/:userId/password-reset", async (req, res) => {
+  // AG-3b: initiating a password reset mints a credential-recovery link for somebody else's account.
+  r.post("/partners/:partnerId/users/:userId/password-reset", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
       mutationResponse(
         res,
         actor.requestId,
-        await svc.sendPartnerUserPasswordReset(actor, req.params.partnerId, req.params.userId, reason)
+        await svc.sendPartnerUserPasswordReset(actor, String(req.params.partnerId), String(req.params.userId), reason)
       );
     } catch (err) {
       sendError(res, err);
@@ -464,28 +485,30 @@ export function partnerManagementRouter(): Router {
   });
 
   /** Clear the user's second factor and force re-enrolment. Revokes sessions. */
-  r.post("/partners/:partnerId/users/:userId/reset-mfa", async (req, res) => {
+  // AG-3b: clearing somebody's second factor removes a security control from their account.
+  r.post("/partners/:partnerId/users/:userId/reset-mfa", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
       mutationResponse(
         res,
         actor.requestId,
-        await svc.resetPartnerUserMfa(actor, req.params.partnerId, req.params.userId, reason)
+        await svc.resetPartnerUserMfa(actor, String(req.params.partnerId), String(req.params.userId), reason)
       );
     } catch (err) {
       sendError(res, err);
     }
   });
 
-  r.post("/partners/:partnerId/users/:userId/revoke-sessions", async (req, res) => {
+  // AG-3b: signing a partner user out of everything is a security action.
+  r.post("/partners/:partnerId/users/:userId/revoke-sessions", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = optionalReason(req.body?.reason, "partner user sessions revoked");
       mutationResponse(
         res,
         actor.requestId,
-        await svc.revokePartnerUserSessions(actor, req.params.partnerId, req.params.userId, reason)
+        await svc.revokePartnerUserSessions(actor, String(req.params.partnerId), String(req.params.userId), reason)
       );
     } catch (err) {
       sendError(res, err);
@@ -527,7 +550,8 @@ export function partnerManagementRouter(): Router {
     }
   });
 
-  r.post("/partners/:partnerId/status", async (req, res) => {
+  // AG-3b: suspending a partner organisation stops every shop floor it owns.
+  r.post("/partners/:partnerId/status", requireAdminStepUp(), async (req, res) => {
     try {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
@@ -537,7 +561,107 @@ export function partnerManagementRouter(): Router {
       mutationResponse(
         res,
         actor.requestId,
-        await svc.changeStatus(actor, req.params.partnerId, status, version, reason)
+        await svc.changeStatus(actor, String(req.params.partnerId), status, version, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /* ------------------------------------------------------------------------------------------
+   * AG-1 — MULTI-LOCATION.
+   *
+   * These are the routes that were simply missing. partner_locations has been multi-location
+   * capable since 0001, but createPartner() inserted one 'Main location' and nothing anywhere
+   * could add a second — which silently capped stations to one shop floor and made the Scanner's
+   * location selector dead code.
+   *
+   * Super Admin only, like every other route on this router (requireSuperAdmin +
+   * requirePartnerAdminCapability applied at mount). Partner Owners and Managers reach their own
+   * locations through the EXISTING portal surfaces and the EXISTING RBAC — no new partner-side
+   * authority is granted here.
+   * ---------------------------------------------------------------------------------------- */
+  r.get("/partners/:partnerId/locations", async (req, res) => {
+    try {
+      res.json({ locations: await svc.listPartnerLocations(req.params.partnerId) });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/locations", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "location created");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.createPartnerLocation(
+          actor,
+          req.params.partnerId,
+          { name: req.body?.name, address: req.body?.address },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.patch("/partners/:partnerId/locations/:locationId", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "location updated");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.updatePartnerLocation(
+          actor,
+          req.params.partnerId,
+          req.params.locationId,
+          { name: req.body?.name, address: req.body?.address },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /*
+   * Suspending a shop floor stops capture there. A REASON IS MANDATORY — unlike creation, this
+   * takes work away from people, and the audit row is the only thing that can later distinguish a
+   * deliberate closure from a mistake.
+   */
+  r.post("/partners/:partnerId/locations/:locationId/status", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.setPartnerLocationStatus(
+          actor,
+          req.params.partnerId,
+          req.params.locationId,
+          String(req.body?.status ?? ""),
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /* Which shop floors a named user may operate at. Replaces the whole set in one decision. */
+  r.post("/partners/:partnerId/users/:userId/locations", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.setPartnerUserLocations(actor, req.params.partnerId, req.params.userId, req.body?.locationIds, reason)
       );
     } catch (err) {
       sendError(res, err);

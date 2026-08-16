@@ -1,4 +1,5 @@
 import { Router, type Express } from "express";
+import { requireAdminStepUp } from "../lib/admin-step-up";
 import { requireSuperAdmin } from "../auth";
 import { listFleetStations, rejectPendingStation, transitionStationStatus } from "./station-service";
 
@@ -30,7 +31,12 @@ export function partnerStationAdminRouter(): Router {
   });
 
   for (const status of ["ACTIVE", "SUSPENDED", "REVOKED"] as const) {
-    r.post(`/stations/:stationCode/${status.toLowerCase()}`, async (req, res) => {
+    /*
+     * AG-3b: approving, suspending or revoking a station changes whether a physical Mac in a shop
+     * can capture paid work. Revocation is effectively irreversible for that install — the station
+     * must re-enrol — so it demands a fresh proof, not merely a live admin session.
+     */
+    r.post(`/stations/:stationCode/${status.toLowerCase()}`, requireAdminStepUp(), async (req, res) => {
       try {
         const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
         await transitionStationStatus(String(req.params.stationCode), status, actorId(req), reason);
@@ -44,7 +50,8 @@ export function partnerStationAdminRouter(): Router {
     });
   }
 
-  r.post("/stations/:stationCode/reject", async (req, res) => {
+  // AG-3b: rejecting a pending enrolment is the same class of decision as revoking an active one.
+  r.post("/stations/:stationCode/reject", requireAdminStepUp(), async (req, res) => {
     try {
       const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
       await rejectPendingStation(String(req.params.stationCode), actorId(req), reason);

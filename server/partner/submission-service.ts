@@ -55,6 +55,64 @@ const SERVICE_TIER_UNAVAILABLE = () =>
  * G6B safety backstop, while normal settlement is driven by the grading lifecycle below. */
 const PARTNER_SUBMISSION_CREDIT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
+/**
+ * THE SINGLE OWNER OF "may this operation run against a submission in this state?".
+ *
+ * This replaces SEVEN independently written guard clauses that had drifted into two different
+ * spellings of the same idea — five sites tested `status !== "draft"` and two tested
+ * `status === "cancelled"` — with the legal graph existing only as the doc comment at the top of
+ * this file. Seven copies of a rule is seven places for the eighth caller to forget it, and nothing
+ * made the two spellings agree.
+ *
+ * Expressing it as an ALLOWLIST per operation rather than a denylist is the point: a new lifecycle
+ * state added by a future migration is refused by default and must be consciously admitted here,
+ * instead of silently becoming permitted everywhere the denylist did not happen to mention it.
+ *
+ * BEHAVIOUR TODAY IS IDENTICAL. The live status domain is exactly
+ * ('draft','submitted_to_mintvault','cancelled') — migration 0007's CHECK — so "not cancelled" and
+ * "draft or submitted_to_mintvault" describe the same set. Migration 0074 widens that domain to
+ * eight values, and when it lands this allowlist becomes STRICTER rather than looser: cancelling or
+ * uploading against a submission already in `grading` or `completed` will be refused, which is what
+ * the documented state machine says should happen and what the old denylist would have allowed.
+ *
+ * This is the APPLICATION half of lifecycle enforcement. It does not replace database enforcement
+ * and must never be treated as sufficient on its own: `partner_card_jobs` carries its own
+ * ENABLE ALWAYS transition trigger (migration 0080), and `partner_runtime` holds UPDATE on
+ * `partner_submissions.status`, so the DB remains the floor.
+ */
+export type SubmissionOperation =
+  | "EDIT_SUBMISSION"
+  | "ADD_CARD"
+  | "EDIT_CARD"
+  | "REMOVE_CARD"
+  | "SUBMIT"
+  | "CANCEL"
+  | "UPLOAD_CARD_IMAGE";
+
+const SUBMISSION_OPERATION_ALLOWED_FROM: Readonly<Record<SubmissionOperation, readonly string[]>> = {
+  // Content edits require an unsubmitted submission — once handed to MintVault the contents are
+  // part of an accepted, credit-reserved handoff and may not change underneath it.
+  EDIT_SUBMISSION: ["draft"],
+  ADD_CARD: ["draft"],
+  EDIT_CARD: ["draft"],
+  REMOVE_CARD: ["draft"],
+  SUBMIT: ["draft"],
+  // Cancellation is legal from draft AND after handoff (the doc'd "rare, always audited" path).
+  CANCEL: ["draft", "submitted_to_mintvault"],
+  // Evidence may still be attached after handoff; it adds to the record rather than altering the
+  // agreed contents.
+  UPLOAD_CARD_IMAGE: ["draft", "submitted_to_mintvault"],
+};
+
+/**
+ * Throws the SAME error the seven inline guards threw, so no caller's contract changes.
+ * `NOT_DRAFT` is retained as the error identity deliberately: it is what the API surface and the
+ * existing tests assert on, and renaming it would be a breaking change dressed up as a cleanup.
+ */
+function assertSubmissionOperationAllowed(status: string, operation: SubmissionOperation): void {
+  if (!SUBMISSION_OPERATION_ALLOWED_FROM[operation].includes(status)) throw NOT_DRAFT();
+}
+
 /** Location-scope predicate, appended to every submission query. Org-wide roles see everything;
  *  everyone else is restricted to their assigned locations via partner_user_locations.
  *  `paramOffset` is the count of placeholders already used earlier in the caller's query, so the
@@ -384,7 +442,7 @@ export async function editSubmissionDraft(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "EDIT_SUBMISSION");
     if (row.version !== input.version) throw STALE();
     if (input.customerId !== undefined) await verifyCustomerOwnership(c, principal.tenantId, input.customerId);
     // Same rule as create: undefined = not changing the tier; null = explicitly clearing it;
@@ -443,7 +501,7 @@ export async function cancelSubmission(
     return await withPartnerAdminTenantTransaction({ tenantId: principal.tenantId }, async (c) => {
       const row = await loadSubmissionForUpdate(c, principal, submissionId);
       if (!row) throw NOT_FOUND();
-      if (row.status === "cancelled") throw NOT_DRAFT();
+      assertSubmissionOperationAllowed(row.status, "CANCEL");
 
       const actor = await c.query<{ email: string; status: string }>(
         `SELECT email, status FROM partner_users WHERE id=$1 AND tenant_id=$2 FOR KEY SHARE`,
@@ -535,7 +593,7 @@ export async function uploadCardImage(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status === "cancelled") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "UPLOAD_CARD_IMAGE");
     const current = await c.query<{ id: string; front_image_key: string | null; back_image_key: string | null }>(
       `SELECT id, front_image_key, back_image_key
          FROM partner_submission_cards
@@ -581,7 +639,7 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "ADD_CARD");
     const seq = await c.query<{ next: number }>(
       `SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next FROM partner_submission_cards
         WHERE submission_id=$1 AND removed_at IS NULL`,
@@ -644,7 +702,7 @@ export async function editCard(
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "EDIT_CARD");
     const { rows } = await c.query(
       `UPDATE partner_submission_cards SET
          card_name = COALESCE($3, card_name),
@@ -689,7 +747,7 @@ export async function removeCard(principal: PartnerPrincipal, submissionId: stri
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") throw NOT_DRAFT();
+    assertSubmissionOperationAllowed(row.status, "REMOVE_CARD");
     const res = await c.query(
       `UPDATE partner_submission_cards SET removed_at=now(), removed_reason=$3
         WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL`,
@@ -793,7 +851,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
 
       const row = await loadSubmissionForUpdate(c, principal, submissionId);
       if (!row) throw NOT_FOUND();
-      if (row.status !== "draft") {
+      if (!["draft"].includes(row.status)) {
         // RACE FIX: two concurrent submits with the SAME key can both reach here — the first commits
         // (setting idempotency_key + status) before this transaction's FOR UPDATE lock is granted, so
         // the pre-lock "already" check above can miss it. Re-check the NOW-committed row's own
@@ -899,6 +957,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       // with fewer credits than cards, which is the defect this change exists to remove.
       const reservations: Awaited<ReturnType<typeof reserveCreditInTransaction>>[] = [];
       for (const unit of creditUnits) {
+        const cardReference = `partner-submission-card:${unit.cardId}:${unit.ordinal}`;
         reservations.push(
           await reserveCreditInTransaction(
             c,
@@ -908,7 +967,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
               locationId: row.location_id,
               // Unique per submission card + ordinal, so uq_partner_credit_reserve_card_live
               // enforces "one live entitlement per card" as designed.
-              cardReference: `partner-submission-card:${unit.cardId}:${unit.ordinal}`,
+              cardReference,
               submissionReference: submissionId,
               expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
               idempotencyKey: `partner-submission-credit:${submissionId}:${unit.cardId}:${unit.ordinal}`,
@@ -925,6 +984,88 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
             }
           )
         );
+
+        /*
+         * THE CANONICAL CARD JOB — created in the SAME transaction as the credit reservation that
+         * pays for it (migration 0080).
+         *
+         * This is what makes "1 Grading Credit = exactly 1 NEW Card Job" a database fact rather than
+         * a convention. Before this, a spent credit was joined to a card only by a nullable TEXT
+         * `card_reference` with no foreign key, compared elsewhere by string matching, so nothing
+         * prevented a reservation without a job, a job without a reservation, or two jobs sharing
+         * one paid credit.
+         *
+         * ATOMICITY: `c` is the same transaction as the reservation above and as every acceptance
+         * write below, so the pair either both commit or neither does. A wallet that runs out
+         * partway rolls the whole acceptance back — including these jobs — exactly as the existing
+         * all-or-nothing reservation behaviour already guarantees.
+         *
+         * IDEMPOTENCY: `reserveCreditInTransaction` returns the EXISTING reservation on a repeated
+         * idempotency key rather than minting a second one, so a retried submit must not mint a
+         * second Card Job either. `uq_partner_card_jobs_unit (card_id, ordinal)` makes that
+         * impossible at the database level and ON CONFLICT DO NOTHING makes the retry a no-op
+         * instead of an error.
+         *
+         * NO MV IS ALLOCATED HERE. certificate_id and mv_number stay NULL until the connector
+         * allocates a real certificate. A Card Job therefore exists in CREDIT_RESERVED with paid
+         * authority and no identity yet, which is precisely the state the lifecycle expects.
+         */
+        let inserted;
+        try {
+          inserted = await c.query<{ id: string }>(
+            `INSERT INTO partner_card_jobs
+             (tenant_id, submission_id, card_id, ordinal, card_reference, reservation_id,
+              location_id, created_by, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'CREDIT_RESERVED')
+           ON CONFLICT (card_id, ordinal) DO NOTHING
+           RETURNING id`,
+            [
+              principal.tenantId,
+              submissionId,
+              unit.cardId,
+              unit.ordinal,
+              cardReference,
+              reservations[reservations.length - 1].reservation.id,
+              row.location_id,
+              principal.userId,
+            ]
+          );
+        } catch (err) {
+          /*
+           * 42P01 = undefined_table. This is the ONE failure mode that would otherwise be genuinely
+           * misleading (invariant I18): the acceptance rolls back and the partner sees a bare 500,
+           * with nothing anywhere naming the missing migration. Everything else — a constraint
+           * violation, a tenant mismatch — is a real defect and must keep propagating untouched.
+           */
+          if ((err as { code?: string })?.code === "42P01") {
+            throw new Error(
+              "Submission cannot be accepted: the canonical Card Job table is missing. " +
+                "Apply migrations/0080_partner_card_jobs.sql, then retry."
+            );
+          }
+          throw err;
+        }
+
+        if (inserted.rowCount === 0) {
+          /*
+           * The job already existed — the expected path for an idempotent retry. Verify it is
+           * funded by the SAME reservation rather than assuming it. A mismatch would mean one card
+           * unit is associated with two different paid credits, which is the exact double-spend this
+           * table exists to prevent, so it fails loudly and rolls the acceptance back rather than
+           * quietly proceeding.
+           */
+          const existing = await c.query<{ reservation_id: string | null }>(
+            `SELECT reservation_id FROM partner_card_jobs
+              WHERE card_id=$1 AND ordinal=$2 AND tenant_id=$3`,
+            [unit.cardId, unit.ordinal, principal.tenantId]
+          );
+          const existingReservation = existing.rows[0]?.reservation_id ?? null;
+          if (existingReservation !== reservations[reservations.length - 1].reservation.id) {
+            throw new Error(
+              "Card Job reservation mismatch: this card unit is already funded by a different credit reservation."
+            );
+          }
+        }
       }
       // Retained for the audit/event payload below, which records the acceptance as a whole.
       const reservation = reservations[0];

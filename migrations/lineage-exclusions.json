@@ -1,0 +1,20 @@
+[
+  {
+    "incoming": "0044_partner_mfa_pending_lifecycle.sql",
+    "occupant": "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+    "supersededBy": "0090_lineage_convergence_scanner.sql",
+    "reason": "Staging's 0044 slot is its old submission-lifecycle identity (renumbered to 0074 for this release). Staging already applied this exact MFA body — byte-identical checksum — as its own 0046_partner_mfa_pending_lifecycle.sql, so the content is present; 0090 verifies it and fails loudly if absent."
+  },
+  {
+    "incoming": "0046_scanner_processing_jobs.sql",
+    "occupant": "0046_partner_mfa_pending_lifecycle.sql",
+    "supersededBy": "0090_lineage_convergence_scanner.sql",
+    "reason": "Staging's 0046 slot is its applied MFA lifecycle identity (production applied the same MFA body at 0044). The scanner_processing_jobs content is genuinely missing on staging and is delivered idempotently by 0090."
+  },
+  {
+    "incoming": "0047_scanner_evidence_staging.sql",
+    "occupant": "0047_partner_owner_invariant_tenants_rls.sql",
+    "supersededBy": "0090_lineage_convergence_scanner.sql",
+    "reason": "Staging's 0047 slot is its applied owner-invariant/tenants-RLS identity (whose semantics reach other hosts via 0073). The scanner_evidence_staging content is genuinely missing on staging and is delivered idempotently by 0090."
+  }
+]

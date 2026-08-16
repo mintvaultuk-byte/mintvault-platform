@@ -30,8 +30,17 @@ describe("partner login and invitation UI source assertions", () => {
     const src = read("client/src/pages/admin/partner-management-detail.tsx");
     expect(src).toContain("/onboarding-readiness");
     expect(src).toContain("pm-onboarding-section");
-    expect(src).toContain("READY TO LOG IN");
-    expect(src).toContain("LOGIN BLOCKED");
+    // The badge still renders the server's onboarding state with underscores stripped, but the
+    // read must stay NULL-SAFE: Fly does a rolling deploy across two machines, so a new bundle
+    // can be served alongside an older API that returns readiness without `onboardingState`.
+    // A bare `onboardingState.replaceAll` would throw in render and white-screen the page, so
+    // the guard is pinned here to stop it being "simplified" back.
+    expect(src).toContain('onboardingState ?? "UNKNOWN"');
+    expect(src).toContain(".replaceAll(\"_\", \" \")");
+    expect(src).toContain("Password configured");
+    expect(src).toContain("MFA configured");
+    expect(src).toContain("Send password setup");
+    expect(src).toContain("Reset MFA");
     expect(src).toContain("copy-invitation-link");
     expect(src).toContain("Staging/internal only.");
   });
@@ -40,5 +49,12 @@ describe("partner login and invitation UI source assertions", () => {
     const app = read("client/src/App.tsx");
     expect(app.indexOf('path="/partner/invite"')).toBeGreaterThan(app.indexOf('path="/partner/login"'));
     expect(app.indexOf('path="/partner/invite"')).toBeLessThan(app.indexOf('path="/partner/dashboard"'));
+  });
+
+  it("partner dashboard gives a truthful station-setup handoff", () => {
+    const src = read("client/src/pages/partner/dashboard.tsx");
+    expect(src).toContain("card-dashboard-scanner-station");
+    expect(src).toContain("wait for Super Admin approval");
+    expect(src).toContain("does not guess at device approval");
   });
 });

@@ -15,8 +15,87 @@ import {
 // to locate the admin's pin_hash; the constant must match the actual row's email.
 const ADMIN_EMAIL = "mintvaultuk@gmail.com";
 
+/**
+ * ADVISORY-ONLY per-process counters (invariant I19).
+ *
+ * These remain as a cheap first-line check, but they are NO LONGER the only control on the admin
+ * password step. On the two-Machine production topology a per-process Map gives an attacker double
+ * the advertised budget and is wiped by every rolling deploy. The AUTHORITATIVE control is now the
+ * durable, shared lockout below (password_failed_count / password_locked_until on `users`,
+ * migration 0079), which mirrors the PIN step's long-standing DB-backed lockout in server/pin.ts.
+ *
+ * Keeping both is deliberate: the in-memory check short-circuits obvious floods without a query,
+ * while correctness no longer depends on it.
+ */
 const loginAttempts = new Map<string, { count: number; firstAttempt: number }>();
 const pinAttempts = new Map<string, { count: number; firstAttempt: number }>();
+
+/** Mirrors server/pin.ts so both admin credential steps lock out identically. */
+const PASSWORD_LOCKOUT_THRESHOLD = 5;
+const PASSWORD_LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+/**
+ * Durable, fleet-wide lockout state for the admin PASSWORD step.
+ *
+ * Degrades to "not locked" when the 0079 columns are absent, so this is safe to deploy either side
+ * of the migration (expand → migrate → deploy) — the pre-existing in-memory control still applies in
+ * that window, which is exactly the previous behaviour rather than a regression.
+ */
+export async function isAdminPasswordLockedOut(): Promise<{ locked: boolean; retryAfter?: Date }> {
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    const r = await db.execute(sql`
+      SELECT password_locked_until FROM users
+       WHERE LOWER(email) = LOWER(${ADMIN_EMAIL}) AND deleted_at IS NULL LIMIT 1
+    `);
+    const row = r.rows[0] as { password_locked_until: string | null } | undefined;
+    if (!row?.password_locked_until) return { locked: false };
+    const until = new Date(row.password_locked_until);
+    return until > new Date() ? { locked: true, retryAfter: until } : { locked: false };
+  } catch {
+    // Pre-0079 database, or a transient error. Do NOT fail closed here: that would let a database
+    // blip lock the owner out of their own admin panel entirely. The in-memory limiter and the
+    // separate PIN step (which has its own durable lockout) still apply.
+    return { locked: false };
+  }
+}
+
+/** Atomic increment-and-maybe-lock, matching server/pin.ts's registerFailure(). */
+export async function registerAdminPasswordFailure(): Promise<void> {
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      UPDATE users
+         SET password_failed_count = COALESCE(password_failed_count, 0) + 1,
+             password_locked_until = CASE
+               WHEN COALESCE(password_failed_count, 0) + 1 >= ${PASSWORD_LOCKOUT_THRESHOLD}
+               THEN NOW() + ${sql.raw(`INTERVAL '${PASSWORD_LOCKOUT_DURATION_MS / 1000} seconds'`)}
+               ELSE password_locked_until
+             END,
+             updated_at = NOW()
+       WHERE LOWER(email) = LOWER(${ADMIN_EMAIL}) AND deleted_at IS NULL
+    `);
+  } catch {
+    /* pre-0079 database — the in-memory counter still records the attempt */
+  }
+}
+
+/** Clear the durable counter on a successful password step. */
+export async function clearAdminPasswordFailures(): Promise<void> {
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      UPDATE users
+         SET password_failed_count = 0, password_locked_until = NULL, updated_at = NOW()
+       WHERE LOWER(email) = LOWER(${ADMIN_EMAIL}) AND deleted_at IS NULL
+    `);
+  } catch {
+    /* pre-0079 database — nothing durable to clear */
+  }
+}
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 const MAX_PIN_ATTEMPTS = 5;
@@ -237,6 +316,14 @@ declare module "express-session" {
     authRole: string;
     credentialVersion: number;
     authenticatedAt: number;
+    /**
+     * AG-3b — when this ADMIN session last re-proved its human (password + PIN), as an ISO string
+     * taken from PostgreSQL. Absent means never; it is never backfilled, so every session that
+     * predates this reads as un-proved. Persisted with the rest of the session by
+     * connect-pg-simple, which is what makes it shared across Fly Machines rather than
+     * process-local (invariant I19).
+     */
+    adminStepUpAt: string | undefined;
     // Legacy customer magic link auth (dashboard)
     customerEmail: string;
     // Unified account auth

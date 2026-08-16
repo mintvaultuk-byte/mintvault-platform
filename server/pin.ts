@@ -177,7 +177,11 @@ export type PinAttemptReason =
   | "pin_set"
   | "pin_reset"
   | "reset_link_sent"
-  | "admin_blocked";
+  | "admin_blocked"
+  // AG-3b: a Super Admin re-proving themselves before a destructive action. Recorded distinctly
+  // rather than borrowed from "ok", because "logged in" and "authorised a station revocation"
+  // are different events and an investigation needs to tell them apart.
+  | "admin_step_up";
 
 /** Single insert into pin_attempts plus a conditional audit_log row for
  *  security-relevant events (failures, lockouts, resets). Successful
@@ -186,7 +190,7 @@ export async function logPinEvent(
   email: string,
   success: boolean,
   reason: PinAttemptReason,
-  ipHash: string,
+  ipHash: string
 ): Promise<void> {
   try {
     await db.execute(sql`

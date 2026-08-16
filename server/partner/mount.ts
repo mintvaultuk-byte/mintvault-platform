@@ -32,6 +32,7 @@ import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { definerModelViolations } from "./definer-guard";
 import { getPartnerRuntimeCapability } from "./admin-capability";
+import { checkPartnerSchemaContract } from "./schema-contract";
 import { partnerPortalEnvStatus } from "../config";
 
 /** The single path prefix the authenticated partner surface is served from. */
@@ -161,7 +162,39 @@ async function requirePortalEnabled(_req: Request, res: Response, next: NextFunc
 }
 
 /**
- * The authenticated partner surface as a single mountable router: four fail-closed gates, then the
+ * Gate 5 — SCHEMA CONTRACT (invariant I18). This build must prove the database actually has the
+ * schema it depends on, and say so in one clear line when it does not.
+ *
+ * Without this, deploying a version ahead of its migration produces a scatter of unrelated
+ * symptoms — 401 "invalid credentials" on login, 500s on password reset and invitation accept, and a
+ * Super Admin panel that reports "LOGIN BLOCKED — add a partner user" for an organisation that has
+ * users — none of which names the missing column. Rolling deploys across two Machines make that
+ * window routine rather than exceptional, so the diagnosis has to be built in.
+ *
+ * Deliberately placed LAST of the gates: the cheaper env/flag checks run first, and this one only
+ * issues its (cached-on-success) probes for requests that would otherwise be served.
+ *
+ * A distinct response code is used here rather than the shared `unavailable()` body. Every other
+ * gate is intentionally indistinguishable so a caller cannot learn WHICH gate closed, but that
+ * reasoning does not apply to a schema fault: it is identical for every caller, carries no
+ * per-tenant or per-account information, and is precisely what the operator needs to see.
+ */
+async function requireSchemaContract(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  const verdict = await checkPartnerSchemaContract();
+  if (verdict.ok) {
+    next();
+    return;
+  }
+  res.status(503).json({
+    error: "partner portal unavailable: database schema contract unsatisfied",
+    code: "PARTNER_SCHEMA_CONTRACT_UNSATISFIED",
+    // Names the migration to apply. Safe to expose: it is deployment configuration, not tenant data.
+    missing: verdict.missing,
+  });
+}
+
+/**
+ * The authenticated partner surface as a single mountable router: five fail-closed gates, then the
  * session middleware, then the three route families. Nothing admin, staff, grader, scanner, Vault
  * Quest or certificate-CRUD is reachable through it (asserted by FORBIDDEN_PARTNER_PATHS).
  */
@@ -172,6 +205,7 @@ export function partnerPortalRouter(): Router {
   r.use(requireDefinerModel);
   r.use(requireNoEmergencyStop);
   r.use(requirePortalEnabled);
+  r.use(requireSchemaContract);
 
   r.use(partnerSessionMiddleware);
   r.use(partnerApiRouter());
@@ -193,4 +227,14 @@ export function partnerPortalRouter(): Router {
  */
 export function mountPartnerPortal(app: Express): void {
   app.use(PARTNER_PORTAL_BASE, partnerPortalRouter());
+
+  // Swap the per-machine in-memory rate-limit store for the shared PostgreSQL one (invariant I19).
+  // Fire-and-forget so a slow or unavailable database cannot delay mounting: until it resolves, the
+  // in-memory default remains in place, which is the previous behaviour rather than a regression.
+  // Errors are handled and logged inside; the catch here only guarantees no unhandled rejection.
+  void import("./rate-limit-store-pg")
+    .then((m) => m.installSharedPartnerRateLimitStore())
+    .catch(() => {
+      /* already logged */
+    });
 }
