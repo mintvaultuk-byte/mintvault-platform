@@ -144,11 +144,26 @@ function canonical({ stationCode, method, path, timestamp, nonce, contentSha256 
  * it Fly is free to serve both halves of a "cross-Machine" test from the same process, and the test
  * would pass while proving nothing.
  */
+/**
+ * The station request nonce is a MONOTONIC INTEGER, not a UUID.
+ *
+ * server/partner/station-identity.ts requires /^[1-9][0-9]{0,18}$/ and station-service.ts admits a
+ * request only when `last_request_nonce < :nonce`, so each request must carry a strictly larger
+ * value than the station's last accepted one. That is replay protection: a captured request cannot
+ * be resent, because its nonce is no longer greater than the stored high-water mark.
+ *
+ * Seeding from Date.now() clears any previously stored value (the counter is also reset to 0 when
+ * the credential epoch rotates on approval) and the post-increment guarantees strict monotonicity
+ * even for requests issued within the same millisecond.
+ */
+let nonceCounter = Date.now();
+const nextNonce = () => String(nonceCounter++);
+
 async function signedRequest({ machine, method, path, body, station, key, session }) {
   const raw = body === undefined ? "" : JSON.stringify(body);
   const contentSha256 = createHash("sha256").update(raw).digest("hex");
   const timestamp = Date.now();
-  const nonce = randomUUID();
+  const nonce = nextNonce();
   const envelope = { stationCode: station.toUpperCase(), method, path, timestamp, nonce, contentSha256 };
   const signature = edSign(null, Buffer.from(canonical(envelope)), key).toString("base64url");
 
