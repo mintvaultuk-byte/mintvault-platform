@@ -66,7 +66,13 @@ describe("Card-stage live certificate preview (1-3, 13)", () => {
     expect(ASIDE).toContain('<div className="min-h-0 flex-1">{card}</div>');
     expect(ASIDE).toContain('<div className="shrink-0">{below}</div>');
     // and the canonical workstation passes the preview through that `below` slot
-    expect(WORKSTATION).toMatch(/below=\{[\s\S]{0,1200}<CertificatePreviewPanel/);
+    // MOVED 2026-08-16 on owner evidence: the certificate no longer sits UNDER the card.
+    // Beneath it, it consumed rail height the card needed and the card's bottom edge — the
+    // set/rarity/promo/copyright strip graders must read — was cut off. It now shares the
+    // Front/Back tabs' row, where it costs the card no vertical space at all, so the aside's
+    // `below` slot is unused and the bottom allocation is 0px.
+    expect(WORKSTATION).not.toMatch(/below=\{/);
+    expect(WORKSTATION).toMatch(/previewTopSlot=\{[\s\S]{0,1200}<CertificatePreviewPanel/);
   });
 
   it("3. no duplicate preview component, formatter or endpoint was introduced", () => {

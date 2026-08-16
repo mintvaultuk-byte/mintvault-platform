@@ -185,6 +185,8 @@ interface Props {
    */
   approvalStageActive?: boolean;
   previewHost?: HTMLElement | null;
+  /** Canonical certificate preview, rendered in the rail viewer's top row. */
+  previewTopSlot?: React.ReactNode;
   onPreviewChange?: (fields: CertificatePreviewFields) => void;
   /** The server-issued revision of the persisted grading state, when this save
    * has one. It is never a client-generated sequence. */
@@ -363,6 +365,7 @@ export default function GradingPanel({
   active,
   approvalStageActive = false,
   previewHost = null,
+  previewTopSlot = null,
   onPreviewChange,
   onPreviewSaved,
   onReviewTransitionReady,
@@ -3168,6 +3171,7 @@ export default function GradingPanel({
                   side={viewerSide as "front" | "back"}
                   omitSideTabs
                   fillHost={previewHost != null}
+                  topRowSlot={previewHost != null ? previewTopSlot : null}
                   onOpenCardTool={active && workstationCapabilities.imageMutations ? setManualCardToolSide : undefined}
                   // MVGS v2.1 measurement state — flows back through the
                   // callbacks below when the operator draws a whitening or

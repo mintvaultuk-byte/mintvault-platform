@@ -97,7 +97,7 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // full-width row above the form.
     expect(FORM).not.toContain("<CardPreviewPanel");
     expect((ASIDE_SRC.match(/<CardPreviewPanel/g) ?? []).length).toBe(1);
-    const aside = slice(WORKSTATION_SRC, "<WorkstationPreviewAside", "below={");
+    const aside = slice(WORKSTATION_SRC, "<WorkstationPreviewAside", "/>");
     expect(aside).toContain("WorkstationPreviewAside");
   });
 });

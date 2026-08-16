@@ -41,7 +41,7 @@ const ASIDE = readFileSync("client/src/components/grading-workflow/WorkstationPr
 describe("rail containment — ImageViewer reserves space for its controls", () => {
   it("the rail root is a flex COLUMN that fills the host, not block flow", () => {
     // `space-y-2` in the rail is the defect. It must remain for the inline layout only.
-    expect(VIEWER).toMatch(/className=\{fillHost \? "flex h-full min-h-0 flex-col gap-2" : "space-y-2"\}/);
+    expect(VIEWER).toMatch(/className=\{fillHost \? "flex h-full min-h-0 flex-col gap-1" : "space-y-2"\}/);
   });
 
   it("the card frame absorbs ONLY the leftover height (flex-1 min-h-0)", () => {
@@ -59,7 +59,10 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
   });
 
   it("the Front/Back tabs keep their intrinsic height in the rail", () => {
-    expect(VIEWER).toMatch(/fillHost \? <div className="shrink-0">\{renderTabs\(\)\}<\/div> : renderTabs\(\)/);
+    expect(VIEWER).toMatch(/flex shrink-0 items-center justify-between gap-3/);
+    // The tabs and the certificate share ONE shrink-0 row; the certificate therefore
+    // costs the card no vertical space.
+    expect(VIEWER).toMatch(/topRowSlot \? <div className="shrink-0">\{topRowSlot\}<\/div> : null/);
   });
 
   it("the controls row is NOT absolutely or fixed positioned — it cannot float over anything", () => {
@@ -90,7 +93,7 @@ describe("rail containment — the aside gives the certificate its OWN reserved 
   });
 
   it("the aside itself is a flex column, so the two children cannot overlap", () => {
-    expect(ASIDE).toMatch(/flex min-h-0 flex-col gap-1\.5/);
+    expect(ASIDE).toMatch(/flex min-h-0 flex-col gap-1/);
   });
 
   it("nothing in the aside is absolutely or fixed positioned", () => {

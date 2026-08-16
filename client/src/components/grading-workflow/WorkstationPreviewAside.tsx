@@ -96,7 +96,7 @@ export function WorkstationPreviewAside({
   }
   return (
     <aside
-      className={`flex min-h-0 flex-col gap-1.5 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
+      className={`flex min-h-0 flex-col gap-1 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
       data-testid="grading-preview-panel"
     >
       <div className="min-h-0 flex-1">{card}</div>

@@ -319,18 +319,6 @@ export function GradingWorkstation({
               onInspectionStateChange={setInspectionState}
               apiBase={apiBase}
               interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}
-              below={
-                <CertificatePreviewPanel
-                  key={certId}
-                  fields={previewFields}
-                  endpoint={previewEndpoint}
-                  persistence={reviewReady ? "saved" : "unsaved"}
-                  revision={previewRevision}
-                  expectedRevision={previewExpectedRevision}
-                  requireExpectedRevision={resolvedPreviewCertificateId != null}
-                  onRevisionComplete={handlePreviewRevisionComplete}
-                />
-              }
             />
           ) : null
         }
@@ -398,6 +386,18 @@ export function GradingWorkstation({
             active={stage === GRADE_STAGE}
             approvalStageActive={stage === REVIEW_STAGE}
               previewHost={gradingEnabled ? interactiveCardHost : null}
+              previewTopSlot={
+                  <CertificatePreviewPanel
+                    key={certId}
+                    fields={previewFields}
+                    endpoint={previewEndpoint}
+                    persistence={reviewReady ? "saved" : "unsaved"}
+                    revision={previewRevision}
+                    expectedRevision={previewExpectedRevision}
+                    requireExpectedRevision={resolvedPreviewCertificateId != null}
+                    onRevisionComplete={handlePreviewRevisionComplete}
+                  />
+              }
               inspectionState={inspectionState}
               onInspectionStateChange={setInspectionState}
               onPreviewChange={handleDraftPreviewChange}
