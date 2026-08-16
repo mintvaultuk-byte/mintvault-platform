@@ -54,6 +54,26 @@ export interface VariantLineInput {
    * wording. The legacy columns themselves are never modified either way.
    */
   structuredVariantVersion?: number | null;
+  /**
+   * IMMUTABLE DISPLAY SNAPSHOT of the rarity, persisted on the certificate at save
+   * time from the LIVE catalogue (`certificates.rarity_label`, written by
+   * validateStructuredVariant). It is the wording the grader was actually shown
+   * and Super Admin actually approved.
+   *
+   * WHY IT IS NOW READ AT RENDER. This formatter resolves labels against the
+   * compiled-in SEED catalogue, so a rarity added through the Catalogue Manager —
+   * i.e. every value published by the approval workflow rather than by a code
+   * deploy — was not resolvable here and fell through to humanising its CODE.
+   * "prize_pack_star" printed "Prize Pack Star" even when the approved label was
+   * "Prize Pack Star Holo", silently dropping Super Admin's approved wording.
+   *
+   * Reading the snapshot also makes an issued certificate immutable BY DESIGN
+   * rather than by accident: previously the printed text was re-derived from the
+   * code on every render, so a later code deploy that edited a seed label would
+   * have retroactively changed historical certificates with no migration and no
+   * audit trail. The snapshot pins what was approved.
+   */
+  rarityLabelStructured?: string | null;
 }
 
 /** Public-facing wording overrides where the catalogue's descriptive label is
@@ -86,10 +106,41 @@ function legacyDisplayLabel(code: string): string {
 
 /** Catalogue label → clean public label: apply the override, else strip any
  *  trailing "(…)" qualifier the catalogue uses for disambiguation. */
-function publicLabel(code: string | null | undefined, catalogueLabel: string | undefined): string {
+/**
+ * Drop a single trailing "(…)" disambiguation qualifier from a catalogue label.
+ *
+ * Deliberately NOT a regex. The obvious pattern — /\s*\([^)]*\)\s*$/ — backtracks
+ * polynomially on labels with long runs of spaces or "(", and both inputs here are
+ * uncontrolled: the catalogue label is Super-Admin free text and the snapshot is
+ * whatever was persisted on the certificate. CodeQL flags it as js/polynomial-redos.
+ * This scan is linear and has identical behaviour for a well-formed label.
+ */
+function stripTrailingQualifier(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed.endsWith(")")) return trimmed;
+  const open = trimmed.lastIndexOf("(");
+  // No opener, or the label is ONLY a qualifier — leave it alone rather than
+  // returning an empty variant line.
+  if (open <= 0) return trimmed;
+  // A ")" before the final character means this is not a simple trailing group.
+  if (trimmed.indexOf(")", open) !== trimmed.length - 1) return trimmed;
+  return trimmed.slice(0, open).trim();
+}
+
+function publicLabel(
+  code: string | null | undefined,
+  catalogueLabel: string | undefined,
+  /** Immutable wording persisted on the certificate at save time. Outranks the
+   *  seed catalogue so an issued certificate keeps the approved wording even if
+   *  a later deploy edits the seed, and so a Catalogue-Manager-published value
+   *  prints what Super Admin approved instead of a humanised code. */
+  snapshotLabel?: string | null
+): string {
   if (!code) return "";
   if (PUBLIC_LABEL_OVERRIDES[code]) return PUBLIC_LABEL_OVERRIDES[code];
-  if (catalogueLabel) return catalogueLabel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const pinned = typeof snapshotLabel === "string" ? snapshotLabel.trim() : "";
+  if (pinned) return stripTrailingQualifier(pinned);
+  if (catalogueLabel) return stripTrailingQualifier(catalogueLabel);
   // The code is SET but this process cannot resolve it. That happens for a code
   // added through the Catalogue Manager (validated against the LIVE catalogue_items
   // table) while this pure formatter only ever resolves against SEED_CATALOGUE.
@@ -210,7 +261,13 @@ export function formatVariantLine(input: VariantLineInput): string {
     foldLegacy(input.rarity, input.rarityOther, "rarity");
   }
 
-  const rarity = rarityCode ? publicLabel(rarityCode, rarityByValue(rarityCode)?.label) : rarityLegacyFallback;
+  // The rarity snapshot applies ONLY to the certificate's own structured rarity —
+  // never to a legacy code folded in from `rarity`/`variant`, whose wording comes
+  // from the legacy maps and must stay byte-identical.
+  const raritySnapshot = rarityCode && rarityCode === (input.rarityCode || "") ? input.rarityLabelStructured : null;
+  const rarity = rarityCode
+    ? publicLabel(rarityCode, rarityByValue(rarityCode)?.label, raritySnapshot)
+    : rarityLegacyFallback;
   const promo = promoCode ? publicLabel(promoCode, promoByValue(promoCode)?.label) : "";
   const subset = subsetCode ? publicLabel(subsetCode, promoByValue(subsetCode)?.label) : "";
   const finish = finishCode ? publicLabel(finishCode, finishByValue(finishCode)?.label) : finishLegacyFallback;

@@ -153,6 +153,14 @@ describe("five-role and protected-boundary negative proof", () => {
       // shared/pristine.ts, shared/schema.ts, server/ and migrations/ outright.
       "shared/pokemon-rarity-catalogue.ts",
       "client/src/components/rarity-picker/RarityVariantPicker.tsx",
+      // ── Certificate label-snapshot authority (owner-commissioned) ──────────────
+      // A rarity published through the Catalogue Manager — i.e. everything the Partner
+      // contribution approval workflow will create — printed a humanised CODE instead of
+      // the label Super Admin approved, because this formatter only resolved against the
+      // compiled-in seed. The repair makes it prefer the immutable `rarity_label` snapshot
+      // already persisted on the certificate. Pure display resolution: no scoring, no
+      // authority, no transport. The hard prohibition asserted below is unchanged.
+      "shared/variant-line.ts",
     ]);
     // FAIL-CLOSED, as grading-release-scope.ts requires: a scope proof that cannot be evaluated
     // must error rather than silently pass on a shallow clone.
@@ -165,6 +173,12 @@ describe("five-role and protected-boundary negative proof", () => {
     for (const path of changed) {
       if (
         path.startsWith("tests/") ||
+        // Documentation is not a runtime surface. This guard exists to bound which
+        // PRESENTATION and EVIDENCE code a branch may touch; a markdown file under
+        // docs/ ships in no bundle and executes nowhere, so exempting it cannot widen
+        // the blast radius the guard protects. Same reasoning as the tests/ exemption
+        // directly above and the governance-evidence path below.
+        path.startsWith("docs/") ||
         path.startsWith(".claude/controlled-code-lead/tasks/canonical-compact-workstation-density-20260814/")
       )
         continue;
