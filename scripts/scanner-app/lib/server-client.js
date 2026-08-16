@@ -364,6 +364,31 @@ async function authoriseFix(cardJobId, sides) {
 }
 
 /**
+ * B1 — arm the capture session for a card this station owns. COSTS ZERO GRADING CREDITS.
+ *
+ * THIS REPLACES THE BROWSER STEP. Until this existed the Scanner could start a card and could be
+ * told which sides were outstanding, but only a signed-in Partner browser could actually arm the
+ * session the Scanner then claimed — and the only page that did so was inside the grading
+ * workstation, which does not open until the card already has both photographs. A walk-in card had
+ * no way to be photographed at all.
+ *
+ * `side` is OPTIONAL and normally omitted: the server arms whichever side is still missing, front
+ * first. Sending nothing is therefore the correct call both for the first pass after NEW CARD and
+ * for the second pass after the front has been accepted, which is why the caller does not track
+ * which side it is on. The server refuses a side that already has a current image, so this can
+ * never quietly overwrite a good scan.
+ *
+ * The certificate is NOT sent. The server derives it from the Card Job, which it locates by this
+ * station's own tenant — there is no id this app could send to reach another partner's card.
+ */
+async function armCapture(cardJobId, side) {
+  return postJson(
+    `/api/partner/card-jobs/${encodeURIComponent(cardJobId)}/capture-sessions`,
+    side === "front" || side === "back" ? { side } : {}
+  );
+}
+
+/**
  * P6 — "NEW CARD": ask the server to authorise one new Card Job against one Grading Credit.
  *
  * `clientOpId` is the RETRY TOKEN and must stay identical across every retry of one press. The
@@ -505,6 +530,7 @@ module.exports = {
   getOrphans,
   getFixQueue,
   authoriseFix,
+  armCapture,
   startNewCard,
   getCertPreview,
   softDeleteCert,

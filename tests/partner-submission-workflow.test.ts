@@ -145,8 +145,21 @@ async function seedMintVaultTables(): Promise<void> {
     ]);
 
     await admin.query("DELETE FROM partner_feature_flags");
+    /*
+     * B2 — `partner_submission_intake_enabled` is enabled HERE and nowhere else by default.
+     *
+     * Submitting a portal draft reserves a credit per card into CREDIT_RESERVED, a state no code
+     * path can currently leave, so the capability now fails closed on every real host until a
+     * continuation exists (see the flag's note in server/partner/flags.ts). This suite is about the
+     * submit MECHANICS — idempotency, concurrency, per-card accounting — all of which remain
+     * correct and must stay proved, so it opts in explicitly. The default-off behaviour is pinned
+     * separately by tests/partner-core-release-blockers.test.ts; enabling it here does not weaken
+     * that, because the two assert different things.
+     */
     await admin.query(
-      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true)"
+      `INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES
+         (NULL,'partner_portal_enabled',true),
+         (NULL,'partner_submission_intake_enabled',true)`
     );
     // Global service-tier defaults are seeded out-of-band (superuser/ops), never by the migration
     // itself — see the note in migrations/0007_partner_submissions.sql.

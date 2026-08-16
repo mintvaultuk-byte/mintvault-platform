@@ -24,6 +24,7 @@ import { writePartnerAudit } from "./audit";
 import type { PartnerPrincipal } from "./session";
 import { uploadToR2, getR2SignedUrl } from "../r2";
 import { CreditReservationError, reserveCreditInTransaction } from "./partner-credit-reservation-service";
+import { resolveFlag } from "./flags";
 import {
   PartnerSubmissionCreditLifecycleError,
   releasePartnerReservationForPartnerCancellation,
@@ -847,6 +848,39 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
           );
         }
         return buildDetail(c, principal, submissionId);
+      }
+
+      /**
+       * B2 — THE CREDIT TRAP IS CLOSED HERE, AT THE AUTHORITY, NOT IN THE BROWSER.
+       *
+       * Everything below this line reserves one Grading Credit per card and creates each Card Job
+       * in CREDIT_RESERVED. Nothing in the server can move a job out of CREDIT_RESERVED: the
+       * CREDIT_RESERVED → NEEDS_SCAN edge is declared legal (migration 0080's transition trigger and
+       * LEGAL_TRANSITIONS in card-job-lifecycle.ts) but has no caller, and the capture advancer
+       * ignores the state entirely. A submitted portal card therefore holds a credit for ever.
+       *
+       * WHY A SERVER GATE AND NOT A HIDDEN BUTTON. Hiding the wizard would leave the route reachable
+       * by anyone who kept a tab open, bookmarked it or replayed the call — and the requirement is
+       * that NO Partner path can reserve a credit into an unreachable state, not that the usual one
+       * is inconvenient. This is the only place every submit passes through.
+       *
+       * DELIBERATELY PLACED AFTER THE IDEMPOTENCY SHORT-CIRCUIT. A retry of a submit that already
+       * succeeded still returns its original result, so no shop is left unable to re-read work it
+       * completed before this gate existed. Only a genuinely NEW reservation is refused.
+       *
+       * FAIL-CLOSED BY CONSTRUCTION: `resolveFlag` returns false when no row matches, so this is off
+       * on every host until somebody deliberately enables it — which should happen only once a real
+       * continuation path exists (see the flag's note in flags.ts).
+       */
+      const intakeEnabled = await resolveFlag(c, "partner_submission_intake_enabled", {
+        tenantId: principal.tenantId,
+        locationId: principal.locationId ?? null,
+      });
+      if (!intakeEnabled) {
+        throw new SubmissionError(
+          "submission_intake_disabled",
+          "Submitting cards from the website is temporarily unavailable. Start cards on your MintVault Scanner instead — your draft and any Grading Credits are untouched."
+        );
       }
 
       const row = await loadSubmissionForUpdate(c, principal, submissionId);

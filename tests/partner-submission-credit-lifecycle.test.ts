@@ -322,7 +322,7 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
     connectorService = await import("../server/partner/connector-service");
     await configureConnectorRuntime();
     await admin.query(
-      "INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled) VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false)"
+      "INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled) VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false),('partner_submission_intake_enabled',NULL,NULL,true)"
     );
     await createTenant();
   }, 90_000);

@@ -34,7 +34,12 @@ function sendError(res: import("express").Response, err: unknown): void {
         ? 404
         : err.code === "forbidden"
           ? 403
-          : err.code === "stale_version" ||
+          : // B2 — the submit path is switched off (partner_submission_intake_enabled). 503, not 400:
+            // the request is well-formed and the operator has done nothing wrong, the capability is
+            // simply unavailable — the same shape the portal/emergency-stop gates already return.
+            err.code === "submission_intake_disabled"
+            ? 503
+            : err.code === "stale_version" ||
               err.code === "idempotency_conflict" ||
               err.code === "service_tier_unavailable" ||
               err.code === "credit_unavailable" ||

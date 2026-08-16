@@ -22,6 +22,11 @@ export type PartnerCertificateHistoryRow = {
   stations: string[];
   evidenceComplete: boolean;
   issuedAt: string | null;
+  /**
+   * B3 — the walk-in Card Job lifecycle state, or null for a connector-lineage card that has no
+   * Card Job. Additive: existing consumers that ignore it are unaffected.
+   */
+  cardJobStatus: string | null;
 };
 
 export type PartnerCertificateDetail = PartnerCertificateHistoryRow & {
@@ -41,10 +46,12 @@ export async function listPartnerCertificateHistory(
 ): Promise<PartnerCertificateHistoryRow[]> {
   if (!principal.orgWide && !principal.locationId) return [];
   const params: unknown[] = [principal.tenantId];
-  let locationWhere = "";
+  let connectorLocationWhere = "";
+  let cardJobLocationWhere = "";
   if (!principal.orgWide) {
     params.push(principal.locationId);
-    locationWhere = `AND pci.partner_location_id = $${params.length}::uuid`;
+    connectorLocationWhere = `AND pci.partner_location_id = $${params.length}::uuid`;
+    cardJobLocationWhere = `AND job.location_id = $${params.length}::uuid`;
   }
 
   return withPartnerAdminTransaction(async (client) => {
@@ -65,31 +72,95 @@ export async function listPartnerCertificateHistory(
       stations: string[] | null;
       evidence_complete: boolean;
       issued_at: string | null;
+      card_job_status: string | null;
     }>(
-      `SELECT cert.id AS certificate_id,
+      /*
+       * B3 — ONE PARTNER CARD HISTORY, TWO LINEAGES, NO DUPLICATES.
+       *
+       * THE DEFECT. This query used to be a single chain anchored on `partner_connector_imports`.
+       * A walk-in card never travels that road — its certificate is minted directly inside the NEW
+       * transaction and has no connector import row (and, deliberately, no `submission_item_id`) —
+       * so the inner joins could not match it and every Scanner-started card was invisible here.
+       * The dashboard's "Completed" tile reads Card Jobs and so could report finished work that
+       * this page simultaneously reported as none: one authority visibly contradicting another.
+       *
+       * THE FIX IS A READ, NOT A MIGRATION. No row is copied anywhere. `scope` resolves the SAME
+       * three facts — which partner, which location, which submission — from whichever lineage owns
+       * the certificate, and everything below joins once against that.
+       *
+       * WHY DISTINCT ON RATHER THAN A PLAIN UNION. Migration 0081 stamps `certificate_id` onto the
+       * CONNECTOR lineage's Card Jobs too, so a connector certificate can legitimately match BOTH
+       * arms. A bare UNION would then list that card twice. `lineage_rank` makes the Card Job arm
+       * win, which is also the ordering `loadPartnerCert` already uses — so this page and the
+       * grading loader agree about which lineage owns a card rather than disagreeing quietly.
+       *
+       * TENANT AND LOCATION ARE PROVED INDEPENDENTLY IN EACH ARM, never inherited from the other,
+       * and `cert.origin_*` is re-asserted in both — a certificate whose immutable origin snapshot
+       * does not match the lineage that claims it is not returned at all.
+       */
+      `WITH scope AS (
+         SELECT cert.id AS certificate_id,
+                pci.partner_submission_id::text AS partner_submission_id,
+                pci.partner_organisation_id AS tenant_id,
+                pci.partner_location_id AS location_id,
+                NULL::text AS card_job_status,
+                1 AS lineage_rank
+           FROM certificates cert
+           JOIN submission_items item ON item.id = cert.submission_item_id
+           JOIN submissions submission ON submission.id = item.submission_id
+           JOIN partner_connector_imports pci
+             ON pci.destination_submission_id = submission.id
+            AND pci.state IN ('completed', 'imported')
+           JOIN partner_connector_records connector
+             ON connector.id = pci.connector_record_id
+            AND connector.tenant_id = pci.partner_organisation_id
+            AND connector.partner_submission_id = pci.partner_submission_id
+            AND connector.handoff_id = pci.partner_handoff_id
+            AND connector.state = 'imported'
+          WHERE pci.partner_organisation_id = $1::uuid
+            AND cert.origin_type = 'PARTNER'
+            AND cert.origin_partner_id = pci.partner_organisation_id
+            AND cert.origin_location_id = pci.partner_location_id
+            AND cert.deleted_at IS NULL
+            ${connectorLocationWhere}
+          UNION ALL
+         SELECT cert.id AS certificate_id,
+                job.submission_id::text AS partner_submission_id,
+                job.tenant_id,
+                job.location_id,
+                job.status AS card_job_status,
+                0 AS lineage_rank
+           FROM partner_card_jobs job
+           JOIN certificates cert
+             ON cert.id = job.certificate_id
+            AND cert.deleted_at IS NULL
+          WHERE job.tenant_id = $1::uuid
+            AND job.cancelled_at IS NULL
+            AND cert.origin_type = 'PARTNER'
+            AND cert.origin_partner_id = job.tenant_id
+            AND cert.origin_location_id = job.location_id
+            ${cardJobLocationWhere}
+       ),
+       resolved AS (
+         SELECT DISTINCT ON (certificate_id) *
+           FROM scope
+          ORDER BY certificate_id, lineage_rank
+       )
+       SELECT cert.id AS certificate_id,
               cert.certificate_number,
-              pci.partner_submission_id::text,
+              resolved.partner_submission_id,
               location.name AS location_name,
               cert.card_name, cert.set_name, cert.card_number_display AS card_number, cert.year_text AS year,
               cert.grade::text, cert.grader_status, cert.grade_approved_at AS qa_cleared_at,
               cert.print_state, printed.printed_at, cert.issued_at,
+              resolved.card_job_status,
               COALESCE(station_data.stations, ARRAY[]::text[]) AS stations,
               COALESCE(evidence_data.evidence_complete, false) AS evidence_complete
-         FROM certificates cert
-         JOIN submission_items item ON item.id = cert.submission_item_id
-         JOIN submissions submission ON submission.id = item.submission_id
-         JOIN partner_connector_imports pci
-           ON pci.destination_submission_id = submission.id
-          AND pci.state IN ('completed', 'imported')
-         JOIN partner_connector_records connector
-           ON connector.id = pci.connector_record_id
-          AND connector.tenant_id = pci.partner_organisation_id
-          AND connector.partner_submission_id = pci.partner_submission_id
-          AND connector.handoff_id = pci.partner_handoff_id
-          AND connector.state = 'imported'
+         FROM resolved
+         JOIN certificates cert ON cert.id = resolved.certificate_id
          JOIN partner_locations location
-           ON location.id = pci.partner_location_id
-          AND location.tenant_id = pci.partner_organisation_id
+           ON location.id = resolved.location_id
+          AND location.tenant_id = resolved.tenant_id
          LEFT JOIN LATERAL (
            SELECT max(lp.printed_at) AS printed_at
              FROM label_prints lp
@@ -119,20 +190,14 @@ export async function listPartnerCertificateHistory(
               AND session.state = 'captured'
              JOIN partner_stations station
                ON station.id = session.station_id
-              AND station.tenant_id = pci.partner_organisation_id
-              AND station.location_id = pci.partner_location_id
+              AND station.tenant_id = resolved.tenant_id
+              AND station.location_id = resolved.location_id
               AND station.approved_at IS NOT NULL
             WHERE evidence.certificate_id = cert.id
               AND evidence.is_current = true
               AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
               AND evidence.format = 'tiff'
          ) evidence_data ON true
-        WHERE pci.partner_organisation_id = $1::uuid
-          AND cert.origin_type = 'PARTNER'
-          AND cert.origin_partner_id = pci.partner_organisation_id
-          AND cert.origin_location_id = pci.partner_location_id
-          AND cert.deleted_at IS NULL
-          ${locationWhere}
         ORDER BY cert.issued_at DESC NULLS LAST, cert.id DESC
         LIMIT 500`,
       params
@@ -154,6 +219,13 @@ export async function listPartnerCertificateHistory(
       stations: row.stations ?? [],
       evidenceComplete: row.evidence_complete === true,
       issuedAt: row.issued_at,
+      /**
+       * The walk-in lifecycle state (NEEDS_SCAN / CAPTURING / FIX_REQUIRED / READY_TO_GRADE /
+       * GRADING / SUBMITTED / QA_REVIEW / APPROVED / PRINTABLE / COMPLETED), or null for a
+       * connector-lineage card that has no Card Job. This is what lets a card list separate
+       * "waiting to be photographed" from "finished" without inferring it from the grade.
+       */
+      cardJobStatus: row.card_job_status,
     }));
   });
 }
@@ -171,10 +243,12 @@ export async function getPartnerCertificateDetail(
 ): Promise<PartnerCertificateDetail | null> {
   if (!principal.orgWide && !principal.locationId) return null;
   const params: unknown[] = [principal.tenantId, certificateNumber];
-  let locationWhere = "";
+  let connectorLocationWhere = "";
+  let cardJobLocationWhere = "";
   if (!principal.orgWide) {
     params.push(principal.locationId);
-    locationWhere = `AND pci.partner_location_id = $${params.length}::uuid`;
+    connectorLocationWhere = `AND pci.partner_location_id = $${params.length}::uuid`;
+    cardJobLocationWhere = `AND job.location_id = $${params.length}::uuid`;
   }
 
   return withPartnerAdminTransaction(async (client) => {
@@ -204,10 +278,72 @@ export async function getPartnerCertificateDetail(
       redo_count: number | null;
       front_object_key: string | null;
       back_object_key: string | null;
+      card_job_status: string | null;
     }>(
-      `SELECT cert.id AS certificate_id,
+      /*
+       * B3 — the SAME two-lineage scope as the list above, for the same reason: a walk-in card has
+       * no connector import, so an exact-origin read anchored on one could never return it and the
+       * "Open details" button on a Scanner-started card had nothing behind it.
+       *
+       * The non-confirmation property is preserved exactly. A guessed MV number still produces one
+       * identical not-found whether it belongs to another partner, another location, the wrong
+       * lineage, or nothing at all — both arms prove tenant, location and `cert.origin_*`
+       * independently, and neither leaks which of those failed.
+       */
+      `WITH scope AS (
+         SELECT cert.id AS certificate_id,
+                pci.partner_submission_id::text AS partner_submission_id,
+                pci.partner_organisation_id AS tenant_id,
+                pci.partner_location_id AS location_id,
+                NULL::text AS card_job_status,
+                1 AS lineage_rank
+           FROM certificates cert
+           JOIN submission_items item ON item.id = cert.submission_item_id
+           JOIN submissions submission ON submission.id = item.submission_id
+           JOIN partner_connector_imports pci
+             ON pci.destination_submission_id = submission.id
+            AND pci.state IN ('completed', 'imported')
+           JOIN partner_connector_records connector
+             ON connector.id = pci.connector_record_id
+            AND connector.tenant_id = pci.partner_organisation_id
+            AND connector.partner_submission_id = pci.partner_submission_id
+            AND connector.handoff_id = pci.partner_handoff_id
+            AND connector.state = 'imported'
+          WHERE pci.partner_organisation_id = $1::uuid
+            AND cert.certificate_number = $2::text
+            AND cert.origin_type = 'PARTNER'
+            AND cert.origin_partner_id = pci.partner_organisation_id
+            AND cert.origin_location_id = pci.partner_location_id
+            AND cert.deleted_at IS NULL
+            ${connectorLocationWhere}
+          UNION ALL
+         SELECT cert.id AS certificate_id,
+                job.submission_id::text AS partner_submission_id,
+                job.tenant_id,
+                job.location_id,
+                job.status AS card_job_status,
+                0 AS lineage_rank
+           FROM partner_card_jobs job
+           JOIN certificates cert
+             ON cert.id = job.certificate_id
+            AND cert.deleted_at IS NULL
+          WHERE job.tenant_id = $1::uuid
+            AND cert.certificate_number = $2::text
+            AND job.cancelled_at IS NULL
+            AND cert.origin_type = 'PARTNER'
+            AND cert.origin_partner_id = job.tenant_id
+            AND cert.origin_location_id = job.location_id
+            ${cardJobLocationWhere}
+       ),
+       resolved AS (
+         SELECT DISTINCT ON (certificate_id) *
+           FROM scope
+          ORDER BY certificate_id, lineage_rank
+       )
+       SELECT cert.id AS certificate_id,
               cert.certificate_number,
-              pci.partner_submission_id::text,
+              resolved.partner_submission_id,
+              resolved.card_job_status,
               location.name AS location_name,
               cert.card_name, cert.set_name, cert.card_number_display AS card_number, cert.year_text AS year,
               cert.grade::text, cert.grader_status, cert.grade_approved_at AS qa_cleared_at,
@@ -218,24 +354,14 @@ export async function getPartnerCertificateDetail(
               COALESCE(station_data.stations, ARRAY[]::text[]) AS stations,
               COALESCE(evidence_data.evidence_complete, false) AS evidence_complete,
               evidence_data.front_object_key, evidence_data.back_object_key
-         FROM certificates cert
-         JOIN submission_items item ON item.id = cert.submission_item_id
-         JOIN submissions submission ON submission.id = item.submission_id
-         JOIN partner_connector_imports pci
-           ON pci.destination_submission_id = submission.id
-          AND pci.state IN ('completed', 'imported')
-         JOIN partner_connector_records connector
-           ON connector.id = pci.connector_record_id
-          AND connector.tenant_id = pci.partner_organisation_id
-          AND connector.partner_submission_id = pci.partner_submission_id
-          AND connector.handoff_id = pci.partner_handoff_id
-          AND connector.state = 'imported'
+         FROM resolved
+         JOIN certificates cert ON cert.id = resolved.certificate_id
          JOIN partner_locations location
-           ON location.id = pci.partner_location_id
-          AND location.tenant_id = pci.partner_organisation_id
+           ON location.id = resolved.location_id
+          AND location.tenant_id = resolved.tenant_id
          LEFT JOIN partner_users operator
            ON operator.id::text = cert.graded_by
-          AND operator.tenant_id = pci.partner_organisation_id
+          AND operator.tenant_id = resolved.tenant_id
          LEFT JOIN LATERAL (
            SELECT max(lp.printed_at) AS printed_at
              FROM label_prints lp
@@ -267,21 +393,14 @@ export async function getPartnerCertificateDetail(
               AND session.state = 'captured'
              JOIN partner_stations station
                ON station.id = session.station_id
-              AND station.tenant_id = pci.partner_organisation_id
-              AND station.location_id = pci.partner_location_id
+              AND station.tenant_id = resolved.tenant_id
+              AND station.location_id = resolved.location_id
               AND station.approved_at IS NOT NULL
             WHERE evidence.certificate_id = cert.id
               AND evidence.is_current = true
               AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
               AND evidence.format = 'tiff'
          ) evidence_data ON true
-        WHERE pci.partner_organisation_id = $1::uuid
-          AND cert.certificate_number = $2::text
-          AND cert.origin_type = 'PARTNER'
-          AND cert.origin_partner_id = pci.partner_organisation_id
-          AND cert.origin_location_id = pci.partner_location_id
-          AND cert.deleted_at IS NULL
-          ${locationWhere}
         LIMIT 1`,
       params
     );
@@ -308,6 +427,7 @@ export async function getPartnerCertificateDetail(
       stations: row.stations ?? [],
       evidenceComplete: row.evidence_complete === true,
       issuedAt: row.issued_at,
+      cardJobStatus: row.card_job_status,
       gradeCentering: row.centering_score,
       gradeCorners: row.corners_score,
       gradeEdges: row.edges_score,
