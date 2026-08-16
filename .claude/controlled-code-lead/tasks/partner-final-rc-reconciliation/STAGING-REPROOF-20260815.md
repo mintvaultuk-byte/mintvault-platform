@@ -300,3 +300,62 @@ reservationId plus `replayed:true` on the replay. A per-process idempotency stor
   authenticated half (session/Card Job/wallet/idempotency surviving a restart) was not.
 - **§6 suspended/revoked** and **§7 cross-station / cross-partner** — need a second station and a
   second tenant. `AT23 Bravo Collectibles Ltd` exists with a working owner login for the latter.
+
+---
+
+# ADDENDUM 3 — PR #300 MERGED TO MAIN, and a second UX-1 call site (2026-08-16)
+
+## PR #300 is merged — the RC is now on `main`
+
+Discovered because `safe-deploy` **refused** a staging deploy:
+
+```
+behind: 1fb4a7c0 Merge pull request #300 from mintvaultuk-byte/codex/partner-pilot-pass2
+```
+
+The branch was behind main, so deploying would have shipped staging BACKWARDS — the clobber
+pattern GUARD 1 exists for. `--allow-behind` was NOT used. Everything from this programme is now on
+main: the Partner and Super Admin step-up client flows, the fleet-wide limiter, the 70-suite gate and
+the fail-closed runner.
+
+**Production remained untouched at `36699531` (v1084).** Merging to main does not deploy.
+
+Fast-forwarding also absorbed **PR #303** (partner catalogue contribution) from a concurrent session,
+which changes `shared/variant-line.ts` — the printed label's variant/rarity formatter, a
+grading-adjacent runtime surface. Re-gated rather than assumed: protected grading **21 files / 606
+passed** (including main's new `certificate-label-snapshot-authority` test), full pinned gate
+**70 suites / 1284 passed / 0 failed / 0 skipped**.
+
+## UX-1 was under-fixed: a fourth call site
+
+The first UX-1 fix wired three call sites and **missed the Grading Credit adjustment** on
+`partner-dashboard.tsx`, which calls `/partners/:partnerId/credits/adjust` — behind
+`requireAdminStepUp()` exactly like the station transitions. It would have failed identically to the
+Approve button, and it was found only because §4 happened to need it next.
+
+The claim "wired at all three call sites" was wrong: only two files had been grepped.
+
+**The durable fix is the guard, not the wiring.** `tests/admin-station-approval-step-up-ui.test.ts`
+now parses gated routes out of the SERVER (`r.post("<path>", requireAdminStepUp()` across
+admin-routes / dashboard-routes / partner-management-routes / station-admin-routes) and asserts every
+client caller is wrapped in `runAdminProtected`. A future gated route cannot ship a caller without
+the affordance to satisfy it.
+
+**That guard's first version was VACUOUS**, found only by deliberately breaking the code to see
+whether the test noticed. Removing the wrapper left it GREEN: it checked a raw window of source
+before each call and was satisfied by the explanatory COMMENT above it, which mentions
+`runAdminProtected` by name. Comments are now stripped and the check requires `runAdminProtected(` —
+the call, not a mention. Verified in three states: wired → green; wrapper removed → red, naming the
+offending call site; restored → green.
+
+## §4 pre-conditions (measured, not assumed)
+
+```
+posted balance ....................... 10
+active reservations (MV270, MV271) ... 2
+AVAILABLE ............................ 8
+→ remove 7 to reach exactly 1
+```
+
+Available is **not** the posted balance: the two reservations from §3 are still held. The adjustment
+is Remove 7.
