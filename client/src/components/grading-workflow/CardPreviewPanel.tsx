@@ -218,8 +218,11 @@ export function CardPreviewPanel({
     </div>
   );
 
+  // mb-1 (4px) not mb-1.5: owner evidence 2026-08-16 showed the gap between the
+  // Front/Back controls and the card was eating card height. Every pixel removed
+  // here is a pixel the card-fit box gains.
   const toolbar = (
-    <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
+    <div className="mb-1 flex shrink-0 items-center justify-between gap-2">
       <div className="flex gap-1">
         {(["front", "back"] as const).map((s) => (
           <button
@@ -227,7 +230,7 @@ export function CardPreviewPanel({
             type="button"
             onClick={() => setSide(s)}
             data-testid={`card-preview-${s}`}
-            className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
+            className={`px-2 py-[3px] rounded text-[9px] font-bold uppercase tracking-wider transition-colors ${
               side === s
                 ? "bg-[var(--admin-gold)] text-[#1A1400]"
                 : "text-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] border border-[var(--admin-gold)]/20"
