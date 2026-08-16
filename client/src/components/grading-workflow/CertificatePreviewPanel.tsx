@@ -83,6 +83,9 @@ export function CertificatePreviewPanel({
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Server-supplied "this card simply isn't ready yet" wording (HTTP 422). Held
+   *  separately from `error` so a routine ungraded card is never presented as a fault. */
+  const [notReady, setNotReady] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const urlRef = useRef<string | null>(null);
   const key = JSON.stringify(fields);
@@ -91,6 +94,7 @@ export function CertificatePreviewPanel({
     if (requireExpectedRevision && expectedRevision == null) {
       setLoading(false);
       setError(null);
+      setNotReady(null);
       return;
     }
     // Fingerprint certificate-facing fields only. `expectedRevision` is a
@@ -115,6 +119,7 @@ export function CertificatePreviewPanel({
     const timer = setTimeout(async () => {
       setLoading(true);
       setError(null);
+      setNotReady(null);
       timeout = setTimeout(() => {
         controller.abort(new Error("Certificate preview timed out."));
         setError("Certificate preview timed out.");
@@ -132,6 +137,19 @@ export function CertificatePreviewPanel({
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
+          // An UNGRADED card is not a failure. The server answers 422 with concise,
+          // grader-facing wording ("Not graded yet — the preview appears once a grade
+          // is set."), and this panel used to discard it and render the generic
+          // "Preview unavailable · Retry" instead. On production 125 of 836
+          // certificates are numeric-but-ungraded, so a routine, expected state was
+          // being shown to graders as a system fault. Surface the server's own words
+          // for that case; every genuine fault keeps the unavailable/Retry control.
+          if (res.status === 422 && typeof data.error === "string" && data.error) {
+            setNotReady(data.error);
+            setLoading(false);
+            complete(false);
+            return;
+          }
           throw new Error(data.error || `Certificate preview failed (${res.status})`);
         }
         const headerRevision = res.headers.get("X-MintVault-Review-Revision");
@@ -195,7 +213,7 @@ export function CertificatePreviewPanel({
     <div
       className="mx-auto w-full max-w-[205px]"
       data-testid="certificate-preview-panel"
-      data-preview-state={error ? "error" : url ? "ready" : loading ? "loading" : "empty"}
+      data-preview-state={error ? "error" : notReady ? "not-ready" : url ? "ready" : loading ? "loading" : "empty"}
       data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}
       data-persistence={persistence}
     >
@@ -210,6 +228,17 @@ export function CertificatePreviewPanel({
           className="block h-auto w-full object-contain"
           data-testid="certificate-preview-image"
         />
+      ) : notReady ? (
+        /* Informational, not a fault: the server told us this card has no grade yet.
+           Its own concise wording is shown verbatim, with no Retry control — retrying
+           cannot help; grading the card is what makes the preview appear. */
+        <p
+          className="text-center text-[11px] text-[var(--admin-ink-faint)]"
+          data-testid="certificate-preview-status"
+          aria-live="polite"
+        >
+          {notReady}
+        </p>
       ) : error ? (
         <button
           type="button"
@@ -218,6 +247,7 @@ export function CertificatePreviewPanel({
           aria-label="Retry certificate preview"
           onClick={() => {
             setError(null);
+            setNotReady(null);
             setLoading(true);
             setRetryNonce((nonce) => nonce + 1);
           }}
