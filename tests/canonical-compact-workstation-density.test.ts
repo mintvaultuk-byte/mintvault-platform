@@ -21,6 +21,8 @@ const CENTERING = read("client/src/components/grading/centering-input.tsx");
 const PANEL = read("client/src/components/grading/grading-panel.tsx");
 const HARNESS = read("client/src/pages/dev-canonical-workstation-harness.tsx");
 
+const VIEWER_RAIL_BOUND = /renderImageArea\("100%"\)/;
+
 describe("compact rail geometry", () => {
   it("keeps one responsive canonical shell with a 35% desktop rail and one scroll surface", () => {
     expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
@@ -61,7 +63,12 @@ describe("compact rail geometry", () => {
     // card is capped well below the space the rail actually offers — measured at
     // 1280x800 the card was 361.6x511.6 with the constant vs 434.6x613.8 when
     // parent-bounded, i.e. ~20% of the card's linear size was being thrown away.
-    expect(VIEWER).toContain('renderImageArea(fillHost ? "100%" : 525)');
+    // 2026-08-16: the call was reshaped when the rail became a flex column (the certificate preview
+    // was covering Manual Crop / Card Tool — see grading-rail-control-containment.test.ts). The
+    // PROPERTY this guard exists for is unchanged and is still asserted, on both branches: the rail
+    // is bounded by its real parent ("100%"), the inline grid keeps the 525px constant.
+    expect(VIEWER_RAIL_BOUND.test(VIEWER), "rail must pass 100% so the frame is parent-bounded").toBe(true);
+    expect(VIEWER).toContain("renderImageArea(525)");
     expect(VIEWER).toContain("h-8 w-8");
     expect(PANEL).toContain("rounded-l px-3 py-1 text-[10px]");
     expect(PANEL).toContain("btn-generate-description");

@@ -1652,11 +1652,28 @@ export default function ImageViewer({
   }
 
   // ── Normal (inline) view ────────────────────────────────────────────────
+  /*
+   * RAIL CONTAINMENT (owner defect 2026-08-16: the certificate preview covered Manual Crop /
+   * Recapture / Card Tool).
+   *
+   * In the bounded rail this root used to be `space-y-2` — plain BLOCK FLOW. The card frame was
+   * given maxHeight:100% against an auto-height parent, so it resolved to width x 7/5 and the
+   * controls row stacked AFTER it. Their combined height exceeded the rail host, and the host's
+   * `overflow-hidden` clipped the controls out of existence — leaving the certificate preview
+   * beneath occupying the space where the operator's controls should have been.
+   *
+   * As a flex column the space is RESERVED rather than competed for: the tabs and the controls row
+   * take their intrinsic height (`shrink-0`) and the card takes only what is left (`flex-1
+   * min-h-0`). The card shrinks on short viewports instead of pushing controls out of the box, so
+   * no control can ever be covered or clipped, at any viewport height, in any preview state.
+   *
+   * Scoped to `fillHost`: the inline (non-rail) layout keeps `space-y-2` byte-identically.
+   */
   return (
-    <div className="space-y-2">
+    <div className={fillHost ? "flex h-full min-h-0 flex-col gap-2" : "space-y-2"}>
       <style>{PULSE_CSS}</style>
 
-      {renderTabs()}
+      {fillHost ? <div className="shrink-0">{renderTabs()}</div> : renderTabs()}
 
       {/* Reference comparison */}
       {showReference && referenceImageUrl && (
@@ -1697,10 +1714,17 @@ export default function ImageViewer({
       {/* In the bounded rail the frame is capped by its real parent ("100%"), never by
           a fixed pixel constant that can exceed the host and get clipped. The inline
           grid keeps 525 because that layout has no definite height to resolve against. */}
-      {!showReference && renderImageArea(fillHost ? "100%" : 525)}
+      {!showReference &&
+        (fillHost ? (
+          // A definite, bounded box for the 5:7 frame to resolve maxHeight:100% against, and the
+          // only element allowed to absorb the leftover height.
+          <div className="flex min-h-0 flex-1 items-center justify-center">{renderImageArea("100%")}</div>
+        ) : (
+          renderImageArea(525)
+        ))}
 
-      {/* Controls row */}
-      <div className="flex items-center gap-2 flex-wrap">
+      {/* Controls row — shrink-0 so it always reserves its own space in the rail. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="grading-card-controls">
         {/* Gated on !readOnly to match the old sidebar behaviour: the card
             tool must not open on an approved (locked) cert outside edit mode. */}
         {onOpenCardTool && mutationsEnabled && !readOnly && (
