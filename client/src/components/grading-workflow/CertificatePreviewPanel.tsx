@@ -206,12 +206,26 @@ export function CertificatePreviewPanel({
   );
 
   return (
-    // 205px (was 230px). The certificate is a print-layout REFERENCE, not the primary
-    // object — owner evidence 2026-08-16 showed it consuming rail height the card
-    // needed. DISPLAY WIDTH ONLY: server label dimensions, print resolution and the
+    // 190px (was 230px). The certificate is a print-layout REFERENCE, not the primary
+    // object. DISPLAY WIDTH ONLY: server label dimensions, print resolution and the
     // certificate document output are all untouched.
+    //
+    // RESERVED, STATE-INDEPENDENT HEIGHT — owner evidence 2026-08-16 (MV360, /staff).
+    // Two consecutive real screenshots showed the card fully visible while the preview
+    // was not ready, then the card's bottom cut off the moment the preview rendered.
+    // Cause: this panel's height depended on its STATE. Empty/not-ready occupied almost
+    // nothing, so the sibling card slot (`min-h-0 flex-1`) claimed that space and sized
+    // the card to it; when the PNG arrived the panel grew, the card slot shrank, and the
+    // card — already laid out larger — was clipped by the host's overflow-hidden.
+    //
+    // Pinning the printed label's own 827x236 ratio makes the box identical in every
+    // state (empty, loading, not-ready, error, ready), so the certificate reserves its
+    // space BEFORE the card is sized and the card never jumps or clips when the preview
+    // resolves. A slightly smaller card that is wholly visible beats a larger one that
+    // is cut off.
     <div
-      className="mx-auto w-full max-w-[205px]"
+      className="mx-auto w-full max-w-[190px]"
+      style={{ aspectRatio: "827 / 236" }}
       data-testid="certificate-preview-panel"
       data-preview-state={error ? "error" : notReady ? "not-ready" : url ? "ready" : loading ? "loading" : "empty"}
       data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}

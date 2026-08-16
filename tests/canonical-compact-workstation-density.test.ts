@@ -33,7 +33,13 @@ describe("compact rail geometry", () => {
   it("makes the real certificate preview a bare 205px ratio-correct secondary reference", () => {
     // 205px (was 230px) — owner evidence 2026-08-16: the certificate was consuming rail
     // height the card needed. Display width only; the printed label is unchanged.
-    expect(CERTIFICATE).toContain("max-w-[205px]");
+    expect(CERTIFICATE).toContain("max-w-[190px]");
+    // RESERVED, STATE-INDEPENDENT BOX. Owner evidence 2026-08-16 (MV360, /staff):
+    // the card was whole while the preview was not ready and lost its bottom the
+    // moment the preview rendered, because this panel's height depended on state.
+    // Pinning the printed label's 827x236 ratio makes it identical in every state,
+    // so it reserves its space BEFORE the card is sized and the card cannot jump.
+    expect(CERTIFICATE).toContain('aspectRatio: "827 / 236"');
     expect(CERTIFICATE).toContain("width={231}");
     expect(CERTIFICATE).toContain("height={66}");
     expect(CERTIFICATE).toContain('data-preview-presentation={url ? "bare-image"');
