@@ -131,6 +131,18 @@ interface Props {
    *  position (e.g. above an absolute-positioning anchor wrapper). The
    *  fullscreen-mode renderTabs is unaffected. */
   omitSideTabs?: boolean;
+  /**
+   * True when this viewer is portaled into the canonical left rail
+   * (`grading-interactive-card-host`), which is a BOUNDED, `overflow-hidden` box.
+   *
+   * The inline (non-portal) grid layout has no definite height, so the card frame
+   * there is capped by a fixed pixel maxHeight. In the rail that constant is wrong:
+   * when the host is shorter than it — 1024x768, and any laptop where browser chrome
+   * reduces innerHeight — the aspect-ratio frame overflows the host and is CLIPPED,
+   * which is the reported "card is cut off at the bottom". In the rail the frame must
+   * instead be bounded by its real parent.
+   */
+  fillHost?: boolean;
   /** MVGS v2.1 — line measurements drawn in-line with the pin tool. Mark
    *  mode gains a tool palette (Pin | Whitening | Crease); when whitening or
    *  crease is active, click-drag captures a segment. Each commit fires the
@@ -259,6 +271,7 @@ export default function ImageViewer({
   readOnly,
   side: controlledSide,
   omitSideTabs,
+  fillHost = false,
   onOpenCardTool,
   whiteningLines = [],
   creaseLines = [],
@@ -1681,7 +1694,10 @@ export default function ImageViewer({
       )}
 
       {/* Main image (normal size) */}
-      {!showReference && renderImageArea(525)}
+      {/* In the bounded rail the frame is capped by its real parent ("100%"), never by
+          a fixed pixel constant that can exceed the host and get clipped. The inline
+          grid keeps 525 because that layout has no definite height to resolve against. */}
+      {!showReference && renderImageArea(fillHost ? "100%" : 525)}
 
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">

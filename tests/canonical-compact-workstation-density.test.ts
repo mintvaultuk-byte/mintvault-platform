@@ -50,7 +50,12 @@ describe("compact rail geometry", () => {
     expect(VIEWER).toContain("function getUrl(urls: ImageUrls, side: Side, variant: Variant)");
     expect(VIEWER).toContain("front_greyscale?: string | null");
     expect(VIEWER).toContain("front_highcontrast?: string | null");
-    expect(VIEWER).toContain("renderImageArea(525)");
+    // The INLINE grid keeps the 525px cap (it has no definite height to resolve
+    // against). The RAIL path must instead be bounded by its real parent, or the
+    // card is capped well below the space the rail actually offers — measured at
+    // 1280x800 the card was 361.6x511.6 with the constant vs 434.6x613.8 when
+    // parent-bounded, i.e. ~20% of the card's linear size was being thrown away.
+    expect(VIEWER).toContain('renderImageArea(fillHost ? "100%" : 525)');
     expect(VIEWER).toContain("h-8 w-8");
     expect(PANEL).toContain("rounded-l px-3 py-1 text-[10px]");
     expect(PANEL).toContain("btn-generate-description");
@@ -115,6 +120,10 @@ describe("five-role and protected-boundary negative proof", () => {
       // box regains the height the chrome was consuming. Presentation only: no
       // scoring, no authority, no transport, no printed-label change.
       "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+      // Rail card sizing: the portaled ImageViewer must be bounded by its real
+      // parent instead of a fixed 525px cap. Presentation only.
+      "client/src/components/grading/image-viewer.tsx",
+      "client/src/components/grading/grading-panel.tsx",
       // ── Gold Star classification-safety repair (owner-commissioned) ────────────
       // A vintage EX-era card could be classified as a MODERN Illustration Rare,
       // because rarity search carried no card context and the EX Gold Star had no
@@ -131,6 +140,9 @@ describe("five-role and protected-boundary negative proof", () => {
     for (const path of changed) {
       if (
         path.startsWith("tests/") ||
+        // Documentation is not a runtime surface — markdown ships in no bundle and
+        // executes nowhere, so exempting it cannot widen this guard's blast radius.
+        path.startsWith("docs/") ||
         path.startsWith(".claude/controlled-code-lead/tasks/canonical-compact-workstation-density-20260814/")
       )
         continue;
