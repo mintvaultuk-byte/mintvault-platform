@@ -25,6 +25,7 @@ import {
 import { authorizePartnerScannerCertificate } from "./grading-routes";
 import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-authority";
 import { FixAuthorityError, authoriseFix, invalidateSide, listFixQueue } from "./fix-authority";
+import { CaptureAuthorityError, authoriseStationCapture } from "./capture-authority";
 
 /**
  * FIX failures map to statuses that tell the operator what to do next.
@@ -163,6 +164,18 @@ const partnerStationFixAuthoriseRateLimit = partnerRateLimit({
   // Authorising a FIX is rarer than starting a card and is a lineage decision, so it is tighter —
   // still one per second, which no operator reaches.
   max: 60,
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
+});
+
+const partnerStationCaptureAuthoriseRateLimit = partnerRateLimit({
+  name: "partner-station-capture-authorise",
+  windowMs: 60_000,
+  // Two arms per card (front, back) plus retries after a failed sheet. Sits between the card-start
+  // budget (120/min) and the FIX budget (60/min): a bench can arm faster than it can start cards,
+  // because a rejected sheet is re-armed without starting anything, but this is still one per
+  // second sustained per station and no operator reaches it.
+  max: 90,
   failClosed: true,
   keyFn: (req) => req.station?.id ?? "unknown",
 });
@@ -525,6 +538,92 @@ export function partnerStationRouter(): Router {
       }
     }
   );
+
+  /**
+   * B1 — ARM A CAPTURE SESSION FROM THE STATION ITSELF.
+   *
+   * THE CLOSED LOOP THIS OPENS. `POST /card-jobs` started a walk-in card and
+   * `POST /card-jobs/:id/fix-authorise` said which sides a repair had freed, but neither armed a
+   * capture session, and the only Partner route that did (`/stations/:stationCode/capture-sessions`)
+   * authenticates with the browser cookie and is reachable only from inside the opened grading
+   * workstation — which will not open until the card is READY_TO_GRADE, which requires the very
+   * photographs that could not be taken. Walk-in cards therefore stuck in NEEDS_SCAN.
+   *
+   * WHY THIS IS NOT A NEW PRIVILEGE. The station already proves more here than the browser does on
+   * the cookie route: an Ed25519 request signature bound to its credential epoch, PLUS an
+   * MFA-passed operator session holding `partner.cards.scan`, PLUS tenant and location equality
+   * between station and operator — all established by the two guards below before this handler
+   * runs. No new capability is introduced and none is relaxed.
+   *
+   * THE CERTIFICATE IS NEVER SUPPLIED BY THE CALLER. It is read from a Card Job that was itself
+   * located by the AUTHENTICATED station's tenant, and the station's own location must match the
+   * job's. `createScannerCaptureSession` then re-proves that same station↔job binding against its
+   * own pool before it will arm anything. Two independent locks, neither of which trusts the body.
+   */
+  // Kept on ONE line for the same reason as /card-jobs above: the boundary suite locates this route
+  // with `indexOf('r.post("/card-jobs/:cardJobId/capture-sessions"')` and reads the following
+  // characters, so splitting the path onto its own line would silently void those assertions.
+  r.post("/card-jobs/:cardJobId/capture-sessions", requireSignedStation, requireSignedStationOperator, partnerStationCaptureAuthoriseRateLimit, async (req, res) => {
+    const station = req.station!;
+    const operator = req.partner!;
+    try {
+      // Calibration and profile version are a capture precondition, not an arming one, but refusing
+      // here gives the operator the real reason at the moment they press the button rather than an
+      // opaque failure two steps later when the sheet is already on the glass.
+      const { CANON_LIDE_400_PROFILE } = await import("../lib/lide400-profile");
+      assertStationCaptureReady(station, CANON_LIDE_400_PROFILE.version);
+
+      const authorisation = await authoriseStationCapture({
+        tenantId: station.tenantId,
+        locationId: station.locationId,
+        cardJobId: String(req.params.cardJobId),
+        stationId: station.id,
+        actorUserId: operator.userId,
+        requestedSide: req.body?.side,
+      });
+
+      const { createScannerCaptureSession } = await import("../scanner-capture-service");
+      const capture = await createScannerCaptureSession({
+        certificateId: authorisation.certificateId,
+        side: authorisation.side,
+        workstationId: station.code,
+        stationId: station.id,
+        actorId: operator.userId,
+        // Always false. A side that already has a current image is refused by the authority above,
+        // so there is nothing here for a recapture flag to mean except "overwrite without the
+        // invalidation that is meant to precede it".
+        recapture: false,
+        scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
+      });
+
+      res.status(201).json({
+        capture,
+        cardJob: {
+          cardJobId: authorisation.cardJobId,
+          mvNumber: authorisation.mvNumber,
+          status: authorisation.status,
+          side: authorisation.side,
+          missingSides: authorisation.missingSides,
+        },
+      });
+    } catch (error) {
+      if (error instanceof CaptureAuthorityError) {
+        const status =
+          error.code === "CARD_JOB_NOT_FOUND"
+            ? 404
+            : error.code === "SIDE_INVALID"
+              ? 400
+              : error.code === "JOB_NOT_CAPTURABLE" ||
+                  error.code === "SIDE_ALREADY_PRESENT" ||
+                  error.code === "NOTHING_TO_CAPTURE"
+                ? 409
+                : 403;
+        res.status(status).json({ error: { code: error.code, message: error.message } });
+        return;
+      }
+      stationError(res, error);
+    }
+  });
 
   // From origin/main: `partnerStationCalibrationIngressRateLimit` runs BEFORE authentication on
   // purpose. requireSignedStation verifies a signed payload and resolves the operator session, so

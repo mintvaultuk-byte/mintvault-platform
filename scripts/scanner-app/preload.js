@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("scanner", {
   fetchOrphans: () => ipcRenderer.invoke("fetch-orphans"),
   startNewCard: (payload) => ipcRenderer.invoke("start-new-card", payload),
   authoriseFix: (payload) => ipcRenderer.invoke("authorise-fix", payload),
+  armCapture: (payload) => ipcRenderer.invoke("arm-capture", payload),
   openGradeCert: (certId) => ipcRenderer.invoke("open-grade-cert", certId),
   getVersion: () => ipcRenderer.invoke("get-version"),
   getStationSetup: () => ipcRenderer.invoke("get-station-setup"),

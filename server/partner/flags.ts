@@ -20,6 +20,20 @@ export const PARTNER_FLAGS = [
   "partner_device_enforcement_enabled",
   "partner_emergency_stop",
   "partner_connector_enabled",
+  /**
+   * B2 — the portal submission wizard's ability to SUBMIT (and therefore to reserve credits).
+   *
+   * OFF EVERYWHERE UNTIL THE LIFECYCLE IS CLOSED. Submitting a portal draft reserves one credit per
+   * card and creates each Card Job in CREDIT_RESERVED, but no code path performs
+   * CREDIT_RESERVED → NEEDS_SCAN: the edge is declared legal in migration 0080 and in
+   * card-job-lifecycle.ts, yet the only writer of NEEDS_SCAN is the Scanner's own INSERT. A portal
+   * card therefore holds a credit it can never spend and can never reach grading.
+   *
+   * Reading, drafting and cancelling are untouched — only the reserving step is gated — so no
+   * existing submission becomes unreachable and nothing already reserved is stranded further.
+   * Turning this on is a deliberate act that should follow, not precede, a real continuation path.
+   */
+  "partner_submission_intake_enabled",
 ] as const;
 export type PartnerFlag = (typeof PARTNER_FLAGS)[number];
 

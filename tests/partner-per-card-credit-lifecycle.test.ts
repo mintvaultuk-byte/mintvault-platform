@@ -259,7 +259,7 @@ describe("Per-card credit lifecycle (real PostgreSQL)", () => {
     submissions = await import("../server/partner/submission-service");
     lifecycle = await import("../server/partner/partner-submission-credit-lifecycle");
     await admin.query(
-      "INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled) VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false)"
+      "INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled) VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false),('partner_submission_intake_enabled',NULL,NULL,true)"
     );
   }, 120_000);
 

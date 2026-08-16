@@ -156,7 +156,14 @@ async function clearAllFlags(): Promise<void> {
 /** Enable the three flags the deployed surface needs to serve a full lifecycle. */
 async function enableLiveFlags(): Promise<void> {
   await clearAllFlags();
-  for (const f of ["partner_portal_enabled", "partner_login_enabled", "partner_onboarding_enabled"]) {
+  for (const f of [
+    "partner_portal_enabled",
+    "partner_login_enabled",
+    "partner_onboarding_enabled",
+    // B2: submitting a portal draft reserves credits and is gated by this flag, which is OFF by
+    // default on every real host. A "full lifecycle" fixture must opt in or the submit step 503s.
+    "partner_submission_intake_enabled",
+  ]) {
     await setGlobalFlag(f, true);
   }
 }

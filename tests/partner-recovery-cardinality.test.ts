@@ -219,8 +219,11 @@ describe("N-card recovery cardinality (real PostgreSQL, real services)", () => {
     lifecycle = await import("../server/partner/partner-submission-credit-lifecycle");
     submissions = await import("../server/partner/submission-service");
     await admin.query(
+      // B2: submitting reserves credits and is now gated by partner_submission_intake_enabled
+      // (default OFF everywhere). This suite proves submit mechanics, so it opts in explicitly.
       `INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled)
-       VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false)`
+       VALUES ('partner_connector_enabled',NULL,NULL,true),('partner_emergency_stop',NULL,NULL,false),
+              ('partner_submission_intake_enabled',NULL,NULL,true)`
     );
   }, 180_000);
 

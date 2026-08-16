@@ -530,13 +530,62 @@ function setupIpc() {
     if (result.ok) {
       pendingNewCardOpId = null;
       const job = result.body && result.body.cardJob ? result.body.cardJob : {};
-      return { ok: true, cardJob: job };
+      /*
+       * B1 — arm the FIRST capture immediately, from this station.
+       *
+       * The card is paid for the moment the server answers above; if nothing arms a session the
+       * operator has a charged card they cannot photograph. Arming is free, spends no credit and
+       * mints nothing, so doing it here costs the shop nothing and removes the browser step that
+       * previously stood between NEW CARD and the glass.
+       *
+       * A FAILURE TO ARM IS NOT A FAILURE TO START. The card exists, holds its MV and keeps its
+       * reservation, and the outstanding side can be armed again later from the fix queue — so
+       * this reports the arming problem while still returning the card. Throwing it away here is
+       * how an operator would conclude the press failed and press again.
+       */
+      let capture = null;
+      let captureError = null;
+      if (job.cardJobId) {
+        try {
+          const armed = await server.armCapture(job.cardJobId);
+          if (armed.ok) capture = (armed.body && armed.body.capture) || null;
+          else captureError = ((armed.body && armed.body.error) || {}).message || "Could not arm the scanner";
+        } catch (err) {
+          captureError = err && err.message ? err.message : "Could not reach MintVault to arm the scanner";
+        }
+      }
+      return { ok: true, cardJob: job, capture, captureError };
     }
     // A refusal the operator can act on (no credits, suspended, station not approved) is final for
     // this press: the token is released so their NEXT press is a genuinely new request.
     pendingNewCardOpId = null;
     const error = (result.body && result.body.error) || {};
     return { ok: false, retryable: false, code: error.code || "error", error: error.message || "Could not start a new card" };
+  });
+
+  /**
+   * B1 — arm the NEXT outstanding side of a card this station owns.
+   *
+   * Used for the back after the front has been accepted, and to recover a card whose first arm
+   * failed or expired. Deliberately takes only a Card Job id: the side is chosen by the server from
+   * what is actually missing, so this app can never name a side that would overwrite a good image,
+   * and it never names a certificate at all.
+   */
+  ipcMain.handle("arm-capture", async (_event, payload) => {
+    const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
+    if (!cardJobId) return { ok: false, error: "A card is required" };
+    let result;
+    try {
+      result = await server.armCapture(cardJobId, payload && payload.side);
+    } catch (err) {
+      return { ok: false, retryable: true, error: err && err.message ? err.message : "Could not reach MintVault" };
+    }
+    if (result.ok) {
+      const body = result.body || {};
+      return { ok: true, capture: body.capture || null, cardJob: body.cardJob || null };
+    }
+    const error = (result.body && result.body.error) || {};
+    return { ok: false, code: error.code || "error", error: error.message || "Could not arm the scanner" };
   });
 
   // Recovery opens the exact historic certificate in the authenticated web
