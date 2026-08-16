@@ -32,7 +32,7 @@ server-authoritative grading · Card Job lineage · existing QA/output controls.
 
 ## FINDING F-1 (HIGH) — two readiness rows are hard-coded placeholders that pre-date the systems they describe
 
-The owner observed *"Credits configured — Credit accounting is not enabled yet."* on the staging
+The owner observed _"Credits configured — Credit accounting is not enabled yet."_ on the staging
 Partner detail page and asked whether that is stale UI, stale readiness computation, fixture state,
 or a genuine backend inconsistency.
 
@@ -56,8 +56,8 @@ Both statements are now false. The authorities exist and are proven by the pinne
 the denominator is the six achievable rows (company, owner, invitation, location, profile, branding).
 With branding incomplete that is 5/6 = **83%** — exactly what the owner saw.
 
-**Consequence, and why this is HIGH rather than cosmetic:** the percentage *excludes the two most
-operationally decisive gates* — does this shop have credits, and does it have an approved station.
+**Consequence, and why this is HIGH rather than cosmetic:** the percentage _excludes the two most
+operationally decisive gates_ — does this shop have credits, and does it have an approved station.
 A Partner can read 83% and be unable to grade a single card. The number overstates readiness by
 construction.
 
@@ -65,7 +65,7 @@ construction.
 state in its detail payload at all. So this is **wiring, not building** — the authorities exist, the
 detail endpoint simply never surfaced them.
 
-**Owner decision needed:** should the percentage be over *all* gates (so it drops when credits or
+**Owner decision needed:** should the percentage be over _all_ gates (so it drops when credits or
 station are missing), or should the headline become a state machine (`ONBOARDING → READY TO GRADE`)
 with the percentage retired? The second is likely better and is what the "READY TO GRADE" target implies.
 
@@ -83,9 +83,9 @@ company created · owner invited · invitation accepted · password configured �
 location active · wallet active · grading credits available · scanner installed · station enrolled ·
 station approved · scanner connected · partner portal enabled → **READY TO GRADE**.
 
-Every failed row must carry an **action**, not just a state: *password not configured → resend setup
-link*; *no station → show request state/instructions*; *no credits → add startup credits / Partner
-buy credits*; *MFA not configured → exact owner action*.
+Every failed row must carry an **action**, not just a state: _password not configured → resend setup
+link_; _no station → show request state/instructions_; _no credits → add startup credits / Partner
+buy credits_; _MFA not configured → exact owner action_.
 
 ## FINDING F-3 (MEDIUM) — the staging Partner shows contradictory onboarding states
 
@@ -106,12 +106,12 @@ which is authoritative. Candidate root cause is the same as F-1: labels assemble
 
 Four separate admin surfaces exist today, reachable by four routes, with no canonical Partner record:
 
-| Route | Page |
-| --- | --- |
-| `/admin/partner-network` | `partner-network.tsx` |
-| `/admin/partner-network/partners` | `partner-management.tsx` |
+| Route                                        | Page                            |
+| -------------------------------------------- | ------------------------------- |
+| `/admin/partner-network`                     | `partner-network.tsx`           |
+| `/admin/partner-network/partners`            | `partner-management.tsx`        |
 | `/admin/partner-network/partners/:partnerId` | `partner-management-detail.tsx` |
-| `/admin/partners/dashboard` | `partner-dashboard.tsx` |
+| `/admin/partners/dashboard`                  | `partner-dashboard.tsx`         |
 
 Plus Station Fleet, Wallet/Credits controls and Connector surfaces reached from elsewhere. The
 information exists; the navigation between it does not.
@@ -222,12 +222,12 @@ Record here: dead ends · duplicate pages · stale statuses · misleading labels
 operational numbers · developer-only actions · unnecessary steps · missing actions · confusing
 transitions.
 
-| # | Type | Surface | Observation |
-| --- | --- | --- | --- |
-| 1 | stale label | Partner detail | "Credits configured — Credit accounting is not enabled yet." Hard-coded; the credit authority exists. (F-1) |
-| 2 | stale label | Partner detail | "Scanner station" permanently `unavailable`; station enrolment/approval exists. (F-1) |
-| 3 | misleading number | Partner detail | 83% excludes credits and station — the two gates that decide whether the shop can grade. (F-1) |
-| 4 | contradictory state | Partner detail | password configured = no, MFA configured = yes; invitation consumed **and** no valid invitation available. (F-3) |
-| 5 | duplicate surface | Super Admin | four parallel Partner surfaces, no canonical record. (F-4) |
-| 6 | dead end | Super Admin | operational counts render as text with no drill-through. (F-5) |
-| 7 | developer-only | Station Fleet | station enrolment currently requires Terminal + SQL + hand-built API call. (F-6) |
+| #   | Type                | Surface        | Observation                                                                                                      |
+| --- | ------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 1   | stale label         | Partner detail | "Credits configured — Credit accounting is not enabled yet." Hard-coded; the credit authority exists. (F-1)      |
+| 2   | stale label         | Partner detail | "Scanner station" permanently `unavailable`; station enrolment/approval exists. (F-1)                            |
+| 3   | misleading number   | Partner detail | 83% excludes credits and station — the two gates that decide whether the shop can grade. (F-1)                   |
+| 4   | contradictory state | Partner detail | password configured = no, MFA configured = yes; invitation consumed **and** no valid invitation available. (F-3) |
+| 5   | duplicate surface   | Super Admin    | four parallel Partner surfaces, no canonical record. (F-4)                                                       |
+| 6   | dead end            | Super Admin    | operational counts render as text with no drill-through. (F-5)                                                   |
+| 7   | developer-only      | Station Fleet  | station enrolment currently requires Terminal + SQL + hand-built API call. (F-6)                                 |
