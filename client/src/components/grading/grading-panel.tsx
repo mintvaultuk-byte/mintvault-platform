@@ -3167,6 +3167,7 @@ export default function GradingPanel({
                   referenceImageUrl={aiIdentification?.referenceImageUrl}
                   side={viewerSide as "front" | "back"}
                   omitSideTabs
+                  fillHost={previewHost != null}
                   onOpenCardTool={active && workstationCapabilities.imageMutations ? setManualCardToolSide : undefined}
                   // MVGS v2.1 measurement state — flows back through the
                   // callbacks below when the operator draws a whitening or

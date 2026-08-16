@@ -113,7 +113,7 @@ describe("6. desktop shell is a real two-column layout at desktop breakpoints", 
     expect(FORM).not.toContain("<CanonicalGradingWorkstationShell");
     expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[45%] md:shrink-0");
     // the old lg-only breakpoint (which collapsed below 1024px) is gone.
     expect(CANON_SHELL).not.toContain("gap-3 lg:flex-row");
   });
