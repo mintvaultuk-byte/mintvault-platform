@@ -19,6 +19,7 @@ import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell, Panel, StatCard, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest } from "@/lib/queryClient";
+import { runAdminProtected } from "@/components/admin/admin-step-up";
 import type {
   DashboardAlert,
   Metric,
@@ -739,12 +740,18 @@ function CreditAdjustmentControl({ partnerId }: { partnerId: string }) {
         throw new Error("Enter a whole credit quantity.");
       if (!reason.trim()) throw new Error("Enter an adjustment reason.");
       if (!idempotencyKey.trim()) throw new Error("Enter an idempotency key.");
-      const response = await apiRequest("POST", `${PARTNER_DASHBOARD_BASE}/partners/${partnerId}/credits/adjust`, {
-        operation,
-        quantity: parsedQuantity,
-        reason: reason.trim(),
-        idempotencyKey: idempotencyKey.trim(),
-      });
+      // Granting or removing Grading Credits moves money-equivalent capacity into a shop's wallet
+      // and is behind requireAdminStepUp. runAdminProtected performs the call and, ONLY if the
+      // server answers 403 admin_step_up_required, prompts and retries this exact adjustment once.
+      // The idempotency key is unchanged across the retry, so the retry can never double-apply.
+      const response = await runAdminProtected(() =>
+        apiRequest("POST", `${PARTNER_DASHBOARD_BASE}/partners/${partnerId}/credits/adjust`, {
+          operation,
+          quantity: parsedQuantity,
+          reason: reason.trim(),
+          idempotencyKey: idempotencyKey.trim(),
+        })
+      );
       return response.json();
     },
     onSuccess: async () => {

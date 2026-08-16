@@ -20,6 +20,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { readFileSync } from "node:fs";
 
 const apiRequest = vi.fn();
 const invalidateQueries = vi.fn(() => Promise.resolve());
@@ -298,5 +299,80 @@ describe("Super Admin station approval — the real UI path", () => {
     expect(approvals).toHaveLength(1); // never retried
     expect(q("dialog-admin-step-up")).toBeNull();
     expect(apiRequest.mock.calls.filter((c) => c[1] === "/api/admin/step-up")).toHaveLength(0);
+  });
+});
+
+/**
+ * COVERAGE GUARD — every client call to a step-up-gated route must go through runAdminProtected.
+ *
+ * WHY THIS EXISTS. The first fix for UX-1 wired three call sites and MISSED a fourth: the Grading
+ * Credit adjustment on partner-dashboard.tsx, which is behind requireAdminStepUp exactly like the
+ * station transitions. It was found only because the next manual step happened to need it. Grepping
+ * by hand is how the miss happened, so the enumeration is now derived from the SERVER and checked
+ * mechanically: a future route that adds requireAdminStepUp cannot ship a client caller without the
+ * affordance to satisfy it.
+ */
+describe("step-up coverage — no gated route may be called without the client affordance", () => {
+  /** Server routes that answer 403 admin_step_up_required, read from the source of truth. */
+  function gatedRoutes(): string[] {
+    const files = [
+      "server/partner/admin-routes.ts",
+      "server/partner/dashboard-routes.ts",
+      "server/partner/partner-management-routes.ts",
+      "server/partner/station-admin-routes.ts",
+    ];
+    const paths: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, "utf8");
+      // r.post("<path>", requireAdminStepUp()  — and the templated station form
+      for (const m of src.matchAll(/r\.post\(\s*[`"]([^`"]+)[`"]\s*,\s*requireAdminStepUp\(\)/g)) paths.push(m[1]);
+    }
+    return paths;
+  }
+
+  it("finds the gated routes from the server, so this guard cannot silently cover nothing", () => {
+    const routes = gatedRoutes();
+    expect(routes.length).toBeGreaterThanOrEqual(8);
+    expect(routes.some((r) => r.includes("credits/adjust"))).toBe(true);
+    expect(routes.some((r) => r.includes("users/:userId/role"))).toBe(true);
+  });
+
+  it("every client call to a gated route is wrapped in runAdminProtected", () => {
+    // The distinctive last path segment of each gated route, mapped to how the client spells it.
+    const needles = ["credits/adjust", "/emergency-stop", "/role", "/reset-mfa", "/password-reset", "/revoke-sessions"];
+    const clientFiles = [
+      "client/src/pages/admin/partner-dashboard.tsx",
+      "client/src/pages/admin/partner-management.tsx",
+      "client/src/pages/admin/partner-management-detail.tsx",
+    ];
+    /*
+     * Comments are STRIPPED before analysis. The first version of this guard checked a raw window of
+     * source before each call and was satisfied by the explanatory comment above it, which mentions
+     * runAdminProtected by name — so removing the actual wrapper still passed. A guard a comment can
+     * satisfy proves nothing; verified by deleting the wrapper and watching this test go red.
+     */
+    const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+    const offenders: string[] = [];
+    for (const f of clientFiles) {
+      const src = stripComments(readFileSync(f, "utf8"));
+      for (const needle of needles) {
+        let i = src.indexOf(needle);
+        while (i !== -1) {
+          const line = src.slice(src.lastIndexOf("\n", i) + 1, src.indexOf("\n", i));
+          // Only consider lines that actually issue a request.
+          if (/apiRequest\(|fetch\(/.test(line)) {
+            // runAdminProtected must appear in the enclosing call, i.e. shortly before this line.
+            // The CALL, not a mention: `runAdminProtected(` must open the enclosing expression.
+            const before = src.slice(Math.max(0, i - 600), i);
+            if (!before.includes("runAdminProtected(")) offenders.push(`${f}: ${line.trim().slice(0, 90)}`);
+          }
+          i = src.indexOf(needle, i + 1);
+        }
+      }
+    }
+    expect(offenders, `these call a step-up-gated route without runAdminProtected:\n${offenders.join("\n")}`).toEqual(
+      []
+    );
   });
 });
