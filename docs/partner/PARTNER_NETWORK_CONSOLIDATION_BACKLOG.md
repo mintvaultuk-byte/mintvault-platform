@@ -231,3 +231,70 @@ transitions.
 | 5   | duplicate surface   | Super Admin    | four parallel Partner surfaces, no canonical record. (F-4)                                                       |
 | 6   | dead end            | Super Admin    | operational counts render as text with no drill-through. (F-5)                                                   |
 | 7   | developer-only      | Station Fleet  | station enrolment currently requires Terminal + SQL + hand-built API call. (F-6)                                 |
+
+---
+
+## FINDING UX-1 (BLOCKER, found live in staging 2026-08-16) — station approval was impossible through the website
+
+**Found by the owner walking the real production onboarding path**, not by a test:
+Partner Network → Partners → Station Fleet → Pending → **Approve** → enter reason → **Confirm** →
+nothing usable happened. Station `MV-STN-HXEKOZNWBLCHF5C6` could not be approved.
+
+### Root cause — the client half of Super Admin step-up did not exist
+
+Not a disabled button, not an unbound reason, not a stale session after the `SESSION_SECRET`
+rotation (that would have been a 401 and a sign-out, not a 403). The chain:
+
+1. Confirm fires correctly — the button gates on `fleetReason.trim().length >= 3` and the reason was
+   well over that.
+2. `POST /api/super-admin/fleet/stations/:code/active` is refused by `requireAdminStepUp()` with
+   `403 { error: "Confirm your admin password and PIN to continue.", code: "admin_step_up_required" }`.
+   **That is correct server behaviour.**
+3. The admin UI had **no handling for `admin_step_up_required` anywhere** — no prompt, no retry. The
+   banner rendered the server's own sentence telling the operator to confirm their password and PIN,
+   with nowhere in the product to do it.
+
+**The server half was already complete**: the guard, and `POST /api/admin/step-up { password, pin }`
+to satisfy it. Only the client half was missing.
+
+**This is the same defect class as RC-F9 on the Partner side** — a complete server-side step-up
+authority with no client flow — which is why it is recorded as a pattern, not a one-off. Anywhere a
+step-up guard is added, the client half must ship with it or the feature is unreachable.
+
+### Blast radius — it was never only the one button
+
+Ten routes sit behind `requireAdminStepUp()`, reached from three UI call sites, and **all of them
+were equally unreachable**: station approve/suspend/revoke/reject; partner credits adjust; partner
+status change; partner-user role, status, password reset, MFA reset, session revocation; emergency
+stop. Every high-risk Super Admin action in the product.
+
+### Fix (implemented in this pass, deliberately narrow)
+
+`client/src/components/admin/admin-step-up.tsx` — `AdminStepUpHost` mounted once in `App.tsx`, plus
+`runAdminProtected(action)`. Run the action; ONLY on `403 admin_step_up_required`, prompt for password
+and PIN, satisfy the existing endpoint, and retry the original action **exactly once**. Imperative
+rather than a context provider because the admin mutations are declared inside the page components,
+so a provider would have forced those pages to be restructured.
+
+**Nothing was weakened:** `requireSuperAdmin`, `requireAdminStepUp`, the mandatory reason, the audit
+record, the station credential-epoch rotation and all tenant/location controls are untouched. A
+cancelled prompt performs nothing and is not reported as a failure. Rejected secrets are wiped and
+never persisted. 423 (locked), 429, 401 and 400 are told apart so the operator gets an instruction
+rather than one unactionable message.
+
+`tests/admin-station-approval-step-up-ui.test.ts` (7 tests) mounts the **real page** and drives the
+**real controls**: reason required · Confirm actually invokes approval · the 403 opens the prompt ·
+success retries exactly once · a failed proof is visibly shown and never retried · success refreshes
+Station Fleet · cancel performs nothing. Source-text assertions could not have caught this — every
+string involved already existed; what was missing was behaviour.
+
+### Why this belongs in the consolidation backlog
+
+It is the sharpest possible evidence for the programme's premise. The authority was correct, complete
+and well tested; the **human workflow was impossible**. It also confirms F-6 concretely: the
+production onboarding path could not be completed through the website, and the only way through was
+a developer bypass — which is exactly what must not be true when an external Partner is onboarded.
+
+**Rule to carry into the consolidation:** a server guard that can refuse an operator action is only
+half a feature. The client affordance to satisfy it ships in the same change, or the action is
+unreachable.

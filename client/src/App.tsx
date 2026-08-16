@@ -3,6 +3,7 @@ import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { AdminStepUpHost } from "@/components/admin/admin-step-up";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
 import ErrorBoundary from "@/components/error-boundary";
@@ -553,6 +554,13 @@ function App() {
           <TooltipProvider>
             <GoldBurstEffect />
             <Toaster />
+            {/*
+              Super Admin step-up prompt. Mounted ONCE, at the root, because the high-risk admin
+              mutations are declared inside the page components themselves — a context provider would
+              have to sit above each page and force those pages to be restructured. It renders
+              nothing until the server issues a challenge.
+            */}
+            <AdminStepUpHost />
             <Router />
             <CookieBanner />
           </TooltipProvider>

@@ -13,6 +13,7 @@ import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { runAdminProtected } from "@/components/admin/admin-step-up";
 import {
   canSuspendLocation,
   statusBadgeVariant,
@@ -604,11 +605,13 @@ export default function PartnerManagementDetailPage() {
       highRisk: isHighRiskStatus(to),
       run: async (r) =>
         (
-          await apiRequest("POST", `${BASE}/partners/${partnerId}/status`, {
-            status: to,
-            reason: r,
-            expectedVersion: version,
-          })
+          await runAdminProtected(() =>
+            apiRequest("POST", `${BASE}/partners/${partnerId}/status`, {
+              status: to,
+              reason: r,
+              expectedVersion: version,
+            })
+          )
         ).json(),
     });
 
@@ -2170,8 +2173,11 @@ function UserActions({
   activeOwnerCount: number;
   onEditInvitation: (u: PartnerUserRow) => void;
 }) {
+  // Every partner-user action reached through this helper — role, status, password reset, MFA reset,
+  // session revocation — is behind requireAdminStepUp. runAdminProtected performs the call and, ONLY
+  // if the server answers 403 admin_step_up_required, prompts and retries this exact action once.
   const post = (path: string, body: Record<string, unknown>) => (reason: string) =>
-    apiRequest("POST", `${BASE}${path}`, { ...body, reason }).then((r) => r.json());
+    runAdminProtected(() => apiRequest("POST", `${BASE}${path}`, { ...body, reason }).then((r) => r.json()));
 
   const [nextRole, setNextRole] = useState<(typeof USER_ROLES)[number]>(
     (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as (typeof USER_ROLES)[number]) : "STAFF"
