@@ -214,37 +214,57 @@ async function preflight() {
 // ── §3 Scanner NEW, alternating Machines ───────────────────────────────────────────────────────
 async function section3(ctx) {
   const clientOpId = randomUUID();
+  const payload = { clientOpId, cardLabel: `AT23 reproof ${new Date().toISOString()}` };
+
   const started = await signedRequest({
     ...ctx,
     machine: A,
     method: "POST",
     path: "/api/partner/card-jobs",
-    body: { clientOpId, cardLabel: `AT23 reproof ${new Date().toISOString()}` },
+    body: payload,
   });
-  record("3", "NEW accepted on Machine A", {
-    pass: started.status === 200,
+  // 201 Created is the correct answer for a NEW card job; 200 is accepted only for a replay.
+  const a = started.body?.cardJob;
+  record("3", "NEW accepted on Machine A (201 Created, one job/MV/certificate/reservation)", {
+    pass: started.status === 201 && !!a?.cardJobId && !!a?.mvNumber && !!a?.certificateId && a?.replayed === false,
     status: started.status,
-    body: started.body,
+    cardJobId: a?.cardJobId,
+    mvNumber: a?.mvNumber,
+    certificateId: a?.certificateId,
+    reservationId: a?.reservationId,
   });
 
-  // Replay the SAME clientOpId on the OTHER Machine: idempotency must be shared state, so this must
-  // return the same job rather than mint a second one.
+  /*
+   * Replay the SAME clientOpId on the OTHER Machine.
+   *
+   * Idempotency must be SHARED state, not per-process: Machine B never saw the original request, so
+   * if it minted a second job the shop would be charged twice and two MV numbers would be burned for
+   * one physical card. Every identity below must match, and the server must say `replayed: true`.
+   */
   const replay = await signedRequest({
     ...ctx,
     machine: B,
     method: "POST",
     path: "/api/partner/card-jobs",
-    body: { clientOpId, cardLabel: "AT23 replay" },
+    body: payload,
   });
-  const sameJob =
-    replay.status === 200 &&
-    started.status === 200 &&
-    JSON.stringify(replay.body?.cardJob?.id ?? replay.body?.cardJobId) ===
-      JSON.stringify(started.body?.cardJob?.id ?? started.body?.cardJobId);
-  record("3", "same clientOpId on Machine B returns the SAME Card Job (one job, one MV, one cert)", {
-    pass: sameJob,
+  const b = replay.body?.cardJob;
+  const sameEverything =
+    !!a &&
+    !!b &&
+    b.cardJobId === a.cardJobId &&
+    b.mvNumber === a.mvNumber &&
+    b.certificateId === a.certificateId &&
+    b.reservationId === a.reservationId &&
+    b.replayed === true;
+  record("3", "same clientOpId on Machine B returns the SAME Card Job, MV, certificate and reservation", {
+    pass: sameEverything,
     status: replay.status,
-    body: replay.body,
+    cardJobId: b?.cardJobId,
+    mvNumber: b?.mvNumber,
+    certificateId: b?.certificateId,
+    reservationId: b?.reservationId,
+    replayed: b?.replayed,
   });
   return started.body;
 }
