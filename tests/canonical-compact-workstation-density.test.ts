@@ -30,8 +30,10 @@ describe("compact rail geometry", () => {
     expect(ASIDE).toContain('data-testid="grading-interactive-card-host"');
   });
 
-  it("makes the real certificate preview a bare 230px ratio-correct secondary reference", () => {
-    expect(CERTIFICATE).toContain("max-w-[230px]");
+  it("makes the real certificate preview a bare 205px ratio-correct secondary reference", () => {
+    // 205px (was 230px) — owner evidence 2026-08-16: the certificate was consuming rail
+    // height the card needed. Display width only; the printed label is unchanged.
+    expect(CERTIFICATE).toContain("max-w-[205px]");
     expect(CERTIFICATE).toContain("width={231}");
     expect(CERTIFICATE).toContain("height={66}");
     expect(CERTIFICATE).toContain('data-preview-presentation={url ? "bare-image"');
@@ -108,6 +110,11 @@ describe("five-role and protected-boundary negative proof", () => {
       "client/src/components/grading/centering-input.tsx",
       "client/src/components/grading/grading-panel.tsx",
       "client/src/pages/dev-canonical-workstation-harness.tsx",
+      // ── Left-rail fit repair (owner evidence 2026-08-16) ──────────────────────
+      // Compact Front/Back controls and a tighter control->card gap, so the card-fit
+      // box regains the height the chrome was consuming. Presentation only: no
+      // scoring, no authority, no transport, no printed-label change.
+      "client/src/components/grading-workflow/CardPreviewPanel.tsx",
       // ── Gold Star classification-safety repair (owner-commissioned) ────────────
       // A vintage EX-era card could be classified as a MODERN Illustration Rare,
       // because rarity search carried no card context and the EX Gold Star had no

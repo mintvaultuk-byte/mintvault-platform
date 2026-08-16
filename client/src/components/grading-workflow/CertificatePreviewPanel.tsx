@@ -188,8 +188,12 @@ export function CertificatePreviewPanel({
   );
 
   return (
+    // 205px (was 230px). The certificate is a print-layout REFERENCE, not the primary
+    // object — owner evidence 2026-08-16 showed it consuming rail height the card
+    // needed. DISPLAY WIDTH ONLY: server label dimensions, print resolution and the
+    // certificate document output are all untouched.
     <div
-      className="mx-auto w-full max-w-[230px]"
+      className="mx-auto w-full max-w-[205px]"
       data-testid="certificate-preview-panel"
       data-preview-state={error ? "error" : url ? "ready" : loading ? "loading" : "empty"}
       data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}
