@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
 import {
   Pencil,
   Eye,
@@ -143,6 +144,15 @@ interface Props {
    * instead be bounded by its real parent.
    */
   fillHost?: boolean;
+  /**
+   * Rendered on the SAME ROW as the Front/Back tabs, right-aligned into the space they
+   * leave. The canonical certificate preview lives here rather than under the card:
+   * beneath it, it consumed rail height the card needed and the owner's screenshot showed
+   * the card's bottom edge — the set/rarity/promo/copyright strip graders must read — cut
+   * off. In the top row it costs the card nothing, because the tabs row already exists.
+   * Rail only; the inline grid never receives it.
+   */
+  topRowSlot?: ReactNode;
   /** MVGS v2.1 — line measurements drawn in-line with the pin tool. Mark
    *  mode gains a tool palette (Pin | Whitening | Crease); when whitening or
    *  crease is active, click-drag captures a segment. Each commit fires the
@@ -272,6 +282,7 @@ export default function ImageViewer({
   side: controlledSide,
   omitSideTabs,
   fillHost = false,
+  topRowSlot,
   onOpenCardTool,
   whiteningLines = [],
   creaseLines = [],
@@ -940,6 +951,9 @@ export default function ImageViewer({
             : {
                 aspectRatio: "5/7",
                 maxHeight: maxH,
+                // Flex items default to `min-height: auto`, which would let the
+                // aspect-derived height win and overflow the rail. 0 lets it shrink.
+                minHeight: 0,
                 padding: "1.5%",
               }
         }
@@ -1456,6 +1470,31 @@ export default function ImageViewer({
               {cardFrame}
             </div>
           </div>
+        ) : fillHost ? (
+          /*
+           * RAIL FIT (owner defect 2026-08-16: the card's BOTTOM EDGE was still cut off on the
+           * real /admin route, hiding the set/rarity/promo/copyright strip graders must read).
+           *
+           * cardFrame was a DIRECT flex item of the rail root with `aspectRatio: 5/7` and
+           * `maxHeight: "100%"`. A percentage max-height resolves against the item's containing
+           * block — the ROOT — not against the space left after the shrink-0 tabs and controls.
+           * So the frame was allowed to be as tall as the WHOLE rail while only part of it
+           * remained, and the host's `overflow-hidden` clipped the difference off the bottom.
+           * As a flex item it also had the default `min-height: auto`, so its aspect-derived
+           * height stopped it shrinking to fit.
+           *
+           * This wrapper is the remaining-space rectangle: `flex-1 min-h-0` takes exactly what
+           * the tabs and controls left, and `max-h-full min-h-0` on the frame binds it to THAT
+           * box. The card now shrinks to stay whole instead of overflowing, which is the
+           * required priority order: complete card first, largest size second.
+           *
+           * `items-start`, not `items-center`: the owner's screenshot showed the card floating in
+           * the middle of the rail with dead space above it, under the Front/Back controls, and
+           * ~46px of unused separation before the certificate. Aligning to the start pulls the
+           * card+certificate group up against the controls, so the leftover height collects in one
+           * place at the bottom instead of being split into two gaps that read as broken.
+           */
+          <div className="flex min-h-0 flex-1 items-start justify-center">{cardFrame}</div>
         ) : (
           cardFrame
         )}
@@ -1670,10 +1709,17 @@ export default function ImageViewer({
    * Scoped to `fillHost`: the inline (non-rail) layout keeps `space-y-2` byte-identically.
    */
   return (
-    <div className={fillHost ? "flex h-full min-h-0 flex-col gap-2" : "space-y-2"}>
+    <div className={fillHost ? "flex h-full min-h-0 flex-col gap-1" : "space-y-2"}>
       <style>{PULSE_CSS}</style>
 
-      {fillHost ? <div className="shrink-0">{renderTabs()}</div> : renderTabs()}
+      {fillHost ? (
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          <div className="min-w-0">{renderTabs()}</div>
+          {topRowSlot ? <div className="shrink-0">{topRowSlot}</div> : null}
+        </div>
+      ) : (
+        renderTabs()
+      )}
 
       {/* Reference comparison */}
       {showReference && referenceImageUrl && (
