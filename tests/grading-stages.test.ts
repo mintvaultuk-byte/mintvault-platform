@@ -174,7 +174,7 @@ describe("card preview is read-only (spec 3)", () => {
     expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
     expect(WORKSTATION).toContain("<WorkstationPreviewAside");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[45%] md:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
     expect(asideSrc).toContain("<CardPreviewPanel");
   });

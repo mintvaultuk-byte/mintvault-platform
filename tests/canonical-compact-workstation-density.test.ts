@@ -25,7 +25,7 @@ describe("compact rail geometry", () => {
   it("keeps one responsive canonical shell with a 35% desktop rail and one scroll surface", () => {
     expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
     expect(SHELL).toContain('WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1"');
-    expect(ASIDE).toContain('WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[35%] md:shrink-0"');
+    expect(ASIDE).toContain('WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[45%] md:shrink-0"');
     expect(ASIDE).toContain('data-testid="grading-preview-panel"');
     expect(ASIDE).toContain('data-testid="grading-interactive-card-host"');
   });

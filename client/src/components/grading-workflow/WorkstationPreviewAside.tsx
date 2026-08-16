@@ -16,7 +16,27 @@ import { CardPreviewPanel } from "./CardPreviewPanel";
 import type { CardInspectionState } from "./card-inspection-state";
 
 /** Single source of truth for the preview column's width + breakpoint. */
-export const WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[35%] md:shrink-0";
+/**
+ * The ONE canonical desktop split for every grading role: 45% card rail / 55% controls.
+ *
+ * Raised from 35% on owner instruction after real measurement at the owner's actual
+ * laptop viewport (845x685). The card frame is 5:7, so at a 35% rail its WIDTH capped its
+ * height at ~405px while the rail host offered ~638px — a third of the rail was
+ * unreachable and no card-side CSS could recover it, because the card was width-bound.
+ * Rail width is the only lever.
+ *
+ * Measured, all fully visible with the certificate below and no horizontal overflow:
+ *
+ *   845x685   35% -> 286.9x405.2 (116k px^2)   45% -> 368.8x520.9 (192k, +65%)
+ *   1024x768  35% -> 347.6x491.0 (171k)        45% -> 434.6x614.0 (267k, +56%)
+ *   1280x800  35% -> 434.6x613.8 (267k)        45% -> 454.0x642.5 (292k,  +9%)
+ *
+ * 48% was rejected: it returns less at 845 and is slightly WORSE at 1024/1280, where the
+ * card becomes height-bound and the extra width only narrows the controls. Right pane at
+ * the tightest tested viewport is 456.8px, with no content overflow and its own vertical
+ * scroll intact.
+ */
+export const WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[45%] md:shrink-0";
 
 export function WorkstationPreviewAside({
   certificateId,
