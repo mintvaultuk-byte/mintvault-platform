@@ -189,6 +189,25 @@ if (results.length === 0) {
   console.error("\nno suites executed — refusing to report green");
   process.exit(1);
 }
+/*
+ * DID WE ACTUALLY RUN EVERY TARGET WE WERE GIVEN?
+ *
+ * Observed for real on 2026-08-16: a run selected all 70 critical suites, executed only the first
+ * 37, and exited 0 printing "All 37 suite(s) green" — a truncated run reporting success, with the
+ * 33 unexecuted suites recorded nowhere. Every other fail-closed rule in this runner judges the
+ * suites it OBSERVED; none of them noticed that a third of the gate never ran at all.
+ *
+ * The count is the cheapest possible check and it closes the last way this script can report green
+ * over missing evidence: a verdict is only valid for the exact set of targets it was asked to cover.
+ */
+if (results.length !== targets.length) {
+  console.error(
+    `\nTRUNCATED RUN: ${results.length} of ${targets.length} selected suite(s) executed. ` +
+      `Refusing to report green — the remaining ${targets.length - results.length} were never run, ` +
+      `so nothing is known about them.`
+  );
+  process.exit(1);
+}
 const observed = results.reduce((n, r) => n + r.passed, 0);
 if (observed === 0) {
   console.error("\nzero tests observed across every suite — refusing to report green");

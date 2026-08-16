@@ -16,6 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { classifyReport, GREEN_VERDICTS } from "../scripts/ci/partner-suite-verdict.mjs";
 
 const FILE = "tests/partner-example.test.ts";
@@ -120,6 +121,20 @@ describe("partner gate runner — process-level contract", () => {
     expect(r.status).not.toBe(0);
     expect(`${r.stdout}${r.stderr}`).toMatch(/unknown suite|usage:/);
     expect(r.stdout ?? "").not.toContain("suite(s) green");
+  });
+
+  it("a TRUNCATED run is refused: green is only valid for the exact target set", () => {
+    // Observed for real on 2026-08-16: a run selected all 70 critical suites, executed only the
+    // first 37, and exited 0 printing "All 37 suite(s) green" — a third of the gate never ran and
+    // was recorded nowhere. Every other rule here judges the suites it OBSERVED; none noticed that
+    // suites were MISSING. Asserted on the source because reproducing it at runtime would mean
+    // killing a real 70-suite run mid-flight.
+    const src = readFileSync("scripts/ci/run-partner-suite.mjs", "utf8");
+    expect(src).toMatch(/results\.length !== targets\.length/);
+    expect(src).toContain("TRUNCATED RUN");
+    // and the refusal must exit non-zero rather than merely warn
+    const after = src.slice(src.indexOf("TRUNCATED RUN"));
+    expect(after.slice(0, 400)).toMatch(/process\.exit\(1\)/);
   });
 
   it("the runner ALWAYS collects JSON evidence, so a verdict is never inferred from an exit code", () => {
