@@ -30,8 +30,28 @@ import {
 
 const MIGRATION = "0034_partner_rbac_seed.sql";
 const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
-const ADDITIVE_MIGRATION = "0073_lineage_convergence.sql";
-const additiveSql = readFileSync(join(process.cwd(), "migrations", ADDITIVE_MIGRATION), "utf8");
+/**
+ * Migrations that ADD to the catalogue seeded by 0034.
+ *
+ * The catalogue is cumulative: 0034 seeds it, and later numbered migrations extend it. Comparing
+ * TypeScript against 0034 ALONE would report every later addition as drift, so each one is folded
+ * in here. Adding a permission in a new migration therefore means adding it to this list too —
+ * which is the point: the repository rule is that an RBAC change needs a migration AND a matching
+ * TypeScript change, and this file is what makes "and" enforceable.
+ *
+ *   0073 — partner.cards.preview, granted with `WHERE r.code IN (...)`
+ *   0083 — partner.credits.purchase, granted with `WHERE r.code = '...'` (single role)
+ *
+ * The two grant SHAPES differ, so the parser below handles both rather than assuming one.
+ */
+const ADDITIVE_MIGRATIONS = [
+  "0073_lineage_convergence.sql",
+  "0083_partner_credit_packs.sql",
+  "0085_partner_scanner_operator_role.sql",
+] as const;
+const additiveSqlByFile = ADDITIVE_MIGRATIONS.map(
+  (file) => [file, readFileSync(join(process.cwd(), "migrations", file), "utf8")] as const
+);
 
 /** Body of the `INSERT INTO _rbac_roles ... VALUES (...);` block. */
 function parseMigrationRoles(): Array<{ code: string; label: string }> {
@@ -81,16 +101,83 @@ function typescriptMappings(): Set<string> {
 describe("Partner RBAC parity — TypeScript ⇄ migration 0034", () => {
   const migRoles = parseMigrationRoles();
   const migPerms = [...parseMigrationPermissions()];
-  for (const match of additiveSql.matchAll(/VALUES \('([^']+)',\s*'[^']+'\)/g)) {
-    if (!migPerms.includes(match[1])) migPerms.push(match[1]);
+  /*
+   * ORDER MATTERS, and getting it wrong invents grants that no migration ever made.
+   *
+   * 0034's mapping block is a CROSS JOIN of the full permission set against the roles in its
+   * `IN ('PARTNER_OWNER', 'PARTNER_MANAGER')` clause. So any permission handed to
+   * parseMigrationMappings is treated as granted to BOTH of those roles. A permission introduced by
+   * a LATER migration was not in existence when 0034 ran and therefore cannot have been part of that
+   * cross join — feeding it in fabricates a mapping.
+   *
+   * That is not hypothetical: 0083 grants partner.credits.purchase to PARTNER_OWNER *only*
+   * (billing authority is granted, never assumed). Cross-joining it would have asserted that
+   * PARTNER_MANAGER holds it too, and this suite would then have demanded that TypeScript grant
+   * MANAGER the right to spend the shop's money.
+   *
+   * So: the cross join is computed over 0034's OWN permissions, and each additive migration
+   * contributes only the mappings its own grant clause actually expresses.
+   */
+  const migMaps = parseMigrationMappings(parseMigrationPermissions());
+  /*
+   * ADDITIVE PERMISSIONS. 0083 declares one per VALUES row; 0085 declares two in a single
+   * multi-row VALUES. Both shapes are matched.
+   */
+  for (const [, additiveSql] of additiveSqlByFile) {
+    for (const match of additiveSql.matchAll(/\('([a-z][a-z0-9.]*\.[a-z0-9.]+)',\s*'[^']*'\)/g)) {
+      if (!migPerms.includes(match[1])) migPerms.push(match[1]);
+    }
   }
-  const migMaps = parseMigrationMappings(migPerms);
-  const additivePermission = additiveSql.match(/p\.code = '([^']+)'/)?.[1];
-  const additiveRoles = additiveSql.match(/r\.code IN \(([^)]*)\)/)?.[1];
-  if (!additivePermission || !additiveRoles) throw new Error(`${ADDITIVE_MIGRATION}: could not parse grant`);
-  for (const match of additiveRoles.matchAll(/'([^']+)'/g)) {
-    migMaps.add(`${match[1]}|${additivePermission}`);
+
+  /*
+   * ADDITIVE ROLES. 0073 and 0083 added none; 0085 adds SCANNER_OPERATOR. Without this the
+   * "every TypeScript role exists in the migrations" assertion would fail on a role the migration
+   * genuinely does seed.
+   */
+  for (const [, additiveSql] of additiveSqlByFile) {
+    const roleInsert = additiveSql.match(/INSERT INTO partner_roles \(code, label\) VALUES([\s\S]*?)ON CONFLICT/);
+    if (!roleInsert) continue;
+    for (const match of roleInsert[1].matchAll(/\('([A-Z_]+)',\s*'((?:[^']|'')*)'\)/g)) {
+      if (!migRoles.some((r) => r.code === match[1])) {
+        migRoles.push({ code: match[1], label: match[2].replace(/''/g, "'") });
+      }
+    }
   }
+
+  /*
+   * ADDITIVE GRANTS, parsed generically as (permission set) x (role set).
+   *
+   * Every grant block in these migrations has the same skeleton — a SELECT joining
+   * partner_permissions on a code predicate, with a WHERE on the role code — but each half appears
+   * in BOTH an `= 'X'` and an `IN ('X','Y')` form, and 0085 uses a different combination from
+   * 0073 and 0083. Parsing each block as two sets and taking their product covers all four
+   * combinations, instead of hard-coding the shapes seen so far.
+   *
+   * FAILING LOUDLY MATTERS MORE THAN PARSING CLEVERLY: a regex that silently matches nothing would
+   * make this whole comparison weaker rather than red, which is the exact failure mode this file's
+   * parser-sanity guard exists to prevent. So a grant block that yields an empty set on either side
+   * throws.
+   */
+  const GRANT_BLOCK = /INSERT INTO partner_role_permissions[\s\S]*?(?=INSERT INTO|ON CONFLICT DO NOTHING;|$)/g;
+  function codesIn(fragment: string | undefined): string[] {
+    if (!fragment) return [];
+    return [...fragment.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  }
+  for (const [file, additiveSql] of additiveSqlByFile) {
+    let sawGrant = false;
+    for (const block of additiveSql.matchAll(GRANT_BLOCK)) {
+      const body = block[0];
+      const permFragment = body.match(/p\.code (?:=\s*'[^']+'|IN \(([^)]*)\))/)?.[0];
+      const roleFragment = body.match(/r\.code (?:=\s*'[^']+'|IN \(([^)]*)\))/)?.[0];
+      const perms = codesIn(permFragment);
+      const roles = codesIn(roleFragment);
+      if (perms.length === 0 || roles.length === 0) continue;
+      sawGrant = true;
+      for (const role of roles) for (const perm of perms) migMaps.add(`${role}|${perm}`);
+    }
+    if (!sawGrant) throw new Error(`${file}: no role-permission grant block could be parsed`);
+  }
+
   const tsMaps = typescriptMappings();
 
   // Guard the parser itself: if a refactor of the SQL silently defeats these regexes, every

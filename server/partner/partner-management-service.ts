@@ -149,7 +149,13 @@ type AuditAction =
   | "partner_invitation_amended"
   | "partner_legal_name_changed"
   | "partner_duplicate_override"
-  | "partner_wallet_backfilled";
+  | "partner_wallet_backfilled"
+  // AG-1 multi-location. Recorded honestly rather than borrowed from a neighbouring action —
+  // a location rename is not a profile update, and 0033 exists because that distinction matters.
+  | "partner_location_created"
+  | "partner_location_updated"
+  | "partner_location_status_changed"
+  | "partner_user_locations_changed";
 
 // ---------------------------------------------------------------------------
 // Partner + profile lookups (admin pool, explicit tenant scoping).
@@ -963,6 +969,9 @@ export const ADMIN_ROLE_TO_PARTNER_ROLE = {
   ADMIN: "PARTNER_MANAGER",
   GRADER: "MVGS_ASSESSMENT_TECHNICIAN",
   STAFF: "PARTNER_RECEPTION",
+  // AG-2. A role nobody can be given is not a role, so SCANNER_OPERATOR is assignable from both
+  // the Super Admin console and the partner's own Staff area.
+  SCANNER_OPERATOR: "SCANNER_OPERATOR",
 } as const;
 export type AdminPartnerRole = keyof typeof ADMIN_ROLE_TO_PARTNER_ROLE;
 
@@ -970,6 +979,7 @@ const PARTNER_ROLE_TO_ADMIN_ROLE: Record<string, AdminPartnerRole> = {
   PARTNER_OWNER: "OWNER",
   PARTNER_MANAGER: "ADMIN",
   MVGS_ASSESSMENT_TECHNICIAN: "GRADER",
+  SCANNER_OPERATOR: "SCANNER_OPERATOR",
   PARTNER_RECEPTION: "STAFF",
 };
 const ADMIN_ROLE_PRECEDENCE = [
@@ -1363,7 +1373,13 @@ export async function listPartnerUsers(partnerId: string) {
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status, u.last_login_at, u.created_at,
             u.mfa_enabled, u.mfa_required,
-            (u.password_hash IS NOT NULL) AS password_configured,
+            (u.password_hash IS NOT NULL AND u.password_set_at IS NOT NULL) AS password_configured,
+            u.password_set_at AS password_configured_at,
+            EXISTS (
+              SELECT 1 FROM partner_mfa_methods m
+               WHERE m.tenant_id=u.tenant_id AND m.user_id=u.id AND m.method='totp'
+                 AND m.status='ACTIVE' AND m.secret_ref IS NOT NULL
+            ) AS mfa_configured,
             (SELECT count(*)::int FROM partner_sessions s
               WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
                 AND s.absolute_expires_at > now()) AS active_sessions,
@@ -1399,8 +1415,28 @@ export interface PartnerLoginReadiness {
   userActive: boolean;
   invitationValid: boolean;
   passwordConfigured: boolean;
+  passwordConfiguredAt: string | null;
+  mfaRequired: boolean;
+  mfaConfigured: boolean;
+  locationEligible: boolean;
   loginEnabled: boolean;
+  loginFlagEnabled: boolean;
   portalEnabled: boolean;
+  /**
+   * Whether this tenant has at least one APPROVED, ACTIVE station.
+   * `null` means the station subsystem is not present on this database (migration 0045 unapplied),
+   * which is DIFFERENT from "no station yet" and must not be reported as either ready or blocked.
+   */
+  stationReady: boolean | null;
+  onboardingState:
+    | "INVITED"
+    | "AWAITING_PASSWORD_SETUP"
+    | "AWAITING_MFA_SETUP"
+    | "STATION_SETUP_REQUIRED"
+    | "READY_TO_LOG_IN"
+    | "SUSPENDED"
+    | "REVOKED"
+    | "LOGIN_BLOCKED";
   blockedReasons: string[];
 }
 
@@ -1409,14 +1445,23 @@ function buildLoginReadiness(
     org_status: string;
     user_status: string;
     password_configured: boolean;
+    password_configured_at: string | null;
+    mfa_required: boolean;
+    mfa_configured: boolean;
+    location_eligible: boolean;
     invitation_status: string | null;
     invitation_expires_at: string | null;
   },
-  portalEnabled: boolean
+  portalEnabled: boolean,
+  loginFlagEnabled: boolean,
+  stationReady: boolean | null
 ): PartnerLoginReadiness {
   const organisationActive = row.org_status === "ACTIVE";
   const userActive = row.user_status === "ACTIVE";
   const passwordConfigured = row.password_configured === true;
+  const mfaRequired = row.mfa_required === true;
+  const mfaConfigured = row.mfa_configured === true;
+  const locationEligible = row.location_eligible === true;
   const invitationValid =
     !!row.invitation_status &&
     ["PENDING", "SENT", "DELIVERY_FAILED"].includes(row.invitation_status) &&
@@ -1424,6 +1469,7 @@ function buildLoginReadiness(
     new Date(row.invitation_expires_at).getTime() > Date.now();
   const blockedReasons: string[] = [];
   if (!portalEnabled) blockedReasons.push("Partner portal is disabled.");
+  if (!loginFlagEnabled) blockedReasons.push("Partner login is disabled.");
   if (!organisationActive) blockedReasons.push(`Organisation is ${row.org_status}.`);
   if (!userActive) blockedReasons.push(`Partner user is ${row.user_status}.`);
   if (!passwordConfigured) {
@@ -1433,13 +1479,75 @@ function buildLoginReadiness(
         : "No valid invitation is available for the partner to create a password."
     );
   }
+  if (passwordConfigured && mfaRequired && !mfaConfigured) {
+    blockedReasons.push("Partner must enrol an MFA authenticator before the portal is available.");
+  }
+  if (!locationEligible) blockedReasons.push("Partner user has no active eligible location.");
+  // A partner with no approved station can sign in but cannot perform the pilot's core action
+  // (capture a card), so reporting them simply "READY" overstates readiness. `null` means the
+  // station subsystem is absent from this database, which is not the partner's problem and must not
+  // be surfaced as a blocked reason.
+  if (stationReady === false) {
+    blockedReasons.push("No approved station is enrolled for this partner — capture is unavailable.");
+  }
+
+  /*
+   * STATE DERIVATION. Three corrections to what this previously reported:
+   *
+   * 1. REVOKED was collapsed into SUSPENDED. Revocation is terminal; suspension is reversible.
+   *    Reporting a revoked account as "suspended" reads to an operator as "reactivate it", which is
+   *    not possible, so the two are now distinct.
+   *
+   * 2. INVITED ignored `invitationValid`, which was computed directly above and then never used in
+   *    this expression. A user whose invitation had EXPIRED still reported INVITED, so an operator
+   *    waited for an acceptance that could never arrive instead of resending. An INVITED user with a
+   *    dead invitation now falls through to AWAITING_PASSWORD_SETUP, whose blockedReasons already
+   *    carry the accurate "No valid invitation is available…" line.
+   *
+   * 3. STATION_SETUP_REQUIRED did not exist at all, so a partner with no station reported
+   *    READY_TO_LOG_IN — true for login, misleading for readiness.
+   */
+  const orgTerminal = row.org_status === "REVOKED" || row.user_status === "REVOKED";
+  const orgSuspended = row.org_status === "SUSPENDED" || row.user_status === "SUSPENDED";
+  const onboardingState: PartnerLoginReadiness["onboardingState"] = orgTerminal
+    ? "REVOKED"
+    : orgSuspended
+      ? "SUSPENDED"
+      : row.user_status === "INVITED" && invitationValid
+        ? "INVITED"
+        : !passwordConfigured
+          ? "AWAITING_PASSWORD_SETUP"
+          : mfaRequired && !mfaConfigured
+            ? "AWAITING_MFA_SETUP"
+            : portalEnabled && loginFlagEnabled && organisationActive && userActive && locationEligible
+              ? stationReady === false
+                ? "STATION_SETUP_REQUIRED"
+                : "READY_TO_LOG_IN"
+              : "LOGIN_BLOCKED";
   return {
     organisationActive,
     userActive,
     invitationValid,
     passwordConfigured,
-    loginEnabled: portalEnabled && organisationActive && userActive && passwordConfigured,
+    passwordConfiguredAt: row.password_configured_at,
+    mfaRequired,
+    mfaConfigured,
+    locationEligible,
+    stationReady,
+    // loginEnabled is deliberately NOT gated on the station: a partner with no station must still be
+    // able to sign in — that is how they reach the station-enrolment screen. Station readiness is
+    // reported separately, via onboardingState and blockedReasons.
+    loginEnabled:
+      portalEnabled &&
+      loginFlagEnabled &&
+      organisationActive &&
+      userActive &&
+      passwordConfigured &&
+      (!mfaRequired || mfaConfigured) &&
+      locationEligible,
+    loginFlagEnabled,
     portalEnabled,
+    onboardingState,
     blockedReasons,
   };
 }
@@ -1447,15 +1555,37 @@ function buildLoginReadiness(
 export async function getPartnerOnboardingReadiness(partnerId: string) {
   const org = await loadPartner(partnerId);
   let portalEnabled = false;
+  let loginFlagEnabled = false;
   try {
     const { resolveGlobalFlag } = await import("./flags");
-    portalEnabled = await resolveGlobalFlag("partner_portal_enabled");
+    [portalEnabled, loginFlagEnabled] = await Promise.all([
+      resolveGlobalFlag("partner_portal_enabled"),
+      resolveGlobalFlag("partner_login_enabled"),
+    ]);
   } catch {
     portalEnabled = false;
   }
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status AS user_status,
-            o.status AS org_status, u.last_login_at, (u.password_hash IS NOT NULL) AS password_configured,
+            o.status AS org_status, u.last_login_at,
+            (u.password_hash IS NOT NULL AND u.password_set_at IS NOT NULL) AS password_configured,
+            u.password_set_at AS password_configured_at, u.mfa_required,
+            EXISTS (
+              SELECT 1 FROM partner_mfa_methods m
+               WHERE m.tenant_id=u.tenant_id AND m.user_id=u.id AND m.method='totp'
+                 AND m.status='ACTIVE' AND m.secret_ref IS NOT NULL
+            ) AS mfa_configured,
+            EXISTS (
+              SELECT 1 FROM partner_locations l
+               LEFT JOIN partner_user_locations ul ON ul.tenant_id=l.tenant_id AND ul.location_id=l.id AND ul.user_id=u.id
+               WHERE l.tenant_id=u.tenant_id AND l.status='ACTIVE'
+                 AND (ul.user_id IS NOT NULL OR EXISTS (
+                   SELECT 1 FROM partner_user_roles our
+                   JOIN partner_roles orole ON orole.id=our.role_id
+                   WHERE our.tenant_id=u.tenant_id AND our.user_id=u.id
+                     AND orole.code IN ('PARTNER_OWNER','PARTNER_MANAGER','PARTNER_FINANCE_VIEWER')
+                 ))
+            ) AS location_eligible,
             COALESCE(json_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS role_codes,
             (SELECT count(*)::int FROM partner_sessions s
               WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
@@ -1478,6 +1608,29 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       LIMIT 500`,
     [org.id]
   );
+  /*
+   * Station readiness is probed SEPARATELY rather than joined into the query above, because
+   * `partner_stations` arrives in migration 0045 and several test migration lists deliberately stop
+   * short of it. Referencing the table inline would make this whole endpoint fail on those
+   * databases; a guarded probe degrades to `null` (= "cannot tell") instead.
+   *
+   * `null` is a THIRD state, not a synonym for false: it must never be reported as a blocked reason
+   * (the partner has done nothing wrong) nor silently treated as ready.
+   */
+  let stationReady: boolean | null = null;
+  try {
+    const stationRows = await partnerAdminQuery<{ present: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM partner_stations
+          WHERE tenant_id = $1 AND status = 'ACTIVE' AND approved_at IS NOT NULL
+       ) AS present`,
+      [org.id]
+    );
+    stationReady = stationRows.rows[0]?.present === true;
+  } catch {
+    stationReady = null; // station subsystem absent on this database — report unknown, not blocked
+  }
+
   return {
     organisation: { id: org.id, legalName: org.legal_name, status: org.status },
     portalEnabled,
@@ -1495,7 +1648,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       acceptedAt: u.invitation_consumed_at,
       lastLoginAt: u.last_login_at,
       activeSessions: u.active_sessions ?? 0,
-      readiness: buildLoginReadiness(u, portalEnabled),
+      readiness: buildLoginReadiness(u, portalEnabled, loginFlagEnabled, stationReady),
     })),
   };
 }
@@ -1730,7 +1883,11 @@ export async function sendPartnerUserPasswordReset(
   const email = u.rows[0].email;
   return withAudit(actor, org.id, "partner_user_password_reset_initiated", reason, { userId }, async () => {
     const { createPasswordResetToken } = await import("./auth");
-    const token = await createPasswordResetToken(org.id, userId);
+    // force: this is an authenticated Super Admin action already wrapped in withAudit above. The
+    // reissue cooldown exists to stop an UNAUTHENTICATED flood holding a partner's recovery shut;
+    // applying it here would leave the operator with no token to deliver and no way to help.
+    const token = await createPasswordResetToken(org.id, userId, { force: true });
+    if (token === null) throw new Error("Password reset token was not issued.");
     let deliveryStatus = "SENT";
     try {
       const { deliverResetToken } = await import("./delivery");
@@ -2148,4 +2305,354 @@ export async function getPartnerAudit(partnerId: string, offset: number, limit: 
     [org.id, limit, offset]
   );
   return { audit: rows };
+}
+
+// ---------------------------------------------------------------------------
+// AG-1 — MULTI-LOCATION
+//
+// partner_locations has been multi-location-capable since migration 0001: tenant-scoped rows, a
+// status ladder, per-user assignment via partner_user_locations, a station binding that already
+// carries (tenant_id, location_id), and a resolver (findSoleEligibleLocation) that already handles
+// the zero / exactly-one / more-than-one cases correctly. The ONE thing missing was any way to
+// create a second row: createPartner() inserts a single 'Main location' and nothing else in the
+// server tree has ever inserted into that table.
+//
+// So this section adds the missing administrative surface and NOTHING ELSE. No second location
+// model, no new table, no column, no backfill. Existing single-location partners are unaffected —
+// their one row keeps its id, and every code path that reads a location keeps reading the same one.
+// ---------------------------------------------------------------------------
+
+/** Locations are never hard-deleted (locked rule 14); a closed shop is SUSPENDED and stays auditable. */
+const LOCATION_STATUSES = new Set(["PENDING", "ACTIVE", "SUSPENDED"]);
+
+export interface PartnerLocationRow {
+  id: string;
+  publicRef: string;
+  name: string;
+  address: string | null;
+  status: string;
+  createdAt: string;
+  /** Approved, non-revoked stations bound to this location. */
+  stationCount: number;
+  /** Users explicitly assigned here. Org-wide roles reach every location and are NOT counted. */
+  assignedUserCount: number;
+}
+
+function cleanLocationName(value: unknown): string {
+  const name = typeof value === "string" ? value.trim() : "";
+  if (name.length < 2 || name.length > 120) {
+    throw new G5RequestError("VALIDATION_ERROR", "A location name of 2-120 characters is required.");
+  }
+  return name;
+}
+
+function cleanLocationAddress(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  const address = typeof value === "string" ? value.trim() : "";
+  if (address.length > 500)
+    throw new G5RequestError("VALIDATION_ERROR", "A location address must be under 500 characters.");
+  return address || null;
+}
+
+/**
+ * Every location of one partner, with the two counts an administrator actually needs before
+ * suspending one: how many stations sit there, and how many people are pinned to it.
+ *
+ * Both counts are computed in SQL rather than by the caller, so a large estate does not turn one
+ * screen into N+1 round trips.
+ */
+export async function listPartnerLocations(partnerId: string): Promise<PartnerLocationRow[]> {
+  const org = await loadPartner(partnerId);
+  const { rows } = await partnerAdminQuery<{
+    id: string;
+    public_ref: string;
+    name: string;
+    address: string | null;
+    status: string;
+    created_at: string;
+    station_count: string;
+    assigned_user_count: string;
+  }>(
+    `SELECT l.id, l.public_ref, l.name, l.address, l.status, l.created_at,
+            COALESCE((SELECT count(*) FROM partner_stations s
+                       WHERE s.location_id = l.id AND s.tenant_id = l.tenant_id
+                         AND s.status <> 'REVOKED'), 0)::text AS station_count,
+            COALESCE((SELECT count(*) FROM partner_user_locations pul
+                       WHERE pul.location_id = l.id AND pul.tenant_id = l.tenant_id), 0)::text
+              AS assigned_user_count
+       FROM partner_locations l
+      WHERE l.tenant_id = $1
+      ORDER BY (l.status = 'ACTIVE') DESC, l.name`,
+    [org.id]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    publicRef: r.public_ref,
+    name: r.name,
+    address: r.address,
+    status: r.status,
+    createdAt: new Date(r.created_at).toISOString(),
+    stationCount: Number(r.station_count),
+    assignedUserCount: Number(r.assigned_user_count),
+  }));
+}
+
+/**
+ * Add a shop floor to an existing partner.
+ *
+ * Created ACTIVE, because an administrator adding a location is the approval — there is no second
+ * party to wait for, unlike a station, whose PENDING state exists so that a Mac cannot enrol itself
+ * into service. `partner_id` is set to the tenant id, matching the shape 0001 established and
+ * createPartner() already uses.
+ *
+ * The duplicate-name refusal comes from uq_partner_locations_tenant_name_live (0084) and is
+ * translated here into a message an administrator can act on, rather than a raw constraint error.
+ */
+export async function createPartnerLocation(
+  actor: ActorContext,
+  partnerId: string,
+  input: { name: unknown; address?: unknown },
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  const name = cleanLocationName(input.name);
+  const address = cleanLocationAddress(input.address);
+
+  return withAudit(actor, org.id, "partner_location_created", reason, null, async () => {
+    let created;
+    try {
+      created = await partnerAdminQuery<{ id: string; public_ref: string }>(
+        `INSERT INTO partner_locations (tenant_id, partner_id, name, address, status, created_by)
+         VALUES ($1::uuid,$1::uuid,$2,$3,'ACTIVE',$4)
+         RETURNING id, public_ref`,
+        [org.id, name, address, actor.actorUserId]
+      );
+    } catch (err) {
+      if ((err as { constraint?: string })?.constraint === "uq_partner_locations_tenant_name_live") {
+        throw new G5RequestError(
+          "VALIDATION_ERROR",
+          `This partner already has a location called "${name}". Two shop floors with one name make every station list and audit line ambiguous.`
+        );
+      }
+      throw err;
+    }
+    return {
+      result: {
+        locationId: created.rows[0].id,
+        publicRef: created.rows[0].public_ref,
+        name,
+        address,
+        status: "ACTIVE",
+      },
+      entityType: "location",
+      entityId: created.rows[0].id,
+      afterState: { name, address, status: "ACTIVE" },
+    };
+  });
+}
+
+/**
+ * Correct a location's name or address.
+ *
+ * The location id is NEVER reissued, so every station, Card Job, certificate origin snapshot and
+ * audit row that already points here keeps pointing here. Renaming a shop must not rewrite the
+ * provenance of cards it has already graded — locked rule 8 — and it does not: the origin snapshot
+ * on `certificates` was frozen at issue and is trigger-protected.
+ */
+export async function updatePartnerLocation(
+  actor: ActorContext,
+  partnerId: string,
+  locationId: string,
+  input: { name?: unknown; address?: unknown },
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  const before = await partnerAdminQuery<{ name: string; address: string | null; status: string }>(
+    `SELECT name, address, status FROM partner_locations WHERE id=$1 AND tenant_id=$2`,
+    [locationId, org.id]
+  );
+  if (before.rows.length === 0) throw new G5RequestError("PARTNER_NOT_FOUND", "Location not found for this partner.");
+
+  const name = "name" in input && input.name !== undefined ? cleanLocationName(input.name) : before.rows[0].name;
+  const address =
+    "address" in input && input.address !== undefined ? cleanLocationAddress(input.address) : before.rows[0].address;
+
+  return withAudit(actor, org.id, "partner_location_updated", reason, before.rows[0], async () => {
+    try {
+      await partnerAdminQuery(
+        `UPDATE partner_locations SET name=$3, address=$4, updated_at=now() WHERE id=$1 AND tenant_id=$2`,
+        [locationId, org.id, name, address]
+      );
+    } catch (err) {
+      if ((err as { constraint?: string })?.constraint === "uq_partner_locations_tenant_name_live") {
+        throw new G5RequestError("VALIDATION_ERROR", `This partner already has a location called "${name}".`);
+      }
+      throw err;
+    }
+    return {
+      result: { locationId, name, address },
+      entityType: "location",
+      entityId: locationId,
+      afterState: { name, address },
+    };
+  });
+}
+
+/**
+ * Open or close a shop floor. Never a delete.
+ *
+ * SUSPENDING IS A REAL OPERATIONAL EVENT, not a tidy-up, so the guards are deliberate:
+ *
+ *  - The LAST active location cannot be suspended. Every station and every user assignment hangs off
+ *    a location; removing the last one would leave the partner unable to start any card while
+ *    appearing perfectly healthy. Suspend the ORGANISATION for that.
+ *  - Active stations are reported rather than silently orphaned. `assertStartAllowed` and
+ *    `authoriseFix` both re-read location status, so capture at a suspended location stops server
+ *    side — but an administrator should be told what they are about to stop.
+ *
+ * Cards already in flight keep their MV, their certificate and their credit: a closed shop floor is
+ * not a reason to unpick paid work.
+ */
+export async function setPartnerLocationStatus(
+  actor: ActorContext,
+  partnerId: string,
+  locationId: string,
+  toStatus: string,
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  if (!LOCATION_STATUSES.has(toStatus)) {
+    throw new G5RequestError("VALIDATION_ERROR", "A location status must be PENDING, ACTIVE or SUSPENDED.");
+  }
+  const before = await partnerAdminQuery<{ status: string; name: string }>(
+    `SELECT status, name FROM partner_locations WHERE id=$1 AND tenant_id=$2`,
+    [locationId, org.id]
+  );
+  if (before.rows.length === 0) throw new G5RequestError("PARTNER_NOT_FOUND", "Location not found for this partner.");
+  if (before.rows[0].status === toStatus) {
+    /*
+     * Already in the requested state. Returned as a successful no-op rather than an error, so a
+     * retried request is not punished — but `changed: false` says plainly that nothing happened, and
+     * no audit row is written, because recording a suspension that did not occur would put a false
+     * event in the one ledger an investigation would trust.
+     *
+     * `alreadyCompleted` is false: this was not an idempotency-key replay, it was a request whose
+     * work was already done.
+     */
+    return { result: { locationId, status: toStatus, changed: false }, alreadyCompleted: false };
+  }
+
+  if (toStatus !== "ACTIVE") {
+    const remaining = await partnerAdminQuery<{ n: string }>(
+      `SELECT count(*)::text AS n FROM partner_locations
+        WHERE tenant_id=$1 AND status='ACTIVE' AND id <> $2`,
+      [org.id, locationId]
+    );
+    if (Number(remaining.rows[0].n) === 0) {
+      throw new G5RequestError(
+        "VALIDATION_ERROR",
+        "This is the partner's only active location. Suspend the partner organisation instead — leaving it with no active location would stop all work while still looking healthy."
+      );
+    }
+  }
+
+  return withAudit(actor, org.id, "partner_location_status_changed", reason, before.rows[0], async () => {
+    await partnerAdminQuery(`UPDATE partner_locations SET status=$3, updated_at=now() WHERE id=$1 AND tenant_id=$2`, [
+      locationId,
+      org.id,
+      toStatus,
+    ]);
+    const stations = await partnerAdminQuery<{ n: string }>(
+      `SELECT count(*)::text AS n FROM partner_stations
+        WHERE tenant_id=$1 AND location_id=$2 AND status='ACTIVE'`,
+      [org.id, locationId]
+    );
+    return {
+      result: {
+        locationId,
+        status: toStatus,
+        changed: true,
+        /** Reported, not hidden: these stations stop capturing the moment this commits. */
+        activeStationsAffected: Number(stations.rows[0].n),
+      },
+      entityType: "location",
+      entityId: locationId,
+      afterState: { status: toStatus, activeStationsAffected: Number(stations.rows[0].n) },
+    };
+  });
+}
+
+/**
+ * Set exactly which shop floors a named user may operate at.
+ *
+ * REPLACES the whole set rather than adding one at a time, because "which locations may this person
+ * work at" is a single decision and an add/remove pair leaves a window in which the answer is
+ * neither the old one nor the new one.
+ *
+ * An EMPTY set is permitted and meaningful: the user is pinned nowhere and
+ * `findSoleEligibleLocation` returns null for them, which the submission path already treats as
+ * fail-CLOSED. It is not an error, and it must not be quietly converted into "all locations".
+ *
+ * Org-wide roles (OWNER / MANAGER / FINANCE_VIEWER) reach every ACTIVE location by role, so these
+ * rows are advisory for them and authoritative for everybody else — the same rule
+ * findSoleEligibleLocation and switchLocation already enforce. This function does not reimplement
+ * that rule; it only records the assignments the rule reads.
+ */
+export async function setPartnerUserLocations(
+  actor: ActorContext,
+  partnerId: string,
+  userId: string,
+  locationIds: unknown,
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  if (!Array.isArray(locationIds)) {
+    throw new G5RequestError("VALIDATION_ERROR", "A list of location ids is required (an empty list is allowed).");
+  }
+  const requested = [...new Set(locationIds.map((id) => (typeof id === "string" ? id : "")))].filter(Boolean);
+
+  const user = await partnerAdminQuery<{ id: string }>(`SELECT id FROM partner_users WHERE id=$1 AND tenant_id=$2`, [
+    userId,
+    org.id,
+  ]);
+  if (user.rows.length === 0) throw new G5RequestError("PARTNER_NOT_FOUND", "User not found for this partner.");
+
+  // Every requested location must belong to THIS tenant. Checked in SQL against the tenant rather
+  // than trusted from the request, so a valid-looking id from another partner cannot be assigned.
+  if (requested.length > 0) {
+    const owned = await partnerAdminQuery<{ id: string }>(
+      `SELECT id FROM partner_locations WHERE tenant_id=$1 AND id = ANY($2::uuid[])`,
+      [org.id, requested]
+    );
+    if (owned.rows.length !== requested.length) {
+      throw new G5RequestError("VALIDATION_ERROR", "One or more locations do not belong to this partner.");
+    }
+  }
+
+  const before = await partnerAdminQuery<{ location_id: string }>(
+    `SELECT location_id FROM partner_user_locations WHERE tenant_id=$1 AND user_id=$2 ORDER BY location_id`,
+    [org.id, userId]
+  );
+  const beforeIds = before.rows.map((r) => r.location_id);
+
+  return withAudit(actor, org.id, "partner_user_locations_changed", reason, { locationIds: beforeIds }, async () => {
+    await partnerAdminQuery(
+      `DELETE FROM partner_user_locations WHERE tenant_id=$1 AND user_id=$2 AND NOT (location_id = ANY($3::uuid[]))`,
+      [org.id, userId, requested]
+    );
+    if (requested.length > 0) {
+      await partnerAdminQuery(
+        `INSERT INTO partner_user_locations (tenant_id, user_id, location_id)
+         SELECT $1::uuid, $2::uuid, unnest($3::uuid[])
+         ON CONFLICT (user_id, location_id) DO NOTHING`,
+        [org.id, userId, requested]
+      );
+    }
+    return {
+      result: { userId, locationIds: requested },
+      entityType: "partner_user",
+      entityId: userId,
+      afterState: { locationIds: requested },
+    };
+  });
 }

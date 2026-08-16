@@ -317,7 +317,19 @@ async function partnerTeamInvite(
 async function partnerLoginCookie(email: string, password = OWNER_PASSWORD): Promise<string> {
   const r = await req("POST", "/api/partner/auth/login", { body: { email, password } });
   expect(r.status, `partner login for ${email} must succeed`).toBe(200);
-  return (r.setCookie ?? "").split(";")[0];
+  const cookie = (r.setCookie ?? "").split(";")[0];
+  /*
+   * AG-3 STEP-UP. Inviting a team member is behind `requireRecentAuth()`, so a freshly logged-in
+   * session is answered 403 `step_up_required` until it re-proves the human. This performs the REAL
+   * proof against the REAL endpoint — deliberately not an UPDATE of last_step_up_at, which would
+   * keep passing even if the step-up route stopped checking the password.
+   *
+   * It lives in the login helper because every caller here is exercising onboarding, not step-up:
+   * the step-up challenge/prove/retry cycle itself is proven in partner-runtime-integration.
+   */
+  const proof = await req("POST", "/api/partner/auth/step-up", { body: { password }, cookie });
+  expect(proof.status, `partner step-up for ${email} must succeed`).toBe(200);
+  return cookie;
 }
 
 /** Pull the invitation URL out of a captured Resend HTML payload (production-built, HTML-escaped). */
@@ -815,6 +827,7 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     const pending = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
     expect(pending.status).toBe(200);
     const pendingUser = ((pending.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((pendingUser.readiness as Json).onboardingState).toBe("INVITED");
     expect((pendingUser.readiness as Json).loginEnabled).toBe(false);
     expect((pendingUser.readiness as Json).blockedReasons).toContain("Organisation is PENDING.");
     expect((pendingUser.readiness as Json).blockedReasons).toContain(
@@ -831,14 +844,125 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     const acceptedUser = ((acceptedReadiness.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
     expect((acceptedUser.readiness as Json).passwordConfigured).toBe(true);
     expect((acceptedUser.readiness as Json).userActive).toBe(true);
+    expect((acceptedUser.readiness as Json).onboardingState).toBe("AWAITING_MFA_SETUP");
     expect((acceptedUser.readiness as Json).loginEnabled).toBe(false);
     expect((acceptedUser.readiness as Json).blockedReasons).toContain("Organisation is PENDING.");
 
     await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [TENANT_A]);
+    const awaitingMfa = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, {
+      cookie: superAdminCookie,
+    });
+    const awaitingMfaUser = ((awaitingMfa.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((awaitingMfaUser.readiness as Json).onboardingState).toBe("AWAITING_MFA_SETUP");
+    expect((awaitingMfaUser.readiness as Json).loginEnabled).toBe(false);
+
+    await admin.query(
+      `INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status)
+       VALUES ($1,$2,'totp','synthetic-readiness-factor','ACTIVE')`,
+      [TENANT_A, invited.userId]
+    );
     const ready = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
     const readyUser = ((ready.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((readyUser.readiness as Json).onboardingState).toBe("READY_TO_LOG_IN");
     expect((readyUser.readiness as Json).loginEnabled).toBe(true);
     expect((readyUser.readiness as Json).blockedReasons).toEqual([]);
+
+    await setGlobalFlag("partner_login_enabled", false);
+    const disabled = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
+    const disabledUser = ((disabled.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((disabledUser.readiness as Json).onboardingState).toBe("LOGIN_BLOCKED");
+    expect((disabledUser.readiness as Json).loginEnabled).toBe(false);
+    expect((disabledUser.readiness as Json).blockedReasons).toContain("Partner login is disabled.");
+    await setGlobalFlag("partner_login_enabled", true);
+  });
+
+  it("password reset supersedes older links, enforces the bcrypt byte boundary, and exposes authenticated /me", async () => {
+    const userId = "0a5b0001-0000-0000-0000-0000000000e1";
+    const email = "psp-reset-me@example.test";
+    const initialPassword = "synthetic-reset-initial-1";
+    const finalPassword = "synthetic-reset-final-2";
+    seenPasswords.push(initialPassword, finalPassword);
+    const initialHash = await bcrypt.hash(initialPassword, 12);
+    await admin.query(
+      `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, password_set_at, status, mfa_required)
+       VALUES ($1,'pspResetMe',$2,$2,$3,$4,now(),'ACTIVE',false)`,
+      [userId, TENANT_A, email, initialHash]
+    );
+    await admin.query(
+      `INSERT INTO partner_user_roles (tenant_id, user_id, role_id)
+       SELECT $1,$2,id FROM partner_roles WHERE code='PARTNER_OWNER'`,
+      [TENANT_A, userId]
+    );
+    await admin.query("INSERT INTO partner_user_locations (tenant_id, user_id, location_id) VALUES ($1,$2,$3)", [
+      TENANT_A,
+      userId,
+      LOCATION_A,
+    ]);
+
+    const auth = await import("../server/partner/auth");
+    const oldToken = await auth.createPasswordResetToken(TENANT_A, userId);
+    expect(oldToken).not.toBeNull();
+
+    // The reissue cooldown (denial-of-recovery guard) deliberately preserves a fresh live link, so
+    // an immediate second request mints NOTHING and leaves the first token usable. That is the
+    // property that stops an unauthenticated attacker holding a partner's recovery shut.
+    expect(await auth.createPasswordResetToken(TENANT_A, userId)).toBeNull();
+
+    // A superseding link is still issuable through the authenticated operator path, which bypasses
+    // the cooldown — and superseding must still invalidate the previous link.
+    const freshToken = await auth.createPasswordResetToken(TENANT_A, userId, { force: true });
+    expect(freshToken).not.toBeNull();
+    expect(await auth.consumePasswordResetToken(oldToken!, finalPassword)).toBe(false);
+    expect(await auth.consumePasswordResetToken(freshToken, "a".repeat(73))).toBe(false);
+    expect(await auth.consumePasswordResetToken(freshToken, finalPassword)).toBe(true);
+
+    const tokens = await admin.query<{ live: number; used: number }>(
+      `SELECT count(*) FILTER (WHERE used_at IS NULL)::int AS live,
+              count(*) FILTER (WHERE used_at IS NOT NULL)::int AS used
+         FROM partner_password_reset_tokens WHERE user_id=$1`,
+      [userId]
+    );
+    expect(tokens.rows[0]).toEqual({ live: 0, used: 2 });
+
+    const login = await req("POST", "/api/partner/auth/login", { body: { email, password: finalPassword } });
+    expect(login.status).toBe(200);
+    const me = await req("GET", "/api/partner/me", { cookie: (login.setCookie ?? "").split(";")[0] });
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({ userId, tenantId: TENANT_A, mfaPassed: true });
+    expect(me.raw).not.toMatch(/password|token_hash|secret_ref/i);
+  });
+
+  it("readiness applies the same organisation-wide location rule as authenticated Partner Managers", async () => {
+    const email = "psp-manager-readiness@example.test";
+    const password = "synthetic-manager-readiness-1";
+    seenPasswords.push(password);
+    const invited = await superAdminInvite(TENANT_A, email, "ADMIN");
+    expect(invited.status).toBe(200);
+    expect((await req("POST", ACCEPT, { body: { token: invited.token, password } })).status).toBe(200);
+    await admin.query(
+      `INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status)
+       VALUES ($1,$2,'totp','synthetic-manager-factor','ACTIVE')`,
+      [TENANT_A, invited.userId]
+    );
+    const readiness = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
+    const manager = ((readiness.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((manager.readiness as Json).locationEligible).toBe(true);
+    expect((manager.readiness as Json).onboardingState).toBe("READY_TO_LOG_IN");
+
+    const login = await req("POST", "/api/partner/auth/login", { body: { email, password } });
+    expect(login.status).toBe(200);
+    const cookie = (login.setCookie ?? "").split(";")[0];
+    const pendingMe = await req("GET", "/api/partner/me", { cookie });
+    expect(pendingMe.body).toMatchObject({ mfaPassed: false, mfaEnrolmentRequired: false });
+    const sessionToken = await admin.query<{ id: string }>(
+      "SELECT id FROM partner_sessions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1",
+      [invited.userId]
+    );
+    const { markSessionMfaPassed } = await import("../server/partner/auth");
+    expect(await markSessionMfaPassed(TENANT_A, sessionToken.rows[0].id, invited.userId)).toBe(true);
+    const me = await req("GET", "/api/partner/me", { cookie });
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({ userId: invited.userId, locationId: LOCATION_A });
   });
 
   // =========================================================================
@@ -1076,11 +1200,11 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     };
 
     const before = await snapshot();
-    // Controlled validation failure: passwords outside [MIN_PASSWORD_LEN, MAX_PASSWORD_LEN] are
+    // Controlled validation failure: passwords outside [MIN_PASSWORD_LEN, 72 UTF-8 bytes] are
     // refused before the accept transaction opens. Mid-transaction invitation rollback is covered by
     // tests/partner-management-integration.test.ts using the shared service transaction helper.
     const tooShort = "9-chars-".slice(0, 9);
-    const tooLong = "x".repeat(201);
+    const tooLong = "x".repeat(73);
     seenPasswords.push(tooShort, tooLong);
     for (const [label, password] of [
       ["password below the minimum length", tooShort],

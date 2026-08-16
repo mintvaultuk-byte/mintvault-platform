@@ -13,7 +13,9 @@ import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { runAdminProtected } from "@/components/admin/admin-step-up";
 import {
+  canSuspendLocation,
   statusBadgeVariant,
   allowedNextStatuses,
   isHighRiskStatus,
@@ -49,6 +51,7 @@ const BASE = "/api/super-admin/partner-management";
 const TABS = [
   "overview",
   "users",
+  "locations",
   "profile",
   "contacts",
   "branding",
@@ -61,6 +64,7 @@ type TabKey = (typeof TABS)[number];
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "Overview",
   users: "Users",
+  locations: "Locations",
   profile: "Company Profile",
   contacts: "Contacts",
   branding: "Branding",
@@ -72,6 +76,20 @@ const TAB_LABELS: Record<TabKey, string> = {
 
 const TYPED_CONFIRM = "CONFIRM";
 const USER_ROLES = ["OWNER", "ADMIN", "GRADER", "STAFF"] as const;
+
+/** Shape of one row from GET /partners/:id/locations (listPartnerLocations, AG-1). */
+interface PartnerLocationRow {
+  id: string;
+  publicRef: string;
+  name: string;
+  address: string | null;
+  status: "PENDING" | "ACTIVE" | "SUSPENDED";
+  createdAt: string;
+  /** Stations enrolled here, excluding REVOKED. */
+  stationCount: number;
+  /** Users pinned to this floor. Org-wide roles are deliberately not counted. */
+  assignedUserCount: number;
+}
 
 /** Shape of one row from GET /partners/:id/users (see listPartnerUsers in partner-management-service). */
 interface PartnerUserRow {
@@ -88,6 +106,11 @@ interface PartnerUserRow {
   invitation_consumed_at?: string | null;
   last_login_at: string | null;
   active_sessions?: number;
+  password_configured?: boolean;
+  password_configured_at?: string | null;
+  mfa_enabled?: boolean;
+  mfa_required?: boolean;
+  mfa_configured?: boolean;
   created_at: string;
 }
 
@@ -108,8 +131,14 @@ interface OnboardingUser {
     userActive: boolean;
     invitationValid: boolean;
     passwordConfigured: boolean;
+    passwordConfiguredAt: string | null;
+    mfaRequired: boolean;
+    mfaConfigured: boolean;
+    locationEligible: boolean;
     loginEnabled: boolean;
+    loginFlagEnabled: boolean;
     portalEnabled: boolean;
+    onboardingState: string;
     blockedReasons: string[];
   };
 }
@@ -125,6 +154,7 @@ export default function PartnerManagementDetailPage() {
   const [modal, setModal] = useState<{
     kind: string;
     title: string;
+    successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
     /**
@@ -133,11 +163,18 @@ export default function PartnerManagementDetailPage() {
      * invisible to screen readers.
      */
     input?: { label: string; initial: string; testId: string; required?: boolean };
-    run: (reason: string, value: string) => Promise<unknown>;
+    /**
+     * A SECOND optional field, added for locations: a shop floor is created with a name and an
+     * address together, and splitting that into two sequential one-field dialogs would mean a
+     * location existed briefly with no address and two audit rows describing one act.
+     */
+    input2?: { label: string; initial: string; testId: string; required?: boolean };
+    run: (reason: string, value: string, value2: string) => Promise<unknown>;
   } | null>(null);
   const [reason, setReason] = useState("");
   const [typed, setTyped] = useState("");
   const [modalValue, setModalValue] = useState("");
+  const [modalValue2, setModalValue2] = useState("");
   // note modal
   const [noteBody, setNoteBody] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
@@ -224,6 +261,11 @@ export default function PartnerManagementDetailPage() {
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/users`).then((r) => r.json()),
     enabled: on && (tab === "users" || tab === "overview"),
   });
+  const locations = useQuery({
+    queryKey: pmKeys.locations(partnerId),
+    queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/locations`).then((r) => r.json()),
+    enabled: on && tab === "locations",
+  });
   const onboarding = useQuery({
     queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"],
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/onboarding-readiness`).then((r) => r.json()),
@@ -242,12 +284,16 @@ export default function PartnerManagementDetailPage() {
   const version = profile?.version ?? 1;
 
   const mutation = useMutation({
-    mutationFn: async (run: (reason: string, value: string) => Promise<unknown>) => run(reason, modalValue),
-    onSuccess: () => {
-      setBanner("Action completed.");
+    mutationFn: async (run: (reason: string, value: string, value2: string) => Promise<unknown>) =>
+      run(reason, modalValue, modalValue2),
+    onSuccess: (data: any) => {
+      setBanner(
+        modal?.successMessage ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage) : "Action completed."
+      );
       closeModal();
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.locations(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
@@ -469,6 +515,7 @@ export default function PartnerManagementDetailPage() {
       setBanner(deliveryBanner(body?.result?.deliveryStatus));
       setInviteEdit(null);
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.locations(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
     } catch (err) {
@@ -482,6 +529,22 @@ export default function PartnerManagementDetailPage() {
     setReason("");
     setTyped("");
     setModalValue("");
+    setModalValue2("");
+  }
+
+  /**
+   * Open a modal AND seed its fields from their declared `initial` values.
+   *
+   * The older openers below seed `modalValue` by hand immediately before `setModal`, which works
+   * but means the initial value is stated twice and a caller that forgets the first half silently
+   * gets an empty box — an "Edit" dialog that opens blank reads as "this location has no name" and
+   * invites the operator to retype it. Declaring `initial` and having it honoured removes that
+   * class of bug for every new caller.
+   */
+  function openModalSeeded(m: NonNullable<typeof modal>) {
+    setModalValue(m.input?.initial ?? "");
+    setModalValue2(m.input2?.initial ?? "");
+    setModal(m);
   }
   useEffect(() => {
     if (!modal && !noteOpen && !userOpen && !profileOpen && !inviteEdit) return;
@@ -542,11 +605,13 @@ export default function PartnerManagementDetailPage() {
       highRisk: isHighRiskStatus(to),
       run: async (r) =>
         (
-          await apiRequest("POST", `${BASE}/partners/${partnerId}/status`, {
-            status: to,
-            reason: r,
-            expectedVersion: version,
-          })
+          await runAdminProtected(() =>
+            apiRequest("POST", `${BASE}/partners/${partnerId}/status`, {
+              status: to,
+              reason: r,
+              expectedVersion: version,
+            })
+          )
         ).json(),
     });
 
@@ -694,6 +759,7 @@ export default function PartnerManagementDetailPage() {
                       <th>Email</th>
                       <th>Role</th>
                       <th>Status</th>
+                      <th>Onboarding</th>
                       <th>Last login</th>
                       <th>Invitation</th>
                       <th>Created</th>
@@ -707,6 +773,15 @@ export default function PartnerManagementDetailPage() {
                         <td>{u.email}</td>
                         <td>{u.role}</td>
                         <td>{u.status}</td>
+                        <td>
+                          {u.password_configured ? "Password set" : "Password setup needed"}
+                          <br />
+                          {u.mfa_required
+                            ? u.mfa_configured
+                              ? "MFA enabled"
+                              : "MFA setup needed"
+                            : "MFA not required"}
+                        </td>
                         <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "—"}</td>
                         <td>{u.invitation_status ?? (u.status === "ACTIVE" ? "ACCEPTED" : "—")}</td>
                         <td>{new Date(u.created_at).toLocaleString()}</td>
@@ -718,6 +793,109 @@ export default function PartnerManagementDetailPage() {
                             partnerId={partnerId}
                             activeOwnerCount={activeOwnerCount}
                             onEditInvitation={openInviteEdit}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </Panel>
+        )}
+
+        {/*
+          LOCATIONS (AG-1). The backend has been proven since 0084 and had no operator surface at
+          all: a partner's second shop floor could only be created by hand in SQL. Every route here
+          is the canonical partner-management one. The older super-admin suspend route is
+          deliberately NOT used: it predates AG-1 and carries none of its invariants — no
+          last-active-location guard and no partner_management_audit row — and a test asserts this
+          file never names it.
+        */}
+        {tab === "locations" && (
+          <Panel
+            title="Locations"
+            sub="Shop floors belonging to this partner. A location id is never reissued — stations, Card Jobs, certificate origin snapshots and audit rows all point at it."
+            actions={
+              <AdminButton
+                size="sm"
+                variant="gold"
+                disabled={mutation.isPending}
+                data-testid="pm-location-create"
+                onClick={() =>
+                  openModalSeeded({
+                    kind: "location-create",
+                    title: "Add a location",
+                    successMessage: "Location created.",
+                    input: { label: "Location name", initial: "", testId: "pm-location-name", required: true },
+                    input2: { label: "Address (optional)", initial: "", testId: "pm-location-address" },
+                    run: async (r, name, address) =>
+                      (
+                        await apiRequest("POST", `${BASE}/partners/${partnerId}/locations`, {
+                          name,
+                          address: address.trim() === "" ? null : address,
+                          reason: r,
+                        })
+                      ).json(),
+                  })
+                }
+              >
+                Add location
+              </AdminButton>
+            }
+          >
+            <div data-testid="pm-locations">
+              {locations.isLoading ? (
+                <div data-testid="pm-locations-loading">Loading locations…</div>
+              ) : (locations.data?.locations ?? []).length === 0 ? (
+                <div data-testid="pm-locations-empty">
+                  This partner has no locations. Every partner needs at least one active shop floor before a station can
+                  be enrolled.
+                </div>
+              ) : (
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Reference</th>
+                      <th>Address</th>
+                      <th>Status</th>
+                      <th>Stations</th>
+                      <th>Assigned users</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(locations.data?.locations ?? []).map((l: PartnerLocationRow) => (
+                      <tr key={l.id} data-testid={`pm-location-${l.id}`}>
+                        <td>{l.name}</td>
+                        <td>{l.publicRef}</td>
+                        <td>{l.address ?? "—"}</td>
+                        <td>
+                          <Badge variant={statusBadgeVariant(l.status)} testId={`pm-location-status-${l.id}`}>
+                            {l.status}
+                          </Badge>
+                        </td>
+                        {/*
+                          stationCount excludes REVOKED and is NOT the same number the suspend
+                          confirmation reports (which counts ACTIVE only). Labelled so the two
+                          cannot be read as disagreeing.
+                        */}
+                        <td data-testid={`pm-location-stations-${l.id}`}>{l.stationCount} enrolled</td>
+                        <td>{l.assignedUserCount}</td>
+                        <td>{new Date(l.createdAt).toLocaleString()}</td>
+                        <td>
+                          <LocationActions
+                            location={l}
+                            partnerId={partnerId}
+                            busy={mutation.isPending}
+                            activeLocationCount={
+                              (locations.data?.locations ?? []).filter(
+                                (row: PartnerLocationRow) => row.status === "ACTIVE"
+                              ).length
+                            }
+                            openModal={openModalSeeded}
                           />
                         </td>
                       </tr>
@@ -1039,6 +1217,34 @@ export default function PartnerManagementDetailPage() {
                   {modal.input.required && modalValue.trim() === "" && (
                     <div role="alert" style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}>
                       {modal.input.label} is required.
+                    </div>
+                  )}
+                </div>
+              )}
+              {modal.input2 && (
+                <div style={{ marginBottom: 10 }}>
+                  <label
+                    htmlFor="pm-modal-input2"
+                    style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}
+                  >
+                    {modal.input2.label}
+                  </label>
+                  <input
+                    id="pm-modal-input2"
+                    data-testid={modal.input2.testId}
+                    value={modalValue2}
+                    onChange={(e) => setModalValue2(e.target.value)}
+                    style={{
+                      width: "100%",
+                      background: "var(--admin-bg, #0d0d0d)",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                  {modal.input2.required && modalValue2.trim() === "" && (
+                    <div role="alert" style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}>
+                      {modal.input2.label} is required.
                     </div>
                   )}
                 </div>
@@ -1701,7 +1907,16 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
       </div>
     );
   }
-  const ready = primary.readiness.loginEnabled;
+  // VERSION-SKEW GUARD — same reasoning as the onboardingState guard below, applied to the whole
+  // object rather than one field. Fly runs a ROLLING deploy across two Machines, so a new SPA bundle
+  // can be served by one Machine while the other still runs the previous build and returns a user
+  // row with no `readiness` object at all. Every unguarded deref below then throws during
+  // render, and because the ONLY error boundary is at the application root
+  // (client/src/App.tsx) whose sole recovery is window.location.reload(), a persistently
+  // old-shaped response white-screens the entire admin SPA in a reload loop.
+  const readiness = primary.readiness ?? null;
+  const ready = readiness?.loginEnabled ?? false;
+  const blockedReasons = readiness?.blockedReasons ?? [];
   const invitationStatus = primary.invitationStatus ?? (primary.userStatus === "ACTIVE" ? "ACCEPTED" : "—");
   return (
     <div data-testid="pm-onboarding-section" style={{ marginTop: 14, paddingTop: 12 }}>
@@ -1719,10 +1934,14 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
           color: ready ? "var(--admin-green, #7fbf7f)" : "var(--admin-red, #cd8073)",
         }}
       >
-        {ready ? "READY TO LOG IN" : "LOGIN BLOCKED"}
+        {/* Fly runs a ROLLING deploy across two machines, so a new SPA bundle can be served by
+            one machine while the other still runs the previous build and returns a readiness
+            object with no `onboardingState`. An unguarded .replaceAll() would throw during
+            render and white-screen this page for the whole roll. */}
+        {String(readiness?.onboardingState ?? "UNKNOWN").replaceAll("_", " ")}
       </div>
       <div style={{ display: "grid", gap: 4, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
-        <Field label="Organisation status" v={primary.readiness.organisationActive ? "ACTIVE" : "Not active"} />
+        <Field label="Organisation status" v={readiness?.organisationActive ? "ACTIVE" : "Not active"} />
         <Field label="Partner user status" v={primary.userStatus} />
         <Field label="Email" v={primary.email} />
         <Field label="Role" v={primary.role} />
@@ -1732,16 +1951,23 @@ function OnboardingSection({ users }: { users: OnboardingUser[] }) {
         <Field label="Accepted" v={primary.acceptedAt} />
         <Field label="Last login" v={primary.lastLoginAt} />
         <Field label="Active sessions" v={String(primary.activeSessions ?? 0)} />
-        <Field label="Portal enabled" v={primary.readiness.portalEnabled ? "yes" : "no"} />
+        <Field label="Portal enabled" v={readiness?.portalEnabled ? "yes" : "no"} />
+        <Field label="Login enabled" v={readiness?.loginFlagEnabled ? "yes" : "no"} />
+        <Field label="Password configured" v={readiness?.passwordConfigured ? "yes" : "no"} />
+        <Field label="MFA required" v={readiness?.mfaRequired ? "yes" : "no"} />
+        <Field label="MFA configured" v={readiness?.mfaConfigured ? "yes" : "no"} />
+        <Field label="Eligible location" v={readiness?.locationEligible ? "yes" : "no"} />
       </div>
       <div data-testid="pm-login-readiness-reasons" style={{ marginTop: 8, fontSize: 13 }}>
         {ready ? (
           "Login is currently allowed."
         ) : (
           <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {primary.readiness.blockedReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
+            {blockedReasons.length === 0 ? (
+              <li>Readiness detail is unavailable — retry after the deployment settles.</li>
+            ) : (
+              blockedReasons.map((reason) => <li key={reason}>{reason}</li>)
+            )}
           </ul>
         )}
       </div>
@@ -1799,6 +2025,132 @@ function UserInput({
  * Actions that end a person's access (suspend, remove, revoke sessions, demote the last owner) are
  * marked highRisk, which additionally demands the typed CONFIRM.
  */
+/**
+ * Per-location actions: rename/re-address, and the status change.
+ *
+ * There is no delete, because AG-1 has none — a location id is referenced by stations, Card Jobs,
+ * certificate origin snapshots and audit rows, so it is suspended, never removed. Offering a delete
+ * that the server would refuse would be a lie in the interface.
+ */
+function LocationActions({
+  location,
+  partnerId,
+  busy,
+  activeLocationCount,
+  openModal,
+}: {
+  location: PartnerLocationRow;
+  partnerId: string;
+  busy: boolean;
+  activeLocationCount: number;
+  openModal: (m: {
+    kind: string;
+    title: string;
+    successMessage?: string;
+    highRisk?: boolean;
+    body?: ReactNode;
+    input?: { label: string; initial: string; testId: string; required?: boolean };
+    input2?: { label: string; initial: string; testId: string; required?: boolean };
+    run: (reason: string, value: string, value2: string) => Promise<unknown>;
+  }) => void;
+}) {
+  const suspendable = canSuspendLocation(location.status, activeLocationCount);
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        data-testid={`pm-location-edit-${location.id}`}
+        onClick={() =>
+          openModal({
+            kind: "location-edit",
+            title: `Edit ${location.name}`,
+            successMessage: "Location updated.",
+            input: { label: "Location name", initial: location.name, testId: "pm-location-name", required: true },
+            input2: { label: "Address", initial: location.address ?? "", testId: "pm-location-address" },
+            run: async (reason, name, address) =>
+              (
+                await apiRequest("PATCH", `${BASE}/partners/${partnerId}/locations/${location.id}`, {
+                  name,
+                  address: address.trim() === "" ? null : address,
+                  reason,
+                })
+              ).json(),
+          })
+        }
+      >
+        Edit
+      </AdminButton>
+
+      {location.status === "ACTIVE" ? (
+        <AdminButton
+          size="sm"
+          variant="ghost"
+          disabled={busy || !suspendable}
+          /*
+           * Disabled rather than hidden, with the reason in the title: an operator who cannot find
+           * the control assumes a bug, whereas one who sees why reaches the right action — suspend
+           * the ORGANISATION — without a support call.
+           */
+          title={
+            suspendable
+              ? undefined
+              : "This is the partner's only active location. Suspend the partner organisation instead — leaving it with no active location would stop all work while still looking healthy."
+          }
+          data-testid={`pm-location-suspend-${location.id}`}
+          onClick={() =>
+            openModal({
+              kind: "location-status-SUSPENDED",
+              title: `Suspend ${location.name}`,
+              successMessage: "Location suspended.",
+              highRisk: true,
+              body: (
+                <p style={{ fontSize: 12, opacity: 0.8 }}>
+                  Stations at this floor stop being able to start new cards. Its name becomes reusable. Cards already in
+                  progress keep their location on record.
+                </p>
+              ),
+              run: async (reason) =>
+                (
+                  await apiRequest("POST", `${BASE}/partners/${partnerId}/locations/${location.id}/status`, {
+                    status: "SUSPENDED",
+                    reason,
+                  })
+                ).json(),
+            })
+          }
+        >
+          Suspend
+        </AdminButton>
+      ) : (
+        <AdminButton
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          data-testid={`pm-location-activate-${location.id}`}
+          onClick={() =>
+            openModal({
+              kind: "location-status-ACTIVE",
+              title: `Activate ${location.name}`,
+              successMessage: "Location activated.",
+              run: async (reason) =>
+                (
+                  await apiRequest("POST", `${BASE}/partners/${partnerId}/locations/${location.id}/status`, {
+                    status: "ACTIVE",
+                    reason,
+                  })
+                ).json(),
+            })
+          }
+        >
+          Activate
+        </AdminButton>
+      )}
+    </div>
+  );
+}
+
 function UserActions({
   user,
   busy,
@@ -1812,6 +2164,7 @@ function UserActions({
   openModal: (m: {
     kind: string;
     title: string;
+    successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
     run: (reason: string) => Promise<unknown>;
@@ -1820,8 +2173,11 @@ function UserActions({
   activeOwnerCount: number;
   onEditInvitation: (u: PartnerUserRow) => void;
 }) {
+  // Every partner-user action reached through this helper — role, status, password reset, MFA reset,
+  // session revocation — is behind requireAdminStepUp. runAdminProtected performs the call and, ONLY
+  // if the server answers 403 admin_step_up_required, prompts and retries this exact action once.
   const post = (path: string, body: Record<string, unknown>) => (reason: string) =>
-    apiRequest("POST", `${BASE}${path}`, { ...body, reason }).then((r) => r.json());
+    runAdminProtected(() => apiRequest("POST", `${BASE}${path}`, { ...body, reason }).then((r) => r.json()));
 
   const [nextRole, setNextRole] = useState<(typeof USER_ROLES)[number]>(
     (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as (typeof USER_ROLES)[number]) : "STAFF"
@@ -2054,6 +2410,50 @@ function UserActions({
         data-testid={`pm-user-revoke-${user.id}`}
       >
         Revoke sessions
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || user.status !== "ACTIVE"}
+        onClick={() =>
+          openModal({
+            kind: "user-password-reset",
+            title: `Send a password-setup link to ${user.email}?`,
+            successMessage: "Password setup link issued.",
+            highRisk: true,
+            body: (
+              <p style={{ fontSize: 12 }}>
+                This sends a fresh single-use link. The password and link are never shown to MintVault staff.
+              </p>
+            ),
+            run: post(`/partners/${partnerId}/users/${user.id}/password-reset`, {}),
+          })
+        }
+        data-testid={`pm-user-password-reset-${user.id}`}
+      >
+        Send password setup
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || user.status !== "ACTIVE"}
+        onClick={() =>
+          openModal({
+            kind: "user-reset-mfa",
+            title: `Reset MFA for ${user.email}?`,
+            highRisk: true,
+            body: (
+              <p style={{ fontSize: 12 }}>
+                All MFA methods and recovery codes are disabled and every active session is revoked. The user must enrol
+                a new authenticator.
+              </p>
+            ),
+            run: post(`/partners/${partnerId}/users/${user.id}/reset-mfa`, {}),
+          })
+        }
+        data-testid={`pm-user-reset-mfa-${user.id}`}
+      >
+        Reset MFA
       </AdminButton>
     </div>
   );

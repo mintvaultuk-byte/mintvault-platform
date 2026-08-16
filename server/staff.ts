@@ -111,31 +111,47 @@ interface CachedStaff {
   credentialVersion: number;
   expiry: number;
 }
-const staffSessionCache = new Map<string, CachedStaff>();
-
-export function invalidateStaffSessionCache(staffId: string): void {
-  staffSessionCache.delete(String(staffId));
+/**
+ * NO CACHE — deliberately removed (invariant I19: no process-local authoritative state).
+ *
+ * This previously memoised the row for 60s in a module-level Map, with `invalidateStaffSessionCache`
+ * called after a capability change, a password reset, a forced session revocation and an account
+ * deletion. On the two-Machine production topology those invalidations only ever cleared the Map of
+ * the Machine that served the request, so a REVOKED or DELETED staff account kept acting on the
+ * other Machine for up to 60 seconds — while the comments at the call sites claimed the effect was
+ * immediate.
+ *
+ * The credential_version check did not save it, and could not: `live` was read from the same stale
+ * cache, so the stale entry reported the PRE-bump version, that matched the session's version, and
+ * the session was not destroyed. `setStaffCapabilities` does not bump credential_version at all, so
+ * it depended entirely on the invalidation that did not propagate.
+ *
+ * A cache that grants authorisation while stale is not "advisory" — it is authoritative, which I19
+ * forbids for exactly this reason. The replacement is one indexed primary-key lookup per request,
+ * which is what requireAdmin already does (server/auth.ts), so this is consistent with the rest of
+ * the codebase rather than a new cost centre.
+ */
+export function invalidateStaffSessionCache(_staffId: string): void {
+  /* No-op: there is no longer a cache to invalidate. Retained so the existing call sites — which
+     document an intent to take effect immediately — keep compiling and keep reading correctly.
+     Every read below is already live, so that intent is now genuinely satisfied. */
 }
 
 async function validateStaffSession(staffId: string): Promise<CachedStaff> {
-  const cached = staffSessionCache.get(staffId);
-  if (cached && Date.now() < cached.expiry) return cached;
   const r = await db.execute(sql`
     SELECT deleted_at, can_grade, can_scan, can_print, can_edit_sets, credential_version FROM users WHERE id = ${staffId} LIMIT 1
   `);
   const row = r.rows[0] as any;
   const live = !!row && !row.deleted_at;
-  const v: CachedStaff = {
+  return {
     exists: live,
     capGrade: live && !!row.can_grade,
     capScan: live && !!row.can_scan,
     capPrint: live && !!row.can_print,
     capEditSets: live && !!row.can_edit_sets,
     credentialVersion: live ? credentialVersionOf(row) : 1,
-    expiry: Date.now() + 60_000,
+    expiry: 0, // unused — retained so the CachedStaff shape (and its consumers) are untouched
   };
-  staffSessionCache.set(staffId, v);
-  return v;
 }
 
 /** Authenticated staff only (mutually exclusive with admin). 401 otherwise.

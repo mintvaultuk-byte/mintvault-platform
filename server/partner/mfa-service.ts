@@ -12,8 +12,14 @@ import type { PoolClient } from "pg";
 import { withTenant } from "./db";
 import { writePartnerAudit, writePartnerSecurity } from "./audit";
 import {
-  generateTotpSecret, currentTotp, matchTotpCounter, encryptSecret, decryptSecret, mfaEncryptionConfigured,
-  generateRecoveryCodes, recoveryHash,
+  generateTotpSecret,
+  currentTotp,
+  matchTotpCounter,
+  encryptSecret,
+  decryptSecret,
+  mfaEncryptionConfigured,
+  generateRecoveryCodes,
+  recoveryHash,
 } from "./mfa";
 
 export const MFA_PENDING_SETUP_MINUTES = 10;
@@ -26,7 +32,7 @@ export const MFA_PENDING_SETUP_MINUTES = 10;
 export async function verifyActiveTotpNoReplay(c: PoolClient, userId: string, code: string): Promise<boolean> {
   const m = await c.query<{ id: string; secret_ref: string; last_totp_counter: string | null }>(
     "SELECT id, secret_ref, last_totp_counter FROM partner_mfa_methods WHERE user_id=$1 AND method='totp' AND status='ACTIVE' AND secret_ref IS NOT NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
-    [userId],
+    [userId]
   );
   if (m.rowCount !== 1) return false;
   const counter = matchTotpCounter(decryptSecret(m.rows[0].secret_ref), code, Date.now());
@@ -39,14 +45,20 @@ export async function verifyActiveTotpNoReplay(c: PoolClient, userId: string, co
 
 /** Re-verify the user's password inside the tenant (elevated verification). */
 async function verifyPassword(c: PoolClient, userId: string, password: string): Promise<boolean> {
-  const { rows } = await c.query<{ password_hash: string | null }>("SELECT password_hash FROM partner_users WHERE id=$1", [userId]);
+  const { rows } = await c.query<{ password_hash: string | null }>(
+    "SELECT password_hash FROM partner_users WHERE id=$1",
+    [userId]
+  );
   if (rows.length !== 1 || !rows[0].password_hash) return false;
   return bcrypt.compare(password, rows[0].password_hash);
 }
 
 export type EnrolResult =
   | { ok: true; enrolmentId: string; secret: string; otpauthUri: string; expiresAt: string }
-  | { ok: false; reason: "unauthorised" | "encryption_unavailable" | "requires_current_factor" | "second_factor_required" };
+  | {
+      ok: false;
+      reason: "unauthorised" | "encryption_unavailable" | "requires_current_factor" | "second_factor_required";
+    };
 
 /** A current second factor as supplied by the caller. Exactly one form is used; recovery wins. */
 export interface SecondFactorInput {
@@ -55,7 +67,10 @@ export interface SecondFactorInput {
 }
 
 async function hasActiveMethod(c: PoolClient, userId: string): Promise<boolean> {
-  const r = await c.query("SELECT 1 FROM partner_mfa_methods WHERE user_id=$1 AND method='totp' AND status='ACTIVE' AND secret_ref IS NOT NULL LIMIT 1", [userId]);
+  const r = await c.query(
+    "SELECT 1 FROM partner_mfa_methods WHERE user_id=$1 AND method='totp' AND status='ACTIVE' AND secret_ref IS NOT NULL LIMIT 1",
+    [userId]
+  );
   return (r.rowCount ?? 0) > 0;
 }
 
@@ -70,7 +85,7 @@ async function verifySecondFactor(c: PoolClient, userId: string, secondFactor: S
   if (secondFactor.recoveryCode) {
     const rc = await c.query(
       "UPDATE partner_recovery_codes SET used_at=now() WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL RETURNING id",
-      [userId, recoveryHash(secondFactor.recoveryCode)],
+      [userId, recoveryHash(secondFactor.recoveryCode)]
     );
     return (rc.rowCount ?? 0) === 1;
   }
@@ -106,7 +121,7 @@ export async function getMfaStatus(ctx: { tenantId: string; userId: string }): P
     const enrolled = await hasActiveMethod(c, ctx.userId);
     const rc = await c.query<{ n: string }>(
       "SELECT count(*)::text AS n FROM partner_recovery_codes WHERE user_id=$1 AND used_at IS NULL",
-      [ctx.userId],
+      [ctx.userId]
     );
     return {
       required,
@@ -143,7 +158,7 @@ export async function getMfaStatus(ctx: { tenantId: string; userId: string }): P
 export async function mfaEnrolStart(
   ctx: { tenantId: string; userId: string; sessionId: string; email?: string; sessionMfaPassed?: boolean },
   password: string,
-  secondFactor: SecondFactorInput = {},
+  secondFactor: SecondFactorInput = {}
 ): Promise<EnrolResult> {
   if (!mfaEncryptionConfigured()) return { ok: false, reason: "encryption_unavailable" };
   const secret = generateTotpSecret();
@@ -153,16 +168,23 @@ export async function mfaEnrolStart(
       // F1 (unchanged): a password-only, mfa-pending session may never replace an existing factor.
       if (!ctx.sessionMfaPassed) return { ok: false, reason: "requires_current_factor" };
       // F3: …and neither may a password alone from an mfa-passed session.
-      if (!(await verifySecondFactor(c, ctx.userId, secondFactor))) return { ok: false, reason: "second_factor_required" };
+      if (!(await verifySecondFactor(c, ctx.userId, secondFactor)))
+        return { ok: false, reason: "second_factor_required" };
     }
-    const email = ctx.email ?? (await c.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [ctx.userId])).rows[0]?.email ?? "user";
+    const email =
+      ctx.email ??
+      (await c.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [ctx.userId])).rows[0]?.email ??
+      "user";
     // Keep historical rows for audit, but ensure only the newest setup can complete.
-    await c.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp' AND status='PENDING'", [ctx.userId]);
+    await c.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp' AND status='PENDING'",
+      [ctx.userId]
+    );
     const inserted = await c.query<{ id: string; expires_at: string }>(
       `INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status, enrolment_session_id, expires_at)
        VALUES ($1,$2,'totp',$3,'PENDING',$4, now() + ($5 || ' minutes')::interval)
        RETURNING id, expires_at`,
-      [ctx.tenantId, ctx.userId, encryptSecret(secret), ctx.sessionId, String(MFA_PENDING_SETUP_MINUTES)],
+      [ctx.tenantId, ctx.userId, encryptSecret(secret), ctx.sessionId, String(MFA_PENDING_SETUP_MINUTES)]
     );
     await writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_enrol_start" });
     const otpauthUri = `otpauth://totp/MintVault:${encodeURIComponent(email)}?secret=${secret}&issuer=MintVault`;
@@ -191,12 +213,12 @@ export type ConfirmResult =
 export async function mfaEnrolConfirm(
   ctx: { tenantId: string; userId: string; sessionId: string; sessionMfaPassed?: boolean },
   enrolmentId: string,
-  code: string,
+  code: string
 ): Promise<ConfirmResult> {
   return withTenant({ tenantId: ctx.tenantId }, async (c): Promise<ConfirmResult> => {
     const live = await c.query(
       "SELECT 1 FROM partner_sessions s JOIN partner_users u ON u.id=s.user_id WHERE s.id=$1 AND s.user_id=$2 AND s.tenant_id=$3 AND s.revoked_at IS NULL AND s.credential_version=u.credential_version LIMIT 1",
-      [ctx.sessionId, ctx.userId, ctx.tenantId],
+      [ctx.sessionId, ctx.userId, ctx.tenantId]
     );
     if (live.rowCount !== 1) return { ok: false, reason: "stale_session" };
     const replacing = await hasActiveMethod(c, ctx.userId);
@@ -207,44 +229,54 @@ export async function mfaEnrolConfirm(
          FROM partner_mfa_methods
         WHERE id=$1 AND user_id=$2 AND method='totp' AND status='PENDING' AND enrolment_session_id=$3
         FOR UPDATE`,
-      [enrolmentId, ctx.userId, ctx.sessionId],
+      [enrolmentId, ctx.userId, ctx.sessionId]
     );
     if (pend.rowCount !== 1) return { ok: false, reason: "no_pending" };
     if (pend.rows[0].expired) return { ok: false, reason: "expired" };
     const counter = matchTotpCounter(decryptSecret(pend.rows[0].secret_ref), code, Date.now());
     if (counter === null) return { ok: false, reason: "invalid_code" };
     // activate this method, deactivate any previously-active (partial unique enforces one ACTIVE)
-    await c.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp' AND status='ACTIVE'", [ctx.userId]);
-    await c.query("UPDATE partner_mfa_methods SET status='ACTIVE', consumed_at=now(), last_totp_counter=$2 WHERE id=$1", [pend.rows[0].id, counter]);
+    await c.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp' AND status='ACTIVE'",
+      [ctx.userId]
+    );
+    await c.query(
+      "UPDATE partner_mfa_methods SET status='ACTIVE', consumed_at=now(), last_totp_counter=$2 WHERE id=$1",
+      [pend.rows[0].id, counter]
+    );
     await c.query(
       replacing
         ? "UPDATE partner_users SET mfa_enabled=true, mfa_required=true, credential_version=credential_version+1 WHERE id=$1"
         : "UPDATE partner_users SET mfa_enabled=true, mfa_required=true WHERE id=$1",
-      [ctx.userId],
+      [ctx.userId]
     );
     // fresh recovery codes (replace any prior)
     await c.query("DELETE FROM partner_recovery_codes WHERE user_id=$1", [ctx.userId]);
     const { plaintext, hashes } = generateRecoveryCodes(10);
     for (const h of hashes) {
-      await c.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [ctx.tenantId, ctx.userId, h]);
+      await c.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [
+        ctx.tenantId,
+        ctx.userId,
+        h,
+      ]);
     }
     if (replacing) {
       // Every OTHER live session dies with the factor it was issued under.
       await c.query(
         "UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2",
-        [ctx.userId, ctx.sessionId ?? null],
+        [ctx.userId, ctx.sessionId ?? null]
       );
       // …and the acting session is carried across the credential_version bump it just caused, so the
       // user is not signed out of the flow they are completing. Without this the bump above would
       // invalidate it at session.ts's `session_cred_version !== user_cred_version` check.
       await c.query(
         "UPDATE partner_sessions SET credential_version=(SELECT credential_version FROM partner_users WHERE id=$1) WHERE id=$2",
-        [ctx.userId, ctx.sessionId],
+        [ctx.userId, ctx.sessionId]
       );
     }
     const passed = await c.query(
       "UPDATE partner_sessions SET mfa_passed=true WHERE id=$1 AND user_id=$2 AND tenant_id=$3 AND revoked_at IS NULL",
-      [ctx.sessionId, ctx.userId, ctx.tenantId],
+      [ctx.sessionId, ctx.userId, ctx.tenantId]
     );
     if (passed.rowCount !== 1) throw new Error("MFA session upgrade failed");
     await writePartnerAudit(c, {
@@ -288,7 +320,7 @@ export async function mfaEnrolConfirm(
  */
 export async function mfaEnrolRestart(
   ctx: { tenantId: string; userId: string; sessionId: string; email?: string; sessionMfaPassed?: boolean },
-  password: string,
+  password: string
 ): Promise<EnrolResult> {
   if (!mfaEncryptionConfigured()) return { ok: false, reason: "encryption_unavailable" };
   const secret = generateTotpSecret();
@@ -298,18 +330,28 @@ export async function mfaEnrolRestart(
     if (await hasActiveMethod(c, ctx.userId)) return { ok: false, reason: "requires_current_factor" };
     const live = await c.query(
       "SELECT 1 FROM partner_sessions s JOIN partner_users u ON u.id=s.user_id WHERE s.id=$1 AND s.user_id=$2 AND s.tenant_id=$3 AND s.revoked_at IS NULL AND s.credential_version=u.credential_version LIMIT 1",
-      [ctx.sessionId, ctx.userId, ctx.tenantId],
+      [ctx.sessionId, ctx.userId, ctx.tenantId]
     );
     if (live.rowCount !== 1) return { ok: false, reason: "unauthorised" };
-    await c.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp' AND status='PENDING'", [ctx.userId]);
+    await c.query(
+      "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp' AND status='PENDING'",
+      [ctx.userId]
+    );
     const inserted = await c.query<{ id: string; expires_at: string }>(
       `INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status, enrolment_session_id, expires_at)
        VALUES ($1,$2,'totp',$3,'PENDING',$4, now() + ($5 || ' minutes')::interval)
        RETURNING id, expires_at`,
-      [ctx.tenantId, ctx.userId, encryptSecret(secret), ctx.sessionId, String(MFA_PENDING_SETUP_MINUTES)],
+      [ctx.tenantId, ctx.userId, encryptSecret(secret), ctx.sessionId, String(MFA_PENDING_SETUP_MINUTES)]
     );
-    const email = ctx.email ?? (await c.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [ctx.userId])).rows[0]?.email ?? "user";
-    await writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_enrol_restarted" });
+    const email =
+      ctx.email ??
+      (await c.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [ctx.userId])).rows[0]?.email ??
+      "user";
+    await writePartnerAudit(c, {
+      tenantId: ctx.tenantId,
+      actorUserId: ctx.userId,
+      action: "partner_mfa_enrol_restarted",
+    });
     const otpauthUri = `otpauth://totp/MintVault:${encodeURIComponent(email)}?secret=${secret}&issuer=MintVault`;
     return { ok: true, enrolmentId: inserted.rows[0].id, secret, otpauthUri, expiresAt: inserted.rows[0].expires_at };
   });
@@ -320,14 +362,17 @@ export async function mfaEnrolCancel(ctx: { tenantId: string; userId: string; se
   await withTenant({ tenantId: ctx.tenantId }, async (c) => {
     await c.query(
       "UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND enrolment_session_id=$2 AND method='totp' AND status='PENDING'",
-      [ctx.userId, ctx.sessionId],
+      [ctx.userId, ctx.sessionId]
     );
-    await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE id=$1 AND user_id=$2 AND tenant_id=$3 AND revoked_at IS NULL", [
-      ctx.sessionId,
-      ctx.userId,
-      ctx.tenantId,
-    ]);
-    await writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_enrol_cancelled" });
+    await c.query(
+      "UPDATE partner_sessions SET revoked_at=now() WHERE id=$1 AND user_id=$2 AND tenant_id=$3 AND revoked_at IS NULL",
+      [ctx.sessionId, ctx.userId, ctx.tenantId]
+    );
+    await writePartnerAudit(c, {
+      tenantId: ctx.tenantId,
+      actorUserId: ctx.userId,
+      action: "partner_mfa_enrol_cancelled",
+    });
   });
 }
 
@@ -360,21 +405,30 @@ export type RegenResult =
 export async function mfaRegenerateRecovery(
   ctx: { tenantId: string; userId: string; sessionMfaPassed?: boolean },
   password: string,
-  secondFactor: SecondFactorInput = {},
+  secondFactor: SecondFactorInput = {}
 ): Promise<RegenResult> {
   return withTenant({ tenantId: ctx.tenantId }, async (c): Promise<RegenResult> => {
     if (!(await verifyPassword(c, ctx.userId, password))) return { ok: false, reason: "unauthorised" };
     if (await hasActiveMethod(c, ctx.userId)) {
       // Mirrors mfaEnrolStart's REPLACEMENT gate exactly — same order, same reasons, same helper.
       if (!ctx.sessionMfaPassed) return { ok: false, reason: "requires_current_factor" };
-      if (!(await verifySecondFactor(c, ctx.userId, secondFactor))) return { ok: false, reason: "second_factor_required" };
+      if (!(await verifySecondFactor(c, ctx.userId, secondFactor)))
+        return { ok: false, reason: "second_factor_required" };
     }
     await c.query("DELETE FROM partner_recovery_codes WHERE user_id=$1", [ctx.userId]);
     const { plaintext, hashes } = generateRecoveryCodes(10);
     for (const h of hashes) {
-      await c.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [ctx.tenantId, ctx.userId, h]);
+      await c.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [
+        ctx.tenantId,
+        ctx.userId,
+        h,
+      ]);
     }
-    await writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_recovery_regenerated" });
+    await writePartnerAudit(c, {
+      tenantId: ctx.tenantId,
+      actorUserId: ctx.userId,
+      action: "partner_mfa_recovery_regenerated",
+    });
     // Partner-VISIBLE evidence: replacing the recovery set is a credential-class change, so it is
     // surfaced at the same severity as partner_mfa_disabled / partner_mfa_replaced rather than being
     // recorded only in the internal audit ledger the account holder never sees.
@@ -410,16 +464,20 @@ export type DisableResult = { ok: true } | { ok: false; reason: "unauthorised" |
 export async function mfaDisable(
   ctx: { tenantId: string; userId: string },
   password: string,
-  secondFactor: { code?: string; recoveryCode?: string },
+  secondFactor: { code?: string; recoveryCode?: string }
 ): Promise<DisableResult> {
   return withTenant({ tenantId: ctx.tenantId }, async (c): Promise<DisableResult> => {
     if (!(await verifyPassword(c, ctx.userId, password))) return { ok: false, reason: "unauthorised" };
     // require an existing MFA second factor (shared with the enrolment-replacement gate — F3)
-    if (!(await verifySecondFactor(c, ctx.userId, secondFactor))) return { ok: false, reason: "second_factor_required" };
+    if (!(await verifySecondFactor(c, ctx.userId, secondFactor)))
+      return { ok: false, reason: "second_factor_required" };
     await c.query("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND method='totp'", [ctx.userId]);
     await c.query("DELETE FROM partner_recovery_codes WHERE user_id=$1", [ctx.userId]);
     // F2: mfa_required stays TRUE. Only the METHOD is removed.
-    await c.query("UPDATE partner_users SET mfa_enabled=false, mfa_required=true, credential_version=credential_version+1 WHERE id=$1", [ctx.userId]);
+    await c.query(
+      "UPDATE partner_users SET mfa_enabled=false, mfa_required=true, credential_version=credential_version+1 WHERE id=$1",
+      [ctx.userId]
+    );
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [ctx.userId]);
     await writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_disabled" });
     await writePartnerSecurity(c, { tenantId: ctx.tenantId, severity: "medium", kind: "partner_mfa_disabled" });
@@ -429,3 +487,36 @@ export async function mfaDisable(
 
 /** Test/helper: compute the current TOTP for a stored ACTIVE/PENDING method (used only in tests via decryptSecret). */
 export { currentTotp };
+
+/**
+ * AG-3 — re-prove the human behind an existing session.
+ *
+ * Reuses the EXACT standard the MFA credential routes already demand: the account password, plus
+ * the current second factor whenever one is enrolled. It is deliberately not a weaker check —
+ * step-up exists to guard spending money and changing who can spend it, so accepting a password
+ * alone from an account that has an authenticator would be the wrong trade.
+ *
+ * Verification and the stamp are NOT combined here: this function answers only "is this really
+ * them", and the caller records the proof. Keeping them apart means nothing can stamp a session
+ * without having asked the question.
+ */
+export async function verifyStepUp(
+  ctx: { tenantId: string; userId: string },
+  password: string,
+  secondFactor: SecondFactorInput
+): Promise<{ ok: true } | { ok: false; reason: "unauthorised" | "second_factor_required" }> {
+  return withTenant({ tenantId: ctx.tenantId }, async (c) => {
+    if (typeof password !== "string" || password.length === 0) return { ok: false, reason: "unauthorised" };
+    if (!(await verifyPassword(c, ctx.userId, password))) return { ok: false, reason: "unauthorised" };
+
+    const enrolled = await c.query(
+      "SELECT 1 FROM partner_mfa_methods WHERE user_id=$1 AND method='totp' AND status='ACTIVE' AND secret_ref IS NOT NULL",
+      [ctx.userId]
+    );
+    if (enrolled.rowCount === 0) return { ok: true };
+
+    if (!secondFactor?.code && !secondFactor?.recoveryCode) return { ok: false, reason: "second_factor_required" };
+    if (!(await verifySecondFactor(c, ctx.userId, secondFactor))) return { ok: false, reason: "unauthorised" };
+    return { ok: true };
+  });
+}

@@ -12,6 +12,7 @@ import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip, adminButtonClass } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { runAdminProtected, isAdminStepUpCancelled } from "@/components/admin/admin-step-up";
 import {
   statusBadgeVariant,
   PARTNER_STATUSES,
@@ -258,9 +259,14 @@ export default function PartnerManagementPage() {
       action: "active" | "suspended" | "revoked" | "reject";
       reason: string;
     }) =>
-      (
-        await apiRequest("POST", `${FLEET_BASE}/stations/${encodeURIComponent(stationCode)}/${action}`, { reason })
-      ).json(),
+      // Station approve/suspend/revoke/reject are behind requireAdminStepUp. runAdminProtected performs
+      // the call and, ONLY if the server answers 403 admin_step_up_required, prompts and retries this
+      // exact action once. Without it the request was refused and the operator had nowhere to comply.
+      runAdminProtected(async () =>
+        (
+          await apiRequest("POST", `${FLEET_BASE}/stations/${encodeURIComponent(stationCode)}/${action}`, { reason })
+        ).json()
+      ),
     onSuccess: async (_data, input) => {
       setBanner(
         `${input.stationCode} ${input.action === "active" ? "approved" : input.action === "reject" ? "rejected" : input.action}.`
@@ -270,6 +276,9 @@ export default function PartnerManagementPage() {
       await queryClient.invalidateQueries({ queryKey: [FLEET_BASE] });
     },
     onError: (err: unknown) => {
+      // Dismissing the confirmation is not a failure: nothing was changed, so the operator is
+      // returned to the list silently rather than shown an error they caused.
+      if (isAdminStepUpCancelled(err)) return;
       setBanner(
         serverErrorMessage((err as { body?: unknown })?.body, "Station action failed. No station state was changed.")
       );
@@ -625,7 +634,7 @@ export default function PartnerManagementPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {fleet.data?.stations.map((station) => (
+                  {fleet.data?.stations?.map((station) => (
                     <tr key={station.stationCode} data-testid={`pm-fleet-row-${station.stationCode}`}>
                       <td>
                         <code>{station.stationCode}</code>

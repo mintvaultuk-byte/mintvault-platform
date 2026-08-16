@@ -261,6 +261,15 @@ async function usePartnerAdminRole(url: string): Promise<void> {
       s.authUserId = adminUserId;
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
+      /*
+       * AG-3b: these suites drive DESTRUCTIVE Super Admin routes (status change, role change, MFA
+       * reset, credit adjustment), which now require a recent step-up proof. The real console
+       * obtains one from POST /api/admin/step-up after re-entering the passphrase and PIN; this
+       * test-only login stamps the equivalent so the suite exercises the ROUTE rather than
+       * repeatedly proving that the guard returns 403 — which tests/partner-admin-step-up.test.ts
+       * already proves directly, including that a MISSING stamp is refused.
+       */
+      s.adminStepUpAt = new Date().toISOString();
       req.session.save(() => res.json({ ok: true }));
     });
     app.post("/__test/session", (req, res) => {

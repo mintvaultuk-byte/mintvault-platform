@@ -30,6 +30,7 @@
  * per-Fly-machine — the same accepted trade-off the G4/G5 routers document.
  */
 import { Router, type Express, type Request, type Response, type NextFunction } from "express";
+import { requireAdminStepUp } from "../lib/admin-step-up";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { storage } from "../storage";
@@ -293,7 +294,10 @@ export function partnerDashboardRouter(): Router {
     () => 1
   );
 
-  r.post("/partners/:partnerId/credits/adjust", async (req: Request, res: Response) => {
+  // AG-3b: granting or removing Grading Credits moves money-equivalent capacity into a shop's
+  // wallet. It is audited and idempotent, but auditing tells you afterwards WHO the session
+  // belonged to — not that they were still at the keyboard.
+  r.post("/partners/:partnerId/credits/adjust", requireAdminStepUp(), async (req: Request, res: Response) => {
     try {
       const tenantId = paramId(req.params.partnerId);
       const operation = req.body?.operation;

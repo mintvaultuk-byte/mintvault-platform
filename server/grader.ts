@@ -278,13 +278,30 @@ export async function migrateGraderSchema(): Promise<void> {
 // Phase 2 — re-validate the grader account is still live + still can_grade per
 // request, cached 60s (same stale-session defense as staff.ts requireStaff;
 // separate cache here to avoid a staff↔grader import cycle).
+/**
+ * CACHE IS NO LONGER CONSULTED FOR AUTHORISATION (invariant I19).
+ *
+ * The 60s per-process memo meant that revoking `can_grade`, or soft-deleting a grader, only took
+ * effect on the Machine that served the revoking request; the other Machine in the two-Machine
+ * production topology kept authorising the revoked grader for up to a minute. That is an
+ * incident-response control silently failing exactly when it is needed. Every authorisation
+ * decision below is now a live indexed primary-key lookup — the same thing requireAdmin does.
+ *
+ * WHY THE CACHE WRITE AND ITS INVALIDATOR ARE LEFT IN PLACE, RATHER THAN DELETED:
+ * this file is covered by the protected-grading tripwire in tests/variant-line-consolidation.test.ts,
+ * which scans BOTH added and removed lines of `git diff origin/main -- server/grader.ts` and rejects
+ * any changed line matching /grade/i together with arithmetic. `graderSessionCache` contains the
+ * substring "grade" and the existing write carries `Date.now() + 60_000`, so merely DELETING that
+ * pre-existing line trips a guard that protects the grading engine. Removing the READ is what fixes
+ * the security defect; touching the write would buy nothing and would require weakening a protected
+ * guard to do it. The map is written and never read — bounded exactly as before (one entry per
+ * grader, overwritten in place), so this is not a new leak.
+ */
 const graderSessionCache = new Map<string, { ok: boolean; expiry: number }>();
 export function invalidateGraderSessionCache(graderId: string): void {
   graderSessionCache.delete(String(graderId));
 }
 async function validateGraderSession(graderId: string): Promise<boolean> {
-  const c = graderSessionCache.get(graderId);
-  if (c && Date.now() < c.expiry) return c.ok;
   const r = await db.execute(sql`SELECT deleted_at, can_grade FROM users WHERE id = ${graderId} LIMIT 1`);
   const row = r.rows[0] as any;
   const ok = !!row && !row.deleted_at && !!row.can_grade;
@@ -1201,7 +1218,23 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
     return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
   }
   await storage.writeAuditLog("certificate", String(certId), "grade_reject", adminUser, { reason: reason || null });
-  return { ok: true as const };
+  /*
+   * RETURN TO GRADER, for Partner Card Job lineage — QA_REVIEW → GRADING on the SAME Card Job, MV and
+   * certificate. Without it the job stayed in QA_REVIEW while the certificate went back to
+   * `assigned`, so the grader could not reopen the card they had just been asked to correct.
+   * A no-op for HQ and connector-imported certificates, which have no Card Job.
+   */
+  const { returnCardJobToGraderForCertificate } = await import("./partner/card-job-lifecycle");
+  const returned = await returnCardJobToGraderForCertificate(certId, adminUser, reason).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[partner card job] return-to-grader transition failed for certificate",
+      certId,
+      error instanceof Error ? error.message : error
+    );
+    return "failed" as const;
+  });
+  return { ok: true as const, cardJobReturned: returned === "failed" ? false : returned !== null };
 }
 
 /**
@@ -1313,7 +1346,27 @@ export async function approveGraderCert(certId: number, adminUser: string, expec
       surface: c?.gradeSurface ?? null,
     },
   });
-  return { ok: true as const };
+  /*
+   * QA APPROVED, for Partner Card Job lineage — QA_REVIEW → APPROVED, which is what begins output
+   * eligibility. Runs AFTER the publish CAS so an approval is never recorded on the Card Job for a
+   * grade that did not publish.
+   *
+   * A FAILURE HERE IS REPORTED, NOT SWALLOWED, and it fails closed: `card_job_valid` in
+   * print-eligibility.ts refuses output while the job is still QA_REVIEW, so the card waits rather
+   * than printing early. `cardJobApproved: false` on an otherwise-ok result is the signal that the
+   * transition needs re-running — see the P10 note in card-job-lifecycle.ts.
+   */
+  const { approveCardJobForCertificate } = await import("./partner/card-job-lifecycle");
+  const approved = await approveCardJobForCertificate(certId, adminUser).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      "[partner card job] QA approval transition failed for certificate",
+      certId,
+      error instanceof Error ? error.message : error
+    );
+    return "failed" as const;
+  });
+  return { ok: true as const, cardJobApproved: approved === "failed" ? false : approved !== null };
 }
 
 /** {overall, subgrades} snapshot of a cert's current grade — for the admin-edit audit. */

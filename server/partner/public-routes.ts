@@ -121,11 +121,17 @@ export function partnerPublicRouter(): Router {
             resetDeliveryConfigured()
           ) {
             const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
-            // TIMING: dispatched WITHOUT await. Waiting on an outbound provider round trip only for
-            // known accounts made response latency an account-existence oracle. The catch is
-            // attached synchronously so this can never reject or raise an unhandled rejection;
-            // deliverResetToken has already emitted its own redacted failure signal by then.
-            void deliverResetToken(email, token).catch(() => {});
+            // A NULL token means a fresh link already exists and was deliberately preserved (see
+            // RESET_REISSUE_COOLDOWN_MINUTES). That is a success: the usable link is already in the
+            // account's inbox, so there is nothing to send. Sending here would be pointless mail;
+            // minting here is what let an attacker hold recovery shut.
+            if (token !== null) {
+              // TIMING: dispatched WITHOUT await. Waiting on an outbound provider round trip only for
+              // known accounts made response latency an account-existence oracle. The catch is
+              // attached synchronously so this can never reject or raise an unhandled rejection;
+              // deliverResetToken has already emitted its own redacted failure signal by then.
+              void deliverResetToken(email, token).catch(() => {});
+            }
           }
         } catch {
           /* generic response */
@@ -141,7 +147,7 @@ export function partnerPublicRouter(): Router {
       return;
     }
     const { token, newPassword } = req.body ?? {};
-    if (typeof token !== "string" || !isValidPartnerPassword(newPassword)) {
+    if (typeof token !== "string" || typeof newPassword !== "string" || !isValidPartnerPassword(newPassword)) {
       res.status(400).json({ error: "invalid request" });
       return;
     }

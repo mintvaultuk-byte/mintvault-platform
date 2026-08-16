@@ -20,7 +20,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
-import { applyMigrations, planMigrations } from "../scripts/db/migrate";
+import {
+  applyMigrations,
+  planMigrations,
+  listMigrationFiles,
+  loadLineageExclusions,
+  partitionIdentityConflicts,
+} from "../scripts/db/migrate";
 
 let cluster: DisposablePostgres17;
 let pool: pg.Pool;
@@ -167,5 +173,147 @@ describe("migration identity guard", () => {
     }
     const after = await pool.query("SELECT filename, checksum, status FROM schema_migrations ORDER BY filename");
     expect(after.rows, "a refused run must leave the journal byte-identical").toEqual(before.rows);
+  });
+});
+
+/**
+ * LINEAGE EXCLUSION DECLARATIONS (2026-08-14) — the guard's "exclude the colliding file from
+ * this environment" remedy, made explicit and fail-closed. A declaration names the EXACT
+ * (incoming, occupant) pair plus a supersededBy convergence migration that must ship in the
+ * same release; anything less specific still aborts the whole run.
+ */
+describe("lineage exclusion declarations", () => {
+  const STAGING_SHAPED = [
+    { filename: "0044_partner_submission_lifecycle_and_location_snapshot.sql", sql: "SELECT 1" },
+    { filename: "0046_partner_mfa_pending_lifecycle.sql", sql: "SELECT 2" },
+    { filename: "0047_partner_owner_invariant_tenants_rls.sql", sql: "SELECT 3" },
+  ];
+
+  it("EXCLUDES a declared (incoming, occupant) pair and applies the rest — never journalling the excluded file", async () => {
+    await freshJournal(STAGING_SHAPED);
+    const client = await pool.connect();
+    try {
+      const result = await applyMigrations(
+        client as never,
+        [
+          // Would poison probe_target if it ran — proving exclusion means NOT-RUN, not just unlogged.
+          file("0046_scanner_processing_jobs.sql", "ALTER TABLE probe_target ADD COLUMN poisoned integer"),
+          file("0090_lineage_convergence_scanner.sql", "ALTER TABLE probe_target ADD COLUMN converged90 integer"),
+        ],
+        {
+          exclusions: [
+            {
+              incoming: "0046_scanner_processing_jobs.sql",
+              occupant: "0046_partner_mfa_pending_lifecycle.sql",
+              supersededBy: "0090_lineage_convergence_scanner.sql",
+              reason: "test",
+            },
+          ],
+        }
+      );
+      expect(result.applied).toEqual(["0090_lineage_convergence_scanner.sql"]);
+    } finally {
+      client.release();
+    }
+    const cols = await pool.query(
+      "SELECT count(*)::int c FROM information_schema.columns WHERE table_name='probe_target' AND column_name='poisoned'"
+    );
+    expect(cols.rows[0].c, "the excluded migration must not have run").toBe(0);
+    const journal = await pool.query(
+      "SELECT 1 FROM schema_migrations WHERE filename='0046_scanner_processing_jobs.sql'"
+    );
+    expect(journal.rowCount, "the excluded migration must not be journalled").toBe(0);
+  });
+
+  it("a declaration whose supersededBy is ABSENT from the release is void — the conflict still aborts", async () => {
+    await freshJournal(STAGING_SHAPED);
+    const client = await pool.connect();
+    try {
+      await expect(
+        applyMigrations(client as never, [file("0046_scanner_processing_jobs.sql", "SELECT 1")], {
+          exclusions: [
+            {
+              incoming: "0046_scanner_processing_jobs.sql",
+              occupant: "0046_partner_mfa_pending_lifecycle.sql",
+              supersededBy: "0090_lineage_convergence_scanner.sql", // not in this file set
+              reason: "test",
+            },
+          ],
+        })
+      ).rejects.toThrow(/Migration identity conflict/);
+    } finally {
+      client.release();
+    }
+  });
+
+  it("a declaration naming the WRONG occupant does not match — the conflict still aborts", async () => {
+    await freshJournal(STAGING_SHAPED);
+    const client = await pool.connect();
+    try {
+      await expect(
+        applyMigrations(
+          client as never,
+          [
+            file("0046_scanner_processing_jobs.sql", "SELECT 1"),
+            file("0090_lineage_convergence_scanner.sql", "SELECT 1"),
+          ],
+          {
+            exclusions: [
+              {
+                incoming: "0046_scanner_processing_jobs.sql",
+                occupant: "0046_some_other_identity.sql", // staging's real occupant is the MFA file
+                supersededBy: "0090_lineage_convergence_scanner.sql",
+                reason: "test",
+              },
+            ],
+          }
+        )
+      ).rejects.toThrow(/Migration identity conflict/);
+    } finally {
+      client.release();
+    }
+  });
+
+  it("the SHIPPED declarations file resolves the real staging lineage: 3 excluded, 0 undeclared", () => {
+    const files = listMigrationFiles();
+    const exclusions = loadLineageExclusions();
+    expect(exclusions).toHaveLength(3);
+    for (const d of exclusions) {
+      expect(
+        files.some((f) => f.filename === d.incoming),
+        `${d.incoming} must ship in this release`
+      ).toBe(true);
+      expect(
+        files.some((f) => f.filename === d.supersededBy),
+        `${d.supersededBy} must ship in this release`
+      ).toBe(true);
+    }
+    // Staging's journal identities at the colliding numbers, as read on 2026-08-14.
+    const stagingJournal = [
+      "0044_partner_submission_lifecycle_and_location_snapshot.sql",
+      "0046_partner_mfa_pending_lifecycle.sql",
+      "0047_partner_owner_invariant_tenants_rls.sql",
+    ];
+    const pending = files.map((f) => f.filename);
+    const partition = partitionIdentityConflicts(pending, stagingJournal, files, exclusions);
+    expect(partition.undeclared).toEqual([]);
+    expect(partition.excluded.map((c) => c.incoming).sort()).toEqual([
+      "0044_partner_mfa_pending_lifecycle.sql",
+      "0046_scanner_processing_jobs.sql",
+      "0047_scanner_evidence_staging.sql",
+    ]);
+  });
+
+  it("on a FRESH journal the declarations never match — 0044/0046/0047 apply normally", () => {
+    const files = listMigrationFiles();
+    const exclusions = loadLineageExclusions();
+    const partition = partitionIdentityConflicts(
+      files.map((f) => f.filename),
+      [],
+      files,
+      exclusions
+    );
+    expect(partition.undeclared).toEqual([]);
+    expect(partition.excluded).toEqual([]);
   });
 });

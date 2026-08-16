@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  canSuspendLocation,
   PROFILE_FIELD_DEFS,
   PARTNER_USER_ROLES,
   isPartnerUserRole,
@@ -958,5 +959,35 @@ describe("accessibility and safety invariants (unchanged from G5)", () => {
   it("does not weaken the typed-confirmation on high-risk status changes", () => {
     expect(detail).toContain("isHighRiskStatus(");
     expect(detail).toContain('data-testid="pm-typed-confirm"');
+  });
+});
+
+describe("AG-1 locations — the last-active-location rule, client side", () => {
+  /*
+   * The SERVER is the authority: setPartnerLocationStatus refuses this in SQL, inside the same
+   * transaction that would perform it. These cases pin the client's advance warning, which exists
+   * so an operator is not asked to type a reason into a dialog that cannot succeed.
+   */
+  it("refuses to suspend the only active location", () => {
+    expect(canSuspendLocation("ACTIVE", 1)).toBe(false);
+  });
+
+  it("allows suspending one of several active locations", () => {
+    expect(canSuspendLocation("ACTIVE", 2)).toBe(true);
+    expect(canSuspendLocation("ACTIVE", 7)).toBe(true);
+  });
+
+  it("offers no suspend for a location that is not ACTIVE", () => {
+    // SUSPENDED and PENDING are activated, not suspended again — the control is the other one.
+    for (const status of ["SUSPENDED", "PENDING"]) {
+      expect(canSuspendLocation(status, 5)).toBe(false);
+    }
+  });
+
+  it("fails closed on a count that cannot be right", () => {
+    // A zero/negative count means the list did not load. Offering the destructive action on a
+    // number we do not believe is worse than withholding it.
+    expect(canSuspendLocation("ACTIVE", 0)).toBe(false);
+    expect(canSuspendLocation("ACTIVE", -1)).toBe(false);
   });
 });

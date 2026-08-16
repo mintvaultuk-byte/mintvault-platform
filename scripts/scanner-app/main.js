@@ -19,6 +19,17 @@ const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
 const os    = require("node:os");
+const { randomUUID } = require("node:crypto");
+
+/**
+ * The in-flight NEW CARD retry token (P6).
+ *
+ * Advisory process state only, and safe to lose: if the app restarts mid-press the token is gone
+ * and the next press is a genuinely new request — the SERVER's (station, client_op_id) record is
+ * the authority on what was already bought, never this variable. That is what invariant I19
+ * requires: no process-local state may be authoritative over money.
+ */
+let pendingNewCardOpId = null;
 
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
@@ -351,13 +362,33 @@ function pushStateToRenderer() {
   refreshTray();
 }
 
-function stationSummary(sessionBody) {
+function stationSummary(sessionBody, availableCredits) {
   if (!sessionBody || typeof sessionBody !== "object") return null;
   return {
     organisationName: typeof sessionBody.organisationName === "string" ? sessionBody.organisationName : null,
     locationName: typeof sessionBody.locationName === "string" ? sessionBody.locationName : null,
     displayName: typeof sessionBody.displayName === "string" ? sessionBody.displayName : null,
+    // Number, or null. NEVER 0 as a stand-in for "not answered": an unasked question rendered as an
+    // empty wallet would stop a station that can work perfectly well.
+    availableCredits: typeof availableCredits === "number" ? availableCredits : null,
   };
+}
+
+/**
+ * Best-effort read of the shop's balance for the identity row.
+ *
+ * Deliberately swallows every failure to null. This is a DISPLAY value: the server re-checks the
+ * balance on every NEW press and refuses independently, so a station that cannot read it must still
+ * be able to work. Blocking setup on a credits fetch would turn a reporting hiccup into a dead shop.
+ */
+async function availableCreditsOrNull() {
+  try {
+    const result = await stationClient.creditSummary();
+    const value = result?.ok ? result.body?.summary?.availableCredits : null;
+    return typeof value === "number" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
@@ -374,7 +405,7 @@ async function stationSetupState() {
     }
     return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
   }
-  const summary = stationSummary(session.body);
+  const summary = stationSummary(session.body, await availableCreditsOrNull());
   const code = stationIdentity.currentStationCode();
   if (!code) {
     const locations = await stationClient.enrolmentLocations();
@@ -454,8 +485,58 @@ function setupIpc() {
     return { ok: true };
   });
 
+  /**
+   * P7 — the FIX picker.
+   *
+   * Now calls the tenant-scoped partner queue instead of `/api/admin/orphan-certs`, which correctly
+   * refuses a signed station because it addresses certificates with NO tenant predicate. The button
+   * was dead for exactly that reason; the fix is a properly scoped route, not a weakened guard.
+   */
   ipcMain.handle("fetch-orphans", async () => {
-    return server.getOrphans();
+    return server.getFixQueue();
+  });
+
+  ipcMain.handle("authorise-fix", async (_event, payload) => {
+    const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
+    if (!cardJobId) return { ok: false, error: "Select a card to fix" };
+    const result = await server.authoriseFix(cardJobId, payload && payload.sides);
+    if (result.ok) return { ok: true, fix: result.body && result.body.fix };
+    const error = (result.body && result.body.error) || {};
+    return { ok: false, code: error.code || "error", error: error.message || "Could not start the fix" };
+  });
+
+  /**
+   * P6 — NEW CARD.
+   *
+   * THE RETRY TOKEN IS MINTED HERE, IN THE MAIN PROCESS, AND HELD UNTIL THE SERVER ANSWERS. A
+   * renderer that generated a fresh id per click would turn an impatient double-click into two
+   * paid cards. Holding it means every retry of the SAME press carries the SAME token, so the
+   * server answers the second one from its idempotency record rather than the wallet.
+   *
+   * The token is cleared only once the server has given a definitive answer — success or a refusal
+   * the operator must act on. A network error deliberately KEEPS it, because that is exactly the
+   * case where we do not know whether the card was created.
+   */
+  ipcMain.handle("start-new-card", async (_event, payload) => {
+    const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
+    if (!pendingNewCardOpId) pendingNewCardOpId = `new-${randomUUID()}`;
+    let result;
+    try {
+      result = await server.startNewCard(pendingNewCardOpId, cardName);
+    } catch (err) {
+      // Outcome unknown — keep the token so a retry replays instead of buying a second card.
+      return { ok: false, retryable: true, error: err && err.message ? err.message : "Could not reach MintVault" };
+    }
+    if (result.ok) {
+      pendingNewCardOpId = null;
+      const job = result.body && result.body.cardJob ? result.body.cardJob : {};
+      return { ok: true, cardJob: job };
+    }
+    // A refusal the operator can act on (no credits, suspended, station not approved) is final for
+    // this press: the token is released so their NEXT press is a genuinely new request.
+    pendingNewCardOpId = null;
+    const error = (result.body && result.body.error) || {};
+    return { ok: false, retryable: false, code: error.code || "error", error: error.message || "Could not start a new card" };
   });
 
   // Recovery opens the exact historic certificate in the authenticated web

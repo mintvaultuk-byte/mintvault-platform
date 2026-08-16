@@ -7,11 +7,12 @@ import {
   partnerCustomers,
   partnerDashboard,
   partnerErrorMessage,
+  partnerOperations,
   partnerSubmissions,
 } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 import { usePartnerSession } from "@/hooks/use-partner-session";
-import { ArrowRight, PlusCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, PlusCircle, ScanLine, Wrench } from "lucide-react";
 
 function metric(value: number | null | undefined, empty = "Not available") {
   return value == null ? empty : value.toLocaleString("en-GB");
@@ -47,6 +48,7 @@ export default function PartnerDashboardPage() {
   const { session, hasPermission } = usePartnerSession();
   const canViewCredits = hasPermission("partner.credits.view");
   const canAssessCards = hasPermission("partner.cards.assess");
+  const canPurchaseCredits = hasPermission("partner.credits.purchase");
 
   const submissions = useQuery({
     queryKey: ["/api/partner/dashboard/submissions"],
@@ -65,6 +67,28 @@ export default function PartnerDashboardPage() {
     queryKey: ["/api/partner/submissions", "dashboard-recent"],
     queryFn: () => partnerSubmissions.list({ page: 1, pageSize: 5 }),
   });
+  /**
+   * P8 — the operational read.
+   *
+   * One call for the lifecycle counts, the station fleet and the shop floors, all scoped
+   * SERVER-SIDE from the session. Nothing below filters by tenant or location in the browser:
+   * a client-side filter is a display convention, not a boundary, and this console shows a
+   * paying shop its own money and its own customers' cards.
+   */
+  const operations = useQuery({
+    queryKey: ["/api/partner/dashboard/operations"],
+    queryFn: () => partnerOperations.view(),
+  });
+  const fixQueue = useQuery({
+    queryKey: ["/api/partner/fix-queue"],
+    queryFn: () => partnerOperations.fixQueue(),
+    enabled: hasPermission("partner.cards.view"),
+  });
+  const readiness = useQuery({
+    queryKey: ["/api/partner/onboarding-readiness"],
+    queryFn: () => partnerOperations.readiness(),
+  });
+
   const gradingQueue = useQuery({
     queryKey: ["/api/partner/grading/queue", "partner-dashboard"],
     enabled: canAssessCards,
@@ -169,7 +193,304 @@ export default function PartnerDashboardPage() {
                 </Card>
               </div>
             )}
+            {/*
+              Zero- and low-credit states.
+
+              `balanceStatus` is SERVER-DERIVED (portal-view-service computes empty at 0 and low
+              below the threshold from partner_credit_availability). This panel re-reads that verdict;
+              it never recomputes availability from the individual tiles, because a second formula in
+              the browser would be a second balance authority — the exact thing the credit model
+              forbids. Nothing here can add capacity: the only control is a link to the wallet page.
+            */}
+            {canViewCredits && credits.data && credits.data.summary.balanceStatus === "empty" && (
+              <Card className="rounded-md border-rose-400/50" data-testid="card-credit-empty">
+                <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-rose-300 mt-0.5" aria-hidden="true" />
+                    <div>
+                      <p className="font-medium" data-testid="text-credit-empty-title">
+                        No Grading Credits left
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        New cards cannot be started until you add credits. Cards already authorised keep moving —
+                        grading, fixing a missing image and printing all continue as normal.
+                      </p>
+                    </div>
+                  </div>
+                  {canPurchaseCredits && (
+                    <Link href="/partner/billing">
+                      <Button data-testid="button-buy-credits-empty">Buy more Grading Credits</Button>
+                    </Link>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+            {canViewCredits && credits.data && credits.data.summary.balanceStatus === "low" && (
+              <Card className="rounded-md border-amber-400/50" data-testid="card-credit-low">
+                <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="h-5 w-5 text-amber-300 mt-0.5" aria-hidden="true" />
+                    <div>
+                      <p className="font-medium" data-testid="text-credit-low-title">
+                        Running low on Grading Credits
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Top up before your next batch so the Scanner does not stop mid-session.
+                      </p>
+                    </div>
+                  </div>
+                  {canPurchaseCredits && (
+                    <Link href="/partner/billing">
+                      <Button variant="outline" data-testid="button-buy-credits-low">
+                        Buy more Grading Credits
+                      </Button>
+                    </Link>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </section>
+
+          {/*
+            P8 — OPERATIONAL SUMMARY.
+            Every figure is server-derived from the Card Job lifecycle and scoped to this tenant
+            (and to one shop floor for a location-scoped user). The browser adds no arithmetic.
+          */}
+          <section aria-labelledby="operations-title" className="space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h2 id="operations-title" className="text-base font-semibold">
+                Card work
+              </h2>
+              {operations.data?.locationScoped && (
+                <span className="text-xs text-muted-foreground" data-testid="text-operations-location-scoped">
+                  Showing your assigned location only
+                </span>
+              )}
+            </div>
+            {operations.isLoading && <p className="text-sm text-muted-foreground">Loading card work…</p>}
+            {operations.error && (
+              <p className="text-sm text-muted-foreground" role="alert" data-testid="text-operations-error">
+                Card work is unavailable right now.{" "}
+                <button type="button" className="text-primary underline" onClick={() => void operations.refetch()}>
+                  Try again
+                </button>
+              </p>
+            )}
+            {operations.data && (
+              <div className="grid grid-cols-2 lg:grid-cols-6 gap-3" data-testid="grid-operations">
+                {[
+                  ["Reserved / in progress", operations.data.counts.reservedInProgress, "reserved"],
+                  ["Needs scan", operations.data.counts.needsScan, "needs-scan"],
+                  ["FIX required", operations.data.counts.fixRequired, "fix-required"],
+                  ["Ready to grade", operations.data.counts.readyToGrade, "ready-to-grade"],
+                  ["In review", operations.data.counts.inReview, "in-review"],
+                  ["Completed", operations.data.counts.completed, "completed"],
+                ].map(([label, value, id]) => (
+                  <Card key={String(id)} className="rounded-md">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xl font-semibold" data-testid={`text-ops-${id}`}>
+                        {metric(value as number)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/*
+            P8 — PRIMARY ACTIONS. Deliberately four, and deliberately in this order: the two things
+            an operator does all day, then the two things they do when something is wrong or running
+            out. SCAN NEW CARD does not start a card here — the authority is the Scanner's, bound to
+            an approved station — so this points at the station rather than pretending to be one.
+          */}
+          <section aria-labelledby="actions-title" className="space-y-3">
+            <h2 id="actions-title" className="text-base font-semibold">
+              What do you want to do?
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="grid-primary-actions">
+              <Card className="rounded-md" data-testid="action-scan-new-card">
+                <CardContent className="pt-6 space-y-2">
+                  <p className="font-medium inline-flex items-center gap-2">
+                    <ScanLine className="h-4 w-4" aria-hidden="true" /> Scan a new card
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Press NEW CARD on an approved Scanner station. One Grading Credit is reserved at that moment, by the
+                    server.
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-md" data-testid="action-buy-credits">
+                <CardContent className="pt-6 space-y-2">
+                  <p className="font-medium">Buy more Grading Credits</p>
+                  {canPurchaseCredits ? (
+                    <Link href="/partner/billing" className="text-sm text-primary inline-flex items-center gap-1">
+                      Go to Credits &amp; Billing <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </Link>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Ask an owner at your shop to buy credits.</p>
+                  )}
+                </CardContent>
+              </Card>
+              <Card className="rounded-md" data-testid="action-fix-queue">
+                <CardContent className="pt-6 space-y-2">
+                  <p className="font-medium inline-flex items-center gap-2">
+                    <Wrench className="h-4 w-4" aria-hidden="true" /> FIX queue
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {operations.data
+                      ? `${operations.data.counts.fixRequired} card(s) need a replacement image. Fixing costs no credits.`
+                      : "Cards needing a replacement image. Fixing costs no credits."}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-md" data-testid="action-ready-to-grade">
+                <CardContent className="pt-6 space-y-2">
+                  <p className="font-medium">Ready to grade</p>
+                  {canAssessCards ? (
+                    <Link href="/partner/grading" className="text-sm text-primary inline-flex items-center gap-1">
+                      Open grading <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </Link>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Your role does not include grading.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
+          {/*
+            P8 — FIX QUEUE. Server-derived from THIS partner's own Card Jobs, which is why nobody
+            ever types an MV number: typing one is what creates the opportunity to type someone
+            else's. The wording is explicit that identity and payment survive a fix.
+          */}
+          {hasPermission("partner.cards.view") && (
+            <section aria-labelledby="fix-title" className="space-y-3">
+              <h2 id="fix-title" className="text-base font-semibold">
+                Cards needing a replacement image
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Fixing a card costs no Grading Credits. The card keeps its MV number, its certificate and the credit
+                already paid for it.
+              </p>
+              {fixQueue.data && fixQueue.data.items.length === 0 && (
+                <p className="text-sm text-muted-foreground" data-testid="text-fix-empty">
+                  Nothing to fix.
+                </p>
+              )}
+              {fixQueue.data && fixQueue.data.items.length > 0 && (
+                <div className="divide-y divide-border border-y border-border" data-testid="list-fix-queue">
+                  {fixQueue.data.items.slice(0, 10).map((item) => (
+                    <div key={item.cardJobId} className="py-3 flex items-center justify-between gap-4 text-sm">
+                      <span className="font-mono">{item.mvNumber}</span>
+                      <span className="text-xs text-rose-300">{item.missingLabel}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/*
+            P8 — STATIONS. `ready` is the SERVER's verdict; the browser never recomputes it, so the
+            console and the Scanner cannot disagree about whether a Mac can work.
+          */}
+          <section aria-labelledby="stations-title" className="space-y-3">
+            <h2 id="stations-title" className="text-base font-semibold">
+              Scanner stations
+            </h2>
+            {operations.data && operations.data.stations.length === 0 && (
+              <p className="text-sm text-muted-foreground" data-testid="text-stations-empty">
+                No Scanner station has been registered yet.
+              </p>
+            )}
+            {operations.data && operations.data.stations.length > 0 && (
+              <div className="overflow-x-auto border border-border rounded-md" data-testid="table-stations-wrap">
+                <table data-testid="table-stations" className="w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th scope="col">Station</th>
+                      <th scope="col">Location</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Last seen</th>
+                      <th scope="col">App version</th>
+                      <th scope="col">Ready</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {operations.data.stations.map((station) => (
+                      <tr key={station.stationCode}>
+                        <td className="font-mono whitespace-nowrap">{station.stationCode}</td>
+                        <td>{station.locationName || "Not available"}</td>
+                        <td>{station.status}</td>
+                        <td className="whitespace-nowrap">
+                          {station.lastSeenAt ? new Date(station.lastSeenAt).toLocaleString("en-GB") : "Never"}
+                        </td>
+                        <td>{station.appVersion || "Unknown"}</td>
+                        <td className={station.ready ? "text-emerald-300" : "text-muted-foreground"}>
+                          {station.ready ? "Ready" : "Not ready"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/*
+            P8 — LOCATIONS. Listed from the server with a station count, with no assumption that a
+            partner has exactly one shop floor called "Main location". Creating and suspending a
+            location remains a Super Admin action; this is the shop's read-only view of its estate.
+          */}
+          <section aria-labelledby="locations-title" className="space-y-3">
+            <h2 id="locations-title" className="text-base font-semibold">
+              Locations
+            </h2>
+            {operations.data && (
+              <div className="divide-y divide-border border-y border-border" data-testid="list-locations">
+                {operations.data.locations.map((location) => (
+                  <div key={location.id} className="py-3 flex items-center justify-between gap-4 text-sm">
+                    <span>{location.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {location.status} · {location.stationCount} station(s)
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/*
+            P8 — SETUP STATUS. Read from the SAME computation the Super Admin console uses, so the
+            two can never disagree about whether a shop is ready. `stationReady === null` means the
+            station subsystem is absent on this deployment, which is NOT the same as "no station
+            yet" and is deliberately not reported as either ready or blocked.
+          */}
+          {readiness.data && (
+            <section aria-labelledby="readiness-title" className="space-y-3">
+              <h2 id="readiness-title" className="text-base font-semibold">
+                Setup status
+              </h2>
+              <Card className="rounded-md" data-testid="card-onboarding-readiness">
+                <CardContent className="pt-6 space-y-2 text-sm">
+                  <p className="font-medium" data-testid="text-onboarding-state">
+                    {READINESS_COPY[readiness.data.onboardingState] ?? readiness.data.onboardingState}
+                  </p>
+                  {readiness.data.blockedReasons && readiness.data.blockedReasons.length > 0 && (
+                    <ul className="text-xs text-muted-foreground list-disc pl-4" data-testid="list-readiness-reasons">
+                      {readiness.data.blockedReasons.map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            </section>
+          )}
 
           <section aria-labelledby="submission-summary-title" className="space-y-3">
             <h2 id="submission-summary-title" className="text-base font-semibold">
@@ -268,6 +589,31 @@ export default function PartnerDashboardPage() {
             </div>
           </section>
 
+          <section aria-labelledby="scanner-station-title" className="space-y-3">
+            <h2 id="scanner-station-title" className="text-base font-semibold">
+              Scanner station
+            </h2>
+            <Card className="rounded-md" data-testid="card-dashboard-scanner-station">
+              <CardContent className="pt-6 text-sm text-muted-foreground space-y-3">
+                <p>
+                  Set up the assigned Mac in the MintVault Scanner: sign in with your Partner account, choose an
+                  authorised location, register the Mac, then wait for Super Admin approval. The Scanner shows the
+                  authoritative station and calibration status; this dashboard does not guess at device approval.
+                </p>
+                {/*
+                  A display of the server's verdict, not a control. The Scanner asks the server on every
+                  NEW press and the server refuses independently of anything shown here, so this line
+                  can only ever be a hint that saves the operator a walk to the Mac.
+                */}
+                {canViewCredits && credits.data && credits.data.summary.balanceStatus === "empty" && (
+                  <p className="text-rose-300" data-testid="text-scanner-new-unavailable">
+                    NEW CARD is unavailable on every station until credits are added. FIX and grading are unaffected.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
           {/*
             The "Operations" section (Cards in progress / Turnaround / Quality rating) was removed.
             All three were client-side literal "Not available" strings with no server field behind
@@ -307,7 +653,7 @@ export default function PartnerDashboardPage() {
             <h2 id="recent-submissions-title" className="text-base font-semibold">
               Recent submissions
             </h2>
-            {recentSubmissions.data?.items.length ? (
+            {recentSubmissions.data?.items?.length ? (
               <div
                 className="divide-y divide-border border-y border-border"
                 data-testid="list-dashboard-recent-submissions"
@@ -332,6 +678,21 @@ export default function PartnerDashboardPage() {
     </div>
   );
 }
+
+/**
+ * Plain-English readiness. The server's states are deliberately precise; a shop owner needs to know
+ * what to DO next, so each one is rendered as the next action rather than as a status code.
+ */
+const READINESS_COPY: Record<string, string> = {
+  INVITED: "Invited — the owner needs to open their setup link",
+  AWAITING_PASSWORD_SETUP: "Waiting for a password to be set",
+  AWAITING_MFA_SETUP: "Waiting for two-step security to be set up",
+  STATION_SETUP_REQUIRED: "Register and approve a Scanner station to start scanning",
+  READY_TO_LOG_IN: "Ready",
+  LOGIN_BLOCKED: "Sign-in is blocked — contact MintVault",
+  SUSPENDED: "Suspended — contact MintVault",
+  REVOKED: "Revoked — contact MintVault",
+};
 
 const STATUS_COPY: Record<string, string> = {
   draft: "Draft",

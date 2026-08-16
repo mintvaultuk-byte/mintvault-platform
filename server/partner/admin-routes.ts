@@ -6,12 +6,13 @@
  * events. Mounted additively under /api/super-admin/grading-partners.
  */
 import { Router, type Express, type Request, type Response } from "express";
+import { requireAdminStepUp } from "../lib/admin-step-up";
 import rateLimit from "express-rate-limit";
-import { requireAdmin } from "../auth";
+import { requireSuperAdmin } from "../auth";
 import { partnerAdminQuery } from "./db";
 import { PARTNER_FLAGS } from "./flags";
 import { getPartnerAdminCapability } from "./admin-capability";
-import { g5StatusFor, toG5Error } from "./partner-management-errors";
+import { G5RequestError, g5StatusFor, toG5Error } from "./partner-management-errors";
 import { setPartnerUserStatus, resetPartnerUserMfa, type ActorContext } from "./partner-management-service";
 
 async function adminAudit(
@@ -48,9 +49,17 @@ const legacyMutationRateLimit = rateLimit({
 
 function actorOf(req: Request): ActorContext {
   const session = req.session as { authUserId?: string; adminEmail?: string };
+  // Fail rather than attribute a privileged partner mutation to a phantom actor. The previous
+  // null-UUID/"admin" fallback meant an MFA reset or account change could be recorded against
+  // 00000000-0000-0000-0000-000000000000 with no real identity — an unattributable audit entry for
+  // exactly the actions that most need attribution. The canonical partner-management router already
+  // throws here; these two must agree.
+  if (!session?.authUserId || !session?.adminEmail) {
+    throw new G5RequestError("UNAUTHENTICATED", "An identified admin session is required.");
+  }
   return {
-    actorUserId: session.authUserId ?? "00000000-0000-0000-0000-000000000000",
-    actorEmail: session.adminEmail ?? "admin",
+    actorUserId: session.authUserId,
+    actorEmail: session.adminEmail,
     requestId: String(req.headers["x-request-id"] ?? `legacy-gp-${req.method}-${Date.now()}`),
     idempotencyKey: typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined,
   };
@@ -75,7 +84,14 @@ async function requirePartnerAdminCapability(_req: Request, res: Response, next:
 
 export function superAdminPartnerRouter(): Router {
   const r = Router();
-  r.use(requireAdmin);
+  // requireSuperAdmin, NOT requireAdmin. This legacy router reaches the SAME hardened services as
+  // /api/super-admin/partner-management (which has always required Super Admin) — including
+  // resetPartnerUserMfa, which disables every MFA method, burns recovery codes and revokes sessions
+  // for an arbitrary partner user in an arbitrary tenant. Gating it on plain `requireAdmin` meant any
+  // non-super-admin admin session could strip a partner OWNER's second factor cross-tenant, then
+  // drive that owner's password reset — full tenant takeover without Super Admin. The two routers
+  // must not disagree about who may perform an identical state change.
+  r.use(requireSuperAdmin);
   r.use(requirePartnerAdminCapability);
 
   r.get("/", async (_req, res) => {
@@ -265,7 +281,9 @@ export function superAdminPartnerRouter(): Router {
     res.json({ ok: true });
   });
 
-  r.post("/:partnerId/emergency-stop", async (req, res) => {
+  // AG-3b: emergency stop halts every NEW card for a partner instantly. It is the right tool in a
+  // real incident and the wrong one in anybody else's hands.
+  r.post("/:partnerId/emergency-stop", requireAdminStepUp(), async (req, res) => {
     const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
     await partnerAdminQuery(
       "INSERT INTO partner_emergency_controls (tenant_id, scope, frozen, set_by, reason) VALUES ($1,'partner',true,$2,$3)",
@@ -278,8 +296,67 @@ export function superAdminPartnerRouter(): Router {
       "INSERT INTO partner_security_events (tenant_id, severity, kind) VALUES ($1,'critical','partner_emergency_stop')",
       [req.params.partnerId]
     );
-    await adminAudit(req.params.partnerId, "partner_emergency_stop", String(req.body?.reason ?? ""), email);
+    await adminAudit(String(req.params.partnerId), "partner_emergency_stop", String(req.body?.reason ?? ""), email);
     res.json({ ok: true });
+  });
+
+  return r;
+}
+
+/**
+ * P12 — PARTNER OPERATIONS HEALTH, for Super Admin.
+ *
+ * WHY A SEPARATE ROUTER. The router above is per-partner and capability-gated for tenant management.
+ * This one answers a different question — "is the Partner platform healthy right now, across every
+ * tenant" — which is an estate-wide operational read, not a tenant administration action.
+ *
+ * NO FAKE METRICS. Every number here is a live COUNT over the real tables, computed at request time
+ * by the SAME functions the scheduled reconciliation job runs. Nothing is cached, sampled, estimated
+ * or derived from a counter that something else is responsible for incrementing — a dashboard whose
+ * numbers can drift from the database is worse than no dashboard, because it is believed.
+ *
+ * STRICTLY READ-ONLY. The redrive is deliberately NOT exposed here. It runs on its own schedule with
+ * its own audit trail; a button that silently mutates lifecycle state from a health screen is how an
+ * operator repairs something they have not looked at.
+ */
+export function superAdminPartnerOpsRouter(): Router {
+  const r = Router();
+  r.use(requireSuperAdmin);
+
+  /**
+   * The signals that mean "somebody must do something", in one call.
+   *
+   * `qaDrift` is the documented split-transaction MEDIUM: an approved certificate whose Card Job
+   * never left QA_REVIEW. It is fail-closed (output is refused) and the scheduled job repairs it
+   * within 15 minutes, so a NON-ZERO value here is normal only briefly — a number that stays
+   * non-zero across ticks means the redrive is refusing, and the audit trail says why.
+   */
+  r.get("/health", async (_req, res) => {
+    try {
+      const { detectQaCardJobDrift, detectStuckCardJobs, detectStaleLeases } =
+        await import("./card-job-reconciliation");
+      const [drift, stuck, stale] = await Promise.all([
+        detectQaCardJobDrift(),
+        detectStuckCardJobs(),
+        detectStaleLeases(),
+      ]);
+      res.json({
+        qaDrift: {
+          // `ran: false` is reported rather than silently returning zero — "could not check" and
+          // "nothing wrong" are different answers and must never look the same.
+          checked: drift.ran,
+          skippedReason: drift.skippedReason ?? null,
+          count: drift.items.length,
+          items: drift.items.slice(0, 50),
+        },
+        stuckCardJobs: { count: stuck.items.length, items: stuck.items.slice(0, 50) },
+        staleLeases: { count: stale.items.length },
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("[partner-ops-health] failed:", error instanceof Error ? error.message : error);
+      res.status(503).json({ error: "Partner operations health is unavailable." });
+    }
   });
 
   return r;
@@ -288,4 +365,6 @@ export function superAdminPartnerRouter(): Router {
 /** Additive registration into the existing MintVault admin app (Phase 1 super-admin control shell). */
 export function registerSuperAdminPartnerRoutes(app: Express): void {
   app.use("/api/super-admin/grading-partners", superAdminPartnerRouter());
+  // Estate-wide Partner operations health (P12). Read-only; the redrive stays on its schedule.
+  app.use("/api/super-admin/partner-ops", superAdminPartnerOpsRouter());
 }

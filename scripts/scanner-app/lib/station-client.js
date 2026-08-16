@@ -46,6 +46,18 @@ async function operatorJson(method, apiPath, payload) {
   return { ok: response.ok, status: response.status, body: await readJson(response) };
 }
 
+/**
+ * The shop's SERVER-REPORTED Grading Credit balance, for the Scanner's identity row.
+ *
+ * Read through the operator's own session because `/api/partner/credits` is a portal capability
+ * (`partner.credits.view`), not a station one — a Mac has no wallet of its own to report. Display
+ * only: pressing NEW asks the server again, and the server's answer at that moment is the one that
+ * decides. A stale number here can never authorise or refuse a card.
+ */
+async function creditSummary() {
+  return operatorJson("GET", "/api/partner/credits");
+}
+
 async function signedJson(method, apiPath, payload) {
   const fetch = await getFetch();
   const serialized = Buffer.from(JSON.stringify(payload || {}));
@@ -116,6 +128,7 @@ async function saveCalibration(payload) {
 }
 
 module.exports = {
+  creditSummary,
   signIn,
   completeMfa,
   stationSession,

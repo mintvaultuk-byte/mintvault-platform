@@ -10,7 +10,18 @@
  * (partner_roles/permissions/role_permissions). RLS is enforced in the DB (see the migration);
  * the app additionally sets app.tenant_id per transaction and never trusts a browser-supplied id.
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, bigint, primaryKey, unique } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  jsonb,
+  bigint,
+  primaryKey,
+  unique,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // --- global reference tables ---
@@ -34,7 +45,7 @@ export const partnerRolePermissions = pgTable(
     roleId: uuid("role_id").notNull(),
     permissionId: uuid("permission_id").notNull(),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.roleId, t.permissionId] }) }),
+  (t) => ({ pk: primaryKey({ columns: [t.roleId, t.permissionId] }) })
 );
 
 // --- tenant-scoped tables ---
@@ -82,7 +93,7 @@ export const partnerUsers = pgTable(
     createdBy: uuid("created_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({ uqTenantEmail: unique().on(t.tenantId, t.email) }),
+  (t) => ({ uqTenantEmail: unique().on(t.tenantId, t.email) })
 );
 
 export const partnerUserLocations = pgTable(
@@ -94,7 +105,7 @@ export const partnerUserLocations = pgTable(
     locationId: uuid("location_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({ uqUserLoc: unique().on(t.userId, t.locationId) }),
+  (t) => ({ uqUserLoc: unique().on(t.userId, t.locationId) })
 );
 
 export const partnerUserRoles = pgTable(
@@ -106,7 +117,7 @@ export const partnerUserRoles = pgTable(
     roleId: uuid("role_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({ uqUserRole: unique().on(t.userId, t.roleId) }),
+  (t) => ({ uqUserRole: unique().on(t.userId, t.roleId) })
 );
 
 export const partnerSessions = pgTable("partner_sessions", {
@@ -190,5 +201,8 @@ export const PARTNER_ROLE_CODES = [
   "PARTNER_RECEPTION",
   "PARTNER_FINANCE_VIEWER",
   "PARTNER_TRAINEE",
+  // AG-2: the least-privilege shop-floor role. Operates an APPROVED station and nothing else —
+  // no grading, no credits, no staff, no station enrolment. Seeded by migration 0085.
+  "SCANNER_OPERATOR",
 ] as const;
 export type PartnerRoleCode = (typeof PARTNER_ROLE_CODES)[number];

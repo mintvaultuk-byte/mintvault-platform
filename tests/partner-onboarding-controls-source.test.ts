@@ -26,9 +26,22 @@ describe("partner onboarding and login-control source guards", () => {
     expect(svc).toContain("getPartnerOnboardingReadiness");
     expect(svc).toContain("organisationActive");
     expect(svc).toContain("passwordConfigured");
-    expect(svc).toContain("loginEnabled: portalEnabled && organisationActive && userActive && passwordConfigured");
+    expect(svc).toContain("onboardingState");
+    expect(svc).toContain('resolveGlobalFlag("partner_login_enabled")');
+    expect(svc).toContain("mfa_configured");
+    expect(svc).toContain("location_eligible");
+    expect(svc).toContain("password_set_at");
     expect(svc).toContain("blockedReasons.push(`Organisation is ${row.org_status}.`)");
     expect(svc).toContain("No valid invitation is available for the partner to create a password.");
+  });
+
+  it("uses a Super Admin boundary and secure credential lifecycle primitives", () => {
+    const auth = read("server/partner/auth.ts");
+    const routes = read("server/partner/partner-management-routes.ts");
+    expect(routes).toContain("r.use(requireSuperAdmin)");
+    expect(auth).toContain("MAX_PASSWORD_BYTES = 72");
+    expect(auth).toContain("UPDATE partner_password_reset_tokens SET used_at=now()");
+    expect(auth).toContain("password_set_at=now()");
   });
 
   it("invitation preview is token-derived and acceptance reports pending organisation state", () => {

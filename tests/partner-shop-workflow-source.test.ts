@@ -105,6 +105,51 @@ describe("partner grading adapter reuses the existing MVGS workspace", () => {
     expect(GRADING).not.toMatch(/computeMvgsScore|gradeFromMvgsScore|mvgsTierName/);
   });
 
+  /*
+   * P9 UX CLOSEOUT — the grading edit lease, on the client.
+   *
+   * This could not be wired honestly until the Card Job → grading bridge existed: a Scanner Card Job
+   * could not be opened for grading at all, so there was no moment at which a browser could acquire a
+   * lease. These assertions pin the four behaviours that make the lease real to an operator rather
+   * than merely present on the server.
+   */
+  const LEASE_HOOK = read("client/src/hooks/use-partner-grading-lease.ts");
+  const GRADING_PANEL = read("client/src/components/grading/grading-panel.tsx");
+
+  it("acquires, heartbeats, releases and can take over the grading lease from the canonical workstation", () => {
+    // Acquire on open; release on close (keepalive, because this fires during navigation).
+    expect(LEASE_HOOK).toContain("/lease`");
+    expect(LEASE_HOOK).toContain("/lease/heartbeat`");
+    expect(LEASE_HOOK).toContain("/lease/release`");
+    expect(LEASE_HOOK).toContain("keepalive: true");
+    // The heartbeat runs ONLY while held, and is torn down — a beat that outlived the workstation
+    // would hold a colleague's card open from a closed tab.
+    expect(LEASE_HOOK).toContain('if (state !== "held" || !cardJobId) return;');
+    expect(LEASE_HOOK).toContain("window.clearInterval");
+    // Takeover is a separate, reasoned action — never a flag on acquire.
+    expect(LEASE_HOOK).toContain("/lease/takeover`");
+    expect(GRADING).toContain("lease.takeover(takeoverReason.trim())");
+    expect(GRADING).toContain("Reason for taking over");
+    // A stale or seized session produces a reload/reconcile affordance, not a dead form.
+    expect(LEASE_HOOK).toContain("noteWriteRejection");
+    expect(LEASE_HOOK).toContain("STALE_REVISION");
+    expect(GRADING).toContain("Reopen this card");
+  });
+
+  it("keeps grading authority on the server: the lease generation travels with every write", () => {
+    // The panel merges the envelope into EVERY write through the one function they all funnel
+    // through, so an omitted call site is impossible rather than merely unlikely.
+    expect(GRADING_PANEL).toContain("writeEnvelope");
+    expect(GRADING_PANEL).toContain("...(writeEnvelope?.() ?? {})");
+    expect(GRADING).toContain("leaseRevision: lease.revision");
+    // Openability is the SERVER's answer. Re-deriving it in the browser is what made every Scanner
+    // Card Job un-openable, because its certificate is `unassigned` until the lease is taken.
+    expect(GRADING).toContain("card.openable");
+    expect(GRADING).not.toContain('card.gradingStatus === "assigned" && card.assignedToMe');
+    // And the browser never computes a grade.
+    expect(GRADING).not.toMatch(/computeMvgsScore|gradeFromMvgsScore|mvgsTierName/);
+  });
+
   it("authorizes partner grading by tenant, location, assignment and existing connector provenance", () => {
     expect(MOUNT).toContain("partnerGradingRouter()");
     expect(GRADING_ROUTES).toContain('requirePartnerCapability("partner.cards.assess")');
