@@ -107,7 +107,7 @@ describe("4. all three stages use the same desktop breakpoint (md) for the two-c
   it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
-    expect(ASIDE).toContain("md:w-[35%] md:shrink-0");
+    expect(ASIDE).toContain("md:w-[45%] md:shrink-0");
     // no competing/second breakpoint (e.g. lg:, 2xl:) governs the aside's own width.
     expect(ASIDE).not.toMatch(/lg:w-\[|2xl:w-\[|xl:w-\[/);
   });

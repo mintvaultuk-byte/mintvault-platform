@@ -145,7 +145,7 @@ describe("4. Review restores the two-column workstation (card left, details righ
     // identical md breakpoint rather than requiring a new one. The column
     // ratio itself now lives in ONE shared constant (WorkstationPreviewAside).
     expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
-    expect(ASIDE_SRC).toContain("md:w-[35%] md:shrink-0");
+    expect(ASIDE_SRC).toContain("md:w-[45%] md:shrink-0");
     expect(ASIDE_SRC).toContain("WORKSTATION_PREVIEW_WIDTH_CLASS");
   });
   it("mobile stacking remains supported (no md:/lg:-only mandatory two-column)", () => {

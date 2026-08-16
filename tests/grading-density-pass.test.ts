@@ -89,7 +89,7 @@ describe("two-column shell + density (spec 1, 3, 19)", () => {
     // unified-shell pass: the column-ratio class now lives in ONE shared
     // constant inside WorkstationPreviewAside, not inline in certificate-form.
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[35%] md:shrink-0");
+    expect(asideSrc).toContain("md:w-[45%] md:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
     expect(WORKSTATION).toContain("<WorkstationPreviewAside");
   });
