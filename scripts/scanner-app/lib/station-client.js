@@ -13,10 +13,10 @@ function getFetch() {
 }
 
 function baseUrl() {
-  // Share the same configured host (including the explicit local-development
-  // override and legacy-ingest migration fallback) as the scanner evidence
-  // client. First-run identity must never silently enrol against production
-  // while the physical capture client points at a development server.
+  // Share the DECLARED environment with the scanner evidence client, so identity enrolment and
+  // physical capture can never address two different MintVaults. This now THROWS on an
+  // unconfigured or contradictory station instead of resolving to a default host — refusing to
+  // sign in is the correct answer to "which MintVault is this?" when nobody has said.
   return String(require("./server-client").API_BASE).replace(/\/$/, "");
 }
 

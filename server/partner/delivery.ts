@@ -6,7 +6,7 @@
  * sending real email. In production, if NO approved delivery provider is configured, delivery FAILS
  * CLOSED (throws) — the reset request stays generic to the caller, but no token is issued/leaked.
  */
-import { APP_BASE_URL } from "../app-url";
+import { requireCredentialLinkBaseUrl } from "../app-url";
 
 export type ResetDeliveryAdapter = (email: string, token: string) => Promise<void>;
 export type InvitationDeliveryAdapter = (data: {
@@ -64,7 +64,7 @@ export async function deliverResetToken(email: string, token: string): Promise<v
     const { RESET_TOKEN_MINUTES } = await import("./auth");
     sent = await sendPartnerResetEmail({
       email,
-      resetUrl: `${APP_BASE_URL}/partner/reset?token=${encodeURIComponent(token)}`,
+      resetUrl: `${requireCredentialLinkBaseUrl()}/partner/reset?token=${encodeURIComponent(token)}`,
       expiresMinutes: RESET_TOKEN_MINUTES,
     });
   } catch {

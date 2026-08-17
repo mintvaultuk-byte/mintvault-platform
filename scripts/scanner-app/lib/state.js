@@ -74,6 +74,9 @@ const DEFAULT = Object.freeze({
   soundEnabled:     true,
   // Direct ImageCaptureCore device/profile state, refreshed by the existing
   // scanner process. This is intentionally distinct from HTTP health.
+  // Which MintVault this Scanner is declared to belong to. Present in EVERY state payload so the
+  // renderer can show the badge before sign-in, when it matters most.
+  environment:      null,
   scannerHealth:    { status: "checking" },
   // Setup-only broad JPEG Preview. It has no certificate/session identifier,
   // no TIFF, and is never an evidence source; the renderer can display only

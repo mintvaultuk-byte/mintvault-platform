@@ -870,3 +870,40 @@ body {
   font-size: 14px;
   font-weight: 600;
 }
+
+/* ---- Environment badge -------------------------------------------------
+   Shown for every deployment EXCEPT a healthy production one, on the
+   principle that "this is not the real MintVault" is the surprising fact and
+   surprising facts should be the ones on screen. An unresolvable environment
+   is red, because a Scanner that does not know where it is pointing must not
+   look merely unusual — it must look wrong. */
+.hdr-env {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 3px;
+  margin-right: 8px;
+  text-transform: uppercase;
+  background: #D4AF37;
+  color: #1A1400;
+}
+.hdr-env[data-environment="invalid"] { background: #b3261e; color: #fff; }
+.hdr-env[data-environment="development"] { background: #3a6ea5; color: #fff; }
+
+#environmentWarning { color: #b3261e; font-weight: 700; }
+
+/* A button that reads as a link — keeps keyboard/focus semantics correct
+   while sitting inside the sign-in form. */
+.linklike {
+  background: none;
+  border: 0;
+  padding: 6px 0 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #7a7a7a;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linklike:hover { color: #1A1400; }

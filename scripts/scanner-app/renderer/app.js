@@ -71,6 +71,11 @@ const els = {
   placementPanel: document.getElementById("placementPanel"),
   placementViewport: document.getElementById("placementViewport"),
   placementPreview: document.getElementById("placementPreview"),
+  environmentBadge: document.getElementById("environmentBadge"),
+  environmentName: document.getElementById("environmentName"),
+  environmentApi: document.getElementById("environmentApi"),
+  environmentWarning: document.getElementById("environmentWarning"),
+  stationForgotPasswordBtn: document.getElementById("stationForgotPasswordBtn"),
   placementOuterBox: document.getElementById("placementOuterBox"),
   placementSafeBox: document.getElementById("placementSafeBox"),
   placementCardBox: document.getElementById("placementCardBox"),
@@ -898,6 +903,7 @@ function renderRecent(recent) {
 
 function renderState(state) {
   lastState = state || {};
+  renderEnvironment(state?.environment);
   els.scannerHealth.textContent = renderHealth(lastState.scannerHealth);
   renderAvailableCredits();
   renderTarget(lastState);
@@ -1068,6 +1074,43 @@ async function refreshMissingImages() {
 }
 
 els.hideBtn.addEventListener("click", () => window.scanner.hidePopover());
+
+/*
+ * WHICH MINTVAULT AM I TALKING TO?
+ *
+ * Shown permanently, not on demand. A staging Scanner that looks identical to a production one is
+ * how a station spent an afternoon authenticating against the wrong deployment while the operator
+ * was told "sign-in failed". The badge is the answer to a question nobody thought to ask.
+ */
+function renderEnvironment(descriptor) {
+  if (!descriptor) return;
+  const label = descriptor.label || "UNCONFIGURED";
+  els.environmentName.textContent = label;
+  els.environmentApi.textContent = descriptor.apiBase
+    ? String(descriptor.apiBase).replace(/^https?:\/\//, "")
+    : "—";
+
+  // The badge is loud for anything that is not production, and loudest when nothing is configured.
+  const isProduction = descriptor.environment === "production";
+  els.environmentBadge.hidden = isProduction && descriptor.ok;
+  els.environmentBadge.textContent = label;
+  els.environmentBadge.setAttribute("data-environment", descriptor.ok ? descriptor.environment || "unknown" : "invalid");
+
+  const showWarning = !descriptor.ok;
+  els.environmentWarning.hidden = !showWarning;
+  els.environmentWarning.textContent = showWarning ? descriptor.message || "" : "";
+}
+
+els.stationForgotPasswordBtn.addEventListener("click", () => {
+  /*
+   * Opens the PARTNER WEBSITE recovery flow rather than reimplementing password reset inside
+   * Electron. One canonical token lifecycle, one set of rate limits, one audit trail — a second
+   * implementation here would be a second thing to get wrong, in the process least able to be
+   * patched quickly. The URL is derived from the declared environment, so a staging Scanner can
+   * never send its operator to the production reset page.
+   */
+  void window.scanner.openForgotPassword();
+});
 
 els.stationSignInForm.addEventListener("submit", (event) => {
   event.preventDefault();

@@ -21,3 +21,30 @@
  */
 export const APP_BASE_URL: string =
   process.env.APP_URL || "https://mintvaultuk.com";
+
+/**
+ * The base URL for CREDENTIAL links, which must never be guessed.
+ *
+ * WHY THIS IS SEPARATE FROM `APP_BASE_URL`. The fallback above is a reasonable default for a
+ * verify URL or a QR code: pointing a public certificate link at the brand domain is harmless
+ * even from the wrong box. A PASSWORD RESET LINK is not that. If staging's `APP_URL` secret is
+ * ever unset, the fallback would send a partner a link to PRODUCTION carrying a token that only
+ * staging can redeem — the link fails, and worse, we have emailed a credential-bearing URL for a
+ * system the recipient was not being asked to authenticate against.
+ *
+ * Both Fly apps currently set `APP_URL` (verified 2026-08-17, distinct digests on `mintvault` and
+ * `mintvault-v2`), so this changes nothing today. It exists so that removing the secret produces
+ * an undelivered email and a loud failure, rather than a silently cross-environment one.
+ *
+ * Throws rather than returning a default, because there is no safe default for this.
+ */
+export function requireCredentialLinkBaseUrl(): string {
+  const configured = process.env.APP_URL;
+  if (!configured || !configured.trim()) {
+    throw new Error(
+      "APP_URL is not set, so no credential link can be addressed. Refusing to fall back to the " +
+        "brand domain: a reset link must point at the deployment that minted the token."
+    );
+  }
+  return configured.replace(/\/$/, "");
+}

@@ -9,6 +9,7 @@
   <header class="hdr" id="hdr">
     <span class="hdr-title">MintVault Scanner</span>
     <div class="hdr-spacer"></div>
+    <span class="hdr-env" id="environmentBadge" hidden data-tip="Which MintVault this Scanner is signed in to"></span>
     <span class="hdr-version" id="appVersion" data-tip="Installed app version"></span>
     <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
   </header>
@@ -168,6 +169,12 @@
   <details class="row settings secondary" id="diagnosticsRow">
     <summary id="settingsToggle">Service &amp; diagnostics</summary>
     <div class="settings-body" id="settingsBody" hidden>
+      <div class="settings-test environment-panel" id="environmentPanel">
+        <span class="row-header">MintVault environment</span>
+        <p class="hint"><strong>ENVIRONMENT:</strong> <span id="environmentName">—</span></p>
+        <p class="hint"><strong>API:</strong> <span id="environmentApi">—</span></p>
+        <p class="hint" id="environmentWarning" hidden></p>
+      </div>
       <div class="settings-test full-platen-diagnostics" id="fullPlatenDiagnostics" hidden>
         <span class="row-header">Full-platen placement diagnostic</span>
         <div class="positioning-preview-viewport">
@@ -269,6 +276,7 @@
         <label class="field"><span>Email</span><input type="email" id="stationEmail" autocomplete="username" required /></label>
         <label class="field"><span>Password</span><input type="password" id="stationPassword" autocomplete="current-password" required /></label>
         <button class="btn primary" type="submit" id="stationSignInBtn">SIGN IN</button>
+        <button class="linklike" type="button" id="stationForgotPasswordBtn">FORGOT PASSWORD?</button>
       </form>
       <form id="stationMfaForm" class="station-setup-form" hidden>
         <label class="field"><span>Authentication code</span><input type="text" id="stationMfaCode" autocomplete="one-time-code" inputmode="numeric" /></label>

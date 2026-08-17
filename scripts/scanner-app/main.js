@@ -36,6 +36,7 @@ const server   = require("./lib/server-client");
 const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
+const environment = require("./lib/environment");
 
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
@@ -357,7 +358,11 @@ function togglePopover() {
 
 function pushStateToRenderer() {
   if (popover && !popover.isDestroyed()) {
-    popover.webContents.send("state-update", stateMod.get());
+    /*
+     * Resolved on every push rather than cached at boot, so declaring the environment in Service &
+     * Diagnostics takes effect immediately. Cheap: a file read the OS has in page cache.
+     */
+    popover.webContents.send("state-update", { ...stateMod.get(), environment: environment.resolveEnvironment() });
   }
   refreshTray();
 }
@@ -870,6 +875,20 @@ function setupIpc() {
   ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
 
   ipcMain.handle("arm-next-side", async () => armNextOutstandingSide("operator"));
+
+  /*
+   * Password recovery is the WEBSITE's authority, not the Scanner's. Opening the partner portal in
+   * the operator's browser keeps one token lifecycle, one set of rate limits and one audit trail —
+   * a second reset implementation inside Electron would be a second thing to get wrong, in the
+   * component that is hardest to patch quickly. The URL comes from the DECLARED environment, so a
+   * staging Scanner cannot send its operator to the production reset page.
+   */
+  ipcMain.handle("open-forgot-password", () => {
+    const resolved = environment.resolveEnvironment();
+    if (!resolved.ok) return { ok: false, error: resolved.message };
+    shell.openExternal(`${resolved.apiBase}/partner/forgot-password`);
+    return { ok: true };
+  });
 
   ipcMain.handle("get-station-setup", () => stationSetupState());
   ipcMain.handle("station-sign-in", async (_event, payload) => {

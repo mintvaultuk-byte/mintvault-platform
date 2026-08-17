@@ -15,6 +15,7 @@ const crypto    = require("node:crypto");
 const { Transform } = require("node:stream");
 const FormData  = require("form-data");
 const stationIdentity = require("./station-identity");
+const environment = require("./environment");
 // node-fetch v3 is ESM-only. Lazy-load via dynamic import; cache the promise.
 let _fetchPromise = null;
 function getFetch() {
@@ -241,11 +242,28 @@ function baseFromLegacyIngestUrl(value) {
 }
 
 const env = loadEnv();
-const API_BASE =
-  process.env.MINTVAULT_API_BASE ||
-  env.MINTVAULT_API_BASE ||
-  baseFromLegacyIngestUrl(process.env.MINTVAULT_INGEST_URL || env.MINTVAULT_INGEST_URL) ||
-  "https://mintvaultuk.com";
+
+/*
+ * THE API TARGET IS NOW A CONSEQUENCE OF A DECLARED ENVIRONMENT, NOT A GUESS.
+ *
+ * This used to be a four-branch fallback chain ending in a hardcoded production hostname. On
+ * 2026-08-17 that last branch fired: a staging station relaunched without MINTVAULT_API_BASE fell
+ * through to a legacy env file from June naming the production ingest URL, and began
+ * authenticating against mintvaultuk.com with credentials that only exist on staging. See
+ * lib/environment.js for the full account.
+ *
+ * `MINTVAULT_INGEST_URL` is deliberately NO LONGER a source of the API base. It is a legacy
+ * watcher setting, it is stale on real machines, and letting it decide which MintVault a station
+ * talks to is what caused the incident. `baseFromLegacyIngestUrl` is retained only for the legacy
+ * upload path and its own regression test.
+ *
+ * Resolved per call rather than once at module load, so a station that is configured while the app
+ * is running starts working without a restart — and, more importantly, so an UNCONFIGURED station
+ * throws at the point of use instead of silently binding a hostname at import time.
+ */
+function apiBase() {
+  return environment.requireApiBase();
+}
 
 // Live credentials: the env file is re-read whenever its mtime changes, so a
 // rotated SCANNER_API_TOKEN takes effect on the next request WITHOUT an app
@@ -288,7 +306,7 @@ function requestAuthHeaders(method, urlPath, body) {
 
 async function getJson(urlPath) {
   const fetch = await getFetch();
-  const res = await fetch(`${API_BASE}${urlPath}`, {
+  const res = await fetch(`${apiBase()}${urlPath}`, {
     method: "GET",
     headers: requestAuthHeaders("GET", urlPath, Buffer.alloc(0)),
   });
@@ -301,7 +319,7 @@ async function getJson(urlPath) {
 async function postJson(urlPath, payload) {
   const fetch = await getFetch();
   const requestBody = JSON.stringify(payload || {});
-  const res = await fetch(`${API_BASE}${urlPath}`, {
+  const res = await fetch(`${apiBase()}${urlPath}`, {
     method: "POST",
     headers: { ...requestAuthHeaders("POST", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
     body: requestBody,
@@ -315,7 +333,7 @@ async function postJson(urlPath, payload) {
 async function deleteJson(urlPath, payload) {
   const fetch = await getFetch();
   const requestBody = JSON.stringify(payload || {});
-  const res = await fetch(`${API_BASE}${urlPath}`, {
+  const res = await fetch(`${apiBase()}${urlPath}`, {
     method: "DELETE",
     headers: { ...requestAuthHeaders("DELETE", urlPath, Buffer.from(requestBody)), "content-type": "application/json" },
     body: requestBody,
@@ -444,7 +462,7 @@ async function uploadPair(frontPath, backPath, idempotencyKey) {
   // stable across retries/restarts). The server's UNIQUE-index gate makes a
   // re-driven/raced ingest resolve to the SAME cert — never a duplicate.
   const headers = idempotencyKey ? { "x-idempotency-key": idempotencyKey } : {};
-  return postForm(`${API_BASE}/api/admin/scan-ingest`, form, headers);
+  return postForm(`${apiBase()}/api/admin/scan-ingest`, form, headers);
 }
 
 /**
@@ -465,7 +483,7 @@ async function attachImage(certId, side, filePath, replaceExisting) {
   appendTiffMaster(form, "image", filePath);
   form.append("side", side);
   form.append("replace_existing", replaceExisting ? "true" : "false");
-  return postForm(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, form);
+  return postForm(`${apiBase()}/api/admin/certs/${encodeURIComponent(certId)}/image`, form);
 }
 
 /** Claim only a server-armed, workstation-bound capture target. */
@@ -505,7 +523,7 @@ async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) 
   appendTiffMaster(form, "image", filePath);
   form.append("device_id", deviceId);
   form.append("capture_provenance", JSON.stringify(provenance));
-  return postForm(`${API_BASE}/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/evidence`, form);
+  return postForm(`${apiBase()}/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/evidence`, form);
 }
 
 /**
@@ -535,7 +553,16 @@ async function failCapture(sessionId, deviceId, reason) {
 }
 
 module.exports = {
-  API_BASE,
+  /*
+   * A GETTER, not a captured string. Binding this at module load is what allowed a stale value to
+   * outlive the configuration that produced it; resolving on read means an unconfigured station
+   * throws here rather than handing out a hostname it was never told to use.
+   */
+  get API_BASE() {
+    return apiBase();
+  },
+  /** Non-throwing environment descriptor, for Service & Diagnostics and the STAGING badge. */
+  describeEnvironment: () => environment.resolveEnvironment(),
   hasToken: () => {
     const vals = liveEnv();
     return stationIdentity.hasActiveStationSession() ||

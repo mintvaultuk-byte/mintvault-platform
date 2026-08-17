@@ -81,14 +81,37 @@ describe("partner reset delivery adapter", () => {
     expect(payload.html).toContain(`${RESET_TOKEN_MINUTES} minutes`);
   });
 
-  it("falls back to the canonical brand URL when APP_URL is unset", async () => {
+  it("REFUSES to send when APP_URL is unset, rather than addressing production", async () => {
+    /*
+     * This test previously asserted the opposite: that an unset APP_URL fell back to
+     * https://mintvaultuk.com. That fallback is fine for a public verify link and wrong for a
+     * CREDENTIAL link. Staging minting a token and emailing a PRODUCTION URL sends a partner a
+     * credential-bearing link for a system that cannot redeem it — the token is useless there, and
+     * we have pointed them at the wrong MintVault to type a new password into.
+     *
+     * There is no safe default for this, so there is no default. Delivery fails, loudly.
+     */
     process.env.RESEND_API_KEY = "re_test_key";
     delete process.env.APP_URL;
     const d = await loadDelivery();
+
+    // Fails through the module's existing REDACTED signal, so the caller still returns the generic
+    // "if an account exists…" response and no email is attempted.
+    await expect(d.deliverResetToken(EMAIL, TOKEN)).rejects.toThrow(/partner reset delivery failed/);
+
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("addresses the reset link at the deployment that minted the token", async () => {
+    process.env.RESEND_API_KEY = "re_test_key";
+    process.env.APP_URL = "https://mintvault-v2.fly.dev";
+    const d = await loadDelivery();
     await d.deliverResetToken(EMAIL, TOKEN);
-    expect(sendMock.mock.calls[0][0].html).toContain(
-      `href="https://mintvaultuk.com/partner/reset?token=${ENCODED}"`
-    );
+
+    const html = sendMock.mock.calls[0][0].html;
+    expect(html).toContain(`href="https://mintvault-v2.fly.dev/partner/reset?token=${ENCODED}"`);
+    // A staging deployment must never emit a production link.
+    expect(html).not.toContain("https://mintvaultuk.com/partner/reset");
   });
 
   it("gives an explicitly registered adapter precedence over the Resend default", async () => {

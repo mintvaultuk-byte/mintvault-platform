@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("scanner", {
   armCapture: (payload) => ipcRenderer.invoke("arm-capture", payload),
   cancelCardJob: (payload) => ipcRenderer.invoke("cancel-card-job", payload),
   openGradeCert: (certId) => ipcRenderer.invoke("open-grade-cert", certId),
+  openForgotPassword: () => ipcRenderer.invoke("open-forgot-password"),
   getVersion: () => ipcRenderer.invoke("get-version"),
   getStationSetup: () => ipcRenderer.invoke("get-station-setup"),
   stationSignIn: (payload) => ipcRenderer.invoke("station-sign-in", payload),
