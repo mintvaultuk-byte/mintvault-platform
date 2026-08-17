@@ -227,6 +227,26 @@ function hasAny(urls: ImageUrls, side: Side): boolean {
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6];
 
+/**
+ * Grading-rail SAFE FIT insets, in CSS pixels, applied symmetrically on each
+ * axis so that centring the fitted image cannot spend one edge's allowance on
+ * the opposite edge.
+ *
+ * The vertical inset is the binding requirement: the owner's acceptance bar is
+ * a MINIMUM OF 12PX of visible clearance between the rendered source image's
+ * bottom and the visible inspection viewport's bottom. 0px, 1px or 2px is not
+ * "technically fits" — the grader has to be able to see that the scan ends.
+ * 14 is set deliberately above the 12 floor so sub-pixel layout rounding can
+ * never bring the measured clearance under the bar.
+ *
+ * Full visibility of the scan outranks card size. Do not reduce these to make
+ * the card larger.
+ */
+const RAIL_SAFE_INSET_X = 10;
+const RAIL_SAFE_INSET_Y = 14;
+/** The contractual floor these insets exist to satisfy. */
+export const RAIL_MIN_BOTTOM_CLEARANCE_PX = 12;
+
 function nextZoomStep(current: number): number {
   for (const s of ZOOM_STEPS) {
     if (s > current + 0.01) return s;
@@ -524,6 +544,32 @@ export default function ImageViewer({
   const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
   const [imgNaturalDims, setImgNaturalDims] = useState<{ w: number; h: number } | null>(null);
 
+  // ── Rail SAFE FIT (owner defect 2026-08-16: the physical card's bottom edge) ──
+  //
+  // Every previous geometry check measured the FRAME rectangle and reported
+  // "clipped = 0" while the owner still could not see the bottom of the scan.
+  // Both halves of that contradiction were real, and neither was about the frame:
+  //
+  //   1. The frame sized itself with `aspectRatio: 5/7` + `maxHeight: 100%` and
+  //      the <img> filled its content box exactly (`w-full h-full`). The only
+  //      separation was the frame's own `padding: 1.5%` — about 4.5px, which is
+  //      padding, not visible clearance. The card ran to the very edge.
+  //   2. The frame carried `rounded-[5%]` together with `overflow-hidden`. At a
+  //      ~370px-wide card that is an ~18px corner radius cutting into the scan's
+  //      lower corners — exactly where the set symbol, card number and copyright
+  //      line sit. The image RECTANGLE was inside the frame RECTANGLE the whole
+  //      time; the rounded mask removed content anyway, so a rect-vs-rect test
+  //      could never see it.
+  //
+  // The fix is to stop asking CSS to infer the fit. We measure the real
+  // remaining-space viewport, read the scan's own natural dimensions, and
+  // compute explicit rendered pixels with a guaranteed safety inset — so the
+  // <img> itself, not a wrapper, is the fitted authority. Scoped to the grading
+  // rail (`fillHost` && !markMode); the inline and public viewers are untouched.
+  const railViewportRef = useRef<HTMLDivElement>(null);
+  const [railViewport, setRailViewport] = useState<{ w: number; h: number } | null>(null);
+  const [railNaturalDims, setRailNaturalDims] = useState<{ w: number; h: number } | null>(null);
+
   // Measure the scrollable fitRef's box on mount + resize. ResizeObserver
   // re-fires whenever the parent flex layout reflows (e.g. toolbar wraps,
   // window resizes). Only meaningful in mark mode — outside mark mode
@@ -548,6 +594,9 @@ export default function ImageViewer({
   // renderW/H for the new image.
   useEffect(() => {
     setImgNaturalDims(null);
+    // Same reasoning for the rail: a stale natural size from the previous side
+    // would fit the NEW scan to the OLD aspect and could push content off-edge.
+    setRailNaturalDims(null);
   }, [side, variant]);
 
   // baseFit: the image scaled to fit inside fitBox preserving its intrinsic
@@ -566,6 +615,57 @@ export default function ImageViewer({
   // transform-free, so getBoundingClientRect and CSS dims line up exactly.
   const renderW = baseFit ? baseFit.w * zoom : null;
   const renderH = baseFit ? baseFit.h * zoom : null;
+
+  // The rail's safe fit applies to the inspection view only. Mark mode already
+  // owns its own explicit-pixel fit (fitBox / baseFit above) and must not change.
+  const railFitEnabled = fillHost && !markMode;
+
+  // Measure the REAL remaining-space card viewport — the `min-h-0 flex-1` box
+  // that sits between the tabs row and the controls row. Its border box is the
+  // rectangle the owner sees, so it is also the rectangle clearances are
+  // measured against.
+  useLayoutEffect(() => {
+    const el = railViewportRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = Math.floor(el.clientWidth);
+      const h = Math.floor(el.clientHeight);
+      setRailViewport((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [railFitEnabled, showReference]);
+
+  const railFit =
+    railFitEnabled &&
+    railViewport &&
+    railNaturalDims &&
+    railNaturalDims.w > 0 &&
+    railNaturalDims.h > 0 &&
+    railViewport.w > RAIL_SAFE_INSET_X * 2 &&
+    railViewport.h > RAIL_SAFE_INSET_Y * 2
+      ? (() => {
+          // viewport minus the safety insets on BOTH axes. The insets are
+          // symmetric so that centring the result cannot spend one side's
+          // allowance on the other — a symmetric inset of N guarantees at least
+          // N of visible clearance on every edge, including the bottom.
+          const safeW = railViewport.w - RAIL_SAFE_INSET_X * 2;
+          const safeH = railViewport.h - RAIL_SAFE_INSET_Y * 2;
+          const scale = Math.min(safeW / railNaturalDims.w, safeH / railNaturalDims.h);
+          if (!Number.isFinite(scale) || scale <= 0) return null;
+          const w = railNaturalDims.w * scale;
+          const h = railNaturalDims.h * scale;
+          return {
+            w,
+            h,
+            // Centred, so each axis' leftover splits evenly.
+            clearanceX: (railViewport.w - w) / 2,
+            clearanceY: (railViewport.h - h) / 2,
+          };
+        })()
+      : null;
 
   const currentUrl = getUrl(urls, side, variant);
   const sideDefects = defects.filter((d) => d.image_side === side);
@@ -936,7 +1036,15 @@ export default function ImageViewer({
     const cardFrame = (
       <div
         ref={containerRef}
-        className={`relative rounded-[5%] select-none ${
+        className={`relative select-none ${
+          // The decorative 5% corner radius is DROPPED on the grading rail. Paired
+          // with overflow-hidden it masks roughly 18px off each corner of a ~370px
+          // card — the set symbol, card number and copyright line — while every
+          // rectangle-based check still reports the image as fully inside the frame.
+          // The grader must inspect the true scan, so the inspection viewport does
+          // not crop it decoratively. Every other surface keeps the rounding.
+          railFitEnabled ? "" : "rounded-[5%] "
+        }${
           markMode
             ? "flex-shrink-0"
             : `overflow-hidden ${zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"}`
@@ -948,14 +1056,55 @@ export default function ImageViewer({
               // box equals the visible image area. Pin coord math then
               // aligns on both sides regardless of natural aspect.
               { cursor: PIN_CURSOR }
-            : {
-                aspectRatio: "5/7",
-                maxHeight: maxH,
-                // Flex items default to `min-height: auto`, which would let the
-                // aspect-derived height win and overflow the rail. 0 lets it shrink.
-                minHeight: 0,
-                padding: "1.5%",
-              }
+            : railFit
+              ? // RAIL SAFE FIT: explicit measured pixels, computed from the real
+                // viewport and the scan's own natural dimensions. No padding, so
+                // the frame box IS the rendered image box — which keeps the
+                // overlay contract (zoom-pan div == img box) exactly as before.
+                // RAIL SAFE FIT — the computed result, applied literally.
+                //
+                // `position: absolute` at the computed offsets is what makes the fit
+                // deterministic rather than negotiated. An in-flow box carrying an
+                // explicit width becomes its ancestors' MIN-CONTENT width, and with
+                // `min-width: auto` anywhere up the chain that re-widens the rail,
+                // which re-measures the viewport, which re-widens the card. The
+                // reproduction latched at a 1066px card inside an 829px row and never
+                // converged. Out of flow, the card contributes nothing upward: the
+                // viewport's size is decided by the rail alone, and the card is placed
+                // into it. `left`/`top` ARE the clearances — the numbers reported on
+                // the diagnostic attributes are the same numbers CSS is given, so the
+                // measured rectangle and the computed rectangle cannot drift.
+                {
+                  position: "absolute",
+                  left: railFit.clearanceX,
+                  top: railFit.clearanceY,
+                  width: railFit.w,
+                  height: railFit.h,
+                }
+              : railFitEnabled
+                ? // Transient first paint only, before the viewport has been
+                  // measured or the scan's natural size is known.
+                  //
+                  // Out of flow here too, for the same reason as the fitted state.
+                  // An in-flow fallback sized by `max-width/max-height: 100%` has to
+                  // resolve those percentages against a viewport whose own width is
+                  // still being decided — a circular constraint the browser breaks by
+                  // falling back to the content's intrinsic size. The reproduction
+                  // showed the effect precisely: the frame took the scan's natural
+                  // 1200x1680, dragged the 45% rail out to 1318px, and the first
+                  // measurement was taken from that inflated box. `inset: 0` with
+                  // object-contain fills the viewport exactly, shows the whole scan,
+                  // and contributes nothing upward, so the first measurement is the
+                  // real one.
+                  { position: "absolute", inset: 0 }
+                : {
+                    aspectRatio: "5/7",
+                    maxHeight: maxH,
+                    // Flex items default to `min-height: auto`, which would let the
+                    // aspect-derived height win and overflow the rail. 0 lets it shrink.
+                    minHeight: 0,
+                    padding: "1.5%",
+                  }
         }
         onPointerDown={handleMarkPointerDown}
         onClick={handleContainerClick}
@@ -970,6 +1119,23 @@ export default function ImageViewer({
         data-inspection-zoom={zoom}
         data-inspection-focus-x={pan.x / 100}
         data-inspection-focus-y={pan.y / 100}
+        {...(railFitEnabled
+          ? {
+              // READ-ONLY runtime diagnostics. These report the computed safe fit
+              // so acceptance can be checked without inferring geometry from CSS.
+              // They describe the rendered <img> box against the visible viewport
+              // box — never a wrapper, never padding.
+              "data-card-fit-state": railFit ? "safe-fit" : "measuring",
+              "data-card-natural-w": railNaturalDims?.w ?? "",
+              "data-card-natural-h": railNaturalDims?.h ?? "",
+              "data-card-rendered-w": railFit ? railFit.w.toFixed(1) : "",
+              "data-card-rendered-h": railFit ? railFit.h.toFixed(1) : "",
+              "data-card-clearance-top": railFit ? railFit.clearanceY.toFixed(1) : "",
+              "data-card-clearance-bottom": railFit ? railFit.clearanceY.toFixed(1) : "",
+              "data-card-clearance-left": railFit ? railFit.clearanceX.toFixed(1) : "",
+              "data-card-clearance-right": railFit ? railFit.clearanceX.toFixed(1) : "",
+            }
+          : {})}
       >
         {currentUrl ? (
           <div
@@ -1008,12 +1174,17 @@ export default function ImageViewer({
                       }
                   : undefined
               }
+              data-testid={railFitEnabled ? "grading-card-image" : undefined}
               onLoad={(e) => {
+                const w = e.currentTarget.naturalWidth;
+                const h = e.currentTarget.naturalHeight;
+                // The rail's safe fit is computed from the SCAN's own natural
+                // dimensions, not from an assumed 5:7 card ratio — a scan that is
+                // not exactly 5:7 is precisely the case where assuming the ratio
+                // pushes real card content past the viewport edge.
+                if (railFitEnabled) setRailNaturalDims({ w, h });
                 if (!markMode) return;
-                setImgNaturalDims({
-                  w: e.currentTarget.naturalWidth,
-                  h: e.currentTarget.naturalHeight,
-                });
+                setImgNaturalDims({ w, h });
               }}
               draggable={false}
             />
@@ -1483,18 +1654,24 @@ export default function ImageViewer({
            * As a flex item it also had the default `min-height: auto`, so its aspect-derived
            * height stopped it shrinking to fit.
            *
-           * This wrapper is the remaining-space rectangle: `flex-1 min-h-0` takes exactly what
-           * the tabs and controls left, and `max-h-full min-h-0` on the frame binds it to THAT
-           * box. The card now shrinks to stay whole instead of overflowing, which is the
-           * required priority order: complete card first, largest size second.
-           *
-           * `items-start`, not `items-center`: the owner's screenshot showed the card floating in
-           * the middle of the rail with dead space above it, under the Front/Back controls, and
-           * ~46px of unused separation before the certificate. Aligning to the start pulls the
-           * card+certificate group up against the controls, so the leftover height collects in one
-           * place at the bottom instead of being split into two gaps that read as broken.
+           * THIS element is the visible inspection viewport: the rectangle the card is
+           * fitted into, the rectangle every clearance is measured against, and the
+           * element the ResizeObserver watches. It deliberately wraps the card frame
+           * ALONE. renderImageArea returns a fragment of `frame + zoom toolbar`, so
+           * measuring their shared parent would fold the toolbar's width into the card's
+           * available space and report a viewport the card never had.
            */
-          <div className="flex min-h-0 flex-1 items-start justify-center">{cardFrame}</div>
+          <div
+            ref={railViewportRef}
+            className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"
+            data-testid="grading-card-viewport"
+            data-card-viewport-w={railViewport?.w ?? ""}
+            data-card-viewport-h={railViewport?.h ?? ""}
+            data-card-safe-inset-x={RAIL_SAFE_INSET_X}
+            data-card-safe-inset-y={RAIL_SAFE_INSET_Y}
+          >
+            {cardFrame}
+          </div>
         ) : (
           cardFrame
         )}
@@ -1502,7 +1679,7 @@ export default function ImageViewer({
         {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card
           art. Right-aligned row directly under the image, matching the
           existing "Mark Defects / Manual Crop" button row pattern. */}
-        <div className="mt-2 flex items-center justify-end">
+        <div className="mt-2 flex shrink-0 items-center justify-end">
           <div className="flex items-center gap-0.5 bg-[var(--admin-panel2)] border border-[var(--admin-line-hard)] rounded-full px-1 py-0.5">
             <button
               type="button"
@@ -1762,9 +1939,21 @@ export default function ImageViewer({
           grid keeps 525 because that layout has no definite height to resolve against. */}
       {!showReference &&
         (fillHost ? (
-          // A definite, bounded box for the 5:7 frame to resolve maxHeight:100% against, and the
-          // only element allowed to absorb the leftover height.
-          <div className="flex min-h-0 flex-1 items-center justify-center">{renderImageArea("100%")}</div>
+          // THE VISIBLE INSPECTION VIEWPORT. This is the rectangle the owner sees and
+          // the rectangle every clearance is measured against — it is measured directly
+          // (ResizeObserver on railViewportRef) rather than inferred, and the fitted
+          // image is centred inside it with a guaranteed safety inset on every edge.
+          // A COLUMN, not a row. renderImageArea returns the card viewport followed by the
+          // zoom toolbar; as a row the toolbar sat BESIDE the card and took ~110px out of
+          // the rail's width, which is the dark band beside the card in the owner's
+          // screenshots. Its own comment says it belongs "directly under the image", and
+          // stacking restores that: the card gets the rail's full width, and the leftover
+          // height it was already not using goes to the card instead of nothing.
+          //
+          // Column also fixes the card's height contract. The viewport's content is
+          // positioned, so in a row (`items-center`) it sized to 0 and the card vanished
+          // entirely; as a column child with `flex-1` it takes the real remaining height.
+          <div className="flex min-h-0 flex-1 flex-col">{renderImageArea("100%")}</div>
         ) : (
           renderImageArea(525)
         ))}
