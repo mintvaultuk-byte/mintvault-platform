@@ -110,7 +110,9 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     // If an ancestor's height is content-driven there is no available height to fit
     // into — the card defines it. Treating a 0 height as authoritative is precisely
     // what stranded the image invisible.
-    expect(VIEWER).toMatch(/const heightUsable = vp\.h > RAIL_SAFE_INSET_Y \* 2;/);
+    // The height ceiling is now the VISIBLE viewport, not the container it lives in.
+    expect(VIEWER).toMatch(/const heightUsable = availableH > RAIL_SAFE_INSET_Y \* 2;/);
+    expect(VIEWER).toMatch(/railAvailableHeight\(\{/);
     expect(VIEWER).toMatch(/mode === "safe-fit" \? Math\.min\(widthScale/);
     expect(VIEWER).toMatch(/heightUsable \|\| prev\?\.mode === "safe-fit" \? "safe-fit" : "width-fit"/);
   });
