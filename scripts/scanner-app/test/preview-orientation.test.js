@@ -73,10 +73,45 @@ describe("OPERATOR VIEW: all four physical quadrants land where the operator see
     assert.ok(Math.abs(mapped.x - presentationX) < 0.5);
   });
 
-  test("the image carries the SAME vertical flip, so outline and card cannot diverge", () => {
+  test("THE OWNER'S SCREENSHOT: card pixels and template occupy the SAME quadrant and overlap", () => {
+    /*
+     * The failure this pins is not a maths identity — both previous fixes passed quadrant tests
+     * while the screen was still wrong. It is the RELATIONSHIP between where the card actually is
+     * in the raster and where the overlay is drawn.
+     *
+     * Ground truth, read from the real .display.jpg: the card sits at CANONICAL (148.9, 204.6),
+     * right/bottom, artwork upright. The template is drawn from the PRESENTATION rect via the
+     * operator mapping, landing left/bottom. The CSS mirror is what has to reconcile them.
+     */
     const css = fs.readFileSync(path.join(__dirname, "..", "renderer", "styles.css"), "utf8");
-    assert.match(css, /\.positioning-preview\s*\{\s*transform:\s*scaleY\(-1\)/,
-      "the preview raster must be flipped in lockstep with operatorRectToRasterRect");
+    const mirrorsX = /\.positioning-preview\s*\{[^}]*transform:\s*scaleX\(-1\)/.test(css);
+    assert.ok(mirrorsX, "the preview raster must be mirrored on X to meet the operator template");
+    assert.doesNotMatch(css, /\.positioning-preview\s*\{\s*transform:\s*scaleY\(-1\)\s*\}/,
+      "a Y flip sends the card to the TOP while the template stays at the BOTTOM");
+
+    // Where the card ENDS UP on screen after the CSS mirror.
+    const cardVisualX = PLATEN.width - OBSERVED_CARD_CANONICAL.x - OBSERVED_CARD_CANONICAL.width;
+    const cardVisualY = OBSERVED_CARD_CANONICAL.y;
+
+    // Where the template is DRAWN.
+    const template = transform.operatorRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    const templateMmX = (template.x / RASTER.width) * PLATEN.width;
+    const templateMmY = (template.y / RASTER.height) * PLATEN.height;
+
+    // Same quadrant...
+    assert.ok(cardVisualX < PLATEN.width / 2 && cardVisualY > PLATEN.height / 2, "card must be BOTTOM-LEFT");
+    assert.ok(templateMmX < PLATEN.width / 2 && templateMmY > PLATEN.height / 2, "template must be BOTTOM-LEFT");
+
+    // ...and actually coincident, not merely both in the same corner.
+    assert.ok(Math.abs(cardVisualX - templateMmX) < 0.01, `card x ${cardVisualX} vs template x ${templateMmX}`);
+    assert.ok(Math.abs(cardVisualY - templateMmY) < 0.01, `card y ${cardVisualY} vs template y ${templateMmY}`);
+  });
+
+  test("a Y flip would have separated them — proving this test catches the last attempt", () => {
+    const cardIfYFlipped = { x: OBSERVED_CARD_CANONICAL.x, y: PLATEN.height - OBSERVED_CARD_CANONICAL.y - OBSERVED_CARD_CANONICAL.height };
+    // top / right — the exact state the owner screenshotted.
+    assert.ok(cardIfYFlipped.x > PLATEN.width / 2, "Y flip leaves the card on the RIGHT");
+    assert.ok(cardIfYFlipped.y < PLATEN.height / 2, "Y flip sends the card to the TOP");
   });
 
   test("non-zero origins keep their operator position", () => {

@@ -378,14 +378,24 @@ body {
   overflow: hidden;
   position: relative;
 }
-/* The operator-facing vertical flip.
-   Must stay in lockstep with operatorRectToRasterRect() in
-   lib/lide400-preview-transform.js: that function flips Y for the overlays,
-   this flips Y for the raster they sit on. Applying one without the other is
-   exactly how the outline stops landing on the card. The horizontal axis is
-   untouched — the 180-degree presentation raster already handles X. */
-.positioning-preview { transform: scaleY(-1); }
+/* THE OPERATOR-FACING MIRROR — horizontal, not vertical.
+   Established by looking at the actual raster rather than trusting its metadata
+   label. The .display.jpg carries the card at CANONICAL (148.9, 204.6) —
+   right/bottom — with its artwork upright, despite being tagged
+   "...presentation-raster-rotate-180". The overlays are placed from the
+   PRESENTATION rectangle, which the operator view maps to (3.5, 204.6) —
+   left/bottom. One flip reconciles them, and it is the X axis: mirroring X
+   sends the card to x = 3.47, matching the overlay to three decimal places,
+   while Y (204.6, bottom) is already correct in both.
+   An earlier attempt flipped Y instead and sent the card to the TOP-RIGHT
+   while the template sat bottom-left — the two moved apart instead of together.
+   NOTE: a horizontal mirror necessarily mirrors the artwork. That is inherent,
+   not incidental: the sensor images the face against the glass, the operator
+   looks at the opposite face, and no rotation can reconcile two views taken
+   from opposite sides of a pane of glass. Position and handedness are not
+   independent for a rigid image. */
 .positioning-preview {
+  transform: scaleX(-1);
   display: block;
   height: 220px;
   object-fit: contain;
