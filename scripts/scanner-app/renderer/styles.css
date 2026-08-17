@@ -561,6 +561,11 @@ body {
   flex-direction: column;
   gap: 9px;
 }
+/* Four primary actions in a balanced 2 x 2:
+     NEW CARD      PREVIEW
+     SCAN CARD     FIX MISSING IMAGES
+   All four share .capture-primary sizing, so recovery reads as ordinary shop
+   work rather than an exceptional or destructive operation. */
 .action-grid {
   display: grid;
   gap: 8px;
@@ -950,3 +955,13 @@ body {
   cursor: pointer;
 }
 .linklike:hover { color: #1A1400; }
+
+/* Capture-window save outcome. A refusal used to render in the same grey as
+   "Saving…" and as success, which is how an operator came to believe a refused
+   save had worked. Three outcomes, three appearances. */
+#captureWindowStatus[data-state="refused"] {
+  color: #b3261e;
+  font-weight: 800;
+}
+#captureWindowStatus[data-state="saved"] { color: #1f7a34; font-weight: 700; }
+#captureWindowStatus[data-state="pending"] { color: #7a7a7a; }

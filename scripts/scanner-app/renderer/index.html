@@ -89,6 +89,15 @@
       <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
       <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
       <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
+      <!--
+        FOURTH PRIMARY ACTION. Recovering a card that is missing a side is normal shop work, not
+        diagnostics: it happens when a scan fails or a station drops mid-card, which is exactly when
+        an operator should not have to go hunting in a collapsed technical panel. It is NOT styled
+        as destructive, because it destroys nothing — it re-arms a missing side on a card that
+        already exists, keeping its MV number and costing no Grading Credit. The server decides
+        which jobs are eligible and which side is missing; this button only opens that list.
+      -->
+      <button class="btn capture-primary" id="fixMissingImagesBtn">FIX MISSING IMAGES</button>
     </div>
     <p class="hint action-hint" id="captureActionHint">Press NEW CARD to start a card, or arm one in MintVault.</p>
     <p class="hint" id="newCardError" hidden></p>
@@ -240,7 +249,6 @@
         </p>
       </div>
       <div class="settings-test">
-        <button class="btn" id="orphansBtn">Fix missing images</button>
         <p class="hint">Recovery only. MintVault derives this list from your own cards and authorises exactly the missing side — you never type a card number. A card with no image yet can also be cancelled here, which returns its Grading Credit and keeps its number for ever.</p>
       </div>
     </div>

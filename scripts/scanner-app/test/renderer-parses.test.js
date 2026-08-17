@@ -97,3 +97,38 @@ test("renderer only reads element handles that the els map defines", () => {
     `els.<name> read but never assigned from getElementById: ${undeclared.join(", ")}`
   );
 });
+
+test("FIX MISSING IMAGES is a fourth PRIMARY action, not a diagnostics link", () => {
+  /*
+   * Recovering a card that is missing a side is normal shop work: it happens when a scan fails or
+   * a station drops mid-card, which is exactly when an operator should not be hunting inside a
+   * collapsed technical panel. It lived in Service & Diagnostics as a plain `.btn`.
+   */
+  const html = fs.readFileSync(path.join(APP_ROOT, "renderer", "index.html"), "utf8");
+  const app = fs.readFileSync(path.join(APP_ROOT, "renderer", "app.js"), "utf8");
+
+  const grid = html.slice(html.indexOf('class="action-grid"'), html.indexOf("</div>", html.indexOf('class="action-grid"')));
+  assert.ok(grid.includes('id="fixMissingImagesBtn"'), "FIX MISSING IMAGES must sit in the primary action grid");
+  assert.ok(grid.includes("capture-primary"), "it must share the primary sizing of its siblings");
+
+  // All four primary actions present, in one grid.
+  for (const id of ["newCardBtn", "positioningPreviewBtn", "scanCardBtn", "fixMissingImagesBtn"]) {
+    assert.ok(grid.includes(`id="${id}"`), `${id} must be one of the four primary actions`);
+  }
+
+  // The old diagnostics button is gone, and the handler is retargeted rather than duplicated.
+  assert.ok(!html.includes('id="orphansBtn"'), "the diagnostics duplicate must be removed");
+  assert.ok(app.includes('document.getElementById("fixMissingImagesBtn")'), "handler must bind the new id");
+
+  // Not styled as destructive.
+  assert.ok(!/id="fixMissingImagesBtn"[^>]*danger/.test(grid), "recovery is not a destructive action");
+});
+
+test("a refused capture-window save is visually distinct from a successful one", () => {
+  const app = fs.readFileSync(path.join(APP_ROOT, "renderer", "app.js"), "utf8");
+  const css = fs.readFileSync(path.join(APP_ROOT, "renderer", "styles.css"), "utf8");
+  // The success path sets the attribute via a ternary, so match the states rather than a literal call.
+  assert.match(app, /setAttribute\("data-state", "refused"\)/, "a refusal must mark itself");
+  assert.match(app, /"saved" : "refused"/, "a success must mark itself distinctly from a refusal");
+  assert.match(css, /\[data-state="refused"\][\s\S]{0,80}color:\s*#b3261e/, "refusal must not render as ordinary grey text");
+});

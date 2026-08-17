@@ -25,7 +25,7 @@ const els = {
   statusText: document.getElementById("statusText"),
   statusSub: document.getElementById("statusSub"),
   recentList: document.getElementById("recentList"),
-  orphansBtn: document.getElementById("orphansBtn"),
+  orphansBtn: document.getElementById("fixMissingImagesBtn"),
   orphanModal: document.getElementById("orphanModal"),
   orphanList: document.getElementById("orphanList"),
   orphanClose: document.getElementById("orphanClose"),
@@ -1314,14 +1314,28 @@ els.captureWindowResetBtn.addEventListener("click", () => {
 });
 
 els.captureWindowSaveBtn.addEventListener("click", async () => {
+  /*
+   * A REFUSAL MUST LOOK LIKE A REFUSAL.
+   *
+   * The reason was already written here, but as the same undifferentiated grey text used for
+   * "Saving…" and for success — so an operator who pressed SAVE while a card was open reasonably
+   * believed it had worked, and only found out later that the station calibration had never moved.
+   * The refusal itself is correct and stays: a capture window cannot move mid-card, or a card's
+   * FRONT and BACK would come from two different physical rectangles.
+   *
+   * `data-state` drives the styling, so the three outcomes are visually distinct.
+   */
+  els.captureWindowStatus.setAttribute("data-state", "pending");
   els.captureWindowStatus.textContent = "Saving…";
   const result = await window.scanner.saveCaptureWindow({ ...captureWindowOriginMm });
   if (!result?.ok) {
+    els.captureWindowStatus.setAttribute("data-state", "refused");
     els.captureWindowStatus.textContent = result?.error || "The capture window could not be saved.";
     return;
   }
   // The local save and the station calibration record are reported separately: a station whose
   // window moved but whose calibration authority did not is exactly the divergence to surface.
+  els.captureWindowStatus.setAttribute("data-state", result.calibration?.saved ? "saved" : "refused");
   els.captureWindowStatus.textContent = result.calibration?.saved
     ? "Capture window saved and recorded against this station's calibration."
     : `Saved on this Mac, but the station calibration was NOT recorded: ${result.calibration?.error || "unknown reason"}`;
