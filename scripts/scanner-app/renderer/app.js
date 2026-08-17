@@ -71,6 +71,7 @@ const els = {
   placementPanel: document.getElementById("placementPanel"),
   placementViewport: document.getElementById("placementViewport"),
   placementPreview: document.getElementById("placementPreview"),
+  placementOuterBox: document.getElementById("placementOuterBox"),
   placementSafeBox: document.getElementById("placementSafeBox"),
   placementCardBox: document.getElementById("placementCardBox"),
   placementMessage: document.getElementById("placementMessage"),
@@ -556,8 +557,8 @@ function renderPlacementPreview(entry, state) {
   const verdict = entry.verdict || {};
   // Echoed straight from the watcher's verdict. An unrecognised state falls back to RED, because the
   // failure direction for "I do not understand this placement" is refuse, not permit.
-  const state = ["GREEN", "AMBER", "RED"].includes(verdict.state) ? verdict.state : "RED";
-  els.placementPanel.setAttribute("data-placement-state", state);
+  const placementState = ["GREEN", "AMBER", "RED"].includes(verdict.state) ? verdict.state : "RED";
+  els.placementPanel.setAttribute("data-placement-state", placementState);
   els.placementMessage.textContent = verdict.message || "";
 
   const overlay = entry.overlay || {};
@@ -582,7 +583,7 @@ function renderPlacementPreview(entry, state) {
   // Millimetres are confined to this collapsed block. The normal operator path is the two boxes.
   const card = verdict.cardBoundsMm;
   els.placementDiagnosticsBody.textContent = [
-    `state        ${state}${verdict.amberFloorMm ? ` (amber above ${verdict.amberFloorMm} mm)` : ""}`,
+    `state        ${placementState}${verdict.amberFloorMm ? ` (amber above ${verdict.amberFloorMm} mm)` : ""}`,
     `profile      ${verdict.profileId || "—"} ${verdict.profileVersion || ""}`,
     `coordinates  ${verdict.coordinateSpace || "—"}`,
     `window       ${entry.areaMm ? `${entry.areaMm.width} x ${entry.areaMm.height} mm at ${entry.originMm?.x}, ${entry.originMm?.y}` : "—"}`,
