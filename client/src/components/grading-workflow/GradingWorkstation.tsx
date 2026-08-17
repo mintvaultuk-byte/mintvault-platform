@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNod
 import GradingPanel from "@/components/grading/grading-panel";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import { RailWidthProvider } from "@/components/grading-workflow/rail-width-context";
 import {
   CertificatePreviewPanel,
   type CertificatePreviewFields,
@@ -135,15 +136,13 @@ export function GradingWorkstation({
 
   const handlePreviewRevisionComplete = useCallback(
     (revision: number, ok: boolean, fingerprint: string, authoritativeRevision?: number | null) => {
-    const waiter = previewWaitersRef.current.get(revision);
-    if (!waiter) return;
-    previewWaitersRef.current.delete(revision);
-    const exact =
-      ok &&
-      fingerprint === waiter.expectedFingerprint &&
-      authoritativeRevision === waiter.expectedRevision;
-    if (!exact) setAuthoritativePreview(null);
-    waiter.resolve(exact);
+      const waiter = previewWaitersRef.current.get(revision);
+      if (!waiter) return;
+      previewWaitersRef.current.delete(revision);
+      const exact =
+        ok && fingerprint === waiter.expectedFingerprint && authoritativeRevision === waiter.expectedRevision;
+      if (!exact) setAuthoritativePreview(null);
+      waiter.resolve(exact);
     },
     []
   );
@@ -294,99 +293,103 @@ export function GradingWorkstation({
   const workstationCapabilities =
     mode === "partner"
       ? {
-    catalogueEndpoint: "/api/partner/catalogue/snapshot",
-    customSetMutations: false,
-    identify: false,
-    imageMutations: false,
-    generateDescription: false,
+          catalogueEndpoint: "/api/partner/catalogue/snapshot",
+          customSetMutations: false,
+          identify: false,
+          imageMutations: false,
+          generateDescription: false,
         }
       : undefined;
 
   return (
-    <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
-      data-testid="grading-workstation"
-      data-mode={mode}
-      data-api-base={apiBase}
-    >
-      <CanonicalGradingWorkstationShell
-        rootRef={rootRef}
-        previewAside={
-          resolvedPreviewCertificateId != null ? (
-            <WorkstationPreviewAside
-              certificateId={resolvedPreviewCertificateId ?? null}
-              inspectionState={inspectionState}
-              onInspectionStateChange={setInspectionState}
-              apiBase={apiBase}
-              interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}
-            />
-          ) : null
-        }
+    /* One provider per workstation: the portalled card viewer publishes the rail
+       requirement it predicted, the rail applies it. Scoped here so two mounted
+       workstations (the dev harness stacks five) never share a width. */
+    <RailWidthProvider>
+      <div
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        data-testid="grading-workstation"
+        data-mode={mode}
+        data-api-base={apiBase}
       >
-        {/* Fixed (shrink-0) header region — canonical class, same as /admin. */}
-        <div className={WORKSTATION_HEADER_REGION_CLASS}>
-          <WorkstationHeaderStrip
-            workflowCurrent={stage}
-            workflowMax={3}
-            onStageClick={(i) => goToStage(i)}
-            queue={queue}
-            batch={batch}
-            sessionCompleted={0}
-          />
-          {reviewBarrierStatus !== "idle" && (
-            <div
-              className={`px-3 py-1 text-xs ${reviewBarrierStatus === "error" ? "text-red-300" : "text-amber-300"}`}
-              data-testid="review-transition-status"
-            >
-              {reviewBarrierStatus === "saving"
-                ? "Saving the authoritative grade before Review…"
-                : reviewBarrierStatus === "previewing"
-                  ? "Refreshing the certificate preview for that saved revision…"
-                  : "Review is locked because save or preview failed. Retry Review."}
-            </div>
-          )}
-        </div>
-        {/* Canonical scroll body — same class as the /admin <form> body. The
+        <CanonicalGradingWorkstationShell
+          rootRef={rootRef}
+          previewAside={
+            resolvedPreviewCertificateId != null ? (
+              <WorkstationPreviewAside
+                certificateId={resolvedPreviewCertificateId ?? null}
+                inspectionState={inspectionState}
+                onInspectionStateChange={setInspectionState}
+                apiBase={apiBase}
+                interactiveCardHostRef={gradingEnabled ? interactiveCardHostRef : undefined}
+              />
+            ) : null
+          }
+        >
+          {/* Fixed (shrink-0) header region — canonical class, same as /admin. */}
+          <div className={WORKSTATION_HEADER_REGION_CLASS}>
+            <WorkstationHeaderStrip
+              workflowCurrent={stage}
+              workflowMax={3}
+              onStageClick={(i) => goToStage(i)}
+              queue={queue}
+              batch={batch}
+              sessionCompleted={0}
+            />
+            {reviewBarrierStatus !== "idle" && (
+              <div
+                className={`px-3 py-1 text-xs ${reviewBarrierStatus === "error" ? "text-red-300" : "text-amber-300"}`}
+                data-testid="review-transition-status"
+              >
+                {reviewBarrierStatus === "saving"
+                  ? "Saving the authoritative grade before Review…"
+                  : reviewBarrierStatus === "previewing"
+                    ? "Refreshing the certificate preview for that saved revision…"
+                    : "Review is locked because save or preview failed. Retry Review."}
+              </div>
+            )}
+          </div>
+          {/* Canonical scroll body — same class as the /admin <form> body. The
             grading-stage-gate + data-ws-stage drive stage-content gating (CSS in
             admin-tokens.css) so the stage bar controls which GradingPanel
             sections are shown — hidden-not-unmounted, no grading-logic change. */}
-        <div
-          className={`${WORKSTATION_BODY_SCROLL_CLASS} grading-stage-gate`}
-          data-testid="grading-workstation-slot"
-          data-ws-stage={stage}
-        >
-          {/* Scanner/station entry controls share the canonical right-column
+          <div
+            className={`${WORKSTATION_BODY_SCROLL_CLASS} grading-stage-gate`}
+            data-testid="grading-workstation-slot"
+            data-ws-stage={stage}
+          >
+            {/* Scanner/station entry controls share the canonical right-column
               scroll body and stage owner. CSS makes this Card Details-only;
               the control itself owns capture-session transport, not another
               card viewer, inspection state or workflow stage. */}
-          {scannerControls && (
-            <div data-canonical-section="scanner-controls" data-testid="workstation-scanner-controls">
-              {scannerControls}
-            </div>
-          )}
-          {/* Admin Review identity editor — inside the workstation body (right
+            {scannerControls && (
+              <div data-canonical-section="scanner-controls" data-testid="workstation-scanner-controls">
+                {scannerControls}
+              </div>
+            )}
+            {/* Admin Review identity editor — inside the workstation body (right
               column), above the grading panel; never a detached section. */}
-          {identityEditor && <div data-testid="workstation-identity-editor">{identityEditor}</div>}
-          {/* Remount per card so no identity/grade/approval state leaks between
+            {identityEditor && <div data-testid="workstation-identity-editor">{identityEditor}</div>}
+            {/* Remount per card so no identity/grade/approval state leaks between
               records (GradingPanel seeds a lot of state from props at mount). */}
-          {/* PR A · EXPLICIT lifecycle. The Grade panel is hidden-not-unmounted
+            {/* PR A · EXPLICIT lifecycle. The Grade panel is hidden-not-unmounted
               by the stage gate above, so it must be told when it is genuinely on
               screen — otherwise its debounced auto-save keeps running behind
               Card Details / Review and persists UI defaults as grading data.
               Derived from this adapter's own stage, which is the only thing that
               knows; `active` is not accepted from the page for that reason. */}
-          {/* M-2 · each shortcut is wired to the stage that OWNS it: Ctrl+S to
+            {/* M-2 · each shortcut is wired to the stage that OWNS it: Ctrl+S to
               Grade (`active`), Ctrl+Enter to Review (`approvalStageActive`).
               Both derive from THIS adapter's own stage for the same reason —
               a page must not be able to contradict what is on screen. */}
-          {gradingEnabled && (
-          <GradingPanel
-            key={`${apiBase}:${certId}`}
-            {...panelProps}
-            active={stage === GRADE_STAGE}
-            approvalStageActive={stage === REVIEW_STAGE}
-              previewHost={gradingEnabled ? interactiveCardHost : null}
-              previewTopSlot={
+            {gradingEnabled && (
+              <GradingPanel
+                key={`${apiBase}:${certId}`}
+                {...panelProps}
+                active={stage === GRADE_STAGE}
+                approvalStageActive={stage === REVIEW_STAGE}
+                previewHost={gradingEnabled ? interactiveCardHost : null}
+                previewTopSlot={
                   <CertificatePreviewPanel
                     key={certId}
                     fields={previewFields}
@@ -397,20 +400,21 @@ export function GradingWorkstation({
                     requireExpectedRevision={resolvedPreviewCertificateId != null}
                     onRevisionComplete={handlePreviewRevisionComplete}
                   />
-              }
-              inspectionState={inspectionState}
-              onInspectionStateChange={setInspectionState}
-              onPreviewChange={handleDraftPreviewChange}
-              onPreviewSaved={handlePreviewSaved}
-              onReviewTransitionReady={registerReviewTransitionHandler}
-              reviewBarrierReady={reviewReady}
-              onReviewValidityChange={handleReviewValidityChange}
-            workstationCapabilities={workstationCapabilities}
-          />
-          )}
-        </div>
-      </CanonicalGradingWorkstationShell>
-    </div>
+                }
+                inspectionState={inspectionState}
+                onInspectionStateChange={setInspectionState}
+                onPreviewChange={handleDraftPreviewChange}
+                onPreviewSaved={handlePreviewSaved}
+                onReviewTransitionReady={registerReviewTransitionHandler}
+                reviewBarrierReady={reviewReady}
+                onReviewValidityChange={handleReviewValidityChange}
+                workstationCapabilities={workstationCapabilities}
+              />
+            )}
+          </div>
+        </CanonicalGradingWorkstationShell>
+      </div>
+    </RailWidthProvider>
   );
 }
 
