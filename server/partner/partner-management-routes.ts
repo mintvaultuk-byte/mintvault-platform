@@ -484,6 +484,33 @@ export function partnerManagementRouter(): Router {
     }
   });
 
+  /**
+   * Void a Card Job whose capture geometry cannot be recovered.
+   *
+   * The only route by which a card HOLDING EVIDENCE can be closed. Station cancellation refuses
+   * such a card on purpose (`JOB_HAS_EVIDENCE`) — throwing away a photographed card is not an
+   * operator decision. But a card whose sessions predate the 0091 acquisition-region snapshot can
+   * neither finish (its two sides would come from unknown, possibly different rectangles) nor
+   * cancel, and it blocks its station from recalibrating for as long as it stays open.
+   *
+   * Releases the Grading Credit once, preserves the MV number for ever, and LEAVES THE EVIDENCE
+   * IN PLACE — this closes a job, it does not rewrite what was captured.
+   */
+  // AG-3b: closing somebody's paid-for card and returning its credit is a money-and-record event.
+  r.post("/partners/:partnerId/card-jobs/:cardJobId/void", requireAdminStepUp(), async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.voidPartnerCardJob(actor, String(req.params.partnerId), String(req.params.cardJobId), reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   /** Clear the user's second factor and force re-enrolment. Revokes sessions. */
   // AG-3b: clearing somebody's second factor removes a security control from their account.
   r.post("/partners/:partnerId/users/:userId/reset-mfa", requireAdminStepUp(), async (req, res) => {

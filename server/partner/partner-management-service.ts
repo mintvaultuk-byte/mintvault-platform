@@ -125,6 +125,9 @@ async function maybeWaitAcceptBarrierForTest(point: "before_invitation_lock"): P
 }
 
 type AuditAction =
+  // Closing a card that holds evidence and returning its credit. Named distinctly from a station
+  // cancellation so the trail can tell a super-admin void from an operator abandoning a blank card.
+  | "partner_card_job_voided"
   | "partner_created"
   | "profile_updated"
   | "status_changed"
@@ -2654,5 +2657,62 @@ export async function setPartnerUserLocations(
       entityId: userId,
       afterState: { locationIds: requested },
     };
+  });
+}
+
+/**
+ * Void a Card Job whose capture geometry cannot be recovered.
+ *
+ * Thin on purpose. The authority — what may be voided, releasing the credit exactly once,
+ * preserving the MV number, leaving the evidence untouched — lives in
+ * `voidCardJobUnrecoverableGeometry`, next to the station cancellation it deliberately differs
+ * from, so the two refusal sets can be read against each other in one file. This adds the
+ * super-admin wrapper: partner resolution, a mandatory reason, and the audit envelope.
+ */
+export async function voidPartnerCardJob(
+  actor: ActorContext,
+  partnerId: string,
+  cardJobId: string,
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  return withAudit(actor, org.id, "partner_card_job_voided", reason, { cardJobId }, async () => {
+    const { voidCardJobUnrecoverableGeometry } = await import("./card-job-cancellation");
+    const job = await lookupCardJobLocation(org.id, cardJobId);
+    const voided = await voidCardJobUnrecoverableGeometry({
+      tenantId: org.id,
+      locationId: job.locationId,
+      cardJobId,
+      actorUserId: actor.actorUserId,
+      actorEmail: actor.actorEmail ?? null,
+      reason,
+    });
+    return {
+      result: voided,
+      entityType: "partner_card_job",
+      entityId: voided.cardJobId,
+      // The audit "after" is the fact that matters later: the card is closed, the number survives,
+      // and the credit went back exactly once (or was already spent and correctly left alone).
+      afterState: {
+        status: voided.status,
+        mvNumber: voided.mvNumber,
+        reservationId: voided.reservationId,
+        reservationReleased: voided.reservationReleased,
+        cancelledCaptureSessions: voided.cancelledCaptureSessions,
+        evidenceRetained: true,
+      },
+    };
+  });
+}
+
+/** The job's own location, so the void runs under the same tenant+location scope as its creation. */
+async function lookupCardJobLocation(tenantId: string, cardJobId: string): Promise<{ locationId: string | null }> {
+  return withPartnerAdminTransaction(async (client) => {
+    const found = await client.query<{ location_id: string | null }>(
+      "SELECT location_id FROM partner_card_jobs WHERE tenant_id=$1 AND id=$2",
+      [tenantId, cardJobId]
+    );
+    if (found.rows.length !== 1) throw new G5RequestError("PARTNER_NOT_FOUND", "Card Job not found.");
+    return { locationId: found.rows[0].location_id ?? null };
   });
 }

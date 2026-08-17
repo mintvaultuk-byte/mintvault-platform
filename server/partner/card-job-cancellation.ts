@@ -50,6 +50,10 @@ export class CardJobCancellationError extends Error {
       | "CARD_JOB_NOT_FOUND"
       | "JOB_NOT_CANCELLABLE"
       | "JOB_HAS_EVIDENCE"
+      // Super-admin void route. Separate codes so a caller can tell "you may not do this here"
+      // from "this card is not a candidate", and neither is confused with a station cancellation.
+      | "STATION_MAY_NOT_VOID"
+      | "JOB_NOT_VOIDABLE"
       | "CAPTURE_IN_PROGRESS"
       | "CREDIT_ALREADY_SETTLED"
       | "STATION_NOT_ACTIVE"
@@ -388,6 +392,176 @@ export async function cancelCardJob(input: CancelCardJobInput): Promise<CancelCa
           stationId: input.stationId ?? null,
           // Recorded explicitly so the trail says in as many words that the number was KEPT.
           mvNumberPreserved: job.mvNumber,
+        },
+      });
+
+      return {
+        cardJobId: job.id,
+        mvNumber: moved.job.mvNumber,
+        certificateId: moved.job.certificateId,
+        status: "CANCELLED" as const,
+        reservationId,
+        reservationReleased,
+        changed: moved.changed,
+        cancelledCaptureSessions,
+      };
+    }
+  );
+}
+
+/* ==========================================================================================
+ * VOIDING A CARD WHOSE CAPTURE GEOMETRY CANNOT BE RECOVERED
+ * ==========================================================================================
+ *
+ * WHY THIS EXISTS, AND WHY IT IS NOT `cancelCardJob`.
+ *
+ * `cancelCardJob` above refuses any job holding evidence, and that refusal is right: throwing away
+ * a photographed card is not a station decision. But on 2026-08-17 MV272 reached a state that has
+ * NO exit through normal authority:
+ *
+ *   - Its FRONT is real, accepted evidence, so it cannot be cancelled.
+ *   - Every one of its capture sessions carries `acquisition_region = NULL`, because they were
+ *     armed BEFORE migration 0091 began snapshotting the authoritative capture window. We do not
+ *     know which physical rectangle that FRONT was captured under.
+ *   - 0091 therefore refuses to pair it with a BACK: a card whose two sides came from two different
+ *     rectangles is not one piece of evidence, and "assume the standard one" is a guess, not a fact.
+ *   - And the station cannot recalibrate while the card is open, because moving the window mid-card
+ *     is the very thing that would produce mismatched sides.
+ *
+ * Four correct refusals with no way out between them. That is not a bug in any one of them; it is a
+ * missing route, and it will recur for any card caught across a geometry-authority migration.
+ *
+ * WHAT THIS DOES, DELIBERATELY DIFFERENTLY.
+ *
+ *   - It ACCEPTS a job that holds evidence. That is the entire point, so the evidence assertion is
+ *     skipped rather than weakened — `assertNothingCaptured` is untouched and still guards the
+ *     station path.
+ *   - It is SUPER-ADMIN ONLY. No station, no operator, no partner user. The route that calls it must
+ *     sit behind admin step-up; this function refuses a station id outright so a Mac cannot reach it
+ *     even if a route were wired wrongly later.
+ *   - It PRESERVES THE MV NUMBER, like every other terminal path here. A voided card keeps its
+ *     number for ever; numbers are never reused.
+ *   - It RELEASES THE RESERVATION EXACTLY ONCE, through the same `releaseReservationOnce` helper, so
+ *     the shop is not charged for a card that produced nothing usable. A consumed reservation is
+ *     left alone by that helper — a credit already spent is not refunded here.
+ *   - It DOES NOT DELETE EVIDENCE. The FRONT master stays exactly where it is. Voiding closes the
+ *     job; it does not rewrite history, and an auditor can still see what was captured and when.
+ *
+ * WHY A SEPARATE ACTION NAME. `partner_card_job_voided_unrecoverable_geometry` is deliberately not
+ * reused from cancellation: a void is a rarer, higher-authority event with a different cause, and an
+ * audit trail that cannot distinguish "operator cancelled an unphotographed card" from "an admin
+ * closed a card we could not finish" is not much of an audit trail.
+ */
+export interface VoidCardJobInput {
+  tenantId: string;
+  locationId: string | null;
+  cardJobId: string;
+  /** The super-admin performing this. Never a station, never a partner operator. */
+  actorUserId: string;
+  actorEmail?: string | null;
+  /** Mandatory. A void with no stated cause is indistinguishable from data loss. */
+  reason: string;
+}
+
+/** Anything not already terminal. A finished or cancelled card is not a candidate for voiding. */
+const VOIDABLE_STATUSES: readonly CardJobStatus[] = [
+  CARD_JOB_STATUS.CREDIT_RESERVED,
+  CARD_JOB_STATUS.NEEDS_SCAN,
+  CARD_JOB_STATUS.CAPTURING,
+  CARD_JOB_STATUS.FIX_REQUIRED,
+];
+
+export async function voidCardJobUnrecoverableGeometry(
+  input: VoidCardJobInput
+): Promise<CancelCardJobResult> {
+  const reason = String(input.reason ?? "").trim();
+  if (!reason) {
+    throw new CardJobCancellationError(
+      "REASON_REQUIRED",
+      "A reason is required to void a card and return its Grading Credit."
+    );
+  }
+  if ((input as { stationId?: unknown }).stationId) {
+    // Belt and braces against a future route wiring a station through by accident.
+    throw new CardJobCancellationError(
+      "STATION_MAY_NOT_VOID",
+      "Voiding a card that holds evidence is a super-admin action and can never be performed at a station."
+    );
+  }
+
+  return withPartnerAdminTenantTransaction(
+    { tenantId: input.tenantId, locationId: input.locationId ?? null },
+    async (client) => {
+      const job = await lockCardJob(client, input.tenantId, input.cardJobId);
+
+      const reservation = await client.query<{ reservation_id: string | null }>(
+        `SELECT reservation_id FROM partner_card_jobs WHERE id = $1 AND tenant_id = $2`,
+        [job.id, input.tenantId]
+      );
+      const reservationId = reservation.rows[0]?.reservation_id ?? null;
+
+      // A void that already landed. Same idempotent shape as cancellation.
+      if (job.status === CARD_JOB_STATUS.CANCELLED) {
+        return {
+          cardJobId: job.id,
+          mvNumber: job.mvNumber,
+          certificateId: job.certificateId,
+          status: "CANCELLED" as const,
+          reservationId,
+          reservationReleased: false,
+          changed: false,
+          cancelledCaptureSessions: 0,
+        };
+      }
+
+      if (!VOIDABLE_STATUSES.includes(job.status)) {
+        throw new CardJobCancellationError(
+          "JOB_NOT_VOIDABLE",
+          `A card in ${job.status} cannot be voided. This route exists for a card that cannot finish capture, not for one that already has.`
+        );
+      }
+
+      // NOTE: assertNothingCaptured is deliberately NOT called. Holding evidence is the precondition
+      // for this route, not a bar to it. The evidence itself is left untouched on purpose.
+
+      const cancelledCaptureSessions = await cancelOutstandingCaptureSessions(
+        client,
+        job.certificateId,
+        "Card Job voided — capture geometry could not be recovered"
+      );
+
+      const reservationReleased = reservationId
+        ? await releaseReservationOnce(client, {
+            tenantId: input.tenantId,
+            cardJobId: job.id,
+            reservationId,
+            mvNumber: job.mvNumber,
+            stationId: null,
+            actorUserId: input.actorUserId,
+            actorEmail: input.actorEmail ?? null,
+            reason,
+          })
+        : false;
+
+      const moved = await transitionCardJob(client, {
+        tenantId: input.tenantId,
+        cardJobId: job.id,
+        from: VOIDABLE_STATUSES,
+        to: CARD_JOB_STATUS.CANCELLED,
+        idempotent: true,
+        actorUserId: input.actorUserId,
+        deviceId: null,
+        action: "partner_card_job_voided_unrecoverable_geometry",
+        reason,
+        audit: {
+          reservationId,
+          reservationReleased,
+          cancelledCaptureSessions,
+          stationId: null,
+          mvNumberPreserved: job.mvNumber,
+          // Stated explicitly: this closed a card that HELD evidence, and left that evidence alone.
+          evidenceRetained: true,
+          voidAuthority: "super_admin",
         },
       });
 
