@@ -400,6 +400,16 @@ body {
 .acquisition-boundary-overlay.unsafe {
   border: 3px dashed var(--orange);
 }
+/* ---- Diagnostic labels sit OUTSIDE their box ---------------------------
+   These labels used to be drawn as the first flow child INSIDE the overlay
+   rectangle, which put an opaque colour swatch straight over the top-left of
+   the very card the operator was trying to inspect. The outline already says
+   where the region is; the text only has to be readable near it.
+
+   Anchored above the box by default and flipped below when the box is close
+   to the top of the viewport, so a card near the platen's top edge does not
+   push its own label out of sight. Positioned relative to the overlay, so it
+   tracks the box without any extra measurement. */
 .card-boundary-overlay span,
 .acquisition-boundary-overlay span {
   color: #0f0f0f;
@@ -410,6 +420,22 @@ body {
   padding: 1px 3px;
   white-space: nowrap;
   width: max-content;
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 0;
+  border-radius: 2px;
+}
+/* Near the top edge there is no room above — drop the label underneath. */
+.card-boundary-overlay[data-label-below] span,
+.acquisition-boundary-overlay[data-label-below] span {
+  bottom: auto;
+  top: calc(100% + 3px);
+}
+/* Near the right edge, right-align so the text stays inside the viewport. */
+.card-boundary-overlay[data-label-right] span,
+.acquisition-boundary-overlay[data-label-right] span {
+  left: auto;
+  right: 0;
 }
 .card-boundary-overlay span {
   background: var(--blue);

@@ -1,0 +1,169 @@
+/*
+ * PHYSICAL LEFT MUST BE DISPLAYED LEFT.
+ *
+ * The defect this pins. The Preview publishes card and acquisition rectangles already in
+ * PRESENTATION millimetres (`lide400-preview-presentation-mm-v1`), alongside a separate
+ * `canonicalCardBoundsMm` for the server. The preview raster is likewise already the presentation
+ * raster (`imagecapturecore-scan-area-presentation-raster-rotate-180-v2`). The renderer then fed
+ * those presentation rectangles through `physicalRectToRasterRect`, which turns a CANONICAL
+ * rectangle 180 degrees on its way to that raster.
+ *
+ * Rotating an already-rotated rectangle is a 360-degree round trip on the maths and a 180-degree
+ * error on the glass. With a real card detected at presentation x = 3.47 mm — hard left — the
+ * orange acquisition box was drawn at the far right, so an operator standing at the scanner saw
+ * the UI contradict the platen in front of them.
+ *
+ * The canonical/server geometry was never wrong. This was display only, and is fixed display only.
+ */
+const { test, describe } = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const transform = require("../lib/lide400-preview-transform");
+
+// The real Canon LiDE 400 platen, as reported by ImageCaptureCore.
+const PLATEN = { x: 0, y: 0, width: 215.9, height: 297.0106666666666 };
+const RASTER = { width: 2550, height: 3508 };
+
+// The exact rectangles observed in the live station state on 2026-08-17.
+const OBSERVED_CARD_PRESENTATION = { x: 3.466284403669725, y: 3.6301303703703702, width: 63.54854740061162, height: 88.77318814814814 };
+const OBSERVED_CARD_CANONICAL = { x: 148.88516819571868, y: 204.6073481481481, width: 63.548547400611625, height: 88.77318814814812 };
+
+describe("presentation rectangles map without a second rotation", () => {
+  test("a card on the physical LEFT is drawn on the LEFT", () => {
+    const mapped = transform.presentationRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    // Left third of the raster.
+    assert.ok(
+      mapped.x < RASTER.width / 3,
+      `expected a left-hand card to map into the left third; got x=${mapped.x} of ${RASTER.width}`
+    );
+  });
+
+  test("a card on the physical RIGHT is drawn on the RIGHT", () => {
+    const rightCard = { ...OBSERVED_CARD_PRESENTATION, x: PLATEN.width - 3.5 - OBSERVED_CARD_PRESENTATION.width };
+    const mapped = transform.presentationRectToRasterRect(rightCard, PLATEN, RASTER);
+    assert.ok(
+      mapped.x + mapped.width > (RASTER.width * 2) / 3,
+      `expected a right-hand card to map into the right third; got x=${mapped.x}`
+    );
+  });
+
+  test("top stays top and bottom stays bottom", () => {
+    const top = transform.presentationRectToRasterRect({ x: 20, y: 5, width: 100, height: 130 }, PLATEN, RASTER);
+    const bottom = transform.presentationRectToRasterRect(
+      { x: 20, y: PLATEN.height - 135, width: 100, height: 130 },
+      PLATEN,
+      RASTER
+    );
+    assert.ok(top.y < RASTER.height / 3, `top rect should map high; got y=${top.y}`);
+    assert.ok(bottom.y > RASTER.height / 2, `bottom rect should map low; got y=${bottom.y}`);
+  });
+
+  test("THE REGRESSION: the old mapper puts the same left-hand card on the right", () => {
+    // Proves the two mappers genuinely differ, so this test cannot silently pass on the old code.
+    const wrong = transform.physicalRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    const right = transform.presentationRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    assert.ok(wrong.x > (RASTER.width * 2) / 3, "the old mapper should place it right — that was the bug");
+    assert.ok(right.x < RASTER.width / 3, "the new mapper must place it left");
+  });
+});
+
+describe("canonical authority is unchanged and still round-trips", () => {
+  test("canonical and presentation remain exact 180-degree complements", () => {
+    const backToCanonicalX = PLATEN.width - OBSERVED_CARD_PRESENTATION.x - OBSERVED_CARD_PRESENTATION.width;
+    const backToCanonicalY = PLATEN.height - OBSERVED_CARD_PRESENTATION.y - OBSERVED_CARD_PRESENTATION.height;
+    assert.ok(Math.abs(backToCanonicalX - OBSERVED_CARD_CANONICAL.x) < 0.001);
+    assert.ok(Math.abs(backToCanonicalY - OBSERVED_CARD_CANONICAL.y) < 0.001);
+  });
+
+  test("the canonical mapper is untouched — physical still rotates 180", () => {
+    const mapped = transform.physicalRectToRasterRect(OBSERVED_CARD_CANONICAL, PLATEN, RASTER);
+    // Canonical bottom-right must land presentation top-left, i.e. where the card actually shows.
+    const expected = transform.presentationRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    assert.ok(Math.abs(mapped.x - expected.x) < 0.5, `canonical->raster ${mapped.x} should equal presentation->raster ${expected.x}`);
+    assert.ok(Math.abs(mapped.y - expected.y) < 0.5);
+  });
+
+  test("physical <-> raster round trip is still lossless", () => {
+    const raster = transform.physicalRectToRasterRect(OBSERVED_CARD_CANONICAL, PLATEN, RASTER);
+    const back = transform.rasterRectToPhysicalRect(raster, PLATEN, RASTER);
+    assert.ok(Math.abs(back.x - OBSERVED_CARD_CANONICAL.x) < 0.01);
+    assert.ok(Math.abs(back.y - OBSERVED_CARD_CANONICAL.y) < 0.01);
+  });
+});
+
+describe("non-zero origins survive the display transform", () => {
+  const cases = [
+    { name: "the approved 20 x 20 default", origin: { x: 20, y: 20 } },
+    { name: "the currently saved 0 x 0 origin", origin: { x: 0, y: 0 } },
+    { name: "an off-centre origin", origin: { x: 5, y: 162 } },
+    { name: "a right-hand origin", origin: { x: 110.9, y: 5 } },
+  ];
+
+  for (const { name, origin } of cases) {
+    test(`${name} maps proportionally, with no offset invented`, () => {
+      const window = { x: origin.x, y: origin.y, width: 100, height: 130 };
+      const mapped = transform.presentationRectToRasterRect(window, PLATEN, RASTER);
+
+      const expectedX = (origin.x / PLATEN.width) * RASTER.width;
+      const expectedY = (origin.y / PLATEN.height) * RASTER.height;
+      assert.ok(Math.abs(mapped.x - expectedX) < 0.001, `x ${mapped.x} != ${expectedX}`);
+      assert.ok(Math.abs(mapped.y - expectedY) < 0.001, `y ${mapped.y} != ${expectedY}`);
+
+      // Width/height are never affected by origin.
+      assert.ok(Math.abs(mapped.width - (100 / PLATEN.width) * RASTER.width) < 0.001);
+      assert.ok(Math.abs(mapped.height - (130 / PLATEN.height) * RASTER.height) < 0.001);
+    });
+  }
+
+  test("a 180-degree presentation contract is still declared", () => {
+    assert.strictEqual(transform.PRESENTATION_ROTATION_DEGREES, 180);
+    assert.match(transform.COORDINATE_SPACE, /rotate-180/);
+  });
+});
+
+describe("diagnostic labels do not cover the card", () => {
+  const css = fs.readFileSync(path.join(__dirname, "..", "renderer", "styles.css"), "utf8");
+
+  test("labels are positioned OUTSIDE their box, not as in-flow children", () => {
+    const block = css.slice(css.indexOf(".card-boundary-overlay span"));
+    assert.match(block, /position:\s*absolute/, "label must be taken out of flow");
+    assert.match(block, /bottom:\s*calc\(100% \+/, "label must sit above the box, clear of its edge");
+  });
+
+  test("a box near the top edge flips its label below instead of off-screen", () => {
+    assert.match(css, /\[data-label-below\][\s\S]{0,120}top:\s*calc\(100% \+/);
+  });
+
+  test("a box near the right edge right-aligns its label", () => {
+    assert.match(css, /\[data-label-right\][\s\S]{0,120}right:\s*0/);
+  });
+
+  test("the renderer sets those attributes from measured position", () => {
+    const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+    assert.match(app, /data-label-below/);
+    assert.match(app, /data-label-right/);
+  });
+});
+
+describe("nothing diagnostic can reach the evidence master", () => {
+  test("overlays are DOM elements, never drawn into an image buffer", () => {
+    const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+    /*
+     * The structural guarantee: the renderer has no canvas drawing context and no image encoding.
+     * Overlays are absolutely-positioned <div>s over an <img>. There is no code path from an
+     * overlay to a pixel, so no overlay can enter a 1200-DPI TIFF.
+     */
+    assert.doesNotMatch(app, /getContext\(\s*["']2d["']\s*\)/, "renderer must not rasterise anything");
+    assert.doesNotMatch(app, /toDataURL|toBlob|createImageBitmap/, "renderer must not encode images");
+  });
+
+  test("the upload client sends the untouched TIFF master", () => {
+    const client = fs.readFileSync(path.join(__dirname, "..", "lib", "server-client.js"), "utf8");
+    // The master is streamed from disk; it is never decoded or re-encoded in this process.
+    assert.match(client, /createReadStream/);
+    assert.match(client, /assertTiffMaster/);
+    assert.doesNotMatch(client, /sharp\(/, "the evidence path must not process pixels");
+  });
+});

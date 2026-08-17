@@ -113,6 +113,44 @@
     };
   }
 
+  /*
+   * PRESENTATION mm -> presentation raster px. NO ROTATION, deliberately.
+   *
+   * `physicalRectToRasterRect` above turns a CANONICAL ImageCaptureCore rectangle 180 degrees,
+   * because the raster it targets is the presentation raster. That is correct for canonical input
+   * and WRONG for input that has already been rotated — and the renderer was feeding it exactly
+   * that. The Preview publishes `cardBoundsMm` and `proposedHardwareRectMm` tagged
+   * `lide400-preview-presentation-mm-v1`, i.e. already in presentation space, alongside a separate
+   * `canonicalCardBoundsMm` for the server. Rotating those a second time produced a 360-degree
+   * round trip on the maths and a 180-degree error on screen: with the card at presentation
+   * x = 3.5 mm (hard left) the orange acquisition box was drawn at the far right, so the operator
+   * standing at the scanner saw the UI disagree with the glass in front of them.
+   *
+   * A presentation rectangle and the presentation raster are the same space. The mapping is a pure
+   * scale. Keeping this as its OWN function, rather than adding a flag to the one above, is the
+   * point: the coordinate space is named at the call site, so mixing them again is visible in a
+   * diff instead of hiding inside a boolean.
+   */
+  function presentationRectToRasterRect(presentationRect, acquisitionAreaMm, previewRaster) {
+    const presentation = rect(presentationRect, "presentation rectangle");
+    const area = rect(acquisitionAreaMm, "ImageCaptureCore acquisition area");
+    const pixels = raster(previewRaster, "Preview raster");
+    return {
+      x: ((presentation.x - area.x) / area.width) * pixels.width,
+      y: ((presentation.y - area.y) / area.height) * pixels.height,
+      width: (presentation.width / area.width) * pixels.width,
+      height: (presentation.height / area.height) * pixels.height,
+    };
+  }
+
+  function presentationRectToContainedViewportRect(presentationRect, acquisitionAreaMm, sourceRaster, viewportRaster) {
+    return containedRasterRect(
+      presentationRectToRasterRect(presentationRect, acquisitionAreaMm, sourceRaster),
+      sourceRaster,
+      viewportRaster,
+    );
+  }
+
   function physicalRectToContainedViewportRect(physicalRect, acquisitionAreaMm, sourceRaster, viewportRaster) {
     return containedRasterRect(
       physicalRectToRasterRect(physicalRect, acquisitionAreaMm, sourceRaster),
@@ -126,6 +164,8 @@
     PRESENTATION_ROTATION_DEGREES,
     assertUprightOrientation,
     physicalRectToRasterRect,
+    presentationRectToRasterRect,
+    presentationRectToContainedViewportRect,
     rasterRectToPhysicalRect,
     containedRasterRect,
     physicalRectToContainedViewportRect,

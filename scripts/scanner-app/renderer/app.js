@@ -453,7 +453,7 @@ function positionPreviewOverlay(element, physicalRect, entry, className) {
     return;
   }
   try {
-    const mapped = transform.physicalRectToContainedViewportRect(
+    const mapped = transform.presentationRectToContainedViewportRect(
       physicalRect,
       area,
       { width: image.naturalWidth, height: image.naturalHeight },
@@ -466,6 +466,18 @@ function positionPreviewOverlay(element, physicalRect, entry, className) {
       height: `${mapped.height}px`,
     });
     element.className = className;
+
+    /*
+     * Keep the label on screen. It sits above the box by default; within its own height of the
+     * top edge there is nowhere to put it, so it flips below. Same idea horizontally: a box hard
+     * against the right edge gets a right-aligned label rather than one running off the viewport.
+     * Both are presentation-only attributes — they move text, never geometry.
+     */
+    const LABEL_CLEARANCE_PX = 14;
+    if (mapped.y < LABEL_CLEARANCE_PX) element.setAttribute("data-label-below", "");
+    else element.removeAttribute("data-label-below");
+    if (mapped.x + mapped.width > imageRect.width - LABEL_CLEARANCE_PX) element.setAttribute("data-label-right", "");
+    else element.removeAttribute("data-label-right");
     element.hidden = false;
   } catch {
     element.hidden = true;
@@ -492,7 +504,7 @@ function renderPositioningCardCrop(entry) {
   const bottom = Math.min(area.y + area.height, card.y + card.height + marginMm);
   if (right <= x || bottom <= y) return;
   try {
-    const crop = transform.physicalRectToRasterRect(
+    const crop = transform.presentationRectToRasterRect(
       { x, y, width: right - x, height: bottom - y },
       area,
       { width: image.naturalWidth, height: image.naturalHeight },
