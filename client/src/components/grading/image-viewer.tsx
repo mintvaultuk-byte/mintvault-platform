@@ -248,6 +248,43 @@ const RAIL_SAFE_INSET_Y = 14;
 export const RAIL_MIN_BOTTOM_CLEARANCE_PX = 12;
 
 /**
+ * Gap kept between the bottom of the rail's controls and the bottom of the REAL visible
+ * viewport, so nothing in the left workstation sits on the very edge of the screen or
+ * requires page scrolling to reach.
+ */
+export const RAIL_VISIBLE_BOTTOM_SAFETY_PX = 14;
+
+/**
+ * The card's available height, derived from the REAL VISIBLE VIEWPORT rather than from
+ * the container it lives in.
+ *
+ * Exported pure so the contract can be driven directly: a right pane with a large
+ * scrollHeight must not change the answer. The card is in flow, so it inflates its own
+ * container; that container sits in a scrollable page, so `clientHeight` can report a
+ * box far taller than the physical screen. Measuring the container cannot detect that —
+ * the container is the thing being inflated.
+ *
+ * Every input here is card-INDEPENDENT: the card cannot move its own top (fixed-height
+ * header above) and cannot change the controls' height below it.
+ */
+export function railAvailableHeight(input: {
+  /** The measured container height. Applies only when it is the TIGHTER ceiling. */
+  containerH: number;
+  /** window.visualViewport?.height ?? window.innerHeight */
+  visibleH: number;
+  /** The card viewport's top, in viewport coordinates. */
+  top: number;
+  /** Height of the controls row rendered beneath the card. */
+  controlsH: number;
+}): number {
+  const { containerH, visibleH, top, controlsH } = input;
+  if (!(visibleH > 0) || !Number.isFinite(visibleH)) return containerH;
+  const fromVisible = visibleH - top - controlsH - RAIL_VISIBLE_BOTTOM_SAFETY_PX;
+  if (!Number.isFinite(fromVisible)) return containerH;
+  return Math.min(containerH, fromVisible);
+}
+
+/**
  * THE RATCHET — the single decision that keeps the card from oscillating.
  *
  * Exported as a pure function so the stability contract can be driven over many
@@ -712,6 +749,27 @@ export default function ImageViewer({
    * card is visible it stays visible.
    */
   const railObserverCountRef = useRef(0);
+  const railControlsRef = useRef<HTMLDivElement>(null);
+  /**
+   * A tick that changes whenever the REAL VISIBLE viewport changes, so the fit effect
+   * re-runs. The value itself is unused — the measurement is taken live inside the
+   * effect, from element rects, at the moment it matters.
+   */
+  const [visibleViewportTick, setVisibleViewportTick] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!railFitEnabled) return;
+    const bump = () => setVisibleViewportTick((t) => t + 1);
+    const vv = window.visualViewport;
+    window.addEventListener("resize", bump);
+    vv?.addEventListener("resize", bump);
+    vv?.addEventListener("scroll", bump);
+    return () => {
+      window.removeEventListener("resize", bump);
+      vv?.removeEventListener("resize", bump);
+      vv?.removeEventListener("scroll", bump);
+    };
+  }, [railFitEnabled]);
   const railFitRef = useRef<{
     key: string;
     vw: number;
@@ -737,11 +795,44 @@ export default function ImageViewer({
     if (vp.w <= RAIL_SAFE_INSET_X * 2) return;
 
     const prev = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
-    const heightUsable = vp.h > RAIL_SAFE_INSET_Y * 2;
+
+    /**
+     * THE VISIBLE VIEWPORT IS THE CEILING — owner P0, real staging screenshot: roughly
+     * half the card was BELOW the bottom of the MacBook screen while every measurement
+     * said it fitted.
+     *
+     * Both statements were true. The card is in flow, so it makes its own container
+     * taller; that container is inside a page that can scroll, so `clientHeight` happily
+     * reported a box far taller than the physical screen. The card fitted its container
+     * and the container ran off the display. Measuring the container can never detect
+     * this — the container is the thing being inflated.
+     *
+     * So the authority is the real visible viewport, and the card is given only what is
+     * left of it after the chrome above and the controls below:
+     *
+     *   available = visibleViewportHeight - cardViewportTop - controlsHeight - safety
+     *
+     * Every term is card-INDEPENDENT. The card cannot move its own top (the header above
+     * is fixed height) and cannot change the controls' height, so this closes the
+     * feedback path at the source rather than damping it. `visualViewport` is preferred
+     * over `innerHeight` because it excludes browser UI and is correct under pinch-zoom.
+     */
+    const el = railViewportRef.current;
+    const visibleH = window.visualViewport?.height ?? window.innerHeight;
+    const availableH = el
+      ? railAvailableHeight({
+          containerH: vp.h,
+          visibleH,
+          top: el.getBoundingClientRect().top,
+          controlsH: railControlsRef.current?.getBoundingClientRect().height ?? 0,
+        })
+      : vp.h;
+
+    const heightUsable = availableH > RAIL_SAFE_INSET_Y * 2;
     // Sticky: once this source has been fitted against a real height, never drop back to
     // width-only. Mode flapping was half of the limit cycle.
     const mode: "safe-fit" | "width-fit" = heightUsable || prev?.mode === "safe-fit" ? "safe-fit" : "width-fit";
-    const effectiveH = heightUsable ? vp.h : (prev?.vh ?? 0);
+    const effectiveH = heightUsable ? availableH : (prev?.vh ?? 0);
     if (mode === "safe-fit" && effectiveH <= RAIL_SAFE_INSET_Y * 2) return;
 
     // The ratchet: ignore growth and sub-pixel jitter, keep the last known good fit.
@@ -768,7 +859,7 @@ export default function ImageViewer({
       revision: (railFitRef.current?.revision ?? 0) + 1,
     };
     setRailFitRevision((r) => r + 1);
-  }, [railFitEnabled, railViewport, railNaturalDims, railFitKey]);
+  }, [railFitEnabled, railViewport, railNaturalDims, railFitKey, visibleViewportTick]);
 
   // A new source starts with no last-known-good — Front's dimensions must never be
   // reused for Back, which has its own natural aspect.
@@ -2113,7 +2204,11 @@ export default function ImageViewer({
         ))}
 
       {/* Controls row — shrink-0 so it always reserves its own space in the rail. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2" data-testid="grading-card-controls">
+      <div
+        ref={railControlsRef}
+        className="flex shrink-0 flex-wrap items-center gap-2"
+        data-testid="grading-card-controls"
+      >
         {/* Gated on !readOnly to match the old sidebar behaviour: the card
             tool must not open on an approved (locked) cert outside edit mode. */}
         {onOpenCardTool && mutationsEnabled && !readOnly && (

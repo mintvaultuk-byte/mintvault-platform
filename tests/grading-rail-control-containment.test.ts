@@ -59,9 +59,11 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
   });
 
   it("the controls row never shrinks and is a real in-flow sibling", () => {
-    expect(VIEWER).toMatch(
-      /className="flex shrink-0 flex-wrap items-center gap-2" data-testid="grading-card-controls"/
-    );
+    // The row now also carries a ref: the fit has to reserve room for it, because the
+    // card's ceiling is the visible screen minus everything rendered beneath the card.
+    expect(VIEWER).toMatch(/ref=\{railControlsRef\}/);
+    expect(VIEWER).toMatch(/className="flex shrink-0 flex-wrap items-center gap-2"/);
+    expect(VIEWER).toMatch(/data-testid="grading-card-controls"/);
   });
 
   it("the Front/Back tabs keep their intrinsic height in the rail", () => {
