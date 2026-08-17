@@ -704,10 +704,16 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
    * calibrates anything — the capture window is moved deliberately in "Capture window position"
    * below, and the RED/GREEN that governs a scan is the per-side placement gate.
    */
-  const window = entry.captureWindowMm;
-  const windowText = window
-    ? `Capture area ${formatMm(window.width)} × ${formatMm(window.height)} at ${formatMm(window.x)}, ${formatMm(window.y)}.`
-    : "This station has no saved capture area yet — set one in Capture window position below.";
+  /*
+   * NOT `window`. Naming a `const` after the global shadows it for the WHOLE function under
+   * temporal-dead-zone rules, so the `window.scanner.getPositioningPreview(...)` call earlier in this
+   * same function threw "Cannot access 'window' before initialization" and killed the render.
+   */
+  const captureAreaMm = entry.captureWindowMm;
+  const windowText = captureAreaMm
+    ? `Capture area ${formatMm(captureAreaMm.width)} × ${formatMm(captureAreaMm.height)} at ` +
+      `${formatMm(captureAreaMm.x)}, ${formatMm(captureAreaMm.y)}.`
+    : "This station has no saved capture area yet — it is set during station maintenance.";
 
   if (status === "detected") {
     els.positioningResult.textContent = "CARD DETECTED";

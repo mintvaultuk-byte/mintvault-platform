@@ -320,6 +320,21 @@ export async function getStationEnrollmentStatus(
   calibrationStatus: CalibrationStatus;
   appVersion: string | null;
   minimumSupportedVersion: string | null;
+  /**
+   * THE STATION'S FIXED CAPTURE RECTANGLE, so the Scanner can ADOPT it rather than be told to
+   * recalibrate.
+   *
+   * A station whose local jig origin has never been written reports `profile_unprovisioned` and
+   * cannot Preview or scan — even when the SERVER already holds a perfectly good VALID calibration
+   * for it. The only way to clear that was the operator dragging the window, which is now
+   * maintenance-gated and, correctly, refused while a card is open. A half-captured card therefore
+   * became unrecoverable: it needs an origin, and the origin could not be set until it finished.
+   *
+   * Publishing the region breaks that circle without weakening anything. Adopting the geometry the
+   * server ALREADY records is a synchronisation, not a move: nothing physical changes, so none of
+   * the move guards apply. The server stays the single authority; the Mac stops being a second one.
+   */
+  acquisitionRegion: { x: number; y: number; width: number; height: number } | null;
 }> {
   const code = typeof stationCode === "string" ? stationCode.trim().toUpperCase() : "";
   if (!/^MV-STN-[A-Z2-7]{10,24}$/.test(code)) throw new StationServiceError("validation", "stationCode is invalid");
@@ -330,10 +345,13 @@ export async function getStationEnrollmentStatus(
     calibration_status: CalibrationStatus;
     app_version: string | null;
     minimum_supported_version: string | null;
+    acquisition_region: unknown;
   }>(
     `SELECT s.station_code, s.status, s.location_id, s.calibration_status,
-            s.app_version, s.minimum_supported_version
+            s.app_version, s.minimum_supported_version,
+            k.acquisition_region
        FROM partner_stations s
+       LEFT JOIN partner_station_calibrations k ON k.id = s.current_calibration_id
       WHERE s.station_code=$1 AND s.tenant_id=$2
         AND ($3::boolean OR EXISTS (
           SELECT 1 FROM partner_user_locations ul WHERE ul.user_id=$4 AND ul.location_id=s.location_id
@@ -350,6 +368,21 @@ export async function getStationEnrollmentStatus(
     calibrationStatus: station.calibration_status,
     appVersion: station.app_version,
     minimumSupportedVersion: station.minimum_supported_version,
+    /*
+     * Published only when the calibration is VALID and the geometry is a legal capture window. A
+     * station must never adopt a rectangle the arm path would go on to reject — that would trade an
+     * honest "unprovisioned" for a capture that fails after the scan.
+     */
+    acquisitionRegion:
+      station.calibration_status === "VALID"
+        ? (() => {
+            try {
+              return assertLegalCaptureWindow(station.acquisition_region as never);
+            } catch {
+              return null;
+            }
+          })()
+        : null,
   };
 }
 

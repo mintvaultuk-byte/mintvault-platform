@@ -821,14 +821,15 @@ class Watcher extends EventEmitter {
 
   async reanalyseStoredPositioningPreview() {
     const entry = stateMod.get().positioningPreview;
-    if (!entry || !["detected", "reposition", "not_detected"].includes(entry.status)) return false;
+    // "reposition" is gone with the card-chasing solve; a retained preview is detected or not.
+    if (!entry || !["detected", "not_detected"].includes(entry.status)) return false;
     const areaMm = entry.capture?.areaMm;
     if (!areaMm || !["x", "y", "width", "height"].every((key) => Number.isFinite(Number(areaMm[key])))) return false;
     const sourcePath = this.storedPositioningPreviewSource(entry);
     if (!sourcePath) return false;
     try {
       const analysis = await this.analysePositioningPreview(sourcePath, areaMm);
-      const status = analysis.cardCandidate ? (analysis.placement.ready ? "detected" : "reposition") : "not_detected";
+      const status = analysis.cardCandidate ? "detected" : "not_detected";
       stateMod.set({
         positioningPreview: {
           ...entry,
@@ -841,7 +842,7 @@ class Watcher extends EventEmitter {
           },
           image: analysis.image,
           cardCandidate: analysis.cardCandidate,
-          placement: analysis.placement,
+          captureWindowMm: this.calibratedCaptureWindowMm(),
         },
         /*
          * `lastError` IS DELIBERATELY NOT TOUCHED HERE.
@@ -862,7 +863,7 @@ class Watcher extends EventEmitter {
          */
       });
       this.emitState();
-      this.log(`positioning-preview ${JSON.stringify({ id: entry.id, stage: "reanalysed", cardDetected: Boolean(analysis.cardCandidate), placementReady: Boolean(analysis.placement.ready) })}`);
+      this.log(`positioning-preview ${JSON.stringify({ id: entry.id, stage: "reanalysed", cardDetected: Boolean(analysis.cardCandidate) })}`);
       return true;
     } catch (error) {
       this.log(`positioning-preview retained Preview reanalysis failed: ${error.message || String(error)}`, "warn");

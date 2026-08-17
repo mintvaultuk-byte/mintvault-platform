@@ -37,6 +37,7 @@ const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
 const environment = require("./lib/environment");
+const lide400 = require("./lib/lide400-controller");
 
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
@@ -547,6 +548,25 @@ async function stationSetupState() {
     return { ok: true, stage: "station_unavailable", summary, stationCode: code };
   }
   const station = status.body.station;
+  /*
+   * ADOPT THE SERVER'S CAPTURE RECTANGLE. A synchronisation, not a move.
+   *
+   * A Mac whose local jig origin has never been written reports `profile_unprovisioned` and cannot
+   * Preview or scan, even when the server holds a perfectly good VALID calibration for that station.
+   * Clearing it used to mean dragging the window — now maintenance-gated and, correctly, refused
+   * while a card is open. So a half-captured card became unrecoverable: it needs an origin, and the
+   * origin could not be set until the card finished. This is that circle, broken at the only point
+   * where breaking it costs nothing: the geometry is the server's own, already recorded, already
+   * validated as a legal window before it was published.
+   *
+   * Idempotent and quiet when they already agree. It never OVERRIDES a local origin that matches,
+   * and it is not a calibration write — nothing is sent back.
+   */
+  try {
+    lide400.adoptServerCaptureWindow(station.acquisitionRegion);
+  } catch (error) {
+    console.warn(`[station] could not adopt the server capture window: ${error?.message || error}`);
+  }
   if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
     return {
       ok: true,

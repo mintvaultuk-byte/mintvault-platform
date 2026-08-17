@@ -132,3 +132,26 @@ test("a refused capture-window save is visually distinct from a successful one",
   assert.match(app, /"saved" : "refused"/, "a success must mark itself distinctly from a refusal");
   assert.match(css, /\[data-state="refused"\][\s\S]{0,80}color:\s*#b3261e/, "refusal must not render as ordinary grey text");
 });
+
+test("the renderer never shadows a browser global it also uses", () => {
+  /*
+   * `const window = entry.captureWindowMm;` shipped and killed the setup preview at runtime.
+   *
+   * It PARSES — so the sibling parse test above passed — but a `const` named after a global puts
+   * that global in the temporal dead zone for the ENTIRE enclosing function, so an earlier
+   * `window.scanner.getPositioningPreview(...)` in the same function threw
+   * "Cannot access 'window' before initialization". Static parsing cannot see it and neither can
+   * `tsc`, because this file is untyped sandboxed JS.
+   */
+  const source = require("node:fs").readFileSync(
+    require("node:path").join(__dirname, "..", "renderer", "app.js"),
+    "utf8"
+  );
+  for (const name of ["window", "document", "navigator", "location"]) {
+    assert.doesNotMatch(
+      source,
+      new RegExp(`\\b(?:const|let|var)\\s+${name}\\s*=`),
+      `renderer/app.js declares a local named "${name}", which shadows the global for its whole scope`
+    );
+  }
+});

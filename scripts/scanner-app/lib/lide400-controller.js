@@ -165,6 +165,46 @@ function persistJigOrigin(origin) {
   return { configPath, originMm: jigOrigin(), areaMm: PROFILE_AREA_MM, profileVersion: PROFILE_VERSION };
 }
 
+/**
+ * Adopt the SERVER's recorded capture rectangle as this Mac's acquisition origin.
+ *
+ * NOT a calibration. Nothing is written back to the server and nothing physical is decided here —
+ * this only stops the Mac being a second, emptier source of truth about a rectangle the server
+ * already owns. A station whose local origin has never been written is `profile_unprovisioned` and
+ * cannot scan; with a VALID server calibration in hand, that state is pure bookkeeping.
+ *
+ * Writes the station config so it survives a restart, and is a no-op when the two already agree, so
+ * it can run on every session refresh without churning the file.
+ *
+ * Returns the adopted origin, or null when there is nothing legal to adopt.
+ */
+function adoptServerCaptureWindow(region) {
+  const x = Number(region?.x);
+  const y = Number(region?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  // The server validated this before publishing it; refuse anything that would not clamp cleanly
+  // here too, rather than trusting a payload because of where it came from.
+  if (captureProfile.clampCaptureOriginMm({ x, y }).clamped) return null;
+  const current = jigOrigin();
+  if (current && Math.abs(current.x - x) < 0.001 && Math.abs(current.y - y) < 0.001) return current;
+  /*
+   * The process environment FIRST, and it is the part that matters: `jigOrigin()` reads it ahead of
+   * the config file, so this makes the station usable immediately. Writing the file is a durability
+   * bonus, and an instance with no `MINTVAULT_STATION_CONFIG_PATH` — which is a supported
+   * configuration, not a fault — simply re-adopts from the server on the next session refresh.
+   * Failing the whole adoption because the optional half is unavailable would leave a station
+   * unable to scan for a reason that does not affect scanning.
+   */
+  process.env.MINTVAULT_LIDE_SCAN_X_MM = String(Number(x.toFixed(2)));
+  process.env.MINTVAULT_LIDE_SCAN_Y_MM = String(Number(y.toFixed(2)));
+  try {
+    persistJigOrigin({ x, y });
+  } catch {
+    // Durability only. The in-process origin above is already live for this session.
+  }
+  return jigOrigin();
+}
+
 function calibrationRegion(input) {
   const x = Number(input?.x);
   const y = Number(input?.y);
@@ -440,6 +480,7 @@ module.exports = {
   placementPreview,
   scanCalibrationRegion,
   persistJigOrigin,
+  adoptServerCaptureWindow,
   captureProfile,
   _private: {
     jigOrigin,
