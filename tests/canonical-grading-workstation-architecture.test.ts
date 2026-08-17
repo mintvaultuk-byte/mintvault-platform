@@ -34,6 +34,7 @@ const SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorks
 const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const CERT_FORM = read("client/src/components/certificate-form.tsx");
 const ADMIN_DASH = read("client/src/pages/admin-dashboard.tsx");
+const FOCUS_SURFACE = read("client/src/components/admin/admin-focus-surface.ts");
 const STAFF = read("client/src/pages/staff.tsx");
 const GRADER = read("client/src/pages/grader.tsx");
 const ADMIN_STAFF = read("client/src/pages/admin-staff.tsx");
@@ -128,15 +129,26 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     // be a flex COLUMN (so the child can claim height) and must carry a real
     // desktop viewport bound (so there is a height to claim).
     expect(ADMIN_DASH, "/admin workstation wrapper must be a flex column").toMatch(
-      // NO `flex-1` in this assertion, and that is the whole point. `flex-1` is
-      // `flex: 1 1 0%`, and on a flex ITEM flex-basis REPLACES height for main-axis
-      // sizing — so with it present the bound is computed and discarded and the item
-      // stretches to its auto-height parent. Measured in a real browser against the
-      // compiled CSS at 1280x800: with flex-1 the workspace was 2568px, the document
-      // scrolled, the right pane did NOT scroll internally and the Live Certificate
-      // Preview sat at y=2552. Without it: 728px, right pane scrolls, preview bottom
-      // 763px, document not scrollable. Same result at 1024x768 (696px / 731px).
-      /className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/
+      // The desktop bound is REAL, not guessed. `md:h-[calc(100dvh-4.5rem)]` was
+      // right that a bound is needed and wrong about the number: 4.5rem assumed
+      // 72px of chrome above, the browser measures 43px, and the difference was
+      // unreachable dead space (the owner's black band). The subtraction is now
+      // deleted rather than re-tuned — the surface owns the definite desktop
+      // height, the header is shrink-0, the workstation is md:flex-1 md:min-h-0,
+      // and the BROWSER subtracts the header's real height.
+      //
+      // `flex-1` is safe here ONLY because the parent is definite now. Against
+      // the old AUTO-height parent it genuinely did inflate the workspace to
+      // 2568px with the Live Certificate Preview at y=2552 (the PR #234
+      // regression), which is why the surface height and the workstation flex
+      // are asserted as a PAIR and must never be separated.
+      /className=\{ADMIN_FOCUS_WORKSTATION_CLASS\}/
+    );
+    expect(FOCUS_SURFACE).toContain(
+      'ADMIN_FOCUS_SURFACE_CLASS = "flex min-h-[100dvh] flex-col p-2.5 md:h-[100dvh] md:min-h-0"'
+    );
+    expect(FOCUS_SURFACE).toContain(
+      'ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"'
     );
     expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);

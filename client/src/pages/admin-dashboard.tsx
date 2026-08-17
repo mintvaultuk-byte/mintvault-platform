@@ -108,6 +108,11 @@ import CertificateForm from "@/components/certificate-form";
 import CaptureWizard from "@/components/grading/capture-wizard";
 import { CertificateToolsDrawer, CertificateToolsButton } from "@/components/grading-workflow/CertificateToolsDrawer";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
+import {
+  ADMIN_FOCUS_HEADER_CLASS,
+  ADMIN_FOCUS_SURFACE_CLASS,
+  ADMIN_FOCUS_WORKSTATION_CLASS,
+} from "@/components/admin/admin-focus-surface";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 import { useToast } from "@/hooks/use-toast";
 
@@ -403,13 +408,17 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   if (showForm) {
     return (
       <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} focus>
-        <div className="flex min-h-[100dvh] flex-col p-2.5">
+        <div className={ADMIN_FOCUS_SURFACE_CLASS} data-testid="admin-focus-surface">
           {/* Compact grading header — the SHARED AdminHeaderRow primitive (same
               breadcrumb-left/actions-right row every admin surface uses).
               Replaces the tall "Edit MV####" header chrome so the three-stage
               form starts near the top on a 13-inch MacBook. Certificate Tools
               is the shared compact utility-button primitive beside the
               breadcrumb, not a large isolated top-right pill. */}
+          {/* shrink-0 — the header must never absorb the surface's height
+              pressure. See ADMIN_FOCUS_HEADER_CLASS. Its measured height is
+              what the workstation's flex-1 subtracts; nothing hard-codes it. */}
+          <div className={ADMIN_FOCUS_HEADER_CLASS} data-testid="admin-focus-header">
           <AdminHeaderRow
             testId="grading-header"
             left={
@@ -471,42 +480,31 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               ) : undefined
             }
           />
+          </div>
           {/* Owner directive (2026-07-01): one continuous block, in workflow
               order — EDIT MV#### header → AI Identify → grading workstation
               (card tool + defects, passed into the form as workstationSlot) →
               Card Details → Grade — with Ownership + NFC in the tools drawer.
               The form fills the remaining height (fixed-height workstation). */}
-          {/* OWNER-AUTHORISED REPAIR (2026-08-11) — BOUNDED DESKTOP WORKSTATION.
-              AdminShell(focus) deliberately uses min-height and no overflow
-              clipping, and documents that "the workstation itself sets a bounded,
-              viewport-relative height at desktop so its right column scrolls
-              internally". certificate-form.tsx used to supply that bound; the
-              canonical-workstation refactor removed it and nothing replaced it,
-              so on /admin the shell's h-full resolved against an auto-height
-              parent, the internal overflow-y-auto never engaged, the whole page
-              grew instead, and the Live Certificate Preview was pushed far below
-              the fold. That is the same missing-bound regression that caused the
-              PR #234 same-day production rollback.
-              Three changes, all required:
-                • flex + flex-col — this box was a BLOCK box, so the workstation's
-                  own `flex-1` was inert and could never claim a definite height.
-                • md:h-[calc(100dvh-4.5rem)] — the bound itself, desktop-only, so
-                  below `md` the surface still flows and the page scrolls (the
-                  documented fallback). 4.5rem is the compact AdminHeaderRow +
-                  container padding above this box.
-                • NO `flex-1` — and this one is load-bearing, not tidying.
-                  `flex-1` is `flex: 1 1 0%`, and on a flex ITEM `flex-basis`
-                  REPLACES `height` for main-axis sizing. With `flex-1` present the
-                  height above is computed and then discarded, the item stretches to
-                  its parent, and the parent here is `min-h-[100dvh]` with height
-                  AUTO — so it grows to content and every descendant grows with it.
-                  Measured in a real browser at 1280x800 against the compiled CSS:
-                  with `flex-1` the workspace was 2568px tall, the page itself
-                  scrolled, the right pane never scrolled internally, and the Live
-                  Certificate Preview landed at y=2552 — i.e. the exact reported
-                  defect survived the "fix". Without it: 728px, right pane scrolls,
-                  preview bottom at 763px, document not scrollable. */}
-          <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]">
+          {/* OWNER-AUTHORISED REPAIR (2026-08-17) — MEASURED DESKTOP BOUND.
+              Supersedes the 2026-08-11 repair, which bounded this box with
+              `md:h-[calc(100dvh-4.5rem)]`. That repair was right that the box
+              needs a desktop bound and right that `flex-1` was unsafe AT THE
+              TIME — with the old auto-height parent, `flex-1` genuinely did
+              inflate the workspace to 2568px and push the Live Certificate
+              Preview to y=2552 (the PR #234 regression). What it could not fix
+              was the 4.5rem itself: 72px was a GUESS at the chrome above, the
+              real chrome measures ~47px, and the ~25px difference is exactly
+              the unreachable black band the owner reported.
+              The subtraction is now deleted rather than re-tuned. The parent
+              surface carries the definite desktop height
+              (ADMIN_FOCUS_SURFACE_CLASS), the header is shrink-0, and this box
+              is `md:flex-1 md:min-h-0` — so the BROWSER subtracts the header's
+              real height and no constant remains to be wrong. `flex-1` is safe
+              here only because the parent is now definite; the two changes are
+              a pair and must not be separated. Below `md` nothing is bounded
+              and the page scrolls, preserving the PR #234 fallback. */}
+          <div className={ADMIN_FOCUS_WORKSTATION_CLASS} data-testid="admin-focus-workstation">
             {editingCert ? (
               <GradingWorkstation
                 mode="super-admin"
