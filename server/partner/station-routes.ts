@@ -24,6 +24,7 @@ import {
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
 import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-authority";
+import { CardJobCancellationError, cancelCardJob } from "./card-job-cancellation";
 import { FixAuthorityError, authoriseFix, invalidateSide, listFixQueue } from "./fix-authority";
 import { CaptureAuthorityError, authoriseStationCapture } from "./capture-authority";
 
@@ -163,6 +164,17 @@ const partnerStationFixAuthoriseRateLimit = partnerRateLimit({
   windowMs: 60_000,
   // Authorising a FIX is rarer than starting a card and is a lineage decision, so it is tighter —
   // still one per second, which no operator reaches.
+  max: 60,
+  failClosed: true,
+  keyFn: (req) => req.station?.id ?? "unknown",
+});
+
+const partnerStationCardJobCancelRateLimit = partnerRateLimit({
+  name: "partner-station-card-job-cancel",
+  windowMs: 60_000,
+  // Cancelling is rarer than starting and each one moves money back, so it is tighter than the
+  // 120/min card-start budget — still one per second sustained, which no operator reaches. Keyed per
+  // station and fleet-wide for the same reasons as its neighbours.
   max: 60,
   failClosed: true,
   keyFn: (req) => req.station?.id ?? "unknown",
@@ -540,6 +552,61 @@ export function partnerStationRouter(): Router {
   );
 
   /**
+   * P6c — CANCEL A CARD THAT WAS STARTED BY MISTAKE AND NEVER PHOTOGRAPHED.
+   *
+   * THE EDGE THAT HAD NO CALLER. `NEEDS_SCAN -> CANCELLED` has been legal since migration 0080 and
+   * `transitionCardJob` could always perform it, but nothing reachable ever did — so a mis-pressed
+   * NEW held its Grading Credit for the full 365-day reservation TTL and left a job that could never
+   * be finished or closed. This is that caller, and it is deliberately NOT the submission
+   * cancellation path: releasing through the submission would return the credit and leave the Card
+   * Job stranded in NEEDS_SCAN, which is worse than the defect.
+   *
+   * BOTH IDENTITIES ARE REQUIRED, exactly as for NEW. Returning a credit is a money movement, so it
+   * demands the same proof that spending one does: the approved Mac's Ed25519 signature AND an
+   * MFA-passed operator session holding `partner.cards.scan`, with tenant and location equality
+   * between the two. `requireNotViewOnly` is unnecessary here only because that scope cannot hold
+   * `partner.cards.scan` in the first place.
+   *
+   * THE CARD JOB ID IS THE ONLY CLIENT INPUT, and it is resolved under the AUTHENTICATED station's
+   * tenant. A forged or cross-tenant id resolves to 404 — the same answer an absent id gets.
+   */
+  // Kept on ONE line for the same reason as /card-jobs above: the boundary suites locate this route
+  // with `indexOf('r.post("/card-jobs/:cardJobId/cancel"')` and read the following characters.
+  r.post("/card-jobs/:cardJobId/cancel", requireSignedStation, requireSignedStationOperator, partnerStationCardJobCancelRateLimit, async (req, res) => {
+    const station = req.station!;
+    const operator = req.partner!;
+    try {
+      const cancellation = await cancelCardJob({
+        tenantId: station.tenantId,
+        locationId: station.locationId,
+        cardJobId: String(req.params.cardJobId),
+        stationId: station.id,
+        actorUserId: operator.userId,
+        actorEmail: req.body?.operatorEmail ?? operator.userId,
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+      });
+      res.json({ cancellation });
+    } catch (error) {
+      if (error instanceof CardJobCancellationError) {
+        const status =
+          error.code === "CARD_JOB_NOT_FOUND"
+            ? 404
+            : error.code === "JOB_NOT_CANCELLABLE" ||
+                error.code === "JOB_HAS_EVIDENCE" ||
+                error.code === "CAPTURE_IN_PROGRESS" ||
+                error.code === "CREDIT_ALREADY_SETTLED"
+              ? 409
+              : error.code === "REASON_REQUIRED"
+                ? 400
+                : 403;
+        res.status(status).json({ error: { code: error.code, message: error.message } });
+        return;
+      }
+      stationError(res, error);
+    }
+  });
+
+  /**
    * B1 — ARM A CAPTURE SESSION FROM THE STATION ITSELF.
    *
    * THE CLOSED LOOP THIS OPENS. `POST /card-jobs` started a walk-in card and
@@ -619,6 +686,28 @@ export function partnerStationRouter(): Router {
                 ? 409
                 : 403;
         res.status(status).json({ error: { code: error.code, message: error.message } });
+        return;
+      }
+      /*
+       * THE ARM PATH MUST NOT REDUCE A REAL, ACTIONABLE REFUSAL TO "Station request could not be
+       * completed". That generic 500 is what an operator saw when their station already held a live
+       * target: it named no card, suggested nothing, and was produced for a condition they could
+       * have cleared in one press had anyone told them what it was.
+       *
+       * `ScannerCaptureConflictError` is imported lazily for the same reason
+       * `createScannerCaptureSession` is — the HQ capture service pulls in the Drizzle pool, and the
+       * partner router must stay loadable on a partner-only deployment.
+       */
+      const { ScannerCaptureConflictError } = await import("../scanner-capture-service");
+      if (error instanceof ScannerCaptureConflictError) {
+        res.status(409).json({
+          error: {
+            code: error.code,
+            message: error.message,
+            holdingCertificateNumber: error.holdingCertificateNumber,
+            holdingSide: error.holdingSide,
+          },
+        });
         return;
       }
       stationError(res, error);

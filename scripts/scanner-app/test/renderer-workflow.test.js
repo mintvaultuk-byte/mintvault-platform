@@ -47,8 +47,15 @@ test("operator sign-out clears only the human session and keeps the Mac station 
 
 test("Fix missing images is target-bound recovery only and cannot delete a certificate", () => {
   const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
-  assert.match(html, /Recovery only\. It opens the selected card in MintVault/);
-  assert.match(renderer, /recover\.textContent = "Open in MintVault"/);
+  assert.match(html, /Recovery only\./);
+  /*
+   * P7 replaced "open the card in MintVault" with an in-app, server-derived FIX: the operator never
+   * types a card number, so this asserts the CURRENT affordance. The old assertion still named a
+   * `recover` button that P7 deleted, and had been failing ever since.
+   */
+  assert.match(renderer, /fixBtn\.textContent = "FIX THIS CARD"/);
+  assert.match(renderer, /cardJobId: item\.cardJobId/);
+  assert.doesNotMatch(renderer, /prompt\(|Enter an MV/);
   assert.doesNotMatch(html, /Soft-delete|deleteModal/);
   assert.doesNotMatch(renderer, /deleteCert|delete-cert|Soft-delete/);
   assert.doesNotMatch(preload, /deleteCert|delete-cert/);

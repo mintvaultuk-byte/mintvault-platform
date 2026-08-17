@@ -702,3 +702,27 @@ body {
   font-size: 15px;
   font-weight: 600;
 }
+
+/*
+ * P6c — the unresolved-card block. Same shape as .card-complete so the operator reads it as the same
+ * kind of station-level notice, but in the error colour: this one is a stop, not a finish.
+ */
+.card-blocked {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #e5484d;
+  border-radius: 8px;
+  text-align: center;
+  background: rgba(229, 72, 77, 0.08);
+}
+.card-blocked-title {
+  display: block;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  color: #e5484d;
+}
+.card-blocked-detail {
+  margin: 6px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}

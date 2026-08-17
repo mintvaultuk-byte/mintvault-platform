@@ -626,6 +626,77 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
   });
 
   /* ============================================================================================
+   * AT-B1d — RETRY SCANNER on a card the station is already holding.
+   *
+   * THE DEFECT, AND IT DEAD-ENDED A REAL BENCH (staging, MV272, 17 Aug 10:46 and 10:52). Migration
+   * 0075 puts a partial unique index on `station_id` for state IN ('armed','claimed','capturing'),
+   * so a second arm for a station that already holds a live target raised a RAW UNIQUE VIOLATION.
+   * That is not a typed error, so it fell past the route's CaptureAuthorityError arm and became
+   * `500 internal_error / "Station request could not be completed"` — a message naming nothing.
+   *
+   * The trap was worse than the message. The Scanner's keepalive RENEWS the target it holds, so the
+   * service's expiry sweep can never reclaim the slot: RETRY SCANNER was guaranteed to fail for as
+   * long as the app kept the card alive, and the operator's only offered recovery could not work by
+   * construction.
+   *
+   * A re-arm of the SAME card is now a REPLAY that returns the session already held — no second
+   * session, no new credit, no new Card Job. A re-arm while holding a DIFFERENT card is a typed
+   * 409 that NAMES the blocking card, which is the sentence an operator can act on.
+   * ========================================================================================== */
+  it("AT-B1d: re-arming the card a station already holds replays it; another card is a named refusal", async () => {
+    await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
+      ON scanner_capture_sessions (station_id)
+      WHERE station_id IS NOT NULL AND state IN ('armed', 'claimed', 'capturing')`);
+    const captures = await import("../server/scanner-capture-service");
+    const card = await scannerNew(shopA);
+    const arm = (certificateId: number) =>
+      captures.createScannerCaptureSession({
+        certificateId,
+        side: "front",
+        workstationId: "MV-STN-B1DTESTAA22",
+        stationId: shopA.stationA,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      });
+
+    const first = await arm(card.certificateId);
+    expect(first.state).toBe("armed");
+
+    // THE EXACT SHAPE THAT FAILED: the station claims it (as the Scanner's poll does), the keepalive
+    // keeps it alive, and the operator then presses RETRY SCANNER.
+    const claimed = await captures.claimNextScannerCapture("MV-STN-B1DTESTAA22", "MV-STN-B1DTESTAA22", shopA.stationA);
+    expect(claimed?.state).toBe("claimed");
+
+    const retried = await arm(card.certificateId);
+    expect(retried.id).toBe(first.id); // the SAME session — a replay, not a second one
+    expect(retried.certificateId).toBe(card.certificateId);
+    expect(retried.side).toBe("front");
+    expect(retried.state).toBe("claimed"); // still held by the station, and still scannable
+
+    // And no second session was created behind it.
+    const sessions = await admin.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM scanner_capture_sessions WHERE certificate_id=$1`,
+      [card.certificateId]
+    );
+    expect(Number(sessions.rows[0].n)).toBe(1);
+
+    // A DIFFERENT card while the station is holding this one: refused with the held card NAMED,
+    // not a raw unique violation and not a generic 500.
+    const other = await scannerNew(shopA);
+    await expect(arm(other.certificateId)).rejects.toThrow(/already holding MV\d+ \(front\)/);
+    await expect(arm(other.certificateId)).rejects.toBeInstanceOf(captures.ScannerCaptureConflictError);
+
+    // The refusal changed nothing: the held session stands and the other card has none.
+    const after = await admin.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM scanner_capture_sessions WHERE certificate_id=$1`,
+      [other.certificateId]
+    );
+    expect(Number(after.rows[0].n)).toBe(0);
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [first.id]);
+  });
+
+  /* ============================================================================================
    * AT-B2 / AT-B6 — a Partner grader can open a Scanner Card Job at all.
    * ========================================================================================== */
   it("AT-B2/AT-B6: a grader opens a Scanner Card Job — the lease is granted and the job enters GRADING", async () => {

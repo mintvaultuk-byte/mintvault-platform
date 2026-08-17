@@ -39,9 +39,58 @@ function deviceId() {
   return `mac-${stationId()}`;
 }
 
+/**
+ * Read the persisted station configuration back off disk.
+ *
+ * THE DEFECT THIS CLOSES. `persistJigOrigin` writes the placement to
+ * `MINTVAULT_STATION_CONFIG_PATH` **and** sets `process.env` — so a saved calibration worked
+ * perfectly for the rest of that run and then VANISHED on the next launch, because nothing ever read
+ * the file back. Nothing in this app did. The operator's own record said the placement was saved
+ * (the file on disk proved it), while the station reported `profile_unprovisioned`, which gates BOTH
+ * `pollTargetedCapture` and `scanActiveTarget` — so a correctly calibrated station could neither
+ * claim its armed card nor photograph one, and the only visible symptom was "No card ready".
+ *
+ * Re-read on every call, cheap and mtime-cached, for the same reason `server-client.liveEnv` is: the
+ * file can change under a running process (a placement save from this very app), and a value cached
+ * once at boot is how the app ends up disagreeing with its own configuration.
+ */
+const STATION_CONFIG_KEYS = ["MINTVAULT_LIDE_SCAN_X_MM", "MINTVAULT_LIDE_SCAN_Y_MM"];
+let stationConfigCache = { path: null, mtimeMs: -1, values: {} };
+function stationConfigValues() {
+  const configured = String(process.env.MINTVAULT_STATION_CONFIG_PATH || "").trim();
+  if (!configured || !path.isAbsolute(configured)) return {};
+  try {
+    const stat = fs.statSync(configured);
+    if (stationConfigCache.path === configured && stationConfigCache.mtimeMs === stat.mtimeMs) {
+      return stationConfigCache.values;
+    }
+    const values = {};
+    for (const line of fs.readFileSync(configured, "utf8").split("\n")) {
+      const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+      // Only the placement keys are honoured. This file is operator-editable, so it must never be a
+      // channel for setting arbitrary environment for this process.
+      if (match && STATION_CONFIG_KEYS.includes(match[1])) values[match[1]] = match[2];
+    }
+    stationConfigCache = { path: configured, mtimeMs: stat.mtimeMs, values };
+    return values;
+  } catch {
+    // A missing or unreadable file means "no persisted placement", which `jigOrigin` already treats
+    // as unprovisioned. It must never be an exception on the health path.
+    return {};
+  }
+}
+
+/**
+ * The saved placement, or null.
+ *
+ * `process.env` WINS, so an explicitly launched override and the value `persistJigOrigin` sets
+ * in-process both still take precedence; the file is the fallback that makes a saved placement
+ * survive a restart.
+ */
 function jigOrigin() {
-  const x = Number(process.env.MINTVAULT_LIDE_SCAN_X_MM);
-  const y = Number(process.env.MINTVAULT_LIDE_SCAN_Y_MM);
+  const configured = stationConfigValues();
+  const x = Number(process.env.MINTVAULT_LIDE_SCAN_X_MM ?? configured.MINTVAULT_LIDE_SCAN_X_MM);
+  const y = Number(process.env.MINTVAULT_LIDE_SCAN_Y_MM ?? configured.MINTVAULT_LIDE_SCAN_Y_MM);
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return null;
   return { x, y };
 }

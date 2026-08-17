@@ -737,6 +737,7 @@ class Watcher extends EventEmitter {
     if (entry.previewPath && fs.existsSync(entry.previewPath)) this.moveFile(entry.previewPath, this.dateFolder(PROCESSED));
     this.removeTargetedPending(entry.sessionId);
     const certId = capture?.certificateNumber || entry.certId;
+    const cardRegistered = capture?.cardRegistered === true;
     stateMod.set({
       state: "success",
       activeCapture: null,
@@ -744,9 +745,19 @@ class Watcher extends EventEmitter {
       lastAcceptedCapture: {
         certId,
         side: entry.side,
-        cardRegistered: capture?.cardRegistered === true,
+        cardRegistered,
         acceptedAt: new Date().toISOString(),
       },
+      /*
+       * THE CARD IS ONLY FINISHED WHEN THE SERVER SAYS BOTH SIDES ARE REGISTERED.
+       *
+       * `cardRegistered` is the server's own answer (`card_registered` on the accept/status
+       * response), never a local count of how many sides this app believes it has sent. Clearing on
+       * an accepted FRONT would re-enable NEW CARD with the card still on the glass, which is
+       * precisely the double-mint this record exists to prevent; keeping it set until the server
+       * confirms completion is what makes FRONT -> BACK stay on the SAME MV.
+       */
+      ...(cardRegistered ? { openCardJob: null } : {}),
       lastError: null,
     });
     stateMod.pushRecent({ certId, side: entry.side, source: "targeted-lide" });
@@ -1091,7 +1102,22 @@ class Watcher extends EventEmitter {
     }
     const capture = claim.body?.capture;
     if (!capture) return { ok: true, idle: true };
-    const entry = {
+    const entry = this.targetEntryFromCapture(capture);
+    this.addTargetedPending(entry);
+    this.setTargetState(entry, "awaiting_scan", "awaiting_scan");
+    this.logCaptureStage(entry, "target_claimed_waiting_for_operator");
+    return { ok: true, armed: true, capture };
+  }
+
+  /**
+   * The one place a server capture record becomes a local durable queue entry.
+   *
+   * Shared by the polling claim above and by `adoptArmedCapture` below so the two cannot drift: a
+   * target adopted at the moment of arming and the same target rediscovered by a later poll produce
+   * a byte-identical entry, which is what makes a restart mid-card resume rather than diverge.
+   */
+  targetEntryFromCapture(capture) {
+    return {
       phase: "awaiting_scan",
       sessionId: capture.id,
       certId: capture.certificateNumber,
@@ -1107,10 +1133,144 @@ class Watcher extends EventEmitter {
       capturedAtMs: null,
       uploadAttempts: 0,
     };
-    this.addTargetedPending(entry);
+  }
+
+  /**
+   * COMMIT A CAPTURE THIS STATION JUST ARMED INTO THE SHARED STATE THE RENDERER READS.
+   *
+   * THE DEFECT THIS CLOSES. `start-new-card` and `arm-capture` both received a fully armed capture
+   * session from the server and RETURNED it to the renderer as a function result — while the shared
+   * state that actually drives the window (`stateMod.activeCapture`) stayed null. The operator was
+   * therefore shown "No card ready" for a card that existed, was paid for, and had its FRONT armed
+   * and waiting, until the idle poll happened to rediscover it up to 35 seconds later. Worse, the
+   * physical Scan button is gated on `activeTargetEntry()`, which reads the durable queue — so until
+   * that poll landed the card could not be photographed at all.
+   *
+   * Arming and adopting are now one act. Nothing waits for a poll to rediscover what this process
+   * itself just created.
+   *
+   * IDEMPOTENT. Re-adopting the session already held is a no-op, so a retried arm that the server
+   * answers from an existing session cannot produce a duplicate queue entry.
+   *
+   * REFUSES TO DISPLACE A DIFFERENT LIVE TARGET. If this station is already holding another session
+   * the adoption is declined rather than overwriting it: migration 0075 guarantees the server will
+   * only ever have one active target per station, so a mismatch means our local view is stale and
+   * the reconciling poll — which can archive a staged TIFF safely — must be the one to resolve it.
+   *
+   * IT MUST CLAIM, NOT MERELY COPY. THIS IS THE WHOLE POINT AND IT WAS THE BUG.
+   *
+   * `POST /card-jobs/:id/capture-sessions` returns a capture in state `armed` with
+   * `claimed_by_device_id` still NULL. Every subsequent scanner call — keepalive, status, evidence
+   * upload — is scoped to THE DEVICE THAT CLAIMED THE SESSION. A first version of this method built
+   * the local entry straight from the arm response and never claimed, so the station looked armed,
+   * scanned a real 1200 DPI TIFF, generated its preview, and then had Accept answered with "Capture
+   * session not found for this scanner" — because as far as the server was concerned no device held
+   * it. The capture was archived and the operator got an error on a scan that had physically worked.
+   *
+   * So adoption goes through the SAME canonical claim the poll uses. The station ends up holding a
+   * session the server agrees it holds, which is the only state in which the rest of the capture
+   * lifecycle can function.
+   */
+  async adoptArmedCapture(capture) {
+    if (!capture || typeof capture.id !== "string" || !capture.id) {
+      return { ok: false, error: "MintVault did not return a usable capture target" };
+    }
+    const held = stateMod.get().activeCapture;
+    if (held?.id === capture.id) return { ok: true, alreadyHeld: true, sessionId: capture.id };
+    if (held?.id) {
+      this.log(`refused to adopt capture ${capture.id}: station is still holding ${held.id}`, "warn");
+      return { ok: false, error: "This station is still finishing another card side" };
+    }
+
+    /*
+     * ALREADY CLAIMED BY THIS STATION — adopt it directly, do NOT try to claim again.
+     *
+     * The server now answers a re-arm of a card this station already holds by returning that same
+     * session (it cannot create a second one; migration 0075 allows one live target per station).
+     * That session is typically already `claimed`, and `claimNextCapture` only ever selects `armed`
+     * rows — so routing this through the claim would answer "nothing to hand over" and leave the
+     * operator with a red NOT ARMED panel over a card that is armed, claimed and ready to scan.
+     *
+     * The station code is compared explicitly: adopting a session claimed by a DIFFERENT Mac would
+     * be taking someone else's card off their glass.
+     */
+    if (capture.state === "claimed" || capture.state === "capturing") {
+      if (String(capture.workstationId || "") !== String(lide400.stationId())) {
+        return { ok: false, error: "This card is already being captured at another station" };
+      }
+      const mine = this.targetEntryFromCapture(capture);
+      this.addTargetedPending(mine);
+      this.setTargetState(mine, "awaiting_scan", "awaiting_scan");
+      this.logCaptureStage(mine, "target_readopted_already_claimed");
+      return { ok: true, sessionId: mine.sessionId, certId: mine.certId, side: mine.side, alreadyClaimed: true };
+    }
+
+    // Claim it for THIS device, exactly as pollTargetedCapture does. 0075 guarantees a station has
+    // at most one active target, so this returns the session that was just armed for it.
+    let claim;
+    try {
+      claim = await server.claimNextCapture(lide400.stationId(), lide400.deviceId());
+    } catch (error) {
+      this.log(`could not claim armed capture ${capture.id}: ${error.message}`, "warn");
+      return { ok: false, retryable: true, error: "MintVault could not hand this card to the scanner. Retry the scanner for this card." };
+    }
+    if (!claim.ok) {
+      const reason = claim.body?.error || `HTTP ${claim.status}`;
+      this.log(`claim rejected for armed capture ${capture.id}: ${reason}`, "warn");
+      return { ok: false, error: `MintVault could not hand this card to the scanner: ${reason}` };
+    }
+    const claimed = claim.body?.capture;
+    if (!claimed?.id) {
+      // Armed but not claimable — most often it expired between the arm and this call. Reported
+      // rather than papered over: adopting an unclaimed session is precisely the defect above.
+      return { ok: false, error: "MintVault did not hand this card to the scanner. Retry the scanner for this card." };
+    }
+    if (claimed.id !== capture.id) {
+      // The server handed over a DIFFERENT outstanding target for this station. Its answer wins —
+      // it is the authority on what this Mac holds — but say so, because the operator asked for one
+      // card and is now looking at another.
+      this.log(`claimed ${claimed.id} (${claimed.certificateNumber}) rather than the just-armed ${capture.id}`, "warn");
+    }
+
+    const entry = this.targetEntryFromCapture(claimed);
+    this.addTargetedPending(entry); // durable BEFORE the state the operator can act on
     this.setTargetState(entry, "awaiting_scan", "awaiting_scan");
-    this.logCaptureStage(entry, "target_claimed_waiting_for_operator");
-    return { ok: true, armed: true, capture };
+    this.logCaptureStage(entry, "target_adopted_at_arm");
+    return { ok: true, sessionId: entry.sessionId, certId: entry.certId, side: entry.side };
+  }
+
+  /**
+   * Drop this station's local target for a card the server has just CANCELLED.
+   *
+   * The server has already made the capture session terminal inside the cancellation transaction,
+   * so this is purely local hygiene: without it the window would keep showing a card that is dead,
+   * and the operator would press Scan on a session that can only be refused.
+   *
+   * MATCHED ON THE MV NUMBER, because that is the identifier the local queue carries (`certId` is
+   * `certificates.certificate_number`); the numeric certificate id never reaches this app. A
+   * mismatch is a no-op — this must never clear a target belonging to a DIFFERENT card, so an
+   * unrecognised cancellation leaves the current target exactly where it is.
+   *
+   * ANY STAGED TIFF IS ARCHIVED, NOT DELETED. A physical scan that happened moments before the
+   * cancellation is kept under the local archive with its reason, so nothing an operator did with a
+   * real card disappears without a trace.
+   */
+  releaseTargetForCancelledCard(certificateId, mvNumber) {
+    const target = String(mvNumber || "").trim();
+    if (!target) return { ok: false, error: "No cancelled card was identified" };
+    const entry = this.readTargetedQueue().find((item) => item && item.certId === target);
+    const active = stateMod.get().activeCapture;
+    if (!entry && active?.certId !== target) return { ok: true, noop: true };
+    if (entry) {
+      this.archivePreviewCandidate(entry, `Card ${target} was cancelled at this station before capture.`);
+      this.removeTargetedPending(entry.sessionId);
+      this.logCaptureStage(entry, "target_released_card_cancelled", { certificateId: certificateId ?? null });
+    }
+    if (active?.certId === target) {
+      stateMod.set({ state: "idle", activeCapture: null, lastError: null });
+    }
+    this.emitState();
+    return { ok: true, released: true };
   }
 
   async scanActiveTarget() {

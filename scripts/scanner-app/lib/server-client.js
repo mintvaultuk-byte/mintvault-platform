@@ -408,6 +408,21 @@ async function startNewCard(clientOpId, cardName) {
   });
 }
 
+/**
+ * P6c — cancel a card started by mistake, and return its Grading Credit.
+ *
+ * SAFE TO RETRY. The server releases the reservation through the canonical engine under a
+ * deterministic idempotency key derived from the Card Job id, so a dropped response or a second
+ * press replays the original release rather than returning a second credit. That is why a network
+ * failure here is reported as retryable rather than swallowed.
+ *
+ * The certificate is never sent and the MV is never destroyed: the server resolves the card from
+ * this station's own tenant and keeps its permanent number on the cancelled record for ever.
+ */
+async function cancelCardJob(cardJobId, reason) {
+  return postJson(`/api/partner/card-jobs/${encodeURIComponent(cardJobId)}/cancel`, { reason });
+}
+
 async function getCertPreview(certId) {
   return getJson(`/api/admin/certs/${encodeURIComponent(certId)}/preview`);
 }
@@ -532,6 +547,7 @@ module.exports = {
   authoriseFix,
   armCapture,
   startNewCard,
+  cancelCardJob,
   getCertPreview,
   softDeleteCert,
   uploadPair,

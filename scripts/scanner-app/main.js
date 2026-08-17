@@ -391,6 +391,32 @@ async function availableCreditsOrNull() {
   }
 }
 
+/**
+ * RE-ASK THE SERVER WHAT THE WALLET HOLDS, AND COMMIT THE ANSWER TO SHARED STATE.
+ *
+ * THE DEFECT THIS CLOSES. `creditSummary()` was read once, during setup/session resolution, and the
+ * number was then rendered from that setup snapshot for the rest of the shift. Every NEW press
+ * reserved a credit and every cancellation returns one, and the figure on the window moved for
+ * neither — so an operator watched a station that said 10 while the shop actually had 4, and the
+ * first they learned of it was a refusal.
+ *
+ * CALLED AFTER EVERY RESERVATION-AFFECTING ACTION, including refusals: an INSUFFICIENT_CREDITS
+ * answer is exactly the moment the operator most needs the true figure. Arming and capture are NOT
+ * reservation-affecting and deliberately do not call it — a credit is reserved at NEW and settled at
+ * grading, never in between, so re-asking there would be traffic that can only report the same
+ * number.
+ *
+ * STILL DISPLAY ONLY, and still never a local counter. Nothing here decrements or increments; it
+ * asks the server and shows the answer, so a failed fetch degrades to "not answered" rather than to
+ * a plausible wrong number.
+ */
+async function refreshAvailableCredits() {
+  const available = await availableCreditsOrNull();
+  stateMod.set({ availableCredits: available });
+  pushStateToRenderer();
+  return available;
+}
+
 /** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
 async function stationSetupState() {
   let session;
@@ -405,7 +431,9 @@ async function stationSetupState() {
     }
     return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
   }
-  const summary = stationSummary(session.body, await availableCreditsOrNull());
+  // Committed to shared state as well as returned, so the identity row and the capture panel are
+  // reading ONE number rather than two that drift apart the moment a card is started.
+  const summary = stationSummary(session.body, await refreshAvailableCredits());
   const code = stationIdentity.currentStationCode();
   if (!code) {
     const locations = await stationClient.enrolmentLocations();
@@ -500,9 +528,55 @@ function setupIpc() {
     const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
     if (!cardJobId) return { ok: false, error: "Select a card to fix" };
     const result = await server.authoriseFix(cardJobId, payload && payload.sides);
-    if (result.ok) return { ok: true, fix: result.body && result.body.fix };
-    const error = (result.body && result.body.error) || {};
-    return { ok: false, code: error.code || "error", error: error.message || "Could not start the fix" };
+    if (!result.ok) {
+      const error = (result.body && result.body.error) || {};
+      return { ok: false, code: error.code || "error", error: error.message || "Could not start the fix" };
+    }
+    const fix = (result.body && result.body.fix) || {};
+
+    /*
+     * AUTHORISING A FIX WAS NOT THE SAME AS ARMING ONE.
+     *
+     * `fix-authorise` answers "which sides may this station re-capture" and creates NO capture
+     * session. The picker then closed itself and left the operator with a card, a positioned sheet
+     * and nothing on the glass — exactly the same shape of defect as NEW returning an armed capture
+     * it never committed. It is also the ONLY recovery route for a card whose target has lapsed:
+     * capture sessions expire after five minutes, so any card left on the bench for longer needs
+     * re-arming, and this is where that happens.
+     *
+     * COSTS NOTHING. Arming spends no credit and mints nothing — same Card Job, same MV, same
+     * certificate, same reservation — so doing it here cannot make a FIX expensive.
+     */
+    let capture = null;
+    let captureError = null;
+    try {
+      const armed = await server.armCapture(cardJobId);
+      if (armed.ok) capture = (armed.body && armed.body.capture) || null;
+      else captureError = ((armed.body && armed.body.error) || {}).message || "Could not arm the scanner";
+    } catch (err) {
+      captureError = err && err.message ? err.message : "Could not reach MintVault to arm the scanner";
+    }
+    if (capture && !captureError && watcher) {
+      const adopted = await watcher.adoptArmedCapture(capture);
+      if (!adopted.ok) captureError = adopted.error;
+    }
+
+    /*
+     * The station is now mid-card on THIS job, so NEW CARD must stay disabled until it is finished
+     * or cancelled — a FIX puts a real card on the glass exactly as a NEW does. Recorded even when
+     * arming failed, so the blocking panel offers retry/cancel rather than an enabled NEW.
+     */
+    stateMod.set({
+      openCardJob: {
+        cardJobId,
+        mvNumber: fix.mvNumber || null,
+        certificateId: typeof fix.certificateId === "number" ? fix.certificateId : null,
+        startedAt: new Date().toISOString(),
+        armError: captureError,
+      },
+    });
+    pushStateToRenderer();
+    return { ok: true, fix, capture, captureError };
   });
 
   /**
@@ -531,6 +605,26 @@ function setupIpc() {
       pendingNewCardOpId = null;
       const job = result.body && result.body.cardJob ? result.body.cardJob : {};
       /*
+       * THE CARD IS RECORDED AS OPEN BEFORE ANYTHING ELSE CAN FAIL.
+       *
+       * The credit is spent the instant the server answered above. From this line on the station is
+       * mid-card, and NEW CARD must stay disabled — through arming, through FRONT, through the gap
+       * before BACK is armed, and through an arm failure. Committing it here rather than after the
+       * arm means an arming failure leaves a DISABLED button and a visible card, not an enabled one
+       * that invites a second press and a second charge.
+       */
+      stateMod.set({
+        openCardJob: {
+          cardJobId: job.cardJobId || null,
+          mvNumber: job.mvNumber || null,
+          certificateId: typeof job.certificateId === "number" ? job.certificateId : null,
+          startedAt: new Date().toISOString(),
+          armError: null,
+        },
+      });
+      pushStateToRenderer();
+
+      /*
        * B1 — arm the FIRST capture immediately, from this station.
        *
        * The card is paid for the moment the server answers above; if nothing arms a session the
@@ -554,12 +648,38 @@ function setupIpc() {
           captureError = err && err.message ? err.message : "Could not reach MintVault to arm the scanner";
         }
       }
+
+      /*
+       * COMMIT THE ARMED TARGET INTO THE SHARED STATE THE WINDOW ACTUALLY READS.
+       *
+       * Returning `capture` to the renderer was never enough: the capture panel, the workflow guide
+       * and the SCAN button all render from `stateMod`, and the physical scan is gated on the
+       * watcher's durable target queue. Without this the operator saw "No card ready" for a card
+       * that was armed and waiting, and could not scan it, until an idle poll happened to
+       * rediscover it up to 35 seconds later.
+       */
+      if (capture && !captureError) {
+        const adopted = watcher ? await watcher.adoptArmedCapture(capture) : { ok: false, error: "Scanner service is starting" };
+        if (!adopted.ok) captureError = adopted.error;
+      }
+      if (captureError) {
+        // Recorded ON THE SAME JOB, so the retry re-arms this card rather than starting another.
+        const open = stateMod.get().openCardJob;
+        if (open) {
+          stateMod.set({ openCardJob: { ...open, armError: captureError } });
+        }
+      }
+      pushStateToRenderer();
+      await refreshAvailableCredits();
       return { ok: true, cardJob: job, capture, captureError };
     }
     // A refusal the operator can act on (no credits, suspended, station not approved) is final for
     // this press: the token is released so their NEXT press is a genuinely new request.
     pendingNewCardOpId = null;
     const error = (result.body && result.body.error) || {};
+    // A refusal is exactly when the true balance matters most — "no credits" must be shown with the
+    // real figure beside it, not with whatever the wallet held at sign-in.
+    await refreshAvailableCredits();
     return { ok: false, retryable: false, code: error.code || "error", error: error.message || "Could not start a new card" };
   });
 
@@ -582,10 +702,89 @@ function setupIpc() {
     }
     if (result.ok) {
       const body = result.body || {};
-      return { ok: true, capture: body.capture || null, cardJob: body.cardJob || null };
+      const capture = body.capture || null;
+      // Same commit as the NEW path, for the same reason: the window and the physical Scan button
+      // read shared state, not this return value. A re-armed BACK must appear on the SAME MV
+      // immediately rather than after the next poll.
+      if (capture && watcher) {
+        const adopted = await watcher.adoptArmedCapture(capture);
+        if (!adopted.ok) {
+          return { ok: false, code: "adopt_failed", error: adopted.error };
+        }
+      }
+      // The arm succeeded, so any recorded arm failure on this card is stale. Cleared rather than
+      // left behind, or the operator would keep being shown a blocking error for a card that is now
+      // armed and waiting on the glass.
+      const open = stateMod.get().openCardJob;
+      if (open && open.armError && (!open.cardJobId || open.cardJobId === cardJobId)) {
+        stateMod.set({ openCardJob: { ...open, armError: null } });
+      }
+      pushStateToRenderer();
+      return { ok: true, capture, cardJob: body.cardJob || null };
     }
     const error = (result.body && result.body.error) || {};
-    return { ok: false, code: error.code || "error", error: error.message || "Could not arm the scanner" };
+    const message = error.message || "Could not arm the scanner";
+    /*
+     * A FAILED ARM IS NOT A BLOCKING CONDITION WHEN THIS STATION ALREADY HOLDS THE TARGET.
+     *
+     * Recording `armError` unconditionally is how a refused re-arm painted a red NOT ARMED panel
+     * over a card that was armed, claimed and waiting to be scanned. The station's own live target
+     * is the authority on whether it can work; the error is still returned to the caller so the
+     * press is not silently swallowed, it simply does not become a blocking state.
+     */
+    const open = stateMod.get().openCardJob;
+    if (open && !stateMod.get().activeCapture && (!open.cardJobId || open.cardJobId === cardJobId)) {
+      stateMod.set({ openCardJob: { ...open, armError: message } });
+      pushStateToRenderer();
+    }
+    return { ok: false, code: error.code || "error", error: message };
+  });
+
+  /**
+   * P6c — CANCEL A CARD STARTED BY MISTAKE.
+   *
+   * The ONLY safe way out of NEEDS_SCAN for a card that was never photographed. It is deliberately
+   * NOT submission cancellation: that path releases the credit through the submission and leaves the
+   * Card Job stranded in NEEDS_SCAN, still listed as outstanding work.
+   *
+   * THE SERVER DOES ALL OF IT IN ONE TRANSACTION — release the reservation exactly once, make any
+   * outstanding capture target terminal, and move the job to CANCELLED — so this handler cannot
+   * produce a half-cancelled card however it is retried. Retrying is safe: the release carries a
+   * deterministic idempotency key derived from the Card Job id, so a second attempt replays rather
+   * than returning a second credit.
+   *
+   * THE MV IS KEPT. Nothing here or on the server touches the certificate; the number stays
+   * allocated to this cancelled card for ever and is never reissued.
+   */
+  ipcMain.handle("cancel-card-job", async (_event, payload) => {
+    const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
+    if (!cardJobId) return { ok: false, error: "A card is required" };
+    const reason = payload && typeof payload.reason === "string" && payload.reason.trim()
+      ? payload.reason.trim()
+      : "Cancelled at the station before any image was captured.";
+    let result;
+    try {
+      result = await server.cancelCardJob(cardJobId, reason);
+    } catch (err) {
+      // Outcome unknown. The operation is idempotent server-side, so a retry is safe and correct —
+      // and we must NOT clear the open-card record on a request whose answer we never saw.
+      return { ok: false, retryable: true, error: err && err.message ? err.message : "Could not reach MintVault" };
+    }
+    if (!result.ok) {
+      const error = (result.body && result.body.error) || {};
+      return { ok: false, code: error.code || "error", error: error.message || "Could not cancel this card" };
+    }
+    const cancellation = (result.body && result.body.cancellation) || {};
+    // Only now is the station free. Clearing the open-card record re-enables NEW CARD, and dropping
+    // a local target for the cancelled session stops the operator being shown a card that is dead.
+    const open = stateMod.get().openCardJob;
+    if (open && (!open.cardJobId || open.cardJobId === cardJobId)) {
+      stateMod.set({ openCardJob: null });
+    }
+    if (watcher) watcher.releaseTargetForCancelledCard(cancellation.certificateId, cancellation.mvNumber);
+    pushStateToRenderer();
+    await refreshAvailableCredits();
+    return { ok: true, cancellation };
   });
 
   // Recovery opens the exact historic certificate in the authenticated web
@@ -626,7 +825,10 @@ function setupIpc() {
     return result.ok ? stationSetupState() : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
   });
   ipcMain.handle("station-sign-out", async () => {
-    if (stateMod.get().activeCapture || watcher?.targetedPendingUploadCount()) {
+    // `openCardJob` is included deliberately: a started-but-unfinished card is exactly the state in
+    // which switching operator loses the thread — the next person would see an enabled NEW button
+    // and a paid card still sitting on the counter with nothing pointing at it.
+    if (stateMod.get().activeCapture || stateMod.get().openCardJob || watcher?.targetedPendingUploadCount()) {
       return { ok: false, error: "Finish or safely retry the current card before switching operator" };
     }
     stationIdentity.clearOperatorSession();

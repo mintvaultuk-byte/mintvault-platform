@@ -50,6 +50,11 @@ const els = {
   cardCompleteTitle: document.getElementById("cardCompleteTitle"),
   cardCompleteInstruction: document.getElementById("cardCompleteInstruction"),
   completeNextCardBtn: document.getElementById("completeNextCardBtn"),
+  openCardPanel: document.getElementById("openCardPanel"),
+  openCardTitle: document.getElementById("openCardTitle"),
+  openCardDetail: document.getElementById("openCardDetail"),
+  retryArmBtn: document.getElementById("retryArmBtn"),
+  cancelCardBtn: document.getElementById("cancelCardBtn"),
   stationCredits: document.getElementById("stationCredits"),
   captureActionHint: document.getElementById("captureActionHint"),
   positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
@@ -108,6 +113,22 @@ let renderedPreviewId = null;
 let renderedPositioningPreviewId = null;
 let actionInFlight = false;
 let actionError = null;
+/*
+ * P6 — NEW CARD is in flight.
+ *
+ * SEPARATE from `actionInFlight`, and consulted by `renderCaptureActions`, because the button is
+ * re-rendered from shared state while the request is outstanding. Disabling the DOM node inside the
+ * click handler alone was not enough: the very first `state-update` that arrived mid-request re-ran
+ * the render and re-enabled it, which is how one impatient operator could get two presses away
+ * before the server had answered the first.
+ */
+let newCardInFlight = false;
+/*
+ * The unresolved card is being cancelled or re-armed. Keeps BOTH recovery buttons dead for the
+ * duration, so a double press cannot send two cancellations — the server release is idempotent, but
+ * the button must not imply otherwise.
+ */
+let openCardActionInFlight = false;
 let stationSetup = null;
 let stationSetupBusy = false;
 let stationSetupPoll = null;
@@ -154,8 +175,26 @@ function renderTarget(state) {
 
   if (state.lastAcceptedCapture?.cardRegistered && !state.activeCapture) {
     els.targetCert.textContent = state.lastAcceptedCapture.certId;
-    els.targetSide.textContent = "CARD REGISTERED";
+    els.targetSide.textContent = "READY TO GRADE";
     els.targetHint.textContent = "Both server-owned sides are captured. Select Next Card only after the physical card has been cleared from this station.";
+    return;
+  }
+
+  /*
+   * A CARD THIS STATION IS STILL HOLDING, WITH NO ARMED TARGET.
+   *
+   * Reached when the card was started and paid for but its scanner target could not be armed. The
+   * old renderer fell straight through to "No card ready", which was actively misleading: the shop
+   * HAD a card, it had been charged for it, and the operator's only visible option was to press NEW
+   * again — buying a second one. Naming the card and its problem is what makes the two honest
+   * recoveries (retry the arm, or cancel the card) findable.
+   */
+  if (state.openCardJob) {
+    els.targetCert.textContent = state.openCardJob.mvNumber || "Card started";
+    els.targetSide.textContent = state.openCardJob.armError ? "NOT ARMED" : "PREPARING…";
+    els.targetHint.textContent = state.openCardJob.armError
+      ? `${state.openCardJob.armError} — retry the scanner for this same card, or cancel it to return its Grading Credit.`
+      : "MintVault is preparing this card's first side. Keep the card at this station.";
     return;
   }
 
@@ -185,12 +224,24 @@ function renderStationIdentity(setup) {
   els.stationOrganisation.textContent = organisation || "MintVault location";
   els.stationIdentity.textContent = setup.stationCode || "Station";
   els.stationUser.textContent = setup.summary?.displayName || "Authorised user";
-  /*
-   * Server-reported capacity, or an em dash. Never 0 as a stand-in for "not answered yet": the two
-   * mean completely different things to a shop, and showing an unasked question as an empty wallet
-   * would stop a station that is perfectly able to work.
-   */
-  const credits = setup.summary?.availableCredits;
+  renderAvailableCredits();
+}
+
+/**
+ * THE AVAILABLE-CREDIT READ-OUT — one number, from the freshest server answer this app has.
+ *
+ * SHARED STATE FIRST, setup snapshot only as a fallback. The setup snapshot is taken once, when the
+ * station resolves its session; every NEW press and every cancellation moves the real balance and
+ * moved that snapshot not at all, so a station that had started six cards still displayed the figure
+ * it signed in with. `state.availableCredits` is re-asked after every reservation-affecting action,
+ * which is what makes the number on the window the shop's actual capacity.
+ *
+ * `null` renders as an em dash. NEVER 0 as a stand-in for "not answered": an unasked question shown
+ * as an empty wallet would stop a station that can work perfectly well.
+ */
+function renderAvailableCredits() {
+  const live = lastState?.availableCredits;
+  const credits = typeof live === "number" ? live : stationSetup?.summary?.availableCredits;
   els.stationCredits.textContent = typeof credits === "number" ? String(credits) : "—";
 }
 
@@ -570,8 +621,51 @@ function renderCaptureActions(state) {
     els.cardCompleteTitle.textContent = `${completedCert} COMPLETE`;
     els.cardCompleteInstruction.textContent = `MARK CARD ${completedCert}`;
   }
-  // NEW CARD is only sensible when this station is not mid-card.
-  els.newCardBtn.disabled = Boolean(active) || actionInFlight;
+  /*
+   * NEW CARD — DISABLED WHENEVER THIS STATION IS MID-CARD, IN EVERY SENSE OF MID-CARD.
+   *
+   * `active` alone was not enough, and the gap it left is a paid one. `activeCapture` is null in
+   * four states that are all still mid-card: while the NEW request is outstanding, after the Card
+   * Job exists but before its first side is armed, in the moment between an accepted FRONT and an
+   * armed BACK, and after an arm has failed. In every one of those a second press bought a second
+   * card and a second MV for the card already on the glass.
+   *
+   * `openCardJob` is the server-confirmed record of the card this station is holding, so it closes
+   * all four. It is cleared only by the server confirming the card is registered, or by an audited
+   * cancellation — never by a timer and never by this renderer.
+   *
+   * This is still the CONVENIENCE guard. The correctness guard is the main process's retry token and
+   * the server's own `(station, client_op_id)` idempotency record, which is what makes a press that
+   * somehow escapes this cost nothing.
+   */
+  const openCard = state.openCardJob;
+  els.newCardBtn.disabled = Boolean(active) || Boolean(openCard) || actionInFlight || newCardInFlight;
+
+  /*
+   * The blocking recovery panel. Shown ONLY when the card genuinely cannot proceed on its own — an
+   * arm that failed. A card that is simply mid-arm shows nothing extra; the operator has no decision
+   * to make yet, and offering CANCEL there would invite them to throw away a card that is about to
+   * work.
+   */
+  /*
+   * A LIVE TARGET BEATS A STALE ARM ERROR, ALWAYS.
+   *
+   * The panel used to render on `armError` alone, so a failed RETRY drew a red "SCANNER NOT ARMED"
+   * block directly beneath a capture panel that was showing MV272 / FRONT with SCAN enabled — the
+   * card WAS armed, and the operator was told in large red letters that it was not. `activeCapture`
+   * is the authoritative answer to "is there a target on this glass"; an arm error is only
+   * meaningful when there is nothing.
+   */
+  const armBlocked = Boolean(openCard?.armError) && !active;
+  els.openCardPanel.hidden = !armBlocked;
+  if (armBlocked) {
+    els.openCardTitle.textContent = openCard.mvNumber
+      ? `${openCard.mvNumber} — SCANNER NOT ARMED`
+      : "CARD STARTED — SCANNER NOT ARMED";
+    els.openCardDetail.textContent = `${openCard.armError} This card and its MV number are safe. Retry the scanner for this SAME card, or cancel it to return its Grading Credit.`;
+    els.retryArmBtn.disabled = openCardActionInFlight || !openCard.cardJobId;
+    els.cancelCardBtn.disabled = openCardActionInFlight || !openCard.cardJobId;
+  }
 
   // Keep the final evidence action visible in every state. A disabled,
   // explained SCAN CARD makes the target-bound rule clear without implying
@@ -645,6 +739,7 @@ function renderRecent(recent) {
 function renderState(state) {
   lastState = state || {};
   els.scannerHealth.textContent = renderHealth(lastState.scannerHealth);
+  renderAvailableCredits();
   renderTarget(lastState);
   renderWorkflowGuide(lastState);
   renderPositioningPreview(lastState.positioningPreview, lastState.scannerHealth, lastState.activeCapture);
@@ -740,15 +835,74 @@ function renderMissingImages(items) {
           alert(result?.error || "Could not start the fix");
           return;
         }
+        // The fix now ARMS the side as well as authorising it, so a failure to arm has to be said
+        // out loud here — closing the picker on a card with nothing on the glass is what left the
+        // operator staring at "No card ready" with a sheet already positioned.
+        if (result.captureError) {
+          alert(`${item.mvNumber} is authorised, but the scanner could not be armed: ${result.captureError}`);
+        }
         closeModal(els.orphanModal);
       } finally {
         fixBtn.disabled = false;
       }
     });
     actions.append(fixBtn);
+
+    /*
+     * P6c — CANCEL, offered ONLY for a card with nothing photographed.
+     *
+     * The condition mirrors the server authority exactly (NEEDS_SCAN, and both sides still missing),
+     * so the button is never shown for something the server would refuse. A card with one side
+     * already captured is real work with real evidence: its route is FIX, not cancellation.
+     *
+     * This is the list a mis-pressed NEW ends up in, so this is where it has to be closable.
+     */
+    const cancellable = item.status === "NEEDS_SCAN" && Array.isArray(item.missingSides) && item.missingSides.length === 2;
+    if (cancellable) {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "btn ghost";
+      cancelBtn.textContent = "CANCEL CARD";
+      cancelBtn.addEventListener("click", async () => {
+        if (!confirm(
+          `Cancel ${item.mvNumber}?\n\nIts Grading Credit is returned to the shop and the card is closed.\n` +
+          `${item.mvNumber} keeps its number for ever — it is never deleted and never reissued.\n\nThis cannot be undone.`
+        )) return;
+        cancelBtn.disabled = true;
+        fixBtn.disabled = true;
+        try {
+          const result = await window.scanner.cancelCardJob({
+            cardJobId: item.cardJobId,
+            reason: "Cancelled from the station queue: the card was started but never photographed.",
+          });
+          if (!result?.ok) {
+            alert(result?.error || "Could not cancel this card");
+            return;
+          }
+          // Re-read the queue from the server rather than removing the row locally: the server is
+          // the authority on what is still outstanding, and a local splice would show a stale list.
+          await refreshMissingImages();
+        } finally {
+          cancelBtn.disabled = false;
+          fixBtn.disabled = false;
+        }
+      });
+      actions.append(cancelBtn);
+    }
+
     row.append(info, actions);
     els.orphanList.append(row);
   }
+}
+
+/** Re-read the server's own FIX queue. The station never derives or caches this list. */
+async function refreshMissingImages() {
+  els.orphanList.textContent = "Loading…";
+  const result = await window.scanner.fetchOrphans();
+  if (!result?.ok) {
+    els.orphanList.textContent = `Could not load missing images: ${result?.body?.error || result?.status || "unknown error"}`;
+    return;
+  }
+  renderMissingImages((result.body && result.body.items) || result.body?.orphans || []);
 }
 
 els.hideBtn.addEventListener("click", () => window.scanner.hidePopover());
@@ -796,14 +950,8 @@ els.updateBtn.addEventListener("click", async () => {
 });
 
 els.orphansBtn.addEventListener("click", async () => {
-  els.orphanList.textContent = "Loading…";
   openModal(els.orphanModal);
-  const result = await window.scanner.fetchOrphans();
-  if (!result?.ok) {
-    els.orphanList.textContent = `Could not load missing images: ${result?.body?.error || result?.status || "unknown error"}`;
-    return;
-  }
-  renderMissingImages((result.body && result.body.items) || result.body?.orphans || []);
+  await refreshMissingImages();
 });
 
 els.orphanClose.addEventListener("click", () => closeModal(els.orphanModal));
@@ -841,7 +989,15 @@ els.nextCardBtn.addEventListener("click", () => void runCaptureAction(() => wind
  * shown verbatim: at zero credits the operator is told to buy more, not shown a broken button.
  */
 async function startNewCard() {
-  if (els.newCardBtn.disabled) return;
+  /*
+   * THE IN-FLIGHT FLAG IS CHECKED AND SET BEFORE THE FIRST AWAIT, and it is a module variable rather
+   * than the button's own `disabled` property. Reading `disabled` was not a guard: the state-update
+   * that arrives while the request is outstanding re-renders the button, and the old `finally`
+   * re-enabled it unconditionally — so a second press landed in the window between the render and
+   * the server's answer.
+   */
+  if (newCardInFlight || els.newCardBtn.disabled) return;
+  newCardInFlight = true;
   els.newCardBtn.disabled = true;
   els.newCardError.hidden = true;
   const previousLabel = els.newCardBtn.textContent;
@@ -854,16 +1010,79 @@ async function startNewCard() {
       return;
     }
     els.cardCompletePanel.hidden = true;
+    // A card that started but could not be armed is a BLOCKING condition, not a footnote — the
+    // panel rendered from `openCardJob` carries the two recoveries, so it is surfaced here too.
+    if (result.captureError) {
+      els.newCardError.textContent = result.captureError;
+      els.newCardError.hidden = false;
+    }
   } catch (err) {
     els.newCardError.textContent = err?.message || "Could not reach MintVault";
     els.newCardError.hidden = false;
   } finally {
+    newCardInFlight = false;
     els.newCardBtn.textContent = previousLabel;
-    els.newCardBtn.disabled = false;
+    /*
+     * NOT re-enabled here. `renderCaptureActions` owns the button's enabled state and reads the
+     * server-confirmed `openCardJob`, so a card that is now open keeps it disabled and only a
+     * genuinely free station gets it back. Setting `disabled = false` in a finally block is exactly
+     * how the button came back to life with a paid, unphotographed card still on the counter.
+     */
+    renderState(lastState);
   }
 }
 
 els.newCardBtn.addEventListener("click", () => void startNewCard());
+
+/**
+ * P6c — the two honest ways out of an unresolved card.
+ *
+ * RETRY re-arms the SAME Card Job: same MV, same certificate, same reservation, no second credit.
+ * CANCEL asks the server to release that reservation exactly once and stamp the job CANCELLED, and
+ * it KEEPS the MV number for ever — a cancelled card is a permanent, readable record, never a
+ * deletion and never a number that gets handed to somebody else.
+ *
+ * Neither of them is allowed to start a new card, which is the whole point: the operator's way out
+ * of "I pressed NEW and nothing happened" must not be another NEW.
+ */
+async function runOpenCardAction(action) {
+  if (openCardActionInFlight) return;
+  const cardJobId = lastState?.openCardJob?.cardJobId;
+  if (!cardJobId) return;
+  openCardActionInFlight = true;
+  renderState(lastState);
+  try {
+    const result = await action(cardJobId);
+    if (!result?.ok) {
+      els.newCardError.textContent = result?.error || "That action was not accepted";
+      els.newCardError.hidden = false;
+    } else {
+      els.newCardError.hidden = true;
+    }
+  } catch (err) {
+    els.newCardError.textContent = err?.message || "Could not reach MintVault";
+    els.newCardError.hidden = false;
+  } finally {
+    openCardActionInFlight = false;
+    renderState(lastState);
+  }
+}
+
+els.retryArmBtn.addEventListener("click", () =>
+  void runOpenCardAction((cardJobId) => window.scanner.armCapture({ cardJobId }))
+);
+
+els.cancelCardBtn.addEventListener("click", () => {
+  const open = lastState?.openCardJob;
+  const label = open?.mvNumber || "this card";
+  if (!confirm(
+    `Cancel ${label}?\n\nIts Grading Credit is returned to the shop and the card is closed.\n` +
+    `${label} keeps its number for ever — it is never deleted and never reissued.\n\nThis cannot be undone.`
+  )) return;
+  void runOpenCardAction((cardJobId) =>
+    window.scanner.cancelCardJob({ cardJobId, reason: "Cancelled at the station: the card was started but never photographed." })
+  );
+});
 
 // NEXT CARD on the completion panel does BOTH: clears the finished card, then starts the next one,
 // so the operator's loop is a single press per card rather than two.

@@ -705,9 +705,24 @@ describe("P6 integration surfaces", () => {
     expect(scannerMain).toContain("availableCreditsOrNull");
     expect(scannerMain).toContain("availableCredits:");
     // The summary the renderer reads is built WITH the credits value.
-    expect(scannerMain).toContain("stationSummary(session.body, await availableCreditsOrNull())");
+    expect(scannerMain).toContain("stationSummary(session.body, await refreshAvailableCredits())");
     // A failed read degrades to null, never to 0, and never blocks setup.
     expect(scannerMain).toMatch(/catch \{\s*return null;/);
+    /*
+     * SECOND DEFECT PINNED (P6c): feeding the cell ONCE was not enough. `creditSummary()` was read
+     * during session resolution and never again, so every NEW press and every cancellation moved
+     * the shop's real balance while the number on the window stayed at whatever it was at sign-in.
+     * The read-out is now committed to the SHARED state the capture panel renders from, and
+     * re-asked after every reservation-affecting action — including a refusal, which is exactly
+     * when the operator most needs the true figure.
+     */
+    expect(scannerMain).toContain("async function refreshAvailableCredits()");
+    expect(scannerMain).toContain("stateMod.set({ availableCredits: available })");
+    expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{ ok: true, cardJob: job/);
+    expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{ ok: false, retryable: false/);
+    // Still never a local counter: nothing in the app increments or decrements the displayed figure.
+    expect(scannerMain).not.toMatch(/availableCredits\s*(\+\+|--|\+=|-=)/);
+    expect(scannerApp).not.toMatch(/availableCredits\s*(\+\+|--|\+=|-=)/);
   });
 
   it("the Scanner shows the operational identity the shop needs, and never fakes a credit balance", () => {

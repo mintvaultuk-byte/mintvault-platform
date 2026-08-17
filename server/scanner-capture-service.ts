@@ -7,6 +7,25 @@ import { randomUUID } from "node:crypto";
 import { pool } from "./db";
 import { hashLockKey } from "./lib/advisory-lock";
 
+/**
+ * A station was asked to arm a card while it is already holding a live target for a DIFFERENT one.
+ *
+ * Typed so the HTTP boundary can answer 409 with the blocking card NAMED, instead of letting
+ * migration 0075's raw unique violation fall through to a generic 500. It carries no internal detail
+ * — just the card and side an operator has to deal with before this one can be armed.
+ */
+export class ScannerCaptureConflictError extends Error {
+  readonly code = "station_holds_another_card" as const;
+  constructor(
+    message: string,
+    readonly holdingCertificateNumber: string,
+    readonly holdingSide: string
+  ) {
+    super(message);
+    this.name = "ScannerCaptureConflictError";
+  }
+}
+
 export type CaptureSide = "front" | "back";
 export type ScannerCaptureSession = {
   id: string;
@@ -177,6 +196,11 @@ export async function createScannerCaptureSession(input: {
              ON job.tenant_id=station.tenant_id
             AND job.location_id=station.location_id
             AND job.certificate_id=$2
+            -- P6c: a CANCELLED Card Job binds nothing. Its credit has been returned, so arming
+            -- against its certificate would let a station photograph a card the shop is no longer
+            -- paying for. The Card Job authorities all carry this predicate; this is the
+            -- independent second lock on the HQ pool, which the browser arming route also reaches.
+            AND job.cancelled_at IS NULL
           WHERE station.id=$1
             AND station.status='ACTIVE'
           LIMIT 1`,
@@ -235,6 +259,8 @@ export async function createScannerCaptureSession(input: {
                ON job.tenant_id=station.tenant_id
               AND job.location_id=station.location_id
               AND job.certificate_id=$2
+              -- P6c: same predicate as the walk-in branch above — a cancelled job binds nothing.
+              AND job.cancelled_at IS NULL
             WHERE station.id=$1
               AND station.status='ACTIVE'
             LIMIT 1`,
@@ -253,6 +279,56 @@ export async function createScannerCaptureSession(input: {
       );
       if (evidence.rows.length) throw new Error(`${side} already has a current master; use controlled recapture`);
     }
+    /*
+     * RE-ARMING A STATION THAT ALREADY HOLDS A LIVE TARGET IS A REPLAY, NOT A SECOND SESSION.
+     *
+     * THE DEFECT THIS CLOSES (staging, MV272, 17 Aug 10:46 and 10:52). Migration 0075 puts a partial
+     * unique index on `station_id` for state IN ('armed','claimed','capturing'), so a second INSERT
+     * for a station that already holds a live target raises a raw unique violation. That is not a
+     * typed error, so it fell past the `CaptureAuthorityError` arm of the route's catch, reached the
+     * generic handler, and became `500 internal_error / "Station request could not be completed"` —
+     * a message that names nothing and suggests nothing.
+     *
+     * The trap it created was worse than the message. The Scanner's keepalive RENEWS the session it
+     * holds, so the expiry sweep above can never reclaim the slot, and the operator's only visible
+     * recovery — RETRY SCANNER — was guaranteed to fail for as long as the app kept the card alive.
+     * Retry could not work, by construction, and said nothing about why.
+     *
+     * Returning the session the station already holds is the correct answer to "arm this card":
+     * SAME certificate, SAME side, SAME station, so the caller's request is already satisfied. It
+     * costs nothing, creates nothing and mints nothing — this branch cannot reach the INSERT below.
+     */
+    if (input.stationId) {
+      const held = await client.query(
+        `SELECT s.*, c.certificate_number
+           FROM scanner_capture_sessions s
+           JOIN certificates c ON c.id = s.certificate_id
+          WHERE s.station_id = $1
+            AND s.state IN ('armed','claimed','capturing')
+            AND s.expires_at > NOW()
+          LIMIT 1`,
+        [input.stationId]
+      );
+      const live = held.rows[0] as Record<string, unknown> | undefined;
+      if (live) {
+        if (Number(live.certificate_id) === input.certificateId && live.side === side) {
+          await client.query("COMMIT");
+          return mapRow(live);
+        }
+        /*
+         * A live target for a DIFFERENT card. Refused with a cause the operator can act on and with
+         * the blocking card NAMED — "finish or cancel MV999 first" is a sentence someone at a bench
+         * can follow; "Station request could not be completed" is not. Typed, so the route can map
+         * it to a 409 rather than letting it fall through to the generic 500.
+         */
+        throw new ScannerCaptureConflictError(
+          `This station is already holding ${String(live.certificate_number)} (${String(live.side)}). Finish or cancel that card before arming another.`,
+          String(live.certificate_number),
+          String(live.side)
+        );
+      }
+    }
+
     const id = randomUUID();
     const expires = new Date(Date.now() + SESSION_TTL_MS);
     const inserted = await client.query(

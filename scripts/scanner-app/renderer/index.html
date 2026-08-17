@@ -92,6 +92,22 @@
     <p class="hint action-hint" id="captureActionHint">Press NEW CARD to start a card, or arm one in MintVault.</p>
     <p class="hint" id="newCardError" hidden></p>
 
+    <!--
+      P6c — THE UNRESOLVED CARD. Shown when this station holds a card that was paid for but whose
+      scanner target could not be armed. It is a BLOCKING notice on purpose: NEW CARD stays disabled
+      behind it, because the only two honest ways out are to arm this SAME card again or to cancel
+      it and take the Grading Credit back. Pressing NEW again would buy a second card for the one
+      already sitting on the counter.
+    -->
+    <div class="card-blocked" id="openCardPanel" hidden>
+      <strong class="card-blocked-title" id="openCardTitle">CARD NEEDS ATTENTION</strong>
+      <p class="card-blocked-detail" id="openCardDetail"></p>
+      <div class="action-grid">
+        <button class="btn primary" id="retryArmBtn">RETRY SCANNER</button>
+        <button class="btn ghost" id="cancelCardBtn">CANCEL THIS CARD</button>
+      </div>
+    </div>
+
     <!-- Shown once BOTH sides are accepted. The MV number is the server's, echoed back verbatim. -->
     <div class="card-complete" id="cardCompletePanel" hidden>
       <strong class="card-complete-title" id="cardCompleteTitle">MV— COMPLETE</strong>
@@ -174,7 +190,7 @@
       </div>
       <div class="settings-test">
         <button class="btn" id="orphansBtn">Fix missing images</button>
-        <p class="hint">Recovery only. It opens the selected card in MintVault so an authenticated operator can arm its exact missing side.</p>
+        <p class="hint">Recovery only. MintVault derives this list from your own cards and authorises exactly the missing side — you never type a card number. A card with no image yet can also be cancelled here, which returns its Grading Credit and keeps its number for ever.</p>
       </div>
     </div>
   </details>
@@ -185,7 +201,12 @@
   <div class="modal" id="orphanModal">
     <div class="modal-card wide">
       <div class="modal-title">Fix missing images</div>
-      <p class="modal-meta">Choose a certificate to open in MintVault. Arm the missing side there; this station will capture only that exact target.</p>
+      <!--
+        P7 moved arming INTO this app and P6c added cancellation, but this line still described the
+        old "go and do it in the browser" flow. Copy that tells an operator to do something the
+        buttons beside it no longer do is worse than no copy at all.
+      -->
+      <p class="modal-meta">FIX THIS CARD arms the missing side on this station straight away — the card keeps its number, and it costs no Grading Credit. CANCEL CARD is only for a card that has no image yet: it returns the Grading Credit and closes the card, keeping its number for ever.</p>
       <div class="orphan-list" id="orphanList">Loading…</div>
       <div class="modal-actions">
         <button class="btn ghost" id="orphanClose">Close</button>

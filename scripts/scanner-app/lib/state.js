@@ -83,6 +83,32 @@ const DEFAULT = Object.freeze({
   // Briefly displayed after a server acknowledgement so staff receive a clear
   // Front Saved / Back Saved outcome before MintVault arms the next side.
   lastAcceptedCapture: null,
+  /*
+   * The shop's SERVER-REPORTED available Grading Credits, refreshed after every action that can move
+   * a reservation. `null` means "not answered yet" and renders as an em dash — NEVER 0, because an
+   * unasked question shown as an empty wallet would stop a station that can work perfectly well.
+   *
+   * Display only. The server re-checks the balance on every NEW and refuses independently, so this
+   * number can never authorise or refuse a card; it exists so the operator is not reading a figure
+   * that was true at sign-in and has been wrong ever since.
+   */
+  availableCredits: null,
+  /*
+   * THE UNRESOLVED CARD JOB — what makes NEW CARD safe to press exactly once.
+   *
+   * Set the moment the server confirms a NEW, and cleared only when that card is genuinely finished
+   * (both sides registered) or cancelled. While it is set the station is mid-card, even in the gap
+   * between an accepted FRONT and an armed BACK when `activeCapture` is briefly null — which is the
+   * window a second NEW press used to slip through, minting a second MV and reserving a second
+   * credit for a card already on the glass.
+   *
+   * Shape: { cardJobId, mvNumber, certificateId, startedAt, armError }
+   *
+   * PERSISTED, deliberately. If the app restarts mid-card the operator must come back to the SAME
+   * card, not to an enabled NEW button. The server is still the authority — this is the local record
+   * of a job it already confirmed, never a claim about one it has not.
+   */
+  openCardJob:      null,
   updatedAt:        null,
 });
 
