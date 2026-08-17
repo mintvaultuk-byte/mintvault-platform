@@ -11,6 +11,19 @@
  */
 import { useEffect, useRef, useState } from "react";
 
+/**
+ * Desktop ceiling for the live certificate preview, in CSS pixels.
+ *
+ * Owner override 2026-08-17: at 190px the preview read as too small, so this is the
+ * ~50%-larger target. It is a CEILING, not a fixed width — the panel is `w-full`, so on
+ * a narrow rail it shrinks to whatever genuinely fits and only reaches this value once
+ * there is room. The printed label's 827:236 ratio holds at every size.
+ *
+ * DISPLAY WIDTH ONLY. The certificate document, its print dimensions and its resolution
+ * are untouched.
+ */
+export const CERTIFICATE_PREVIEW_MAX_WIDTH_PX = 285;
+
 export interface CertificatePreviewFields {
   // When set, the server starts the preview from this saved cert's real grade /
   // subgrade / defect columns so the black-label (Pristine) preview matches print.
@@ -223,9 +236,20 @@ export function CertificatePreviewPanel({
     // space BEFORE the card is sized and the card never jumps or clips when the preview
     // resolves. A slightly smaller card that is wholly visible beats a larger one that
     // is cut off.
+    //
+    // 285px desktop target (owner override 2026-08-17: the 190px preview read as too
+    // small). RESPONSIVE, not forced: `w-full` lets it shrink to whatever genuinely fits
+    // when the rail is narrow, and `max-w` is the desktop ceiling it reaches once there
+    // is room. The printed label's 827x236 ratio is preserved at every size, so nothing
+    // about the certificate document, its dimensions or its print resolution changes —
+    // this is display width only.
     <div
-      className="mx-auto w-full max-w-[190px]"
-      style={{ aspectRatio: "827 / 236" }}
+      className="ml-auto w-full"
+      // maxWidth is an inline style, NOT an arbitrary Tailwind class. The cap is
+      // load-bearing — without it the preview grew to 431px in a 569px rail and pushed
+      // the header down onto the card — and a utility class only exists if the JIT
+      // emitted it. An inline value cannot be silently absent.
+      style={{ aspectRatio: "827 / 236", maxWidth: CERTIFICATE_PREVIEW_MAX_WIDTH_PX }}
       data-testid="certificate-preview-panel"
       data-preview-state={error ? "error" : notReady ? "not-ready" : url ? "ready" : loading ? "loading" : "empty"}
       data-preview-presentation={url ? "bare-image" : error ? "error" : loading ? "loading" : "empty"}

@@ -247,6 +247,46 @@ const RAIL_SAFE_INSET_Y = 14;
 /** The contractual floor these insets exist to satisfy. */
 export const RAIL_MIN_BOTTOM_CLEARANCE_PX = 12;
 
+/**
+ * THE RATCHET — the single decision that keeps the card from oscillating.
+ *
+ * Exported as a pure function so the stability contract can be driven over many
+ * measurement cycles in a test, rather than asserted from the shape of the source.
+ *
+ * A committed fit is replaced only when:
+ *   - nothing is committed yet, or
+ *   - the viewport WIDTH changed. Width is card-independent (the viewport is `min-w-0`
+ *     + `overflow-hidden`), so this is the one-way dependency: layout -> width -> fit.
+ *   - the available HEIGHT SHRANK. Shrinking must be honoured or the card overflows;
+ *     GROWTH is refused, and growth is the only thing the feedback loop can offer.
+ *
+ * Refusing growth is what makes the loop provably terminating: the card growing can
+ * only ever increase the measured height, and an increase is ignored.
+ */
+export function shouldRecommitRailFit(
+  prev: { vw: number; vh: number; h: number } | null,
+  next: { vw: number; vh: number }
+): boolean {
+  if (!prev) return true;
+  // Width is the one card-independent input: the viewport is `min-w-0` +
+  // `overflow-hidden`, so the card cannot widen the rail. A real width change is
+  // always worth refitting for.
+  if (Math.abs(prev.vw - next.vw) >= 1) return true;
+  // ECHO GUARD — the defect the convergence model caught.
+  //
+  // Where the host's height is content-driven, the viewport's height IS the card we
+  // just committed. Treating that as an external constraint subtracts the safety inset
+  // from the card AGAIN on the next cycle, and again on the one after: the model shrank
+  // the card by 28px per cycle, 18 times, until width finally bound. That is not a
+  // flicker, it is a slow visible shrink — and it is the "shrinking/growing cycles" in
+  // the owner's report. A measured height that equals our own committed card height is
+  // our own output coming back, not new information.
+  if (Math.abs(next.vh - prev.h) <= 2) return false;
+  // A genuine shrink must still be honoured, or the card overflows its box. Growth is
+  // refused — growth is all the feedback loop can offer, so refusing it terminates.
+  return next.vh <= prev.vh - 1;
+}
+
 function nextZoomStep(current: number): number {
   for (const s of ZOOM_STEPS) {
     if (s > current + 0.01) return s;
@@ -630,6 +670,7 @@ export default function ImageViewer({
     const measure = () => {
       const w = Math.floor(el.clientWidth);
       const h = Math.floor(el.clientHeight);
+      railObserverCountRef.current += 1;
       setRailViewport((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
     };
     measure();
@@ -637,6 +678,104 @@ export default function ImageViewer({
     ro.observe(el);
     return () => ro.disconnect();
   }, [railFitEnabled, showReference]);
+
+  /**
+   * FIT STABILITY — owner P0, staging v492: the card alternated between visible and
+   * not-visible, fast enough that the workstation was unusable.
+   *
+   * The cause was a two-mode limit cycle, and it existed because the fit's OUTPUT could
+   * become its own INPUT. The card is in flow inside the measured viewport, so wherever
+   * an ancestor's height is content-driven the card's fitted height IS the viewport's
+   * height:
+   *
+   *   no usable height -> fit by width -> card is tall (width x natural aspect)
+   *     -> viewport now measures tall -> height "usable" -> fit by height
+   *     -> card shrinks -> viewport measures short -> height unusable
+   *     -> fit by width -> card is tall again -> ...
+   *
+   * Each lap re-rendered the card at a different size, and the transient between laps is
+   * the disappearance the owner photographed.
+   *
+   * The cure is a RATCHET, not a debounce. A feedback loop of this shape needs the
+   * available height to GROW in response to the card growing; refusing to act on growth
+   * makes it provably terminating. A committed fit is therefore replaced only when:
+   *
+   *   - there is no committed fit for this source yet, or
+   *   - the viewport WIDTH changed. Width is card-independent: the viewport is
+   *     `min-w-0` + `overflow-hidden`, so the card cannot widen the rail. This is the
+   *     one-way dependency (rail layout -> width -> fit -> image).
+   *   - the available HEIGHT SHRANK. Shrinking must be honoured or the card would
+   *     overflow its box; growth is exactly what closes the loop, so it is ignored.
+   *
+   * Anything else — a transient zero, an invalid measurement, a sub-pixel jitter, a
+   * height increase caused by the card itself — keeps the LAST KNOWN GOOD fit. Once the
+   * card is visible it stays visible.
+   */
+  const railObserverCountRef = useRef(0);
+  const railFitRef = useRef<{
+    key: string;
+    vw: number;
+    vh: number;
+    w: number;
+    h: number;
+    mode: "safe-fit" | "width-fit";
+    clearanceX: number;
+    clearanceY: number;
+    revision: number;
+  } | null>(null);
+  const [railFitRevision, setRailFitRevision] = useState(0);
+
+  /** Last-known-good is per SOURCE. Front's fit must never be reused for Back. */
+  const railFitKey = `${side}|${variant}`;
+
+  useLayoutEffect(() => {
+    if (!railFitEnabled) return;
+    const nat = railNaturalDims;
+    const vp = railViewport;
+    if (!nat || !vp || nat.w <= 0 || nat.h <= 0) return;
+    // An unusable width is never authoritative — keep whatever is already rendered.
+    if (vp.w <= RAIL_SAFE_INSET_X * 2) return;
+
+    const prev = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
+    const heightUsable = vp.h > RAIL_SAFE_INSET_Y * 2;
+    // Sticky: once this source has been fitted against a real height, never drop back to
+    // width-only. Mode flapping was half of the limit cycle.
+    const mode: "safe-fit" | "width-fit" = heightUsable || prev?.mode === "safe-fit" ? "safe-fit" : "width-fit";
+    const effectiveH = heightUsable ? vp.h : (prev?.vh ?? 0);
+    if (mode === "safe-fit" && effectiveH <= RAIL_SAFE_INSET_Y * 2) return;
+
+    // The ratchet: ignore growth and sub-pixel jitter, keep the last known good fit.
+    if (!shouldRecommitRailFit(prev ? { vw: prev.vw, vh: prev.vh, h: prev.h } : null, { vw: vp.w, vh: effectiveH }))
+      return;
+
+    const safeW = vp.w - RAIL_SAFE_INSET_X * 2;
+    const safeH = effectiveH - RAIL_SAFE_INSET_Y * 2;
+    const widthScale = safeW / nat.w;
+    const scale = mode === "safe-fit" ? Math.min(widthScale, safeH / nat.h) : widthScale;
+    if (!Number.isFinite(scale) || scale <= 0) return;
+
+    const w = nat.w * scale;
+    const h = nat.h * scale;
+    railFitRef.current = {
+      key: railFitKey,
+      vw: vp.w,
+      vh: effectiveH,
+      w,
+      h,
+      mode,
+      clearanceX: (vp.w - w) / 2,
+      clearanceY: mode === "safe-fit" ? (effectiveH - h) / 2 : RAIL_SAFE_INSET_Y,
+      revision: (railFitRef.current?.revision ?? 0) + 1,
+    };
+    setRailFitRevision((r) => r + 1);
+  }, [railFitEnabled, railViewport, railNaturalDims, railFitKey]);
+
+  // A new source starts with no last-known-good — Front's dimensions must never be
+  // reused for Back, which has its own natural aspect.
+  useLayoutEffect(() => {
+    railFitRef.current = null;
+    setRailFitRevision((r) => r + 1);
+  }, [railFitKey]);
 
   /**
    * Height is fitted only when the viewport actually HAS a usable height.
@@ -647,40 +786,13 @@ export default function ImageViewer({
    * In that case we fit by WIDTH alone and let the natural aspect decide the height,
    * which is both correct and always visible.
    */
-  const railHeightUsable = !!railViewport && railViewport.h > RAIL_SAFE_INSET_Y * 2;
-
-  const railFit =
-    railFitEnabled &&
-    railViewport &&
-    railNaturalDims &&
-    railNaturalDims.w > 0 &&
-    railNaturalDims.h > 0 &&
-    railViewport.w > RAIL_SAFE_INSET_X * 2
-      ? (() => {
-          // viewport minus the safety insets on BOTH axes. The insets are
-          // symmetric so that centring the result cannot spend one side's
-          // allowance on the other — a symmetric inset of N guarantees at least
-          // N of visible clearance on every edge, including the bottom.
-          const safeW = railViewport.w - RAIL_SAFE_INSET_X * 2;
-          const safeH = railViewport.h - RAIL_SAFE_INSET_Y * 2;
-          const widthScale = safeW / railNaturalDims.w;
-          // Only let height bind when there is a real height to bind against.
-          const scale = railHeightUsable
-            ? Math.min(widthScale, safeH / railNaturalDims.h)
-            : widthScale;
-          if (!Number.isFinite(scale) || scale <= 0) return null;
-          const w = railNaturalDims.w * scale;
-          const h = railNaturalDims.h * scale;
-          return {
-            w,
-            h,
-            mode: railHeightUsable ? "safe-fit" : "width-fit",
-            // Centred, so each axis' leftover splits evenly.
-            clearanceX: (railViewport.w - w) / 2,
-            clearanceY: railHeightUsable ? (railViewport.h - h) / 2 : RAIL_SAFE_INSET_Y,
-          };
-        })()
-      : null;
+  /**
+   * The committed fit. Read from the ref rather than recomputed each render, so a
+   * re-render caused by anything else (certificate state, defect edits, zoom) can never
+   * resize the card. `railFitRevision` is what makes the ref-read reactive.
+   */
+  void railFitRevision;
+  const railFit = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
 
   const currentUrl = getUrl(urls, side, variant);
   const sideDefects = defects.filter((d) => d.image_side === side);
@@ -1086,7 +1198,12 @@ export default function ImageViewer({
                 // up as an ancestor's min-content width (a flex item whose overflow
                 // is not visible has an automatic minimum size of 0), which is the
                 // feedback loop that made an in-flow explicit width oscillate before.
-                { width: railFit.w, height: railFit.h, flexShrink: 0 }
+                // `transition: none` is explicit and required. The frame inherits
+                // `transition: all` from the global styles, so a refit ANIMATED the
+                // card's width and height — a visible pulse on every measurement, and
+                // part of what the owner saw as the card moving on its own. Automatic
+                // fit must settle instantly; only deliberate user zoom animates.
+                { width: railFit.w, height: railFit.h, flexShrink: 0, transition: "none" }
               : railFitEnabled
                 ? // Not yet measurable — no viewport, or no natural size yet.
                   //
@@ -1132,6 +1249,11 @@ export default function ImageViewer({
               // They describe the rendered <img> box against the visible viewport
               // box — never a wrapper, never padding.
               "data-card-fit-state": railFit ? railFit.mode : "measuring",
+              // Stability instrumentation. `fit-revision` counts COMMITTED fits and
+              // `observer-count` counts ResizeObserver callbacks: if the two climb
+              // together the ratchet has failed and the loop is back.
+              "data-card-fit-revision": railFit ? railFit.revision : 0,
+              "data-card-observer-count": railObserverCountRef.current,
               "data-card-natural-w": railNaturalDims?.w ?? "",
               "data-card-natural-h": railNaturalDims?.h ?? "",
               "data-card-rendered-w": railFit ? railFit.w.toFixed(1) : "",
@@ -1918,10 +2040,15 @@ export default function ImageViewer({
            fixed height once and the card takes all the rest. Nothing in this row is
            allowed to sit beside or beneath the card and take space from it. */
         <div className="flex shrink-0 items-center justify-between gap-2" data-testid="grading-top-utility-row">
-          {/* Controls are shrink-0: they have a fixed intrinsic size and overlap their
+          {/* LEFT COLUMN — Front/Back with the zoom pill stacked beneath, both left
+              aligned. Stacking them turns the header's dead horizontal space into
+              usable width for the certificate: side by side they consumed ~260px of a
+              373px rail and left the certificate nothing to grow into.
+
+              Controls are shrink-0: they have a fixed intrinsic size and overlap their
               neighbours if allowed to compress. The certificate absorbs the squeeze
               instead — it is the one element here that scales cleanly. */}
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-col items-start gap-1">
             <div className="shrink-0">{renderTabs()}</div>
             <div className="shrink-0">{renderZoomPill()}</div>
           </div>
