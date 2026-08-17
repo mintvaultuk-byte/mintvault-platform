@@ -48,13 +48,14 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
     // Without min-h-0 a flex item refuses to shrink below its content, which is exactly how the
     // controls got pushed out of the clipped host. Unchanged requirement.
     //
-    // The region became a COLUMN when the zoom toolbar was stacked beneath the card
-    // instead of beside it (it was taking ~110px out of the rail's width). The
-    // containment contract this test exists to protect — `min-h-0 flex-1`, so the card
-    // area takes the leftover and never pushes the controls out — is identical.
+    // The region became a COLUMN once the zoom controls moved out of it into the top
+    // utility row. The containment contract this test exists to protect — `min-h-0
+    // flex-1`, so the card area takes the leftover and never pushes the controls out —
+    // is identical.
     expect(VIEWER).toMatch(/<div className="flex min-h-0 flex-1 flex-col">\{renderImageArea\("100%"\)\}/);
-    // Centring now belongs to the measured inspection viewport inside that region.
-    expect(VIEWER).toMatch(/className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"/);
+    // Centring belongs to the measured inspection viewport inside that region, whose
+    // overflow containment also stops the card re-inflating the rail.
+    expect(VIEWER).toMatch(/relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden/);
   });
 
   it("the controls row never shrinks and is a real in-flow sibling", () => {
@@ -64,10 +65,12 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
   });
 
   it("the Front/Back tabs keep their intrinsic height in the rail", () => {
-    expect(VIEWER).toMatch(/flex shrink-0 items-center justify-between gap-3/);
-    // The tabs and the certificate share ONE shrink-0 row; the certificate therefore
-    // costs the card no vertical space.
-    expect(VIEWER).toMatch(/topRowSlot \? <div className="shrink-0">\{topRowSlot\}<\/div> : null/);
+    expect(VIEWER).toMatch(/flex shrink-0 items-center justify-between gap-2/);
+    // The tabs, the zoom pill and the certificate share ONE shrink-0 row, so none of
+    // them costs the card vertical space beyond the row that already exists. The
+    // certificate is the flexible member: controls keep their intrinsic size and it
+    // absorbs the squeeze, because compressing a control makes it overlap its neighbour.
+    expect(VIEWER).toMatch(/topRowSlot \? <div className="flex min-w-0 flex-1 justify-end">\{topRowSlot\}<\/div> : null/);
   });
 
   it("the controls row is NOT absolutely or fixed positioned — it cannot float over anything", () => {
