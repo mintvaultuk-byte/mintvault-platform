@@ -41,12 +41,12 @@ export interface Lide400CaptureProfile {
   scannerProfileVersion: string;
   coordinateSpace: string;
   cardMm: Readonly<Lide400CardRangeMm>;
+  /** The FIXED capture area. Size is fixed; only its platen origin is calibrated. */
   outerWindowMm: Readonly<Lide400SizeMm>;
-  safeWindowMm: Readonly<Lide400SizeMm>;
-  /** Normal safe operator zone, in millimetres. NOT an evidence rule. */
-  operatorInsetMm: number;
-  /** Absolute server evidence floor, in millimetres. Never relaxed by a preview verdict. */
+  /** THE authoritative master evidence floor, in millimetres. Never relaxed by a preview verdict. */
   evidenceMinMarginMm: number;
+  /** Proven preview-to-master uncertainty. An input to previewGreenMinMarginMm, not a diagnostic. */
+  previewToMasterBudgetMm: number;
   defaultOriginMm: Readonly<{ x: number; y: number }>;
   captureDpi: number;
   placementPreviewDpi: number;
@@ -55,7 +55,7 @@ export interface Lide400CaptureProfile {
 export type Lide400PlacementState = "GREEN" | "RED";
 
 export type Lide400PlacementCode =
-  "ready" | "card_not_detected" | "card_outside_profile_range" | "card_outside_safe_window";
+  "ready" | "card_not_detected" | "card_outside_profile_range" | "card_inside_preview_margin";
 
 export interface Lide400PlacementVerdict {
   state: Lide400PlacementState;
@@ -64,13 +64,19 @@ export interface Lide400PlacementVerdict {
   profileId: string;
   profileVersion: string;
   coordinateSpace: string;
-  safeWindowMm: Lide400RectMm;
+  /** The capture area inset by the PREVIEW threshold: the rectangle the overlay draws. */
+  placementBoundaryMm: Lide400RectMm;
   outerWindowMm: Lide400RectMm;
-  operatorInsetMm: number;
   evidenceMinMarginMm: number;
   cardBoundsMm: Lide400RectMm | null;
   marginMm?: Lide400MarginMm;
   minMarginMm?: number;
+  /** Master floor + proven preview-to-master uncertainty. The threshold this verdict applied. */
+  previewGreenMinMarginMm: number;
+  /** RED only: how much further in the card must move to reach GREEN. */
+  moveInwardMm?: number;
+  /** RED only: the margin clears the master floor but not the preview threshold. */
+  wouldLikelyPassMaster?: boolean;
 }
 
 export declare const PLATEN_MM: Readonly<Lide400SizeMm>;
@@ -83,11 +89,14 @@ export declare const PLACEMENT: Readonly<{ READY: "GREEN"; REPOSITION: "RED" }>;
 export declare const PLACEMENT_MESSAGE: Readonly<{
   ready: string;
   reposition: string;
+  notDetected: string;
   wrongProfile: string;
 }>;
 
 export declare function profileById(id?: string): Lide400CaptureProfile;
-export declare function safeWindowRectMm(profile?: Lide400CaptureProfile): Lide400RectMm;
+/** Master evidence floor + proven preview-to-master uncertainty. Derived; 5.6 is never a literal. */
+export declare function previewGreenMinMarginMm(profile?: Lide400CaptureProfile): number;
+export declare function placementBoundaryRectMm(profile?: Lide400CaptureProfile): Lide400RectMm;
 export declare function clampCaptureOriginMm(
   origin: { x: number; y: number },
   profile?: Lide400CaptureProfile,
@@ -110,4 +119,4 @@ export declare function placementToleranceMm(
   cardSizeMm: Lide400SizeMm,
   profile?: Lide400CaptureProfile
 ): { horizontal: number; vertical: number };
-export declare function assertSafeWindowIsRotationInvariant(profile: Lide400CaptureProfile): true;
+export declare function assertPlacementBoundaryIsRotationInvariant(profile: Lide400CaptureProfile): true;

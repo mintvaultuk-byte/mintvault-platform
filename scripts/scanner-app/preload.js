@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("scanner", {
   stationCompleteMfa: (payload) => ipcRenderer.invoke("station-complete-mfa", payload),
   registerStation: (payload) => ipcRenderer.invoke("register-station", payload),
   stationSignOut: () => ipcRenderer.invoke("station-sign-out"),
+  setEnvironment: (value) => ipcRenderer.invoke("set-environment", value),
   updateApp: () => ipcRenderer.invoke("update-app"),
   resetScanner: () => ipcRenderer.invoke("reset-scanner"),
   hidePopover: () => ipcRenderer.invoke("hide-popover"),
@@ -35,7 +36,6 @@ contextBridge.exposeInMainWorld("scanner", {
   scanTarget: () => ipcRenderer.invoke("scan-target"),
   runPositioningPreview: () => ipcRenderer.invoke("run-positioning-preview"),
   getPositioningPreview: (previewId) => ipcRenderer.invoke("get-positioning-preview", previewId),
-  applyPositioningPreview: (previewId) => ipcRenderer.invoke("apply-positioning-preview", previewId),
   // Per-side placement gate. Takes no identity: the main process binds the
   // resulting approval to whichever side is currently awaiting Scan.
   runPlacementPreview: () => ipcRenderer.invoke("run-placement-preview"),

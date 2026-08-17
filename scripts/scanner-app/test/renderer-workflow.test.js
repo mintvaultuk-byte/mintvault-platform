@@ -25,7 +25,13 @@ test("normal placement Preview is a card-centred display crop while full platen 
   assert.match(html, /id="positioningCardPreviewViewport"/);
   assert.match(html, /id="positioningFullPreview"/);
   assert.match(html, /<details class="row settings secondary" id="diagnosticsRow">/);
-  assert.match(html, /id="savePlacementBtn"/);
+  /*
+   * SAVE PLACEMENT ZONE is gone. It persisted a station's capture origin derived from wherever a
+   * card happened to be lying, which is how this station came to be calibrated to the platen corner.
+   * The only writer of a capture origin is now the deliberate drag in "Capture window position".
+   */
+  assert.doesNotMatch(html, /id="savePlacementBtn"/);
+  assert.match(html, /id="captureWindowSaveBtn"/);
   assert.match(html, /id="signOutBtn" hidden>SIGN OUT \/ SWITCH USER/);
   assert.match(renderer, /function renderPositioningCardCrop\(/);
   assert.match(renderer, /const marginMm = 8/);
@@ -60,4 +66,46 @@ test("Fix missing images is target-bound recovery only and cannot delete a certi
   assert.doesNotMatch(renderer, /deleteCert|delete-cert|Soft-delete/);
   assert.doesNotMatch(preload, /deleteCert|delete-cert/);
   assert.doesNotMatch(main, /ipcMain\.handle\("delete-cert"/);
+});
+
+test("the capture area is fixed for normal staff — no drag, no save, and no stale geometry", () => {
+  /*
+   * OWNER DECISION 2026-08-17. The 100 x 130 mm capture area sits in a proven physical position on
+   * the scanner bed. Normal shop work is place-card / PREVIEW / SCAN; nobody on the floor moves it,
+   * and somebody moving it by accident is expensive in a way that is invisible at the time — every
+   * card afterwards is framed differently from every card before.
+   */
+
+  // The overlay STAYS. Staff must still see where to put the card.
+  assert.match(html, /id="platenWindow"/);
+  assert.match(html, /<span>CAPTURE AREA<\/span>/);
+
+  // The retired inner box is gone from markup, drawing code and styles alike.
+  assert.doesNotMatch(html, /id="platenSafe"/);
+  assert.doesNotMatch(renderer, /platenSafe/);
+  assert.doesNotMatch(renderer, /SAFE_INSET_MM/);
+
+  // Maintenance controls exist but start hidden, and are no longer worded as a normal action.
+  assert.match(html, /id="captureWindowMaintenance" hidden/);
+  assert.doesNotMatch(html, /SAVE CAPTURE WINDOW/);
+  assert.match(html, /MAINTENANCE ONLY/);
+
+  // Authority drives visibility AND the pointer, so an operator who cannot save also cannot drag a
+  // box whose read-out would then describe somewhere the hardware does not scan.
+  assert.match(renderer, /captureWindowMovable = stationSetup\?\.summary\?\.canCalibrate === true/);
+  assert.match(renderer, /if \(!captureWindowMovable\) return;/);
+
+  /*
+   * The renderer duplicates the platen bound as a plain number because it is sandboxed. It must
+   * match the shared profile's MIN_PLATEN_INSET_MM — the two both reading 5 is what locked every
+   * station out of arming a capture.
+   */
+  const profile = require("../../../shared/lide400-capture-profile.cjs");
+  const declared = /const MIN_INSET_MM = (\d+(?:\.\d+)?);/.exec(renderer);
+  assert.ok(declared, "the renderer must declare its platen inset explicitly");
+  assert.strictEqual(
+    Number(declared[1]),
+    profile.MIN_PLATEN_INSET_MM,
+    "renderer platen inset has drifted from the shared capture profile"
+  );
 });

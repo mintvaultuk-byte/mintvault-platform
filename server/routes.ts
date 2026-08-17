@@ -271,6 +271,12 @@ import { registerVaultClubRoutes } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { isActiveStatus } from "./vault-club-tiers";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+/*
+ * Statically imported, unlike the authority functions themselves, because it is needed in a CATCH
+ * block to classify the failure. Awaiting a dynamic import while already handling an error is a way
+ * to lose the original error to a second one.
+ */
+import { CaptureGeometryError } from "./lib/lide400-capture-authority";
 
 /** Count unused, unexpired credits of a given type */
 async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
@@ -10522,7 +10528,17 @@ Defects (admin-confirmed): ${defectLines}`;
             await finishScannerCapture(sessionId, false, reason, retryable);
           } catch {}
         }
+        /*
+         * A geometry refusal is classified by its TYPE, before any message matching.
+         *
+         * The regex below decides an HTTP status by looking at English prose, which means rewording
+         * an error silently changes its status code. Three of the four capture-geometry refusals
+         * happened to match nothing and were reported as 500 — including "this capture session
+         * carries no authoritative capture window; re-arm this card side", which is an instruction,
+         * not a fault. Type first; prose only as the existing fallback for everything else.
+         */
         const status =
+          error instanceof CaptureGeometryError ||
           /required|invalid|must|does not|refused|expired|not claimed|not found|already|hash|byte length/.test(reason)
             ? 409
             : 500;
@@ -10673,9 +10689,12 @@ Defects (admin-confirmed): ${defectLines}`;
           );
           await finishScannerCapture(sessionId, false, reason, retryable);
         } catch {}
-        const status = /required|invalid|must|does not|refused|expired|not claimed|not found|already/.test(reason)
-          ? 409
-          : 500;
+        // Type before prose — see the equivalent block on the staged-evidence route above.
+        const status =
+          error instanceof CaptureGeometryError ||
+          /required|invalid|must|does not|refused|expired|not claimed|not found|already/.test(reason)
+            ? 409
+            : 500;
         return res.status(status).json({ error: reason });
       }
     }

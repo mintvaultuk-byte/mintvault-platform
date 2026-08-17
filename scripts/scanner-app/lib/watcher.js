@@ -27,7 +27,7 @@ const stationClient = require("./station-client");
 const backDetect = require("./back-detect");
 const lide400    = require("./lide400-controller");
 const cardFrame  = require("./lide400-card-frame");
-const { detectCardBounds, derivePlacementProposal } = require("./lide400-card-detection");
+const { detectCardBounds } = require("./lide400-card-detection");
 const { COORDINATE_SPACE, assertUprightOrientation, physicalRectToRasterRect } = require("./lide400-preview-transform");
 /** The canonical detector and the canonical capture geometry — the same two the server uses. */
 const { detectLide400CardBounds } = require("../../../shared/lide400-card-geometry.cjs");
@@ -500,6 +500,19 @@ class Watcher extends EventEmitter {
     return { path: previewPath, image: { width: info.width, height: info.height, orientation: 1, format: "jpeg" } };
   }
 
+  /**
+   * The station's calibrated capture rectangle on the platen, or null if it has never been
+   * provisioned. Read from the one local authority — never recomputed from anything a card did.
+   */
+  calibratedCaptureWindowMm() {
+    try {
+      const origin = lide400._private.jigOrigin();
+      return origin ? captureProfile.captureWindowRectMm(origin) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async analysePositioningPreview(sourcePath, areaMm) {
     const sharp = require("sharp");
     const image = sharp(sourcePath, { limitInputPixels: false });
@@ -516,8 +529,13 @@ class Watcher extends EventEmitter {
       .raw()
       .toBuffer({ resolveWithObject: true });
     if (info.channels !== 3) throw new Error("Positioning preview requires RGB scanner pixels");
+    /*
+     * ADVISORY ONLY. This is the full-platen setup diagnostic, and it reports WHERE A CARD IS — it
+     * does not propose where the capture area should go. The capture area's origin comes from
+     * `saveCaptureWindowOrigin` and nowhere else; deriving it from a card here is the card-chasing
+     * architecture that was removed on 2026-08-17.
+     */
     const cardCandidate = detectCardBounds(data, info.width, info.height, areaMm);
-    const placement = derivePlacementProposal(cardCandidate, areaMm, lide400._private.PROFILE_AREA_MM);
     return {
       image: {
         width: metadata.width,
@@ -528,7 +546,6 @@ class Watcher extends EventEmitter {
         coordinateSpace: COORDINATE_SPACE,
       },
       cardCandidate,
-      placement,
     };
   }
 
@@ -603,12 +620,13 @@ class Watcher extends EventEmitter {
   /**
    * Overlay rectangles for the renderer, in the DISPLAY raster's own space.
    *
-   * The safe window is centred, so it is its own 180-degree image and needs no transform — proved at
-   * load time by `assertSafeWindowIsRotationInvariant`, not assumed here. The detected CARD is not
-   * centred, so its rectangle is mapped through the one named presentation boundary.
+   * The placement boundary is centred, so it is its own 180-degree image and needs no transform —
+   * proved at load time by `assertPlacementBoundaryIsRotationInvariant`, not assumed here. The
+   * detected CARD is not centred, so its rectangle is mapped through the one named presentation
+   * boundary.
    */
   placementOverlay(detected, areaMm, displayRaster) {
-    const safe = captureProfile.safeWindowRectMm();
+    const boundary = captureProfile.placementBoundaryRectMm();
     const window = { x: 0, y: 0, width: areaMm.width, height: areaMm.height };
     /*
      * Emitted as PERCENTAGES of the capture window, not pixels. The renderer scales one fixed-aspect
@@ -626,8 +644,10 @@ class Watcher extends EventEmitter {
     };
     return {
       aspectRatio: areaMm.width / areaMm.height,
+      /** The capture area itself — the one outline the operator is asked to work to. */
       outerWindow: toPercent({ x: 0, y: 0, width: areaMm.width, height: areaMm.height }),
-      safeWindow: toPercent(safe),
+      /** The 4 mm hard boundary. Drawn very faintly; it is a hint, not a second target. */
+      placementBoundary: toPercent(boundary),
       card: detected ? toPercent(detected.cardBoundsMm) : null,
     };
   }
@@ -905,7 +925,12 @@ class Watcher extends EventEmitter {
       const previewPath = path.join(directory, `${id}.display.jpg`);
       const display = await this.createPositioningPreviewDisplay(capture.path, previewPath);
       const analysis = await this.analysePositioningPreview(capture.path, areaMm);
-      const status = analysis.cardCandidate ? (analysis.placement.ready ? "detected" : "reposition") : "not_detected";
+      /*
+       * TWO STATES, because this diagnostic now only answers "did the scanner see a card". It used
+       * to carry a third, `reposition`, which meant "the card-chasing solve found nowhere to put the
+       * acquisition rectangle" — a question that no longer exists now the rectangle is fixed.
+       */
+      const status = analysis.cardCandidate ? "detected" : "not_detected";
       const positioningPreview = {
         id,
         status,
@@ -923,7 +948,13 @@ class Watcher extends EventEmitter {
         image: analysis.image,
         displayImage: display.image,
         cardCandidate: analysis.cardCandidate,
-        placement: analysis.placement,
+        /**
+         * The FIXED calibrated capture area, so the full-platen diagnostic draws where the hardware
+         * will actually scan instead of a rectangle inferred from wherever the card happens to lie.
+         * Null until the station is calibrated — the diagnostic then shows the card and no window,
+         * which is the honest picture.
+         */
+        captureWindowMm: this.calibratedCaptureWindowMm(),
       };
       stateMod.set({
         // A server target remains only in awaiting_scan. Preview does not
@@ -933,8 +964,8 @@ class Watcher extends EventEmitter {
         lastError: null,
       });
       this.emitState();
-      this.log(`positioning-preview ${JSON.stringify({ id, stage: status, elapsedMs: Date.now() - startedAt, cardDetected: Boolean(analysis.cardCandidate), placementReady: Boolean(analysis.placement.ready) })}`);
-      return { ok: true, previewId: id, status, placementReady: Boolean(analysis.placement.ready) };
+      this.log(`positioning-preview ${JSON.stringify({ id, stage: status, elapsedMs: Date.now() - startedAt, cardDetected: Boolean(analysis.cardCandidate) })}`);
+      return { ok: true, previewId: id, status };
     } catch (error) {
       const reason = error?.message || String(error);
       stateMod.set({
@@ -950,37 +981,30 @@ class Watcher extends EventEmitter {
     }
   }
 
-  applyPositioningPreview(previewId) {
-    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
-      return { ok: false, error: "Placement cannot be saved while scanner work is in progress" };
-    }
-    const entry = stateMod.get().positioningPreview;
-    if (!entry || entry.id !== previewId || entry.status !== "detected" || !entry.placement?.ready) {
-      return { ok: false, error: "This positioning preview is stale or not safe enough to establish a placement zone" };
-    }
-    try {
-      const persisted = lide400.persistJigOrigin(entry.placement.originMm);
-      stateMod.set({
-        positioningPreview: { ...entry, status: "saved", savedAt: new Date().toISOString(), persisted },
-        lastError: null,
-      });
-      this.emitState();
-      this.log(`positioning-preview ${JSON.stringify({ id: entry.id, stage: "placement_saved", originMm: persisted.originMm, areaMm: persisted.areaMm })}`);
-      return { ok: true, persisted };
-    } catch (error) {
-      return { ok: false, error: error?.message || String(error) };
-    }
-  }
+  /*
+   * ─────────────────────────────────────────────────────────────────────────────────────────────
+   * REMOVED 2026-08-17: `applyPositioningPreview` — "SAVE PLACEMENT ZONE".
+   *
+   * It persisted the station's capture origin from `derivePlacementProposal`, i.e. from wherever a
+   * card happened to be lying when someone pressed Preview during setup. That is how this station
+   * came to be calibrated to (0, 0): not a decision anybody made, but a consequence of one card's
+   * position on one afternoon — and (0, 0) is the platen origin, exactly where the LiDE's bezel band
+   * sits.
+   *
+   * `saveCaptureWindowOrigin` replaces it. The operator drags the window to where cards will be
+   * placed and saves that deliberately. A card can no longer calibrate a station by lying somewhere.
+   * ─────────────────────────────────────────────────────────────────────────────────────────────
+   */
 
   /**
    * MOVE THE CAPTURE WINDOW — the one-time station setup action.
    *
-   * WHY THIS REPLACES AUTO-DERIVATION. `applyPositioningPreview` above infers the window origin from
-   * wherever a card happened to be lying during setup. That is how the live station came to be
-   * calibrated to (0, 0): the platen ORIGIN, which is exactly where the LiDE's bezel band sits, and
-   * which left the card corner-registered with 3 mm of background on two edges and 33 mm wasted on
-   * the other two. The operator now places the window deliberately instead of a card placing it for
-   * them.
+   * WHY THIS REPLACES AUTO-DERIVATION. The deleted `applyPositioningPreview` inferred the window
+   * origin from wherever a card happened to be lying during setup. That is how the live station came
+   * to be calibrated to (0, 0): the platen ORIGIN, which is exactly where the LiDE's bezel band sits,
+   * and which left the card corner-registered with 3 mm of background on two edges and 33 mm wasted
+   * on the other two. The operator now places the window deliberately instead of a card placing it
+   * for them. This is the ONLY writer of a station's capture origin.
    *
    * PERSISTED IN BOTH AUTHORITIES. Locally, so the bridge can request the rectangle; and in the
    * station calibration record, which is what the server will validate captures against. A local-only

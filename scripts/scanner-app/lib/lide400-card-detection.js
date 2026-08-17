@@ -4,12 +4,12 @@
  * they never write a crop, create evidence provenance, or reach the server.
  */
 
-const MIN_EVIDENCE_MARGIN_MM = 4;
-// The physical LiDE Preview establishes that this 100 × 130 mm profile can
-// guarantee nine millimetres of ordinary jig-placement latitude beyond the
-// four-millimetre immutable-evidence margin. This avoids a meaningless
-// sub-millimetre calibration shuffle while remaining deliberately generous.
-const DEFAULT_PLACEMENT_TOLERANCE_MM = 9;
+const { STANDARD_TCG } = require("../../../shared/lide400-capture-profile.cjs");
+/**
+ * Sourced from the capture profile rather than restated. Two files each holding their own "4" is how
+ * a floor gets changed in one place and silently kept in the other.
+ */
+const MIN_EVIDENCE_MARGIN_MM = STANDARD_TCG.evidenceMinMarginMm;
 const { rasterRectToPhysicalRect } = require("./lide400-preview-transform");
 /** The canonical, shared segmentation + card-shaped reduction. See shared/lide400-card-geometry.cjs. */
 const { detectLide400CardBounds } = require("../../../shared/lide400-card-geometry.cjs");
@@ -218,94 +218,29 @@ function legacyDetectCardBounds(raw, width, height, regionMm) {
   };
 }
 
-/**
- * Produce a safe fixed hardware acquisition proposal. A card must have both
- * the immutable-evidence margin and normal operator placement tolerance on
- * every side. If the current preview is too close to a platen edge, the
- * result explicitly requires repositioning instead of clamping and risking a
- * cropped final TIFF.
+/*
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
+ * REMOVED 2026-08-17: `derivePlacementProposal`, and the whole card-chasing architecture.
+ *
+ * It took the detected card bounds and computed where the 100 x 130 mm HARDWARE ACQUISITION
+ * RECTANGLE should move to in order to sit around that card — centring it on the card, then solving
+ * a clamp window against the platen. For a card near a platen edge the solve had no solution and it
+ * proposed rectangles off the glass entirely, such as x = -11.54, y = -15.09. The operator's
+ * experience of that was a Scanner that refused every position while apparently asking them to keep
+ * moving the card, because the target was moving with them.
+ *
+ * The capture area is now FIXED: its size is the profile's, its origin is calibrated once during
+ * station setup (`watcher.saveCaptureWindowOrigin`), and the detector's only job is to find the card
+ * INSIDE it. `detectCardBounds` below still does exactly that, and the verdict belongs to
+ * `evaluatePlacement` in shared/lide400-capture-profile.cjs.
+ *
+ * Do not reintroduce a function that derives acquisition geometry from card position. If a card
+ * cannot be captured where it lies, the answer is to move the CARD.
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
  */
-function derivePlacementProposal(cardCandidate, previewAreaMm, profileAreaMm, {
-  evidenceMarginMm = MIN_EVIDENCE_MARGIN_MM,
-  placementToleranceMm = DEFAULT_PLACEMENT_TOLERANCE_MM,
-} = {}) {
-  if (!cardCandidate?.cardBoundsMm) return { ready: false, reason: "CARD NOT DETECTED" };
-  const card = cardCandidate.cardBoundsMm;
-  const bed = previewAreaMm;
-  const profile = profileAreaMm;
-  const hasRect = (value) => value && ["x", "y", "width", "height"].every((key) => Number.isFinite(value[key]));
-  const hasSize = (value) => value && ["width", "height"].every((key) => Number.isFinite(value[key]));
-  if (!hasRect(card) || !hasRect(bed) || !hasSize(profile)) {
-    return { ready: false, reason: "Preview geometry is incomplete" };
-  }
-  const requiredClearance = evidenceMarginMm + placementToleranceMm;
-  const centredHardwareRectMm = {
-    x: card.x - (profile.width - card.width) / 2,
-    y: card.y - (profile.height - card.height) / 2,
-    width: profile.width,
-    height: profile.height,
-  };
-  if (profile.width < card.width + 2 * requiredClearance || profile.height < card.height + 2 * requiredClearance) {
-    return {
-      ready: false,
-      reason: "The locked hardware area is too small for the card plus required placement tolerance",
-      requiredClearanceMm: requiredClearance,
-      proposedHardwareRectMm: centredHardwareRectMm,
-    };
-  }
-  const xLower = Math.max(bed.x, card.x + card.width + requiredClearance - profile.width);
-  const xUpper = Math.min(bed.x + bed.width - profile.width, card.x - requiredClearance);
-  const yLower = Math.max(bed.y, card.y + card.height + requiredClearance - profile.height);
-  const yUpper = Math.min(bed.y + bed.height - profile.height, card.y - requiredClearance);
-  if (xLower > xUpper || yLower > yUpper) {
-    const surroundingAvailableMm = cardCandidate.surroundingBackgroundMm;
-    const observedEvidenceMarginMm = Math.min(...Object.values(surroundingAvailableMm || {}).map(Number));
-    const evidenceMarginSatisfied = Number.isFinite(observedEvidenceMarginMm) && observedEvidenceMarginMm >= evidenceMarginMm;
-    return {
-      ready: false,
-      reason: evidenceMarginSatisfied
-        ? "Card is fully visible with the evidence minimum, but too close to a platen edge for normal placement tolerance"
-        : "Card is too close to a platen edge for the required evidence margin and normal placement tolerance",
-      requiredClearanceMm: requiredClearance,
-      detectedCardMm: card,
-      surroundingAvailableMm,
-      observedEvidenceMarginMm,
-      evidenceMarginSatisfied,
-      evidenceMarginRequiredMm: evidenceMarginMm,
-      proposedHardwareRectMm: centredHardwareRectMm,
-      minimumMoveInwardMm: {
-        x: Math.max(0, requiredClearance - (card.x - bed.x), requiredClearance - (bed.x + bed.width - (card.x + card.width))),
-        y: Math.max(0, requiredClearance - (card.y - bed.y), requiredClearance - (bed.y + bed.height - (card.y + card.height))),
-      },
-    };
-  }
-  const desiredX = centredHardwareRectMm.x;
-  const desiredY = centredHardwareRectMm.y;
-  const x = Math.min(xUpper, Math.max(xLower, desiredX));
-  const y = Math.min(yUpper, Math.max(yLower, desiredY));
-  const hardwareMarginMm = {
-    left: card.x - x,
-    top: card.y - y,
-    right: x + profile.width - (card.x + card.width),
-    bottom: y + profile.height - (card.y + card.height),
-  };
-  return {
-    ready: true,
-    reason: null,
-    originMm: { x, y },
-    areaMm: { width: profile.width, height: profile.height },
-    proposedHardwareRectMm: { x, y, width: profile.width, height: profile.height },
-    cardBoundsMm: card,
-    hardwareMarginMm,
-    evidenceMarginMm,
-    placementToleranceMm: Math.min(...Object.values(hardwareMarginMm).map((value) => value - evidenceMarginMm)),
-  };
-}
 
 module.exports = {
   MIN_EVIDENCE_MARGIN_MM,
-  DEFAULT_PLACEMENT_TOLERANCE_MM,
   detectCardBounds,
-  derivePlacementProposal,
   _private: { longestExpectedSpan, findExpectedCardComponent },
 };

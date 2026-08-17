@@ -11,6 +11,7 @@ import {
   stationPublicKeyFingerprint,
   verifyStationSignature,
 } from "./station-identity";
+import { CaptureGeometryError, assertLegalCaptureWindow } from "../lib/lide400-capture-authority";
 
 export type StationStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED";
 export type CalibrationStatus = "UNPROVISIONED" | "VALID" | "INVALID" | "EXPIRED";
@@ -622,6 +623,24 @@ export async function recordStationHeartbeat(
   });
 }
 
+/**
+ * Re-express a capture-geometry refusal as a station VALIDATION error.
+ *
+ * `CaptureGeometryError` is not a `StationServiceError`, so left alone it falls through the route's
+ * error mapping to a generic 500 "Station request could not be completed" — which is precisely the
+ * wrong answer for an operator who has just dragged a window somewhere illegal. The reason text from
+ * the geometry authority is preserved verbatim; only the classification changes.
+ */
+function assertLegalCalibrationRegion(region: Record<string, number>) {
+  try {
+    // `finiteRegion` has already proved all four keys are present and finite.
+    return assertLegalCaptureWindow(region as { x: number; y: number; width: number; height: number });
+  } catch (error) {
+    if (error instanceof CaptureGeometryError) throw new StationServiceError("validation", error.message);
+    throw error;
+  }
+}
+
 export async function saveStationCalibration(
   station: StationPrincipal,
   actorUserId: string,
@@ -642,7 +661,21 @@ export async function saveStationCalibration(
   ]);
   const scannerHardwareFingerprint = fingerprint(scannerHardware);
   const scannerProfileVersion = boundedText(input.scannerProfileVersion, "scannerProfileVersion", 120);
-  const acquisitionRegion = finiteRegion(input.acquisitionRegion, "acquisitionRegion");
+  /*
+   * VALIDATED AGAINST THE PROFILE AT THE MOMENT IT IS WRITTEN, not only when it is later used.
+   *
+   * `finiteRegion` only proves the four numbers are finite and in [0, 400]. That was enough to
+   * persist a region, hard-code `health_status='VALID'` below, repoint `current_calibration_id`, and
+   * advertise the station as capture-ready — while `assertLegalCaptureWindow` on the arm path went on
+   * to reject the very same geometry on every single capture. The station looked ready and failed
+   * opaquely, forever, and nothing told the operator at the one moment they could have fixed it.
+   *
+   * Checking here makes the failure land on the SAVE, where the operator is standing at the scanner
+   * with the window under their cursor.
+   */
+  const acquisitionRegion = assertLegalCalibrationRegion(
+    finiteRegion(input.acquisitionRegion, "acquisitionRegion")
+  );
   const workingRegion = input.workingRegion == null ? {} : finiteRegion(input.workingRegion, "workingRegion");
   const placementToleranceMm =
     input.placementToleranceMm == null ? {} : finiteMargins(input.placementToleranceMm, "placementToleranceMm");
@@ -656,6 +689,40 @@ export async function saveStationCalibration(
     calibrationVersion,
   });
   return withPartnerAdminTransaction(async (client) => {
+    /*
+     * REFUSED WHILE THIS STATION HOLDS AN OPEN CARD — enforced HERE, not only in the Scanner.
+     *
+     * The Scanner already refuses this (`watcher.saveCaptureWindowOrigin`), and the sentence below is
+     * deliberately the same one it shows, so the operator's experience is unchanged when the client
+     * guard works and correct when it is bypassed. But that guard is JavaScript on a shop Mac: a
+     * hand-edited app, a replayed request, or any other holder of the station signing key could move
+     * the window between a card's FRONT and its BACK.
+     *
+     * The session snapshot (migration 0091) makes an already-armed side immune to a recalibration,
+     * which is the primary immutability guarantee and it holds. What it cannot catch is the sequence
+     * ACROSS two sessions of one card: capture FRONT under window A, recalibrate, capture BACK under
+     * window B. Both uploads then agree with their own snapshot and both are accepted, leaving one
+     * certificate whose two sides came from two different physical rectangles. That is not one piece
+     * of evidence, and this is where the sequence is stopped.
+     */
+    const openWork = await client.query<{ certificate_number: string | null }>(
+      `SELECT c.certificate_number
+         FROM scanner_capture_sessions s
+         JOIN certificates c ON c.id = s.certificate_id
+        WHERE s.station_id = $1
+          AND s.state IN ('armed','claimed','capturing')
+          AND s.expires_at > NOW()
+        LIMIT 1`,
+      [station.id]
+    );
+    if (openWork.rows.length > 0) {
+      const held = openWork.rows[0].certificate_number;
+      throw new StationServiceError(
+        "validation",
+        `Finish or release the current card${held ? ` (${held})` : ""} before moving the capture window`
+      );
+    }
+
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO partner_station_calibrations
          (tenant_id,location_id,station_id,calibration_fingerprint,scanner_hardware_fingerprint,scanner_hardware,

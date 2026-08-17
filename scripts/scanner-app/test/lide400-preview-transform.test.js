@@ -1,7 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const transform = require("../lib/lide400-preview-transform");
-const { detectCardBounds, derivePlacementProposal } = require("../lib/lide400-card-detection");
+const cardDetection = require("../lib/lide400-card-detection");
+const { detectCardBounds } = cardDetection;
+const captureProfile = require("../../../shared/lide400-capture-profile.cjs");
 
 const fullPlaten = { x: 0, y: 0, width: 215.9, height: 297.0106666666666 };
 const observedCard = { x: 4.6217125382263, y: 9.240331851851849, width: 64.20879204892967, height: 89.10319999999999 };
@@ -43,31 +45,82 @@ test("contained Preview overlay uses the real portrait image rectangle and 180-d
   assert.ok(mapped.y > 150);
 });
 
-test("edge-adjacent broad Preview produces an unsaveable, visibly clipped final-area proposal", () => {
-  const placement = derivePlacementProposal({
-    cardBoundsMm: observedCard,
-    surroundingBackgroundMm: { left: observedCard.x, top: observedCard.y, right: 147.07, bottom: 198.67 },
-  }, fullPlaten, { width: 100, height: 130 });
-  assert.equal(placement.ready, false);
-  assert.equal(placement.evidenceMarginSatisfied, true, "the broad Preview proves all four current card edges remain visible");
-  close(placement.observedEvidenceMarginMm, 4.62, 0.02);
-  assert.ok(placement.proposedHardwareRectMm.x < 0);
-  assert.ok(placement.proposedHardwareRectMm.y < 0);
-  close(placement.minimumMoveInwardMm.x, 8.38, 0.02);
-  close(placement.minimumMoveInwardMm.y, 3.76, 0.02);
+/*
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
+ * THE CARD-CHASING ARCHITECTURE IS GONE, AND THESE TESTS HOLD IT DOWN.
+ *
+ * Two tests here used to assert `derivePlacementProposal`: that an edge-adjacent card yielded a
+ * proposed acquisition rectangle at NEGATIVE coordinates, and that a card further in "established a
+ * generous 9 mm placement envelope". Both were faithful tests of a rejected design — the rectangle
+ * moved to chase the card, so a card near the glass edge asked the hardware to scan off the platen.
+ *
+ * They are replaced, not deleted, and they keep the same real measurements from the physical
+ * Previews of 2026-08-17 so the evidence outlives the design it was gathered under.
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
+ */
+
+test("the card-chasing proposal is gone and cannot be reintroduced by import", () => {
+  assert.equal(
+    cardDetection.derivePlacementProposal,
+    undefined,
+    "derivePlacementProposal derived acquisition geometry from card position; the capture area is fixed"
+  );
+  assert.equal(cardDetection.DEFAULT_PLACEMENT_TOLERANCE_MM, undefined, "the 9 mm envelope was part of the chasing solve");
+  assert.equal(
+    cardDetection.MIN_EVIDENCE_MARGIN_MM,
+    captureProfile.STANDARD_TCG.evidenceMinMarginMm,
+    "the detector's margin must be the profile's, not a second copy of 4"
+  );
 });
 
-test("latest physical Preview establishes a generous 9 mm placement envelope without a 1 mm operator shuffle", () => {
-  const placement = derivePlacementProposal({
-    cardBoundsMm: latestObservedCard,
-    surroundingBackgroundMm: { left: latestObservedCard.x, top: latestObservedCard.y, right: 138.16, bottom: 193.06 },
-  }, fullPlaten, { width: 100, height: 130 });
-  assert.equal(placement.ready, true);
-  assert.ok(placement.placementToleranceMm >= 9);
-  close(placement.originMm.x, 0, 0.02);
-  close(placement.originMm.y, 0, 0.02);
-  assert.ok(placement.hardwareMarginMm.left >= 13);
-  assert.ok(placement.hardwareMarginMm.top >= 13);
+test("MV272's real FRONT placement is master-valid but preview-refused, and the two are different questions", () => {
+  /*
+   * THE MEASUREMENT THAT SETTLED THE ARGUMENT, and then settled the next one too.
+   *
+   * This is the card position that produced MV272's accepted FRONT master: a 4.62 mm minimum margin.
+   * It cleared the 4 mm MASTER floor, so that evidence is valid and stays valid.
+   *
+   * It does NOT clear the 5.6 mm PREVIEW threshold, and that is correct rather than a return of the
+   * 10 mm gate. 4.62 minus the proven 1.60 mm acquisition uncertainty is 3.02 mm — below the master
+   * floor. That placement was a coin toss, and the sibling fixture `mv272-back-rejected` is what
+   * losing it looks like: 3.752 mm, refused by the server after a full 45-second scan.
+   */
+  close(observedCard.x, 4.62, 0.02);
+  const verdict = captureProfile.evaluatePlacement({
+    x: observedCard.x,
+    y: observedCard.y,
+    width: 63.5,
+    height: 88.9,
+  });
+  assert.equal(verdict.state, captureProfile.PLACEMENT.REPOSITION);
+  assert.equal(verdict.code, "card_inside_preview_margin");
+  close(verdict.minMarginMm, 4.62, 0.02);
+  // Refused, but honest: this one would probably have survived the master.
+  assert.equal(verdict.wouldLikelyPassMaster, true);
+  // The master floor itself is untouched by the preview threshold.
+  assert.equal(verdict.evidenceMinMarginMm, 4);
+});
+
+test("a card well inside the fixed capture area is GREEN with the full budget above the master floor", () => {
+  const verdict = captureProfile.evaluatePlacement({
+    x: latestObservedCard.x,
+    y: latestObservedCard.y,
+    width: 63.5,
+    height: 88.9,
+  });
+  assert.equal(verdict.state, captureProfile.PLACEMENT.READY);
+  close(verdict.minMarginMm, 13.54, 0.02);
+  /*
+   * NO FALSE GREEN: even in the linear worst case this placement reaches the master above 4 mm.
+   * That is what GREEN is promising, expressed as the arithmetic rather than as a colour.
+   */
+  const worstCaseAtMaster = verdict.minMarginMm - captureProfile.STANDARD_TCG.previewToMasterBudgetMm;
+  assert.ok(worstCaseAtMaster >= captureProfile.STANDARD_TCG.evidenceMinMarginMm);
+  /*
+   * THE POINT OF THE WHOLE CHANGE: the capture area did not move. Both cards above are judged
+   * against the same fixed 100 x 130 rectangle at the same origin, and only the card moved.
+   */
+  assert.deepEqual(verdict.outerWindowMm, { x: 0, y: 0, width: 100, height: 130 });
 });
 
 test("positioning Preview detects an isolated card despite a full-width dark platen reflection", () => {

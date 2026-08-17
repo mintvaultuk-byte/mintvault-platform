@@ -147,11 +147,27 @@ describe("TEST 5 — an invalid or unprovisioned calibration fails closed", () =
     );
   });
 
-  it("refuses a stored region at the platen ORIGIN, where the bezel band is", () => {
-    // The live station's old (0,0) calibration must not become authoritative geometry either.
+  it("ACCEPTS a stored region at the platen origin, because refusing it stranded the fleet", () => {
+    /*
+     * INVERTED 2026-08-17. Refusing (0, 0) here was the server half of a fleet-wide lockout: every
+     * VALID staging calibration sat at the platen origin, so this threw on EVERY arm and 0 of 11
+     * capture sessions ever received an acquisition_region. MV272 was stranded by it — a preserved
+     * FRONT captured at (0, 0) and a BACK that could not be armed at its own proven geometry.
+     *
+     * The bezel band is real but is not the origin's problem: the connected-component detector no
+     * longer lets it stretch card bounds, and the 4 mm floor is still measured on the master.
+     */
+    const region = resolveAuthoritativeAcquisitionRegion(
+      calibration({ acquisitionRegion: { x: 0, y: 0, width: 100, height: 130 } }),
+      expected
+    );
+    expect(region).toEqual({ x: 0, y: 0, width: 100, height: 130 });
+  });
+
+  it("still refuses a region that hangs off the far edge of the glass", () => {
     expect(() =>
       resolveAuthoritativeAcquisitionRegion(
-        calibration({ acquisitionRegion: { x: 0, y: 0, width: 100, height: 130 } }),
+        calibration({ acquisitionRegion: { x: 200, y: 20, width: 100, height: 130 } }),
         expected
       )
     ).toThrow(/not a valid position on the platen/);
@@ -222,10 +238,12 @@ describe("TESTS 7-9 — recalibration history is immutable for work in flight", 
 });
 
 describe("TEST 10 — the 4 mm floor is untouched by any of this", () => {
-  it("keeps the evidence floor at 4 mm and the operator zone at 10 mm", async () => {
+  it("keeps the evidence floor at 4 mm, now the single number on both sides of the wire", async () => {
     const { LIDE_400_MIN_EVIDENCE_MARGIN_MM } = await import("../server/lib/lide400-card-frame");
     expect(LIDE_400_MIN_EVIDENCE_MARGIN_MM).toBe(4);
-    expect(STANDARD_TCG.operatorInsetMm).toBe(10);
+    // The gate and the floor are the same figure now; the 10 mm operator zone is gone.
+    expect(STANDARD_TCG.evidenceMinMarginMm).toBe(LIDE_400_MIN_EVIDENCE_MARGIN_MM);
+    expect((STANDARD_TCG as Record<string, unknown>).operatorInsetMm).toBeUndefined();
   });
 
   it("independently rejects a sub-4 mm capture measured against the authoritative region", async () => {

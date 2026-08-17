@@ -268,6 +268,7 @@ describe("partner schema ↔ migration parity", () => {
       // scanner bodies verbatim, so it is a no-op on production and on fresh estates.
       "0090_lineage_convergence_scanner.sql",
       "0091_capture_session_calibration_snapshot.sql",
+      "0092_partner_station_calibrate_permission.sql",
     ]);
   });
 

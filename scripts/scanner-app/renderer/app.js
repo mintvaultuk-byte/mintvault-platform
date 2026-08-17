@@ -63,8 +63,9 @@ const els = {
   captureWindowSetup: document.getElementById("captureWindowSetup"),
   platenViewport: document.getElementById("platenViewport"),
   platenWindow: document.getElementById("platenWindow"),
-  platenSafe: document.getElementById("platenSafe"),
   captureWindowReadout: document.getElementById("captureWindowReadout"),
+  captureWindowMaintenance: document.getElementById("captureWindowMaintenance"),
+  captureWindowFixedNote: document.getElementById("captureWindowFixedNote"),
   captureWindowStatus: document.getElementById("captureWindowStatus"),
   captureWindowSaveBtn: document.getElementById("captureWindowSaveBtn"),
   captureWindowResetBtn: document.getElementById("captureWindowResetBtn"),
@@ -75,9 +76,12 @@ const els = {
   environmentName: document.getElementById("environmentName"),
   environmentApi: document.getElementById("environmentApi"),
   environmentWarning: document.getElementById("environmentWarning"),
+  environmentStagingBtn: document.getElementById("environmentStagingBtn"),
+  environmentProductionBtn: document.getElementById("environmentProductionBtn"),
+  environmentChoiceStatus: document.getElementById("environmentChoiceStatus"),
   stationForgotPasswordBtn: document.getElementById("stationForgotPasswordBtn"),
   placementOuterBox: document.getElementById("placementOuterBox"),
-  placementSafeBox: document.getElementById("placementSafeBox"),
+  placementBoundaryBox: document.getElementById("placementBoundaryBox"),
   placementCardBox: document.getElementById("placementCardBox"),
   placementMessage: document.getElementById("placementMessage"),
   placementDiagnostics: document.getElementById("placementDiagnostics"),
@@ -90,7 +94,6 @@ const els = {
   acquisitionBoundaryOverlay: document.getElementById("acquisitionBoundaryOverlay"),
   positioningResult: document.getElementById("positioningResult"),
   positioningGeometry: document.getElementById("positioningGeometry"),
-  savePlacementBtn: document.getElementById("savePlacementBtn"),
   stationSetupModal: document.getElementById("stationSetupModal"),
   stationSetupTitle: document.getElementById("stationSetupTitle"),
   stationSetupText: document.getElementById("stationSetupText"),
@@ -265,6 +268,9 @@ function renderStationIdentity(setup) {
   els.stationIdentity.textContent = setup.stationCode || "Station";
   els.stationUser.textContent = setup.summary?.displayName || "Authorised user";
   renderAvailableCredits();
+  // Whether this operator may move the capture area travels with their identity, not with scanner
+  // state — it is a property of who signed in.
+  syncCaptureWindowAuthority();
 }
 
 /**
@@ -539,17 +545,18 @@ function renderPositioningCardCrop(entry) {
   }
 }
 
+/**
+ * Draw the full-platen setup diagnostic.
+ *
+ * The acquisition rectangle drawn here is the station's FIXED calibrated capture area, read from the
+ * watcher. It is not derived from the detected card and does not move when the card moves — the
+ * whole point of the 2026-08-17 change. If the station is not calibrated there is no rectangle to
+ * draw, and none is invented.
+ */
 function renderPositioningOverlays(entry) {
   const candidate = entry?.cardCandidate?.cardBoundsMm;
   positionPreviewOverlay(els.cardBoundaryOverlay, candidate, entry, "card-boundary-overlay");
-  const proposal = entry?.placement?.proposedHardwareRectMm;
-  const safe = Boolean(entry?.placement?.ready && ["detected", "saved"].includes(entry.status));
-  positionPreviewOverlay(
-    els.acquisitionBoundaryOverlay,
-    proposal,
-    entry,
-    `acquisition-boundary-overlay ${safe ? "safe" : "unsafe"}`,
-  );
+  positionPreviewOverlay(els.acquisitionBoundaryOverlay, entry?.captureWindowMm, entry, "acquisition-boundary-overlay");
 }
 
 /**
@@ -608,20 +615,31 @@ function renderPlacementPreview(entry, state) {
     element.style.height = `${rect.height}%`;
   };
   place(els.placementOuterBox, overlay.outerWindow);
-  place(els.placementSafeBox, overlay.safeWindow);
+  place(els.placementBoundaryBox, overlay.placementBoundary);
   place(els.placementCardBox, overlay.card);
 
-  // Millimetres are confined to this collapsed block. The normal operator path is the two boxes.
+  // Millimetres are confined to this collapsed block. The normal operator path is one outline.
   const card = verdict.cardBoundsMm;
   els.placementDiagnosticsBody.textContent = [
-    `state        ${placementState}${verdict.amberFloorMm ? ` (amber above ${verdict.amberFloorMm} mm)` : ""}`,
+    `state        ${placementState}`,
     `profile      ${verdict.profileId || "—"} ${verdict.profileVersion || ""}`,
     `coordinates  ${verdict.coordinateSpace || "—"}`,
-    `window       ${entry.areaMm ? `${entry.areaMm.width} x ${entry.areaMm.height} mm at ${entry.originMm?.x}, ${entry.originMm?.y}` : "—"}`,
-    `safe zone    ${verdict.safeWindowMm ? `${verdict.safeWindowMm.width} x ${verdict.safeWindowMm.height} mm, ${verdict.operatorInsetMm} mm inset` : "—"}`,
+    `capture area ${entry.areaMm ? `${entry.areaMm.width} x ${entry.areaMm.height} mm at ${entry.originMm?.x}, ${entry.originMm?.y}` : "—"}`,
+    `boundary     ${verdict.placementBoundaryMm ? `${verdict.placementBoundaryMm.width} x ${verdict.placementBoundaryMm.height} mm, ${verdict.previewGreenMinMarginMm} mm inset` : "—"}`,
     `card         ${card ? `${card.width.toFixed(2)} x ${card.height.toFixed(2)} mm at ${card.x.toFixed(2)}, ${card.y.toFixed(2)}` : "not detected"}`,
     `margins      ${Number.isFinite(verdict.minMarginMm) ? `${verdict.minMarginMm.toFixed(2)} mm closest` : "—"}`,
-    `evidence min ${verdict.evidenceMinMarginMm ?? "—"} mm (server floor, not this gate)`,
+    /*
+     * THE TWO NUMBERS, NAMED, so a marginal refusal is explainable rather than mysterious. Normal
+     * staff never open this block — they get GREEN or RED and one sentence.
+     */
+    `master minimum      ${verdict.evidenceMinMarginMm ?? "—"} mm (authoritative, applied to the 1200-DPI master)`,
+    `preview allowance   ${verdict.previewGreenMinMarginMm ?? "—"} mm (master minimum + proven acquisition uncertainty)`,
+    `current preview     ${Number.isFinite(verdict.minMarginMm) ? `${verdict.minMarginMm.toFixed(2)} mm closest edge` : "—"}`,
+    `${
+      verdict.wouldLikelyPassMaster
+        ? "note         this placement would probably pass the master, but GREEN must mean expected-to-pass"
+        : ""
+    }`,
     `verdict      ${verdict.state || "—"} ${verdict.code || ""}`,
   ].join("\n");
 
@@ -680,40 +698,30 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
   if (showImage && els.positioningFullPreview.complete) renderPositioningOverlays(entry);
   if (showImage && els.positioningCardPreview.complete) renderPositioningCardCrop(entry);
 
+  /*
+   * A DIAGNOSTIC, NOT A DECISION. This panel reports what the scanner saw on the whole platen and
+   * where the fixed capture area sits. It no longer has a SAVE button, because a card no longer
+   * calibrates anything — the capture window is moved deliberately in "Capture window position"
+   * below, and the RED/GREEN that governs a scan is the per-side placement gate.
+   */
+  const window = entry.captureWindowMm;
+  const windowText = window
+    ? `Capture area ${formatMm(window.width)} × ${formatMm(window.height)} at ${formatMm(window.x)}, ${formatMm(window.y)}.`
+    : "This station has no saved capture area yet — set one in Capture window position below.";
+
   if (status === "detected") {
-    els.positioningResult.textContent = "CARD DETECTED — PLACEMENT IS READY";
-    const placement = entry.placement;
-    els.positioningGeometry.textContent = `Card ${formatMm(candidate.x)}, ${formatMm(candidate.y)} · ${formatMm(candidate.width)} × ${formatMm(candidate.height)}. Proposed hardware region ${formatMm(placement.areaMm.width)} × ${formatMm(placement.areaMm.height)} at ${formatMm(placement.originMm.x)}, ${formatMm(placement.originMm.y)}; usable placement tolerance ${formatMm(placement.placementToleranceMm)}.`;
-    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", true, actionInFlight);
-    els.positioningHint.textContent = "All four edges and corners are visible with scanner background. Saving only enables this local station’s final 1200-DPI capture profile.";
-  } else if (status === "reposition") {
-    els.positioningResult.textContent = "CARD DETECTED — MOVE SLIGHTLY INWARD, THEN PREVIEW";
-    const proposal = entry.placement || {};
-    const margins = proposal.surroundingAvailableMm || {};
-    const movement = proposal.minimumMoveInwardMm || {};
-    const moveRightMm = Math.ceil(Number(movement.x) || 0);
-    const moveUpMm = Math.ceil(Number(movement.y) || 0);
-    const evidenceStatus = proposal.evidenceMarginSatisfied
-      ? `All four card edges are visible; observed minimum background is ${formatMm(proposal.observedEvidenceMarginMm)} (requirement ${formatMm(proposal.evidenceMarginRequiredMm)}).`
-      : "At least one card edge does not have the required evidence background.";
-    els.positioningGeometry.textContent = `Detected card ${formatMm(candidate?.x)}, ${formatMm(candidate?.y)} · ${formatMm(candidate?.width)} × ${formatMm(candidate?.height)}. Broad Preview background: left ${formatMm(margins.left)}, top ${formatMm(margins.top)}, right ${formatMm(margins.right)}, bottom ${formatMm(margins.bottom)}. ${evidenceStatus} The 100 × 130 mm area is clipped by the platen, so it is not saved. Measured inward movement: ${moveRightMm} mm right and ${moveUpMm} mm up.`;
-    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
-    els.positioningHint.textContent = "The card is complete, but the placement zone needs a little more room at the glass edge for ordinary staff variation.";
+    els.positioningResult.textContent = "CARD DETECTED";
+    els.positioningGeometry.textContent = `Card ${formatMm(candidate.x)}, ${formatMm(candidate.y)} · ${formatMm(candidate.width)} × ${formatMm(candidate.height)}. ${windowText}`;
+    els.positioningHint.textContent = "Full-platen diagnostic only. Whether a card may be scanned is decided by the per-side placement gate against the fixed capture area.";
   } else if (status === "not_detected") {
-    els.positioningResult.textContent = "CARD NOT DETECTED — REPOSITION AND PREVIEW";
-    els.positioningGeometry.textContent = area ? `Broad hardware preview area: ${formatMm(area.width)} × ${formatMm(area.height)} at ${formatMm(area.x)}, ${formatMm(area.y)}.` : "The scanner did not return usable positioning geometry.";
-    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
-    els.positioningHint.textContent = "No placement was saved and no evidence was created. Reposition the card, then Preview again.";
-  } else if (status === "saved") {
-    els.positioningResult.textContent = "PLACEMENT ZONE SAVED";
-    const placement = entry.persisted || entry.placement;
-    els.positioningGeometry.textContent = `Local station origin ${formatMm(placement.originMm?.x)}, ${formatMm(placement.originMm?.y)} · hardware region ${formatMm(placement.areaMm?.width)} × ${formatMm(placement.areaMm?.height)}.`;
-    setActionButton(els.savePlacementBtn, "PLACEMENT ZONE SAVED", true, true);
-    els.positioningHint.textContent = "Normal SCAN FRONT / SCAN BACK remains target-bound and uses the locked 1200-DPI TIFF profile.";
+    els.positioningResult.textContent = "CARD NOT DETECTED";
+    els.positioningGeometry.textContent = area
+      ? `Full platen preview ${formatMm(area.width)} × ${formatMm(area.height)} at ${formatMm(area.x)}, ${formatMm(area.y)}. ${windowText}`
+      : "The scanner did not return usable positioning geometry.";
+    els.positioningHint.textContent = "No placement was saved and no evidence was created. This diagnostic never changes a card.";
   } else {
     els.positioningResult.textContent = "POSITIONING PREVIEW FAILED";
     els.positioningGeometry.textContent = entry.error || "No card position was saved.";
-    setActionButton(els.savePlacementBtn, "SAVE PLACEMENT ZONE", false, true);
     els.positioningHint.textContent = "No certificate or evidence was changed. Check scanner readiness and Preview again.";
   }
 }
@@ -1125,7 +1133,33 @@ function renderEnvironment(descriptor) {
   const showWarning = !descriptor.ok;
   els.environmentWarning.hidden = !showWarning;
   els.environmentWarning.textContent = showWarning ? descriptor.message || "" : "";
+
+  // The current declaration is marked so "which one am I on" is answerable at a glance, and the
+  // choice that is already active cannot be re-pressed as if it were a change.
+  els.environmentStagingBtn.disabled = actionInFlight || descriptor.environment === "staging";
+  els.environmentProductionBtn.disabled = actionInFlight || descriptor.environment === "production";
 }
+
+/**
+ * Declare the environment. The main process refuses while a card is open, and that refusal is shown
+ * verbatim rather than being retried or reworded — "finish the card first" is the actual answer.
+ */
+function chooseEnvironment(value) {
+  els.environmentChoiceStatus.textContent = "Switching…";
+  void window.scanner
+    .setEnvironment(value)
+    .then((result) => {
+      els.environmentChoiceStatus.textContent = result?.ok
+        ? `This Scanner now belongs to ${String(value).toUpperCase()}. Sign in again.`
+        : result?.error || "The environment could not be changed.";
+    })
+    .catch(() => {
+      els.environmentChoiceStatus.textContent = "The environment could not be changed.";
+    });
+}
+
+els.environmentStagingBtn.addEventListener("click", () => chooseEnvironment("staging"));
+els.environmentProductionBtn.addEventListener("click", () => chooseEnvironment("production"));
 
 els.stationForgotPasswordBtn.addEventListener("click", () => {
   /*
@@ -1220,8 +1254,12 @@ els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => wind
  */
 const PLATEN = { width: 216, height: 297 };
 const WINDOW_MM = { width: 100, height: 130 };
-const SAFE_INSET_MM = 10;
-const MIN_INSET_MM = 5;
+/*
+ * ZERO, matching `MIN_PLATEN_INSET_MM` in the shared profile. It was 5 here and there, and that pair
+ * of fives was the fleet-wide lockout: every station calibrated at the platen origin was read as
+ * UNPROVISIONED by the Scanner and refused by the server, so no station could arm any capture.
+ */
+const MIN_INSET_MM = 0;
 const DEFAULT_ORIGIN_MM = { x: 20, y: 20 };
 const originBounds = {
   minX: MIN_INSET_MM,
@@ -1230,6 +1268,8 @@ const originBounds = {
   maxY: PLATEN.height - WINDOW_MM.height - MIN_INSET_MM,
 };
 let captureWindowOriginMm = { ...DEFAULT_ORIGIN_MM };
+/** Set from the operator's own permissions. FALSE until proven otherwise — see `stationSummary`. */
+let captureWindowMovable = false;
 
 function clampOriginMm(origin) {
   return {
@@ -1244,16 +1284,23 @@ function drawCaptureWindow() {
   els.platenWindow.style.top = pct(captureWindowOriginMm.y, PLATEN.height);
   els.platenWindow.style.width = pct(WINDOW_MM.width, PLATEN.width);
   els.platenWindow.style.height = pct(WINDOW_MM.height, PLATEN.height);
-  els.platenSafe.style.left = pct(captureWindowOriginMm.x + SAFE_INSET_MM, PLATEN.width);
-  els.platenSafe.style.top = pct(captureWindowOriginMm.y + SAFE_INSET_MM, PLATEN.height);
-  els.platenSafe.style.width = pct(WINDOW_MM.width - 2 * SAFE_INSET_MM, PLATEN.width);
-  els.platenSafe.style.height = pct(WINDOW_MM.height - 2 * SAFE_INSET_MM, PLATEN.height);
+  /*
+   * ONE rectangle. The inner 80 x 110 "safe placement box" was drawn here too and is gone with the
+   * 10 mm gate — it was a second target that refused cards which produced valid evidence.
+   */
   els.captureWindowReadout.textContent =
-    `Capture window ${WINDOW_MM.width} × ${WINDOW_MM.height} mm at ${captureWindowOriginMm.x.toFixed(1)}, ` +
-    `${captureWindowOriginMm.y.toFixed(1)} mm. Safe placement box ${WINDOW_MM.width - 2 * SAFE_INSET_MM} × ` +
-    `${WINDOW_MM.height - 2 * SAFE_INSET_MM} mm inside it.`;
+    `${WINDOW_MM.width} × ${WINDOW_MM.height} mm at ${captureWindowOriginMm.x.toFixed(1)}, ` +
+    `${captureWindowOriginMm.y.toFixed(1)} mm on the scanner bed.`;
 }
 
+/**
+ * Dragging exists only for maintenance, and only for an operator who may actually save the result.
+ *
+ * Gating the POINTER as well as the buttons is deliberate: a Scanner Operator who can shove the box
+ * around but cannot save it has been shown a lie about where their station scans, and the readout
+ * beneath it would follow the cursor rather than the hardware. The server is still the real gate —
+ * this only keeps the picture honest.
+ */
 (function enableCaptureWindowDrag() {
   let dragging = null;
   const originFromPointer = (event) => {
@@ -1267,6 +1314,7 @@ function drawCaptureWindow() {
     });
   };
   els.platenWindow.addEventListener("pointerdown", (event) => {
+    if (!captureWindowMovable) return;
     const rect = els.platenViewport.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     // Grab the window where it was actually clicked, so it does not jump under the cursor.
@@ -1278,7 +1326,7 @@ function drawCaptureWindow() {
     event.preventDefault();
   });
   els.platenWindow.addEventListener("pointermove", (event) => {
-    if (!dragging) return;
+    if (!dragging || !captureWindowMovable) return;
     const next = originFromPointer(event);
     if (!next) return;
     captureWindowOriginMm = next;
@@ -1292,6 +1340,23 @@ function drawCaptureWindow() {
   els.platenWindow.addEventListener("pointerup", end);
   els.platenWindow.addEventListener("pointercancel", end);
 })();
+
+/**
+ * Show the maintenance controls only to an operator who holds `partner.stations.calibrate`.
+ *
+ * PRESENTATION, NOT AUTHORISATION. The server refuses `POST /stations/calibrations` without that
+ * capability whatever this does; hiding the controls only avoids offering a Scanner Operator a
+ * button that would refuse them.
+ */
+function syncCaptureWindowAuthority() {
+  captureWindowMovable = stationSetup?.summary?.canCalibrate === true;
+  els.captureWindowMaintenance.hidden = !captureWindowMovable;
+  els.captureWindowFixedNote.hidden = captureWindowMovable;
+  els.platenViewport.title = captureWindowMovable
+    ? "Maintenance only — drag to reposition the capture area"
+    : "The capture area for this station";
+  els.platenWindow.classList.toggle("platen-window--movable", captureWindowMovable);
+}
 
 /*
  * Seed the drag from the station's SAVED window, once, and never again while the operator is
@@ -1351,7 +1416,6 @@ els.positioningPreviewBtn.addEventListener("click", () => {
   }
   void runCaptureAction(() => window.scanner.runPositioningPreview());
 });
-els.savePlacementBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.applyPositioningPreview(lastState?.positioningPreview?.id || previewId)));
 els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId)));
 els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
 els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));

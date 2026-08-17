@@ -1,6 +1,11 @@
 /**
- * The canonical capture profile: geometry, the placement gate, and the two numbers that must never
- * be confused — the 10 mm SAFE OPERATOR ZONE and the 4 mm ABSOLUTE EVIDENCE FLOOR.
+ * The canonical capture profile: the FIXED capture area, the calibrated origin, and the single
+ * number that governs placement — the 4 mm EVIDENCE FLOOR.
+ *
+ * Rewritten 2026-08-17 when the owner collapsed the two-number design (a 10 mm operator zone gating
+ * SCAN, a 4 mm floor gating evidence) into one. The old suite was a faithful test of that design;
+ * these assertions replace it rather than relaxing it, and several are deliberately INVERSIONS of
+ * what this file used to claim. Where that is so, the comment says why.
  *
  * These tests are pure geometry and run in milliseconds. The real-artifact proofs live in
  * `lide400-capture-corpus.test.ts`.
@@ -12,12 +17,13 @@ import {
   MIN_PLATEN_INSET_MM,
   PLACEMENT,
   PLACEMENT_MESSAGE,
-  safeWindowRectMm,
+  placementBoundaryRectMm,
+  previewGreenMinMarginMm,
   clampCaptureOriginMm,
   captureWindowRectMm,
   evaluatePlacement,
   placementToleranceMm,
-  assertSafeWindowIsRotationInvariant,
+  assertPlacementBoundaryIsRotationInvariant,
   profileById,
 } from "@shared/lide400-capture-profile.cjs";
 
@@ -26,9 +32,10 @@ const P = STANDARD_TCG;
 describe("Standard TCG capture geometry", () => {
   it("locks the geometry the owner approved on 2026-08-17", () => {
     expect(P.outerWindowMm).toEqual({ width: 100, height: 130 });
-    expect(P.safeWindowMm).toEqual({ width: 80, height: 110 });
-    expect(P.operatorInsetMm).toBe(10);
     expect(P.evidenceMinMarginMm).toBe(4);
+    // Removed by owner decision: an 80 x 110 safe window and a 10 mm operator inset.
+    expect((P as Record<string, unknown>).safeWindowMm).toBeUndefined();
+    expect((P as Record<string, unknown>).operatorInsetMm).toBeUndefined();
     expect(P.defaultOriginMm).toEqual({ x: 20, y: 20 });
     expect(P.cardMm.minWidth).toBe(62.5);
     expect(P.cardMm.maxWidth).toBe(65.0);
@@ -36,56 +43,62 @@ describe("Standard TCG capture geometry", () => {
     expect(P.cardMm.maxHeight).toBe(90.5);
   });
 
-  it("keeps the 10 mm operator inset and the 4 mm evidence floor as different numbers", () => {
-    // The whole point of the design. If these ever collapse into one value, either staff lose their
-    // placement latitude or the evidence standard has been quietly weakened.
-    expect(P.operatorInsetMm).toBeGreaterThan(P.evidenceMinMarginMm);
+  it("DERIVES the preview threshold rather than storing it, so 5.6 exists nowhere as a literal", () => {
+    /*
+     * The preview threshold is master floor + proven acquisition uncertainty. Asserting the SUM
+     * rather than the value is the point: improve the card-shift measurement and the threshold moves
+     * on its own, with no stale constant left behind in a second file.
+     */
     expect(P.evidenceMinMarginMm).toBe(4);
+    expect(P.previewToMasterBudgetMm).toBe(1.6);
+    expect(previewGreenMinMarginMm(P)).toBeCloseTo(P.evidenceMinMarginMm + P.previewToMasterBudgetMm, 9);
+    expect(previewGreenMinMarginMm(P)).toBeCloseTo(5.6, 9);
+
+    // And it genuinely tracks the budget rather than being a coincidence.
+    expect(previewGreenMinMarginMm({ ...P, previewToMasterBudgetMm: 0 } as never)).toBeCloseTo(4, 9);
+    expect(previewGreenMinMarginMm({ ...P, previewToMasterBudgetMm: 3 } as never)).toBeCloseTo(7, 9);
   });
 
-  it("derives the safe window from the inset so 80x110 and '10 mm' cannot drift apart", () => {
-    expect(safeWindowRectMm(P)).toEqual({ x: 10, y: 10, width: 80, height: 110 });
+  it("derives the placement boundary from the PREVIEW threshold, so the drawn line is the applied rule", () => {
+    /*
+     * Inset by 5.6, not by the 4.0 master floor. Drawing the master floor while gating at the preview
+     * threshold would put a card visibly inside the box and still refuse it.
+     */
+    const boundary = placementBoundaryRectMm(P);
+    expect(boundary.x).toBeCloseTo(5.6, 9);
+    expect(boundary.y).toBeCloseTo(5.6, 9);
+    expect(boundary.width).toBeCloseTo(88.8, 9);
+    expect(boundary.height).toBeCloseTo(118.8, 9);
   });
 
-  it("proves the safe window is centred and therefore its own 180-degree image", () => {
-    const safe = safeWindowRectMm(P);
-    expect(P.outerWindowMm.width - (safe.x + safe.width)).toBe(safe.x);
-    expect(P.outerWindowMm.height - (safe.y + safe.height)).toBe(safe.y);
-    expect(assertSafeWindowIsRotationInvariant(P)).toBe(true);
+  it("proves the placement boundary is centred and therefore its own 180-degree image", () => {
+    const boundary = placementBoundaryRectMm(P);
+    // Closeness, not equality: the inset is a sum of two decimals, so the rotated edge lands at
+    // 5.6000000000000085. That is binary floating point, not asymmetry.
+    expect(P.outerWindowMm.width - (boundary.x + boundary.width)).toBeCloseTo(boundary.x, 9);
+    expect(P.outerWindowMm.height - (boundary.y + boundary.height)).toBeCloseTo(boundary.y, 9);
+    expect(assertPlacementBoundaryIsRotationInvariant(P)).toBe(true);
   });
 
-  it("refuses a profile whose declared safe window disagrees with its inset", () => {
-    const broken = { ...P, safeWindowMm: { width: 84, height: 110 } };
-    expect(() => assertSafeWindowIsRotationInvariant(broken as never)).toThrow(/disagrees with operatorInsetMm/);
-  });
-
-  it("refuses a profile whose safe window is off-centre, because the gate would then be rotation-dependent", () => {
-    const offCentre = {
-      ...P,
-      outerWindowMm: { width: 100, height: 130 },
-      operatorInsetMm: 10,
-      safeWindowMm: { width: 80, height: 110 },
-      cardMm: { ...P.cardMm },
-    };
-    // A 100 mm window inset 10 mm on the left must be inset 10 mm on the right. Declare a window
-    // that is 80 wide inside a 95 wide outer and the centring identity breaks.
-    const asymmetric = { ...offCentre, outerWindowMm: { width: 95, height: 130 } };
-    expect(() => assertSafeWindowIsRotationInvariant(asymmetric as never)).toThrow();
+  it("refuses a profile whose widest card cannot fit inside its own placement boundary", () => {
+    const tooTight = { ...P, outerWindowMm: { width: 70, height: 130 }, cardMm: { ...P.cardMm } };
+    expect(() => assertPlacementBoundaryIsRotationInvariant(tooTight as never)).toThrow(/does not fit/);
   });
 });
 
 describe("Operator placement tolerance", () => {
   it("gives the owner's stated latitude for a nominal card", () => {
     const tolerance = placementToleranceMm({ width: 63.5, height: 88.9 }, P);
-    expect(tolerance.horizontal).toBeCloseTo(8.25, 2);
-    expect(tolerance.vertical).toBeCloseTo(10.55, 2);
+    // Latitude inside the 88.8 x 118.8 preview boundary, not the retired 80 x 110 safe window.
+    expect(tolerance.horizontal).toBeCloseTo(12.65, 2);
+    expect(tolerance.vertical).toBeCloseTo(14.95, 2);
   });
 
   it("still fits the WIDEST card the Standard TCG profile admits", () => {
     // The number that actually matters: latitude for the worst in-profile card, not the nominal one.
     const tolerance = placementToleranceMm({ width: P.cardMm.maxWidth, height: P.cardMm.maxHeight }, P);
-    expect(tolerance.horizontal).toBeCloseTo(7.5, 2);
-    expect(tolerance.vertical).toBeCloseTo(9.75, 2);
+    expect(tolerance.horizontal).toBeCloseTo(11.9, 2);
+    expect(tolerance.vertical).toBeCloseTo(14.15, 2);
     expect(tolerance.horizontal).toBeGreaterThan(0);
     expect(tolerance.vertical).toBeGreaterThan(0);
   });
@@ -105,18 +118,36 @@ describe("Capture-window origin", () => {
     expect(result.originMm).toEqual({ x: 20, y: 20 });
   });
 
-  it("clamps the platen ORIGIN, which is where the measured bezel contamination lives", () => {
-    // The live station was calibrated to (0, 0). Non-card foreground on all eight preserved masters
-    // sits in the first ~1.23 mm of the top edge and ~0.72 mm of the left edge — that is why.
+  it("ACCEPTS the platen origin, because forbidding it stranded every station", () => {
+    /*
+     * INVERTED, and this is the inversion that mattered most. A 5 mm floor on the ORIGIN was added on
+     * the strength of a real bezel measurement (~1.23 mm top, ~0.72 mm left on all eight masters).
+     * But every VALID station calibration in staging sat at (0, 0), `jigOrigin()` refuses rather than
+     * clamps, and the server applies this same constant — so 0 of 11 capture sessions ever acquired
+     * an acquisition_region. No station could arm anything, MV272 included.
+     *
+     * The bezel is handled where it bites: the connected-component detector, and the 4 mm floor
+     * measured on the master. `defaultOriginMm` is still (20, 20), so the RECOMMENDED origin is
+     * unchanged — this only governs what an operator is FORBIDDEN to choose.
+     */
+    expect(MIN_PLATEN_INSET_MM).toBe(0);
     const result = clampCaptureOriginMm({ x: 0, y: 0 }, P);
-    expect(result.clamped).toBe(true);
-    expect(result.originMm).toEqual({ x: MIN_PLATEN_INSET_MM, y: MIN_PLATEN_INSET_MM });
+    expect(result.clamped).toBe(false);
+    expect(result.originMm).toEqual({ x: 0, y: 0 });
   });
 
-  it("keeps the whole window on the platen", () => {
-    const result = clampCaptureOriginMm({ x: 9999, y: 9999 }, P);
-    expect(result.originMm.x + P.outerWindowMm.width).toBeLessThanOrEqual(PLATEN_MM.width - MIN_PLATEN_INSET_MM);
-    expect(result.originMm.y + P.outerWindowMm.height).toBeLessThanOrEqual(PLATEN_MM.height - MIN_PLATEN_INSET_MM);
+  it("hard-clamps a drag that would push the window off the glass, in both directions", () => {
+    const far = clampCaptureOriginMm({ x: 9999, y: 9999 }, P);
+    expect(far.clamped).toBe(true);
+    expect(far.originMm.x + P.outerWindowMm.width).toBeLessThanOrEqual(PLATEN_MM.width);
+    expect(far.originMm.y + P.outerWindowMm.height).toBeLessThanOrEqual(PLATEN_MM.height);
+    // The owner's stated ranges: X 0 -> 116, Y 0 -> 167 for a 100 x 130 window on a 216 x 297 platen.
+    expect(far.boundsMm).toEqual({ minX: 0, maxX: 116, minY: 0, maxY: 167 });
+
+    // The impossible rectangle the card-chasing solve used to propose is clamped back onto the glass.
+    const negative = clampCaptureOriginMm({ x: -11.54, y: -15.09 }, P);
+    expect(negative.clamped).toBe(true);
+    expect(negative.originMm).toEqual({ x: 0, y: 0 });
   });
 
   it("rejects a non-finite origin rather than guessing one", () => {
@@ -137,35 +168,73 @@ describe("The placement gate", () => {
     expect(verdict.message).toBe(PLACEMENT_MESSAGE.ready);
   });
 
-  it("goes AMBER just outside the safe window, where the capture would probably still pass", () => {
-    // 9 mm: outside the 10 mm operator zone, but well above the 4 mm floor plus the 1.6 mm budget.
-    const verdict = evaluatePlacement({ ...centred, x: 9 }, P);
-    expect(verdict.state).toBe(PLACEMENT.MARGINAL);
-    expect(verdict.code).toBe("card_outside_safe_window_marginal");
-    expect(verdict.message).toBe("ALMOST — MOVE THE CARD INSIDE THE GREEN BOX");
-  });
-
-  it("goes RED once the margin drops into the range where the 4 mm floor is at risk", () => {
-    const verdict = evaluatePlacement({ ...centred, x: 5 }, P);
-    expect(verdict.state).toBe(PLACEMENT.REPOSITION);
-    expect(verdict.code).toBe("card_outside_safe_window");
-    expect(verdict.message).toBe("PLACE THE WHOLE CARD INSIDE THE GREEN BOX");
-  });
-
-  it("puts the amber floor exactly at the evidence floor plus the measured budget", () => {
-    const floor = P.evidenceMinMarginMm + P.previewToMasterBudgetMm;
-    expect(floor).toBeCloseTo(5.6, 3);
-    expect(evaluatePlacement({ ...centred, x: floor }, P).state).toBe(PLACEMENT.MARGINAL);
-    expect(evaluatePlacement({ ...centred, x: floor - 0.01 }, P).state).toBe(PLACEMENT.REPOSITION);
-  });
-
-  it("NEVER lets amber authorise a capture — only GREEN is an approval", () => {
+  it("has NO third state: AMBER is gone from the profile entirely", () => {
     /*
-     * The load-bearing property of the amber band. If amber ever became an approval, the operator
-     * zone would silently collapse back to the evidence floor and the 10 mm design would be gone.
+     * INVERTED. The amber band ran from 5.6 mm to 10 mm and unlocked nothing, so the Scanner refused
+     * cards that satisfied the only rule governing evidence — MV272's own accepted FRONT sits at a
+     * 4.62 mm margin and would have been shown a rejection. Collapsing to one number removed it.
      */
-    for (const x of [9, 8, 7, 6, P.evidenceMinMarginMm + P.previewToMasterBudgetMm]) {
-      expect(evaluatePlacement({ ...centred, x }, P).state).not.toBe(PLACEMENT.READY);
+    expect(Object.values(PLACEMENT)).toEqual(["GREEN", "RED"]);
+    expect((PLACEMENT as Record<string, unknown>).MARGINAL).toBeUndefined();
+    expect((PLACEMENT_MESSAGE as Record<string, unknown>).marginal).toBeUndefined();
+  });
+
+  it("is boundary-exact at the derived preview threshold: 5.59 RED, 5.60 GREEN, 6 and 10 GREEN", () => {
+    // The locked truth table. A hundredth of a millimetre decides it — no soft edge on an approval.
+    for (const margin of [10, 6.0, 5.6]) {
+      const verdict = evaluatePlacement({ ...centred, x: margin, y: margin }, P);
+      expect(verdict.state, `${margin} mm must be GREEN`).toBe(PLACEMENT.READY);
+      expect(verdict.minMarginMm).toBeCloseTo(margin, 6);
+    }
+    expect(evaluatePlacement({ ...centred, x: 5.59, y: 5.59 }, P).state).toBe(PLACEMENT.REPOSITION);
+  });
+
+  it("refuses a placement that would PROBABLY pass the master, and says so in diagnostics", () => {
+    /*
+     * Between the 4.0 mm master floor and the 5.6 mm preview threshold the capture would most likely
+     * succeed. It is still refused, because GREEN has to mean expected-to-pass rather than
+     * probably-passes — and the operator is told which of the two situations they are in.
+     */
+    const verdict = evaluatePlacement({ ...centred, x: 4.62, y: 4.62 }, P);
+    expect(verdict.state).toBe(PLACEMENT.REPOSITION);
+    expect(verdict.code).toBe("card_inside_preview_margin");
+    expect(verdict.message).toBe("MOVE CARD AWAY FROM EDGE");
+    expect(verdict.wouldLikelyPassMaster).toBe(true);
+    expect(verdict.moveInwardMm).toBeCloseTo(0.98, 2);
+
+    // Genuinely below the master floor: same colour to the operator, different fact underneath.
+    const below = evaluatePlacement({ ...centred, x: 3.9, y: 3.9 }, P);
+    expect(below.state).toBe(PLACEMENT.REPOSITION);
+    expect(below.wouldLikelyPassMaster).toBe(false);
+  });
+
+  it("NEVER lets the preview threshold leak into the master floor", () => {
+    // The two numbers must stay independent: the preview may tighten without the evidence rule moving.
+    const generous = { ...P, previewToMasterBudgetMm: 20 } as never;
+    expect(previewGreenMinMarginMm(generous)).toBeCloseTo(24, 9);
+    expect((generous as typeof P).evidenceMinMarginMm).toBe(4);
+    expect(evaluatePlacement({ ...centred, x: 10, y: 10 }, generous).evidenceMinMarginMm).toBe(4);
+  });
+
+  it("is RED when the card touches or crosses the capture boundary", () => {
+    expect(evaluatePlacement({ ...centred, x: 0, y: 0 }, P).state).toBe(PLACEMENT.REPOSITION);
+    expect(evaluatePlacement({ ...centred, x: -5, y: 20 }, P).state).toBe(PLACEMENT.REPOSITION);
+  });
+
+  it("NO FALSE GREEN: every GREEN clears the master floor with the whole proven budget to spare", () => {
+    /*
+     * THE PROPERTY THE WHOLE THRESHOLD EXISTS FOR. Swept finely across the band where a false green
+     * could hide, this asserts that a GREEN verdict always leaves at least the full measured
+     * uncertainty above the master floor — so the master cannot refuse a placement the preview
+     * approved, even in the linear worst case.
+     */
+    for (let margin = 4.0; margin <= 12.0; margin += 0.01) {
+      const verdict = evaluatePlacement({ ...centred, x: margin, y: margin }, P);
+      if (verdict.state !== PLACEMENT.READY) continue;
+      const worstCaseAtMaster = (verdict.minMarginMm as number) - P.previewToMasterBudgetMm;
+      expect(worstCaseAtMaster, `GREEN at ${margin.toFixed(2)} mm must survive the master`).toBeGreaterThanOrEqual(
+        P.evidenceMinMarginMm - 1e-9
+      );
     }
   });
 
@@ -182,32 +251,25 @@ describe("The placement gate", () => {
     expect(verdict.message).toBe(PLACEMENT_MESSAGE.wrongProfile);
   });
 
-  it("is exactly boundary-accurate: flush with the safe window is GREEN, a hair outside is not", () => {
-    const safe = safeWindowRectMm(P);
-    const flush = { x: safe.x, y: safe.y, width: 63.5, height: 88.9 };
+  it("is exactly boundary-accurate: flush with the 4 mm boundary is GREEN, a hair outside is not", () => {
+    const boundary = placementBoundaryRectMm(P);
+    const flush = { x: boundary.x, y: boundary.y, width: 63.5, height: 88.9 };
     expect(evaluatePlacement(flush, P).state).toBe(PLACEMENT.READY);
     // A hundredth of a millimetre outside stops being an approval immediately — no soft edge on the
     // thing that unlocks a capture.
-    expect(evaluatePlacement({ ...flush, x: safe.x - 0.01 }, P).state).not.toBe(PLACEMENT.READY);
-    expect(evaluatePlacement({ ...flush, y: safe.y - 0.01 }, P).state).not.toBe(PLACEMENT.READY);
+    expect(evaluatePlacement({ ...flush, x: boundary.x - 0.01 }, P).state).not.toBe(PLACEMENT.READY);
+    expect(evaluatePlacement({ ...flush, y: boundary.y - 0.01 }, P).state).not.toBe(PLACEMENT.READY);
   });
 
-  it("GREEN always implies a margin far above the 4 mm evidence floor", () => {
-    /*
-     * PROOF 5 in miniature. The measured error budget between a green preview and the master is
-     * 1.60 mm linear worst case, so the guaranteed floor is 10 - 1.60 = 8.40 mm against a 4 mm rule.
-     * Swept over every in-profile card size at every legal position inside the safe window.
-     */
-    const safe = safeWindowRectMm(P);
-    const BUDGET_MM = 1.6;
+  it("GREEN always implies the preview threshold, swept over every in-profile card size", () => {
+    const boundary = placementBoundaryRectMm(P);
     for (const width of [P.cardMm.minWidth, 63.5, P.cardMm.maxWidth]) {
       for (const height of [P.cardMm.minHeight, 88.9, P.cardMm.maxHeight]) {
-        for (const x of [safe.x, safe.x + (safe.width - width) / 2, safe.x + safe.width - width]) {
-          for (const y of [safe.y, safe.y + (safe.height - height) / 2, safe.y + safe.height - height]) {
+        for (const x of [boundary.x, boundary.x + (boundary.width - width) / 2, boundary.x + boundary.width - width]) {
+          for (const y of [boundary.y, boundary.y + (boundary.height - height) / 2, boundary.y + boundary.height - height]) {
             const verdict = evaluatePlacement({ x, y, width, height }, P);
             expect(verdict.state).toBe(PLACEMENT.READY);
-            expect(verdict.minMarginMm).toBeGreaterThanOrEqual(P.operatorInsetMm - 1e-9);
-            expect((verdict.minMarginMm as number) - BUDGET_MM).toBeGreaterThan(P.evidenceMinMarginMm);
+            expect(verdict.minMarginMm).toBeGreaterThanOrEqual(previewGreenMinMarginMm(P) - 1e-9);
           }
         }
       }

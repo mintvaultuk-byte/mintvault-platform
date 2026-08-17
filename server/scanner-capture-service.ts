@@ -6,7 +6,11 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "./db";
 import { hashLockKey } from "./lib/advisory-lock";
-import { resolveAuthoritativeAcquisitionRegion, type AcquisitionRegionMm } from "./lib/lide400-capture-authority";
+import {
+  CaptureGeometryError,
+  resolveAuthoritativeAcquisitionRegion,
+  type AcquisitionRegionMm,
+} from "./lib/lide400-capture-authority";
 
 /**
  * A station was asked to arm a card while it is already holding a live target for a DIFFERENT one.
@@ -127,6 +131,72 @@ async function resolveArmedAcquisitionRegion(
     { stationId, scannerProfileVersion }
   );
   return { calibrationId: String(row!.id), region };
+}
+
+/**
+ * ONE CARD, ONE RECTANGLE — the invariant that was asserted in comments and implemented nowhere.
+ *
+ * A certificate whose FRONT and BACK were acquired from two different physical rectangles is not one
+ * piece of evidence: the two faces are framed differently, and any measurement that spans them is
+ * meaningless. The session snapshot (migration 0091) protects a side already armed, but it cannot see
+ * across two sessions of one card — capture FRONT under window A, recalibrate, capture BACK under
+ * window B, and both uploads agree with their own snapshot.
+ *
+ * READ FROM THE EVIDENCE, NOT THE SESSION, AND THAT IS LOAD-BEARING. The proven geometry of a
+ * completed side lives in `certificate_image_evidence.capture_metadata->'scanAreaMm'`, written from
+ * the provenance of the master that was actually accepted. The session row is the wrong source: it
+ * is `NULL` for every side captured before 0091 existed, so pairing on it would refuse a BACK for
+ * every pre-0091 card — including MV272, whose FRONT is preserved, authoritative, and records
+ * `{x:0, y:0, width:100, height:130}` right there in its evidence row. Pairing on the evidence lets
+ * that card finish at its own proven rectangle, which is the entire point.
+ *
+ * Silent when the other side has no recorded geometry at all: that is an unknown, and refusing on an
+ * unknown would strand cards for a fact nobody can establish. The 4 mm floor still applies to every
+ * master independently.
+ */
+async function assertSidesShareOneRectangle(
+  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  certificateId: number,
+  side: string,
+  region: AcquisitionRegionMm
+): Promise<void> {
+  const other = await client.query(
+    `SELECT capture_metadata -> 'scanAreaMm' AS scan_area
+       FROM certificate_image_evidence
+      WHERE certificate_id = $1 AND side <> $2 AND is_current = true
+      LIMIT 1`,
+    [certificateId, side]
+  );
+  const recorded = other.rows[0]?.scan_area;
+  if (!recorded) return;
+  const proven = finiteRegionOrNull(recorded);
+  if (!proven) return;
+  const differs = (["x", "y", "width", "height"] as const).some(
+    (key) => Math.abs(proven[key] - region[key]) > REGION_AGREEMENT_TOLERANCE_MM
+  );
+  if (differs) {
+    throw new CaptureGeometryError(
+      "sides_disagree_on_capture_window",
+      `This card's other side was captured at ${proven.width} x ${proven.height} mm at ${proven.x}, ${proven.y}, ` +
+        `but this station is now calibrated to ${region.width} x ${region.height} mm at ${region.x}, ${region.y}. ` +
+        `Both sides of one card must come from the same capture window — restore the previous window or start a new card.`
+    );
+  }
+}
+
+/** The same 0.5 mm agreement tolerance the declared-region check uses. */
+const REGION_AGREEMENT_TOLERANCE_MM = 0.5;
+
+function finiteRegionOrNull(value: unknown): AcquisitionRegionMm | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const key of ["x", "y", "width", "height"]) {
+    const number = Number(source[key]);
+    if (!Number.isFinite(number)) return null;
+    out[key] = number;
+  }
+  return out as AcquisitionRegionMm;
 }
 
 export async function ensureScannerCaptureSchema(): Promise<void> {
@@ -407,6 +477,7 @@ export async function createScannerCaptureSession(input: {
       const resolved = await resolveArmedAcquisitionRegion(client, input.stationId, input.scannerProfileVersion);
       calibrationId = resolved.calibrationId;
       acquisitionRegion = resolved.region;
+      await assertSidesShareOneRectangle(client, input.certificateId, side, acquisitionRegion);
     }
     const inserted = await client.query(
       `INSERT INTO scanner_capture_sessions

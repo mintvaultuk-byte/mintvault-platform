@@ -220,7 +220,6 @@ body {
   padding: 8px;
 }
 .placement-panel[data-placement-state="GREEN"] { border-color: var(--green); }
-.placement-panel[data-placement-state="AMBER"] { border-color: var(--orange); }
 .placement-panel[data-placement-state="RED"] { border-color: var(--red); }
 /*
  * The viewport is locked to the capture window's own aspect ratio, which is what lets every overlay
@@ -248,27 +247,32 @@ body {
   position: absolute;
 }
 /*
- * THE SAFE ZONE IS ALWAYS GREEN. It is a fixed target, not a verdict — "put the whole card inside
- * the green box" has to mean the same thing in every state, so recolouring it would make the one
- * sentence staff need to learn conditional on the very thing they are trying to fix.
+ * THE 4 mm HARD BOUNDARY — a hairline hint, and deliberately the faintest thing here.
+ *
+ * It used to be a 2px dashed green 80 x 110 box that WAS the target, and it dominated the panel. The
+ * target is now the capture area itself; this line only shows where the last 4 mm begins. Drawn any
+ * heavier it becomes a second box to aim at, which is the thing that was removed.
  */
-.placement-box--safe {
-  border: 2px dashed var(--green);
+.placement-box--boundary {
+  border: 1px dashed color-mix(in srgb, var(--muted) 45%, transparent);
 }
 /*
  * Where the card actually IS. This is the element that carries the verdict, so the operator's eye
- * goes to the thing that moved rather than to the box that never does.
+ * goes to the thing that moved rather than to the outline that never does.
  */
 .placement-box--card {
-  border: 1.5px solid var(--blue);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 55%);
+  border: 1px solid var(--blue);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
 }
 [data-placement-state="GREEN"] .placement-box--card { border-color: var(--green); }
-[data-placement-state="AMBER"] .placement-box--card { border-color: var(--orange); }
 [data-placement-state="RED"] .placement-box--card { border-color: var(--red); }
-/* The hardware acquisition boundary — context only, deliberately faint. */
+/*
+ * THE CAPTURE AREA — the one outline the operator works to, so it is the one that reads as a target.
+ * Still only 1px: "put the whole card inside the capture area" needs a clear edge, not a thick one.
+ */
 .placement-box--outer {
-  border: 1px solid var(--border);
+  border: 1px solid var(--fg);
+  opacity: 0.75;
 }
 .placement-message {
   font-size: 12px;
@@ -279,7 +283,6 @@ body {
   text-align: center;
 }
 [data-placement-state="GREEN"] .placement-message { color: var(--green); }
-[data-placement-state="AMBER"] .placement-message { color: var(--orange); }
 [data-placement-state="RED"] .placement-message { color: var(--red); }
 .placement-diagnostics {
   color: var(--muted);
@@ -320,17 +323,22 @@ body {
   touch-action: none;
   width: 100%;
 }
+/*
+ * The station's FIXED capture area. Default cursor, because for a Scanner Operator this is a
+ * read-out and nothing here is draggable — a grab cursor on an immovable box is an invitation to
+ * try. The grab affordance is added back only under maintenance authority.
+ */
 .platen-window {
   align-items: flex-start;
   background: rgb(96 165 250 / 14%);
-  border: 2px solid var(--blue);
+  border: 1px solid var(--blue);
   border-radius: 3px;
-  cursor: grab;
   display: flex;
   justify-content: center;
   position: absolute;
 }
-.platen-window:active { cursor: grabbing; }
+.platen-window--movable { cursor: grab; }
+.platen-window--movable:active { cursor: grabbing; }
 .platen-window > span {
   color: var(--blue);
   font-size: 7px;
@@ -339,13 +347,11 @@ body {
   padding-top: 2px;
   pointer-events: none;
 }
-/* The safe zone, shown inside the window so setup and capture read as the same geometry. */
-.platen-safe {
-  border: 1px dashed var(--green);
-  border-radius: 2px;
-  pointer-events: none;
-  position: absolute;
-}
+/*
+ * `.platen-safe` — the inner 80 x 110 box — is gone with the 10 mm gate it drew. It refused cards
+ * that produced valid evidence, and drawing it here made setup and capture agree on a rule that
+ * should never have been enforced.
+ */
 .positioning-panel {
   align-items: center;
   background: var(--bg-2);
@@ -409,13 +415,15 @@ body {
   position: absolute;
 }
 .card-boundary-overlay {
-  border: 2px solid var(--blue);
+  border: 1px solid var(--blue);
 }
-.acquisition-boundary-overlay.safe {
-  border: 3px solid var(--green);
-}
-.acquisition-boundary-overlay.unsafe {
-  border: 3px dashed var(--orange);
+/*
+ * ONE APPEARANCE, because there is now only one thing to draw: the station's FIXED capture area.
+ * The safe/unsafe pair went with the card-chasing proposal — a rectangle that moved with the card
+ * needed to say whether it had landed somewhere legal. A fixed rectangle does not.
+ */
+.acquisition-boundary-overlay {
+  border: 1px solid var(--gold);
 }
 /* ---- Diagnostic labels sit OUTSIDE their box ---------------------------
    These labels used to be drawn as the first flow child INSIDE the overlay
@@ -457,11 +465,8 @@ body {
 .card-boundary-overlay span {
   background: var(--blue);
 }
-.acquisition-boundary-overlay.safe span {
-  background: var(--green);
-}
-.acquisition-boundary-overlay.unsafe span {
-  background: var(--orange);
+.acquisition-boundary-overlay span {
+  background: var(--gold);
 }
 .positioning-result {
   color: var(--green);

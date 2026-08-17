@@ -137,15 +137,17 @@
 
       The whole panel is one traffic light. `data-placement-state` is GREEN or RED and drives every
       colour below it, so there is no route to a green outline with a red message. The two boxes are
-      deliberately different things: the SAFE BOX is where the card must go, the CARD BOX is where
-      the card actually is — showing both is what makes "it is 3 mm too far left" self-evident
-      without printing a single millimetre on screen.
+      deliberately different things: the CAPTURE AREA is the fixed rectangle the hardware will scan,
+      the CARD BOX is where the card actually is — showing both is what makes "it is 3 mm too far
+      left" self-evident without printing a single millimetre on screen. The 4 mm hard boundary is
+      drawn as a hairline hint inside the capture area, deliberately faint: it is the rule, but it is
+      not a second box to aim at.
     -->
     <div class="placement-panel" id="placementPanel" hidden>
       <div class="placement-viewport" id="placementViewport">
         <img class="placement-preview" id="placementPreview" alt="Placement preview of the scanner capture window" />
         <div class="placement-box placement-box--outer" id="placementOuterBox" hidden></div>
-        <div class="placement-box placement-box--safe" id="placementSafeBox" hidden></div>
+        <div class="placement-box placement-box--boundary" id="placementBoundaryBox" hidden></div>
         <div class="placement-box placement-box--card" id="placementCardBox" hidden></div>
       </div>
       <p class="placement-message" id="placementMessage"></p>
@@ -183,16 +185,28 @@
         <p class="hint"><strong>ENVIRONMENT:</strong> <span id="environmentName">—</span></p>
         <p class="hint"><strong>API:</strong> <span id="environmentApi">—</span></p>
         <p class="hint" id="environmentWarning" hidden></p>
+        <!--
+          WHICH MINTVAULT THIS SCANNER BELONGS TO.
+
+          The refusal message has always told the operator to choose STAGING or PRODUCTION here. Until
+          now there was nothing to choose with, so a Mac without a hand-edited env file could never
+          sign in. The Scanner still refuses to GUESS — these buttons are the only way to tell it, and
+          it will not let you move a station that is holding a card.
+        -->
+        <div class="preview-actions environment-choice">
+          <button class="btn" id="environmentStagingBtn">USE STAGING</button>
+          <button class="btn" id="environmentProductionBtn">USE PRODUCTION</button>
+        </div>
+        <p class="hint" id="environmentChoiceStatus"></p>
       </div>
       <div class="settings-test full-platen-diagnostics" id="fullPlatenDiagnostics" hidden>
         <span class="row-header">Full-platen placement diagnostic</span>
         <div class="positioning-preview-viewport">
           <img class="positioning-preview" id="positioningFullPreview" alt="Full platen placement diagnostic" />
           <div class="card-boundary-overlay" id="cardBoundaryOverlay" hidden aria-hidden="true"><span>DETECTED CARD</span></div>
-          <div class="acquisition-boundary-overlay" id="acquisitionBoundaryOverlay" hidden aria-hidden="true"><span>FINAL 1200 DPI AREA</span></div>
+          <div class="acquisition-boundary-overlay" id="acquisitionBoundaryOverlay" hidden aria-hidden="true"><span>CAPTURE AREA</span></div>
         </div>
         <p class="hint positioning-geometry" id="positioningGeometry"></p>
-        <button class="btn primary" id="savePlacementBtn" hidden>SAVE PLACEMENT ZONE</button>
       </div>
       <!--
         PHASE C — the movable capture window.
@@ -201,16 +215,37 @@
         card is open, so an ordinary grader cannot nudge the capture area mid-job. Dragging the
         window is the deliberate act; the numbers below it are a readout, never the control.
       -->
+      <!--
+        CAPTURE AREA — FIXED, AND NOT A NORMAL SHOP CONTROL.
+
+        The 100 x 130 mm capture area sits in a proven physical position on the scanner bed. Normal
+        work is: place the card inside it, PREVIEW, SCAN. Nobody on the shop floor moves it, so for a
+        Scanner Operator this panel is a READ-OUT — it says where the area is and nothing more.
+
+        Moving it is maintenance (scanner replaced, Mac replaced, profile change, proven alignment
+        fault) and appears only for an operator holding `partner.stations.calibrate`. Hiding the
+        controls is presentation, NOT the gate: the server refuses the write regardless.
+      -->
       <div class="settings-test capture-window-setup" id="captureWindowSetup">
-        <span class="row-header">Capture window position</span>
-        <div class="platen-viewport" id="platenViewport" title="Drag the capture window to where cards are placed">
-          <div class="platen-window" id="platenWindow"><span>CAPTURE WINDOW</span></div>
-          <div class="platen-safe" id="platenSafe" aria-hidden="true"></div>
+        <span class="row-header">Capture area</span>
+        <div class="platen-viewport" id="platenViewport">
+          <div class="platen-window" id="platenWindow"><span>CAPTURE AREA</span></div>
         </div>
         <p class="hint" id="captureWindowReadout"></p>
-        <div class="preview-actions">
-          <button class="btn" id="captureWindowResetBtn">RESET TO DEFAULT</button>
-          <button class="btn primary" id="captureWindowSaveBtn">SAVE CAPTURE WINDOW</button>
+        <p class="hint" id="captureWindowFixedNote">
+          This is where cards are scanned on this station. It is fixed and does not move during normal
+          use — place the card inside it and press PREVIEW.
+        </p>
+        <div class="capture-window-maintenance" id="captureWindowMaintenance" hidden>
+          <p class="hint">
+            <strong>MAINTENANCE ONLY.</strong> Move this only when the scanner or Mac has been
+            replaced, the profile has changed, or a hardware alignment fault has been proven. Every
+            card captured afterwards is framed differently from every card captured before.
+          </p>
+          <div class="preview-actions">
+            <button class="btn" id="captureWindowResetBtn">RESET TO DEFAULT</button>
+            <button class="btn primary" id="captureWindowSaveBtn">SAVE NEW POSITION</button>
+          </div>
         </div>
         <p class="hint" id="captureWindowStatus"></p>
       </div>

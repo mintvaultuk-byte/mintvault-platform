@@ -19,7 +19,13 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { detectLide400CardBounds, _stages } from "@shared/lide400-card-geometry.cjs";
-import { STANDARD_TCG, PLACEMENT, safeWindowRectMm, evaluatePlacement } from "@shared/lide400-capture-profile.cjs";
+import {
+  STANDARD_TCG,
+  PLACEMENT,
+  placementBoundaryRectMm,
+  previewGreenMinMarginMm,
+  evaluatePlacement,
+} from "@shared/lide400-capture-profile.cjs";
 import { assessLide400CardFrame, LIDE_400_MIN_EVIDENCE_MARGIN_MM } from "../server/lib/lide400-card-frame";
 
 const FIXTURES = path.join(__dirname, "fixtures", "lide400");
@@ -142,7 +148,7 @@ describe("PROOF 2 — the failed MV272 BACK would have been RED before the slow 
     const detected = await detect(read(fixture), fixture.acquisitionMm);
     const verdict = evaluatePlacement(detected!.cardBoundsMm, STANDARD_TCG);
     expect(verdict.state).toBe(PLACEMENT.REPOSITION);
-    expect(verdict.message).toBe("PLACE THE WHOLE CARD INSIDE THE GREEN BOX");
+    expect(verdict.message).toBe("MOVE CARD AWAY FROM EDGE");
     // The capture that actually happened: 3.75 mm, refused by the server after 45 seconds of scanning.
     expect(fixture.expectedMinMarginMm).toBeLessThan(LIDE_400_MIN_EVIDENCE_MARGIN_MM);
   });
@@ -155,23 +161,72 @@ describe("PROOF 2 — the failed MV272 BACK would have been RED before the slow 
     }
   });
 
-  it("refuses every real placement from the session — none would have unlocked SCAN", async () => {
+  it("refuses every real placement from the session — all four are below the preview threshold", async () => {
     /*
-     * Including MV272 FRONT, which was ACCEPTED as evidence at 4.62 mm and remains authoritative.
-     * The gate is stricter than the floor by design: it stops a card being scanned from a position
-     * that only just cleared the rule, without retroactively invalidating anything already captured.
+     * All four preserved fixtures sit under 5.6 mm (4.618, 3.752, 3.608, 3.030), so every one of them
+     * is RED at the gate — including MV272 FRONT, whose master was ACCEPTED and remains
+     * authoritative. That is the correct outcome and it is NOT the old 10 mm gate returning:
+     *
+     *   the 10 mm gate refused 4.62 mm because more room was considered nicer;
+     *   the 5.6 mm threshold refuses it because 4.62 mm minus the proven 1.60 mm uncertainty is
+     *   3.02 mm, which is BELOW the master floor — that placement was a coin toss, and it is exactly
+     *   the coin toss the sibling fixture `mv272-back-rejected` lost at 3.752 mm.
+     *
+     * Accepted-once is not the same as safe-to-repeat. The FRONT stays valid; the placement does not.
      */
     for (const fixture of manifest) {
       const detected = await detect(read(fixture), fixture.acquisitionMm);
-      expect(evaluatePlacement(detected!.cardBoundsMm, STANDARD_TCG).state, fixture.name).not.toBe(PLACEMENT.READY);
+      const verdict = evaluatePlacement(detected!.cardBoundsMm, STANDARD_TCG);
+      expect(verdict.state, `${fixture.name} @ ${fixture.expectedMinMarginMm} mm`).toBe(PLACEMENT.REPOSITION);
+      expect(fixture.expectedMinMarginMm).toBeLessThan(previewGreenMinMarginMm(STANDARD_TCG));
+    }
+  });
+
+  it("separates the two authorities on the SAME artifact: MV272 FRONT is master-valid, preview-refused", async () => {
+    /*
+     * The distinction the whole design rests on, proved on one real 1200-DPI master rather than
+     * asserted. The master floor and the preview threshold are different questions about the same
+     * card, and they are allowed to disagree in exactly this direction — never the other.
+     */
+    const fixture = byName("mv272-front-accepted");
+    const buffer = read(fixture);
+    const meta = await sharp(buffer).metadata();
+
+    // MASTER: accepted. 4.618 mm clears the authoritative 4 mm floor, and this evidence stands.
+    const assessment = await assessLide400CardFrame(
+      buffer,
+      { width: meta.width!, height: meta.height! },
+      fixture.acquisitionMm
+    );
+    expect(assessment.accepted, assessment.reason || "").toBe(true);
+    expect(Math.min(...Object.values(assessment.evidenceMarginMm!))).toBeGreaterThanOrEqual(
+      LIDE_400_MIN_EVIDENCE_MARGIN_MM
+    );
+
+    // PREVIEW: refused, and honest about why — it would probably have passed, and probably is not
+    // what a green light may promise.
+    const detected = await detect(buffer, fixture.acquisitionMm);
+    const verdict = evaluatePlacement(detected!.cardBoundsMm, STANDARD_TCG);
+    expect(verdict.state).toBe(PLACEMENT.REPOSITION);
+    expect(verdict.wouldLikelyPassMaster).toBe(true);
+
+    // A preview verdict can NEVER be more permissive than the master rule. This is the direction
+    // that would be a defect, and it is asserted on every fixture, not just this one.
+    for (const other of manifest) {
+      const bounds = (await detect(read(other), other.acquisitionMm))!.cardBoundsMm;
+      const v = evaluatePlacement(bounds, STANDARD_TCG);
+      if (v.state !== PLACEMENT.READY) continue;
+      expect(other.expectedMinMarginMm, `${other.name} previewed GREEN below the master floor`).toBeGreaterThanOrEqual(
+        LIDE_400_MIN_EVIDENCE_MARGIN_MM
+      );
     }
   });
 });
 
-describe("PROOF 3 — the same BACK card inside the 80 x 110 safe zone becomes GREEN", () => {
-  it("goes green once the real card is re-windowed into the safe zone", async () => {
+describe("PROOF 3 — the same BACK card moved inside the 4 mm boundary becomes GREEN", () => {
+  it("goes green once the real card is re-windowed inside the placement boundary", async () => {
     const fixture = byName("mv272-back-rejected");
-    const safe = safeWindowRectMm(STANDARD_TCG);
+    const safe = placementBoundaryRectMm(STANDARD_TCG);
     const centred = {
       x: safe.x + (safe.width - fixture.expectedCardMm.width) / 2,
       y: safe.y + (safe.height - fixture.expectedCardMm.height) / 2,
@@ -204,9 +259,14 @@ describe("PROOF 4 — a sub-4 mm final evidence margin still fails", () => {
   });
 });
 
-describe("PROOF 5 — the 10 mm safe zone predicts a valid capture with substantial headroom", () => {
-  it("delivers a real margin far above 4 mm for every green re-windowed real card", async () => {
-    const safe = safeWindowRectMm(STANDARD_TCG);
+describe("PROOF 5 — a centred placement predicts a valid capture with substantial headroom", () => {
+  it("delivers a real margin far above 4 mm for every centred re-windowed real card", async () => {
+    /*
+     * The 10 mm safe zone is gone as a GATE, but centring a card is still what an operator naturally
+     * does, and this proves that ordinary behaviour lands nowhere near the floor. The headroom claim
+     * is unchanged because the geometry that produces it is unchanged — only the refusal rule moved.
+     */
+    const safe = placementBoundaryRectMm(STANDARD_TCG);
     for (const fixture of manifest) {
       const centred = {
         x: safe.x + (safe.width - fixture.expectedCardMm.width) / 2,
@@ -573,15 +633,19 @@ describe("PROOF 16 — a non-zero capture-window origin survives to server valid
     };
     expect(() => assertLide400Evidence(inspection as never, provenance as never)).not.toThrow();
 
-    // The platen ORIGIN is no longer a legal window position — the bezel band lives there.
+    /*
+     * INVERTED 2026-08-17: the platen origin is a legal window again, so MV272 — whose immutable
+     * FRONT evidence records exactly this rectangle — can have a BACK captured at its own proven
+     * geometry. Refusing it here was the last of three places that together stranded the card.
+     */
     expect(() =>
       assertLide400Evidence(
         inspection as never,
         { ...provenance, scanAreaMm: { x: 0, y: 0, width: 100, height: 130 } } as never
       )
-    ).toThrow(/not a valid position on the platen/);
+    ).not.toThrow();
 
-    // Nor is a window that would hang off the glass.
+    // A window that would hang off the glass is still refused — that bound is physical, not policy.
     expect(() =>
       assertLide400Evidence(
         inspection as never,

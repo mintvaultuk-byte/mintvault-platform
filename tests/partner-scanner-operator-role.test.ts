@@ -215,8 +215,40 @@ describe("AG-2 integration surfaces", () => {
   });
 
   it("SOP4c: station OPERATION still only needs cards.scan, so a shift is not slowed down", () => {
-    // requireSignedStationOperator is what every signed capture request passes through.
-    expect(stationRoutes).toContain('operator.permissions.has("partner.cards.scan")');
+    /*
+     * `requireSignedStationOperator` is what every signed capture request passes through. The
+     * capability moved from an inline literal into the middleware's own declaration when a second
+     * authority (station maintenance) was added, so this asserts the declaration rather than the
+     * comparison — the comparison is now shared by both middlewares and names neither.
+     */
+    expect(stationRoutes).toMatch(
+      /async function requireSignedStationOperator[\s\S]{0,400}?capability: "partner\.cards\.scan"/
+    );
+    expect(stationRoutes).toContain('operator.permissions.has(required.capability)');
+  });
+
+  it("SOP4d: MOVING the capture area is maintenance, and a Scanner Operator cannot do it", () => {
+    /*
+     * Recalibration used to sit behind `partner.cards.scan`, so the least-privileged role in the
+     * system could silently repoint a station's physical acquisition rectangle. Every card captured
+     * afterwards would be framed differently from every card before, and a certificate straddling
+     * the change would have two sides from two rectangles.
+     */
+    expect(stationRoutes).toMatch(
+      /async function requireSignedStationMaintainer[\s\S]{0,400}?capability: "partner\.stations\.calibrate"/
+    );
+    // And the calibration route actually uses it.
+    expect(stationRoutes).toMatch(/stations\/calibrations"[\s\S]{0,300}?requireSignedStationMaintainer/);
+
+    const calibrateMigration = readFileSync(
+      join(process.cwd(), "migrations", "0092_partner_station_calibrate_permission.sql"),
+      "utf8"
+    );
+    // Granted to the station-MANAGEMENT roles — the ones that could already enrol a whole new Mac.
+    expect(calibrateMigration).toContain("'PARTNER_OWNER', 'PARTNER_MANAGER', 'MVGS_ASSESSMENT_TECHNICIAN'");
+    // And the migration proves its own outcome rather than trusting the INSERT.
+    expect(calibrateMigration).toContain("SCANNER_OPERATOR must not hold partner.stations.calibrate");
+    expect(calibrateMigration).toContain("RAISE EXCEPTION");
   });
 
   it("0034 is not edited — the new role arrives additively in its own numbered migration", () => {

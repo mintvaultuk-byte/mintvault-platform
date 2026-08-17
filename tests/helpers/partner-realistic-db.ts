@@ -231,6 +231,7 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // fails closed — the 0073 failure mode this contract was written to catch. It is classified here
   // because it genuinely depends on the core schema, not to make a list balance.
   "0091_capture_session_calibration_snapshot",
+  "0092_partner_station_calibrate_permission",
 ] as const;
 
 /**

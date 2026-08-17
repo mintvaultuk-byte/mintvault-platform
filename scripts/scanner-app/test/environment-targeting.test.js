@@ -180,3 +180,62 @@ describe("the two canonical deployments are the only hosts this app knows", () =
     );
   });
 });
+
+describe("the declaration the refusal message points at actually exists", () => {
+  /*
+   * THE DEFECT THIS CLOSES. `persistEnvironment` had no caller outside this test file, `MINTVAULT_ENV`
+   * appeared in no installer, wrapper script or README, and there was no IPC handler — yet an
+   * unconfigured Scanner told its operator to "choose STAGING or PRODUCTION in Service & Diagnostics".
+   * The refusal was correct and fail-closed; the instruction was fiction. Any Mac without a
+   * hand-edited `~/.mintvault-scanner.env` was permanently unable to sign in, and nothing on screen
+   * or in the repo said so.
+   *
+   * These assertions are structural on purpose: the failure was never a wrong value, it was a wire
+   * that was never connected, and only the presence of each link in the chain proves it is.
+   */
+  const read = (...parts) => fs.readFileSync(path.join(__dirname, "..", ...parts), "utf8");
+
+  test("the main process exposes a handler that persists the declaration", () => {
+    const main = read("main.js");
+    assert.match(main, /ipcMain\.handle\("set-environment"/);
+    assert.match(main, /environment\.persistEnvironment\(value\)/);
+  });
+
+  test("changing environment is refused while this station holds a card", () => {
+    // Repointing identity, capture sessions and evidence upload at another deployment mid-card would
+    // strand that card on a server the app is no longer talking to.
+    const main = read("main.js");
+    const handler = main.slice(main.indexOf('ipcMain.handle("set-environment"'));
+    assert.match(handler.slice(0, 900), /Finish or safely retry the current card before changing environment/);
+    assert.match(handler.slice(0, 900), /openCardJob/);
+  });
+
+  test("the operator session is cleared, so no badge survives the move", () => {
+    const main = read("main.js");
+    const handler = main.slice(main.indexOf('ipcMain.handle("set-environment"'));
+    assert.match(handler.slice(0, 1400), /stationIdentity\.clearOperatorSession\(\)/);
+  });
+
+  test("the preload bridges it and the renderer offers both choices", () => {
+    assert.match(read("preload.js"), /setEnvironment: \(value\) => ipcRenderer\.invoke\("set-environment", value\)/);
+    const html = read("renderer", "index.html");
+    assert.match(html, /id="environmentStagingBtn"/);
+    assert.match(html, /id="environmentProductionBtn"/);
+    const renderer = read("renderer", "app.js");
+    assert.match(renderer, /chooseEnvironment\("staging"\)/);
+    assert.match(renderer, /chooseEnvironment\("production"\)/);
+    assert.match(renderer, /window\.scanner\s*\n?\s*\.setEnvironment\(value\)/);
+  });
+
+  test("opening a certificate URL reports an undeclared environment instead of throwing", () => {
+    // `API_BASE` throws rather than guessing a hostname, so every call site must catch it. These two
+    // did not, and produced an unhandled rejection in the renderer instead of the real reason.
+    const main = read("main.js");
+    for (const channel of ["open-grade-cert", "open-last-cert"]) {
+      const handler = main.slice(main.indexOf(`ipcMain.handle("${channel}"`), main.indexOf(`ipcMain.handle("${channel}"`) + 700);
+      assert.match(handler, /environment\.resolveEnvironment\(\)/, `${channel} must resolve the environment`);
+      assert.match(handler, /if \(!resolved\.ok\) return \{ ok: false, error: resolved\.message \}/, channel);
+      assert.doesNotMatch(handler, /server\.API_BASE/, `${channel} must not reach for API_BASE directly`);
+    }
+  });
+});

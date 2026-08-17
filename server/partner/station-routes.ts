@@ -27,6 +27,7 @@ import { CardJobAuthorityError, startNewCardJobAtStation } from "./card-job-auth
 import { CardJobCancellationError, cancelCardJob } from "./card-job-cancellation";
 import { FixAuthorityError, authoriseFix, invalidateSide, listFixQueue } from "./fix-authority";
 import { CaptureAuthorityError, authoriseStationCapture } from "./capture-authority";
+import { CaptureGeometryError } from "../lib/lide400-capture-authority";
 
 /**
  * FIX failures map to statuses that tell the operator what to do next.
@@ -222,6 +223,19 @@ function stationError(res: Response, error: unknown): void {
     res.status(status).json({ error: { code: error.code, message: error.message } });
     return;
   }
+  /*
+   * A GEOMETRY REFUSAL IS AN ANSWER, NOT A CRASH.
+   *
+   * `CaptureGeometryError` is neither of the classes above, so it fell through to the 500 below —
+   * and the 500 replaces the message entirely with "Station request could not be completed". So the
+   * one sentence that tells the operator what to do ("re-arm this card side", "the capture window
+   * origin is not a valid position") was being discarded and reported as a server fault, on the arm
+   * path, every time. 409 with the real code and text instead.
+   */
+  if (error instanceof CaptureGeometryError) {
+    res.status(409).json({ error: { code: error.code, message: error.message } });
+    return;
+  }
   // eslint-disable-next-line no-console
   console.error("[partner-stations] request failed", error);
   res.status(500).json({ error: { code: "internal_error", message: "Station request could not be completed" } });
@@ -236,7 +250,43 @@ async function requireSignedStation(req: Request, res: Response, next: NextFunct
   }
 }
 
+/**
+ * MOVING THE CAPTURE AREA IS MAINTENANCE, NOT OPERATION.
+ *
+ * Identical to `requireSignedStationOperator` in every respect except the capability it demands.
+ * The capture area sits in a proven physical position on the scanner bed and normal shop work never
+ * moves it — place the card inside it, Preview, Scan. Gating recalibration on `partner.cards.scan`
+ * meant the least-privileged role in the system could silently repoint a station's physical
+ * acquisition rectangle, and the damage from that is invisible at the time: every card afterwards is
+ * framed differently from every card before, and any certificate straddling the change has two sides
+ * from two rectangles.
+ *
+ * Written as its own middleware rather than a parameter, because `tests/release-route-rate-limits.
+ * test.ts` pins each route's middleware chain BY NAME — so the authority a route requires is legible
+ * in the chain itself and cannot be changed without the pin noticing.
+ */
+async function requireSignedStationMaintainer(req: Request, res: Response, next: NextFunction): Promise<void> {
+  return requireSignedStationCapability(req, res, next, {
+    capability: "partner.stations.calibrate",
+    code: "operator_calibrate_forbidden",
+    message: "Moving the capture area requires station maintenance authority",
+  });
+}
+
 async function requireSignedStationOperator(req: Request, res: Response, next: NextFunction): Promise<void> {
+  return requireSignedStationCapability(req, res, next, {
+    capability: "partner.cards.scan",
+    code: "operator_scan_forbidden",
+    message: "An authorised signed-in scanner operator is required",
+  });
+}
+
+async function requireSignedStationCapability(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  required: { capability: string; code: string; message: string }
+): Promise<void> {
   try {
     if (!req.station) {
       res
@@ -246,10 +296,8 @@ async function requireSignedStationOperator(req: Request, res: Response, next: N
     }
     const token = req.header("x-mintvault-operator-session") || "";
     const operator = await resolvePartnerSession(token);
-    if (!operator?.mfaPassed || !operator.permissions.has("partner.cards.scan")) {
-      res.status(403).json({
-        error: { code: "operator_scan_forbidden", message: "An authorised signed-in scanner operator is required" },
-      });
+    if (!operator?.mfaPassed || !operator.permissions.has(required.capability)) {
+      res.status(403).json({ error: { code: required.code, message: required.message } });
       return;
     }
     if (
@@ -726,7 +774,7 @@ export function partnerStationRouter(): Router {
     "/stations/calibrations",
     partnerStationCalibrationIngressRateLimit,
     requireSignedStation,
-    requireSignedStationOperator,
+    requireSignedStationMaintainer,
     partnerStationCalibrationRateLimit,
     async (req, res) => {
     try {

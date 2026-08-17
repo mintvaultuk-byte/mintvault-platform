@@ -607,20 +607,38 @@ test("a placement saved to the station config is still provisioned after a resta
   assert.deepEqual(lide._private.jigOrigin(), { x: 20, y: 20 }, "a saved placement must survive a restart");
 
   /*
-   * THE PLATEN ORIGIN IS NO LONGER A VALID PLACEMENT — this assertion is deliberately INVERTED from
-   * what it said before, and that inversion is the point of the 2026-08-17 geometry change.
+   * THE PLATEN ORIGIN IS A LEGAL PLACEMENT AGAIN — and this assertion has now been inverted TWICE,
+   * which is worth recording honestly rather than quietly flipping back.
    *
-   * (0, 0) was previously honoured as a real corner-registered placement, and it is what the live
-   * station actually had. Measured on all eight preserved masters, the platen's first ~1.23 mm of
-   * top edge and ~0.72 mm of left edge carry the bezel contamination band, and a window anchored
-   * there also forces the card into a corner with 3 mm of background on two sides and 33 mm wasted
-   * on the other two. It is now read as UNPROVISIONED so the station must be recalibrated onto the
-   * new geometry, rather than silently clamped somewhere nobody chose.
+   * It originally accepted (0, 0). On 2026-08-17 it was inverted to REFUSE (0, 0), on the strength of
+   * a real measurement: the platen's first ~1.23 mm of top edge and ~0.72 mm of left edge carry a
+   * bezel contamination band on all eight preserved masters. The measurement was sound. Making it a
+   * hard bound on the ORIGIN was not, and the cost was immediate and total:
+   *
+   *   - every VALID station calibration in staging was at (0, 0), written by the previous build;
+   *   - `jigOrigin()` refuses rather than clamps (correctly — silently relocating a station's
+   *     physical capture area would change what every stored coordinate means);
+   *   - the server's `assertLegalCaptureWindow` applies the same shared constant, so it refused too;
+   *   - result: 0 of 11 capture sessions ever acquired an acquisition_region. No station could arm
+   *     any capture at all, while still advertising itself as calibrated and ready.
+   *
+   * MV272 was caught in exactly this: a preserved FRONT captured at (0, 0), a BACK that could not be
+   * armed, and a capture window that could not be moved because the card was open.
+   *
+   * The bezel is still real; it is just not the origin's problem to solve. The canonical detector
+   * finds the card as a connected component rather than a global bounding box, so a bezel band no
+   * longer stretches card bounds, and the 4 mm evidence floor is measured on the master regardless of
+   * where the window sits. `defaultOriginMm` remains (20, 20), so the RECOMMENDED position is
+   * unchanged — this governs only what an operator is FORBIDDEN to choose.
    */
   fs.writeFileSync(configPath, "MINTVAULT_LIDE_SCAN_X_MM=0\nMINTVAULT_LIDE_SCAN_Y_MM=0\n");
-  assert.equal(lide._private.jigOrigin(), null, "the platen origin must now demand recalibration");
+  assert.deepEqual(
+    lide._private.jigOrigin(),
+    { x: 0, y: 0 },
+    "the platen origin must stay provisioned: refusing it stranded every station and MV272 with it"
+  );
 
-  // A window that would hang off the far edge of the glass is refused for the same reason.
+  // A window that would hang off the far edge of the glass is still refused — that bound is real.
   fs.writeFileSync(configPath, "MINTVAULT_LIDE_SCAN_X_MM=200\nMINTVAULT_LIDE_SCAN_Y_MM=20\n");
   assert.equal(lide._private.jigOrigin(), null);
 

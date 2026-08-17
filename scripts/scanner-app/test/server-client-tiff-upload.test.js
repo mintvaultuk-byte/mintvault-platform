@@ -332,7 +332,7 @@ test("positioning Preview is a local JPEG-only operation with no target claim, T
   assert.equal(fs.readdirSync(path.dirname(positioning.previewPath)).some((name) => /\.tiff?$/i.test(name)), false);
 });
 
-test("positioning Preview is single-flight and only an exact safe result can persist local jig X/Y", async (t) => {
+test("positioning Preview is single-flight and can no longer persist local jig X/Y at all", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   fixture.state.set({ scannerHealth: { status: "profile_unprovisioned" }, activeCapture: null, positioningPreview: null });
   let releasePreview;
@@ -344,23 +344,31 @@ test("positioning Preview is single-flight and only an exact safe result can per
   fixture.watcher.analysePositioningPreview = async () => ({
     image: {},
     cardCandidate: { cardBoundsMm: { x: 40, y: 60, width: 63, height: 88 }, surroundingBackgroundMm: {} },
-    placement: { ready: true, originMm: { x: 22, y: 39 }, areaMm: { width: 100, height: 130 }, placementToleranceMm: 14 },
   });
-  const first = fixture.watcher.runPositioningPreview();
-  for (let attempt = 0; attempt < 20 && !releasePreview; attempt++) await new Promise((resolve) => setImmediate(resolve));
-  assert.equal((await fixture.watcher.runPositioningPreview()).ok, false, "rapid Preview clicks cannot start two physical scans");
-  releasePreview();
-  assert.equal((await first).ok, true);
-  const previewId = fixture.state.get().positioningPreview.id;
-  assert.equal(fixture.watcher.applyPositioningPreview("stale-preview").ok, false, "a stale Preview cannot alter station configuration");
   let persisted = null;
   fixture.lide.persistJigOrigin = (origin) => {
     persisted = origin;
     return { originMm: origin, areaMm: { width: 100, height: 130 }, profileVersion: "mintvault-canon-lide-400-v3" };
   };
-  assert.equal(fixture.watcher.applyPositioningPreview(previewId).ok, true);
-  assert.deepEqual(persisted, { x: 22, y: 39 });
-  assert.equal(fixture.watcher.applyPositioningPreview(previewId).ok, false, "a duplicate save cannot reapply an already consumed Preview");
+
+  const first = fixture.watcher.runPositioningPreview();
+  for (let attempt = 0; attempt < 20 && !releasePreview; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await fixture.watcher.runPositioningPreview()).ok, false, "rapid Preview clicks cannot start two physical scans");
+  releasePreview();
+  assert.equal((await first).ok, true);
+
+  /*
+   * THE PROPERTY THAT REPLACED "only an exact safe result can persist". A Preview is now incapable of
+   * writing station configuration, safe result or not: `applyPositioningPreview` and the whole
+   * card-chasing proposal it consumed are gone, so a card lying somewhere can no longer calibrate a
+   * station by being previewed. The only writer is the deliberate `saveCaptureWindowOrigin` drag.
+   */
+  assert.equal(typeof fixture.watcher.applyPositioningPreview, "undefined");
+  assert.equal(persisted, null, "a Preview must not write the local jig origin");
+  const entry = fixture.state.get().positioningPreview;
+  assert.equal(entry.status, "detected");
+  assert.equal(entry.placement, undefined, "no acquisition rectangle may be proposed from card position");
+  assert.equal(typeof fixture.watcher.saveCaptureWindowOrigin, "function");
 });
 
 test("explicit Scan creates a JPEG derivative preview without uploading the TIFF", async (t) => {

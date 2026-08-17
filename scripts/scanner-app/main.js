@@ -376,6 +376,18 @@ function stationSummary(sessionBody, availableCredits) {
     // Number, or null. NEVER 0 as a stand-in for "not answered": an unasked question rendered as an
     // empty wallet would stop a station that can work perfectly well.
     availableCredits: typeof availableCredits === "number" ? availableCredits : null,
+    /*
+     * MAY THIS OPERATOR MOVE THE CAPTURE AREA? Display only — the server holds the real gate and
+     * refuses `POST /stations/calibrations` without `partner.stations.calibrate` regardless of what
+     * this says. It exists so a Scanner Operator is not shown a control that will refuse them, which
+     * is a worse experience than not seeing it at all.
+     *
+     * Defaults to FALSE on anything unexpected. The failure direction for "I could not establish
+     * whether you may move the scanner's physical capture area" is no.
+     */
+    canCalibrate: Array.isArray(sessionBody.permissions)
+      ? sessionBody.permissions.includes("partner.stations.calibrate")
+      : false,
   };
 }
 
@@ -866,7 +878,11 @@ function setupIpc() {
   // never arms arbitrary certificate/side combinations from a scanner token.
   ipcMain.handle("open-grade-cert", async (_e, certId) => {
     if (!certId || !/^MV\d+$/i.test(String(certId))) return { ok: false, error: "format MV###" };
-    const base = server.API_BASE.replace(/\/$/, "");
+    // `API_BASE` THROWS on an undeclared environment rather than guessing a hostname, so it must be
+    // caught here — otherwise the renderer gets an unhandled rejection instead of the real reason.
+    const resolved = environment.resolveEnvironment();
+    if (!resolved.ok) return { ok: false, error: resolved.message };
+    const base = resolved.apiBase.replace(/\/$/, "");
     const url = `${base}/admin?search=${encodeURIComponent(String(certId).toUpperCase())}`;
     shell.openExternal(url);
     return { ok: true, url };
@@ -888,6 +904,42 @@ function setupIpc() {
     if (!resolved.ok) return { ok: false, error: resolved.message };
     shell.openExternal(`${resolved.apiBase}/partner/forgot-password`);
     return { ok: true };
+  });
+
+  /*
+   * DECLARE WHICH MINTVAULT THIS SCANNER BELONGS TO.
+   *
+   * Without this handler the refusal message was a lie: it told the operator to "choose STAGING or
+   * PRODUCTION in Service & Diagnostics" and no such control existed. `persistEnvironment` had no
+   * caller outside its own tests, and MINTVAULT_ENV appeared in no installer, wrapper or README — so
+   * a Mac without a hand-edited `~/.mintvault-scanner.env` could never sign in at all, and the one
+   * instruction on screen pointed nowhere. Fail-closed, but permanently.
+   *
+   * REFUSED WHILE THERE IS WORK IN FLIGHT. Changing environment repoints identity, capture sessions
+   * and evidence upload at a different deployment. Doing that with a card open would strand it on a
+   * server this app is no longer talking to, so the two states that must not move are blocked: an
+   * open card, and a live scan.
+   */
+  ipcMain.handle("set-environment", async (_event, value) => {
+    // The same three states that block switching operator, for the same reason and then some: this
+    // moves the whole deployment, not just who is signed in to it.
+    if (stateMod.get().activeCapture || stateMod.get().openCardJob || watcher?.targetedPendingUploadCount()) {
+      return { ok: false, error: "Finish or safely retry the current card before changing environment" };
+    }
+    let declared;
+    try {
+      declared = environment.persistEnvironment(value);
+    } catch (error) {
+      return { ok: false, error: error?.message || "That is not a MintVault environment" };
+    }
+    /*
+     * The operator session belonged to the OLD deployment's token lifecycle. Keeping it would leave
+     * a signed-in badge for an account on a server this app no longer addresses.
+     */
+    stationIdentity.clearOperatorSession();
+    const resolved = environment.resolveEnvironment();
+    pushStateToRenderer();
+    return { ok: resolved.ok, environment: declared, error: resolved.ok ? null : resolved.message };
   });
 
   ipcMain.handle("get-station-setup", () => stationSetupState());
@@ -946,10 +998,11 @@ function setupIpc() {
     return watcher.positioningPreviewData(previewId);
   });
 
-  ipcMain.handle("apply-positioning-preview", (_event, previewId) => {
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
-    return watcher.applyPositioningPreview(previewId);
-  });
+  /*
+   * "apply-positioning-preview" was removed on 2026-08-17 along with the card-chasing architecture.
+   * A station's capture origin is set only by "save-capture-window-origin", which the operator drives
+   * by dragging the window — never inferred from where a card was lying.
+   */
 
   /*
    * The per-side placement gate. Like the setup Preview it carries no path and no card identity —
@@ -1043,7 +1096,10 @@ function setupIpc() {
   ipcMain.handle("open-last-cert", () => {
     const certId = stateMod.get().lastUploadedCert;
     if (!certId) return { ok: false, error: "no cert uploaded yet this session" };
-    const base = server.API_BASE.replace(/\/$/, "");
+    // Same reason as open-grade-cert: an undeclared environment is a message, not a crash.
+    const resolved = environment.resolveEnvironment();
+    if (!resolved.ok) return { ok: false, error: resolved.message };
+    const base = resolved.apiBase.replace(/\/$/, "");
     const url = `${base}/cert/${encodeURIComponent(certId)}`;
     shell.openExternal(url);
     return { ok: true, url };

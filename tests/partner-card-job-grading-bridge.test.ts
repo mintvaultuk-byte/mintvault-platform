@@ -728,6 +728,84 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [first.id]);
   });
 
+  it("AT-B1e: one card's two sides must come from one rectangle — but a pre-0091 FRONT still finishes", async () => {
+    /*
+     * The invariant that was asserted in comments and implemented nowhere: a certificate whose FRONT
+     * and BACK were acquired from two different physical rectangles is not one piece of evidence.
+     * The 0091 session snapshot protects a side already armed, but cannot see ACROSS two sessions of
+     * one card — capture FRONT under window A, recalibrate, capture BACK under window B, and both
+     * uploads agree with their own snapshot.
+     *
+     * The second half of this test is the one that matters for MV272: the pairing reads the PROVEN
+     * geometry from `certificate_image_evidence.capture_metadata->'scanAreaMm'`, not the session row,
+     * because the session row is NULL for every side captured before 0091 existed. Pairing on the
+     * session would refuse a BACK for every pre-0091 card and strand exactly the cards this is meant
+     * to protect.
+     */
+    // Same precondition AT-B1d installs: the arm path refuses outright without this invariant.
+    await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
+      ON scanner_capture_sessions (station_id)
+      WHERE station_id IS NOT NULL AND state IN ('armed', 'claimed', 'capturing')`);
+    const captures = await import("../server/scanner-capture-service");
+    const card = await scannerNew(shopA);
+    const armBack = () =>
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "back",
+        workstationId: "MV-STN-B1ETESTAA22",
+        stationId: shopA.stationA,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      });
+
+    const stationRegion = await admin.query<{ acquisition_region: { x: number; y: number } }>(
+      `SELECT k.acquisition_region
+         FROM partner_stations s
+         JOIN partner_station_calibrations k ON k.id = s.current_calibration_id
+        WHERE s.id = $1`,
+      [shopA.stationA]
+    );
+    const current = stationRegion.rows[0].acquisition_region;
+
+    // A FRONT already accepted under a DIFFERENT rectangle, recorded the way real evidence records it.
+    const insertFront = (scanAreaMm: unknown) =>
+      admin.query(
+        `INSERT INTO certificate_image_evidence
+           (certificate_id, side, evidence_class, evidence_version, object_key, sha256, byte_length,
+            pixel_width, pixel_height, bit_depth, dpi, format, capture_metadata, is_current)
+         VALUES ($1,'front','NEW_IMMUTABLE_MASTER','v2',$2,$3,1,1,1,8,1200,'tiff',$4::jsonb,true)`,
+        [
+          card.certificateId,
+          `evidence/${card.certificateId}/front.tif`,
+          "a".repeat(64),
+          JSON.stringify(scanAreaMm === null ? {} : { scanAreaMm }),
+        ]
+      );
+
+    await insertFront({ x: current.x + 30, y: current.y + 30, width: 100, height: 130 });
+    await expect(armBack()).rejects.toThrow(/Both sides of one card must come from the same capture window/);
+
+    // Same rectangle as the station is calibrated to now: armed, no complaint.
+    await admin.query("DELETE FROM certificate_image_evidence WHERE certificate_id=$1", [card.certificateId]);
+    await insertFront({ ...current, width: 100, height: 130 });
+    const matched = await armBack();
+    expect(matched.side).toBe("back");
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [matched.id]);
+
+    /*
+     * MV272's SHAPE. A FRONT whose evidence records no scanAreaMm at all is an UNKNOWN, not a
+     * mismatch, and refusing on an unknown would strand cards for a fact nobody can establish. The
+     * 4 mm floor still applies to every master independently.
+     */
+    await admin.query("DELETE FROM certificate_image_evidence WHERE certificate_id=$1", [card.certificateId]);
+    await insertFront(null);
+    const unknown = await armBack();
+    expect(unknown.side).toBe("back");
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [unknown.id]);
+    await admin.query("DELETE FROM certificate_image_evidence WHERE certificate_id=$1", [card.certificateId]);
+  });
+
   /* ============================================================================================
    * AT-B2 / AT-B6 — a Partner grader can open a Scanner Card Job at all.
    * ========================================================================================== */
