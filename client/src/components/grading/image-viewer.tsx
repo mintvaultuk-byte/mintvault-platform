@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from "react";
+import { sessionRequiredRailWidth } from "@shared/rail-width";
+import { usePublishRailWidth } from "@/components/grading-workflow/rail-width-context";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import {
@@ -646,6 +648,18 @@ export default function ImageViewer({
   const railViewportRef = useRef<HTMLDivElement>(null);
   const [railViewport, setRailViewport] = useState<{ w: number; h: number } | null>(null);
   const [railNaturalDims, setRailNaturalDims] = useState<{ w: number; h: number } | null>(null);
+  /**
+   * Natural dimensions of every SIDE seen this session, keyed by railFitKey.
+   *
+   * The rail requirement is the widest across all known sides, never the active
+   * one — Front and Back are separate scans with their own aspects, and sizing
+   * the rail to whichever is showing would shove the workstation sideways on
+   * every Front/Back click. These are DECODED SOURCE dimensions, fixed before
+   * layout, so reading them never observes a rendered card.
+   */
+  const railNaturalBySideRef = useRef<Record<string, { w: number; h: number }>>({});
+  const [railSidesRevision, setRailSidesRevision] = useState(0);
+  const publishRailWidth = usePublishRailWidth();
 
   // Measure the scrollable fitRef's box on mount + resize. ResizeObserver
   // re-fires whenever the parent flex layout reflows (e.g. toolbar wraps,
@@ -860,6 +874,51 @@ export default function ImageViewer({
     };
     setRailFitRevision((r) => r + 1);
   }, [railFitEnabled, railViewport, railNaturalDims, railFitKey, visibleViewportTick]);
+
+  /**
+   * PREDICT THE RAIL'S WIDTH — a PASSIVE effect, deliberately separate from the
+   * fit above.
+   *
+   * It must not run inside the fit's `useLayoutEffect`. Publishing there updates
+   * the provider synchronously mid-layout, which re-renders the aside (and the
+   * portal host inside it) before the browser has settled; the card viewport's
+   * ResizeObserver then reports height 0, the fit falls back to width-only mode,
+   * and the card blows up to fill the rail. Reproduced on a cold load at
+   * 1280x800: card 523x729.6 with the controls stranded at y=899, off-screen.
+   * The fit's timing is load-bearing and is left exactly as it was.
+   *
+   * So the prediction runs AFTER paint, reads the same card-INDEPENDENT inputs
+   * for itself, and never perturbs the fit that produced them. Every input is
+   * upstream of layout: the visible viewport, the chrome above the card, the
+   * chrome below it, and the SOURCE image's decoded aspect. No rendered card box
+   * is read, so no card -> rail -> card loop can form.
+   */
+  useEffect(() => {
+    if (!railFitEnabled) return;
+    const el = railViewportRef.current;
+    if (!el) return;
+    const sides = Object.values(railNaturalBySideRef.current);
+    if (sides.length === 0) return;
+    const visibleH = window.visualViewport?.height ?? window.innerHeight;
+    const box = el.getBoundingClientRect();
+    const availableH = railAvailableHeight({
+      containerH: box.height,
+      visibleH,
+      top: box.top,
+      controlsH: railControlsRef.current?.getBoundingClientRect().height ?? 0,
+    });
+    const safeCardHeight = availableH - RAIL_SAFE_INSET_Y * 2;
+    if (!(safeCardHeight > 0)) return;
+    const required = sessionRequiredRailWidth(
+      sides.map((d) => ({ naturalWidth: d.w, naturalHeight: d.h })),
+      safeCardHeight
+    );
+    // Keyed on the input set. A genuinely new viewport, or a newly decoded side,
+    // may legitimately need a NARROWER rail and must settle once; a narrowing at
+    // an UNCHANGED key is the controls-wrap feedback signature, refused by
+    // shouldAdoptRailWidth.
+    publishRailWidth(`${Math.round(visibleH)}|${sides.length}`, required);
+  }, [railFitEnabled, railFitRevision, railSidesRevision, visibleViewportTick, publishRailWidth]);
 
   // A new source starts with no last-known-good — Front's dimensions must never be
   // reused for Back, which has its own natural aspect.
@@ -1401,7 +1460,14 @@ export default function ImageViewer({
                 // dimensions, not from an assumed 5:7 card ratio — a scan that is
                 // not exactly 5:7 is precisely the case where assuming the ratio
                 // pushes real card content past the viewport edge.
-                if (railFitEnabled) setRailNaturalDims({ w, h });
+                if (railFitEnabled) {
+                  setRailNaturalDims({ w, h });
+                  const known = railNaturalBySideRef.current[railFitKey];
+                  if (!known || known.w !== w || known.h !== h) {
+                    railNaturalBySideRef.current = { ...railNaturalBySideRef.current, [railFitKey]: { w, h } };
+                    setRailSidesRevision((r) => r + 1);
+                  }
+                }
                 if (!markMode) return;
                 setImgNaturalDims({ w, h });
               }}
