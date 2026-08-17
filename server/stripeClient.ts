@@ -11,15 +11,30 @@ import Stripe from 'stripe';
  * unsuffixed key the code actually reads, which is precisely the shape that makes a mistaken copy
  * a one-character edit away.
  *
- * RULE. The key's own prefix declares its environment; Stripe guarantees that. So we compare it
- * against the environment the process believes it is in and REFUSE on disagreement:
+ * RULE. The key's own prefix declares its environment; Stripe guarantees that. Two checks:
  *
- *   NODE_ENV=production   → sk_live_ / pk_live_ required, a test key is refused
- *   anything else         → sk_test_ / pk_test_ required, a LIVE key is refused
+ *   1. COHERENCE, always enforced, needs no knowledge of where we are running. The secret and
+ *      publishable keys must be the SAME mode, and both must be recognisable Stripe keys. A
+ *      half-swapped pair — live secret, test publishable — is a misconfiguration under every
+ *      possible deployment story, so it can be refused unconditionally.
  *
- * Refusing a test key in production is not symmetry for its own sake: a production box quietly on
- * test keys takes orders that never collect money, which is a revenue incident that looks healthy
- * from every dashboard.
+ *   2. EXPECTED MODE, enforced only when STRIPE_ENV explicitly says which mode this deployment
+ *      is supposed to be in (`live` or `test`). Set it, and a mismatch is refused in both
+ *      directions: a live key where test is expected moves real money; a test key where live is
+ *      expected takes orders that never collect, which is a revenue incident that looks healthy
+ *      from every dashboard.
+ *
+ * WHY NOT NODE_ENV. It was the obvious discriminator and it is the wrong one HERE: `fly.v2.toml`
+ * sets NODE_ENV=production on STAGING as well as production, because it governs asset building,
+ * not money. Keying the refusal on NODE_ENV would have declared staging to be production, and a
+ * correctly-configured staging box holding test keys would have had its payment path refused the
+ * moment this shipped. An environment signal that cannot tell staging from production must not be
+ * used to decide which Stripe account is legitimate.
+ *
+ * So the strict check is OPT-IN BY CONFIGURATION rather than inferred. Unset STRIPE_ENV keeps
+ * check 1 only — which is still strictly safer than what this module did before, and cannot
+ * break a running deployment. Setting STRIPE_ENV on each app is the follow-up that makes the
+ * refusal total; it is a secrets change and therefore the owner's to make.
  *
  * FAIL CLOSED, AND LATE. The check runs when a client is constructed, not at import, so a
  * misconfigured box still boots and still serves every non-payment route — a config error must not
@@ -31,8 +46,11 @@ import Stripe from 'stripe';
 
 type StripeEnvironment = 'live' | 'test';
 
-function expectedEnvironment(): StripeEnvironment {
-  return process.env.NODE_ENV === 'production' ? 'live' : 'test';
+/** The mode this deployment declares it is supposed to be in, or null when it declares nothing. */
+function expectedEnvironment(): StripeEnvironment | null {
+  const declared = (process.env.STRIPE_ENV || '').trim().toLowerCase();
+  if (declared === 'live' || declared === 'test') return declared;
+  return null;
 }
 
 /** The environment a key declares about itself, or null if it is not a recognised Stripe key. */
@@ -43,24 +61,38 @@ function declaredEnvironment(key: string): StripeEnvironment | null {
 }
 
 function assertEnvironmentMatches(varName: string, key: string): void {
-  const expected = expectedEnvironment();
   const declared = declaredEnvironment(key);
 
   if (declared === null) {
     throw new Error(
-      `${varName} is not a recognised Stripe key (expected an ${expected}-mode key beginning ` +
-        `sk_${expected}_, pk_${expected}_ or rk_${expected}_). Refusing to construct a Stripe client.`
+      `${varName} is not a recognised Stripe key (expected one beginning sk_live_, sk_test_, ` +
+        `pk_live_, pk_test_, rk_live_ or rk_test_). Refusing to construct a Stripe client.`
     );
   }
 
-  if (declared !== expected) {
-    const nodeEnv = process.env.NODE_ENV || 'development';
+  // CHECK 1 — coherence. Wrong under every deployment story, so refused unconditionally.
+  const counterpartName = varName === 'STRIPE_SECRET_KEY' ? 'STRIPE_PUBLISHABLE_KEY' : 'STRIPE_SECRET_KEY';
+  const counterpart = process.env[counterpartName];
+  if (counterpart) {
+    const counterpartMode = declaredEnvironment(counterpart);
+    if (counterpartMode !== null && counterpartMode !== declared) {
+      throw new Error(
+        `Stripe key pair is incoherent: ${varName} is a ${declared}-mode key but ${counterpartName} ` +
+          `is a ${counterpartMode}-mode key. Refusing to construct a Stripe client — half-swapped ` +
+          `credentials are a misconfiguration in every environment.`
+      );
+    }
+  }
+
+  // CHECK 2 — expected mode, only when this deployment declares one.
+  const expected = expectedEnvironment();
+  if (expected !== null && declared !== expected) {
     throw new Error(
-      `Stripe environment mismatch: ${varName} is a ${declared}-mode key but NODE_ENV=${nodeEnv} ` +
+      `Stripe environment mismatch: ${varName} is a ${declared}-mode key but STRIPE_ENV=${expected} ` +
         `requires a ${expected}-mode key. Refusing to construct a Stripe client. ` +
         (declared === 'live'
-          ? 'A non-production process must never hold live Stripe credentials — it would move real money.'
-          : 'A production process on test credentials would take orders that never collect payment.')
+          ? 'This deployment must never hold live Stripe credentials — it would move real money.'
+          : 'A live deployment on test credentials would take orders that never collect payment.')
     );
   }
 }
@@ -96,12 +128,33 @@ export async function getStripeSecretKey(): Promise<string> {
  */
 export function describeStripeEnvironmentMismatch(): string | null {
   const expected = expectedEnvironment();
+  const modes: Partial<Record<string, StripeEnvironment>> = {};
+
   for (const varName of ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY'] as const) {
     const key = process.env[varName];
     if (!key) continue;
     const declared = declaredEnvironment(key);
     if (declared === null) return `${varName} is not a recognised Stripe key`;
-    if (declared !== expected) return `${varName} is a ${declared}-mode key but this process expects ${expected}-mode`;
+    modes[varName] = declared;
+    if (expected !== null && declared !== expected) {
+      return `${varName} is a ${declared}-mode key but STRIPE_ENV=${expected}`;
+    }
   }
+
+  const secret = modes.STRIPE_SECRET_KEY;
+  const publishable = modes.STRIPE_PUBLISHABLE_KEY;
+  if (secret && publishable && secret !== publishable) {
+    return `STRIPE_SECRET_KEY is ${secret}-mode but STRIPE_PUBLISHABLE_KEY is ${publishable}-mode`;
+  }
+
+  if (expected === null) return null;
   return null;
+}
+
+/**
+ * True when this deployment has NOT declared which Stripe mode it expects, so only the coherence
+ * check is active. Surfaced so a startup log can say so out loud rather than implying full cover.
+ */
+export function stripeEnvironmentIsUndeclared(): boolean {
+  return expectedEnvironment() === null;
 }
