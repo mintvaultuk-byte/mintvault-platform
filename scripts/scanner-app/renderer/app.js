@@ -197,6 +197,17 @@ function renderTarget(state) {
      * told to wait for something that was never going to happen.
      */
     els.targetCert.textContent = state.openCardJob.mvNumber || "Card started";
+    const accepted = state.lastAcceptedCapture;
+    const nextSideComing = state.armingNextSide || (accepted && !accepted.cardRegistered);
+    if (nextSideComing) {
+      // FRONT is saved and BACK is being armed. Naming the saved side is what tells the operator
+      // their scan counted — the previous copy said NOT ARMED over a card that had just succeeded.
+      els.targetSide.textContent = accepted && accepted.side === "front" ? "PREPARING BACK" : "PREPARING NEXT SIDE";
+      els.targetHint.textContent = accepted
+        ? `${toTitle(accepted.side)} is saved. MintVault is arming the next side for this same card — keep it at this station.`
+        : "MintVault is arming the next side for this same card.";
+      return;
+    }
     els.targetSide.textContent = "NOT ARMED";
     els.targetHint.textContent = state.openCardJob.armError
       ? `${state.openCardJob.armError} — retry the scanner for this same card, or cancel it to return its Grading Credit.`
@@ -671,7 +682,19 @@ function renderCaptureActions(state) {
    * the situation when there is not. Never the generic "service needs attention" — this panel always
    * knows what it is about.
    */
-  const needsArming = Boolean(openCard) && !active;
+  /*
+   * A CARD WAITING FOR ITS NEXT SIDE IS NOT A FAULT.
+   *
+   * After an accepted FRONT the station legitimately holds a card with no target for a moment while
+   * the server arms BACK. Rendering the red panel there told the operator their card was broken at
+   * the exact instant it was working — the state MV272 was left in at 12:09Z, beside "FRONT SAVED,
+   * flip the card for Back". `armingNextSide` is the in-flight signal; a just-accepted side that the
+   * server has not called complete means the next side is coming.
+   */
+  const awaitingNextSide =
+    Boolean(state.armingNextSide) ||
+    Boolean(state.lastAcceptedCapture && !state.lastAcceptedCapture.cardRegistered && openCard);
+  const needsArming = Boolean(openCard) && !active && !awaitingNextSide;
   els.openCardPanel.hidden = !needsArming;
   if (needsArming) {
     els.openCardTitle.textContent = openCard.mvNumber

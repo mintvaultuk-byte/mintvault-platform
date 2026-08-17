@@ -417,6 +417,75 @@ async function refreshAvailableCredits() {
   return available;
 }
 
+/**
+ * ARM WHATEVER SIDE OF THE OPEN CARD IS STILL OUTSTANDING — the transition that had no caller.
+ *
+ * THE DEFECT (staging, MV272, 17 Aug 12:09). FRONT was captured, uploaded, validated and persisted:
+ * evidence row 5, an immutable 43 MB 1200-DPI master, and the Card Job correctly advanced
+ * NEEDS_SCAN -> CAPTURING. Then nothing armed BACK. The server does not auto-arm the next side, and
+ * the Scanner's poll only ever CLAIMS sessions that already exist — so no back session was ever
+ * created and none could be claimed. The station sat at "FRONT SAVED / Flip the card for Back" and
+ * "NOT ARMED" simultaneously, both statements true, with no path between them. The operator flipped
+ * the card and pressed the only thing that responded, which ran a placement Preview: it moves the
+ * head and sounds exactly like a capture, but by design it is never evidence, so a full physical
+ * BACK acquisition produced nothing at all.
+ *
+ * THE SERVER CHOOSES THE SIDE. This sends only the Card Job id; `authoriseStationCapture` computes
+ * the outstanding sides from the evidence ledger. So this can never re-arm a side that already has
+ * an accepted master, and the client never names, invents or tracks which side comes next — the
+ * missing edge is restored without moving any authority to the Scanner.
+ *
+ * IDEMPOTENT AND SAFE TO CALL REPEATEDLY. A card with both sides present is refused
+ * NOTHING_TO_CAPTURE; a station already holding the right target gets that same session back
+ * (the re-arm replay); a card with nothing outstanding simply does nothing. That is what lets it be
+ * both an immediate reaction to an accepted side AND the reconciler that runs on the poll, so a
+ * restart or a reconnect resolves to the outstanding side rather than to nothing.
+ */
+let armNextInFlight = false;
+async function armNextOutstandingSide(trigger) {
+  const state = stateMod.get();
+  const cardJobId = state.openCardJob && state.openCardJob.cardJobId;
+  if (!cardJobId || state.activeCapture || armNextInFlight) return { ok: false, skipped: true };
+  armNextInFlight = true;
+  stateMod.set({ armingNextSide: true });
+  pushStateToRenderer();
+  try {
+    let result;
+    try {
+      result = await server.armCapture(cardJobId);
+    } catch (err) {
+      // Unknown outcome. Left for the next poll to retry; nothing is recorded as a failure, because
+      // a network blip must not paint a red panel over a card that is probably fine.
+      console.warn(`[arm-next] (${trigger}) could not reach MintVault: ${err && err.message}`);
+      return { ok: false, retryable: true };
+    }
+    if (!result.ok) {
+      const error = (result.body && result.body.error) || {};
+      /*
+       * NOTHING_TO_CAPTURE means both sides are present — the card is finished, not broken. The
+       * server's own completion signal (`card_registered` on accept) is what clears `openCardJob`,
+       * so this only stops the reconciler from asking again.
+       */
+      if (error.code === "NOTHING_TO_CAPTURE") return { ok: true, complete: true };
+      console.warn(`[arm-next] (${trigger}) refused: ${error.code || result.status} ${error.message || ""}`);
+      return { ok: false, code: error.code || "error", error: error.message };
+    }
+    const capture = (result.body && result.body.capture) || null;
+    if (!capture || !watcher) return { ok: false, error: "MintVault did not return a capture target" };
+    const adopted = await watcher.adoptArmedCapture(capture);
+    if (!adopted.ok) {
+      console.warn(`[arm-next] (${trigger}) could not adopt: ${adopted.error}`);
+      return { ok: false, error: adopted.error };
+    }
+    console.log(`[arm-next] (${trigger}) armed ${adopted.certId} ${adopted.side}`);
+    return { ok: true, certId: adopted.certId, side: adopted.side };
+  } finally {
+    armNextInFlight = false;
+    stateMod.set({ armingNextSide: false });
+    pushStateToRenderer();
+  }
+}
+
 /** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
 async function stationSetupState() {
   let session;
@@ -800,6 +869,8 @@ function setupIpc() {
 
   ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
 
+  ipcMain.handle("arm-next-side", async () => armNextOutstandingSide("operator"));
+
   ipcMain.handle("get-station-setup", () => stationSetupState());
   ipcMain.handle("station-sign-in", async (_event, payload) => {
     const email = typeof payload?.email === "string" ? payload.email.trim() : "";
@@ -956,6 +1027,7 @@ app.whenReady().then(async () => {
   let lastErrorState = false;
   let lastSuccessState = false;
   let lastPositioningPreviewId = null;
+  let lastArmedForAcceptance = null;
   watcher.on("state-changed", () => {
     pushStateToRenderer();
     const s = stateMod.get();
@@ -984,6 +1056,21 @@ app.whenReady().then(async () => {
       if (isError   && !lastErrorState)   playSystemSound("Sosumi.aiff");
     }
 
+    /*
+     * THE ACCEPT EDGE. A side has just been accepted and the card is not finished, so its remaining
+     * side is armed now rather than at some later poll — the operator has the card in their hand.
+     * Keyed on the acceptance timestamp so one accepted side arms once, however many state changes
+     * follow it.
+     */
+    const accepted = s.lastAcceptedCapture;
+    if (
+      accepted && accepted.acceptedAt && accepted.acceptedAt !== lastArmedForAcceptance &&
+      !accepted.cardRegistered && !s.activeCapture && s.openCardJob && s.openCardJob.cardJobId
+    ) {
+      lastArmedForAcceptance = accepted.acceptedAt;
+      void armNextOutstandingSide("accepted side");
+    }
+
     lastErrorState     = isError;
     lastSuccessState   = isSuccess;
   });
@@ -1002,6 +1089,15 @@ app.whenReady().then(async () => {
     try {
       await watcher.refreshScannerHealth();
       await watcher.pollTargetedCapture();
+      /*
+       * RECONCILE. If this station still holds a card and has no target, ask the server for the
+       * outstanding side. This is what makes a restart or a reconnect after an accepted FRONT
+       * resolve to BACK rather than to nothing at all — the poll alone cannot, because it only
+       * claims sessions that already exist and no back session is ever created on its own.
+       */
+      if (!stateMod.get().activeCapture && stateMod.get().openCardJob) {
+        await armNextOutstandingSide("poll reconcile");
+      }
     } catch (err) {
       console.error(`[targeted-capture] poll failed: ${err?.message || err}`);
     } finally {

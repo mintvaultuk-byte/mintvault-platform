@@ -109,6 +109,13 @@ const DEFAULT = Object.freeze({
    * of a job it already confirmed, never a claim about one it has not.
    */
   openCardJob:      null,
+  /*
+   * True while this station is asking the server to arm the OUTSTANDING side of the open card.
+   *
+   * Transient and per-run: it exists so the window can say "preparing BACK" instead of drawing a red
+   * NOT ARMED panel during the second or two between an accepted FRONT and its armed BACK.
+   */
+  armingNextSide:   false,
   updatedAt:        null,
 });
 
@@ -168,6 +175,9 @@ function load() {
      * NEW CARD must stay disabled behind it, which is what `openCardJob` itself is for. The next arm
      * attempt records its own outcome.
      */
+    // An in-flight flag from a process that is gone is never true of this one.
+    mem.armingNextSide = false;
+
     if (mem.openCardJob && mem.openCardJob.armError) {
       console.warn(
         `[state] RECOVERY: cleared a prior run's arm error on ${mem.openCardJob.mvNumber || "an open card"} (was "${mem.openCardJob.armError}") — this run has attempted no arm`

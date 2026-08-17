@@ -225,7 +225,9 @@ test("a live target suppresses a stale arm error — the red NOT ARMED panel can
    * ARMED" in red directly beneath a capture panel showing MV272 / FRONT with SCAN enabled. Both
    * were on screen at once and only one of them was true.
    */
-  assert.match(renderer, /const needsArming = Boolean\(openCard\) && !active;/);
+  assert.match(renderer, /const needsArming = Boolean\(openCard\) && !active && !awaitingNextSide;/);
+  // A card between an accepted side and its next armed side is NOT a fault and must not go red.
+  assert.match(renderer, /const awaitingNextSide =/);
   assert.match(renderer, /els\.openCardPanel\.hidden = !needsArming;/);
   // And main must not RECORD a blocking arm error while the station holds a target.
   assert.match(main, /if \(open && !stateMod\.get\(\)\.activeCapture && \(!open\.cardJobId \|\| open\.cardJobId === cardJobId\)\)/);
@@ -415,13 +417,14 @@ test("the recovery panel is driven by current state, so RETRY never disappears w
    * buttons — leaving an open card with no visible way to arm it. The authoritative condition is
    * "this station holds a card with no target on the glass", not "did an arm fail".
    */
-  assert.match(renderer, /const needsArming = Boolean\(openCard\) && !active;/);
+  assert.match(renderer, /const needsArming = Boolean\(openCard\) && !active && !awaitingNextSide;/);
   assert.match(renderer, /els\.openCardPanel\.hidden = !needsArming;/);
   // With no remembered reason the panel still states the situation — never the generic fallback.
   assert.match(renderer, /"This card has no armed scanner target\. "/);
   assert.doesNotMatch(renderer, /openCardDetail\.textContent = [^;]*Scanner service needs attention/);
   // And an open card with no live capture reads NOT ARMED, never "PREPARING…".
   assert.match(renderer, /els\.targetSide\.textContent = "NOT ARMED";/);
+  assert.match(renderer, /PREPARING BACK/);
   assert.doesNotMatch(renderer, /textContent = [^;]*PREPARING…/);
 });
 
@@ -631,4 +634,68 @@ test("FIX 3: the capture panel names the MV and the required side from shared st
   assert.match(renderer, /if \(state\.openCardJob\) \{/);
   assert.match(renderer, /els\.targetCert\.textContent = state\.openCardJob\.mvNumber \|\| "Card started";/);
   assert.match(renderer, /els\.targetSide\.textContent = "READY TO GRADE";/);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+ * FRONT SAVED → BACK ARMED — the transition that had no caller.
+ *
+ * THE DEFECT (staging, MV272, 17 Aug 12:09). FRONT was captured, uploaded, validated and persisted
+ * as an immutable 43 MB master (evidence row 5), and the Card Job correctly advanced NEEDS_SCAN →
+ * CAPTURING. Then nothing armed BACK. The server does not auto-arm the next side, and the Scanner's
+ * poll only CLAIMS sessions that already exist — so no back session was ever created and none could
+ * be claimed. The window said "FRONT SAVED / flip the card for Back" AND "NOT ARMED" at once, both
+ * true, with no path between them. The operator flipped the card and pressed the only control that
+ * responded, which ran a placement Preview: it moves the head and sounds exactly like a capture but
+ * is never evidence, so a full physical BACK acquisition produced nothing at all.
+ * ═════════════════════════════════════════════════════════════════════════════════════════════ */
+
+test("the next outstanding side is armed from the SERVER, and the client never names the side", () => {
+  assert.match(main, /async function armNextOutstandingSide\(trigger\)/);
+  // Only the Card Job id is sent — authoriseStationCapture computes the outstanding side from the
+  // evidence ledger, so an accepted side can never be re-armed and the client invents nothing.
+  assert.match(main, /result = await server\.armCapture\(cardJobId\);/);
+  assert.doesNotMatch(main, /armCapture\(cardJobId,\s*["'](front|back)["']\)/);
+});
+
+test("it fires on the ACCEPT edge exactly once per accepted side", () => {
+  // Keyed on the acceptance timestamp: one accepted side arms once, however many state changes
+  // follow it. Without the key, every subsequent state-change would re-arm.
+  assert.match(main, /accepted\.acceptedAt !== lastArmedForAcceptance/);
+  assert.match(main, /lastArmedForAcceptance = accepted\.acceptedAt;/);
+  // A finished card is never re-armed — the server's own card_registered is the completion signal.
+  assert.match(main, /!accepted\.cardRegistered && !s\.activeCapture/);
+  // And a single-flight guard stops the edge and the reconciler racing each other.
+  assert.match(main, /if \(!cardJobId \|\| state\.activeCapture \|\| armNextInFlight\) return/);
+});
+
+test("RESTART / RECONNECT resolves to the outstanding side, not to nothing", () => {
+  /*
+   * The poll alone cannot recover this: it only claims sessions that already exist, and after an
+   * accepted FRONT no back session exists to claim. The reconciler on the same loop is what makes a
+   * restarted or reconnected station arrive at BACK rather than sitting at NOT ARMED for ever.
+   */
+  assert.match(main, /if \(!stateMod\.get\(\)\.activeCapture && stateMod\.get\(\)\.openCardJob\) \{\s*\n\s*await armNextOutstandingSide\("poll reconcile"\);/);
+});
+
+test("a finished card stops the reconciler instead of asking for ever", () => {
+  // NOTHING_TO_CAPTURE means both sides are present: the card is complete, not broken.
+  assert.match(main, /if \(error\.code === "NOTHING_TO_CAPTURE"\) return \{ ok: true, complete: true \}/);
+});
+
+test("an in-flight arm flag is never resurrected from a dead process", (t) => {
+  const loaded = bootWithPersistedState(t, {
+    state: "idle",
+    armingNextSide: true,
+    openCardJob: { cardJobId: "job-1", mvNumber: "MV272", certificateId: 469, armError: null },
+  });
+  assert.equal(loaded.armingNextSide, false);
+  assert.equal(loaded.openCardJob.cardJobId, "job-1", "the card itself survives");
+});
+
+test("a card between an accepted side and its next armed side reads as PROGRESS, not a fault", () => {
+  assert.match(renderer, /const awaitingNextSide =/);
+  assert.match(renderer, /Boolean\(state\.armingNextSide\)/);
+  assert.match(renderer, /state\.lastAcceptedCapture && !state\.lastAcceptedCapture\.cardRegistered && openCard/);
+  // The saved side is NAMED, so the operator can see their scan counted.
+  assert.match(renderer, /is saved\. MintVault is arming the next side for this same card/);
 });
