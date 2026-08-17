@@ -638,14 +638,24 @@ export default function ImageViewer({
     return () => ro.disconnect();
   }, [railFitEnabled, showReference]);
 
+  /**
+   * Height is fitted only when the viewport actually HAS a usable height.
+   *
+   * If an ancestor's height is content-driven rather than definite, the card is what
+   * gives the rail its height — there is no "available height" to fit into, and
+   * treating a 0 measurement as authoritative is what strands the image invisible.
+   * In that case we fit by WIDTH alone and let the natural aspect decide the height,
+   * which is both correct and always visible.
+   */
+  const railHeightUsable = !!railViewport && railViewport.h > RAIL_SAFE_INSET_Y * 2;
+
   const railFit =
     railFitEnabled &&
     railViewport &&
     railNaturalDims &&
     railNaturalDims.w > 0 &&
     railNaturalDims.h > 0 &&
-    railViewport.w > RAIL_SAFE_INSET_X * 2 &&
-    railViewport.h > RAIL_SAFE_INSET_Y * 2
+    railViewport.w > RAIL_SAFE_INSET_X * 2
       ? (() => {
           // viewport minus the safety insets on BOTH axes. The insets are
           // symmetric so that centring the result cannot spend one side's
@@ -653,16 +663,21 @@ export default function ImageViewer({
           // N of visible clearance on every edge, including the bottom.
           const safeW = railViewport.w - RAIL_SAFE_INSET_X * 2;
           const safeH = railViewport.h - RAIL_SAFE_INSET_Y * 2;
-          const scale = Math.min(safeW / railNaturalDims.w, safeH / railNaturalDims.h);
+          const widthScale = safeW / railNaturalDims.w;
+          // Only let height bind when there is a real height to bind against.
+          const scale = railHeightUsable
+            ? Math.min(widthScale, safeH / railNaturalDims.h)
+            : widthScale;
           if (!Number.isFinite(scale) || scale <= 0) return null;
           const w = railNaturalDims.w * scale;
           const h = railNaturalDims.h * scale;
           return {
             w,
             h,
+            mode: railHeightUsable ? "safe-fit" : "width-fit",
             // Centred, so each axis' leftover splits evenly.
             clearanceX: (railViewport.w - w) / 2,
-            clearanceY: (railViewport.h - h) / 2,
+            clearanceY: railHeightUsable ? (railViewport.h - h) / 2 : RAIL_SAFE_INSET_Y,
           };
         })()
       : null;
@@ -1057,46 +1072,37 @@ export default function ImageViewer({
               // aligns on both sides regardless of natural aspect.
               { cursor: PIN_CURSOR }
             : railFit
-              ? // RAIL SAFE FIT: explicit measured pixels, computed from the real
-                // viewport and the scan's own natural dimensions. No padding, so
-                // the frame box IS the rendered image box — which keeps the
-                // overlay contract (zoom-pan div == img box) exactly as before.
-                // RAIL SAFE FIT — the computed result, applied literally.
+              ? // RAIL SAFE FIT — the computed result, applied literally, IN FLOW.
                 //
-                // `position: absolute` at the computed offsets is what makes the fit
-                // deterministic rather than negotiated. An in-flow box carrying an
-                // explicit width becomes its ancestors' MIN-CONTENT width, and with
-                // `min-width: auto` anywhere up the chain that re-widens the rail,
-                // which re-measures the viewport, which re-widens the card. The
-                // reproduction latched at a 1066px card inside an 829px row and never
-                // converged. Out of flow, the card contributes nothing upward: the
-                // viewport's size is decided by the rail alone, and the card is placed
-                // into it. `left`/`top` ARE the clearances — the numbers reported on
-                // the diagnostic attributes are the same numbers CSS is given, so the
-                // measured rectangle and the computed rectangle cannot drift.
-                {
-                  position: "absolute",
-                  left: railFit.clearanceX,
-                  top: railFit.clearanceY,
-                  width: railFit.w,
-                  height: railFit.h,
-                }
+                // In flow is not incidental; it is the visibility guarantee. The
+                // previous pass positioned this absolutely, which took the card out
+                // of flow — and the card is the only thing in the rail with real
+                // height. Wherever the host's height is content-driven rather than
+                // definite, removing the card from flow collapsed the column to 0
+                // and the card disappeared entirely on the real /admin route.
+                //
+                // `flexShrink: 0` keeps the computed size exact; the viewport's
+                // `overflow-hidden` is what stops this explicit size propagating back
+                // up as an ancestor's min-content width (a flex item whose overflow
+                // is not visible has an automatic minimum size of 0), which is the
+                // feedback loop that made an in-flow explicit width oscillate before.
+                { width: railFit.w, height: railFit.h, flexShrink: 0 }
               : railFitEnabled
-                ? // Transient first paint only, before the viewport has been
-                  // measured or the scan's natural size is known.
+                ? // Not yet measurable — no viewport, or no natural size yet.
                   //
-                  // Out of flow here too, for the same reason as the fitted state.
-                  // An in-flow fallback sized by `max-width/max-height: 100%` has to
-                  // resolve those percentages against a viewport whose own width is
-                  // still being decided — a circular constraint the browser breaks by
-                  // falling back to the content's intrinsic size. The reproduction
-                  // showed the effect precisely: the frame took the scan's natural
-                  // 1200x1680, dragged the 45% rail out to 1318px, and the first
-                  // measurement was taken from that inflated box. `inset: 0` with
-                  // object-contain fills the viewport exactly, shows the whole scan,
-                  // and contributes nothing upward, so the first measurement is the
-                  // real one.
-                  { position: "absolute", inset: 0 }
+                  // This is the LAST-KNOWN-GOOD rendering path, deliberately: it is
+                  // the sizing the rail shipped with before this work, so the worst
+                  // case is the old appearance, never a blank rail. A fallback that
+                  // can only be reached when measurement fails must not itself be a
+                  // new, unproven layout. minWidth/minHeight are pinned to 0 so it
+                  // cannot contribute the scan's natural width upward.
+                  {
+                    aspectRatio: "5/7",
+                    maxWidth: "100%",
+                    maxHeight: "100%",
+                    minHeight: 0,
+                    minWidth: 0,
+                  }
                 : {
                     aspectRatio: "5/7",
                     maxHeight: maxH,
@@ -1125,7 +1131,7 @@ export default function ImageViewer({
               // so acceptance can be checked without inferring geometry from CSS.
               // They describe the rendered <img> box against the visible viewport
               // box — never a wrapper, never padding.
-              "data-card-fit-state": railFit ? "safe-fit" : "measuring",
+              "data-card-fit-state": railFit ? railFit.mode : "measuring",
               "data-card-natural-w": railNaturalDims?.w ?? "",
               "data-card-natural-h": railNaturalDims?.h ?? "",
               "data-card-rendered-w": railFit ? railFit.w.toFixed(1) : "",
@@ -1663,7 +1669,11 @@ export default function ImageViewer({
            */
           <div
             ref={railViewportRef}
-            className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"
+            // `overflow-hidden` is load-bearing: a flex item whose overflow is not
+            // `visible` has an automatic minimum size of 0, which is what stops the
+            // card's explicit width propagating upward as an ancestor's min-content
+            // width and re-inflating the rail on the next measurement.
+            className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden"
             data-testid="grading-card-viewport"
             data-card-viewport-w={railViewport?.w ?? ""}
             data-card-viewport-h={railViewport?.h ?? ""}
@@ -1676,11 +1686,25 @@ export default function ImageViewer({
           cardFrame
         )}
 
-        {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card
-          art. Right-aligned row directly under the image, matching the
-          existing "Mark Defects / Manual Crop" button row pattern. */}
-        <div className="mt-2 flex shrink-0 items-center justify-end">
-          <div className="flex items-center gap-0.5 bg-[var(--admin-panel2)] border border-[var(--admin-line-hard)] rounded-full px-1 py-0.5">
+        {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card art.
+          IN THE RAIL it is not rendered here at all: it lives in the top utility row
+          beside the Front/Back tabs (see renderZoomPill). Below the card it was a row
+          sibling that took ~110px out of the rail's width, and stacked under the card
+          it cost height. In a row that already exists it costs the card neither. */}
+        {railFitEnabled ? null : (
+          <div className="mt-2 flex shrink-0 items-center justify-end">{renderZoomPill()}</div>
+        )}
+      </>
+    );
+  }
+
+  /**
+   * The zoom control pill. Extracted so the rail can render it in the top utility
+   * row while every other layout keeps it where it was.
+   */
+  function renderZoomPill() {
+    return (
+      <div className="flex items-center gap-0.5 bg-[var(--admin-panel2)] border border-[var(--admin-line-hard)] rounded-full px-1 py-0.5">
             <button
               type="button"
               aria-label="Zoom out"
@@ -1721,9 +1745,7 @@ export default function ImageViewer({
                 <RotateCcw size={12} />
               </button>
             )}
-          </div>
-        </div>
-      </>
+      </div>
     );
   }
 
@@ -1890,9 +1912,20 @@ export default function ImageViewer({
       <style>{PULSE_CSS}</style>
 
       {fillHost ? (
-        <div className="flex shrink-0 items-center justify-between gap-3">
-          <div className="min-w-0">{renderTabs()}</div>
-          {topRowSlot ? <div className="shrink-0">{topRowSlot}</div> : null}
+        /* TOP UTILITY ROW — one compact row that owns every control that is not the
+           card: Front/Back and the zoom pill on the left, the ONE live certificate
+           preview on the far right. Everything here is `shrink-0`, so the row costs a
+           fixed height once and the card takes all the rest. Nothing in this row is
+           allowed to sit beside or beneath the card and take space from it. */
+        <div className="flex shrink-0 items-center justify-between gap-2" data-testid="grading-top-utility-row">
+          {/* Controls are shrink-0: they have a fixed intrinsic size and overlap their
+              neighbours if allowed to compress. The certificate absorbs the squeeze
+              instead — it is the one element here that scales cleanly. */}
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="shrink-0">{renderTabs()}</div>
+            <div className="shrink-0">{renderZoomPill()}</div>
+          </div>
+          {topRowSlot ? <div className="flex min-w-0 flex-1 justify-end">{topRowSlot}</div> : null}
         </div>
       ) : (
         renderTabs()
@@ -1943,16 +1976,10 @@ export default function ImageViewer({
           // the rectangle every clearance is measured against — it is measured directly
           // (ResizeObserver on railViewportRef) rather than inferred, and the fitted
           // image is centred inside it with a guaranteed safety inset on every edge.
-          // A COLUMN, not a row. renderImageArea returns the card viewport followed by the
-          // zoom toolbar; as a row the toolbar sat BESIDE the card and took ~110px out of
-          // the rail's width, which is the dark band beside the card in the owner's
-          // screenshots. Its own comment says it belongs "directly under the image", and
-          // stacking restores that: the card gets the rail's full width, and the leftover
-          // height it was already not using goes to the card instead of nothing.
-          //
-          // Column also fixes the card's height contract. The viewport's content is
-          // positioned, so in a row (`items-center`) it sized to 0 and the card vanished
-          // entirely; as a column child with `flex-1` it takes the real remaining height.
+          // The card region now contains ONLY the card. The zoom controls moved up into
+          // the top utility row, so nothing competes with the card for the rail's width
+          // (they took ~110px beside it) or for its height (they cost ~36px beneath it).
+          // The card gets the entire rail width below the header.
           <div className="flex min-h-0 flex-1 flex-col">{renderImageArea("100%")}</div>
         ) : (
           renderImageArea(525)

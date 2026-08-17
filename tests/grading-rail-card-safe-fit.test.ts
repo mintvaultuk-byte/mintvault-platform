@@ -65,7 +65,8 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
   it("computes the fit from the SCAN's own natural dimensions, not an assumed ratio", () => {
     // A scan that is not exactly 5:7 is precisely the case where assuming 5:7 pushes
     // real card content past the edge.
-    expect(VIEWER).toMatch(/Math\.min\(safeW \/ railNaturalDims\.w, safeH \/ railNaturalDims\.h\)/);
+    expect(VIEWER).toMatch(/const widthScale = safeW \/ railNaturalDims\.w;/);
+    expect(VIEWER).toMatch(/safeH \/ railNaturalDims\.h/);
     expect(VIEWER).toMatch(/setRailNaturalDims\(\{ w, h \}\)/);
   });
 
@@ -88,14 +89,37 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     expect(FIT_BRANCH).not.toMatch(/railFit\s*\?[\s\S]{0,400}maxHeight: maxH/);
   });
 
-  it("takes the card out of flow so its size cannot feed back into the rail's width", () => {
-    // An in-flow box with an explicit width becomes its ancestors' min-content width.
-    // With `min-width: auto` anywhere above, that re-widens the rail, which re-measures
-    // the viewport, which re-widens the card. The reproduction latched at a 1066px card
-    // inside an 829px row and never converged.
-    expect(FIT_BRANCH).toMatch(/position: "absolute"/);
-    expect(FIT_BRANCH).toMatch(/left: railFit\.clearanceX/);
-    expect(FIT_BRANCH).toMatch(/top: railFit\.clearanceY/);
+  it("KEEPS THE CARD IN FLOW — out of flow, the rail collapsed and the card vanished", () => {
+    // Owner P0, staging v491: the card image disappeared entirely from the real /admin
+    // rail. The card is the only element in the rail with real height; positioning it
+    // absolutely removed it from flow, and wherever the host's height is content-driven
+    // rather than definite the column collapsed to 0 and nothing rendered.
+    // Reproduced with host=auto: card invisible before, visible after.
+    expect(FIT_BRANCH).not.toMatch(/position: "absolute"/);
+    expect(FIT_BRANCH).toMatch(/flexShrink: 0/);
+  });
+
+  it("breaks the sizing feedback loop with overflow, not by leaving flow", () => {
+    // A flex item whose overflow is not `visible` has an automatic minimum size of 0,
+    // so the card's explicit width cannot become an ancestor's min-content width and
+    // re-inflate the rail on the next measurement.
+    expect(VIEWER).toMatch(/relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden/);
+  });
+
+  it("still fits by WIDTH when the viewport has no usable height", () => {
+    // If an ancestor's height is content-driven there is no available height to fit
+    // into — the card defines it. Treating a 0 height as authoritative is precisely
+    // what stranded the image invisible.
+    expect(VIEWER).toMatch(/const railHeightUsable = !!railViewport && railViewport\.h > RAIL_SAFE_INSET_Y \* 2;/);
+    expect(VIEWER).toMatch(/railHeightUsable\s*\?\s*Math\.min\(widthScale/);
+    expect(VIEWER).toMatch(/mode: railHeightUsable \? "safe-fit" : "width-fit"/);
+  });
+
+  it("falls back to the LAST-KNOWN-GOOD sizing, never to a blank rail", () => {
+    // A path only reachable when measurement fails must not itself be new and unproven.
+    expect(FIT_BRANCH).toMatch(/aspectRatio: "5\/7"/);
+    expect(FIT_BRANCH).toMatch(/maxWidth: "100%"/);
+    expect(FIT_BRANCH).not.toMatch(/inset: 0/);
   });
 
   it("NEVER decoratively clips the inspection image", () => {
@@ -117,13 +141,25 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     expect(VIEWER).toContain('"data-card-fit-state"');
   });
 
-  it("gives the card the rail's full width by stacking the zoom toolbar beneath it", () => {
-    // As a row, the toolbar sat beside the card and took ~110px out of the rail.
+  it("puts Front/Back, the zoom pill and the certificate in ONE top utility row", () => {
+    expect(VIEWER).toMatch(/data-testid="grading-top-utility-row"/);
+    const row = VIEWER.slice(
+      VIEWER.indexOf('data-testid="grading-top-utility-row"'),
+      VIEWER.indexOf("Reference comparison")
+    );
+    expect(row).toMatch(/renderTabs\(\)/);
+    expect(row).toMatch(/renderZoomPill\(\)/);
+    expect(row).toMatch(/topRowSlot/);
+  });
+
+  it("does NOT render the zoom toolbar beside or beneath the card in the rail", () => {
+    // Beside the card it took ~110px of rail width; beneath it, ~36px of height.
+    expect(VIEWER).toMatch(/railFitEnabled \? null : \(/);
     expect(VIEWER).toMatch(/<div className="flex min-h-0 flex-1 flex-col">\{renderImageArea\("100%"\)\}<\/div>/);
   });
 
   it("keeps the remaining-space contract that stops the card overflowing the host", () => {
-    expect(VIEWER).toMatch(/className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center"/);
+    expect(VIEWER).toMatch(/relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden/);
     expect(VIEWER).toMatch(/data-testid="grading-card-controls"/);
     expect(VIEWER).toMatch(/flex h-full min-h-0 flex-col gap-1/);
   });
