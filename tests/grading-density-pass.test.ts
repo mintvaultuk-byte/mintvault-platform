@@ -16,6 +16,7 @@ const FORM = read("client/src/components/certificate-form.tsx");
 const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
+const FOCUS_SURFACE = read("client/src/components/admin/admin-focus-surface.ts");
 const DRAWER = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
 const stripComments = (s: string) =>
@@ -96,7 +97,13 @@ describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("the grading page uses a page-scrollable focus shell + compact header (not the tall Edit header)", () => {
     // Bounded-height workstation: AdminShell focus mode + min-h-[100dvh] flex
     // column (page-scrollable, no clip), replacing the former max-w-6xl container.
-    expect(DASH).toContain("flex min-h-[100dvh] flex-col");
+    // The surface class moved into ADMIN_FOCUS_SURFACE_CLASS so /admin and the
+    // dev geometry harness that measures it cannot drift apart. Below `md` it is
+    // still min-height + auto height (page-scrollable, no clip); the `md:`
+    // tokens add the definite desktop height that replaced the guessed
+    // `calc(100dvh-4.5rem)` offset.
+    expect(DASH).toContain("ADMIN_FOCUS_SURFACE_CLASS");
+    expect(FOCUS_SURFACE).toContain("flex min-h-[100dvh] flex-col");
     // grading-header is now the shared AdminHeaderRow primitive, passed
     // testId="grading-header" (a prop, not a literal data-testid attribute).
     expect(DASH).toContain('testId="grading-header"');

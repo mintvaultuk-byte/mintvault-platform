@@ -16,6 +16,7 @@ const FORM = read("client/src/components/certificate-form.tsx");
 const WORKSTATION_SRC = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
 const SHELL = read("client/src/components/admin/admin-shell.tsx");
+const FOCUS_SURFACE = read("client/src/components/admin/admin-focus-surface.ts");
 // unified-shell pass: the preview aside and the header strip were extracted
 // into their own shared components.
 const ASIDE_SRC = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
@@ -65,15 +66,41 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // workstation's own flex-1 stayed inert and the shell's h-full resolved against
     // an auto-height ancestor — the missing-bound regression behind the PR #234
     // same-day production rollback. Both halves are now required.
-    // NO `flex-1` in this assertion, and that is the whole point. `flex-1` is
-    // `flex: 1 1 0%`, and on a flex ITEM flex-basis REPLACES height for main-axis
-    // sizing — so with it present the bound is computed and discarded and the item
-    // stretches to its auto-height parent. Measured in a real browser against the
-    // compiled CSS at 1280x800: with flex-1 the workspace was 2568px, the document
-    // scrolled, the right pane did NOT scroll internally and the Live Certificate
-    // Preview sat at y=2552. Without it: 728px, right pane scrolls, preview bottom
-    // 763px, document not scrollable. Same result at 1024x768 (696px / 731px).
-    expect(DASH).toMatch(/className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
+    // The bound is REAL, not guessed. It used to be `md:h-[calc(100dvh-4.5rem)]`:
+    // correct that a desktop bound is needed, wrong about the number. 4.5rem
+    // (72px) assumed the chrome above; the chrome measures 43px in the browser,
+    // and the ~29px difference is unreachable dead space — the black band the
+    // owner reported. No constant can be right here, because the header is a
+    // shared primitive whose height depends on its own content.
+    //
+    // So the subtraction is DELETED, not re-tuned: the surface carries the
+    // definite desktop height, the header is shrink-0, and the workstation is
+    // md:flex-1 md:min-h-0 — the browser does the subtraction.
+    //
+    // `flex-1` is safe here ONLY because the parent is now definite. The earlier
+    // "NO flex-1" rule was right for the old AUTO-height parent (with it, the
+    // workspace measured 2568px, the document scrolled, the right pane never
+    // scrolled internally and the Live Certificate Preview sat at y=2552). The
+    // two tokens are a PAIR — md:flex-1 without md:h-[100dvh] restores exactly
+    // that PR #234 regression, which is why both are asserted together.
+    expect(DASH).toContain("ADMIN_FOCUS_WORKSTATION_CLASS");
+    expect(FOCUS_SURFACE).toContain(
+      'ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"'
+    );
+    expect(FOCUS_SURFACE).toContain(
+      'ADMIN_FOCUS_SURFACE_CLASS = "flex min-h-[100dvh] flex-col p-2.5 md:h-[100dvh] md:min-h-0"'
+    );
+    // The guessed offset is gone from every SHIPPED class string. Scoped to the
+    // `export const ... = "..."` lines on purpose: the file's documentation
+    // quotes the old value to explain why it was wrong, and that prose must not
+    // be what keeps this assertion honest.
+    const shippedClassStrings = [...FOCUS_SURFACE.matchAll(/export const \w+ = "([^"]*)"/g)].map((m) => m[1]);
+    expect(shippedClassStrings).toHaveLength(3);
+    for (const cls of shippedClassStrings) {
+      expect(cls).not.toMatch(/calc\(/);
+      expect(cls).not.toMatch(/rem\)/);
+    }
+    expect(DASH).not.toMatch(/className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
     // The panels container is a flex row at md+ (column-stack below): 40% preview
     // aside on the left, flex-1 control panel on the right.
     expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
@@ -128,8 +155,13 @@ describe("5-6. fixed-height shell + internal scroll", () => {
     // grading-header is now the shared AdminHeaderRow primitive, passed
     // testId="grading-header" (a prop, not a literal data-testid attribute).
     expect(DASH).toContain('testId="grading-header"');
-    // min-height (not h-full) so the page can always scroll as a fallback.
-    expect(DASH).toContain("min-h-[100dvh] flex-col");
+    // Below `md` the surface keeps min-height with height AUTO so the page can
+    // always scroll — the documented PR #234 fallback. Every desktop-only token
+    // is md:-prefixed; an unconditional bound is what got PR #234 rolled back
+    // from production the same day.
+    expect(FOCUS_SURFACE).toContain("min-h-[100dvh]");
+    expect(FOCUS_SURFACE).toMatch(/md:h-\[100dvh\]/);
+    expect(FOCUS_SURFACE).toMatch(/md:flex-1/);
   });
   it("AdminShell focus mode hides the big admin-top header AND the sidebar", () => {
     expect(SHELL).toMatch(/focus\??:\s*boolean/);

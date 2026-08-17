@@ -31,6 +31,9 @@ const DevCanonicalWorkstationHarness = import.meta.env.DEV
 const DevCardDetailsHarness = import.meta.env.DEV
   ? lazy(() => import("@/pages/dev-card-details-harness"))
   : (null as unknown as ReturnType<typeof lazy>);
+const DevAdminShellGeometryHarness = import.meta.env.DEV
+  ? lazy(() => import("@/pages/dev-admin-shell-geometry-harness"))
+  : (null as unknown as ReturnType<typeof lazy>);
 const CertDetailPage = lazy(() => import("@/pages/cert-detail"));
 const WhyMintVaultPage = lazy(() => import("@/pages/why-mintvault"));
 const LabelsPage = lazy(() => import("@/pages/labels"));
@@ -396,6 +399,9 @@ function Router() {
             <Route path="/dev/canonical-workstation" component={DevCanonicalWorkstationHarness} />
           )}
           {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
+          {import.meta.env.DEV && (
+            <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />
+          )}
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />
           <Route path="/admin/graders" component={AdminStaffPage} />
