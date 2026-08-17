@@ -1273,6 +1273,16 @@ app.whenReady().then(async () => {
     if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
     heartbeatInFlight = true;
     try {
+      /*
+       * Adopt the server's capture rectangle on the heartbeat, not only when the operator opens the
+       * window. `stationSetupState()` runs on demand from the renderer, so a tray-only Scanner that
+       * nobody has clicked sits at `profile_unprovisioned` — unable to Preview or scan — while the
+       * server has held a VALID calibration for it the whole time. The station should be ready
+       * because it is enrolled, not because somebody looked at it.
+       *
+       * Cheap and idempotent: it returns immediately once the local origin already agrees.
+       */
+      if (!lide400._private.jigOrigin()) await stationSetupState();
       const result = await stationClient.heartbeat(heartbeatPayload());
       if (!result.ok) {
         console.warn(`[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`);
