@@ -143,6 +143,45 @@
     };
   }
 
+  /*
+   * PRESENTATION mm -> OPERATOR-FACING raster px. Flips Y, keeps X.
+   *
+   * WHY A SECOND CORRECTION. Removing the double rotation put the card on the correct SIDE, and
+   * left it on the wrong END. Measured against the live station: a card the operator sees at the
+   * BOTTOM-LEFT of the glass reports canonical (148.9, 204.6) — right/bottom — and presentation
+   * (3.5, 3.6) — left/top. Neither space is what the operator is looking at. The operator's view is
+   * (presentation.x, canonical.y) = (3.5, 204.6): left AND bottom.
+   *
+   * So the operator-facing view is not a rotation of the raw raster at all — it is a MIRROR. That
+   * is the correct physical answer for a flatbed: the operator looks DOWN through the glass at a
+   * card lying face-down, while the sensor images the same face from BELOW. Two observers on
+   * opposite sides of the glass disagree by a mirror, not by a turn. A 180-degree rotation happens
+   * to fix the end and breaks the side; this fixes both.
+   *
+   * Applied to the overlays AND to the preview image together — see `.positioning-preview` in
+   * styles.css — so the outline and the card it describes can never drift apart. If one of them
+   * ever gets this transform without the other, the overlay stops landing on the card, which is the
+   * class of bug this whole module now exists to make impossible.
+   */
+  function operatorRectToRasterRect(presentationRect, acquisitionAreaMm, previewRaster) {
+    const flat = presentationRectToRasterRect(presentationRect, acquisitionAreaMm, previewRaster);
+    const pixels = raster(previewRaster, "Preview raster");
+    return {
+      x: flat.x,
+      y: pixels.height - (flat.y + flat.height),
+      width: flat.width,
+      height: flat.height,
+    };
+  }
+
+  function operatorRectToContainedViewportRect(presentationRect, acquisitionAreaMm, sourceRaster, viewportRaster) {
+    return containedRasterRect(
+      operatorRectToRasterRect(presentationRect, acquisitionAreaMm, sourceRaster),
+      sourceRaster,
+      viewportRaster,
+    );
+  }
+
   function presentationRectToContainedViewportRect(presentationRect, acquisitionAreaMm, sourceRaster, viewportRaster) {
     return containedRasterRect(
       presentationRectToRasterRect(presentationRect, acquisitionAreaMm, sourceRaster),
@@ -166,6 +205,8 @@
     physicalRectToRasterRect,
     presentationRectToRasterRect,
     presentationRectToContainedViewportRect,
+    operatorRectToRasterRect,
+    operatorRectToContainedViewportRect,
     rasterRectToPhysicalRect,
     containedRasterRect,
     physicalRectToContainedViewportRect,

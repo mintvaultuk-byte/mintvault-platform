@@ -453,7 +453,7 @@ function positionPreviewOverlay(element, physicalRect, entry, className) {
     return;
   }
   try {
-    const mapped = transform.presentationRectToContainedViewportRect(
+    const mapped = transform.operatorRectToContainedViewportRect(
       physicalRect,
       area,
       { width: image.naturalWidth, height: image.naturalHeight },
@@ -504,7 +504,7 @@ function renderPositioningCardCrop(entry) {
   const bottom = Math.min(area.y + area.height, card.y + card.height + marginMm);
   if (right <= x || bottom <= y) return;
   try {
-    const crop = transform.presentationRectToRasterRect(
+    const crop = transform.operatorRectToRasterRect(
       { x, y, width: right - x, height: bottom - y },
       area,
       { width: image.naturalWidth, height: image.naturalHeight },

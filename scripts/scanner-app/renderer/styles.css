@@ -378,6 +378,13 @@ body {
   overflow: hidden;
   position: relative;
 }
+/* The operator-facing vertical flip.
+   Must stay in lockstep with operatorRectToRasterRect() in
+   lib/lide400-preview-transform.js: that function flips Y for the overlays,
+   this flips Y for the raster they sit on. Applying one without the other is
+   exactly how the outline stops landing on the card. The horizontal axis is
+   untouched — the 180-degree presentation raster already handles X. */
+.positioning-preview { transform: scaleY(-1); }
 .positioning-preview {
   display: block;
   height: 220px;
@@ -421,7 +428,7 @@ body {
   white-space: nowrap;
   width: max-content;
   position: absolute;
-  bottom: calc(100% + 3px);
+  bottom: calc(100% + 6px);
   left: 0;
   border-radius: 2px;
 }
@@ -429,7 +436,7 @@ body {
 .card-boundary-overlay[data-label-below] span,
 .acquisition-boundary-overlay[data-label-below] span {
   bottom: auto;
-  top: calc(100% + 3px);
+  top: calc(100% + 6px);
 }
 /* Near the right edge, right-align so the text stays inside the viewport. */
 .card-boundary-overlay[data-label-right] span,

@@ -30,6 +30,67 @@ const RASTER = { width: 2550, height: 3508 };
 const OBSERVED_CARD_PRESENTATION = { x: 3.466284403669725, y: 3.6301303703703702, width: 63.54854740061162, height: 88.77318814814814 };
 const OBSERVED_CARD_CANONICAL = { x: 148.88516819571868, y: 204.6073481481481, width: 63.548547400611625, height: 88.77318814814812 };
 
+describe("OPERATOR VIEW: all four physical quadrants land where the operator sees them", () => {
+  const RASTER_MID_X = RASTER.width / 2;
+  const RASTER_MID_Y = RASTER.height / 2;
+
+  function quadrantOf(mapped) {
+    const cx = mapped.x + mapped.width / 2;
+    const cy = mapped.y + mapped.height / 2;
+    return `${cy < RASTER_MID_Y ? "TOP" : "BOTTOM"}-${cx < RASTER_MID_X ? "LEFT" : "RIGHT"}`;
+  }
+
+  // Presentation-space rectangles for a card in each corner of the glass.
+  const NEAR = 20;
+  const W = OBSERVED_CARD_PRESENTATION.width;
+  const H = OBSERVED_CARD_PRESENTATION.height;
+  const corners = {
+    // Presentation TOP maps to operator BOTTOM (the Y flip), X is unchanged.
+    "BOTTOM-LEFT": { x: NEAR, y: NEAR, width: W, height: H },
+    "BOTTOM-RIGHT": { x: PLATEN.width - NEAR - W, y: NEAR, width: W, height: H },
+    "TOP-LEFT": { x: NEAR, y: PLATEN.height - NEAR - H, width: W, height: H },
+    "TOP-RIGHT": { x: PLATEN.width - NEAR - W, y: PLATEN.height - NEAR - H, width: W, height: H },
+  };
+
+  for (const [expected, rectMm] of Object.entries(corners)) {
+    test(`a card the operator sees ${expected} is drawn ${expected}`, () => {
+      const mapped = transform.operatorRectToRasterRect(rectMm, PLATEN, RASTER);
+      assert.strictEqual(quadrantOf(mapped), expected);
+    });
+  }
+
+  test("THE LIVE CARD: presentation (3.47, 3.63) draws BOTTOM-LEFT, where the operator sees it", () => {
+    const mapped = transform.operatorRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    assert.strictEqual(quadrantOf(mapped), "BOTTOM-LEFT");
+  });
+
+  test("the operator Y equals the CANONICAL y — proving this is a mirror, not a turn", () => {
+    const mapped = transform.operatorRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    const canonicalY = (OBSERVED_CARD_CANONICAL.y / PLATEN.height) * RASTER.height;
+    assert.ok(Math.abs(mapped.y - canonicalY) < 0.5, `operator y ${mapped.y} should equal canonical y ${canonicalY}`);
+    // X stays presentation, NOT canonical — that is the half the 180 rotation got right.
+    const presentationX = (OBSERVED_CARD_PRESENTATION.x / PLATEN.width) * RASTER.width;
+    assert.ok(Math.abs(mapped.x - presentationX) < 0.5);
+  });
+
+  test("the image carries the SAME vertical flip, so outline and card cannot diverge", () => {
+    const css = fs.readFileSync(path.join(__dirname, "..", "renderer", "styles.css"), "utf8");
+    assert.match(css, /\.positioning-preview\s*\{\s*transform:\s*scaleY\(-1\)/,
+      "the preview raster must be flipped in lockstep with operatorRectToRasterRect");
+  });
+
+  test("non-zero origins keep their operator position", () => {
+    for (const origin of [{ x: 20, y: 20 }, { x: 0, y: 0 }, { x: 5, y: 162 }, { x: 110.9, y: 5 }]) {
+      const win = { x: origin.x, y: origin.y, width: 100, height: 130 };
+      const mapped = transform.operatorRectToRasterRect(win, PLATEN, RASTER);
+      const expectedX = (origin.x / PLATEN.width) * RASTER.width;
+      const expectedY = RASTER.height - ((origin.y + 130) / PLATEN.height) * RASTER.height;
+      assert.ok(Math.abs(mapped.x - expectedX) < 0.001, `x ${mapped.x} != ${expectedX}`);
+      assert.ok(Math.abs(mapped.y - expectedY) < 0.001, `y ${mapped.y} != ${expectedY}`);
+    }
+  });
+});
+
 describe("presentation rectangles map without a second rotation", () => {
   test("a card on the physical LEFT is drawn on the LEFT", () => {
     const mapped = transform.presentationRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
