@@ -263,3 +263,44 @@ describe("nothing diagnostic can reach the evidence master", () => {
     assert.doesNotMatch(client, /sharp\(/, "the evidence path must not process pixels");
   });
 });
+
+describe("each raster gets the mapping that matches ITS OWN transform", () => {
+  /*
+   * The white-panel regression. #positioningFullPreview carries the operator mirror
+   * (scaleX(-1)); #positioningCardPreview does not. Giving the unmirrored crop the operator's
+   * Y-flipped rectangle cropped a region the card is not in, and the panel rendered blank.
+   *
+   * A mapping belongs to a RASTER, not to a concept.
+   */
+  const app = fs.readFileSync(path.join(__dirname, "..", "renderer", "app.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "renderer", "styles.css"), "utf8");
+
+  test("only the FULL-PLATEN image is mirrored", () => {
+    assert.match(css, /\.positioning-preview\s*\{[^}]*transform:\s*scaleX\(-1\)/);
+    const cropBlock = css.slice(css.indexOf(".positioning-card-preview"));
+    const cropRule = cropBlock.slice(0, cropBlock.indexOf("}"));
+    assert.doesNotMatch(cropRule, /transform:\s*scale/, "the card crop must stay unmirrored");
+  });
+
+  test("the crop is cropped in the raster's own (canonical) space", () => {
+    const cropFn = app.slice(app.indexOf("function renderPositioningCardCrop"));
+    const body = cropFn.slice(0, cropFn.indexOf("\n}"));
+    assert.match(body, /physicalRectToRasterRect/, "unmirrored raster needs the canonical mapping");
+    assert.doesNotMatch(body, /operatorRectTo/, "the operator mapping would crop empty platen");
+  });
+
+  test("the mirrored full platen keeps the operator mapping for its overlays", () => {
+    const overlayFn = app.slice(app.indexOf("function positionPreviewOverlay"));
+    const body = overlayFn.slice(0, overlayFn.indexOf("\n}"));
+    assert.match(body, /operatorRectToContainedViewportRect/);
+  });
+
+  test("the crop actually contains the detected card", () => {
+    // Card at canonical bottom-right; canonical mapping must land inside the raster, on the card.
+    const crop = transform.physicalRectToRasterRect(OBSERVED_CARD_PRESENTATION, PLATEN, RASTER);
+    const cardCanonX = (OBSERVED_CARD_CANONICAL.x / PLATEN.width) * RASTER.width;
+    const cardCanonY = (OBSERVED_CARD_CANONICAL.y / PLATEN.height) * RASTER.height;
+    assert.ok(Math.abs(crop.x - cardCanonX) < 1, `crop x ${crop.x} must sit on the card at ${cardCanonX}`);
+    assert.ok(Math.abs(crop.y - cardCanonY) < 1, `crop y ${crop.y} must sit on the card at ${cardCanonY}`);
+  });
+});

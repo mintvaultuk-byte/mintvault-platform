@@ -504,7 +504,21 @@ function renderPositioningCardCrop(entry) {
   const bottom = Math.min(area.y + area.height, card.y + card.height + marginMm);
   if (right <= x || bottom <= y) return;
   try {
-    const crop = transform.operatorRectToRasterRect(
+    /*
+     * THE CROP USES THE CANONICAL MAPPING, NOT THE OPERATOR ONE.
+     *
+     * This <img> is #positioningCardPreview, a DIFFERENT element from the full-platen
+     * #positioningFullPreview. Only the full platen carries the operator mirror
+     * (`.positioning-preview { transform: scaleX(-1) }`); this one is unmirrored, so it must be
+     * cropped in the raster's own space. Feeding it the operator (Y-flipped) rectangle cropped a
+     * region the card is not in, and the panel rendered as blank white platen — which is exactly
+     * what the operator saw after the last change.
+     *
+     * The rule this encodes: a mapping belongs to a RASTER, not to a concept. Two <img> elements
+     * with different transforms need different mappings, and the pairing has to be stated at the
+     * call site or it drifts the moment one of them moves.
+     */
+    const crop = transform.physicalRectToRasterRect(
       { x, y, width: right - x, height: bottom - y },
       area,
       { width: image.naturalWidth, height: image.naturalHeight },
