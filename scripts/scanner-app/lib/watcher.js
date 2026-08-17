@@ -21,11 +21,18 @@ const { EventEmitter } = require("node:events");
 
 const stateMod   = require("./state");
 const server     = require("./server-client");
+// The station-signed API. Used here only to record a calibration — the capture
+// window's server-side authority — never for evidence.
+const stationClient = require("./station-client");
 const backDetect = require("./back-detect");
 const lide400    = require("./lide400-controller");
 const cardFrame  = require("./lide400-card-frame");
 const { detectCardBounds, derivePlacementProposal } = require("./lide400-card-detection");
-const { COORDINATE_SPACE, assertUprightOrientation } = require("./lide400-preview-transform");
+const { COORDINATE_SPACE, assertUprightOrientation, physicalRectToRasterRect } = require("./lide400-preview-transform");
+/** The canonical detector and the canonical capture geometry — the same two the server uses. */
+const { detectLide400CardBounds } = require("../../../shared/lide400-card-geometry.cjs");
+const captureProfile = require("../../../shared/lide400-capture-profile.cjs");
+const { matchPlacementApproval, PLACEMENT_APPROVAL_TTL_MS } = require("./placement-approval");
 
 // BASE is overridable via MINTVAULT_SCANS_DIR so an isolated TEST instance can
 // run on the same Mac without clobbering the live scanner's inbox / processed /
@@ -40,6 +47,9 @@ const CAPTURE_STAGING = path.join(BASE, "capture-staging");
 // Local-only setup Preview JPEGs. This directory is never watched by the
 // retired hot-folder path and never appears in a server/evidence request.
 const POSITIONING_PREVIEW = path.join(BASE, "positioning-preview");
+// Local-only PER-SIDE placement Preview JPEGs. Same rules: never watched, never
+// uploaded, never evidence — they only decide whether SCAN may be pressed.
+const PLACEMENT_PREVIEW = path.join(BASE, "placement-preview");
 // Direct ImageCaptureCore output is intentionally kept outside the legacy
 // hot-folder queue.  A completed physical scan is valuable evidence even when
 // the app or network dies before the server's acknowledgement arrives.
@@ -119,12 +129,13 @@ class Watcher extends EventEmitter {
     this.targetCaptureInFlight = false;
     this.previewActionInFlight = false;
     this.positioningPreviewInFlight = false;
+    this.placementPreviewInFlight = false;
     this.lastScannerHealthAt = 0;
     this.scannerHealthPromise = null;
   }
 
   async start() {
-    for (const dir of [BASE, INBOX, PROCESSED, FAILED, REJECTED, DISCARDED, CAPTURE_STAGING, POSITIONING_PREVIEW]) {
+    for (const dir of [BASE, INBOX, PROCESSED, FAILED, REJECTED, DISCARDED, CAPTURE_STAGING, POSITIONING_PREVIEW, PLACEMENT_PREVIEW]) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
@@ -521,6 +532,255 @@ class Watcher extends EventEmitter {
     };
   }
 
+  // ── Per-side placement gate: fast 300-DPI preview → RED/GREEN → SCAN ──────
+  //
+  // The gate the operator actually lives in. Until now a misplacement cost a full 1200-DPI capture —
+  // 45 seconds, measured — because placement was only assessed AFTER the scan. Four of the eight
+  // preserved masters of 2026-08-17 were discarded exactly that way.
+  //
+  // NOTHING HERE IS EVIDENCE. It produces a JPEG, never a TIFF; it never uploads; and a GREEN verdict
+  // grants nothing except permission to press SCAN. The server still re-derives geometry from the
+  // immutable master and applies the 4 mm floor itself.
+
+  /**
+   * Analyse a placement preview in CANONICAL coordinates.
+   *
+   * DELIBERATELY DOES NOT ROTATE, unlike `analysePositioningPreview` above. The 180-degree platen
+   * inversion is a PRESENTATION concern and belongs only in the display path; applying it here would
+   * put the gate's card bounds in a different space from the server's, which is the exact class of
+   * defect that reported one physical card at two positions and cost a 52-second scan.
+   */
+  async analysePlacementPreview(sourcePath, areaMm) {
+    const sharp = require("sharp");
+    const image = sharp(sourcePath, { limitInputPixels: false });
+    const metadata = await image.metadata();
+    if (!metadata.width || !metadata.height) throw new Error("Placement preview could not be decoded");
+    const orientation = assertUprightOrientation(metadata.orientation);
+    const { data, info } = await image
+      .clone()
+      .resize({
+        width: Math.min(POSITIONING_PREVIEW_MAX_EDGE_PX, metadata.width),
+        height: POSITIONING_PREVIEW_MAX_EDGE_PX,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (info.channels !== 3) throw new Error("Placement preview requires RGB scanner pixels");
+    const detected = detectLide400CardBounds(new Uint8Array(data), info.width, info.height, info.channels, {
+      width: areaMm.width,
+      height: areaMm.height,
+    });
+    const verdict = captureProfile.evaluatePlacement(detected ? detected.cardBoundsMm : null);
+    return {
+      image: {
+        width: metadata.width,
+        height: metadata.height,
+        orientation,
+        coordinateSpace: captureProfile.COORDINATE_SPACE,
+      },
+      detected,
+      verdict,
+    };
+  }
+
+  /** Operator-facing derivative. This is the ONLY place the 180-degree inversion is applied. */
+  async createPlacementPreviewDisplay(sourcePath, previewPath) {
+    const sharp = require("sharp");
+    const info = await sharp(sourcePath, { limitInputPixels: false })
+      .rotate(180)
+      .resize(POSITIONING_PREVIEW_MAX_EDGE_PX, POSITIONING_PREVIEW_MAX_EDGE_PX, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 86, mozjpeg: true })
+      .toFile(previewPath);
+    const stat = fs.statSync(previewPath);
+    if (!stat.isFile() || stat.size < 4 || stat.size > PREVIEW_MAX_BYTES) {
+      throw new Error("Placement preview is unreadable or exceeds the station limit");
+    }
+    return { path: previewPath, image: { width: info.width, height: info.height, orientation: 1, format: "jpeg" } };
+  }
+
+  /**
+   * Overlay rectangles for the renderer, in the DISPLAY raster's own space.
+   *
+   * The safe window is centred, so it is its own 180-degree image and needs no transform — proved at
+   * load time by `assertSafeWindowIsRotationInvariant`, not assumed here. The detected CARD is not
+   * centred, so its rectangle is mapped through the one named presentation boundary.
+   */
+  placementOverlay(detected, areaMm, displayRaster) {
+    const safe = captureProfile.safeWindowRectMm();
+    const window = { x: 0, y: 0, width: areaMm.width, height: areaMm.height };
+    /*
+     * Emitted as PERCENTAGES of the capture window, not pixels. The renderer scales one fixed-aspect
+     * viewport, so a percentage stays correct at any preview resolution or window size, and the UI
+     * never has to know the raster dimensions to draw a box in the right place.
+     */
+    const toPercent = (rectMm) => {
+      const raster = physicalRectToRasterRect(rectMm, window, displayRaster);
+      return {
+        left: (100 * raster.x) / displayRaster.width,
+        top: (100 * raster.y) / displayRaster.height,
+        width: (100 * raster.width) / displayRaster.width,
+        height: (100 * raster.height) / displayRaster.height,
+      };
+    };
+    return {
+      aspectRatio: areaMm.width / areaMm.height,
+      outerWindow: toPercent({ x: 0, y: 0, width: areaMm.width, height: areaMm.height }),
+      safeWindow: toPercent(safe),
+      card: detected ? toPercent(detected.cardBoundsMm) : null,
+    };
+  }
+
+  placementApproval() {
+    return stateMod.get().placementApproval || null;
+  }
+
+  /**
+   * Drop any standing placement approval.
+   *
+   * Called whenever the world the approval described stops being true: a side is accepted, a target
+   * is armed or released, a capture starts. An approval that outlives its own side is precisely how
+   * a FRONT preview would come to authorise a BACK capture.
+   */
+  clearPlacementApproval(reason) {
+    if (!stateMod.get().placementApproval) return;
+    stateMod.set({ placementApproval: null });
+    this.log(`placement-gate ${JSON.stringify({ stage: "cleared", reason: reason || "superseded" })}`);
+  }
+
+  /**
+   * Is there a live GREEN approval for exactly this session and side?
+   *
+   * Four independent conditions, all required. Any one of them failing means the operator must take
+   * a fresh preview — there is no path here that upgrades a weaker approval into a usable one.
+   */
+  placementApprovalFor(entry) {
+    const approval = this.placementApproval();
+    const match = matchPlacementApproval(approval, entry, Date.now(), PLACEMENT_APPROVAL_TTL_MS);
+    if (!match.ok) return { ok: false, error: match.error, code: match.code };
+    return { ok: true, approval };
+  }
+
+  /**
+   * Run the per-side placement gate.
+   *
+   * Refuses unless a target is genuinely awaiting Scan, so this can never be used as a general
+   * scanner-poking tool, and so the resulting approval is always bound to a real armed side.
+   */
+  async runPlacementPreview() {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.placementPreviewInFlight) {
+      return { ok: false, error: "Preview is unavailable while another scan or Preview is in progress" };
+    }
+    const entry = this.activeTargetEntry();
+    if (!entry || entry.phase !== "awaiting_scan") {
+      return { ok: false, error: "No card side is awaiting Scan" };
+    }
+    if (stateMod.get().scannerHealth?.status !== "ready") {
+      return { ok: false, error: "Canon LiDE 400 is not ready for a placement Preview" };
+    }
+    this.placementPreviewInFlight = true;
+    // The previous approval dies the moment a new preview starts. If this one fails, the operator is
+    // left with NO approval rather than the last good one, which is the safe direction to fail in.
+    this.clearPlacementApproval("new placement preview started");
+    const id = crypto.randomUUID();
+    const directory = path.join(PLACEMENT_PREVIEW, id);
+    try {
+      fs.mkdirSync(directory, { recursive: true });
+      stateMod.set({ placementPreview: { id, status: "scanning", certId: entry.certId, side: entry.side, startedAt: new Date().toISOString() } });
+      this.emitState();
+      this.log(`placement-gate ${JSON.stringify({ id, stage: "started", certId: entry.certId, side: entry.side })}`);
+
+      const capture = await lide400.placementPreview(directory);
+      const displayPath = path.join(directory, `${id}.display.jpg`);
+      const [analysis, display] = await Promise.all([
+        this.analysePlacementPreview(capture.path, capture.areaMm),
+        this.createPlacementPreviewDisplay(capture.path, displayPath),
+      ]);
+      const verdict = analysis.verdict;
+      const green = verdict.state === captureProfile.PLACEMENT.READY;
+
+      /*
+       * The approval is written ONLY on GREEN, and only for this session and side. A RED preview
+       * records its verdict for the operator but leaves the station with no approval at all.
+       */
+      stateMod.set({
+        placementPreview: {
+          id,
+          status: green ? "ready" : "reposition",
+          certId: entry.certId,
+          side: entry.side,
+          previewPath: display.path,
+          capturedAt: capture.capturedAt,
+          areaMm: capture.areaMm,
+          originMm: capture.originMm,
+          verdict,
+          overlay: this.placementOverlay(analysis.detected, capture.areaMm, display.image),
+        },
+        placementApproval: green
+          ? {
+              id,
+              sessionId: entry.sessionId,
+              certId: entry.certId,
+              side: entry.side,
+              state: verdict.state,
+              message: verdict.message,
+              approvedAtMs: Date.now(),
+              cardBoundsMm: verdict.cardBoundsMm,
+              minMarginMm: verdict.minMarginMm,
+              areaMm: capture.areaMm,
+              originMm: capture.originMm,
+              profileVersion: verdict.profileVersion,
+            }
+          : null,
+      });
+      this.emitState();
+      this.log(
+        `placement-gate ${JSON.stringify({
+          id,
+          stage: "evaluated",
+          certId: entry.certId,
+          side: entry.side,
+          state: verdict.state,
+          code: verdict.code,
+          cardMm: verdict.cardBoundsMm,
+          minMarginMm: verdict.minMarginMm,
+        })}`
+      );
+      return { ok: true, previewId: id, state: verdict.state, message: verdict.message };
+    } catch (error) {
+      const message = error.message || String(error);
+      stateMod.set({
+        placementPreview: { id, status: "failed", certId: entry.certId, side: entry.side, error: message },
+        placementApproval: null,
+      });
+      this.emitState();
+      this.log(`placement-gate failed: ${message}`, "warn");
+      return { ok: false, error: message };
+    } finally {
+      this.placementPreviewInFlight = false;
+    }
+  }
+
+  placementPreviewData(previewId) {
+    const entry = stateMod.get().placementPreview;
+    if (!entry || entry.id !== previewId || !["ready", "reposition"].includes(entry.status)) {
+      return { ok: false, error: "Placement preview is stale or unavailable" };
+    }
+    const root = path.resolve(PLACEMENT_PREVIEW) + path.sep;
+    const previewPath = path.resolve(String(entry.previewPath || ""));
+    if (!previewPath.startsWith(root) || ![".jpg", ".jpeg"].includes(path.extname(previewPath).toLowerCase())) {
+      return { ok: false, error: "Placement preview path is invalid" };
+    }
+    try {
+      const stat = fs.statSync(previewPath);
+      if (!stat.isFile() || stat.size < 4 || stat.size > PREVIEW_MAX_BYTES) throw new Error("Placement preview file is unavailable");
+      return { ok: true, previewId, dataUrl: `data:image/jpeg;base64,${fs.readFileSync(previewPath).toString("base64")}` };
+    } catch (error) {
+      return { ok: false, error: error.message || "Placement preview file is unavailable" };
+    }
+  }
+
   storedPositioningPreviewSource(entry) {
     const root = path.resolve(POSITIONING_PREVIEW) + path.sep;
     const displayPath = path.resolve(String(entry?.previewPath || ""));
@@ -710,6 +970,111 @@ class Watcher extends EventEmitter {
     } catch (error) {
       return { ok: false, error: error?.message || String(error) };
     }
+  }
+
+  /**
+   * MOVE THE CAPTURE WINDOW — the one-time station setup action.
+   *
+   * WHY THIS REPLACES AUTO-DERIVATION. `applyPositioningPreview` above infers the window origin from
+   * wherever a card happened to be lying during setup. That is how the live station came to be
+   * calibrated to (0, 0): the platen ORIGIN, which is exactly where the LiDE's bezel band sits, and
+   * which left the card corner-registered with 3 mm of background on two edges and 33 mm wasted on
+   * the other two. The operator now places the window deliberately instead of a card placing it for
+   * them.
+   *
+   * PERSISTED IN BOTH AUTHORITIES. Locally, so the bridge can request the rectangle; and in the
+   * station calibration record, which is what the server will validate captures against. A local-only
+   * save is how a station and a server come to disagree about which rectangle was scanned.
+   */
+  async saveCaptureWindowOrigin(originMm) {
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.placementPreviewInFlight) {
+      return { ok: false, error: "The capture window cannot be moved while scanner work is in progress" };
+    }
+    /*
+     * REFUSED WHILE A CARD IS OPEN. Moving the window mid-card would mean the FRONT already captured
+     * and the BACK about to be captured came from two different physical rectangles.
+     */
+    if (this.activeTargetEntry()) {
+      return { ok: false, error: "Finish or release the current card before moving the capture window" };
+    }
+    let bounded;
+    try {
+      bounded = captureProfile.clampCaptureOriginMm(originMm);
+    } catch (error) {
+      return { ok: false, error: error?.message || "Capture window origin is invalid" };
+    }
+    if (bounded.clamped) {
+      return {
+        ok: false,
+        error:
+          `The capture window must stay on the platen (X ${bounded.boundsMm.minX}–${bounded.boundsMm.maxX} mm, ` +
+          `Y ${bounded.boundsMm.minY}–${bounded.boundsMm.maxY} mm)`,
+      };
+    }
+    const profile = captureProfile.STANDARD_TCG;
+    const rect = captureProfile.captureWindowRectMm(bounded.originMm);
+    let persisted;
+    try {
+      persisted = lide400.persistJigOrigin(bounded.originMm);
+    } catch (error) {
+      return { ok: false, error: error?.message || "Capture window could not be saved on this Mac" };
+    }
+    // Any standing approval was measured against the OLD window and is now meaningless.
+    this.clearPlacementApproval("capture window moved");
+
+    /*
+     * The server record is reported, never silently swallowed. A station whose local window moved but
+     * whose calibration authority still describes the old one is exactly the divergence this save
+     * exists to prevent, so the operator is told plainly if the second half did not land.
+     */
+    let calibration = { saved: false, error: null };
+    try {
+      const health = stateMod.get().scannerHealth || {};
+      const response = await stationClient.saveCalibration({
+        scannerHardware: {
+          manufacturer: "Canon",
+          model: health.model || "Canon LiDE 400",
+          serial: health.serial || null,
+          deviceId: lide400.deviceId(),
+        },
+        scannerProfileVersion: lide400.PROFILE_VERSION,
+        acquisitionRegion: rect,
+        workingRegion: {
+          x: rect.x + profile.operatorInsetMm,
+          y: rect.y + profile.operatorInsetMm,
+          width: profile.safeWindowMm.width,
+          height: profile.safeWindowMm.height,
+        },
+        placementToleranceMm: {
+          left: profile.operatorInsetMm,
+          top: profile.operatorInsetMm,
+          right: profile.operatorInsetMm,
+          bottom: profile.operatorInsetMm,
+        },
+        calibrationVersion: profile.version,
+      });
+      if (response?.ok) calibration = { saved: true, error: null };
+      else calibration = { saved: false, error: response?.body?.error || `Calibration was not recorded — HTTP ${response?.status}` };
+    } catch (error) {
+      calibration = { saved: false, error: error?.message || "Calibration could not be recorded" };
+    }
+
+    stateMod.set({
+      positioningPreview: null,
+      lastError: calibration.saved ? null : calibration.error,
+    });
+    this.emitState();
+    this.log(
+      `capture-window ${JSON.stringify({
+        stage: "saved",
+        originMm: bounded.originMm,
+        areaMm: profile.outerWindowMm,
+        safeWindowMm: profile.safeWindowMm,
+        profileVersion: profile.version,
+        calibrationRecorded: calibration.saved,
+      })}`
+    );
+    return { ok: true, persisted, rectMm: rect, calibration };
   }
 
   previewData(previewId) {
@@ -1297,13 +1662,14 @@ class Watcher extends EventEmitter {
     if (active?.certId === target) {
       stateMod.set({ state: "idle", activeCapture: null, lastError: null });
     }
+    this.clearPlacementApproval(`card ${target} cancelled`);
     this.emitState();
     return { ok: true, released: true };
   }
 
   async scanActiveTarget() {
-    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) {
-      return { ok: false, error: "A scan, Accept, Rescan, or positioning Preview action is already in progress" };
+    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.placementPreviewInFlight) {
+      return { ok: false, error: "A scan, Accept, Rescan, or Preview action is already in progress" };
     }
     const current = this.activeTargetEntry();
     if (!current || current.phase !== "awaiting_scan") {
@@ -1312,10 +1678,24 @@ class Watcher extends EventEmitter {
     if (stateMod.get().scannerHealth?.status !== "ready") {
       return { ok: false, error: "Canon LiDE 400 is not ready for a locked-profile scan" };
     }
+    /*
+     * THE PLACEMENT GATE. No fresh GREEN placement approval for THIS session and THIS side, no scan.
+     *
+     * Checked here rather than only in the renderer because the renderer's disabled button is a
+     * convenience, not a control: this method is reachable over IPC. The approval must name the same
+     * session, side and MV number, and must be inside its TTL.
+     */
+    const gate = this.placementApprovalFor(current);
+    if (!gate.ok) return { ok: false, error: gate.error };
     // Claim the local single-flight guard before the first await. Otherwise
     // two rapid IPC clicks can both observe `awaiting_scan` and start two
     // physical scans while the device-bound keepalive resolves.
     this.targetCaptureInFlight = true;
+    /*
+     * CONSUME the approval as the capture begins. One preview authorises exactly one capture: a
+     * retry, a second side, or a second press all require the operator to look at the glass again.
+     */
+    this.clearPlacementApproval(`consumed by ${current.certId} ${current.side} capture`);
     try {
       const kept = await this.keepTargetAlive(current);
       if (!kept.ok) return { ok: false, error: kept.error || "Capture target can no longer be used" };
@@ -1407,6 +1787,13 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "This TIFF did not pass the four-side card-boundary safety check and cannot be accepted" };
     }
     this.previewActionInFlight = true;
+    /*
+     * Accepting a side ends any placement approval outright. `placementApprovalFor` would already
+     * refuse a FRONT approval for a BACK capture — the binding is on session AND side — but the rule
+     * "a FRONT preview never authorises BACK" matters enough to be enforced where it is legible,
+     * rather than left as an inference from a comparison three functions away.
+     */
+    this.clearPlacementApproval(`${current.certId} ${current.side} accepted`);
     try {
       const truth = await this.reconcileTargetedCapture(current);
       if (truth.accepted) return this.completeTargetedCapture(current, truth.capture);

@@ -1,5 +1,6 @@
 import type { ScannerEvidenceInspection } from "./image-evidence";
 import { LIDE_400_PRESENTATION_ROTATION_DEGREES } from "./lide400-presentation";
+import { STANDARD_TCG, PLATEN_MM, MIN_PLATEN_INSET_MM } from "@shared/lide400-capture-profile.cjs";
 
 /**
  * The only production profile accepted from the LiDE control bridge.  The
@@ -24,7 +25,9 @@ export const CANON_LIDE_400_PROFILE = Object.freeze({
   // Presentation derivatives only. The immutable TIFF keeps its exact
   // scanner-produced bytes and orientation for provenance.
   presentationRotationDegrees: LIDE_400_PRESENTATION_ROTATION_DEGREES,
-  areaMm: Object.freeze({ width: 100, height: 130 }),
+  // Sourced from the canonical capture profile the Scanner requests its rectangle from, so the
+  // station and the server can never hold two different ideas of how big the capture window is.
+  areaMm: STANDARD_TCG.outerWindowMm,
   // Actual ICA output can differ by a few pixels because the driver rounds the
   // physical rectangle to native sensor coordinates.  This is a geometry check
   // in addition to (never instead of) decoded DPI metadata.
@@ -121,6 +124,28 @@ export function assertLide400Evidence(
   }
   if (provenance.scanAreaMm.width !== profile.areaMm.width || provenance.scanAreaMm.height !== profile.areaMm.height) {
     throw new Error("LiDE 400 capture does not use the locked MintVault acquisition area");
+  }
+  /*
+   * A CHEAP SHAPE CHECK ON THE DECLARED ORIGIN — NOT THE AUTHORITY.
+   *
+   * The authority is `lide400-capture-authority`: the acquisition rectangle snapshotted onto the
+   * capture session from the station's current VALID calibration, which the evidence path uses
+   * INSTEAD of anything in this provenance. The declared origin is separately required to agree with
+   * that snapshot.
+   *
+   * This check stays because it is free and it rejects a structurally impossible claim early, with a
+   * clearer message than a mismatch against a specific station's window would give. It must never be
+   * mistaken for the thing that makes the origin trustworthy — on its own it would happily accept
+   * 20,20 from a station calibrated to 60,40.
+   */
+  const { x, y } = provenance.scanAreaMm;
+  const maxX = PLATEN_MM.width - profile.areaMm.width - MIN_PLATEN_INSET_MM;
+  const maxY = PLATEN_MM.height - profile.areaMm.height - MIN_PLATEN_INSET_MM;
+  if (x < MIN_PLATEN_INSET_MM || x > maxX || y < MIN_PLATEN_INSET_MM || y > maxY) {
+    throw new Error(
+      `LiDE 400 capture window origin ${x}, ${y} mm is not a valid position on the platen ` +
+        `(X ${MIN_PLATEN_INSET_MM}-${maxX} mm, Y ${MIN_PLATEN_INSET_MM}-${maxY} mm)`
+    );
   }
   if (inspection.evidenceClass !== "NEW_IMMUTABLE_MASTER" || inspection.format !== "tiff") {
     throw new Error("LiDE 400 capture must be an original TIFF master");

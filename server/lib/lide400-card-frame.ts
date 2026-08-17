@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { detectLide400CardBounds } from "@shared/lide400-card-geometry.cjs";
+import { STANDARD_TCG } from "@shared/lide400-capture-profile.cjs";
 import type { ScannerEvidenceInspection } from "./image-evidence";
 
 /**
@@ -8,7 +9,17 @@ import type { ScannerEvidenceInspection } from "./image-evidence";
  * master nor treats a downstream working crop as proof that the hardware frame
  * contained all four card edges.
  */
-export const LIDE_400_MIN_EVIDENCE_MARGIN_MM = 4;
+/**
+ * THE ABSOLUTE EVIDENCE FLOOR. 4 mm, unchanged, and deliberately NOT the 10 mm the operator is
+ * guided to. The placement gate's safe zone gives staff real latitude; this decides whether a
+ * captured master is admissible. A green preview never reaches this number — the server re-derives
+ * the geometry from the immutable master and applies it here, on its own.
+ */
+export const LIDE_400_MIN_EVIDENCE_MARGIN_MM = STANDARD_TCG.evidenceMinMarginMm;
+/**
+ * Outer sanity bound: is this a card-shaped object at all. Deliberately wider than any one profile,
+ * and checked first so an obviously wrong object gets an obviously right error message.
+ */
 const CARD_WIDTH_MM = { min: 55, max: 78 } as const;
 const CARD_HEIGHT_MM = { min: 80, max: 105 } as const;
 const DETECTION_MAX_EDGE_PX = 1800;
@@ -84,13 +95,7 @@ export async function assessLide400CardFrame(
      * NOTHING BELOW IS RELAXED. The plausibility window and the 4 mm evidence margin are byte-for-
      * byte the rules they were; only the measurement handed to them changed.
      */
-    const detected = detectLide400CardBounds(
-      new Uint8Array(data),
-      info.width,
-      info.height,
-      info.channels,
-      acquisition
-    );
+    const detected = detectLide400CardBounds(new Uint8Array(data), info.width, info.height, info.channels, acquisition);
     if (!detected)
       return rejected(
         "Card edges could not be determined inside the acquired frame; rescan with clear scanner background on all sides"
@@ -131,6 +136,32 @@ export async function assessLide400CardFrame(
         ...common,
       };
     }
+    /*
+     * PROFILE CONFORMANCE, after the outer sanity bound and before the margin rule.
+     *
+     * The Standard TCG profile declares 62.5-65.0 x 87.5-90.5 mm, and the placement gate refuses to
+     * go green outside it. Enforcing the same range here is what stops the two from drifting: a
+     * client-side-only range would be a rule the server does not actually hold, and every one of
+     * those eventually gets bypassed. All eight preserved masters of 2026-08-17 measure
+     * 63.27-63.85 x 88.75-89.18 mm and pass comfortably.
+     */
+    const range = STANDARD_TCG.cardMm;
+    if (
+      cardBoundsMm.width < range.minWidth ||
+      cardBoundsMm.width > range.maxWidth ||
+      cardBoundsMm.height < range.minHeight ||
+      cardBoundsMm.height > range.maxHeight
+    ) {
+      return {
+        accepted: false,
+        reason:
+          `Detected card (${cardBoundsMm.width.toFixed(1)} x ${cardBoundsMm.height.toFixed(1)} mm) is outside the ` +
+          `${STANDARD_TCG.label} profile range (${range.minWidth}-${range.maxWidth} x ${range.minHeight}-${range.maxHeight} mm); ` +
+          `use the correct card profile`,
+        ...common,
+      };
+    }
+
     const closestMargin = Math.min(...Object.values(evidenceMarginMm));
     if (closestMargin < LIDE_400_MIN_EVIDENCE_MARGIN_MM) {
       return {

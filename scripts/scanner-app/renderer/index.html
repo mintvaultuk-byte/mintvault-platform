@@ -122,6 +122,30 @@
       <p class="hint" id="positioningHint">Preview is a local placement check only. It never becomes card evidence.</p>
       <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
     </div>
+    <!--
+      THE PER-SIDE PLACEMENT GATE.
+
+      The whole panel is one traffic light. `data-placement-state` is GREEN or RED and drives every
+      colour below it, so there is no route to a green outline with a red message. The two boxes are
+      deliberately different things: the SAFE BOX is where the card must go, the CARD BOX is where
+      the card actually is — showing both is what makes "it is 3 mm too far left" self-evident
+      without printing a single millimetre on screen.
+    -->
+    <div class="placement-panel" id="placementPanel" hidden>
+      <div class="placement-viewport" id="placementViewport">
+        <img class="placement-preview" id="placementPreview" alt="Placement preview of the scanner capture window" />
+        <div class="placement-box placement-box--outer" id="placementOuterBox" hidden></div>
+        <div class="placement-box placement-box--safe" id="placementSafeBox" hidden></div>
+        <div class="placement-box placement-box--card" id="placementCardBox" hidden></div>
+      </div>
+      <p class="placement-message" id="placementMessage"></p>
+      <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
+      <!-- Millimetres live here and nowhere else. Normal staff never need to open this. -->
+      <details class="placement-diagnostics" id="placementDiagnostics">
+        <summary>Service &amp; Diagnostics</summary>
+        <pre class="placement-diagnostics-body" id="placementDiagnosticsBody"></pre>
+      </details>
+    </div>
     <div class="preview-card" id="previewPanel" hidden>
       <img class="capture-preview" id="capturePreview" alt="Non-authoritative scan preview" />
       <p class="preview-note">CHECK THE WHOLE CARD, ALL EDGES AND ALL CORNERS</p>
@@ -153,6 +177,26 @@
         </div>
         <p class="hint positioning-geometry" id="positioningGeometry"></p>
         <button class="btn primary" id="savePlacementBtn" hidden>SAVE PLACEMENT ZONE</button>
+      </div>
+      <!--
+        PHASE C — the movable capture window.
+
+        Station setup, not card capture: it lives inside Service & Diagnostics and refuses while a
+        card is open, so an ordinary grader cannot nudge the capture area mid-job. Dragging the
+        window is the deliberate act; the numbers below it are a readout, never the control.
+      -->
+      <div class="settings-test capture-window-setup" id="captureWindowSetup">
+        <span class="row-header">Capture window position</span>
+        <div class="platen-viewport" id="platenViewport" title="Drag the capture window to where cards are placed">
+          <div class="platen-window" id="platenWindow"><span>CAPTURE WINDOW</span></div>
+          <div class="platen-safe" id="platenSafe" aria-hidden="true"></div>
+        </div>
+        <p class="hint" id="captureWindowReadout"></p>
+        <div class="preview-actions">
+          <button class="btn" id="captureWindowResetBtn">RESET TO DEFAULT</button>
+          <button class="btn primary" id="captureWindowSaveBtn">SAVE CAPTURE WINDOW</button>
+        </div>
+        <p class="hint" id="captureWindowStatus"></p>
       </div>
       <label class="checkbox">
         <input type="checkbox" id="autoOpenOnError" />

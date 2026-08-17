@@ -582,7 +582,7 @@ test("a placement saved to the station config is still provisioned after a resta
    */
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-station-config-"));
   const configPath = path.join(dir, "station.env");
-  fs.writeFileSync(configPath, "MINTVAULT_STATION_LABEL=staging\nMINTVAULT_LIDE_SCAN_X_MM=12.5\nMINTVAULT_LIDE_SCAN_Y_MM=0\n");
+  fs.writeFileSync(configPath, "MINTVAULT_STATION_LABEL=staging\nMINTVAULT_LIDE_SCAN_X_MM=20\nMINTVAULT_LIDE_SCAN_Y_MM=20\n");
   const priorConfig = process.env.MINTVAULT_STATION_CONFIG_PATH;
   const priorX = process.env.MINTVAULT_LIDE_SCAN_X_MM;
   const priorY = process.env.MINTVAULT_LIDE_SCAN_Y_MM;
@@ -604,14 +604,28 @@ test("a placement saved to the station config is still provisioned after a resta
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  assert.deepEqual(lide._private.jigOrigin(), { x: 12.5, y: 0 }, "a saved placement must survive a restart");
+  assert.deepEqual(lide._private.jigOrigin(), { x: 20, y: 20 }, "a saved placement must survive a restart");
 
-  // A corner-registered origin at the platen corner is 0,0 — a REAL provisioned placement, and the
-  // one this station actually saved. It must never be read as "not provisioned".
+  /*
+   * THE PLATEN ORIGIN IS NO LONGER A VALID PLACEMENT — this assertion is deliberately INVERTED from
+   * what it said before, and that inversion is the point of the 2026-08-17 geometry change.
+   *
+   * (0, 0) was previously honoured as a real corner-registered placement, and it is what the live
+   * station actually had. Measured on all eight preserved masters, the platen's first ~1.23 mm of
+   * top edge and ~0.72 mm of left edge carry the bezel contamination band, and a window anchored
+   * there also forces the card into a corner with 3 mm of background on two sides and 33 mm wasted
+   * on the other two. It is now read as UNPROVISIONED so the station must be recalibrated onto the
+   * new geometry, rather than silently clamped somewhere nobody chose.
+   */
   fs.writeFileSync(configPath, "MINTVAULT_LIDE_SCAN_X_MM=0\nMINTVAULT_LIDE_SCAN_Y_MM=0\n");
-  assert.deepEqual(lide._private.jigOrigin(), { x: 0, y: 0 });
+  assert.equal(lide._private.jigOrigin(), null, "the platen origin must now demand recalibration");
 
-  // An explicit launch-time override still wins over the file.
+  // A window that would hang off the far edge of the glass is refused for the same reason.
+  fs.writeFileSync(configPath, "MINTVAULT_LIDE_SCAN_X_MM=200\nMINTVAULT_LIDE_SCAN_Y_MM=20\n");
+  assert.equal(lide._private.jigOrigin(), null);
+
+  // An explicit launch-time override still wins over the file — when it is itself a legal window.
+  fs.writeFileSync(configPath, "MINTVAULT_LIDE_SCAN_X_MM=20\nMINTVAULT_LIDE_SCAN_Y_MM=20\n");
   process.env.MINTVAULT_LIDE_SCAN_X_MM = "7";
   assert.equal(lide._private.jigOrigin().x, 7);
   delete process.env.MINTVAULT_LIDE_SCAN_X_MM;
@@ -621,8 +635,8 @@ test("a placement saved to the station config is still provisioned after a resta
   assert.equal(lide._private.jigOrigin(), null);
 
   // The file is operator-editable, so it must never be a channel for arbitrary process environment.
-  fs.writeFileSync(configPath, "MINTVAULT_API_BASE=https://evil.test\nMINTVAULT_LIDE_SCAN_X_MM=1\nMINTVAULT_LIDE_SCAN_Y_MM=1\n");
-  assert.deepEqual(lide._private.jigOrigin(), { x: 1, y: 1 });
+  fs.writeFileSync(configPath, "MINTVAULT_API_BASE=https://evil.test\nMINTVAULT_LIDE_SCAN_X_MM=25\nMINTVAULT_LIDE_SCAN_Y_MM=25\n");
+  assert.deepEqual(lide._private.jigOrigin(), { x: 25, y: 25 });
   assert.notEqual(process.env.MINTVAULT_API_BASE, "https://evil.test");
 });
 

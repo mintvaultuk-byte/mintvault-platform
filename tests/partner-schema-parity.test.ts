@@ -267,6 +267,7 @@ describe("partner schema ↔ migration parity", () => {
       // — the next globally free number — verifies the MFA content and inlines the two idempotent
       // scanner bodies verbatim, so it is a no-op on production and on fresh estates.
       "0090_lineage_convergence_scanner.sql",
+      "0091_capture_session_calibration_snapshot.sql",
     ]);
   });
 

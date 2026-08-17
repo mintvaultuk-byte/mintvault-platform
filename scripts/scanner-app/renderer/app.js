@@ -60,6 +60,22 @@ const els = {
   positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
   positioningHint: document.getElementById("positioningHint"),
   positioningPanel: document.getElementById("positioningPanel"),
+  captureWindowSetup: document.getElementById("captureWindowSetup"),
+  platenViewport: document.getElementById("platenViewport"),
+  platenWindow: document.getElementById("platenWindow"),
+  platenSafe: document.getElementById("platenSafe"),
+  captureWindowReadout: document.getElementById("captureWindowReadout"),
+  captureWindowStatus: document.getElementById("captureWindowStatus"),
+  captureWindowSaveBtn: document.getElementById("captureWindowSaveBtn"),
+  captureWindowResetBtn: document.getElementById("captureWindowResetBtn"),
+  placementPanel: document.getElementById("placementPanel"),
+  placementViewport: document.getElementById("placementViewport"),
+  placementPreview: document.getElementById("placementPreview"),
+  placementSafeBox: document.getElementById("placementSafeBox"),
+  placementCardBox: document.getElementById("placementCardBox"),
+  placementMessage: document.getElementById("placementMessage"),
+  placementDiagnostics: document.getElementById("placementDiagnostics"),
+  placementDiagnosticsBody: document.getElementById("placementDiagnosticsBody"),
   positioningCardPreviewViewport: document.getElementById("positioningCardPreviewViewport"),
   positioningCardPreview: document.getElementById("positioningCardPreview"),
   positioningFullPreview: document.getElementById("positioningFullPreview"),
@@ -111,6 +127,7 @@ const STATE_LABELS = {
 let lastState = null;
 let renderedPreviewId = null;
 let renderedPositioningPreviewId = null;
+let renderedPlacementPreviewId = null;
 let actionInFlight = false;
 let actionError = null;
 /*
@@ -503,6 +520,89 @@ function renderPositioningOverlays(entry) {
   );
 }
 
+/**
+ * Draw the per-side placement gate.
+ *
+ * The verdict, its message and both overlay rectangles all arrive from the watcher. Nothing here
+ * decides whether a placement is acceptable — the renderer would be a second opinion, and a second
+ * opinion is exactly what this programme spent a day removing.
+ */
+function renderPlacementPreview(entry, state) {
+  const status = String(entry?.status || "");
+  const showing = ["ready", "reposition"].includes(status);
+
+  /*
+   * While a side is awaiting Scan the PREVIEW button belongs to this gate, so it is relabelled here,
+   * AFTER renderPositioningPreview has had its say. The setup preview owns the button at every other
+   * moment, and it is disabled during a scan for the same reason every other action is.
+   */
+  const awaitingScan = String(state?.activeCapture?.stage || "") === "awaiting_scan";
+  if (awaitingScan) {
+    const scanning = status === "scanning";
+    setActionButton(
+      els.positioningPreviewBtn,
+      scanning ? "PREVIEWING…" : "PREVIEW",
+      true,
+      actionInFlight || scanning || state?.scannerHealth?.status !== "ready"
+    );
+  }
+  els.placementPanel.hidden = !showing;
+  if (!showing) {
+    els.placementPanel.removeAttribute("data-placement-state");
+    renderedPlacementPreviewId = null;
+    return;
+  }
+
+  const verdict = entry.verdict || {};
+  // Echoed straight from the watcher's verdict. An unrecognised state falls back to RED, because the
+  // failure direction for "I do not understand this placement" is refuse, not permit.
+  const state = ["GREEN", "AMBER", "RED"].includes(verdict.state) ? verdict.state : "RED";
+  els.placementPanel.setAttribute("data-placement-state", state);
+  els.placementMessage.textContent = verdict.message || "";
+
+  const overlay = entry.overlay || {};
+  if (Number.isFinite(overlay.aspectRatio) && overlay.aspectRatio > 0) {
+    els.placementViewport.style.aspectRatio = String(overlay.aspectRatio);
+  }
+  const place = (element, rect) => {
+    if (!rect) {
+      element.hidden = true;
+      return;
+    }
+    element.hidden = false;
+    element.style.left = `${rect.left}%`;
+    element.style.top = `${rect.top}%`;
+    element.style.width = `${rect.width}%`;
+    element.style.height = `${rect.height}%`;
+  };
+  place(els.placementOuterBox, overlay.outerWindow);
+  place(els.placementSafeBox, overlay.safeWindow);
+  place(els.placementCardBox, overlay.card);
+
+  // Millimetres are confined to this collapsed block. The normal operator path is the two boxes.
+  const card = verdict.cardBoundsMm;
+  els.placementDiagnosticsBody.textContent = [
+    `state        ${state}${verdict.amberFloorMm ? ` (amber above ${verdict.amberFloorMm} mm)` : ""}`,
+    `profile      ${verdict.profileId || "—"} ${verdict.profileVersion || ""}`,
+    `coordinates  ${verdict.coordinateSpace || "—"}`,
+    `window       ${entry.areaMm ? `${entry.areaMm.width} x ${entry.areaMm.height} mm at ${entry.originMm?.x}, ${entry.originMm?.y}` : "—"}`,
+    `safe zone    ${verdict.safeWindowMm ? `${verdict.safeWindowMm.width} x ${verdict.safeWindowMm.height} mm, ${verdict.operatorInsetMm} mm inset` : "—"}`,
+    `card         ${card ? `${card.width.toFixed(2)} x ${card.height.toFixed(2)} mm at ${card.x.toFixed(2)}, ${card.y.toFixed(2)}` : "not detected"}`,
+    `margins      ${Number.isFinite(verdict.minMarginMm) ? `${verdict.minMarginMm.toFixed(2)} mm closest` : "—"}`,
+    `evidence min ${verdict.evidenceMinMarginMm ?? "—"} mm (server floor, not this gate)`,
+    `verdict      ${verdict.state || "—"} ${verdict.code || ""}`,
+  ].join("\n");
+
+  if (entry.id !== renderedPlacementPreviewId) {
+    renderedPlacementPreviewId = entry.id;
+    els.placementPreview.removeAttribute("src");
+    window.scanner.getPlacementPreview(entry.id).then((result) => {
+      if (lastState?.placementPreview?.id !== entry.id || !result?.ok) return;
+      els.placementPreview.src = result.dataUrl;
+    }).catch(() => {});
+  }
+}
+
 function renderPositioningPreview(entry, scannerHealth, activeCapture) {
   const evidenceReviewActive = ["scanning", "retrying_scan", "processing_preview", "preview_ready", "preview_error", "upload"].includes(String(activeCapture?.stage || ""));
   const status = String(entry?.status || "");
@@ -618,7 +718,23 @@ function renderCaptureActions(state) {
   const awaitingScan = stage === "awaiting_scan";
   const hasTarget = Boolean(active?.certId && active?.side);
   const scanLabel = hasTarget ? `SCAN ${side}` : "SCAN CARD";
-  const scanEnabled = awaitingScan && state.scannerHealth?.status === "ready" && !actionInFlight;
+  /*
+   * SCAN IS GATED ON A LIVE GREEN PLACEMENT APPROVAL FOR THIS EXACT SIDE.
+   *
+   * A convenience, not the control: `watcher.scanActiveTarget` re-checks the same approval, because
+   * this method is reachable over IPC and a disabled button stops nobody who isn't looking at it.
+   * The binding is on session AND side AND MV number, so a FRONT approval cannot light up SCAN BACK.
+   */
+  const approval = state.placementApproval;
+  const placementGreen = Boolean(
+    approval &&
+      approval.state === "GREEN" &&
+      active &&
+      approval.sessionId === active.id &&
+      approval.side === active.side &&
+      approval.certId === active.certId
+  );
+  const scanEnabled = awaitingScan && placementGreen && state.scannerHealth?.status === "ready" && !actionInFlight;
   const cardRegistered = state.lastAcceptedCapture?.cardRegistered === true && !active;
 
   /*
@@ -728,8 +844,10 @@ function renderCaptureActions(state) {
     ? "Open or arm a card in MintVault to enable final scanning."
     : awaitingScan && state.scannerHealth?.status !== "ready"
     ? "Finish this station’s placement setup before final scanning is enabled."
+    : awaitingScan && !placementGreen
+    ? `Place the ${side.toLowerCase()} inside the box, then press Preview. Scan unlocks when the box turns green.`
     : awaitingScan
-    ? `Position the ${side.toLowerCase()}, then press Scan. No scan starts automatically.`
+    ? `Placement is ready — press Scan. Do not move the card. No scan starts automatically.`
     : scanning
       ? "The locked 1200 DPI TIFF is being captured once; its derivative preview follows."
       : previewReady
@@ -784,6 +902,8 @@ function renderState(state) {
   renderTarget(lastState);
   renderWorkflowGuide(lastState);
   renderPositioningPreview(lastState.positioningPreview, lastState.scannerHealth, lastState.activeCapture);
+  renderPlacementPreview(lastState.placementPreview, lastState);
+  syncCaptureWindowFromState(lastState);
 
   if (els.autoOpenOnError) els.autoOpenOnError.checked = lastState.autoOpenOnError !== false;
   if (els.soundEnabled) els.soundEnabled.checked = lastState.soundEnabled !== false;
@@ -1011,7 +1131,142 @@ els.diagnosticsRow.addEventListener("toggle", () => {
 els.autoOpenOnError.addEventListener("change", () => window.scanner.setSetting("autoOpenOnError", els.autoOpenOnError.checked));
 els.soundEnabled.addEventListener("change", () => window.scanner.setSetting("soundEnabled", els.soundEnabled.checked));
 els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.scanTarget()));
-els.positioningPreviewBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.runPositioningPreview()));
+/*
+ * ONE PREVIEW BUTTON, TWO JOBS, CHOSEN BY WHAT THE STATION IS DOING.
+ *
+ * With a side awaiting Scan it runs the PER-SIDE PLACEMENT GATE — the 300-DPI check of the calibrated
+ * capture window that must go green before SCAN unlocks. With no card in hand it runs the original
+ * full-platen SETUP preview. Staff therefore learn one button: place the card, press PREVIEW, wait
+ * for green.
+ */
+/*
+ * ── PHASE C: dragging the capture window ─────────────────────────────────────────────────────
+ *
+ * The geometry is duplicated here as plain numbers ON PURPOSE: the renderer is a sandboxed page and
+ * cannot require the shared profile module. It is a DRAWING only — every value it produces is
+ * re-validated in the main process against the real profile, and an origin outside the platen is
+ * refused there rather than corrected here. If these ever drift, the save fails loudly instead of
+ * persisting a window the station cannot scan.
+ */
+const PLATEN = { width: 216, height: 297 };
+const WINDOW_MM = { width: 100, height: 130 };
+const SAFE_INSET_MM = 10;
+const MIN_INSET_MM = 5;
+const DEFAULT_ORIGIN_MM = { x: 20, y: 20 };
+const originBounds = {
+  minX: MIN_INSET_MM,
+  maxX: PLATEN.width - WINDOW_MM.width - MIN_INSET_MM,
+  minY: MIN_INSET_MM,
+  maxY: PLATEN.height - WINDOW_MM.height - MIN_INSET_MM,
+};
+let captureWindowOriginMm = { ...DEFAULT_ORIGIN_MM };
+
+function clampOriginMm(origin) {
+  return {
+    x: Math.min(originBounds.maxX, Math.max(originBounds.minX, origin.x)),
+    y: Math.min(originBounds.maxY, Math.max(originBounds.minY, origin.y)),
+  };
+}
+
+function drawCaptureWindow() {
+  const pct = (value, total) => `${(100 * value) / total}%`;
+  els.platenWindow.style.left = pct(captureWindowOriginMm.x, PLATEN.width);
+  els.platenWindow.style.top = pct(captureWindowOriginMm.y, PLATEN.height);
+  els.platenWindow.style.width = pct(WINDOW_MM.width, PLATEN.width);
+  els.platenWindow.style.height = pct(WINDOW_MM.height, PLATEN.height);
+  els.platenSafe.style.left = pct(captureWindowOriginMm.x + SAFE_INSET_MM, PLATEN.width);
+  els.platenSafe.style.top = pct(captureWindowOriginMm.y + SAFE_INSET_MM, PLATEN.height);
+  els.platenSafe.style.width = pct(WINDOW_MM.width - 2 * SAFE_INSET_MM, PLATEN.width);
+  els.platenSafe.style.height = pct(WINDOW_MM.height - 2 * SAFE_INSET_MM, PLATEN.height);
+  els.captureWindowReadout.textContent =
+    `Capture window ${WINDOW_MM.width} × ${WINDOW_MM.height} mm at ${captureWindowOriginMm.x.toFixed(1)}, ` +
+    `${captureWindowOriginMm.y.toFixed(1)} mm. Safe placement box ${WINDOW_MM.width - 2 * SAFE_INSET_MM} × ` +
+    `${WINDOW_MM.height - 2 * SAFE_INSET_MM} mm inside it.`;
+}
+
+(function enableCaptureWindowDrag() {
+  let dragging = null;
+  const originFromPointer = (event) => {
+    const rect = els.platenViewport.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const mmPerPxX = PLATEN.width / rect.width;
+    const mmPerPxY = PLATEN.height / rect.height;
+    return clampOriginMm({
+      x: (event.clientX - rect.left) * mmPerPxX - dragging.offsetMmX,
+      y: (event.clientY - rect.top) * mmPerPxY - dragging.offsetMmY,
+    });
+  };
+  els.platenWindow.addEventListener("pointerdown", (event) => {
+    const rect = els.platenViewport.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    // Grab the window where it was actually clicked, so it does not jump under the cursor.
+    dragging = {
+      offsetMmX: (event.clientX - rect.left) * (PLATEN.width / rect.width) - captureWindowOriginMm.x,
+      offsetMmY: (event.clientY - rect.top) * (PLATEN.height / rect.height) - captureWindowOriginMm.y,
+    };
+    els.platenWindow.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  els.platenWindow.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    const next = originFromPointer(event);
+    if (!next) return;
+    captureWindowOriginMm = next;
+    drawCaptureWindow();
+  });
+  const end = (event) => {
+    if (!dragging) return;
+    dragging = null;
+    try { els.platenWindow.releasePointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+  };
+  els.platenWindow.addEventListener("pointerup", end);
+  els.platenWindow.addEventListener("pointercancel", end);
+})();
+
+/*
+ * Seed the drag from the station's SAVED window, once, and never again while the operator is
+ * dragging — re-seeding on every state push would drag the box back out from under them.
+ */
+let captureWindowSeeded = false;
+function syncCaptureWindowFromState(state) {
+  if (captureWindowSeeded) return;
+  const saved = state?.scannerHealth?.captureWindow?.originMm;
+  if (!saved || !Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) return;
+  captureWindowSeeded = true;
+  captureWindowOriginMm = clampOriginMm({ x: Number(saved.x), y: Number(saved.y) });
+  drawCaptureWindow();
+}
+
+els.captureWindowResetBtn.addEventListener("click", () => {
+  captureWindowOriginMm = { ...DEFAULT_ORIGIN_MM };
+  els.captureWindowStatus.textContent = "";
+  drawCaptureWindow();
+});
+
+els.captureWindowSaveBtn.addEventListener("click", async () => {
+  els.captureWindowStatus.textContent = "Saving…";
+  const result = await window.scanner.saveCaptureWindow({ ...captureWindowOriginMm });
+  if (!result?.ok) {
+    els.captureWindowStatus.textContent = result?.error || "The capture window could not be saved.";
+    return;
+  }
+  // The local save and the station calibration record are reported separately: a station whose
+  // window moved but whose calibration authority did not is exactly the divergence to surface.
+  els.captureWindowStatus.textContent = result.calibration?.saved
+    ? "Capture window saved and recorded against this station's calibration."
+    : `Saved on this Mac, but the station calibration was NOT recorded: ${result.calibration?.error || "unknown reason"}`;
+});
+
+drawCaptureWindow();
+
+els.positioningPreviewBtn.addEventListener("click", () => {
+  const stage = String(lastState?.activeCapture?.stage || "");
+  if (stage === "awaiting_scan") {
+    void runCaptureAction(() => window.scanner.runPlacementPreview());
+    return;
+  }
+  void runCaptureAction(() => window.scanner.runPositioningPreview());
+});
 els.savePlacementBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.applyPositioningPreview(lastState?.positioningPreview?.id || previewId)));
 els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId)));
 els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));

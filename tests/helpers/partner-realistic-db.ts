@@ -225,6 +225,12 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // partner-only harness and failing closed there. See tests/lineage-convergence-0090.test.ts for
   // the real-PostgreSQL proof of its convergence behaviour.
   "0090_lineage_convergence_scanner",
+  // APPLICATION scope, for the same structural reason as 0090: it is a bare
+  // `ALTER TABLE scanner_capture_sessions ADD COLUMN`, and that table is created by 0047/0090 with
+  // `REFERENCES certificates(id)`. On a partner-only database the table does not exist and the ALTER
+  // fails closed — the 0073 failure mode this contract was written to catch. It is classified here
+  // because it genuinely depends on the core schema, not to make a list balance.
+  "0091_capture_session_calibration_snapshot",
 ] as const;
 
 /**

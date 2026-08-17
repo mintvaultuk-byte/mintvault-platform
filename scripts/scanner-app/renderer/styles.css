@@ -202,6 +202,150 @@ body {
   font-size: 16px;
   line-height: 1.14;
 }
+/*
+ * PER-SIDE PLACEMENT GATE.
+ *
+ * One `data-placement-state` attribute on the panel drives the border, both boxes and the message,
+ * so a green outline can never appear beside a red instruction. The state is set from the watcher's
+ * verdict and is never computed in the renderer.
+ */
+.placement-panel {
+  align-items: center;
+  background: var(--bg-2);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+.placement-panel[data-placement-state="GREEN"] { border-color: var(--green); }
+.placement-panel[data-placement-state="AMBER"] { border-color: var(--orange); }
+.placement-panel[data-placement-state="RED"] { border-color: var(--red); }
+/*
+ * The viewport is locked to the capture window's own aspect ratio, which is what lets every overlay
+ * be expressed as a PERCENTAGE of the window rather than in raster pixels. Set inline from the
+ * verdict so a future profile with a different window needs no CSS change.
+ */
+.placement-viewport {
+  aspect-ratio: 100 / 130;
+  background: #000;
+  border-radius: 5px;
+  max-width: 218px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+.placement-preview {
+  display: block;
+  height: 100%;
+  object-fit: fill;
+  width: 100%;
+}
+.placement-box {
+  border-radius: 2px;
+  pointer-events: none;
+  position: absolute;
+}
+/*
+ * THE SAFE ZONE IS ALWAYS GREEN. It is a fixed target, not a verdict — "put the whole card inside
+ * the green box" has to mean the same thing in every state, so recolouring it would make the one
+ * sentence staff need to learn conditional on the very thing they are trying to fix.
+ */
+.placement-box--safe {
+  border: 2px dashed var(--green);
+}
+/*
+ * Where the card actually IS. This is the element that carries the verdict, so the operator's eye
+ * goes to the thing that moved rather than to the box that never does.
+ */
+.placement-box--card {
+  border: 1.5px solid var(--blue);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 55%);
+}
+[data-placement-state="GREEN"] .placement-box--card { border-color: var(--green); }
+[data-placement-state="AMBER"] .placement-box--card { border-color: var(--orange); }
+[data-placement-state="RED"] .placement-box--card { border-color: var(--red); }
+/* The hardware acquisition boundary — context only, deliberately faint. */
+.placement-box--outer {
+  border: 1px solid var(--border);
+}
+.placement-message {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  line-height: 1.35;
+  margin: 0;
+  text-align: center;
+}
+[data-placement-state="GREEN"] .placement-message { color: var(--green); }
+[data-placement-state="AMBER"] .placement-message { color: var(--orange); }
+[data-placement-state="RED"] .placement-message { color: var(--red); }
+.placement-diagnostics {
+  color: var(--muted);
+  font-size: 10px;
+  width: 100%;
+}
+.placement-diagnostics summary {
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.placement-diagnostics-body {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+/*
+ * PHASE C — the draggable capture window, drawn to the platen's real 216 x 297 mm proportions so a
+ * drag maps linearly to millimetres. Every position shown here is one the station can actually
+ * scan: the main process clamps and then REFUSES anything outside the platen bounds rather than
+ * silently relocating it.
+ */
+.capture-window-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.platen-viewport {
+  aspect-ratio: 216 / 297;
+  background: repeating-linear-gradient(45deg, #1a1a1a, #1a1a1a 6px, #161616 6px, #161616 12px);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  margin: 0 auto;
+  max-width: 190px;
+  position: relative;
+  touch-action: none;
+  width: 100%;
+}
+.platen-window {
+  align-items: flex-start;
+  background: rgb(96 165 250 / 14%);
+  border: 2px solid var(--blue);
+  border-radius: 3px;
+  cursor: grab;
+  display: flex;
+  justify-content: center;
+  position: absolute;
+}
+.platen-window:active { cursor: grabbing; }
+.platen-window > span {
+  color: var(--blue);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  padding-top: 2px;
+  pointer-events: none;
+}
+/* The safe zone, shown inside the window so setup and capture read as the same geometry. */
+.platen-safe {
+  border: 1px dashed var(--green);
+  border-radius: 2px;
+  pointer-events: none;
+  position: absolute;
+}
 .positioning-panel {
   align-items: center;
   background: var(--bg-2);

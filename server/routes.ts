@@ -10555,7 +10555,19 @@ Defects (admin-confirmed): ${defectLines}`;
         const provenance = parseLide400CaptureProvenance(JSON.parse(String(req.body?.capture_provenance || "")));
         assertLide400Evidence(inspection, provenance);
         const { assessLide400CardFrame } = await import("./lib/lide400-card-frame");
-        const frameAssessment = await assessLide400CardFrame(file.buffer, inspection, provenance.scanAreaMm);
+        /*
+         * SERVER-OWNED GEOMETRY, exactly as in `finaliseScannerEvidence`. The acquisition rectangle
+         * is the one snapshotted onto this session when the side was armed, from the station's
+         * current VALID calibration — never the station's own declaration in the upload, which is
+         * only required to agree with it. Both evidence paths must derive it the same way or the
+         * weaker one becomes the way in.
+         */
+        const { authoritativeRegionForSession, assertDeclaredRegionMatchesAuthority } = await import(
+          "./lib/lide400-capture-authority"
+        );
+        const authoritativeRegion = authoritativeRegionForSession(session);
+        assertDeclaredRegionMatchesAuthority(provenance.scanAreaMm, authoritativeRegion);
+        const frameAssessment = await assessLide400CardFrame(file.buffer, inspection, authoritativeRegion);
         if (!frameAssessment.accepted) {
           throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
         }

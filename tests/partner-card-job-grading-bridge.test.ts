@@ -151,7 +151,12 @@ async function seedMintVaultTables(): Promise<void> {
     state varchar(16) not null check (state in ('armed','claimed','capturing','captured','failed','expired','cancelled')),
     claimed_by_device_id text, recapture boolean not null default false, failure_reason text,
     created_at timestamptz not null default now(), claimed_at timestamptz,
-    captured_at timestamptz, expires_at timestamptz not null
+    captured_at timestamptz, expires_at timestamptz not null,
+    -- Mirrors migration 0091. The server snapshots the station's authoritative capture window here
+    -- when a side is armed, and evidence is validated against THIS rather than the upload's own
+    -- provenance. This suite hand-mirrors the live DDL, so it has to mirror these too.
+    calibration_id uuid,
+    acquisition_region jsonb
   )`);
   await admin.query(`CREATE TABLE certificate_image_evidence (
     id serial primary key,
@@ -238,7 +243,7 @@ async function makeTenant(label: string): Promise<Fixture> {
       .replace(/[^a-z0-9]/g, "0")
       .padEnd(64, "0")
       .slice(0, 64);
-    return (
+    const stationId = (
       await admin.query<{ id: string }>(
         `INSERT INTO partner_stations
            (tenant_id, location_id, station_code, status, approved_at, public_key_pem, public_key_fingerprint)
@@ -252,6 +257,33 @@ async function makeTenant(label: string): Promise<Fixture> {
         ]
       )
     ).rows[0].id;
+    /*
+     * EVERY STATION IS CALIBRATED, because arming a card now requires it.
+     *
+     * A station-bound capture session snapshots the station's current VALID calibration so evidence
+     * can be validated against the exact capture window that station is using. A station with no
+     * calibration has no verified idea where on the platen it scans, so it cannot arm at all — which
+     * is the point, and which makes an uncalibrated station an unrealistic fixture rather than a
+     * convenient one. The 20,20 origin is the approved Standard TCG default.
+     */
+    const calibration = await admin.query<{ id: string }>(
+      `INSERT INTO partner_station_calibrations
+         (tenant_id, location_id, station_id, calibration_fingerprint, scanner_hardware_fingerprint,
+          scanner_hardware, scanner_profile_version, acquisition_region, working_region,
+          placement_tolerance_mm, calibration_version, health_status)
+       VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,'mintvault-canon-lide-400-v3',
+               '{"x":20,"y":20,"width":100,"height":130}'::jsonb,
+               '{"x":30,"y":30,"width":80,"height":110}'::jsonb,
+               '{"left":10,"top":10,"right":10,"bottom":10}'::jsonb,
+               'capture-geometry-v1','VALID')
+       RETURNING id`,
+      [tenantId, locationId, stationId, fingerprint, fingerprint]
+    );
+    await admin.query(`UPDATE partner_stations SET current_calibration_id = $2 WHERE id = $1`, [
+      stationId,
+      calibration.rows[0].id,
+    ]);
+    return stationId;
   };
 
   return {

@@ -79,6 +79,18 @@ const DEFAULT = Object.freeze({
   // no TIFF, and is never an evidence source; the renderer can display only
   // the restricted local derivative referenced by this transient record.
   positioningPreview: null,
+  /*
+   * The PER-SIDE placement gate's last result: a fast 300-DPI JPEG of the calibrated capture window,
+   * its RED/GREEN verdict and the overlay rectangles the renderer draws. Like positioningPreview it
+   * carries no TIFF and is never an evidence source.
+   */
+  placementPreview: null,
+  /*
+   * The standing GREEN approval, or null. Bound to ONE session, side and MV number, time-limited,
+   * and CONSUMED by the capture that uses it — so a FRONT preview cannot authorise BACK and a stale
+   * preview cannot authorise a later capture. Never restored from disk: see the load path below.
+   */
+  placementApproval: null,
   activeCapture:    null,
   // Briefly displayed after a server acknowledgement so staff receive a clear
   // Front Saved / Back Saved outcome before MintVault arms the next side.
@@ -143,6 +155,22 @@ function load() {
       );
     }
     mem.confirmCard = null;
+
+    /*
+     * A PLACEMENT APPROVAL NEVER SURVIVES A RESTART.
+     *
+     * It is a claim about where a physical card is lying at this instant. Between the process dying
+     * and it coming back, the lid has probably been opened, the card has probably been picked up,
+     * and nobody can say otherwise. Restoring one would let a crash-restart hand the operator a
+     * green SCAN button for a placement no living preview ever verified — the "stale Preview
+     * authorises a later capture" failure, arriving through the back door of process restart rather
+     * than through the gate that was carefully built to prevent it.
+     *
+     * The preview RECORD is cleared alongside it, so the renderer cannot show a green panel from a
+     * previous run either.
+     */
+    mem.placementApproval = null;
+    mem.placementPreview = null;
 
     /*
      * AN ERROR WITH NO RECORDED REASON IS NOT AN ERROR WORTH SHOWING.

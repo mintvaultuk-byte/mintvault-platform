@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "./db";
 import { hashLockKey } from "./lib/advisory-lock";
+import { resolveAuthoritativeAcquisitionRegion, type AcquisitionRegionMm } from "./lib/lide400-capture-authority";
 
 /**
  * A station was asked to arm a card while it is already holding a live target for a DIFFERENT one.
@@ -39,6 +40,10 @@ export type ScannerCaptureSession = {
   side: CaptureSide;
   workstationId: string;
   scannerProfileVersion: string;
+  /** The calibration this session was armed under. Provenance; never re-resolved later. */
+  calibrationId: string | null;
+  /** THE authoritative capture window, snapshotted at arm time. Evidence is validated against this. */
+  acquisitionRegion: AcquisitionRegionMm | null;
   state: "armed" | "claimed" | "capturing" | "captured" | "failed" | "expired" | "cancelled";
   expiresAt: Date;
   recapture: boolean;
@@ -77,7 +82,51 @@ function mapRow(row: Record<string, unknown>): ScannerCaptureSession {
     expiresAt: new Date(String(row.expires_at)),
     recapture: row.recapture === true,
     failureReason: row.failure_reason == null ? null : String(row.failure_reason),
+    /*
+     * The SERVER-OWNED capture window this session was armed under. Carried on every mapped session
+     * so the evidence path never has to go and ask again — and so it cannot be tempted to ask the
+     * station instead.
+     */
+    calibrationId: row.calibration_id == null ? null : String(row.calibration_id),
+    acquisitionRegion: row.acquisition_region == null ? null : (row.acquisition_region as AcquisitionRegionMm),
   };
+}
+
+/**
+ * Resolve the station's current VALID calibration and return the rectangle to snapshot.
+ *
+ * Runs inside the arming transaction, on a row the arm already has the station id for, so it costs
+ * one indexed join at arm time and NOTHING in the evidence hot path — the region travels on the
+ * session row that path already loads.
+ */
+async function resolveArmedAcquisitionRegion(
+  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  stationId: string,
+  scannerProfileVersion: string
+): Promise<{ calibrationId: string; region: AcquisitionRegionMm }> {
+  const found = await client.query(
+    `SELECT k.id, k.station_id, k.health_status, k.scanner_profile_version, k.calibration_version, k.acquisition_region
+       FROM partner_stations s
+       JOIN partner_station_calibrations k ON k.id = s.current_calibration_id
+      WHERE s.id = $1
+      LIMIT 1`,
+    [stationId]
+  );
+  const row = found.rows[0];
+  const region = resolveAuthoritativeAcquisitionRegion(
+    row
+      ? {
+          id: row.id == null ? null : String(row.id),
+          stationId: row.station_id == null ? null : String(row.station_id),
+          healthStatus: row.health_status == null ? null : String(row.health_status),
+          scannerProfileVersion: row.scanner_profile_version == null ? null : String(row.scanner_profile_version),
+          calibrationVersion: row.calibration_version == null ? null : String(row.calibration_version),
+          acquisitionRegion: row.acquisition_region,
+        }
+      : null,
+    { stationId, scannerProfileVersion }
+  );
+  return { calibrationId: String(row!.id), region };
 }
 
 export async function ensureScannerCaptureSchema(): Promise<void> {
@@ -115,6 +164,15 @@ export async function ensureScannerCaptureSchema(): Promise<void> {
       ON scanner_capture_sessions (state, expires_at, workstation_id, created_at)
     `);
     await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS station_id UUID`);
+    /*
+     * The server-owned capture window, snapshotted when a side is armed. Mirrored here as idempotent
+     * runtime DDL for the same reason `station_id` above is — this table is created by this function
+     * on a fresh database — and journalled properly as migration 0091 so a deployed database is not
+     * left carrying columns no migration records. Both must exist: runtime DDL alone was how this
+     * repo previously ended up reconciling undocumented drift.
+     */
+    await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS calibration_id UUID`);
+    await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS acquisition_region JSONB`);
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_scanner_capture_station_claim
         ON scanner_capture_sessions (station_id, created_at) WHERE state = 'armed'
@@ -331,11 +389,30 @@ export async function createScannerCaptureSession(input: {
 
     const id = randomUUID();
     const expires = new Date(Date.now() + SESSION_TTL_MS);
+    /*
+     * SNAPSHOT THE AUTHORITATIVE CAPTURE WINDOW AT ARM TIME.
+     *
+     * Resolved from this station's current VALID calibration and frozen onto the session, so the
+     * upload is judged against the geometry the card was armed under. A recalibration after this
+     * point applies to LATER sessions and cannot re-interpret a scan that has already happened.
+     *
+     * Fails closed: a station with no valid calibration cannot arm a card at all, which is the
+     * correct outcome — it has no verified idea where on the platen it is scanning. Enforced only
+     * for station-bound sessions; the legacy admin workstation path has no station calibration and
+     * is unchanged.
+     */
+    let calibrationId: string | null = null;
+    let acquisitionRegion: AcquisitionRegionMm | null = null;
+    if (input.stationId) {
+      const resolved = await resolveArmedAcquisitionRegion(client, input.stationId, input.scannerProfileVersion);
+      calibrationId = resolved.calibrationId;
+      acquisitionRegion = resolved.region;
+    }
     const inserted = await client.query(
       `INSERT INTO scanner_capture_sessions
        (id, certificate_id, card_id, submission_item_id, submission_id, side, workstation_id, station_id,
-        scanner_profile_version, actor_id, state, recapture, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'armed',$11,$12)
+        scanner_profile_version, actor_id, state, recapture, expires_at, calibration_id, acquisition_region)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'armed',$11,$12,$13,$14::jsonb)
        RETURNING *, (SELECT certificate_number FROM certificates WHERE id = certificate_id) AS certificate_number`,
       [
         id,
@@ -350,6 +427,8 @@ export async function createScannerCaptureSession(input: {
         input.actorId,
         input.recapture,
         expires,
+        calibrationId,
+        acquisitionRegion ? JSON.stringify(acquisitionRegion) : null,
       ]
     );
     await client.query("COMMIT");
@@ -635,8 +714,7 @@ export async function getScannerCaptureStatus(
       [sessionId, deviceId]
     );
     const row = found.rows[0] as
-      | (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean })
-      | undefined;
+      (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean }) | undefined;
     if (!row) throw new Error("Capture session not found for this scanner");
     if (
       (row.state === "armed" || row.state === "claimed") &&

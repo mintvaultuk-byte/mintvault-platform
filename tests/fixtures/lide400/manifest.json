@@ -1,0 +1,86 @@
+[
+  {
+    "name": "mv272-front-accepted",
+    "note": "MV272 FRONT — the authoritative accepted master",
+    "file": "mv272-front-accepted.jpg",
+    "sourceMaster": "processed/2026-08-17/mintvault-lide-15EB9C6D-CA92-41A6-94DE-552CA1B61972.tiff",
+    "sourcePixels": {
+      "width": 4724,
+      "height": 6136
+    },
+    "acquisitionMm": {
+      "width": 99.9913,
+      "height": 129.8787
+    },
+    "expectedCardMm": {
+      "x": 6.277,
+      "y": 4.618,
+      "width": 63.487,
+      "height": 88.967
+    },
+    "expectedMinMarginMm": 4.618
+  },
+  {
+    "name": "mv272-back-rejected",
+    "note": "MV272 BACK — refused at 3.8 mm, the capture this programme exists to prevent",
+    "file": "mv272-back-rejected.jpg",
+    "sourceMaster": "capture-staging/de95fce2-1d2f-4af4-8244-20509d6a5931/97aeee9b-6db4-49d0-9240-1c9dae8fe18e/mintvault-lide-5816D355-F5BF-4EDF-BB35-3CCA73FE10B6.tiff",
+    "sourcePixels": {
+      "width": 4724,
+      "height": 6136
+    },
+    "acquisitionMm": {
+      "width": 99.9913,
+      "height": 129.8787
+    },
+    "expectedCardMm": {
+      "x": 3.896,
+      "y": 3.752,
+      "width": 63.27,
+      "height": 88.823
+    },
+    "expectedMinMarginMm": 3.752
+  },
+  {
+    "name": "corner-registered-3mm",
+    "note": "Worst real placement: 3.03 mm left margin",
+    "file": "corner-registered-3mm.jpg",
+    "sourceMaster": "discarded/2026-08-17/mintvault-lide-2DAB51B0-E0B6-4F81-BC70-390C07FFF0E8.tiff",
+    "sourcePixels": {
+      "width": 4724,
+      "height": 6136
+    },
+    "acquisitionMm": {
+      "width": 99.9913,
+      "height": 129.8787
+    },
+    "expectedCardMm": {
+      "x": 3.03,
+      "y": 3.68,
+      "width": 63.847,
+      "height": 88.75
+    },
+    "expectedMinMarginMm": 3.03
+  },
+  {
+    "name": "widest-card",
+    "note": "Card-size variation, 63.63 x 88.89 mm",
+    "file": "widest-card.jpg",
+    "sourceMaster": "discarded/2026-08-17/mintvault-lide-2C4F919D-1875-45A6-A933-548C84ED2B31.tiff",
+    "sourcePixels": {
+      "width": 4724,
+      "height": 6136
+    },
+    "acquisitionMm": {
+      "width": 99.9913,
+      "height": 129.8787
+    },
+    "expectedCardMm": {
+      "x": 3.896,
+      "y": 3.608,
+      "width": 63.631,
+      "height": 88.895
+    },
+    "expectedMinMarginMm": 3.608
+  }
+]

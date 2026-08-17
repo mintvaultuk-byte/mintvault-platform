@@ -8,6 +8,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const stationIdentity = require("./station-identity");
+/*
+ * THE CANONICAL CAPTURE PROFILE — the same module the server validates against. Geometry lives in
+ * exactly one place for the same reason the detector does: two copies of "how big is the capture
+ * window" is how a station and a server come to disagree about the same physical frame.
+ */
+const captureProfile = require("../../../shared/lide400-capture-profile.cjs");
 
 const PROFILE_VERSION = "mintvault-canon-lide-400-v3";
 const MODEL = "CanoScan LiDE 400";
@@ -18,9 +24,10 @@ const SUPPORT = process.env.MINTVAULT_SCANS_DIR
   : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
 const BINARY = path.join(SUPPORT, "mintvault-lide-bridge");
 const CALIBRATION_MIN_MM = Object.freeze({ width: 110, height: 140 });
-const PLATEN_MAX_MM = Object.freeze({ width: 216, height: 297 });
-const PROFILE_AREA_MM = Object.freeze({ width: 100, height: 130 });
+const PLATEN_MAX_MM = captureProfile.PLATEN_MM;
+const PROFILE_AREA_MM = captureProfile.STANDARD_TCG.outerWindowMm;
 const POSITIONING_PREVIEW_DPI = 300;
+const PLACEMENT_PREVIEW_DPI = captureProfile.STANDARD_TCG.placementPreviewDpi;
 const POSITIONING_PREVIEW_COORDINATE_SPACE = "imagecapturecore-scan-area-upright-raster-v1";
 let buildPromise = null;
 
@@ -92,6 +99,23 @@ function jigOrigin() {
   const x = Number(process.env.MINTVAULT_LIDE_SCAN_X_MM ?? configured.MINTVAULT_LIDE_SCAN_X_MM);
   const y = Number(process.env.MINTVAULT_LIDE_SCAN_Y_MM ?? configured.MINTVAULT_LIDE_SCAN_Y_MM);
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return null;
+  /*
+   * A saved origin outside the profile's platen bounds is treated as UNPROVISIONED, not clamped.
+   *
+   * THE DEFECT THIS CLOSES. The live station was calibrated to (0, 0) — the platen ORIGIN — which is
+   * exactly where the LiDE's bezel band sits: measured non-card foreground in the first ~1.23 mm of
+   * the top edge and ~0.72 mm of the left edge of every one of the eight preserved masters. Silently
+   * clamping such an origin to (5, 5) would move a station's physical capture area without anyone
+   * deciding to, and every previously captured coordinate would then refer to a different rectangle.
+   *
+   * Failing closed instead forces one explicit recalibration onto the new geometry, which is what
+   * "moving the window is a recalibration action" has to mean if it means anything.
+   */
+  try {
+    if (captureProfile.clampCaptureOriginMm({ x, y }).clamped) return null;
+  } catch {
+    return null;
+  }
   return { x, y };
 }
 
@@ -105,6 +129,18 @@ function persistJigOrigin(origin) {
   const y = Number(origin?.y);
   if (![x, y].every(Number.isFinite) || x < 0 || y < 0) {
     throw new Error("Detected LiDE jig origin is invalid");
+  }
+  /*
+   * REFUSE an out-of-bounds origin rather than clamping it. The setup UI constrains the drag live,
+   * so a request that arrives here outside the platen is a bug or a tampered payload, and quietly
+   * moving it somewhere else would persist a capture window nobody chose.
+   */
+  const bounds = captureProfile.clampCaptureOriginMm({ x, y });
+  if (bounds.clamped) {
+    throw new Error(
+      `LiDE capture-window origin ${x}, ${y} mm is outside the usable platen ` +
+        `(X ${bounds.boundsMm.minX}-${bounds.boundsMm.maxX} mm, Y ${bounds.boundsMm.minY}-${bounds.boundsMm.maxY} mm)`
+    );
   }
   const configured = String(process.env.MINTVAULT_STATION_CONFIG_PATH || "").trim();
   if (!configured || !path.isAbsolute(configured)) {
@@ -213,10 +249,13 @@ async function health() {
   try {
     const bridge = await ensureBridge();
     const result = await run(bridge, ["health"], 12_000);
+    // The saved window travels with health so the setup UI opens on the placement this station is
+    // actually using, rather than on the default with no way to tell the two apart.
+    const captureWindow = { originMm: origin, areaMm: PROFILE_AREA_MM, profileVersion: captureProfile.STANDARD_TCG.version };
     if (result.status === "ready" && !origin) {
-      return { ...result, status: "profile_unprovisioned", error: "Canon is connected but the station jig origin is not provisioned", profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
+      return { ...result, status: "profile_unprovisioned", error: "Canon is connected but the station capture window is not provisioned", profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId(), captureWindow };
     }
-    return { ...result, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
+    return { ...result, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId(), captureWindow };
   } catch (error) {
     return { status: "control_unavailable", error: error.message, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
   }
@@ -294,6 +333,66 @@ async function positioningPreview(outputDirectory) {
 }
 
 /**
+ * Acquire the PER-SIDE PLACEMENT PREVIEW: the calibrated capture window only, at 300 DPI, as JPEG.
+ *
+ * WHY THIS EXISTS. Until now the operator scanned at 1200 DPI — 45 seconds, measured — and only then
+ * learned the placement was wrong. Four of today's eight masters were discarded that way. This
+ * previews the IDENTICAL rectangle the evidence capture will use, so the gate and the master frame
+ * the same physical area, at a quarter of the linear resolution.
+ *
+ * It shares `scan`'s origin and window but NOT its authority: no certificate/session input, JPEG
+ * only, no TIFF, no provenance acceptance, and no server evidence path. A green verdict from this
+ * frame never entitles anything — the server still re-derives geometry from the immutable master.
+ */
+async function placementPreview(outputDirectory) {
+  const origin = jigOrigin();
+  if (!origin) throw new Error("Scanner capture window is not provisioned; run the LiDE station setup");
+  const bridge = await ensureBridge();
+  const startedAt = new Date().toISOString();
+  const result = await run(bridge, ["place", outputDirectory, String(origin.x), String(origin.y)], 180_000);
+  if (result.status !== "captured" || result.captureKind !== "placement_preview" || typeof result.path !== "string") {
+    throw new Error(result.error || "LiDE placement preview failed");
+  }
+  if (result.previewCoordinateSpace !== POSITIONING_PREVIEW_COORDINATE_SPACE || Number(result.previewRasterOrientation) !== 1) {
+    throw new Error("LiDE placement Preview did not return the canonical upright ImageCaptureCore coordinate contract");
+  }
+  if (Number(result.driverResolutionDpi) !== PLACEMENT_PREVIEW_DPI) {
+    throw new Error("LiDE placement Preview did not apply the locked 300-DPI preview resolution");
+  }
+  const root = path.resolve(outputDirectory) + path.sep;
+  const capturedPath = path.resolve(result.path);
+  if (!capturedPath.startsWith(root) || ![".jpg", ".jpeg"].includes(path.extname(capturedPath).toLowerCase())) {
+    throw new Error("LiDE bridge returned an unsafe or non-JPEG placement preview");
+  }
+  const stat = fs.statSync(capturedPath);
+  if (!stat.isFile() || stat.size < 4) throw new Error("LiDE bridge returned an empty placement preview");
+  /*
+   * The applied rectangle must be the profile window at the calibrated origin. If the driver applied
+   * anything else, the gate would be judging a different frame from the one the master will contain,
+   * so this refuses rather than analysing it.
+   */
+  const applied = result.scanAreaMm || {};
+  const expected = captureProfile.captureWindowRectMm(origin);
+  const agrees = ["x", "y", "width", "height"].every((key) => Math.abs(Number(applied[key]) - expected[key]) <= 0.5);
+  if (!agrees) {
+    throw new Error("LiDE placement Preview did not apply the calibrated capture window");
+  }
+  return {
+    path: capturedPath,
+    sizeBytes: stat.size,
+    originMm: origin,
+    areaMm: expected,
+    appliedRegionMm: applied,
+    requestedDpi: Number(result.requestedDpi),
+    driverResolutionDpi: Number(result.driverResolutionDpi),
+    coordinateSpace: result.previewCoordinateSpace,
+    rasterOrientation: Number(result.previewRasterOrientation),
+    capturedAt: startedAt,
+    scanner: { model: result.model || MODEL, deviceId: result.deviceId || "", serial: result.serial || null },
+  };
+}
+
+/**
  * Capture a disposable-card calibration frame using ImageCaptureCore's actual
  * scan area. It is deliberately separate from `scan`: no capture session,
  * server client, provenance acceptance, or evidence upload is reachable here.
@@ -338,7 +437,18 @@ module.exports = {
   health,
   scan,
   positioningPreview,
+  placementPreview,
   scanCalibrationRegion,
   persistJigOrigin,
-  _private: { jigOrigin, calibrationRegion, ensureBridge, CALIBRATION_MIN_MM, PLATEN_MAX_MM, PROFILE_AREA_MM, POSITIONING_PREVIEW_DPI },
+  captureProfile,
+  _private: {
+    jigOrigin,
+    calibrationRegion,
+    ensureBridge,
+    CALIBRATION_MIN_MM,
+    PLATEN_MAX_MM,
+    PROFILE_AREA_MM,
+    POSITIONING_PREVIEW_DPI,
+    PLACEMENT_PREVIEW_DPI,
+  },
 };

@@ -27,6 +27,17 @@ static NSString *const kExpectedShortName = @"LiDE 400";
 @property(nonatomic) double scanHeightMm;
 @property(nonatomic) BOOL calibration;
 @property(nonatomic) BOOL positioningPreview;
+/*
+ * The per-side PLACEMENT preview: the calibrated capture window only, at 300 DPI, as JPEG.
+ *
+ * Deliberately distinct from positioningPreview, which is the uncalibrated FULL PLATEN setup view.
+ * This one scans exactly the rectangle the 1200-DPI evidence capture will use, so the placement
+ * gate judges the same physical frame the master will contain — a full-platen view could not, and a
+ * 1200-DPI capture would cost the operator 45 seconds per placement attempt.
+ *
+ * Like positioningPreview it produces a JPEG and never a TIFF, so it cannot masquerade as evidence.
+ */
+@property(nonatomic) BOOL placementPreview;
 @property(nonatomic, strong) NSDictionary *appliedScanAreaMm;
 @property(nonatomic) BOOL scanning;
 @property(nonatomic) BOOL complete;
@@ -170,7 +181,8 @@ static NSString *const kExpectedShortName = @"LiDE 400";
     [self finish:payload];
     return;
   }
-  NSUInteger requestedResolution = self.positioningPreview ? 300 : 1200;
+  BOOL lowResolutionPreview = self.positioningPreview || self.placementPreview;
+  NSUInteger requestedResolution = lowResolutionPreview ? 300 : 1200;
   if (![unit.supportedResolutions containsIndex:requestedResolution]) {
     [self finish:@{ @"status": @"profile_unsupported", @"error": [NSString stringWithFormat:@"LiDE driver does not expose %lu DPI", (unsigned long)requestedResolution] }];
     return;
@@ -186,7 +198,7 @@ static NSString *const kExpectedShortName = @"LiDE 400";
   scanner.transferMode = ICScannerTransferModeFileBased;
   scanner.downloadsDirectory = [NSURL fileURLWithPath:self.outputDirectory isDirectory:YES];
   scanner.documentName = [NSString stringWithFormat:@"mintvault-lide-%@", NSUUID.UUID.UUIDString];
-  scanner.documentUTI = self.positioningPreview ? @"public.jpeg" : @"public.tiff";
+  scanner.documentUTI = lowResolutionPreview ? @"public.jpeg" : @"public.tiff";
   unit.measurementUnit = ICScannerMeasurementUnitCentimeters;
   unit.pixelDataType = ICScannerPixelDataTypeRGB;
   unit.bitDepth = ICScannerBitDepth8Bits;
@@ -194,7 +206,9 @@ static NSString *const kExpectedShortName = @"LiDE 400";
   unit.scanAreaOrientation = 1; // EXIF orientation 1: deterministic upright capture.
   // This is a physical ImageCaptureCore acquisition rectangle, not a later
   // Sharp/libvips crop. Profile scans are always 100 x 130 mm; calibration is
-  // deliberately a larger bounded acquisition so the jig can be measured.
+  // deliberately a larger bounded acquisition so the jig can be measured. A
+  // PLACEMENT preview uses the identical rectangle a profile scan would, so the
+  // gate and the evidence master frame the same physical area.
   if (self.positioningPreview) {
     // Deliberately broad, uncalibrated setup view. We read the active ICA
     // flatbed size in centimetres rather than guessing an X/Y, then request
@@ -246,14 +260,16 @@ static NSString *const kExpectedShortName = @"LiDE 400";
   NSMutableDictionary *payload = [[self devicePayload:scanner ready:YES] mutableCopy];
   payload[@"status"] = @"captured";
   payload[@"path"] = self.scanURL.path;
-  payload[@"requestedDpi"] = @(self.positioningPreview ? 300 : 1200);
+  payload[@"requestedDpi"] = @((self.positioningPreview || self.placementPreview) ? 300 : 1200);
   payload[@"driverResolutionDpi"] = @(unit.resolution);
   payload[@"scanAreaMm"] = self.appliedScanAreaMm ?: @{
     @"x": @(self.originXmm), @"y": @(self.originYmm),
     @"width": @(self.scanWidthMm), @"height": @(self.scanHeightMm),
   };
-  payload[@"captureKind"] = self.positioningPreview ? @"positioning_preview" : (self.calibration ? @"calibration" : @"profile");
-  if (self.positioningPreview) {
+  payload[@"captureKind"] = self.positioningPreview
+    ? @"positioning_preview"
+    : (self.placementPreview ? @"placement_preview" : (self.calibration ? @"calibration" : @"profile"));
+  if (self.positioningPreview || self.placementPreview) {
     // This bridges one explicit contract to the JavaScript detector/renderer:
     // requested ImageCaptureCore scan-area millimetres map to an upright
     // orientation-1 raster. A non-upright JPEG is rejected by the client
@@ -284,22 +300,27 @@ int main(int argc, const char * argv[]) {
     BOOL profileScan = argc == 5 && strcmp(argv[1], "scan") == 0;
     BOOL calibrationScan = argc == 7 && strcmp(argv[1], "calibrate") == 0;
     BOOL positioningPreview = argc == 3 && strcmp(argv[1], "preview") == 0;
-    BOOL scanning = profileScan || calibrationScan || positioningPreview;
+    // The per-side placement gate. Same rectangle as `scan`, 300 DPI, JPEG out.
+    BOOL placementPreview = argc == 5 && strcmp(argv[1], "place") == 0;
+    BOOL scanning = profileScan || calibrationScan || positioningPreview || placementPreview;
     if (!scanning && !(argc == 2 && strcmp(argv[1], "health") == 0)) {
-      printJSON(@{ @"status": @"control_unavailable", @"error": @"Usage: health | preview <output-dir> | scan <output-dir> <origin-x-mm> <origin-y-mm> | calibrate <output-dir> <origin-x-mm> <origin-y-mm> <width-mm> <height-mm>" });
+      printJSON(@{ @"status": @"control_unavailable", @"error": @"Usage: health | preview <output-dir> | place <output-dir> <origin-x-mm> <origin-y-mm> | scan <output-dir> <origin-x-mm> <origin-y-mm> | calibrate <output-dir> <origin-x-mm> <origin-y-mm> <width-mm> <height-mm>" });
       return 64;
     }
     MintVaultLideBridge *bridge = [MintVaultLideBridge new];
     bridge.scanning = scanning;
     bridge.calibration = calibrationScan;
     bridge.positioningPreview = positioningPreview;
+    bridge.placementPreview = placementPreview;
     bridge.discoveredDevices = [NSMutableArray array];
     if (scanning) {
       bridge.outputDirectory = [NSString stringWithUTF8String:argv[2]];
       bridge.originXmm = positioningPreview ? 0.0 : strtod(argv[3], NULL);
       bridge.originYmm = positioningPreview ? 0.0 : strtod(argv[4], NULL);
-      bridge.scanWidthMm = profileScan ? 100.0 : (calibrationScan ? strtod(argv[5], NULL) : 0.0);
-      bridge.scanHeightMm = profileScan ? 130.0 : (calibrationScan ? strtod(argv[6], NULL) : 0.0);
+      // A placement preview MUST request the identical 100 x 130 mm window a profile scan would.
+      // Anything else would gate the operator on a frame the evidence capture will not reproduce.
+      bridge.scanWidthMm = (profileScan || placementPreview) ? 100.0 : (calibrationScan ? strtod(argv[5], NULL) : 0.0);
+      bridge.scanHeightMm = (profileScan || placementPreview) ? 130.0 : (calibrationScan ? strtod(argv[6], NULL) : 0.0);
       if (!positioningPreview && (
         bridge.originXmm < 0 || bridge.originYmm < 0 ||
         bridge.scanWidthMm <= 0 || bridge.scanHeightMm <= 0 ||

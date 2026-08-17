@@ -932,6 +932,31 @@ function setupIpc() {
     return watcher.applyPositioningPreview(previewId);
   });
 
+  /*
+   * The per-side placement gate. Like the setup Preview it carries no path and no card identity —
+   * the watcher binds the approval to the side that is actually awaiting Scan, so the renderer
+   * cannot ask for an approval on behalf of some other card.
+   */
+  ipcMain.handle("run-placement-preview", async () => {
+    if (!watcher) return { ok: false, error: "Scanner service is starting" };
+    return watcher.runPlacementPreview();
+  });
+
+  ipcMain.handle("get-placement-preview", (_event, previewId) => {
+    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Placement preview is unavailable" };
+    return watcher.placementPreviewData(previewId);
+  });
+
+  /*
+   * Move the capture window. An explicit RECALIBRATION action, not part of card capture: it is
+   * reachable only from Service & Diagnostics and it invalidates any standing placement approval,
+   * because an approval measured against the old window says nothing about the new one.
+   */
+  ipcMain.handle("save-capture-window", async (_event, originMm) => {
+    if (!watcher) return { ok: false, error: "Scanner service is starting" };
+    return watcher.saveCaptureWindowOrigin(originMm);
+  });
+
   ipcMain.handle("get-capture-preview", (_event, previewId) => {
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
     return watcher.previewData(previewId);

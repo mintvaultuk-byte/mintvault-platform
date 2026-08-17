@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { storage } from "./storage";
 import type { ScannerCaptureSession } from "./scanner-capture-service";
+import { authoritativeRegionForSession, assertDeclaredRegionMatchesAuthority } from "./lib/lide400-capture-authority";
 
 type TrustedCapturePrincipal = {
   stationId: string | null;
@@ -52,7 +53,23 @@ export async function finaliseScannerEvidence(input: {
   const inspection = await inspectScannerEvidence(input.buffer);
   const provenance = parseLide400CaptureProvenance(input.provenanceInput);
   assertLide400Evidence(inspection, provenance);
-  const frameAssessment = await assessLide400CardFrame(input.buffer, inspection, provenance.scanAreaMm);
+
+  /*
+   * THE ACQUISITION RECTANGLE COMES FROM THE SERVER, NOT FROM THE UPLOAD.
+   *
+   * `provenance.scanAreaMm` is a STATION-supplied number. It was safe to scale millimetres by while
+   * every station used the same hard-coded window — the size was pinned against a server constant
+   * and the margin verdict depends on size alone — but the window is now movable per station, so a
+   * declared ORIGIN is an unverified claim about where on the platen this scan happened.
+   *
+   * The authority is the region snapshotted onto this session when the side was ARMED, taken from
+   * the station's current VALID calibration. The upload's own declaration is then required merely to
+   * AGREE with it; disagreement means a stale local config, a hand-edited station file or a forged
+   * payload, and all three are refusals.
+   */
+  const authoritativeRegion = authoritativeRegionForSession(input.session);
+  assertDeclaredRegionMatchesAuthority(provenance.scanAreaMm, authoritativeRegion);
+  const frameAssessment = await assessLide400CardFrame(input.buffer, inspection, authoritativeRegion);
   if (!frameAssessment.accepted) {
     throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
   }

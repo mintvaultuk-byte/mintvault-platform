@@ -225,6 +225,39 @@ async function writePositioningJpeg(dir, name = "placement-preview.jpg") {
   return filePath;
 }
 
+/**
+ * Take a real placement Preview and pass its gate.
+ *
+ * SCAN now requires a live GREEN placement approval bound to the exact session and side, so every
+ * test that reaches a physical capture has to go through the gate the operator goes through. Only
+ * the two things that need real hardware or real pixels are stubbed — the scanner call and the
+ * pixel analysis. Approval creation, its binding to session/side/card, and its consumption by the
+ * capture all run for real, which is the point: these tests would otherwise prove that scanning
+ * works in a world where the gate does not exist.
+ */
+async function passPlacementGate(fixture, cardBoundsMm = { x: 18.25, y: 20.55, width: 63.5, height: 88.9 }) {
+  const { evaluatePlacement } = require("../../../shared/lide400-capture-profile.cjs");
+  fixture.lide.placementPreview = async (dir) => ({
+    path: await writePositioningJpeg(dir, "gate-preview.jpg"),
+    sizeBytes: 1,
+    originMm: { x: 20, y: 20 },
+    areaMm: { x: 20, y: 20, width: 100, height: 130 },
+    appliedRegionMm: { x: 20, y: 20, width: 100, height: 130 },
+    requestedDpi: 300,
+    driverResolutionDpi: 300,
+    coordinateSpace: "imagecapturecore-scan-area-upright-raster-v1",
+    rasterOrientation: 1,
+    capturedAt: new Date().toISOString(),
+    scanner: {},
+  });
+  fixture.watcher.analysePlacementPreview = async () => ({
+    image: { width: 900, height: 1200, orientation: 1 },
+    detected: { cardBoundsMm },
+    verdict: evaluatePlacement(cardBoundsMm),
+  });
+  return fixture.watcher.runPlacementPreview();
+}
+
 function configureClaimedStation({ watcher, state, server, lide }) {
   server.hasToken = () => true;
   server.claimNextCapture = async () => ({ ok: true, body: { capture: claimedTarget() } });
@@ -341,6 +374,7 @@ test("explicit Scan creates a JPEG derivative preview without uploading the TIFF
   fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: { certId: "MV900" } }; };
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   const result = await fixture.watcher.scanActiveTarget();
   assert.equal(result.ok, true);
   assert.equal(uploads, 0, "preview creation must not cross the evidence-upload boundary");
@@ -394,6 +428,7 @@ test("a frame that lacks four-side evidence margin is previewed but can only be 
   fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: { certId: "MV900" } }; };
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   const scan = await fixture.watcher.scanActiveTarget();
   assert.equal(scan.ok, false);
   const previewId = fixture.state.get().activeCapture.previewId;
@@ -418,12 +453,20 @@ test("rapid Scan clicks start exactly one physical capture", async (t) => {
   };
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   const first = fixture.watcher.scanActiveTarget();
   for (let attempt = 0; attempt < 20 && !resolveScan; attempt++) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   assert.equal(scans, 1);
-  assert.equal((await fixture.watcher.scanActiveTarget()).ok, false, "double Scan must be single-flight before native capture completes");
+  const second = await fixture.watcher.scanActiveTarget();
+  assert.equal(second.ok, false, "double Scan must be single-flight before native capture completes");
+  /*
+   * REFUSED FOR THE RIGHT REASON. The capture also CONSUMES its placement approval, so a second
+   * press would be refused by the gate even if single-flight were broken. Asserting the message
+   * keeps this test proving single-flight rather than quietly proving the gate twice.
+   */
+  assert.match(second.error, /already in progress/);
   resolveScan();
   assert.equal((await first).ok, true);
   assert.equal(scans, 1);
@@ -468,6 +511,7 @@ test("a preview pins its exact card-side target until Accept, Rescan, or expiry"
   });
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
   const before = fixture.state.get().activeCapture;
   const repeatedPoll = await fixture.watcher.pollTargetedCapture();
@@ -495,11 +539,14 @@ test("stale or duplicate Accept and Rescan during upload cannot cross card sides
   };
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
   const stalePreviewId = fixture.state.get().activeCapture.previewId;
   assert.equal((await fixture.watcher.rescanPreview(stalePreviewId)).ok, true);
   assert.equal((await fixture.watcher.acceptPreview(stalePreviewId)).ok, false, "a discarded preview cannot be accepted");
   assert.equal(uploads, 0);
+
+  await passPlacementGate(fixture);
 
   await fixture.watcher.scanActiveTarget();
   const currentPreviewId = fixture.state.get().activeCapture.previewId;
@@ -527,6 +574,7 @@ test("an expired preview is never uploaded or rescanned", async (t) => {
   fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: {} }; };
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
   fixture.server.getCaptureStatus = async () => ({ ok: true, body: { accepted: false, capture: { state: "expired" } } });
   const previewId = fixture.state.get().activeCapture.previewId;
@@ -561,6 +609,7 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   };
 
   await fixture.watcher.pollTargetedCapture();
+  await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
   assert.equal((await fixture.watcher.acceptPreview(fixture.state.get().activeCapture.previewId)).ok, true);
   assert.deepEqual(fixture.state.get().lastAcceptedCapture?.side, "front");
@@ -570,12 +619,28 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   const acceptedFrontBytes = fs.readFileSync(acceptedFront);
 
   await fixture.watcher.pollTargetedCapture();
+  assert.equal(fixture.state.get().activeCapture.side, "back");
+
+  /*
+   * A FRONT PREVIEW NEVER AUTHORISES BACK — proved on the live watcher, not just on the predicate.
+   *
+   * Accepting FRONT cleared its approval, and BACK is a different session and side besides, so SCAN
+   * must refuse until the operator looks at the glass again. Without this the gate would be a rule
+   * that holds in a unit test and evaporates in the object that actually runs it.
+   */
+  const withoutFreshPreview = await fixture.watcher.scanActiveTarget();
+  assert.equal(withoutFreshPreview.ok, false, "BACK must not scan on the FRONT side's placement approval");
+  assert.match(withoutFreshPreview.error, /placement Preview/i);
+
+  await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
   assert.equal((await fixture.watcher.rescanPreview(fixture.state.get().activeCapture.previewId)).ok, true);
   assert.equal(uploads, 1, "only accepted front was uploaded");
   assert.equal(fs.readFileSync(acceptedFront).equals(acceptedFrontBytes), true, "back Rescan never alters accepted front evidence");
   assert.equal(fixture.state.get().activeCapture.side, "back");
   assert.equal(fixture.watcher.readTargetedQueue()[0].phase, "awaiting_scan");
+
+  await passPlacementGate(fixture);
 
   await fixture.watcher.scanActiveTarget();
   assert.equal((await fixture.watcher.acceptPreview(fixture.state.get().activeCapture.previewId)).ok, true);
