@@ -92,7 +92,9 @@ test("positioning Preview detects an isolated card despite a full-width dark pla
   }
   const candidate = detectCardBounds(raw, width, height, fullPlaten);
   assert.ok(candidate, "expected the card candidate despite unrelated full-width reflection");
-  assert.equal(candidate.detectionMethod, "connected_component");
+  // Renamed with the canonical detector; the behaviour is identical — projection cannot separate
+  // the card through a full-width reflection, so the card-sized component fallback answers.
+  assert.equal(candidate.detectionMethod, "dominant_component");
   close(candidate.cardBoundsMm.x, 5.94, 0.05);
   close(candidate.cardBoundsMm.y, 6.27, 0.05);
   close(candidate.cardBoundsMm.width, 63.88, 0.05);

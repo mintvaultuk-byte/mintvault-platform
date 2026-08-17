@@ -136,6 +136,44 @@ function load() {
       );
     }
     mem.confirmCard = null;
+
+    /*
+     * AN ERROR WITH NO RECORDED REASON IS NOT AN ERROR WORTH SHOWING.
+     *
+     * THE DEFECT. A persisted `state: "error"` whose `lastError` did not survive rendered the
+     * generic "Scanner service needs attention — see service logs" for a failure nobody had
+     * described — on a station that was, at that moment, perfectly healthy. The operator was sent to
+     * the logs to look up a fault that had already been resolved in a previous run.
+     *
+     * THE REASON ITSELF IS DELIBERATELY KEPT. When `lastError` DID survive it is a specific,
+     * actionable sentence about the last real capture attempt ("LiDE 400 capture must decode as RGB
+     * colour evidence"), and that is exactly the text the operator needs after a restart. Only the
+     * reasonless case is dropped, and the moment a live target is claimed the watcher clears both.
+     */
+    if (mem.state === "error" && !mem.lastError) {
+      console.warn("[state] RECOVERY: dropped a prior run's error state that carried no reason — nothing to report");
+      mem.state = "idle";
+    }
+
+    /*
+     * A PREVIOUS PROCESS'S ARM FAILURE IS NOT THIS PROCESS'S.
+     *
+     * `openCardJob.armError` describes ONE in-flight request. A newly booted app has attempted no
+     * arm, so it cannot honestly claim one failed — yet this string survived every restart and kept
+     * a red "SCANNER NOT ARMED" panel on screen for a condition that had since been fixed and
+     * deployed. Observed on staging: an 11:00Z arm refusal was still being shown at 12:21Z, long
+     * after the server fix that removed its cause went live.
+     *
+     * The CARD is kept. Only the stale explanation is dropped: the station is still mid-card and
+     * NEW CARD must stay disabled behind it, which is what `openCardJob` itself is for. The next arm
+     * attempt records its own outcome.
+     */
+    if (mem.openCardJob && mem.openCardJob.armError) {
+      console.warn(
+        `[state] RECOVERY: cleared a prior run's arm error on ${mem.openCardJob.mvNumber || "an open card"} (was "${mem.openCardJob.armError}") — this run has attempted no arm`
+      );
+      mem.openCardJob = { ...mem.openCardJob, armError: null };
+    }
   } catch {
     mem = { ...DEFAULT };
   }

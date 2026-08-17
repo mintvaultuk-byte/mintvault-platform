@@ -11,6 +11,8 @@ const MIN_EVIDENCE_MARGIN_MM = 4;
 // sub-millimetre calibration shuffle while remaining deliberately generous.
 const DEFAULT_PLACEMENT_TOLERANCE_MM = 9;
 const { rasterRectToPhysicalRect } = require("./lide400-preview-transform");
+/** The canonical, shared segmentation + card-shaped reduction. See shared/lide400-card-geometry.cjs. */
+const { detectLide400CardBounds } = require("../../../shared/lide400-card-geometry.cjs");
 
 function median(values) {
   if (!values.length) return 0;
@@ -98,7 +100,53 @@ function findExpectedCardComponent(active, width, height, regionMm) {
  * `regionMm` is the *actual ImageCaptureCore acquisition rectangle*, so the
  * returned geometry is in real platen millimetres rather than preview pixels.
  */
-function detectCardBounds(raw, width, height, regionMm) {
+function detectCardBounds(raw, width, height, regionMm, channels = 3) {
+  /*
+   * THE CANONICAL DETECTOR DOES THE FINDING; THIS FUNCTION ONLY CHANGES COORDINATES.
+   *
+   * Segmentation and card-shaped reduction now live in ONE place, shared with the Scanner's
+   * pre-Accept guard and the server's immutable-evidence validation, so a card cannot be found in
+   * one position by one implementation and somewhere else by another.
+   *
+   * WHAT REMAINS HERE, AND WHY. The placement Preview is an OPERATOR-FACING surface: its overlays
+   * and its placement proposal are drawn in the orientation staff actually see, because the LiDE
+   * platen is physically inverted relative to how a card is laid down. That 180-degree correction is
+   * a PRESENTATION concern, and this is now the single named boundary where it is applied —
+   * `rasterRectToPhysicalRect`. It is deliberately NOT applied to evidence geometry: doing so
+   * silently is how the same physical card came to be reported at 30.2, 36.3 by the Scanner's
+   * evidence guard and at 6.3, 4.7 by the server, with no way to tell which was right.
+   */
+  const detected = detectLide400CardBounds(raw, width, height, channels, regionMm);
+  if (!detected) return null;
+  const cardBoundsMm = rasterRectToPhysicalRect(
+    {
+      x: detected.cardBoundsPx.left,
+      y: detected.cardBoundsPx.top,
+      width: detected.cardBoundsPx.width,
+      height: detected.cardBoundsPx.height,
+    },
+    regionMm,
+    { width, height }
+  );
+  const { x, y, width: cardWidth, height: cardHeight } = cardBoundsMm;
+  return {
+    cardBoundsMm: { x, y, width: cardWidth, height: cardHeight },
+    surroundingBackgroundMm: {
+      left: x - regionMm.x,
+      top: y - regionMm.y,
+      right: regionMm.x + regionMm.width - (x + cardWidth),
+      bottom: regionMm.y + regionMm.height - (y + cardHeight),
+    },
+    backgroundRgb: [detected.backgroundRgb.r, detected.backgroundRgb.g, detected.backgroundRgb.b],
+    detectionMethod: detected.detectionMethod,
+    /** The same bounds in the canonical evidence convention, for diagnostics that must compare. */
+    canonicalCardBoundsMm: detected.cardBoundsMm,
+    coordinateSpace: "lide400-preview-presentation-mm-v1",
+  };
+}
+
+/** Retained for the legacy projection helpers below, which the canonical detector supersedes. */
+function legacyDetectCardBounds(raw, width, height, regionMm) {
   const border = Math.max(3, Math.floor(Math.min(width, height) * 0.025));
   const red = [];
   const green = [];

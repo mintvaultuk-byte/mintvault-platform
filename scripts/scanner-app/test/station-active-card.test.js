@@ -225,7 +225,8 @@ test("a live target suppresses a stale arm error — the red NOT ARMED panel can
    * ARMED" in red directly beneath a capture panel showing MV272 / FRONT with SCAN enabled. Both
    * were on screen at once and only one of them was true.
    */
-  assert.match(renderer, /const armBlocked = Boolean\(openCard\?\.armError\) && !active;/);
+  assert.match(renderer, /const needsArming = Boolean\(openCard\) && !active;/);
+  assert.match(renderer, /els\.openCardPanel\.hidden = !needsArming;/);
   // And main must not RECORD a blocking arm error while the station holds a target.
   assert.match(main, /if \(open && !stateMod\.get\(\)\.activeCapture && \(!open\.cardJobId \|\| open\.cardJobId === cardJobId\)\)/);
 });
@@ -272,6 +273,164 @@ test("a network failure during the claim is retryable and adopts nothing", async
   assert.equal(refused.retryable, true);
   assert.equal(state.get().activeCapture, null);
   assert.equal(watcher.readTargetedQueue().length, 0);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+ * STALE ERROR TEXT MUST NEVER OUTLIVE THE CONDITION THAT CAUSED IT.
+ *
+ * Observed on staging at 12:21Z: the window showed "MV272 — SCANNER NOT ARMED / Station request
+ * could not be completed" (an arm refusal frozen at 11:00Z, whose server-side cause had been fixed
+ * and deployed at 11:19Z) above "Scanner service needs attention — see service logs" (the GENERIC
+ * fallback, rendered because `state` was `error` while `lastError` had not survived — so the one
+ * genuinely useful sentence, "LiDE 400 capture must decode as RGB colour evidence", was the only
+ * thing NOT on screen). Two messages, both misleading, on a healthy station.
+ * ═════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/** Boot a fresh state module over a written state.json, exactly as the app does on launch. */
+function bootWithPersistedState(t, persisted) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-stale-error-"));
+  const previousScansDir = process.env.MINTVAULT_SCANS_DIR;
+  process.env.MINTVAULT_SCANS_DIR = tempDir;
+  fs.mkdirSync(path.join(tempDir, "app-state"), { recursive: true });
+  fs.writeFileSync(path.join(tempDir, "app-state", "state.json"), JSON.stringify(persisted, null, 2));
+  const statePath = require.resolve("../lib/state");
+  delete require.cache[statePath];
+  const state = require("../lib/state");
+  t.after(() => {
+    if (previousScansDir === undefined) delete process.env.MINTVAULT_SCANS_DIR;
+    else process.env.MINTVAULT_SCANS_DIR = previousScansDir;
+    delete require.cache[statePath];
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+  return state.load();
+}
+
+test("a prior run's arm error is cleared on boot, but the open CARD is kept", (t) => {
+  const loaded = bootWithPersistedState(t, {
+    state: "error",
+    lastError: "LiDE 400 capture must decode as RGB colour evidence",
+    openCardJob: {
+      cardJobId: "job-1",
+      mvNumber: "MV272",
+      certificateId: 469,
+      armError: "Station request could not be completed",
+    },
+  });
+
+  assert.equal(loaded.openCardJob.armError, null, "this run has attempted no arm; it cannot claim one failed");
+  // The CARD survives — the station is still mid-card, so NEW CARD must stay disabled behind it.
+  assert.equal(loaded.openCardJob.cardJobId, "job-1");
+  assert.equal(loaded.openCardJob.mvNumber, "MV272");
+  assert.equal(loaded.openCardJob.certificateId, 469);
+});
+
+test("a specific failure reason SURVIVES a restart — it is the sentence the operator needs", (t) => {
+  const loaded = bootWithPersistedState(t, {
+    state: "error",
+    lastError: "LiDE 400 capture must decode as RGB colour evidence",
+  });
+
+  assert.equal(loaded.state, "error");
+  assert.equal(loaded.lastError, "LiDE 400 capture must decode as RGB colour evidence");
+});
+
+test("an error state carrying NO reason is dropped rather than shown as a generic fault", (t) => {
+  const loaded = bootWithPersistedState(t, { state: "error", lastError: null });
+
+  // This exact combination is what rendered "Scanner service needs attention — see service logs"
+  // on a healthy station, for a failure nobody had described.
+  assert.equal(loaded.state, "idle");
+  assert.equal(loaded.lastError, null);
+});
+
+test("a live target overrides persisted error text — session state beats remembered failure", (t) => {
+  const { watcher, state } = isolatedWatcher(t);
+  state.set({
+    state: "error",
+    lastError: "LiDE 400 capture must decode as RGB colour evidence",
+    openCardJob: { cardJobId: "job-1", mvNumber: "MV272", certificateId: 469, armError: "Station request could not be completed" },
+  });
+
+  watcher.setTargetState(watcher.targetEntryFromCapture(armedCapture()), "awaiting_scan", "awaiting_scan");
+
+  assert.equal(state.get().state, "awaiting_scan");
+  assert.equal(state.get().lastError, null, "the remembered failure describes a world that no longer exists");
+  assert.equal(state.get().openCardJob.armError, null, "no red NOT ARMED panel over an armed card");
+  assert.equal(state.get().openCardJob.cardJobId, "job-1", "the card itself is untouched");
+});
+
+test("a successful RETRY clears the prior error state on the same card", async (t) => {
+  const { watcher, state, adopt } = isolatedWatcher(t);
+  state.set({
+    state: "error",
+    lastError: "Capture rejected — restart this side",
+    openCardJob: { cardJobId: "job-1", mvNumber: "MV272", certificateId: 469, armError: "Station request could not be completed" },
+  });
+
+  const retried = await adopt(armedCapture());
+
+  assert.equal(retried.ok, true);
+  assert.equal(state.get().state, "awaiting_scan");
+  assert.equal(state.get().lastError, null);
+  assert.equal(state.get().openCardJob.armError, null);
+  assert.equal(state.get().activeCapture.certId, "MV272");
+});
+
+test("a background placement re-analysis must not erase a real capture failure reason", async (t) => {
+  /*
+   * THE DEFECT THIS PINS, and it is what actually produced "Scanner service needs attention" on a
+   * station that knew perfectly well what had gone wrong. The boot-time re-analysis of a RETAINED
+   * placement Preview wrote `lastError: null` while leaving `state` at `error` — so the specific
+   * sentence recorded two minutes earlier ("Detected card geometry is implausible…") was destroyed
+   * by an unrelated background refresh, and the renderer fell back to the generic message.
+   *
+   * Re-measuring a placement photograph says nothing about whether a capture failure was resolved.
+   */
+  const { watcher, state } = isolatedWatcher(t);
+  const reason = "Detected card geometry is implausible for a complete standard card; rescan with all four edges visible";
+  state.set({
+    state: "error",
+    lastError: reason,
+    positioningPreview: { id: "prev-1", status: "detected", capture: { areaMm: { x: 0, y: 0, width: 216, height: 297 } } },
+  });
+  // Drive the real re-analysis, with only the image work stubbed — the state write is the subject.
+  watcher.storedPositioningPreviewSource = () => "/dev/null";
+  watcher.analysePositioningPreview = async () => ({
+    image: { orientation: "upright" },
+    cardCandidate: { cardBoundsMm: { x: 10, y: 10, width: 63, height: 88 } },
+    placement: { ready: true, originMm: { x: 0, y: 0 } },
+  });
+
+  const reanalysed = await watcher.reanalyseStoredPositioningPreview();
+
+  assert.equal(reanalysed, true, "the re-analysis itself must still run");
+  assert.equal(state.get().positioningPreview.status, "detected");
+  assert.equal(state.get().lastError, reason, "the capture failure reason must survive an unrelated refresh");
+  assert.equal(state.get().state, "error");
+});
+
+test("the recovery panel is driven by current state, so RETRY never disappears with a cleared error", () => {
+  /*
+   * Clearing the stale arm error removed the panel entirely — and with it the RETRY and CANCEL
+   * buttons — leaving an open card with no visible way to arm it. The authoritative condition is
+   * "this station holds a card with no target on the glass", not "did an arm fail".
+   */
+  assert.match(renderer, /const needsArming = Boolean\(openCard\) && !active;/);
+  assert.match(renderer, /els\.openCardPanel\.hidden = !needsArming;/);
+  // With no remembered reason the panel still states the situation — never the generic fallback.
+  assert.match(renderer, /"This card has no armed scanner target\. "/);
+  assert.doesNotMatch(renderer, /openCardDetail\.textContent = [^;]*Scanner service needs attention/);
+  // And an open card with no live capture reads NOT ARMED, never "PREPARING…".
+  assert.match(renderer, /els\.targetSide\.textContent = "NOT ARMED";/);
+  assert.doesNotMatch(renderer, /textContent = [^;]*PREPARING…/);
+});
+
+test("the generic fallback appears ONLY when there is no specific reason", () => {
+  // explainFailure returns the real detail whenever there is one, and the "see service logs"
+  // sentence solely for an empty reason — which `load()` above now prevents from persisting.
+  assert.match(renderer, /return detail \|\| "Scanner service needs attention — see service logs";/);
+  // And the status line renders that reason rather than a fixed string.
+  assert.match(renderer, /\? explainFailure\(lastState\.lastError\)/);
 });
 
 // ── FIX 4 — the open-card record survives the whole card ──────────────────────────────────────

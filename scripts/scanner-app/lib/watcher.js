@@ -364,6 +364,17 @@ class Watcher extends EventEmitter {
   }
 
   setTargetState(entry, stage, state = stage, lastError = null) {
+    /*
+     * A LIVE TARGET IS THE CURRENT TRUTH, AND IT OUTRANKS ANY REMEMBERED FAILURE.
+     *
+     * The moment the server hands this station a card, an arm error recorded earlier is describing a
+     * world that no longer exists. Leaving it set kept a red "SCANNER NOT ARMED" panel alive behind
+     * a capture panel that was showing the armed card — the state the operator saw at 12:21Z on
+     * staging. `lastError` is already reset by the write below (it defaults to null); this extends
+     * the same rule to the open-card record, so authoritative session state always wins over
+     * persisted UI error text.
+     */
+    const open = stateMod.get().openCardJob;
     stateMod.set({
       state,
       activeCapture: {
@@ -376,6 +387,7 @@ class Watcher extends EventEmitter {
         attempt: Number(entry.attempt || 1),
       },
       lastError,
+      ...(open && open.armError ? { openCardJob: { ...open, armError: null } } : {}),
     });
     this.emitState();
   }
@@ -551,7 +563,23 @@ class Watcher extends EventEmitter {
           cardCandidate: analysis.cardCandidate,
           placement: analysis.placement,
         },
-        lastError: null,
+        /*
+         * `lastError` IS DELIBERATELY NOT TOUCHED HERE.
+         *
+         * THE DEFECT THIS CLOSES. This is the passive re-analysis of a RETAINED placement Preview,
+         * run at boot. It used to write `lastError: null` — so a real, specific capture failure
+         * recorded moments earlier ("Detected card geometry is implausible for a complete standard
+         * card; rescan with all four edges visible") was wiped by an unrelated background refresh,
+         * while `state` stayed `error`. The renderer then had an error with no reason and fell back
+         * to "Scanner service needs attention — see service logs" — sending the operator to the logs
+         * to rediscover a sentence this app had already been told and then thrown away. Observed on
+         * staging at 11:28Z, two minutes after the failure it erased.
+         *
+         * Re-measuring a placement photograph is not evidence that a capture failure was resolved.
+         * The things that legitimately clear it are the operator starting a new action and the
+         * server handing this station a live target — `setTargetState` does the latter, which is why
+         * arming a card correctly wipes both the state and the reason.
+         */
       });
       this.emitState();
       this.log(`positioning-preview ${JSON.stringify({ id: entry.id, stage: "reanalysed", cardDetected: Boolean(analysis.cardCandidate), placementReady: Boolean(analysis.placement.ready) })}`);

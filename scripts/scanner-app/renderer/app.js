@@ -190,11 +190,17 @@ function renderTarget(state) {
    * recoveries (retry the arm, or cancel the card) findable.
    */
   if (state.openCardJob) {
+    /*
+     * NO ACTIVE CAPTURE MEANS NOT ARMED, whether or not anyone recorded why. "PREPARING…" was shown
+     * for any open card without a remembered error — including a card that had been sitting
+     * unarmed since a previous run, where nothing was preparing anything and the operator was being
+     * told to wait for something that was never going to happen.
+     */
     els.targetCert.textContent = state.openCardJob.mvNumber || "Card started";
-    els.targetSide.textContent = state.openCardJob.armError ? "NOT ARMED" : "PREPARING…";
+    els.targetSide.textContent = "NOT ARMED";
     els.targetHint.textContent = state.openCardJob.armError
       ? `${state.openCardJob.armError} — retry the scanner for this same card, or cancel it to return its Grading Credit.`
-      : "MintVault is preparing this card's first side. Keep the card at this station.";
+      : "This card has no armed scanner target. Retry the scanner for this same card, or cancel it to return its Grading Credit.";
     return;
   }
 
@@ -648,21 +654,33 @@ function renderCaptureActions(state) {
    * work.
    */
   /*
-   * A LIVE TARGET BEATS A STALE ARM ERROR, ALWAYS.
+   * THE PANEL IS DRIVEN BY CURRENT STATE, NOT BY A REMEMBERED ERROR.
    *
-   * The panel used to render on `armError` alone, so a failed RETRY drew a red "SCANNER NOT ARMED"
-   * block directly beneath a capture panel that was showing MV272 / FRONT with SCAN enabled — the
-   * card WAS armed, and the operator was told in large red letters that it was not. `activeCapture`
-   * is the authoritative answer to "is there a target on this glass"; an arm error is only
-   * meaningful when there is nothing.
+   * TWO DEFECTS, ONE CONDITION. It first rendered on `armError` alone, so a failed RETRY drew a red
+   * "SCANNER NOT ARMED" block directly beneath a capture panel showing MV272 / FRONT with SCAN
+   * enabled — the card WAS armed and the operator was told in red that it was not. Clearing the
+   * stale error then removed the panel entirely, taking RETRY and CANCEL with it and leaving an open
+   * card with no visible way to arm it.
+   *
+   * Both come from asking the wrong question. The authoritative condition is not "did an arm fail"
+   * but "does this station hold a card with no target on the glass" — `openCard && !active`. That is
+   * true exactly when the operator needs to act, false the instant a target is claimed, and it does
+   * not depend on whether anyone remembered why.
+   *
+   * The REASON is then presentation: the specific sentence when there is one, a plain statement of
+   * the situation when there is not. Never the generic "service needs attention" — this panel always
+   * knows what it is about.
    */
-  const armBlocked = Boolean(openCard?.armError) && !active;
-  els.openCardPanel.hidden = !armBlocked;
-  if (armBlocked) {
+  const needsArming = Boolean(openCard) && !active;
+  els.openCardPanel.hidden = !needsArming;
+  if (needsArming) {
     els.openCardTitle.textContent = openCard.mvNumber
       ? `${openCard.mvNumber} — SCANNER NOT ARMED`
       : "CARD STARTED — SCANNER NOT ARMED";
-    els.openCardDetail.textContent = `${openCard.armError} This card and its MV number are safe. Retry the scanner for this SAME card, or cancel it to return its Grading Credit.`;
+    const cause = openCard.armError
+      ? `${openCard.armError} `
+      : "This card has no armed scanner target. ";
+    els.openCardDetail.textContent = `${cause}This card and its MV number are safe. Retry the scanner for this SAME card, or cancel it to return its Grading Credit.`;
     els.retryArmBtn.disabled = openCardActionInFlight || !openCard.cardJobId;
     els.cancelCardBtn.disabled = openCardActionInFlight || !openCard.cardJobId;
   }

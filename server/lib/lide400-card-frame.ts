@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { detectCardBoundary } from "../image-processing";
+import { detectLide400CardBounds } from "@shared/lide400-card-geometry.cjs";
 import type { ScannerEvidenceInspection } from "./image-evidence";
 
 /**
@@ -65,47 +65,57 @@ export async function assessLide400CardFrame(
     if (!info.width || !info.height || info.channels < 3)
       return rejected("LiDE card-boundary analysis could not decode RGB pixels");
 
-    // Preserve raw detected edges: the established working crop's aspect
-    // tightening/padding is intentionally not appropriate for an acceptance
-    // boundary check, where any uncertainty must fail closed.
-    const boundary = detectCardBoundary(new Uint8Array(data), info.width, info.height, info.channels, undefined, {
-      safetyPadPx: 0,
-      preserveRawBounds: true,
-    });
-    if (!boundary)
+    /*
+     * THE CANONICAL DETECTOR, run here on the IMMUTABLE MASTER, independently of anything the
+     * Scanner reported. The server remains the final authority and re-derives the geometry itself —
+     * it just no longer does so with a DIFFERENT algorithm.
+     *
+     * WHAT THIS REPLACES. `detectCardBoundary(..., { preserveRawBounds: true })` reduces to
+     * `boundingBox(allForegroundPixels)`. On the MV272 master its segmentation was correct — 42.18%
+     * card pixels against 43.4% for a real card — but ~0.5% of those pixels, at the platen corner
+     * the 0,0-anchored acquisition region includes, stretched the box from 62.8 mm to the full
+     * 100 mm width. It reported a 100.0 x 114.0 mm "card" and the plausibility rule below correctly
+     * refused it, after a 52-second physical scan. The Scanner's own detector, on the same bytes,
+     * found 63.49 x 89.05 mm.
+     *
+     * A global bounding box measures the extent of everything that is not background. That is the
+     * card only when the frame is otherwise spotless, which no real platen ever is.
+     *
+     * NOTHING BELOW IS RELAXED. The plausibility window and the 4 mm evidence margin are byte-for-
+     * byte the rules they were; only the measurement handed to them changed.
+     */
+    const detected = detectLide400CardBounds(
+      new Uint8Array(data),
+      info.width,
+      info.height,
+      info.channels,
+      acquisition
+    );
+    if (!detected)
       return rejected(
         "Card edges could not be determined inside the acquired frame; rescan with clear scanner background on all sides"
       );
 
+    // Map the detector's downscaled pixel bounds back onto the full master for the record.
     const xScale = inspection.width / info.width;
     const yScale = inspection.height / info.height;
-    const leftPx = Math.max(0, Math.round(boundary.minX * xScale));
-    const topPx = Math.max(0, Math.round(boundary.minY * yScale));
-    const rightPx = Math.min(inspection.width - 1, Math.round(boundary.maxX * xScale));
-    const bottomPx = Math.min(inspection.height - 1, Math.round(boundary.maxY * yScale));
-    const widthPx = rightPx - leftPx + 1;
-    const heightPx = bottomPx - topPx + 1;
-    if (widthPx <= 0 || heightPx <= 0) return rejected("Card-boundary analysis produced an invalid frame; rescan");
+    const leftPx = Math.max(0, Math.round(detected.cardBoundsPx.left * xScale));
+    const topPx = Math.max(0, Math.round(detected.cardBoundsPx.top * yScale));
+    const widthPx = Math.max(1, Math.round(detected.cardBoundsPx.width * xScale));
+    const heightPx = Math.max(1, Math.round(detected.cardBoundsPx.height * yScale));
 
-    const xMmPerPixel = acquisition.width / inspection.width;
-    const yMmPerPixel = acquisition.height / inspection.height;
     const cardBoundsMm = {
-      left: leftPx * xMmPerPixel,
-      top: topPx * yMmPerPixel,
-      width: widthPx * xMmPerPixel,
-      height: heightPx * yMmPerPixel,
+      left: detected.cardBoundsMm.x,
+      top: detected.cardBoundsMm.y,
+      width: detected.cardBoundsMm.width,
+      height: detected.cardBoundsMm.height,
     };
-    const evidenceMarginMm = {
-      left: cardBoundsMm.left,
-      top: cardBoundsMm.top,
-      right: Math.max(0, (inspection.width - 1 - rightPx) * xMmPerPixel),
-      bottom: Math.max(0, (inspection.height - 1 - bottomPx) * yMmPerPixel),
-    };
+    const evidenceMarginMm = detected.evidenceMarginMm;
     const common = {
       cardBoundsPx: { left: leftPx, top: topPx, width: widthPx, height: heightPx },
       cardBoundsMm,
       evidenceMarginMm,
-      detector: { nonBackgroundPercent: boundary.nonBlackPct, matRgb: boundary.matRgb },
+      detector: { nonBackgroundPercent: detected.cardPixelPercent, matRgb: detected.backgroundRgb },
     };
 
     if (

@@ -24,8 +24,15 @@ describe("LiDE 400 acquired-frame safety gate", () => {
     expect(assessment.accepted).toBe(true);
     expect(assessment.evidenceMarginMm?.left).toBeCloseTo(15, 1);
     expect(assessment.evidenceMarginMm?.top).toBeCloseTo(17.33, 1);
-    expect(assessment.evidenceMarginMm?.right).toBeCloseTo(21.9, 1);
-    expect(assessment.evidenceMarginMm?.bottom).toBeCloseTo(24.6, 1);
+    /*
+     * 22.0, not 21.9. The retired reduction computed the far margins from the LAST CARD PIXEL
+     * INDEX (`width - 1 - rightPx`), which understated right and bottom by one pixel-width. The
+     * canonical detector computes `area - (origin + span)`, which is exact: a 63 mm card at 15 mm
+     * in a 100 mm region leaves exactly 22 mm. The old value was conservative — it under-reported
+     * clearance and so could only ever fail closed — but it was arithmetically wrong.
+     */
+    expect(assessment.evidenceMarginMm?.right).toBeCloseTo(22.0, 1);
+    expect(assessment.evidenceMarginMm?.bottom).toBeCloseTo(24.7, 1);
     // Boundary detection maps whole downscaled pixels back to millimetres;
     // assert physical-card scale rather than sub-millimetre raster rounding.
     expect(assessment.cardBoundsMm?.width).toBeCloseTo(63, 0);
