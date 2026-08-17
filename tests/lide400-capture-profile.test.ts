@@ -141,8 +141,18 @@ describe("Capture-window origin", () => {
     expect(far.clamped).toBe(true);
     expect(far.originMm.x + P.outerWindowMm.width).toBeLessThanOrEqual(PLATEN_MM.width);
     expect(far.originMm.y + P.outerWindowMm.height).toBeLessThanOrEqual(PLATEN_MM.height);
-    // The owner's stated ranges: X 0 -> 116, Y 0 -> 167 for a 100 x 130 window on a 216 x 297 platen.
-    expect(far.boundsMm).toEqual({ minX: 0, maxX: 116, minY: 0, maxY: 167 });
+    /*
+     * The owner's stated ranges, X 0 -> 115.9 and Y 0 -> 167.0, and they come out exactly because
+     * PLATEN_MM is the ImageCaptureCore-reported 215.9 x 297.0107 rather than a tidy 216 x 297.
+     * Rounding the platen UP put the far bound at 116, permitting a window whose right edge lands
+     * 0.1 mm past the addressable glass — invisible while the origin was inset 5 mm, exposed the
+     * moment that inset became 0.
+     */
+    expect(far.boundsMm.minX).toBe(0);
+    expect(far.boundsMm.minY).toBe(0);
+    expect(far.boundsMm.maxX).toBeCloseTo(115.9, 6);
+    expect(far.boundsMm.maxY).toBeCloseTo(167.01, 2);
+    expect(far.boundsMm.maxX + P.outerWindowMm.width).toBeLessThanOrEqual(PLATEN_MM.width);
 
     // The impossible rectangle the card-chasing solve used to propose is clamped back onto the glass.
     const negative = clampCaptureOriginMm({ x: -11.54, y: -15.09 }, P);
@@ -275,6 +285,36 @@ describe("The placement gate", () => {
       }
     }
   });
+
+  /*
+   * ALL FOUR EDGES ON THE GATE TOO. `Math.min(marginMm.left, marginMm.top)` — i.e. deleting the two
+   * far edges from the placement gate entirely — failed only ONE of the eighty-six tests in this
+   * commit, and that one was an accident of a rotation proof in the corpus. This suite, the one that
+   * exists to test the gate, had no discriminating power on right or bottom at all.
+   */
+  for (const edge of ["left", "top", "right", "bottom"] as const) {
+    it(`is RED when only the ${edge.toUpperCase()} margin is inside the preview threshold`, () => {
+      const w = 63.5;
+      const h = 88.9;
+      const floor = previewGreenMinMarginMm(P);
+      const tight = floor - 1;
+      const centredX = (P.outerWindowMm.width - w) / 2;
+      const centredY = (P.outerWindowMm.height - h) / 2;
+      const card =
+        edge === "left"
+          ? { x: tight, y: centredY, width: w, height: h }
+          : edge === "top"
+            ? { x: centredX, y: tight, width: w, height: h }
+            : edge === "right"
+              ? { x: P.outerWindowMm.width - w - tight, y: centredY, width: w, height: h }
+              : { x: centredX, y: P.outerWindowMm.height - h - tight, width: w, height: h };
+
+      const verdict = evaluatePlacement(card, P);
+      expect(verdict.marginMm![edge]).toBeCloseTo(tight, 6);
+      expect(verdict.state, `a ${tight} mm ${edge} margin must be RED`).toBe(PLACEMENT.REPOSITION);
+      expect(verdict.code).toBe("card_inside_preview_margin");
+    });
+  }
 
   it("uses the REAL detected bounds, never a nominal card size", () => {
     // Two cards at the same position but different real sizes must be able to disagree.

@@ -17,8 +17,17 @@ const sharp = require("sharp");
  * inversion remains where it belongs, in the Preview's display/proposal path.
  */
 const { detectLide400CardBounds } = require("../../../shared/lide400-card-geometry.cjs");
+const { STANDARD_TCG } = require("../../../shared/lide400-capture-profile.cjs");
 
-const MIN_EVIDENCE_MARGIN_MM = 4;
+/**
+ * The MASTER evidence floor, sourced from the profile rather than restated.
+ *
+ * This was a third hardcoded `4` — the server's `lide400-card-frame.ts` and the Scanner's
+ * `lide400-card-detection.js` both derive from the profile, and this one did not. A hostile review
+ * dropped it to 1 and the entire 129-test Scanner suite stayed green, because the only test touching
+ * this module synthesises a card at exactly 0 mm, which any positive floor rejects.
+ */
+const MIN_EVIDENCE_MARGIN_MM = STANDARD_TCG.evidenceMinMarginMm;
 
 async function assessLide400CardFrame(tiffPath, acquisition) {
   const widthMm = Number(acquisition?.width);

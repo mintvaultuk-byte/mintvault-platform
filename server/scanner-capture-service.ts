@@ -154,6 +154,31 @@ async function resolveArmedAcquisitionRegion(
  * unknown would strand cards for a fact nobody can establish. The 4 mm floor still applies to every
  * master independently.
  */
+/**
+ * The same invariant, re-checked when evidence is COMMITTED rather than when a side is armed.
+ *
+ * The arm-time check is necessary but not sufficient: at arm, the other side may be armed and not
+ * yet uploaded, so there is no evidence row to compare against and the check passes silently. Two
+ * stations calibrated differently can therefore hold the two sides of one card at once, and each
+ * upload then agrees with its OWN session snapshot. Checking again at commit closes that window,
+ * because by then the first side's evidence exists.
+ *
+ * Exported and called from BOTH evidence paths. A check that lives on only one of them is a check
+ * with a way around it.
+ */
+export async function assertCommittedSidesShareOneRectangle(
+  certificateId: number,
+  side: string,
+  region: AcquisitionRegionMm
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await assertSidesShareOneRectangle(client as never, certificateId, side, region);
+  } finally {
+    client.release();
+  }
+}
+
 async function assertSidesShareOneRectangle(
   client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
   certificateId: number,

@@ -1017,8 +1017,13 @@ class Watcher extends EventEmitter {
     /*
      * REFUSED WHILE A CARD IS OPEN. Moving the window mid-card would mean the FRONT already captured
      * and the BACK about to be captured came from two different physical rectangles.
+     *
+     * `openCardJob` AS WELL AS `activeTargetEntry`, because `activeCapture` is deliberately null in
+     * the gap between an accepted FRONT and an armed BACK, and after a failed arm. Those are exactly
+     * the moments a card is half-captured, so checking only the live session left the window movable
+     * in the one window where moving it does the damage this guard describes.
      */
-    if (this.activeTargetEntry()) {
+    if (this.activeTargetEntry() || stateMod.get().openCardJob) {
       return { ok: false, error: "Finish or release the current card before moving the capture window" };
     }
     let bounded;
@@ -1037,19 +1042,17 @@ class Watcher extends EventEmitter {
     }
     const profile = captureProfile.STANDARD_TCG;
     const rect = captureProfile.captureWindowRectMm(bounded.originMm);
-    let persisted;
-    try {
-      persisted = lide400.persistJigOrigin(bounded.originMm);
-    } catch (error) {
-      return { ok: false, error: error?.message || "Capture window could not be saved on this Mac" };
-    }
-    // Any standing approval was measured against the OLD window and is now meaningless.
-    this.clearPlacementApproval("capture window moved");
-
+    const boundary = captureProfile.placementBoundaryRectMm(profile);
+    const previewFloorMm = captureProfile.previewGreenMinMarginMm(profile);
     /*
-     * The server record is reported, never silently swallowed. A station whose local window moved but
-     * whose calibration authority still describes the old one is exactly the divergence this save
-     * exists to prevent, so the operator is told plainly if the second half did not land.
+     * THE SERVER GOES FIRST, AND ITS REFUSAL IS FINAL.
+     *
+     * This used to persist the local origin and then tell the server. Any failure of the second half
+     * — a 403 because the operator lacks `partner.stations.calibrate`, a network drop, a refusal
+     * because a card is open — left the Mac scanning at the NEW rectangle while the server authority
+     * still described the OLD one. Every subsequent capture is then acquired at one rectangle and
+     * validated against another, and the operator's only clue is a banner they have already scrolled
+     * past. Asking the authority first means a refused move changes nothing at all.
      */
     let calibration = { saved: false, error: null };
     try {
@@ -1063,17 +1066,24 @@ class Watcher extends EventEmitter {
         },
         scannerProfileVersion: lide400.PROFILE_VERSION,
         acquisitionRegion: rect,
+        /*
+         * The PREVIEW boundary — the capture area inset by the derived preview threshold. This was
+         * `safeWindowMm`/`operatorInsetMm`, which were deleted with the 10 mm gate, and referencing
+         * them here threw a TypeError on EVERY save: the local origin had already been written and
+         * the server was never told, which is precisely the divergence this function exists to
+         * prevent. Both fields are optional server-side; they are derived, never restated.
+         */
         workingRegion: {
-          x: rect.x + profile.operatorInsetMm,
-          y: rect.y + profile.operatorInsetMm,
-          width: profile.safeWindowMm.width,
-          height: profile.safeWindowMm.height,
+          x: rect.x + boundary.x,
+          y: rect.y + boundary.y,
+          width: boundary.width,
+          height: boundary.height,
         },
         placementToleranceMm: {
-          left: profile.operatorInsetMm,
-          top: profile.operatorInsetMm,
-          right: profile.operatorInsetMm,
-          bottom: profile.operatorInsetMm,
+          left: previewFloorMm,
+          top: previewFloorMm,
+          right: previewFloorMm,
+          bottom: previewFloorMm,
         },
         calibrationVersion: profile.version,
       });
@@ -1082,6 +1092,27 @@ class Watcher extends EventEmitter {
     } catch (error) {
       calibration = { saved: false, error: error?.message || "Calibration could not be recorded" };
     }
+    if (!calibration.saved) {
+      // Nothing has been written locally, so there is nothing to roll back and the station keeps
+      // scanning the rectangle the server still describes.
+      stateMod.set({ lastError: calibration.error });
+      this.emitState();
+      return { ok: false, error: calibration.error };
+    }
+
+    let persisted;
+    try {
+      persisted = lide400.persistJigOrigin(bounded.originMm);
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          `${error?.message || "Capture window could not be saved on this Mac"} — the server now records the NEW ` +
+          `window, so this station must be repaired before it scans again.`,
+      };
+    }
+    // Any standing approval was measured against the OLD window and is now meaningless.
+    this.clearPlacementApproval("capture window moved");
 
     stateMod.set({
       positioningPreview: null,
@@ -1093,7 +1124,7 @@ class Watcher extends EventEmitter {
         stage: "saved",
         originMm: bounded.originMm,
         areaMm: profile.outerWindowMm,
-        safeWindowMm: profile.safeWindowMm,
+        placementBoundaryMm: captureProfile.placementBoundaryRectMm(profile),
         profileVersion: profile.version,
         calibrationRecorded: calibration.saved,
       })}`

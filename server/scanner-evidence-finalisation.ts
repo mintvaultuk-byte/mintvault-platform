@@ -69,6 +69,14 @@ export async function finaliseScannerEvidence(input: {
    */
   const authoritativeRegion = authoritativeRegionForSession(input.session);
   assertDeclaredRegionMatchesAuthority(provenance.scanAreaMm, authoritativeRegion);
+  /*
+   * RE-CHECKED AT COMMIT, not only at arm. At arm the other side may be armed and not yet uploaded,
+   * so there is nothing to compare against and the check passes silently — which lets two stations
+   * calibrated differently hold the two sides of one card, each upload agreeing with its own
+   * snapshot. By now the first side's evidence exists.
+   */
+  const { assertCommittedSidesShareOneRectangle } = await import("./scanner-capture-service");
+  await assertCommittedSidesShareOneRectangle(input.session.certificateId, input.session.side, authoritativeRegion);
   const frameAssessment = await assessLide400CardFrame(input.buffer, inspection, authoritativeRegion);
   if (!frameAssessment.accepted) {
     throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
@@ -95,6 +103,15 @@ export async function finaliseScannerEvidence(input: {
         submissionId: input.session.submissionId,
         cardFrameAssessment: frameAssessment,
         ...provenance,
+        /*
+         * THE SERVER'S RECTANGLE, WRITTEN LAST so it wins over the client's declaration in the
+         * spread above. `scanAreaMm` from provenance is a STATION-supplied number permitted to
+         * differ by up to 0.5 mm; storing it made it the "proven geometry" that the cross-side
+         * pairing check reads back, so the two tolerances composed to 1.0 mm. The declared value is
+         * kept alongside for forensics rather than discarded.
+         */
+        declaredScanAreaMm: provenance.scanAreaMm,
+        scanAreaMm: authoritativeRegion,
         stationId: input.trusted.stationId ?? input.session.stationId,
         tenantId: input.trusted.tenantId,
         locationId: input.trusted.locationId,

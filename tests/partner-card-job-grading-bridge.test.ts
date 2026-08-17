@@ -728,6 +728,59 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [first.id]);
   });
 
+  it("AT-B1f: the calibration write boundary refuses geometry the arm path would reject", async () => {
+    /*
+     * The defect this closes: `saveStationCalibration` validated only that the four numbers were
+     * finite, then hard-coded `health_status='VALID'` and repointed `current_calibration_id`. It
+     * would happily persist — and advertise as capture-ready — a rectangle that
+     * `assertLegalCaptureWindow` rejects on EVERY subsequent arm. The station looked ready and
+     * failed opaquely forever, and nothing told the operator at the one moment they could act.
+     *
+     * A hostile review reverted this guard and 76 of 76 tests still passed.
+     */
+    const { saveStationCalibration, StationServiceError } = await import("../server/partner/station-service");
+    const station = await admin.query<{ id: string; tenant_id: string; location_id: string; station_code: string }>(
+      `SELECT id, tenant_id, location_id, station_code FROM partner_stations WHERE id=$1`,
+      [shopA.stationA]
+    );
+    const principalRow = station.rows[0];
+    const stationPrincipal = {
+      id: principalRow.id,
+      code: principalRow.station_code,
+      tenantId: principalRow.tenant_id,
+      locationId: principalRow.location_id,
+      appVersion: null,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      calibrationStatus: "VALID",
+    } as never;
+    const save = (acquisitionRegion: unknown) =>
+      saveStationCalibration(stationPrincipal, shopA.owner, {
+        scannerHardware: { manufacturer: "Canon", model: "Canon LiDE 400", serial: null, deviceId: "d" },
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+        acquisitionRegion,
+        calibrationVersion: "capture-geometry-v1",
+      });
+
+    // Wrong SIZE — finite, in range, and not a capture window.
+    await expect(save({ x: 20, y: 20, width: 216, height: 297 })).rejects.toThrow(/Capture window must be 100 x 130/);
+    // Right size, off the far edge of the glass.
+    await expect(save({ x: 200, y: 20, width: 100, height: 130 })).rejects.toThrow(/not a valid position on the platen/);
+    // Refused as a VALIDATION error, not a 500-shaped internal fault.
+    await expect(save({ x: 200, y: 20, width: 100, height: 130 })).rejects.toBeInstanceOf(StationServiceError);
+
+    // The platen ORIGIN is legal — this is the calibration MV272 and the whole staging fleet carry.
+    const ok = await save({ x: 0, y: 0, width: 100, height: 130 });
+    expect(ok.calibrationStatus).toBe("VALID");
+
+    // And nothing was persisted for either refusal.
+    const rows = await admin.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM partner_station_calibrations
+        WHERE station_id=$1 AND acquisition_region->>'width' <> '100'`,
+      [shopA.stationA]
+    );
+    expect(Number(rows.rows[0].n)).toBe(0);
+  });
+
   it("AT-B1e: one card's two sides must come from one rectangle — but a pre-0091 FRONT still finishes", async () => {
     /*
      * The invariant that was asserted in comments and implemented nowhere: a certificate whose FRONT

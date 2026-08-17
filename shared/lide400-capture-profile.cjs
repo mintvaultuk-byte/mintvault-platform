@@ -67,8 +67,18 @@
 
 const { CANONICAL_COORDINATE_SPACE } = require("./lide400-card-geometry.cjs");
 
-/** Driver-reported LiDE 400 flatbed, confirmed from a 2550 x 3508 px 300-DPI full-platen preview. */
-const PLATEN_MM = Object.freeze({ width: 216, height: 297 });
+/**
+ * The LiDE 400 flatbed AS REPORTED BY ImageCaptureCore, not rounded up to whole millimetres.
+ *
+ * It was 216 x 297. The measured value is 215.9 x 297.0107 — pinned in two test files as the real
+ * platen since before this profile existed. While `MIN_PLATEN_INSET_MM` was 5 the rounding was
+ * harmless, because the origin bound sat 5 mm inside either way. Zeroing that inset exposed it:
+ * `maxX = 216 - 100 - 0 = 116` permitted a window whose right edge lands at 216.0 mm, i.e. 0.1 mm
+ * past the addressable glass. Small, but it is the difference between "the clamp is exact" and "the
+ * clamp is approximately right", and this constant is the authority for both the Scanner and the
+ * server. It also matches the owner's stated range: X 0 -> 115.9.
+ */
+const PLATEN_MM = Object.freeze({ width: 215.9, height: 297.0107 });
 
 /**
  * Minimum distance from any platen edge to the capture window. ZERO, by owner decision on
@@ -313,6 +323,12 @@ function evaluatePlacement(cardBoundsMm, profile = STANDARD_TCG) {
     placementBoundaryMm: boundary,
     outerWindowMm: { x: 0, y: 0, ...profile.outerWindowMm },
     evidenceMinMarginMm: profile.evidenceMinMarginMm,
+    /*
+     * On the BASE, so it is present on EVERY verdict. It used to be attached only to the two
+     * branches that compare against it, so "card not detected" and "wrong card size" rendered
+     * `undefined mm inset` in the operator diagnostics — the two most common refusals.
+     */
+    previewGreenMinMarginMm: previewGreenMinMarginMm(profile),
   };
 
   const finite = (value) => Number.isFinite(Number(value));

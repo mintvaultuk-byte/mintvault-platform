@@ -371,6 +371,62 @@ test("positioning Preview is single-flight and can no longer persist local jig X
   assert.equal(typeof fixture.watcher.saveCaptureWindowOrigin, "function");
 });
 
+/*
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
+ * THE GATE, AS A CAPABILITY — not as arithmetic.
+ *
+ * The 5.6 mm preview threshold is proven exhaustively as a pure function across three test files.
+ * None of them touched the ONE call site that turns a verdict into an operator-visible capability:
+ * `const green = verdict.state === PLACEMENT.READY` in watcher.js, which decides whether a
+ * placement approval is written and therefore whether SCAN is live. A hostile review replaced it
+ * with `const green = true` — every RED placement authorising a capture — and 129 of 129 tests
+ * passed. These connect the two.
+ * ─────────────────────────────────────────────────────────────────────────────────────────────
+ */
+test("a RED placement grants no approval, and SCAN is refused rather than merely discouraged", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  configureClaimedStation(fixture);
+  await fixture.watcher.pollTargetedCapture();
+
+  const captureProfile = require("../../../shared/lide400-capture-profile.cjs");
+  const floor = captureProfile.previewGreenMinMarginMm();
+  // A hair inside the preview threshold: RED, and above the master floor, so this is precisely the
+  // "would probably have passed" band that must still not unlock a capture.
+  const tooClose = { x: floor - 0.5, y: floor - 0.5, width: 63.5, height: 88.9 };
+
+  const preview = await passPlacementGate(fixture, tooClose);
+  assert.equal(preview.ok, true, "the preview itself succeeds — it is the VERDICT that refuses");
+  assert.equal(fixture.state.get().placementPreview.verdict.state, "RED");
+  assert.equal(fixture.watcher.placementApproval(), null, "a RED verdict must not write an approval");
+
+  let scans = 0;
+  fixture.lide.scan = async () => { scans++; throw new Error("a RED placement must never reach the scanner"); };
+  const refused = await fixture.watcher.scanActiveTarget();
+  assert.equal(refused.ok, false);
+  assert.equal(scans, 0, "no 1200-DPI capture may be attempted without a GREEN approval");
+});
+
+test("a GREEN placement grants exactly one approval, and it is spent by the scan it authorised", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  configureClaimedStation(fixture);
+  await fixture.watcher.pollTargetedCapture();
+
+  const captureProfile = require("../../../shared/lide400-capture-profile.cjs");
+  const floor = captureProfile.previewGreenMinMarginMm();
+  await passPlacementGate(fixture, { x: floor, y: floor, width: 63.5, height: 88.9 });
+  assert.equal(fixture.state.get().placementPreview.verdict.state, "GREEN", "exactly at the threshold is GREEN");
+  assert.ok(fixture.watcher.placementApproval(), "a GREEN verdict must write an approval");
+
+  fixture.lide.scan = async (dir) => ({
+    path: await writeStationTiff(dir),
+    provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
+  });
+  assert.equal((await fixture.watcher.scanActiveTarget()).ok, true);
+  // SINGLE USE. A standing approval would let a second capture happen from a placement nobody
+  // re-checked — the card may have been moved or replaced in between.
+  assert.equal(fixture.watcher.placementApproval(), null, "the approval must be consumed by its scan");
+});
+
 test("explicit Scan creates a JPEG derivative preview without uploading the TIFF", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);

@@ -33,7 +33,7 @@ BEGIN
   END IF;
 
   INSERT INTO partner_permissions (code, label) VALUES
-    ('partner.stations.calibrate', 'Move a grading station''s physical capture area')
+    ('partner.stations.calibrate', 'Move a grading station physical capture area')
   ON CONFLICT (code) DO NOTHING;
 
   -- The same three roles that hold partner.stations.enrol. Station management, not station operation.
@@ -43,6 +43,22 @@ BEGIN
     JOIN partner_permissions p ON p.code = 'partner.stations.calibrate'
    WHERE r.code IN ('PARTNER_OWNER', 'PARTNER_MANAGER', 'MVGS_ASSESSMENT_TECHNICIAN')
   ON CONFLICT DO NOTHING;
+
+  -- POSITIVE ASSERTION FIRST. The negative check below can only fire on something this file never
+  -- does, so on its own it is unfalsifiable. The real risk is the opposite: `INSERT ... SELECT ...
+  -- WHERE r.code IN (...)` inserts ZERO rows if those role codes are absent or renamed, the DO block
+  -- succeeds, the journal records `applied`, and every caller then gets 403 forever. Assert that the
+  -- grant actually landed.
+  IF (
+    SELECT count(*)
+      FROM partner_role_permissions rp
+      JOIN partner_roles r ON r.id = rp.role_id
+      JOIN partner_permissions p ON p.id = rp.permission_id
+     WHERE p.code = 'partner.stations.calibrate'
+       AND r.code IN ('PARTNER_OWNER', 'PARTNER_MANAGER', 'MVGS_ASSESSMENT_TECHNICIAN')
+  ) <> 3 THEN
+    RAISE EXCEPTION 'partner.stations.calibrate must be granted to exactly the 3 station-management roles';
+  END IF;
 
   -- 0085 pins SCANNER_OPERATOR at exactly three permissions and raises if that changes. Prove the
   -- same thing here, so a future edit that grants this capability shop-floor-wide fails loudly at

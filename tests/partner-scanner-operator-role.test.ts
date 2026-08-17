@@ -109,7 +109,8 @@ describe("AG-2 SCANNER_OPERATOR (real seeded catalogue)", () => {
         f.filename === "0034_partner_rbac_seed.sql" ||
         f.filename === "0073_lineage_convergence.sql" ||
         f.filename === "0083_partner_credit_packs.sql" ||
-        f.filename === "0085_partner_scanner_operator_role.sql"
+        f.filename === "0085_partner_scanner_operator_role.sql" ||
+        f.filename === "0092_partner_station_calibrate_permission.sql"
     );
     await applyMigrations(admin as never, files);
   }, 180_000);

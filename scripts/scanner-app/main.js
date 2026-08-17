@@ -1026,6 +1026,29 @@ function setupIpc() {
    */
   ipcMain.handle("save-capture-window", async (_event, originMm) => {
     if (!watcher) return { ok: false, error: "Scanner service is starting" };
+    /*
+     * AUTHORITY IS CHECKED HERE, not only by hiding a button.
+     *
+     * The renderer hides the maintenance controls when the operator lacks
+     * `partner.stations.calibrate`, but this app runs from a plain repository checkout, the preload
+     * bridge exposes `saveCaptureWindow` to the page unconditionally, and the LOCAL half of a window
+     * move is what actually drives the hardware. So "the server refuses it anyway" was only ever
+     * true of the server's RECORD — the physical rectangle would still have moved.
+     *
+     * Re-asked from the session on every call rather than cached, so a sign-out or a switch of
+     * operator takes effect immediately. The server remains the authority on the record; this is the
+     * authority on the machine.
+     */
+    let allowed = false;
+    try {
+      const setup = await stationSetupState();
+      allowed = setup?.summary?.canCalibrate === true;
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) {
+      return { ok: false, error: "Moving the capture area requires station maintenance authority" };
+    }
     return watcher.saveCaptureWindowOrigin(originMm);
   });
 

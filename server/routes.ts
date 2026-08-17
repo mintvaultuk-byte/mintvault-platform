@@ -10583,6 +10583,9 @@ Defects (admin-confirmed): ${defectLines}`;
         );
         const authoritativeRegion = authoritativeRegionForSession(session);
         assertDeclaredRegionMatchesAuthority(provenance.scanAreaMm, authoritativeRegion);
+        // Same commit-time pairing check as the staged path — see scanner-evidence-finalisation.ts.
+        const { assertCommittedSidesShareOneRectangle } = await import("./scanner-capture-service");
+        await assertCommittedSidesShareOneRectangle(session.certificateId, session.side, authoritativeRegion);
         const frameAssessment = await assessLide400CardFrame(file.buffer, inspection, authoritativeRegion);
         if (!frameAssessment.accepted) {
           throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
@@ -10619,6 +10622,10 @@ Defects (admin-confirmed): ${defectLines}`;
               submissionId: session.submissionId,
               cardFrameAssessment: frameAssessment,
               ...provenance,
+              // The SERVER's rectangle, not the station's declaration — see the equivalent note in
+              // scanner-evidence-finalisation.ts. Written after the spread so it wins.
+              declaredScanAreaMm: provenance.scanAreaMm,
+              scanAreaMm: authoritativeRegion,
               // These values are never trusted from multipart provenance.
               // They resolve only from the armed session and station/operator
               // principals authenticated by the server.

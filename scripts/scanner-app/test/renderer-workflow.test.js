@@ -101,11 +101,34 @@ test("the capture area is fixed for normal staff — no drag, no save, and no st
    * station out of arming a capture.
    */
   const profile = require("../../../shared/lide400-capture-profile.cjs");
-  const declared = /const MIN_INSET_MM = (\d+(?:\.\d+)?);/.exec(renderer);
-  assert.ok(declared, "the renderer must declare its platen inset explicitly");
+  const numeric = (pattern, label) => {
+    const found = pattern.exec(renderer);
+    assert.ok(found, `the renderer must declare ${label} explicitly`);
+    return Number(found[1]);
+  };
   assert.strictEqual(
-    Number(declared[1]),
+    numeric(/const MIN_INSET_MM = (\d+(?:\.\d+)?);/, "its platen inset"),
     profile.MIN_PLATEN_INSET_MM,
     "renderer platen inset has drifted from the shared capture profile"
+  );
+  /*
+   * The platen and window sizes are duplicated too, and nothing pinned them. A drift there would
+   * mis-draw the capture area against the scanner bed with no error anywhere — the operator would be
+   * told the window is somewhere it is not.
+   */
+  assert.strictEqual(
+    numeric(/const PLATEN = \{ width: (\d+(?:\.\d+)?),/, "the platen width"),
+    profile.PLATEN_MM.width,
+    "renderer platen width has drifted from the shared capture profile"
+  );
+  assert.strictEqual(
+    numeric(/const PLATEN = \{ width: \d+(?:\.\d+)?, height: (\d+(?:\.\d+)?) \}/, "the platen height"),
+    profile.PLATEN_MM.height,
+    "renderer platen height has drifted from the shared capture profile"
+  );
+  assert.strictEqual(
+    numeric(/const WINDOW_MM = \{ width: (\d+(?:\.\d+)?),/, "the capture window width"),
+    profile.STANDARD_TCG.outerWindowMm.width,
+    "renderer capture window width has drifted from the shared capture profile"
   );
 });

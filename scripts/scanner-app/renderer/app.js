@@ -1252,7 +1252,7 @@ els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => wind
  * refused there rather than corrected here. If these ever drift, the save fails loudly instead of
  * persisting a window the station cannot scan.
  */
-const PLATEN = { width: 216, height: 297 };
+const PLATEN = { width: 215.9, height: 297.0107 };
 const WINDOW_MM = { width: 100, height: 130 };
 /*
  * ZERO, matching `MIN_PLATEN_INSET_MM` in the shared profile. It was 5 here and there, and that pair

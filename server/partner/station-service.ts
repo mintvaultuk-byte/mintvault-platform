@@ -723,6 +723,44 @@ export async function saveStationCalibration(
       );
     }
 
+    /*
+     * ALSO REFUSED WHILE A CARD IS HALF-CAPTURED — and this is the case the live-session check above
+     * cannot see.
+     *
+     * A card with an accepted FRONT and no BACK has NO live capture session: the FRONT's session is
+     * terminal and the BACK has not been armed. It is invisible to the query above, so moving the
+     * window was permitted — and the same-rectangle invariant then refuses that BACK arm FOREVER,
+     * because a snapshot can only ever come from the station's CURRENT calibration. The card is
+     * bricked, and the only way out is `partner.cards.fix`, which the shop floor does not hold.
+     *
+     * Two such cards exist on staging right now (MV268 and MV272, both FRONT-only at 0,0). The first
+     * operator to move the window would have stranded both, which is precisely the trap this whole
+     * change set exists to remove rather than relocate.
+     */
+    const halfCaptured = await client.query<{ certificate_number: string }>(
+      `SELECT c.certificate_number
+         FROM certificates c
+         JOIN certificate_image_evidence e ON e.certificate_id = c.id AND e.is_current = true
+        WHERE EXISTS (
+                SELECT 1 FROM scanner_capture_sessions s
+                 WHERE s.certificate_id = c.id AND s.station_id = $1
+              )
+        GROUP BY c.id, c.certificate_number
+       HAVING COUNT(DISTINCT e.side) = 1
+        ORDER BY c.certificate_number
+        LIMIT 5`,
+      [station.id]
+    );
+    if (halfCaptured.rows.length > 0) {
+      const names = halfCaptured.rows.map((row) => row.certificate_number).join(", ");
+      throw new StationServiceError(
+        "validation",
+        `${names} ${halfCaptured.rows.length === 1 ? "has" : "have"} one side captured at this station's current ` +
+          `capture area. Moving it now would leave ${halfCaptured.rows.length === 1 ? "that card" : "those cards"} ` +
+          `unable to have a second side scanned. Finish or void ${halfCaptured.rows.length === 1 ? "it" : "them"} first.`
+      );
+    }
+
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO partner_station_calibrations
          (tenant_id,location_id,station_id,calibration_fingerprint,scanner_hardware_fingerprint,scanner_hardware,

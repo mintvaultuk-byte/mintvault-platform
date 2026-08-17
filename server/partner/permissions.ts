@@ -47,6 +47,18 @@ export const PARTNER_PERMISSIONS = [
    */
   "partner.stations.enrol",
   "partner.cards.fix",
+  /*
+   * Moving a station's PHYSICAL capture area is maintenance, not shop work (migration 0092). It was
+   * gated on partner.cards.scan, so the least-privileged role could silently repoint the rectangle
+   * every subsequent card is framed by. Granted to the same three roles as partner.stations.enrol —
+   * whoever could already bring a whole new Mac into service.
+   *
+   * IT MUST BE LISTED HERE AND NOT ONLY IN THE MIGRATION. `seedPartnerRbac` builds every test
+   * fixture from this array and `getUserPermissions` reads the DB catalogue, so a permission that
+   * exists only in SQL is one that no fixture can ever hold and that no deploy can grant before its
+   * migration lands — the route 403s for everyone, exactly as partner.credits.purchase once did.
+   */
+  "partner.stations.calibrate",
   "partner.cards.assess",
   "partner.cards.preview",
   "partner.support.view",
@@ -59,6 +71,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
   PARTNER_OWNER: [...PARTNER_PERMISSIONS],
   PARTNER_MANAGER: [
     "partner.stations.enrol",
+    "partner.stations.calibrate",
     "partner.cards.fix",
     "partner.dashboard.view",
     "partner.organisation.view",
@@ -84,6 +97,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
   ],
   MVGS_ASSESSMENT_TECHNICIAN: [
     "partner.stations.enrol",
+    "partner.stations.calibrate",
     "partner.cards.fix",
     "partner.dashboard.view",
     "partner.location.view",
