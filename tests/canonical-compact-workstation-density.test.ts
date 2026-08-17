@@ -32,10 +32,20 @@ describe("compact rail geometry", () => {
     expect(ASIDE).toContain('data-testid="grading-interactive-card-host"');
   });
 
-  it("makes the real certificate preview a bare 205px ratio-correct secondary reference", () => {
-    // 205px (was 230px) — owner evidence 2026-08-16: the certificate was consuming rail
-    // height the card needed. Display width only; the printed label is unchanged.
-    expect(CERTIFICATE).toContain("max-w-[190px]");
+  it("makes the real certificate preview a bare ratio-correct secondary reference", () => {
+    // Ceiling raised 190 -> 285px on explicit owner override 2026-08-17 ("the certificate
+    // is now visibly TOO SMALL ... approximately 50% larger"). It is a CEILING, not a
+    // fixed width: the panel is `w-full`, so a narrow rail shrinks it responsively and it
+    // only reaches 285 once the header has room. Measured cost is reported per viewport.
+    //
+    // The value lives in a named constant applied as an INLINE STYLE, not an arbitrary
+    // Tailwind class. The cap is load-bearing — uncapped, the preview grew to 431px in a
+    // 569px rail and pushed the header down onto the card — and a utility class only
+    // exists if the JIT emitted it. An inline value cannot be silently absent.
+    expect(CERTIFICATE).toContain("CERTIFICATE_PREVIEW_MAX_WIDTH_PX = 285");
+    expect(CERTIFICATE).toContain("maxWidth: CERTIFICATE_PREVIEW_MAX_WIDTH_PX");
+    // Display width only. The certificate document, its print dimensions and its
+    // resolution are untouched.
     // RESERVED, STATE-INDEPENDENT BOX. Owner evidence 2026-08-16 (MV360, /staff):
     // the card was whole while the preview was not ready and lost its bottom the
     // moment the preview rendered, because this panel's height depended on state.

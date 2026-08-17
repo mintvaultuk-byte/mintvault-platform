@@ -58,15 +58,15 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
   it("subtracts the insets from BOTH edges of each axis", () => {
     // Symmetric insets are what make centring safe: split evenly, each edge still
     // gets the full inset. Subtracting a single inset per axis would halve it.
-    expect(VIEWER).toMatch(/railViewport\.w - RAIL_SAFE_INSET_X \* 2/);
-    expect(VIEWER).toMatch(/railViewport\.h - RAIL_SAFE_INSET_Y \* 2/);
+    expect(VIEWER).toMatch(/vp\.w - RAIL_SAFE_INSET_X \* 2/);
+    expect(VIEWER).toMatch(/effectiveH - RAIL_SAFE_INSET_Y \* 2/);
   });
 
   it("computes the fit from the SCAN's own natural dimensions, not an assumed ratio", () => {
     // A scan that is not exactly 5:7 is precisely the case where assuming 5:7 pushes
     // real card content past the edge.
-    expect(VIEWER).toMatch(/const widthScale = safeW \/ railNaturalDims\.w;/);
-    expect(VIEWER).toMatch(/safeH \/ railNaturalDims\.h/);
+    expect(VIEWER).toMatch(/const widthScale = safeW \/ nat\.w;/);
+    expect(VIEWER).toMatch(/safeH \/ nat\.h/);
     expect(VIEWER).toMatch(/setRailNaturalDims\(\{ w, h \}\)/);
   });
 
@@ -110,9 +110,9 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     // If an ancestor's height is content-driven there is no available height to fit
     // into — the card defines it. Treating a 0 height as authoritative is precisely
     // what stranded the image invisible.
-    expect(VIEWER).toMatch(/const railHeightUsable = !!railViewport && railViewport\.h > RAIL_SAFE_INSET_Y \* 2;/);
-    expect(VIEWER).toMatch(/railHeightUsable\s*\?\s*Math\.min\(widthScale/);
-    expect(VIEWER).toMatch(/mode: railHeightUsable \? "safe-fit" : "width-fit"/);
+    expect(VIEWER).toMatch(/const heightUsable = vp\.h > RAIL_SAFE_INSET_Y \* 2;/);
+    expect(VIEWER).toMatch(/mode === "safe-fit" \? Math\.min\(widthScale/);
+    expect(VIEWER).toMatch(/heightUsable \|\| prev\?\.mode === "safe-fit" \? "safe-fit" : "width-fit"/);
   });
 
   it("falls back to the LAST-KNOWN-GOOD sizing, never to a blank rail", () => {
