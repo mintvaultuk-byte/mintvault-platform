@@ -29,6 +29,14 @@ export type ScannerEvidenceInspection = {
   bitDepth: number | null;
   dpi: number | null;
   channels: number | null;
+  /**
+   * True when the decoded image carries an alpha channel.
+   *
+   * Recorded separately from `channels` because the two together are what identify a colour model:
+   * 4 channels means RGB+alpha when this is true and CMYK when it is false, and a validator that
+   * sees only the count cannot tell a genuine colour scan from a completely different colour space.
+   */
+  hasAlpha: boolean;
   colourSpace: string | null;
   hasIccProfile: boolean;
 };
@@ -95,6 +103,7 @@ export async function inspectScannerEvidence(buffer: Buffer): Promise<ScannerEvi
     bitDepth: bitDepth(meta.depth),
     dpi: typeof meta.density === "number" && Number.isFinite(meta.density) ? meta.density : null,
     channels: meta.channels ?? null,
+    hasAlpha: meta.hasAlpha === true,
     colourSpace: meta.space ?? null,
     hasIccProfile: Boolean(meta.icc),
   };

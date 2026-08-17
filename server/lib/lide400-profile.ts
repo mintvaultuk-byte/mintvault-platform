@@ -137,7 +137,26 @@ export function assertLide400Evidence(
   ) {
     throw new Error("LiDE 400 TIFF dimensions do not match the locked card-region capture");
   }
-  if (inspection.channels !== 3 || inspection.colourSpace !== "srgb") {
+  /*
+   * THREE COLOUR CHANNELS, IN sRGB. The requirement is unchanged; how it is measured is corrected.
+   *
+   * THE DEFECT. This asked for `channels === 3`, and the approved scanner does not produce that.
+   * A Canon LiDE 400 driven through Apple Image Capture emits a genuine RGB TIFF with an ASSOCIATED
+   * ALPHA extra-sample — `Photometric Interpretation: RGB color`, `Samples/Pixel: 4`,
+   * `Extra Samples: 1 <assoc-alpha>`, 8 bits/sample, LZW, ICC profile present. Its colour data is
+   * exactly the three RGB channels the rule demands; the fourth sample is an opaque alpha the driver
+   * always attaches. Counting raw samples therefore rejected the only hardware this profile approves,
+   * and it did so AFTER a 57-second physical scan — the operator was told their genuine colour
+   * capture was not colour evidence.
+   *
+   * NOT A RELAXATION. Subtracting a declared alpha channel measures the COLOUR channels, which is
+   * what "RGB colour evidence" has always meant, and every non-colour model is still refused by the
+   * same arithmetic: greyscale (1) fails, greyscale+alpha (2−1=1) fails, CMYK (4, no alpha) fails,
+   * and a palette or CMYK image cannot pass by having four samples. The sRGB space check is
+   * untouched, so a correctly-sampled image in the wrong colour space is still refused.
+   */
+  const colourChannels = (inspection.channels ?? 0) - (inspection.hasAlpha ? 1 : 0);
+  if (colourChannels !== 3 || inspection.colourSpace !== "srgb") {
     throw new Error("LiDE 400 capture must decode as RGB colour evidence");
   }
 }

@@ -45,6 +45,95 @@ describe("Canon LiDE 400 locked profile", () => {
     );
   });
 
+  /* ============================================================================================
+   * THE COLOUR MODEL THE APPROVED HARDWARE ACTUALLY PRODUCES.
+   *
+   * DEFECT PINNED, and it stopped a real bench (staging, MV272, 17 Aug 12:10). This guard asked for
+   * `channels === 3`. A Canon LiDE 400 driven through Apple Image Capture does not produce that: it
+   * emits a genuine RGB TIFF with an ASSOCIATED ALPHA extra-sample. `tiffinfo` on the rejected
+   * master, byte-for-byte:
+   *
+   *     Image Width: 4724  Image Length: 6136
+   *     Resolution: 1200, 1200 pixels/inch
+   *     Bits/Sample: 8      Sample Format: unsigned integer
+   *     Compression Scheme: LZW
+   *     Photometric Interpretation: RGB color
+   *     Extra Samples: 1<assoc-alpha>
+   *     Samples/Pixel: 4
+   *     Make: Canon   Model: LiDE 400   Software: Apple Image Capture
+   *     ICC Profile: <present>, 1992 bytes
+   *
+   * So the only hardware this profile approves could never satisfy the profile — and it found out
+   * AFTER a 57-second physical scan, with "must decode as RGB colour evidence" for an image whose
+   * photometric interpretation is literally RGB.
+   *
+   * The requirement is NOT relaxed here. What is measured is the COLOUR channels, and every
+   * non-colour model is still refused by the same arithmetic — proven below, not asserted.
+   * ========================================================================================== */
+  it("accepts the Canon's real RGB+alpha master and still refuses every non-RGB colour model", async () => {
+    const w = 4724;
+    const h = 6136;
+    const tiff = (channels: 3 | 4) =>
+      sharp({
+        create: {
+          width: w,
+          height: h,
+          channels,
+          background: channels === 4 ? { r: 60, g: 80, b: 100, alpha: 1 } : { r: 60, g: 80, b: 100 },
+        },
+      })
+        .tiff({ compression: "lzw", predictor: "horizontal" })
+        .withMetadata({ density: 1200 })
+        .toBuffer();
+
+    // A REAL ENCODED TIFF in exactly the Canon's shape: RGB + associated alpha, 8-bit, LZW,
+    // 1200 DPI, 4724 x 6136. This is the artifact that was rejected on the bench.
+    const canon = await inspectScannerEvidence(await tiff(4));
+    expect(canon.channels).toBe(4);
+    expect(canon.hasAlpha).toBe(true);
+    expect(canon.colourSpace).toBe("srgb");
+    expect(canon.bitDepth).toBe(8);
+    expect(canon.dpi).toBe(1200);
+    expect(canon.width).toBe(4724);
+    expect(canon.height).toBe(6136);
+    expect(canon.hasIccProfile).toBe(true);
+    expect(() => assertLide400Evidence(canon, parseLide400CaptureProvenance(provenance()))).not.toThrow();
+
+    // Plain RGB, no alpha — the shape the guard already accepted. Must keep working.
+    const plainRgb = await inspectScannerEvidence(await tiff(3));
+    expect(plainRgb.channels).toBe(3);
+    expect(plainRgb.hasAlpha).toBe(false);
+    expect(() => assertLide400Evidence(plainRgb, parseLide400CaptureProvenance(provenance()))).not.toThrow();
+
+    /*
+     * THE REJECTION MATRIX IS EXERCISED AGAINST THE GUARD DIRECTLY, and deliberately so: sharp's
+     * TIFF encoder always writes RGB or RGBA (verified — `toColourspace("b-w")` and 1/2-channel raw
+     * input both come back as 3/4-channel sRGB), so a genuine greyscale or CMYK TIFF cannot be
+     * synthesised here. `assertLide400Evidence` is a pure function of the inspection record, so
+     * varying ONLY the colour-model fields of a real inspection is an exact test of the arithmetic
+     * that replaced `channels === 3` — and it is the arithmetic, not the encoder, that changed.
+     */
+    const variant = (over: Partial<typeof canon>) => ({ ...canon, ...over });
+    const refused: Array<[string, Partial<typeof canon>]> = [
+      ["greyscale", { channels: 1, hasAlpha: false }],
+      ["greyscale + alpha", { channels: 2, hasAlpha: true }],
+      // The case a bare `channels === 4` allowance would have let straight in. Subtracting only a
+      // DECLARED alpha is exactly what keeps this refused.
+      ["CMYK / four samples, no alpha", { channels: 4, hasAlpha: false }],
+      ["five samples with alpha", { channels: 5, hasAlpha: true }],
+      ["no channel information at all", { channels: null, hasAlpha: false }],
+      // The colour SPACE check is untouched: right sample count, wrong space, still refused.
+      ["correct samples in the wrong colour space", { colourSpace: "cmyk" }],
+      ["correct samples with no colour space", { colourSpace: null }],
+    ];
+    for (const [label, over] of refused) {
+      expect(
+        () => assertLide400Evidence(variant(over), parseLide400CaptureProvenance(provenance())),
+        label
+      ).toThrow("must decode as RGB colour evidence");
+    }
+  }, 60_000);
+
   it("rejects a low-DPI TIFF even when its filename/MIME would claim LiDE provenance", async () => {
     const inspection = await master(900);
     expect(() => assertLide400Evidence(inspection, parseLide400CaptureProvenance(provenance()))).toThrow(
