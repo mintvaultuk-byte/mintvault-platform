@@ -9,7 +9,7 @@
  * Logic is in ./partner-management-helpers (unit-tested); this is a thin renderer with data-testids.
  */
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { useLocation, useRoute } from "wouter";
+import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -56,6 +56,7 @@ import {
 } from "./partner-management-helpers";
 import { ReadinessPanel } from "@/components/partner/readiness-panel";
 import { PartnerDrilldown } from "./partner-dashboard";
+import { partnerLifecycleSummary } from "./partner-network-lifecycle";
 
 const BASE = "/api/super-admin/partner-management";
 const TABS = [
@@ -474,6 +475,7 @@ export default function PartnerManagementDetailPage() {
       }),
     [org, userRows, statistics.data, branding.data, profile]
   );
+  const lifecycle = partnerLifecycleSummary(partnerId, onboarding.data?.operational);
 
   const [profileTouched, setProfileTouched] = useState(false);
   const profileErrors: FieldErrors = useMemo(() => validateProfileForm(profileForm), [profileForm]);
@@ -875,6 +877,37 @@ export default function PartnerManagementDetailPage() {
               <div>Accreditation: {org.accreditation_level}</div>
               <div>Health: {org.health}</div>
               <div>Created: {new Date(org.created_at).toLocaleString()}</div>
+              <section
+                aria-label="Partner lifecycle"
+                data-testid="pm-lifecycle-summary"
+                style={{ marginTop: 12, padding: 12, border: "1px solid rgba(255,255,255,.14)", borderRadius: 8 }}
+              >
+                <div style={{ fontWeight: 600 }}>Current stage: {lifecycle?.currentStage ?? "—"}</div>
+                {lifecycle ? (
+                  <>
+                    <div style={{ marginTop: 6, fontSize: 13 }}>
+                      Completed: {lifecycle.completed.length ? lifecycle.completed.join(" · ") : "—"}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 13 }}>
+                      Blockers: {lifecycle.blockers.length ? lifecycle.blockers.join(" · ") : "None"}
+                    </div>
+                    {lifecycle.nextAction ? (
+                      <Link
+                        href={lifecycle.nextAction.href}
+                        className="underline"
+                        data-testid="pm-lifecycle-next-action"
+                        style={{ display: "inline-block", marginTop: 8, fontSize: 13 }}
+                      >
+                        Next action: {lifecycle.nextAction.label}
+                      </Link>
+                    ) : (
+                      <div style={{ marginTop: 8, fontSize: 13 }}>Next action: Start grading when work arrives.</div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ marginTop: 6, fontSize: 13 }}>Readiness is unavailable right now.</div>
+                )}
+              </section>
               <ReadinessPanel readiness={onboarding.data?.operational} audience="SUPER_ADMIN" />
               <div style={{ marginTop: 12 }} data-testid="pm-setup-checklist">
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
