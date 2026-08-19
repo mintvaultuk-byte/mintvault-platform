@@ -21,6 +21,18 @@ test("station UI keeps final Scan visible but target-gated", () => {
   assert.match(renderer, /STEP 2 — FLIP THE CARD/);
 });
 
+test("post-scan Accept/Reject is removed — Scan approval immediately becomes upload", () => {
+  const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
+  assert.doesNotMatch(html, /id="acceptPreviewBtn"/);
+  assert.doesNotMatch(html, /id="rescanPreviewBtn"/);
+  assert.match(html, /SCAN ACCEPTED FROM GREEN PREVIEW — UPLOADING THIS TIFF/);
+  assert.doesNotMatch(renderer, /acceptPreviewBtn|rescanPreviewBtn|acceptCapturePreview/);
+  assert.doesNotMatch(preload, /acceptCapturePreview|accept-capture-preview/);
+  assert.doesNotMatch(main, /accept-capture-preview/);
+  assert.match(renderer, /scanEstimate/);
+  assert.match(renderer, /uploadProgressText/);
+});
+
 test("normal placement Preview is a card-centred display crop while full platen and calibration stay secondary", () => {
   assert.match(html, /id="positioningCardPreviewViewport"/);
   assert.match(html, /id="positioningFullPreview"/);

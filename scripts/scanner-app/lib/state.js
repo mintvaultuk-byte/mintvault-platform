@@ -95,6 +95,12 @@ const DEFAULT = Object.freeze({
    */
   placementApproval: null,
   activeCapture:    null,
+  /*
+   * Rolling, local-only physical scan timings by scanner/profile/DPI/window/side. Used for the
+   * operator countdown only after this station has measured real captures; no static fake timer is
+   * invented for a fresh Mac.
+   */
+  scanTimingProfiles: {},
   // Briefly displayed after a server acknowledgement so staff receive a clear
   // Front Saved / Back Saved outcome before MintVault arms the next side.
   lastAcceptedCapture: null,

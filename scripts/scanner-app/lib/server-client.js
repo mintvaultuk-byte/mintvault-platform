@@ -86,16 +86,18 @@ function fingerprintTiffMaster(filePath) {
 }
 
 /** PUT an exact TIFF stream to a server-minted R2 staging URL. */
-async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
+async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength, options = {}) {
   const fetch = await getFetch();
   const stream = fs.createReadStream(filePath);
   const controller = new AbortController();
   let lastProgressAt = Date.now();
   let sent = 0;
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const counter = new Transform({
     transform(chunk, _encoding, callback) {
       sent += chunk.length;
       lastProgressAt = Date.now();
+      if (onProgress) onProgress({ phase: "uploading", bytesSent: sent, totalBytes: byteLength });
       callback(null, chunk);
     },
   });
@@ -116,6 +118,7 @@ async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
       return { ok: false, status: response.status, body: { error: message || `R2 staging PUT failed — HTTP ${response.status}` } };
     }
     if (sent !== byteLength) return { ok: false, status: 0, body: { error: "R2 staging stream ended before all TIFF bytes were sent" } };
+    if (onProgress) onProgress({ phase: "uploaded", bytesSent: byteLength, totalBytes: byteLength });
     return { ok: true, status: response.status, body: {} };
   } catch (error) {
     return { ok: false, status: 0, body: { error: error?.name === "AbortError" ? "R2 staging upload stalled" : (error?.message || String(error)) } };
@@ -498,8 +501,10 @@ async function claimNextCapture(workstationId, deviceId) {
  * promote that exact object. Older/local development servers retain the
  * bounded multipart route as a compatibility fallback only.
  */
-async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) {
+async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const expected = await fingerprintTiffMaster(filePath);
+  if (onProgress) onProgress({ phase: "queued", bytesSent: 0, totalBytes: expected.byteLength });
   const grant = await postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload`, {
     device_id: deviceId,
     sha256: expected.sha256,
@@ -511,8 +516,11 @@ async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) 
   // the existing bounded receive path; production rejects static-token use and
   // the current route always chooses direct staging.
   if (grant.ok && grant.body?.transport === "direct" && grant.body?.upload_url && grant.body?.staging_id) {
-    const staged = await putStagedTiff(grant.body.upload_url, grant.body.headers || {}, filePath, expected.byteLength);
+    const staged = await putStagedTiff(grant.body.upload_url, grant.body.headers || {}, filePath, expected.byteLength, {
+      onProgress,
+    });
     if (!staged.ok) return staged;
+    if (onProgress) onProgress({ phase: "server_validating", bytesSent: expected.byteLength, totalBytes: expected.byteLength });
     return postJson(
       `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload/${encodeURIComponent(grant.body.staging_id)}/finalise`,
       { device_id: deviceId }
@@ -523,6 +531,7 @@ async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) 
   appendTiffMaster(form, "image", filePath);
   form.append("device_id", deviceId);
   form.append("capture_provenance", JSON.stringify(provenance));
+  if (onProgress) onProgress({ phase: "server_validating", bytesSent: expected.byteLength, totalBytes: expected.byteLength });
   return postForm(`${apiBase()}/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/evidence`, form);
 }
 

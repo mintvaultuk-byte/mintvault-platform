@@ -23,19 +23,25 @@ fail-closed pending owner commercial/environment configuration (`SFAP-023`).
 
 The same pass repaired the local physical-scan durability barrier (`SFAP-024`): an fsync-confirmed
 journal now precedes ICA acquisition, and an interrupted journal can retain exactly one discovered
-TIFF only as an upload-refused recovery candidate. Focused proof: scanner active-card **41 passed**;
-full Scanner suite **163 passed, 0 failed**; auth/station/security focused gate **31 passed, 0
-failed** (two disposable-Postgres suites skipped without their explicit local database URLs);
-`npm run check` and `git diff --check` passed.
+TIFF only as an upload-refused recovery candidate.
+
+The current pass removed the normal post-scan `ACCEPT`/`RESCAN` branch for locally safe captures:
+a GREEN placement plus explicit `SCAN` is now the operator acceptance, the TIFF auto-enters upload
+after local frame safety, the preview remains visible during upload, byte-level upload progress is
+propagated from the direct staging stream, and a scan countdown is shown only from this station's
+measured rolling timings. The remaining `SFAP-015` blocker is narrower and still real: BACK is not
+armed/preparable while FRONT upload/finalisation is unresolved, because the server currently holds
+one live station session and finalisation requires immutable FRONT evidence before BACK.
 
 ## Evidence
 
 - Focused scanner suite: 71 passed, 0 failed.
-- Full scanner suite: 161 passed, 0 failed.
+- Focused Scanner workflow gate for this pass: 84 passed, 0 failed.
+- Full scanner suite: 164 passed, 0 failed.
 - `npm run check`: passed.
 - `git diff --check`: passed.
-- Changed-file ESLint: 0 errors, 44 pre-existing warnings.
-- Repository-wide ESLint: baseline-red with 1,626 errors / 5,769 warnings across unrelated files and nested `.claude/worktrees`; not a clean release gate.
+- Changed-file ESLint for this pass: 0 errors, 116 pre-existing warnings.
+- Repository-wide ESLint: baseline-red with 1,626 errors / 5,773 warnings across unrelated files and nested `.claude/worktrees`; not a clean release gate.
 - Protected repair focused/wider gate: 97 passed, 0 failed across FRONT/BACK full-resolution pixel
   source contract, real-PostgreSQL Price/currency/environment/replay grant authority, concurrent
   NEW boundary, migration parity/migrator proof, Stripe environment isolation, and grading inspection.

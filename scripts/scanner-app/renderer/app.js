@@ -45,8 +45,6 @@ const els = {
   scanCardBtn: document.getElementById("scanCardBtn"),
   previewPanel: document.getElementById("previewPanel"),
   capturePreview: document.getElementById("capturePreview"),
-  acceptPreviewBtn: document.getElementById("acceptPreviewBtn"),
-  rescanPreviewBtn: document.getElementById("rescanPreviewBtn"),
   rescanErrorBtn: document.getElementById("rescanErrorBtn"),
   nextCardBtn: document.getElementById("nextCardBtn"),
   newCardBtn: document.getElementById("newCardBtn"),
@@ -133,7 +131,6 @@ const STATE_LABELS = {
   positioning_preview_error: "Placement Preview needs attention",
   awaiting_scan: "Card positioned? Press Scan",
   processing_preview: "Generating scan preview…",
-  preview_ready: "Preview ready — choose Accept or Rescan",
   preview_error: "Preview needs attention",
   expired: "Capture target expired",
   success: "Capture accepted",
@@ -325,8 +322,10 @@ function renderTarget(state) {
     const stage = String(active.stage || "");
     if (stage === "awaiting_scan") {
       els.targetHint.textContent = `Position the card, then press Scan ${toTitle(active.side)}. This station cannot retarget it.`;
-    } else if (stage === "preview_ready") {
-      els.targetHint.textContent = `Review this exact ${toTitle(active.side)} candidate before accepting or rescanning it.`;
+    } else if (stage === "uploading") {
+      const progress = active.uploadProgress;
+      const pct = typeof progress?.percent === "number" ? ` ${progress.percent}%` : "";
+      els.targetHint.textContent = `${toTitle(active.side)} Scan accepted from GREEN Preview. Uploading authoritative TIFF${pct}.`;
     } else if (stage === "preview_error") {
       els.targetHint.textContent = `This ${toTitle(active.side)} candidate failed its safety check. Review it, reposition the card, then Rescan; it cannot be accepted.`;
     } else {
@@ -445,9 +444,8 @@ function renderWorkflowGuide(state) {
     "scanning",
     "retrying_scan",
     "processing_preview",
-    "preview_ready",
     "preview_error",
-    "upload",
+    "uploading",
   ].includes(stage);
   els.workflowGuide.hidden = presentationPending;
   if (presentationPending) return;
@@ -819,9 +817,8 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
     "scanning",
     "retrying_scan",
     "processing_preview",
-    "preview_ready",
     "preview_error",
-    "upload",
+    "uploading",
   ].includes(String(activeCapture?.stage || ""));
   const status = String(entry?.status || "");
   const canStart = ["ready", "profile_unprovisioned"].includes(String(scannerHealth?.status || ""));
@@ -936,14 +933,34 @@ function renderPreview(active) {
     });
 }
 
+function scanRemainingSeconds(active) {
+  const expected = Number(active?.scanEstimate?.expectedMs);
+  const started = Number(active?.scanEstimate?.startedAtMs);
+  if (!Number.isFinite(expected) || expected <= 0 || !Number.isFinite(started) || started <= 0) return null;
+  return Math.max(0, Math.ceil((expected - (Date.now() - started)) / 1000));
+}
+
+function uploadProgressText(progress) {
+  if (!progress) return "queued";
+  const percent = typeof progress.percent === "number" ? `${progress.percent}%` : "";
+  const total = Number(progress.totalBytes);
+  const sent = Number(progress.bytesSent);
+  const bytes =
+    Number.isFinite(total) && total > 0 && Number.isFinite(sent)
+      ? ` (${Math.min(sent, total).toLocaleString()} / ${total.toLocaleString()} bytes)`
+      : "";
+  const phase = String(progress.phase || "uploading").replace(/_/g, " ").toUpperCase();
+  return `${phase}${percent ? ` ${percent}` : ""}${bytes}`;
+}
+
 function renderCaptureActions(state) {
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
   const side = toTitle(active?.side || "card");
   const scanning = ["scanning", "retrying_scan", "processing_preview"].includes(stage);
-  const previewReady = stage === "preview_ready" && Boolean(active?.previewId);
+  const uploading = stage === "uploading" && Boolean(active?.previewId);
   const previewError = stage === "preview_error" && Boolean(active?.previewId);
-  const previewVisible = previewReady || previewError;
+  const previewVisible = uploading || previewError;
   const awaitingScan = stage === "awaiting_scan";
   const hasTarget = Boolean(active?.certId && active?.side);
   const scanLabel = hasTarget ? `SCAN ${side}` : "SCAN CARD";
@@ -1059,8 +1076,6 @@ function renderCaptureActions(state) {
   // Preview itself can become an authoritative capture.
   setActionButton(els.scanCardBtn, scanLabel, true, !scanEnabled);
   els.previewPanel.hidden = !previewVisible;
-  setActionButton(els.acceptPreviewBtn, `ACCEPT ${side}`, previewReady, actionInFlight);
-  setActionButton(els.rescanPreviewBtn, `RESCAN ${side}`, previewReady, actionInFlight);
   setActionButton(els.rescanErrorBtn, `RESCAN ${side}`, previewError, actionInFlight);
   setActionButton(els.nextCardBtn, "NEXT CARD", cardRegistered, actionInFlight);
 
@@ -1077,13 +1092,18 @@ function renderCaptureActions(state) {
       : awaitingScan && !placementGreen
         ? `Place the ${side.toLowerCase()} inside the box, then press Preview. Scan unlocks when the box turns green.`
         : awaitingScan
-          ? `Placement is ready — press Scan. Do not move the card. No scan starts automatically.`
+          ? `Placement is ready — press Scan to accept this ${side.toLowerCase()} and start the 1200 DPI capture.`
           : scanning
-            ? "The locked 1200 DPI TIFF is being captured once; its derivative preview follows."
-            : previewReady
-              ? "Accept uploads this exact TIFF. Rescan archives it locally and keeps the same card-side target."
+            ? (() => {
+                const remaining = scanRemainingSeconds(active);
+                return remaining === null
+                  ? `SCANNING ${side.toUpperCase()} — measuring this scanner/profile timing.`
+                  : `SCANNING ${side.toUpperCase()} — ~${remaining} SEC REMAINING.`;
+              })()
+            : uploading
+              ? `UPLOAD ${side.toUpperCase()} — ${uploadProgressText(active.uploadProgress)}.`
               : previewError
-                ? "Safety check rejected this staged TIFF before upload. Review the preview, reposition the card, then Rescan; Accept is unavailable."
+                ? "Safety check rejected this staged TIFF before upload. Review the preview, reposition the card, then Rescan this side."
                 : active
                   ? "This target remains bound while the current operation finishes."
                   : "Final scanning remains disabled until this server-owned card side is ready.";
@@ -1632,14 +1652,6 @@ els.positioningPreviewBtn.addEventListener("click", () => {
   }
   void runCaptureAction(() => window.scanner.runPositioningPreview());
 });
-els.acceptPreviewBtn.addEventListener(
-  "click",
-  () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId))
-);
-els.rescanPreviewBtn.addEventListener(
-  "click",
-  () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId))
-);
 els.rescanErrorBtn.addEventListener(
   "click",
   () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId))
@@ -1836,6 +1848,12 @@ els.restartServiceBtn.addEventListener("click", async () => {
 
 window.scanner.onStateUpdate(renderState);
 window.scanner.getState().then(renderState);
+setInterval(() => {
+  const stage = String(lastState?.activeCapture?.stage || "");
+  if (["scanning", "retrying_scan"].includes(stage) && lastState?.activeCapture?.scanEstimate?.expectedMs) {
+    renderState(lastState);
+  }
+}, 1_000);
 void refreshStationSetup();
 window.addEventListener("resize", () => {
   if (!lastState?.positioningPreview) return;

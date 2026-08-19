@@ -33,18 +33,18 @@ The worktree was already dirty at takeover. Modified scanner, viewer, server-aut
 
 ## Completion ledger
 
-| Phases                                             | Status      | Current evidence / next action                                                                                                                                                                                                |
-| -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — reconciliation                                 | IN PROGRESS | Git/runtime/staging/prod baseline recorded. Read-only DB, station, Card Job, wallet, migration, and pack truth still require source-approved read path.                                                                       |
-| 1 — native CaptureService / physical Canon         | BLOCKED     | Current bridge remains short-lived per prior architecture pass. Physical Canon callback proof is mandatory. Awaiting source reconciliation and then a single owner physical instruction.                                      |
-| 2 — packaged runtime                               | NOT STARTED | Current `scripts/scanner-app` is a source checkout and dynamic build path; signed package proof absent.                                                                                                                       |
-| 3–18 — capture profile, preview, queue, credits UX | IN PROGRESS | Existing dirty implementation/test surfaces are being reconciled before any edit.                                                                                                                                             |
-| 19–23 — packs, Stripe TEST, wallet proof           | PARTIAL     | Local grant authority now requires a verified Checkout Session, configured canonical Price ID/currency, and declared Stripe mode. No Stripe configuration, test checkout, webhook delivery, or staging mutation has occurred. |
-| 24–30 — evidence viewer / quality experiments      | PARTIAL     | Pixel inspection now prefers canonical working evidence and labels its actual source. Immutable TIFF handling and grading maths are unchanged; physical quality proof remains outstanding.                                    |
-| 31–36 — recovery, onboarding, security, packaging  | IN PROGRESS | Source review in progress; external/package credentials and physical clean-Mac proof not established.                                                                                                                         |
-| 37–44 — capacity, adversarial, E2E, gates          | NOT STARTED | Requires reconciled implementation, isolated environments, and physical/staging evidence.                                                                                                                                     |
-| 45 — staging release                               | NOT STARTED | No staging deploy is being performed at takeover.                                                                                                                                                                             |
-| 46–48 — readiness / production                     | NOT STARTED | Production remains hard-stopped.                                                                                                                                                                                              |
+| Phases                                             | Status      | Current evidence / next action                                                                                                                                                                                                                                               |
+| -------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — reconciliation                                 | IN PROGRESS | Git/runtime/staging/prod baseline recorded. Read-only DB, station, Card Job, wallet, migration, and pack truth still require source-approved read path.                                                                                                                      |
+| 1 — native CaptureService / physical Canon         | BLOCKED     | Current bridge remains short-lived per prior architecture pass. Physical Canon callback proof is mandatory. Awaiting source reconciliation and then a single owner physical instruction.                                                                                     |
+| 2 — packaged runtime                               | NOT STARTED | Current `scripts/scanner-app` is a source checkout and dynamic build path; signed package proof absent.                                                                                                                                                                      |
+| 3–18 — capture profile, preview, queue, credits UX | PARTIAL     | Local Preview=Acceptance is now implemented: GREEN placement + `SCAN` auto-uploads a frame-safe TIFF, unsafe frames are Rescan-only, upload progress and measured countdown are shown. True background Front→Back remains blocked by server capture-session state/authority. |
+| 19–23 — packs, Stripe TEST, wallet proof           | PARTIAL     | Local grant authority now requires a verified Checkout Session, configured canonical Price ID/currency, and declared Stripe mode. No Stripe configuration, test checkout, webhook delivery, or staging mutation has occurred.                                                |
+| 24–30 — evidence viewer / quality experiments      | PARTIAL     | Pixel inspection now prefers canonical working evidence and labels its actual source. Immutable TIFF handling and grading maths are unchanged; physical quality proof remains outstanding.                                                                                   |
+| 31–36 — recovery, onboarding, security, packaging  | IN PROGRESS | Source review in progress; external/package credentials and physical clean-Mac proof not established.                                                                                                                                                                        |
+| 37–44 — capacity, adversarial, E2E, gates          | NOT STARTED | Requires reconciled implementation, isolated environments, and physical/staging evidence.                                                                                                                                                                                    |
+| 45 — staging release                               | NOT STARTED | No staging deploy is being performed at takeover.                                                                                                                                                                                                                            |
+| 46–48 — readiness / production                     | NOT STARTED | Production remains hard-stopped.                                                                                                                                                                                                                                             |
 
 ## Reconciled local repairs
 
@@ -80,7 +80,44 @@ Wallet refreshes now carry a local display-only generation. A temporary dismissa
 
 Focused proof run: `node --check` for the touched scripts and 71 scanner tests across active-card, environment, renderer workflow, and renderer parse suites: **71 passed, 0 failed**. Tests used isolated temporary state/mocked endpoints only. `git diff --check` passed.
 
-Full local Scanner suite: `npm test --prefix scripts/scanner-app` — **161 passed, 0 failed**. Repository typecheck: `npm run check` — **passed**. The repository-wide lint command is baseline-red (1,626 errors/5,769 warnings, including `.claude/worktrees` and unrelated pre-existing files); focused lint on the four changed Scanner files produced **0 errors** and 44 pre-existing style warnings. No build, Electron restart, hardware command, staging mutation, provider call, or production action was performed.
+Earlier full local Scanner suite at this repair point: `npm test --prefix scripts/scanner-app` —
+**161 passed, 0 failed**. Repository typecheck: `npm run check` — **passed**. The repository-wide
+lint command was already baseline-red across unrelated files and nested `.claude/worktrees`;
+focused lint on the then-changed Scanner files produced **0 errors**. No build, Electron restart,
+hardware command, staging mutation, provider call, or production action was performed.
+
+### Preview=Acceptance, upload progress, and measured countdown — locally proven
+
+The normal post-scan `ACCEPT`/`RESCAN` decision branch has been removed from the Scanner UI, preload
+bridge, main-process IPC, and watcher state machine. A server-owned side still requires a fresh
+GREEN placement Preview; pressing `SCAN` consumes that approval and is now the operator acceptance
+for that side. After ImageCaptureCore returns the locked-profile TIFF, the local frame-safety gate
+either:
+
+- accepts the TIFF and immediately queues/upload it as authoritative evidence; or
+- rejects it into `preview_error`, where the preview remains visible and the only normal action is
+  Rescan. That rejected TIFF is not uploaded as card evidence.
+
+The exact scanner TIFF remains unchanged. The non-authoritative JPEG preview is still only an
+operator display derivative. Direct staging uploads now emit real byte progress from the streaming
+PUT path (`queued`, `uploading`, `uploaded`, `server_validating`) into the durable targeted queue
+and renderer state. The renderer shows percentage and byte counts while keeping the side preview
+visible during upload. Physical scan countdowns are local-only and use this station's measured
+rolling timings by profile/DPI/window/side; a fresh station shows that it is measuring rather than
+inventing a static timer.
+
+Focused proof for this pass: `node --test test/server-client-tiff-upload.test.js
+test/station-active-card.test.js test/renderer-parses.test.js test/renderer-workflow.test.js
+test/ipc-registration.test.js` — **84 passed, 0 failed**. Full Scanner suite:
+`npm test --prefix scripts/scanner-app` — **164 passed, 0 failed**. `npm run check` and
+`git diff --check` passed. Targeted ESLint on touched files returned **0 errors** and 116 legacy
+warnings. Repository-wide `npm run lint` remains baseline-red with **1,626 errors / 5,773
+warnings**, including nested `.claude/worktrees` and unrelated legacy code.
+
+This does **not** close true background Front→Back. The remaining blocker is cross-layer: the
+server currently enforces one live station capture session and Back is only armed on the
+server-accepted Front edge, after immutable Front evidence exists. Safely changing that requires a
+server/session-state redesign and race proof; it was not smuggled into this local UI/runtime patch.
 
 ### Owner-approved protected repair: full-resolution grading inspection — locally proven
 
@@ -169,15 +206,16 @@ environment aggregates, not a claim about a particular Scanner operator.
 
 1. **Physical capture proof:** 18 August data-plane failures were recorded; direct ICA capability exists but persistent lifecycle proof does not. Do not attribute the failure solely to TCPIP/`ippusbd`.
 2. **Packaging:** there is no verified signed/notarised standalone Scanner application; the running app is a development checkout.
-3. **Commercial policy:** GBP pack pricing, VAT treatment, and Stripe Price IDs are owner decisions. The pack flow must remain fail-closed until configured.
-4. **Pre-existing dirty changes:** current implementation must be reconciled and tested before edits or staging deployment; no reset/overwrite is authorised.
-5. **Stripe TEST external acceptance:** staging schema `0093` is applied, but a non-live Stripe TEST Price/configuration record must still include the exact canonical currency alongside each Price ID before any pack becomes purchasable. The owner has not authorised configuration mutation, a test payment, or a staging webhook run in this pass.
-6. **Baseline follow-up:** `partner_card_job_voided` needs its own explicitly approved audit-constraint migration. It is not carried in the protected viewer/Stripe package and must not be smuggled into the `0093` currency migration.
+3. **Background Front→Back:** local post-scan Accept is gone, but Back still cannot be prepared while Front upload/finalisation is unresolved. Closing this requires a server capture-session authority change, not just renderer copy.
+4. **Commercial policy:** GBP pack pricing, VAT treatment, and Stripe Price IDs are owner decisions. The pack flow must remain fail-closed until configured.
+5. **Pre-existing dirty changes:** current implementation must be reconciled and tested before edits or staging deployment; no reset/overwrite is authorised.
+6. **Stripe TEST external acceptance:** staging schema `0093` is applied, but a non-live Stripe TEST Price/configuration record must still include the exact canonical currency alongside each Price ID before any pack becomes purchasable. The owner has not authorised configuration mutation, a test payment, or a staging webhook run in this pass.
+7. **Baseline follow-up:** `partner_card_job_voided` needs its own explicitly approved audit-constraint migration. It is not carried in the protected viewer/Stripe package and must not be smuggled into the `0093` currency migration.
 
 ## Reviewer evidence reconciled by the Lead
 
 - The native bridge is still a runtime-compiled, per-command ImageCaptureCore CLI. It opens ICA even for health and requests close without waiting for the close callback. This confirms `SFAP-001`/`002`/`003`; no physical claim is made from unit tests.
-- The current normal Scanner path still uses post-scan `ACCEPT`/`RESCAN`; upload is synchronous and Back is armed only after Front has been server-accepted. This confirms `SFAP-015`, the required cross-layer background-upload redesign.
+- The current normal Scanner path no longer uses post-scan `ACCEPT`/`RESCAN` after a frame-safe capture; upload starts from the explicit GREEN `SCAN`. However, upload/finalisation is still synchronous from the station's perspective and Back is armed only after Front has been server-accepted. This keeps the narrowed `SFAP-015` background Front→Back blocker open.
 - Card Job start/reservation and zero-credit server authority are already strong and locally proven, including a real-PostgreSQL 5,000-way one-credit start storm. This is not a 5,000-station end-to-end capture/load proof.
 - Station identity/tenant/location/capability binding is source- and test-proven. Real staging onboarding, password delivery, Stripe TEST, capacity, packaged app, clean-Mac, and physical capture remain separate acceptance gates.
 

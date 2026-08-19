@@ -257,7 +257,7 @@ test("adoption CLAIMS the session for this device — it never merely copies the
    * scoped to THE DEVICE THAT CLAIMED THE SESSION. The first version of adoption built the local
    * entry straight from that arm response and never claimed, so the station looked armed, captured a
    * genuine 1200 DPI TIFF over 57 seconds, produced its preview, passed the frame safety check — and
-   * then had Accept answered with "Capture session not found for this scanner", because no device
+   * then had the upload answered with "Capture session not found for this scanner", because no device
    * held it. The TIFF was archived and the operator got an error sound on a scan that had worked.
    */
   const { watcher, state, server } = isolatedWatcher(t);
@@ -882,7 +882,7 @@ test("the next outstanding side is armed from the SERVER, and the client never n
   assert.doesNotMatch(main, /armCapture\(cardJobId,\s*["'](front|back)["']\)/);
 });
 
-test("it fires on the ACCEPT edge exactly once per accepted side", () => {
+test("it fires on the server-accepted edge exactly once per accepted side", () => {
   // Keyed on the acceptance timestamp: one accepted side arms once, however many state changes
   // follow it. Without the key, every subsequent state-change would re-arm.
   assert.match(main, /accepted\.acceptedAt !== lastArmedForAcceptance/);

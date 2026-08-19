@@ -46,6 +46,5 @@ contextBridge.exposeInMainWorld("scanner", {
   getPlacementPreview: (previewId) => ipcRenderer.invoke("get-placement-preview", previewId),
   saveCaptureWindow: (originMm) => ipcRenderer.invoke("save-capture-window", originMm),
   getCapturePreview: (previewId) => ipcRenderer.invoke("get-capture-preview", previewId),
-  acceptCapturePreview: (previewId) => ipcRenderer.invoke("accept-capture-preview", previewId),
   rescanCapturePreview: (previewId) => ipcRenderer.invoke("rescan-capture-preview", previewId),
 });

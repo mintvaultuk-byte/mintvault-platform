@@ -210,7 +210,6 @@ function trayImageForState(s) {
     scanning_front: "tray-busy.png",
     scanning_back: "tray-busy.png",
     awaiting_scan: "tray-idle.png",
-    preview_ready: "tray-idle.png",
     preview_error: "tray-error.png",
     expired: "tray-error.png",
     finalising: "tray-busy.png",
@@ -233,7 +232,6 @@ function trayTooltipForState(s) {
     scanning_front: "Scanning front…",
     scanning_back: "Scanning back…",
     awaiting_scan: "Target armed — waiting for operator Scan",
-    preview_ready: "Preview ready — accept or rescan",
     preview_error: "Preview needs attention",
     expired: "Capture target expired",
     finalising: "Processing image…",
@@ -1188,11 +1186,6 @@ function setupIpc() {
     return watcher.previewData(previewId);
   });
 
-  ipcMain.handle("accept-capture-preview", async (_event, previewId) => {
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
-    return watcher.acceptPreview(previewId);
-  });
-
   ipcMain.handle("rescan-capture-preview", async (_event, previewId) => {
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Preview is unavailable" };
     return watcher.rescanPreview(previewId);
@@ -1315,8 +1308,9 @@ app.whenReady().then(async () => {
     }
 
     /*
-     * THE ACCEPT EDGE. A side has just been accepted and the card is not finished, so its remaining
-     * side is armed now rather than at some later poll — the operator has the card in their hand.
+     * THE SERVER-ACCEPTED EDGE. A side has just been accepted by MintVault and the card is not
+     * finished, so its remaining side is armed now rather than at some later poll — the operator has
+     * the card in their hand.
      * Keyed on the acceptance timestamp so one accepted side arms once, however many state changes
      * follow it.
      */
