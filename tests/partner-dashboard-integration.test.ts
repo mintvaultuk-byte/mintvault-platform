@@ -223,7 +223,7 @@ async function usePartnerAdminRole(url: string): Promise<void> {
     for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_G6D);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, [...PARTNER_MIGRATIONS_WITH_G6D, "0045_partner_stations"]);
 
     const authMod = await import("../server/auth");
     const ADMIN_EMAIL = authMod.ADMIN_EMAIL;
