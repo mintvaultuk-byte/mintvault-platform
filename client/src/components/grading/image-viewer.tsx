@@ -37,6 +37,8 @@ type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inv
 
 interface ImageUrls {
   front_original?: string | null;
+  front_working?: string | null;
+  front_working_cropped?: string | null;
   front_cropped?: string | null;
   /** 1600px q80 viewer derivatives — preferred main-viewer source. The
    *  server falls back to the full-res cropped key on certs that predate
@@ -48,6 +50,8 @@ interface ImageUrls {
   front_edgeenhanced?: string | null;
   front_inverted?: string | null;
   back_original?: string | null;
+  back_working?: string | null;
+  back_working_cropped?: string | null;
   back_cropped?: string | null;
   back_greyscale?: string | null;
   back_highcontrast?: string | null;
@@ -223,11 +227,59 @@ function getUrl(urls: ImageUrls, side: Side, variant: Variant): string | null {
   return (urls[key] as string | null) || urls[`${side}_cropped`] || urls[`${side}_original`] || null;
 }
 
+type PixelInspectionSource =
+  "working-evidence" | "working-cropped-evidence" | "legacy-original" | "legacy-cropped" | "display-derivative";
+
+interface PixelInspectionAsset {
+  url: string;
+  source: PixelInspectionSource;
+}
+
+/**
+ * Pixel inspection must begin with the native-resolution working evidence.  For LiDE capture this
+ * is the canonical evidence-derived image the grading workflow uses; `*_original` is a legacy
+ * upload field and can be a lower-resolution historical derivative.  The immutable TIFF evidence
+ * master remains server-side and is deliberately not represented as a browser image URL here.
+ *
+ * Fallbacks retain legacy certificate access, but are labelled as such at the viewport so a
+ * derivative can never silently masquerade as the grading-evidence source.
+ */
+function getPixelInspectionAsset(urls: ImageUrls, side: Side): PixelInspectionAsset | null {
+  if (side !== "front" && side !== "back") return null;
+  const record = urls as Record<string, string | null | undefined>;
+  const candidates: Array<[PixelInspectionSource, string | null | undefined]> = [
+    ["working-evidence", record[`${side}_working`]],
+    ["working-cropped-evidence", record[`${side}_working_cropped`]],
+    ["legacy-original", record[`${side}_original`]],
+    ["legacy-cropped", record[`${side}_cropped`]],
+    ["display-derivative", record[`${side}_display`]],
+  ];
+  const found = candidates.find(([, url]) => Boolean(url));
+  return found ? { source: found[0], url: found[1]! } : null;
+}
+
+/** The control itself names the selected asset class; a data attribute alone is not enough for a grader. */
+function pixelInspectionLabel(asset: PixelInspectionAsset): string {
+  switch (asset.source) {
+    case "working-evidence":
+      return "Full-Resolution Working Evidence";
+    case "working-cropped-evidence":
+      return "Working Evidence Crop";
+    case "legacy-original":
+      return "Legacy Original Inspection";
+    case "legacy-cropped":
+      return "Legacy Cropped Inspection";
+    case "display-derivative":
+      return "Display Derivative Inspection";
+  }
+}
+
 function hasAny(urls: ImageUrls, side: Side): boolean {
   return !!(urls[`${side}_original`] || urls[`${side}_cropped`]);
 }
 
-const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6];
+const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8, 12];
+const PIXEL_INSPECTION_MAX_ZOOM = 12;
 
 /**
  * Grading-rail SAFE FIT insets, in CSS pixels, applied symmetrically on each
@@ -450,6 +502,7 @@ export default function ImageViewer({
   // Card Tool has always used the simpler one-element pattern; mark mode
   // now matches.)
   const [showReference, setShowReference] = useState(false);
+  const [pixelInspection, setPixelInspection] = useState(false);
   const [zoom, setZoomRaw] = useState(1);
   /** Normal inspection mode stores the image-relative focal point as percent.
    * Mark mode still uses its existing native-scroll geometry below. */
@@ -486,6 +539,11 @@ export default function ImageViewer({
   const canDrawWhitening = mutationsEnabled && !!onWhiteningLinesChange;
   const canDrawCrease = mutationsEnabled && !!onCreaseLinesChange;
 
+  function maxZoom() {
+    if (pixelInspection && !markMode) return PIXEL_INSPECTION_MAX_ZOOM;
+    return inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6;
+  }
+
   const publishInspection = (nextZoom: number, nextPan: { x: number; y: number }) => {
     if (!inspectionState || !onInspectionStateChange || markMode) return;
     onInspectionStateChange(
@@ -502,8 +560,7 @@ export default function ImageViewer({
       x: Math.max(0, Math.min(100, nextPan.x)),
       y: Math.max(0, Math.min(100, nextPan.y)),
     };
-    const boundedZoom =
-      inspectionState && !markMode ? Math.min(CARD_INSPECTION_MAX_ZOOM, Math.max(1, nextZoom)) : nextZoom;
+    const boundedZoom = Math.min(maxZoom(), Math.max(1, nextZoom));
     setZoomRaw(boundedZoom);
     setPanRaw(boundedPan);
     publishInspection(boundedZoom, boundedPan);
@@ -944,7 +1001,10 @@ export default function ImageViewer({
   void railFitRevision;
   const railFit = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
 
-  const currentUrl = getUrl(urls, side, variant);
+  const pixelInspectionAsset = getPixelInspectionAsset(urls, side);
+  const currentUrl = pixelInspection
+    ? pixelInspectionAsset?.url || getUrl(urls, side, variant)
+    : getUrl(urls, side, variant);
   const sideDefects = defects.filter((d) => d.image_side === side);
   const frontDefectCount = defects.filter((d) => d.image_side === "front").length;
   const backDefectCount = defects.filter((d) => d.image_side === "back").length;
@@ -1127,7 +1187,7 @@ export default function ImageViewer({
   }
 
   function zoomIn() {
-    setZoom((z) => Math.min(inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6, nextZoomStep(z)));
+    setZoom((z) => Math.min(maxZoom(), nextZoomStep(z)));
   }
   function zoomOut() {
     setZoom((z) => prevZoomStep(z));
@@ -1389,6 +1449,9 @@ export default function ImageViewer({
         data-testid="grading-image-viewport"
         data-coordinate-mode={markMode ? "measurement" : "inspection"}
         data-inspection-side={side}
+        data-inspection-source={
+          pixelInspection ? `${pixelInspectionAsset?.source ?? "unavailable"}-no-smoothing` : "display"
+        }
         data-inspection-zoom={zoom}
         data-inspection-focus-x={pan.x / 100}
         data-inspection-focus-y={pan.y / 100}
@@ -1450,8 +1513,11 @@ export default function ImageViewer({
                         width: "auto",
                         height: "auto",
                       }
-                  : undefined
+                  : pixelInspection
+                    ? { imageRendering: "pixelated" }
+                    : undefined
               }
+              data-pixel-inspection={pixelInspection ? "no-smoothing" : undefined}
               data-testid={railFitEnabled ? "grading-card-image" : undefined}
               onLoad={(e) => {
                 const w = e.currentTarget.naturalWidth;
@@ -1970,9 +2036,7 @@ export default function ImageViewer({
           beside the Front/Back tabs (see renderZoomPill). Below the card it was a row
           sibling that took ~110px out of the rail's width, and stacked under the card
           it cost height. In a row that already exists it costs the card neither. */}
-        {railFitEnabled ? null : (
-          <div className="mt-2 flex shrink-0 items-center justify-end">{renderZoomPill()}</div>
-        )}
+        {railFitEnabled ? null : <div className="mt-2 flex shrink-0 items-center justify-end">{renderZoomPill()}</div>}
       </>
     );
   }
@@ -1984,46 +2048,44 @@ export default function ImageViewer({
   function renderZoomPill() {
     return (
       <div className="flex items-center gap-0.5 bg-[var(--admin-panel2)] border border-[var(--admin-line-hard)] rounded-full px-1 py-0.5">
-            <button
-              type="button"
-              aria-label="Zoom out"
-              onClick={(e) => {
-                e.stopPropagation();
-                zoomOut();
-              }}
-              disabled={zoom <= 1}
-              className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
-            >
-              <ZoomOut size={14} />
-            </button>
-            <span className="text-white text-[10px] font-mono w-10 text-center select-none">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              type="button"
-              aria-label="Zoom in"
-              onClick={(e) => {
-                e.stopPropagation();
-                zoomIn();
-              }}
-              disabled={zoom >= (inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6)}
-              className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
-            >
-              <ZoomIn size={14} />
-            </button>
-            {zoom > 1 && (
-              <button
-                type="button"
-                aria-label="Reset zoom"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  zoomReset();
-                }}
-                className="h-8 w-8 flex items-center justify-center text-[var(--admin-ink-dim)] hover:text-white transition-colors rounded-full"
-              >
-                <RotateCcw size={12} />
-              </button>
-            )}
+        <button
+          type="button"
+          aria-label="Zoom out"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomOut();
+          }}
+          disabled={zoom <= 1}
+          className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
+        >
+          <ZoomOut size={14} />
+        </button>
+        <span className="text-white text-[10px] font-mono w-10 text-center select-none">{Math.round(zoom * 100)}%</span>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomIn();
+          }}
+          disabled={zoom >= maxZoom()}
+          className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
+        >
+          <ZoomIn size={14} />
+        </button>
+        {zoom > 1 && (
+          <button
+            type="button"
+            aria-label="Reset zoom"
+            onClick={(e) => {
+              e.stopPropagation();
+              zoomReset();
+            }}
+            className="h-8 w-8 flex items-center justify-center text-[var(--admin-ink-dim)] hover:text-white transition-colors rounded-full"
+          >
+            <RotateCcw size={12} />
+          </button>
+        )}
       </div>
     );
   }
@@ -2304,6 +2366,22 @@ export default function ImageViewer({
           <Maximize2 size={11} />
           Mark Defects
         </button>
+        {(side === "front" || side === "back") && pixelInspectionAsset && (
+          <button
+            type="button"
+            onClick={() => {
+              setPixelInspection((value) => !value);
+              zoomReset();
+            }}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${
+              pixelInspection
+                ? "border-[var(--admin-gold)] text-[var(--admin-gold-deep)] bg-[var(--admin-gold)]/10"
+                : "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"
+            }`}
+          >
+            {pixelInspectionLabel(pixelInspectionAsset)}
+          </button>
+        )}
         {certId &&
           mutationsEnabled &&
           !readOnly &&

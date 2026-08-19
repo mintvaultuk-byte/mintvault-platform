@@ -70,12 +70,25 @@ function session(tenantId: string, packCode: string, id = "cs_test_1", paid = tr
   return {
     id,
     payment_status: paid ? "paid" : "unpaid",
+    verifiedCheckout: true as const,
+    livemode: false,
+    currency: "gbp",
+    lineItems: [{ priceId: `price_test_${packCode.toLowerCase()}`, currency: "gbp" }],
     metadata: {
       partner_tenant_id: tenantId,
       partner_pack_code: packCode,
       partner_initiating_user_id: "11111111-1111-1111-1111-111111111111",
     },
   };
+}
+
+async function configureCanonicalPack(packCode: string, currency = "gbp"): Promise<void> {
+  await admin.query(
+    `UPDATE partner_credit_packs
+        SET stripe_price_id=$1, stripe_currency=$2
+      WHERE code=$3`,
+    [`price_test_${packCode.toLowerCase()}`, currency, packCode]
+  );
 }
 
 describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
@@ -92,10 +105,12 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
       MINTVAULT_DATABASE_URL: process.env.MINTVAULT_DATABASE_URL,
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
+      STRIPE_ENV: process.env.STRIPE_ENV,
     };
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
+    process.env.STRIPE_ENV = "test";
     wallet = await import("../server/partner/partner-wallet-service");
     purchase = await import("../server/partner/credit-purchase-service");
   }, 180_000);
@@ -122,15 +137,20 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
   });
 
   it("becomes purchasable the moment a Stripe Price id is configured — data, not a deploy", async () => {
-    await admin.query(`UPDATE partner_credit_packs SET stripe_price_id='price_test_25' WHERE code='PACK_25'`);
+    await admin.query(
+      `UPDATE partner_credit_packs SET stripe_price_id='price_test_25', stripe_currency='gbp' WHERE code='PACK_25'`
+    );
     const pack = await purchase.resolvePackForCheckout("PACK_25");
     expect(pack.credits).toBe(25);
     expect(pack.purchasable).toBe(true);
-    await admin.query(`UPDATE partner_credit_packs SET stripe_price_id=NULL WHERE code='PACK_25'`);
+    await admin.query(
+      `UPDATE partner_credit_packs SET stripe_price_id=NULL, stripe_currency=NULL WHERE code='PACK_25'`
+    );
   });
 
   it("grants exactly the pack's credits on a paid webhook", async () => {
     const tenantId = await makeTenant("grant");
+    await configureCanonicalPack("PACK_10");
     expect(await availableFor(tenantId)).toBe(0);
 
     const out = await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_10"), "evt_grant_1");
@@ -147,6 +167,7 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
 
   it("REPLAY: the same event delivered five times grants once, and SAYS so", async () => {
     const tenantId = await makeTenant("replay");
+    await configureCanonicalPack("PACK_50");
     for (let i = 0; i < 5; i++) {
       const outcome = await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_50"), "evt_replay_1");
       /*
@@ -171,6 +192,7 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
 
   it("CONCURRENT DELIVERY of one event grants once", async () => {
     const tenantId = await makeTenant("concurrent");
+    await configureCanonicalPack("PACK_100");
     // Stripe can deliver the same event to both Fly Machines at once. The ledger unique index is
     // what makes that safe, so fire them genuinely in parallel rather than in sequence.
     const results = await Promise.allSettled(
@@ -192,6 +214,7 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
 
   it("DISTINCT events grant separately — replay safety is not accidental deduplication", async () => {
     const tenantId = await makeTenant("distinct");
+    await configureCanonicalPack("PACK_5");
     await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_5", "cs_a"), "evt_distinct_a");
     await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_5", "cs_b"), "evt_distinct_b");
     expect(await availableFor(tenantId)).toBe(10); // two genuine purchases
@@ -209,6 +232,7 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
 
   it("credits come from the SERVER catalogue, never from session metadata", async () => {
     const tenantId = await makeTenant("tamper");
+    await configureCanonicalPack("PACK_5");
     // A tampered session claiming 9999 credits must still grant only what PACK_5 is worth.
     const tampered = {
       ...session(tenantId, "PACK_5", "cs_tamper"),
@@ -243,6 +267,67 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     expect(out).toMatchObject({ granted: false, reason: "not_a_partner_credit_purchase" });
   });
 
+  it("refuses a browser/raw-event shaped partner checkout that was not re-read from Stripe", async () => {
+    const tenantId = await makeTenant("unverified");
+    await configureCanonicalPack("PACK_10");
+    const unverified = { ...session(tenantId, "PACK_10"), verifiedCheckout: undefined };
+    const out = await purchase.fulfilPartnerCreditPurchase(unverified, "evt_unverified_1");
+    expect(out).toMatchObject({ granted: false, reason: "checkout_not_verified" });
+    expect(await availableFor(tenantId)).toBe(0);
+  });
+
+  it("refuses a verified checkout with the wrong canonical Stripe Price or currency", async () => {
+    const priceTenant = await makeTenant("wrong-price");
+    const currencyTenant = await makeTenant("wrong-currency");
+    await configureCanonicalPack("PACK_25", "gbp");
+
+    const wrongPrice = {
+      ...session(priceTenant, "PACK_25", "cs_wrong_price"),
+      lineItems: [{ priceId: "price_test_some_other_pack", currency: "gbp" }],
+    };
+    const priceOutcome = await purchase.fulfilPartnerCreditPurchase(wrongPrice, "evt_wrong_price_1");
+    expect(priceOutcome).toMatchObject({ granted: false, reason: "checkout_price_mismatch" });
+    expect(await availableFor(priceTenant)).toBe(0);
+
+    const wrongCurrency = {
+      ...session(currencyTenant, "PACK_25", "cs_wrong_currency"),
+      currency: "usd",
+      lineItems: [{ priceId: "price_test_pack_25", currency: "usd" }],
+    };
+    const currencyOutcome = await purchase.fulfilPartnerCreditPurchase(wrongCurrency, "evt_wrong_currency_1");
+    expect(currencyOutcome).toMatchObject({ granted: false, reason: "checkout_currency_mismatch" });
+    expect(await availableFor(currencyTenant)).toBe(0);
+  });
+
+  it("refuses a verified Checkout Session from the wrong Stripe environment", async () => {
+    const tenantId = await makeTenant("wrong-environment");
+    await configureCanonicalPack("PACK_50");
+    const out = await purchase.fulfilPartnerCreditPurchase(
+      { ...session(tenantId, "PACK_50", "cs_live_in_test"), livemode: true },
+      "evt_wrong_environment_1"
+    );
+    expect(out).toMatchObject({ granted: false, reason: "checkout_environment_mismatch" });
+    expect(await availableFor(tenantId)).toBe(0);
+  });
+
+  it("fails closed when this deployment has not declared its Stripe mode", async () => {
+    const tenantId = await makeTenant("undeclared-environment");
+    await configureCanonicalPack("PACK_100");
+    const prior = process.env.STRIPE_ENV;
+    delete process.env.STRIPE_ENV;
+    try {
+      const out = await purchase.fulfilPartnerCreditPurchase(
+        session(tenantId, "PACK_100", "cs_undeclared_environment"),
+        "evt_undeclared_environment_1"
+      );
+      expect(out).toMatchObject({ granted: false, reason: "stripe_environment_undeclared" });
+      expect(await availableFor(tenantId)).toBe(0);
+    } finally {
+      if (prior === undefined) delete process.env.STRIPE_ENV;
+      else process.env.STRIPE_ENV = prior;
+    }
+  });
+
   it("purchase permission: OWNER yes, MANAGER only when granted, GRADER never", () => {
     const none = new Set<string>();
     const granted = new Set(["partner.credits.purchase"]);
@@ -262,6 +347,7 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
 
   it("a refund is recorded as an audited exception and does NOT reduce capacity", async () => {
     const tenantId = await makeTenant("refund");
+    await configureCanonicalPack("PACK_25");
     await purchase.fulfilPartnerCreditPurchase(session(tenantId, "PACK_25", "cs_refund"), "evt_refund_grant");
     expect(await availableFor(tenantId)).toBe(25);
 
@@ -306,7 +392,7 @@ describe("P5 integration surfaces", () => {
   const webhook = read("server/webhookHandlers.ts");
   const routes = read("server/partner/routes.ts");
 
-  it("routes the partner branch through the proven grant, and NEVER pre-claims it", () => {
+  it("re-reads Stripe's Checkout Session before the proven grant, and NEVER pre-claims it", () => {
     expect(webhook).toContain("fulfilPartnerCreditPurchase");
     expect(webhook).toContain("meta.partner_tenant_id && meta.partner_pack_code");
 
@@ -323,6 +409,11 @@ describe("P5 integration surfaces", () => {
       webhook.indexOf("charge.refunded")
     );
     expect(branch).not.toContain("claimStripeEvent");
+    expect(branch).toContain("stripe.checkout.sessions.retrieve");
+    expect(branch).toContain('expand: ["line_items.data.price"]');
+    expect(branch).toContain("verifiedCheckout: true");
+    expect(branch).toContain("livemode: verifiedSession.livemode");
+    expect(branch).toContain("currency: verifiedSession.currency");
   });
 
   it("routes refunds and disputes to audited exception handling, never to a wallet debit", () => {

@@ -456,6 +456,44 @@ describe("P6 Scanner NEW CARD (real PostgreSQL)", () => {
     expect(await availableFor(f.tenantId)).toBe(0);
   });
 
+  it("5000-way NEW storm on one credit yields one winner, no overspend and no duplicate MV", async () => {
+    const f = await makeTenant("storm5000");
+    await addCredits(f.tenantId, 1, "storm5000");
+    const counterBefore = await counterValue();
+
+    const results = await Promise.all(
+      Array.from({ length: 5000 }, (_, i) =>
+        settle(start(f, { clientOpId: `op-storm5000-${String(i).padStart(4, "0")}` }))
+      )
+    );
+
+    const successes = results.filter((r): r is { ok: true; value: Awaited<ReturnType<typeof start>> } => r.ok);
+    const failures = results.filter((r): r is { ok: false; code: string } => !r.ok);
+    expect(successes).toHaveLength(1);
+    expect(failures.every((r) => r.code === "INSUFFICIENT_CREDITS")).toBe(true);
+    expect(await availableFor(f.tenantId)).toBe(0);
+    expect(await counterValue()).toBe(counterBefore + 1);
+
+    const jobs = await admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM partner_card_jobs WHERE tenant_id=$1`,
+      [f.tenantId]
+    );
+    const reservations = await admin.query<{ n: number; credits: string }>(
+      `SELECT count(*)::int AS n, COALESCE(sum(reserved_credits),0)::text AS credits
+           FROM partner_credit_reservations
+          WHERE tenant_id=$1 AND status='active'`,
+      [f.tenantId]
+    );
+    const mvs = await admin.query<{ n: number }>(
+      `SELECT count(DISTINCT mv_number)::int AS n FROM partner_card_jobs WHERE tenant_id=$1`,
+      [f.tenantId]
+    );
+    expect(jobs.rows[0].n).toBe(1);
+    expect(reservations.rows[0].n).toBe(1);
+    expect(Number(reservations.rows[0].credits)).toBe(1);
+    expect(mvs.rows[0].n).toBe(1);
+  }, 180_000);
+
   it("CONCURRENT double-click of the SAME operation creates one job, not two", async () => {
     const f = await makeTenant("dbl1");
     await addCredits(f.tenantId, 5, "dbl1");
@@ -504,6 +542,37 @@ describe("P6 Scanner NEW CARD (real PostgreSQL)", () => {
     const refused = await settle(start(f, { clientOpId: "op-zero1-aaaa" }));
     expect(refused.ok).toBe(false);
     if (!refused.ok) expect(refused.code).toBe("INSUFFICIENT_CREDITS");
+  });
+
+  it("REPEATED zero-credit NEW presses create nothing, reserve nothing and mint no MV", async () => {
+    const f = await makeTenant("zero-repeat1");
+    await addCredits(f.tenantId, 0, "zero-repeat1");
+    const counterBefore = await counterValue();
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        settle(start(f, { clientOpId: `op-zero-repeat1-${String(i).padStart(3, "0")}` }))
+      )
+    );
+
+    expect(results.every((r) => !r.ok && r.code === "INSUFFICIENT_CREDITS")).toBe(true);
+    expect(await counterValue()).toBe(counterBefore);
+    for (const table of [
+      "partner_submissions",
+      "partner_submission_cards",
+      "partner_card_jobs",
+      "partner_credit_reservations",
+    ]) {
+      const count = await admin.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE tenant_id=$1`, [
+        f.tenantId,
+      ]);
+      expect(count.rows[0].n).toBe(0);
+    }
+    const certs = await admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM certificates WHERE origin_partner_id=$1`,
+      [f.tenantId]
+    );
+    expect(certs.rows[0].n).toBe(0);
   });
 
   it("SUSPENSION overrides remaining credits", async () => {
@@ -676,8 +745,11 @@ describe("P6 integration surfaces", () => {
 
   it("the Scanner holds ONE retry token across retries of a single press", () => {
     expect(scannerMain).toContain("pendingNewCardOpId");
-    // Reused when already set — a fresh id per retry is how a shop gets charged twice.
-    expect(scannerMain).toContain("if (!pendingNewCardOpId) pendingNewCardOpId =");
+    // Reused from durable state after restart, then retained for ordinary in-process retries — a
+    // fresh id after an ambiguous transport failure is how a shop gets charged twice.
+    expect(scannerMain).toContain("if (!pendingNewCardOpId && persistedStart?.clientOpId) pendingNewCardOpId =");
+    expect(scannerMain).toContain("if (!pendingNewCardOpId) {");
+    expect(scannerMain).toContain("pendingNewCardStart");
     // A transport failure keeps the token, because the outcome is unknown.
     expect(scannerMain).toMatch(/catch[\s\S]{0,200}retryable: true/);
     expect(scannerClient).toContain("startNewCard");
@@ -717,9 +789,9 @@ describe("P6 integration surfaces", () => {
      * when the operator most needs the true figure.
      */
     expect(scannerMain).toContain("async function refreshAvailableCredits()");
-    expect(scannerMain).toContain("stateMod.set({ availableCredits: available })");
+    expect(scannerMain).toMatch(/stateMod\.set\(\{\s*availableCredits: available,/);
     expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{ ok: true, cardJob: job/);
-    expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{ ok: false, retryable: false/);
+    expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{\s*ok: false,\s*retryable: false/);
     // Still never a local counter: nothing in the app increments or decrements the displayed figure.
     expect(scannerMain).not.toMatch(/availableCredits\s*(\+\+|--|\+=|-=)/);
     expect(scannerApp).not.toMatch(/availableCredits\s*(\+\+|--|\+=|-=)/);

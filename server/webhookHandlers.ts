@@ -271,8 +271,31 @@ export class WebhookHandlers {
        * transient failure correctly grants; a retry after success correctly does not.
        */
       if (meta.partner_tenant_id && meta.partner_pack_code) {
+        // Do not attribute a wallet grant from the event's embedded object alone. Re-read the
+        // Checkout Session through Stripe's authenticated API and expand the actual line items so
+        // the grant boundary can compare the bought Price, currency and Stripe account mode against
+        // the server-side pack configuration. Retrieval failures deliberately propagate: no ledger
+        // write occurs and Stripe retries the signed event onto the same append-only authority.
+        const verifiedSession = await stripe.checkout.sessions.retrieve(session.id, {
+          expand: ["line_items.data.price"],
+        });
+        const lineItems = (verifiedSession.line_items?.data ?? []).map((item) => {
+          const price = typeof item.price === "string" ? null : item.price;
+          return {
+            priceId: typeof item.price === "string" ? item.price : (price?.id ?? null),
+            currency: price?.currency ?? null,
+          };
+        });
         const outcome = await fulfilPartnerCreditPurchase(
-          { id: session.id, payment_status: session.payment_status, metadata: meta },
+          {
+            id: verifiedSession.id,
+            payment_status: verifiedSession.payment_status,
+            metadata: verifiedSession.metadata,
+            verifiedCheckout: true,
+            livemode: verifiedSession.livemode,
+            currency: verifiedSession.currency,
+            lineItems,
+          },
           event.id
         );
         console.log(

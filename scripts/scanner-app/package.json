@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "experiment:lide400-quality": "node experiment-lide400-quality.js"
   },
   "dependencies": {
     "chokidar": "^4.0.1",

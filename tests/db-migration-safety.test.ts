@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { classifyDbHost } from "../scripts/db/db-host-policy";
@@ -334,6 +335,13 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
 
   it("handles mixed case, quoted identifiers, and multiline", () => {
     expect(hasBlocking(lintSql('dRoP   taBLE\n  "Weird Name";'))).toBe(true);
+  });
+
+  it("keeps 0093 additive so the staging runner never needs destructive approval", () => {
+    const migration = readFileSync("migrations/0093_partner_credit_pack_currency.sql", "utf8");
+    expect(migration).toContain("ADD COLUMN IF NOT EXISTS stripe_currency");
+    expect(migration).toContain("ADD CONSTRAINT chk_partner_credit_packs_stripe_currency");
+    expect(hasBlocking(lintSql(migration))).toBe(false);
   });
 });
 

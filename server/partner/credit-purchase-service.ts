@@ -25,6 +25,7 @@
  */
 import { appendFoundationCredit } from "./partner-wallet-service";
 import { partnerAdminQuery } from "./db";
+import { declaredStripeEnvironment } from "../stripeClient";
 
 export class CreditPurchaseError extends Error {
   constructor(
@@ -40,6 +41,7 @@ export interface CreditPack {
   code: string;
   credits: number;
   stripePriceId: string | null;
+  stripeCurrency: string | null;
   /** False when the owner has not yet configured a Stripe Price — catalogued but not buyable. */
   purchasable: boolean;
 }
@@ -54,8 +56,9 @@ export async function listCreditPacks(): Promise<CreditPack[]> {
     code: string;
     credits: number;
     stripe_price_id: string | null;
+    stripe_currency: string | null;
   }>(
-    `SELECT id, code, credits, stripe_price_id
+    `SELECT id, code, credits, stripe_price_id, stripe_currency
        FROM partner_credit_packs
       WHERE active
       ORDER BY sort_order, credits`
@@ -65,7 +68,11 @@ export async function listCreditPacks(): Promise<CreditPack[]> {
     code: r.code,
     credits: Number(r.credits),
     stripePriceId: r.stripe_price_id,
-    purchasable: r.stripe_price_id !== null,
+    stripeCurrency: r.stripe_currency,
+    // A Price without its canonical currency is intentionally not a buyable pack. Do not guess a
+    // currency from deployment convention: staging and production can only sell what the owner
+    // explicitly configured for that exact Stripe Price.
+    purchasable: r.stripe_price_id !== null && r.stripe_currency !== null,
   }));
 }
 
@@ -113,6 +120,14 @@ export interface PartnerCheckoutSession {
   id?: string;
   payment_status?: string | null;
   metadata?: Record<string, string> | null;
+  /** Set only after the signed event's Checkout Session has been re-read from Stripe's API. */
+  verifiedCheckout?: true;
+  /** Stripe's actual account mode for the re-read Checkout Session. */
+  livemode?: boolean | null;
+  /** Stripe's Checkout Session currency, normalized by Stripe to lowercase ISO-4217. */
+  currency?: string | null;
+  /** The server-observed Checkout line items, expanded from the re-read Stripe Session. */
+  lineItems?: ReadonlyArray<{ priceId?: string | null; currency?: string | null }>;
 }
 
 export interface GrantOutcome {
@@ -149,16 +164,62 @@ export async function fulfilPartnerCreditPurchase(
     return { granted: false, credits: 0, reason: "not_a_partner_credit_purchase" };
   }
 
+  // A browser redirect or the raw event payload is never enough. The webhook handler must
+  // re-read this exact Checkout Session through Stripe's authenticated API and mark the constrained
+  // record below as verified before the append-only ledger boundary is even reachable.
+  if (!session.verifiedCheckout || !session.id) {
+    return { granted: false, credits: 0, reason: "checkout_not_verified" };
+  }
+
   // Credits come from the SERVER-side catalogue keyed by pack code, never from session metadata or
   // the amount paid. Metadata is client-influenced at creation time; trusting a `credits` field
   // there would let a tampered session mint arbitrary capacity.
-  const { rows } = await partnerAdminQuery<{ credits: number }>(
-    `SELECT credits FROM partner_credit_packs WHERE code=$1`,
-    [packCode]
-  );
-  const credits = Number(rows[0]?.credits ?? 0);
+  const { rows } = await partnerAdminQuery<{
+    credits: number;
+    stripe_price_id: string | null;
+    stripe_currency: string | null;
+  }>(`SELECT credits, stripe_price_id, stripe_currency FROM partner_credit_packs WHERE code=$1`, [packCode]);
+  const pack = rows[0];
+  const credits = Number(pack?.credits ?? 0);
   if (!credits || credits <= 0) {
     return { granted: false, credits: 0, reason: "pack_not_found" };
+  }
+
+  // Every condition below is permanent for this Checkout Session, so return a handled no-grant
+  // rather than throwing and making Stripe retry a payment that cannot ever become attributable.
+  // A transient database error still throws naturally, leaving the ledger untouched so a later
+  // signed delivery can retry safely.
+  const expectedEnvironment = declaredStripeEnvironment();
+  if (expectedEnvironment === null) {
+    return { granted: false, credits: 0, reason: "stripe_environment_undeclared" };
+  }
+  if (session.livemode !== (expectedEnvironment === "live")) {
+    return { granted: false, credits: 0, reason: "checkout_environment_mismatch" };
+  }
+
+  const expectedPriceId = pack?.stripe_price_id;
+  const expectedCurrency = pack?.stripe_currency?.trim().toLowerCase();
+  if (!expectedPriceId || !expectedCurrency) {
+    return { granted: false, credits: 0, reason: "pack_not_purchasable" };
+  }
+
+  const lineItems = session.lineItems ?? [];
+  if (lineItems.length !== 1) {
+    return { granted: false, credits: 0, reason: "checkout_line_items_invalid" };
+  }
+  const lineItem = lineItems[0];
+  const observedCurrency = lineItem.currency?.trim().toLowerCase();
+  const checkoutCurrency = session.currency?.trim().toLowerCase();
+  if (lineItem.priceId !== expectedPriceId) {
+    return { granted: false, credits: 0, reason: "checkout_price_mismatch" };
+  }
+  if (
+    !observedCurrency ||
+    !checkoutCurrency ||
+    observedCurrency !== expectedCurrency ||
+    checkoutCurrency !== expectedCurrency
+  ) {
+    return { granted: false, credits: 0, reason: "checkout_currency_mismatch" };
   }
 
   const { alreadyApplied } = await appendFoundationCredit(

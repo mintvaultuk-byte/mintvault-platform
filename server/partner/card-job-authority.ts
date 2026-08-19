@@ -582,10 +582,15 @@ async function mintPartnerCertificate(
 /**
  * Start (or replay) a NEW Card Job from an approved station — the "NEW CARD" press.
  *
- * ONE TRANSACTION covers: the walk-in submission, its card, the MV and certificate, the credit
- * reservation, the Card Job and the operation record. Any failure rolls back all of it, so there is
- * no state in which a shop has been charged for a card that does not exist, or holds an MV number
- * attached to nothing.
+ * ONE TRANSACTION covers: the walk-in submission, its card, the credit
+ * reservation, the MV and certificate, the Card Job and the operation record. Any failure rolls
+ * back all of it, so there is no state in which a shop has been charged for a card that does not
+ * exist, or holds an MV number attached to nothing.
+ *
+ * The credit reservation happens before permanent MV identity is minted. The provisional walk-in
+ * card unit exists only inside this transaction until then; if the wallet cannot reserve one credit,
+ * the transaction aborts with no persisted submission, card, Card Job, reservation, certificate or
+ * MV counter movement.
  *
  * The replay check runs FIRST, before any of it — so a double-click, a dropped response or an app
  * restart mid-request returns the SAME job, the SAME MV and the same lineage, having spent nothing
@@ -677,14 +682,7 @@ export async function startNewCardJobAtStation(
       const cardId = card.rows[0].id;
       const ordinal = 1;
 
-      // ---- 4. Permanent identity, in the same transaction that pays for it -----------------------
-      const identity = await mintPartnerCertificate(client, {
-        tenantId: input.tenantId,
-        locationId: input.locationId,
-        actorEmail: input.actorEmail,
-      });
-
-      // ---- 5. Exactly one Grading Credit, through the CANONICAL engine ---------------------------
+      // ---- 4. Exactly one Grading Credit, through the CANONICAL engine ---------------------------
       const cardReference = cardReferenceOf(cardId, ordinal);
       let reservation;
       try {
@@ -708,7 +706,6 @@ export async function startNewCardJobAtStation(
               card_ordinal: ordinal,
               station_id: input.stationId,
               client_op_id: input.clientOpId,
-              mv_number: identity.mvNumber,
               walk_in: true,
             },
           }
@@ -722,6 +719,13 @@ export async function startNewCardJobAtStation(
         }
         throw err;
       }
+
+      // ---- 5. Permanent identity, after the wallet has reserved the paid card unit ---------------
+      const identity = await mintPartnerCertificate(client, {
+        tenantId: input.tenantId,
+        locationId: input.locationId,
+        actorEmail: input.actorEmail,
+      });
 
       // ---- 6. The Card Job, stamped with its identity at INSERT ----------------------------------
       // Stamped on INSERT rather than a later UPDATE: the immutability trigger is BEFORE UPDATE, and

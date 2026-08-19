@@ -29,6 +29,11 @@ const els = {
   orphanModal: document.getElementById("orphanModal"),
   orphanList: document.getElementById("orphanList"),
   orphanClose: document.getElementById("orphanClose"),
+  billingLockModal: document.getElementById("billingLockModal"),
+  billingPackGrid: document.getElementById("billingPackGrid"),
+  billingLockError: document.getElementById("billingLockError"),
+  billingLockStatus: document.getElementById("billingLockStatus"),
+  billingLockClose: document.getElementById("billingLockClose"),
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn: document.getElementById("logsBtn"),
   settingsToggle: document.getElementById("settingsToggle"),
@@ -46,6 +51,8 @@ const els = {
   nextCardBtn: document.getElementById("nextCardBtn"),
   newCardBtn: document.getElementById("newCardBtn"),
   newCardError: document.getElementById("newCardError"),
+  creditEmptyPanel: document.getElementById("creditEmptyPanel"),
+  topUpNowBtn: document.getElementById("topUpNowBtn"),
   cardCompletePanel: document.getElementById("cardCompletePanel"),
   cardCompleteTitle: document.getElementById("cardCompleteTitle"),
   cardCompleteInstruction: document.getElementById("cardCompleteInstruction"),
@@ -158,6 +165,13 @@ let openCardActionInFlight = false;
 let stationSetup = null;
 let stationSetupBusy = false;
 let stationSetupPoll = null;
+const REQUIRED_BILLING_PACK_CREDITS = [5, 10, 25, 50, 100];
+let billingPacks = null;
+let billingPacksLoading = false;
+let billingCheckoutInFlight = false;
+let billingPoll = null;
+let billingModalDismissedAtZero = false;
+let renderedWalletRefreshGeneration = null;
 
 function openModal(modal) {
   modal?.classList.add("visible");
@@ -167,8 +181,130 @@ function closeModal(modal) {
   modal?.classList.remove("visible");
 }
 
+function stationHasReservedCardInProgress(state) {
+  return Boolean(
+    state?.activeCapture ||
+    state?.openCardJob ||
+    state?.armingNextSide ||
+    (state?.lastAcceptedCapture && !state.lastAcceptedCapture.cardRegistered)
+  );
+}
+
+function billingLocked(state) {
+  return availableCreditsFromState(state) === 0;
+}
+
+function shouldShowBillingLock(state) {
+  return billingLocked(state) && !stationHasReservedCardInProgress(state) && !billingModalDismissedAtZero;
+}
+
+function setBillingError(message) {
+  els.billingLockError.textContent = message || "";
+  els.billingLockError.hidden = !message;
+}
+
+function packForCredits(credits) {
+  return Array.isArray(billingPacks) ? billingPacks.find((pack) => Number(pack.credits) === Number(credits)) : null;
+}
+
+function renderBillingPacks() {
+  const buttons = Array.from(els.billingPackGrid.querySelectorAll("[data-credits]"));
+  const anyPurchasable = buttons.some((button) => packForCredits(button.dataset.credits)?.purchasable === true);
+  for (const button of buttons) {
+    const credits = Number(button.dataset.credits);
+    const pack = packForCredits(credits);
+    button.textContent = `${credits} CREDITS`;
+    button.disabled = billingPacksLoading || billingCheckoutInFlight || !pack?.purchasable;
+    button.dataset.packCode = pack?.code || "";
+  }
+  if (billingPacksLoading) {
+    els.billingLockStatus.textContent = "Loading credit packs…";
+    setBillingError("");
+  } else if (billingPacks && !anyPurchasable) {
+    els.billingLockStatus.textContent = "TOP-UP PACKS NOT YET CONFIGURED";
+    setBillingError("TOP-UP PACKS NOT YET CONFIGURED");
+  } else {
+    els.billingLockStatus.textContent =
+      "Credits are added only after Stripe confirms payment through the verified webhook.";
+  }
+}
+
+async function ensureBillingPacks() {
+  if (billingPacks || billingPacksLoading) return;
+  billingPacksLoading = true;
+  renderBillingPacks();
+  try {
+    const result = await window.scanner.creditPacks();
+    billingPacks = result?.ok && Array.isArray(result.packs) ? result.packs : [];
+    if (!result?.ok) setBillingError(result?.error || "Credit packs are unavailable");
+  } catch (error) {
+    billingPacks = [];
+    setBillingError(error?.message || "Credit packs are unavailable");
+  } finally {
+    billingPacksLoading = false;
+    renderBillingPacks();
+  }
+}
+
+async function refreshCreditsForBillingLock() {
+  try {
+    await window.scanner.refreshAvailableCredits();
+  } catch {
+    // The lock is fail-closed: an unreadable wallet never becomes local permission to start NEW.
+  }
+}
+
+function stopBillingPoll() {
+  if (billingPoll) clearInterval(billingPoll);
+  billingPoll = null;
+}
+
+function startBillingPoll() {
+  if (billingPoll) return;
+  billingPoll = setInterval(() => void refreshCreditsForBillingLock(), 4_000);
+}
+
+function renderBillingLock(state) {
+  const walletRefreshGeneration = Number.isFinite(state?.walletRefreshGeneration)
+    ? state.walletRefreshGeneration
+    : null;
+  /*
+   * Close is allowed as a temporary visual dismissal, but a fresh authoritative
+   * wallet response is a new fact. If it still says zero after reconnect or a
+   * failed checkout, show the blocking top-up state again; the local dismissal
+   * must never outlive server reconciliation.
+   */
+  if (
+    walletRefreshGeneration !== null &&
+    renderedWalletRefreshGeneration !== null &&
+    walletRefreshGeneration !== renderedWalletRefreshGeneration &&
+    billingLocked(state)
+  ) {
+    billingModalDismissedAtZero = false;
+  }
+  renderedWalletRefreshGeneration = walletRefreshGeneration;
+  const locked = billingLocked(state);
+  if (!locked) {
+    billingModalDismissedAtZero = false;
+    closeModal(els.billingLockModal);
+    stopBillingPoll();
+    setBillingError("");
+    return;
+  }
+  if (!stationHasReservedCardInProgress(state)) startBillingPoll();
+  if (shouldShowBillingLock(state)) {
+    openModal(els.billingLockModal);
+    void ensureBillingPacks();
+  } else {
+    closeModal(els.billingLockModal);
+  }
+  renderBillingPacks();
+}
+
 function toTitle(value) {
-  return String(value || "").replace(/[_-]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return String(value || "")
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function renderHealth(health) {
@@ -202,7 +338,8 @@ function renderTarget(state) {
   if (state.lastAcceptedCapture?.cardRegistered && !state.activeCapture) {
     els.targetCert.textContent = state.lastAcceptedCapture.certId;
     els.targetSide.textContent = "READY TO GRADE";
-    els.targetHint.textContent = "Both server-owned sides are captured. Select Next Card only after the physical card has been cleared from this station.";
+    els.targetHint.textContent =
+      "Both server-owned sides are captured. Select Next Card only after the physical card has been cleared from this station.";
     return;
   }
 
@@ -245,17 +382,19 @@ function renderTarget(state) {
     const accepted = state.lastAcceptedCapture;
     els.targetCert.textContent = accepted.certId;
     els.targetSide.textContent = `${toTitle(accepted.side)} SAVED`;
-    els.targetHint.textContent = accepted.side === "front"
-      ? "Front saved. MintVault will prepare Back when it is required."
-      : "Card complete. MintVault will provide the next required card.";
+    els.targetHint.textContent =
+      accepted.side === "front"
+        ? "Front saved. MintVault will prepare Back when it is required."
+        : "Card complete. MintVault will provide the next required card.";
     return;
   }
 
   els.targetCert.textContent = "No card ready";
   els.targetSide.textContent = "—";
-  els.targetHint.textContent = state.state === "error"
-    ? "Retry this side from the MintVault card record. This app cannot retarget a capture."
-    : "Arm a card side in MintVault. This station will only scan that server-owned target.";
+  els.targetHint.textContent =
+    state.state === "error"
+      ? "Retry this side from the MintVault card record. This app cannot retarget a capture."
+      : "Arm a card side in MintVault. This station will only scan that server-owned target.";
 }
 
 function renderStationIdentity(setup) {
@@ -268,6 +407,7 @@ function renderStationIdentity(setup) {
   els.stationIdentity.textContent = setup.stationCode || "Station";
   els.stationUser.textContent = setup.summary?.displayName || "Authorised user";
   renderAvailableCredits();
+  renderBillingLock(lastState || {});
   // Whether this operator may move the capture area travels with their identity, not with scanner
   // state — it is a property of who signed in.
   syncCaptureWindowAuthority();
@@ -291,11 +431,24 @@ function renderAvailableCredits() {
   els.stationCredits.textContent = typeof credits === "number" ? String(credits) : "—";
 }
 
+function availableCreditsFromState(state) {
+  const live = state?.availableCredits;
+  const credits = typeof live === "number" ? live : stationSetup?.summary?.availableCredits;
+  return typeof credits === "number" ? credits : null;
+}
+
 function renderWorkflowGuide(state) {
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
   const awaitingScan = stage === "awaiting_scan";
-  const presentationPending = ["scanning", "retrying_scan", "processing_preview", "preview_ready", "preview_error", "upload"].includes(stage);
+  const presentationPending = [
+    "scanning",
+    "retrying_scan",
+    "processing_preview",
+    "preview_ready",
+    "preview_error",
+    "upload",
+  ].includes(stage);
   els.workflowGuide.hidden = presentationPending;
   if (presentationPending) return;
 
@@ -326,15 +479,18 @@ function renderWorkflowGuide(state) {
   if (isBack) {
     els.workflowGuideStep.textContent = "STEP 2 — FLIP THE CARD";
     els.workflowGuideTitle.textContent = "Flip the card, then scan Back";
-    els.workflowGuideHint.textContent = "Place the back face-down in the guide. Preview if needed, then press Scan Back.";
+    els.workflowGuideHint.textContent =
+      "Place the back face-down in the guide. Preview if needed, then press Scan Back.";
   } else if (awaitingScan) {
     els.workflowGuideStep.textContent = "STEP 1 — PLACE CARD";
     els.workflowGuideTitle.textContent = "Place the card face-down in the guide";
-    els.workflowGuideHint.textContent = "Preview if needed, then press Scan Front. The scanner only captures this MintVault target.";
+    els.workflowGuideHint.textContent =
+      "Preview if needed, then press Scan Front. The scanner only captures this MintVault target.";
   } else {
     els.workflowGuideStep.textContent = "SETUP — CHECK PLACEMENT";
     els.workflowGuideTitle.textContent = "Place a card, then Preview";
-    els.workflowGuideHint.textContent = "Preview checks that the complete card is visible. Open a card in MintVault to enable final scanning.";
+    els.workflowGuideHint.textContent =
+      "Preview checks that the complete card is visible. Open a card in MintVault to enable final scanning.";
   }
 }
 
@@ -354,7 +510,8 @@ function renderStationSetup(next) {
 
   if (stage === "mfa") {
     els.stationSetupTitle.textContent = "Verify your MintVault sign-in";
-    els.stationSetupText.textContent = "Enter your authenticator or recovery code. This Mac cannot scan until both you and the station are authorised.";
+    els.stationSetupText.textContent =
+      "Enter your authenticator or recovery code. This Mac cannot scan until both you and the station are authorised.";
   } else if (stage === "register") {
     const locations = Array.isArray(stationSetup.locations) ? stationSetup.locations : [];
     els.stationSetupTitle.textContent = "Connect this station";
@@ -383,10 +540,12 @@ function renderStationSetup(next) {
       : "Install the current signed MintVault Scanner release, then reopen the app.";
   } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
     els.stationSetupTitle.textContent = "Station unavailable";
-    els.stationSetupText.textContent = "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
+    els.stationSetupText.textContent =
+      "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
   } else if (active) {
     els.stationSetupTitle.textContent = "Station ready";
-    els.stationSetupText.textContent = "This station is authorised. Complete placement setup before its first evidence scan.";
+    els.stationSetupText.textContent =
+      "This station is authorised. Complete placement setup before its first evidence scan.";
   } else {
     els.stationSetupTitle.textContent = "Sign in to MintVault";
     els.stationSetupText.textContent = "Use your authorised MintVault account to set up this Mac.";
@@ -463,7 +622,7 @@ function positionPreviewOverlay(element, physicalRect, entry, className) {
       physicalRect,
       area,
       { width: image.naturalWidth, height: image.naturalHeight },
-      { width: imageRect.width, height: imageRect.height },
+      { width: imageRect.width, height: imageRect.height }
     );
     Object.assign(element.style, {
       left: `${imageRect.left - viewportRect.left + mapped.x}px`,
@@ -524,11 +683,10 @@ function renderPositioningCardCrop(entry) {
      * with different transforms need different mappings, and the pairing has to be stated at the
      * call site or it drifts the moment one of them moves.
      */
-    const crop = transform.physicalRectToRasterRect(
-      { x, y, width: right - x, height: bottom - y },
-      area,
-      { width: image.naturalWidth, height: image.naturalHeight },
-    );
+    const crop = transform.physicalRectToRasterRect({ x, y, width: right - x, height: bottom - y }, area, {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    });
     const viewportWidth = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
     if (viewportWidth <= 0 || viewportHeight <= 0 || crop.width <= 0 || crop.height <= 0) return;
@@ -646,19 +804,34 @@ function renderPlacementPreview(entry, state) {
   if (entry.id !== renderedPlacementPreviewId) {
     renderedPlacementPreviewId = entry.id;
     els.placementPreview.removeAttribute("src");
-    window.scanner.getPlacementPreview(entry.id).then((result) => {
-      if (lastState?.placementPreview?.id !== entry.id || !result?.ok) return;
-      els.placementPreview.src = result.dataUrl;
-    }).catch(() => {});
+    window.scanner
+      .getPlacementPreview(entry.id)
+      .then((result) => {
+        if (lastState?.placementPreview?.id !== entry.id || !result?.ok) return;
+        els.placementPreview.src = result.dataUrl;
+      })
+      .catch(() => {});
   }
 }
 
 function renderPositioningPreview(entry, scannerHealth, activeCapture) {
-  const evidenceReviewActive = ["scanning", "retrying_scan", "processing_preview", "preview_ready", "preview_error", "upload"].includes(String(activeCapture?.stage || ""));
+  const evidenceReviewActive = [
+    "scanning",
+    "retrying_scan",
+    "processing_preview",
+    "preview_ready",
+    "preview_error",
+    "upload",
+  ].includes(String(activeCapture?.stage || ""));
   const status = String(entry?.status || "");
   const canStart = ["ready", "profile_unprovisioned"].includes(String(scannerHealth?.status || ""));
   const scanning = status === "scanning";
-  setActionButton(els.positioningPreviewBtn, scanning ? "PREVIEWING…" : "PREVIEW", true, actionInFlight || scanning || !canStart);
+  setActionButton(
+    els.positioningPreviewBtn,
+    scanning ? "PREVIEWING…" : "PREVIEW",
+    true,
+    actionInFlight || scanning || !canStart
+  );
 
   if (!entry || evidenceReviewActive) {
     els.positioningPanel.hidden = true;
@@ -669,7 +842,8 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
   if (scanning) {
     els.positioningPanel.hidden = true;
     els.fullPlatenDiagnostics.hidden = true;
-    els.positioningHint.textContent = "Scanning a local placement Preview. No certificate, TIFF, or upload is involved.";
+    els.positioningHint.textContent =
+      "Scanning a local placement Preview. No certificate, TIFF, or upload is involved.";
     return;
   }
 
@@ -680,17 +854,20 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
     renderedPositioningPreviewId = entry.id;
     els.positioningCardPreview.removeAttribute("src");
     els.positioningFullPreview.removeAttribute("src");
-    window.scanner.getPositioningPreview(entry.id).then((result) => {
-      if (lastState?.positioningPreview?.id !== entry.id || !result?.ok) return;
-      els.positioningFullPreview.onload = () => {
-        if (lastState?.positioningPreview?.id === entry.id) renderPositioningOverlays(lastState.positioningPreview);
-      };
-      els.positioningCardPreview.onload = () => {
-        if (lastState?.positioningPreview?.id === entry.id) renderPositioningCardCrop(lastState.positioningPreview);
-      };
-      els.positioningCardPreview.src = result.dataUrl;
-      els.positioningFullPreview.src = result.dataUrl;
-    }).catch(() => {});
+    window.scanner
+      .getPositioningPreview(entry.id)
+      .then((result) => {
+        if (lastState?.positioningPreview?.id !== entry.id || !result?.ok) return;
+        els.positioningFullPreview.onload = () => {
+          if (lastState?.positioningPreview?.id === entry.id) renderPositioningOverlays(lastState.positioningPreview);
+        };
+        els.positioningCardPreview.onload = () => {
+          if (lastState?.positioningPreview?.id === entry.id) renderPositioningCardCrop(lastState.positioningPreview);
+        };
+        els.positioningCardPreview.src = result.dataUrl;
+        els.positioningFullPreview.src = result.dataUrl;
+      })
+      .catch(() => {});
   }
 
   const candidate = entry.cardCandidate?.cardBoundsMm;
@@ -718,17 +895,20 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
   if (status === "detected") {
     els.positioningResult.textContent = "CARD DETECTED";
     els.positioningGeometry.textContent = `Card ${formatMm(candidate.x)}, ${formatMm(candidate.y)} · ${formatMm(candidate.width)} × ${formatMm(candidate.height)}. ${windowText}`;
-    els.positioningHint.textContent = "Full-platen diagnostic only. Whether a card may be scanned is decided by the per-side placement gate against the fixed capture area.";
+    els.positioningHint.textContent =
+      "Full-platen diagnostic only. Whether a card may be scanned is decided by the per-side placement gate against the fixed capture area.";
   } else if (status === "not_detected") {
     els.positioningResult.textContent = "CARD NOT DETECTED";
     els.positioningGeometry.textContent = area
       ? `Full platen preview ${formatMm(area.width)} × ${formatMm(area.height)} at ${formatMm(area.x)}, ${formatMm(area.y)}. ${windowText}`
       : "The scanner did not return usable positioning geometry.";
-    els.positioningHint.textContent = "No placement was saved and no evidence was created. This diagnostic never changes a card.";
+    els.positioningHint.textContent =
+      "No placement was saved and no evidence was created. This diagnostic never changes a card.";
   } else {
     els.positioningResult.textContent = "POSITIONING PREVIEW FAILED";
     els.positioningGeometry.textContent = entry.error || "No card position was saved.";
-    els.positioningHint.textContent = "No certificate or evidence was changed. Check scanner readiness and Preview again.";
+    els.positioningHint.textContent =
+      "No certificate or evidence was changed. Check scanner readiness and Preview again.";
   }
 }
 
@@ -737,20 +917,23 @@ function renderPreview(active) {
   if (!previewId || previewId === renderedPreviewId) return;
   renderedPreviewId = previewId;
   els.capturePreview.removeAttribute("src");
-  window.scanner.getCapturePreview(previewId).then((result) => {
-    if (lastState?.activeCapture?.previewId !== previewId) return;
-    if (!result?.ok) {
-      actionError = result?.error || "Preview is no longer available";
-      renderState(lastState);
-      return;
-    }
-    els.capturePreview.src = result.dataUrl;
-  }).catch(() => {
-    if (lastState?.activeCapture?.previewId === previewId) {
-      actionError = "Preview could not be loaded";
-      renderState(lastState);
-    }
-  });
+  window.scanner
+    .getCapturePreview(previewId)
+    .then((result) => {
+      if (lastState?.activeCapture?.previewId !== previewId) return;
+      if (!result?.ok) {
+        actionError = result?.error || "Preview is no longer available";
+        renderState(lastState);
+        return;
+      }
+      els.capturePreview.src = result.dataUrl;
+    })
+    .catch(() => {
+      if (lastState?.activeCapture?.previewId === previewId) {
+        actionError = "Preview could not be loaded";
+        renderState(lastState);
+      }
+    });
 }
 
 function renderCaptureActions(state) {
@@ -774,11 +957,11 @@ function renderCaptureActions(state) {
   const approval = state.placementApproval;
   const placementGreen = Boolean(
     approval &&
-      approval.state === "GREEN" &&
-      active &&
-      approval.sessionId === active.id &&
-      approval.side === active.side &&
-      approval.certId === active.certId
+    approval.state === "GREEN" &&
+    active &&
+    approval.sessionId === active.id &&
+    approval.side === active.side &&
+    approval.certId === active.certId
   );
   const scanEnabled = awaitingScan && placementGreen && state.scannerHealth?.status === "ready" && !actionInFlight;
   const cardRegistered = state.lastAcceptedCapture?.cardRegistered === true && !active;
@@ -818,7 +1001,10 @@ function renderCaptureActions(state) {
    * somehow escapes this cost nothing.
    */
   const openCard = state.openCardJob;
-  els.newCardBtn.disabled = Boolean(active) || Boolean(openCard) || actionInFlight || newCardInFlight;
+  const noAvailableCredits = billingLocked(state);
+  els.newCardBtn.disabled =
+    Boolean(active) || Boolean(openCard) || noAvailableCredits || actionInFlight || newCardInFlight;
+  els.creditEmptyPanel.hidden = !noAvailableCredits;
 
   /*
    * The blocking recovery panel. Shown ONLY when the card genuinely cannot proceed on its own — an
@@ -862,9 +1048,7 @@ function renderCaptureActions(state) {
     els.openCardTitle.textContent = openCard.mvNumber
       ? `${openCard.mvNumber} — SCANNER NOT ARMED`
       : "CARD STARTED — SCANNER NOT ARMED";
-    const cause = openCard.armError
-      ? `${openCard.armError} `
-      : "This card has no armed scanner target. ";
+    const cause = openCard.armError ? `${openCard.armError} ` : "This card has no armed scanner target. ";
     els.openCardDetail.textContent = `${cause}This card and its MV number are safe. Retry the scanner for this SAME card, or cancel it to return its Grading Credit.`;
     els.retryArmBtn.disabled = openCardActionInFlight || !openCard.cardJobId;
     els.cancelCardBtn.disabled = openCardActionInFlight || !openCard.cardJobId;
@@ -889,32 +1073,35 @@ function renderCaptureActions(state) {
   els.captureActionHint.textContent = !hasTarget
     ? "Open or arm a card in MintVault to enable final scanning."
     : awaitingScan && state.scannerHealth?.status !== "ready"
-    ? "Finish this station’s placement setup before final scanning is enabled."
-    : awaitingScan && !placementGreen
-    ? `Place the ${side.toLowerCase()} inside the box, then press Preview. Scan unlocks when the box turns green.`
-    : awaitingScan
-    ? `Placement is ready — press Scan. Do not move the card. No scan starts automatically.`
-    : scanning
-      ? "The locked 1200 DPI TIFF is being captured once; its derivative preview follows."
-      : previewReady
-        ? "Accept uploads this exact TIFF. Rescan archives it locally and keeps the same card-side target."
-        : previewError
-          ? "Safety check rejected this staged TIFF before upload. Review the preview, reposition the card, then Rescan; Accept is unavailable."
-          : active
-            ? "This target remains bound while the current operation finishes."
-            : "Final scanning remains disabled until this server-owned card side is ready.";
+      ? "Finish this station’s placement setup before final scanning is enabled."
+      : awaitingScan && !placementGreen
+        ? `Place the ${side.toLowerCase()} inside the box, then press Preview. Scan unlocks when the box turns green.`
+        : awaitingScan
+          ? `Placement is ready — press Scan. Do not move the card. No scan starts automatically.`
+          : scanning
+            ? "The locked 1200 DPI TIFF is being captured once; its derivative preview follows."
+            : previewReady
+              ? "Accept uploads this exact TIFF. Rescan archives it locally and keeps the same card-side target."
+              : previewError
+                ? "Safety check rejected this staged TIFF before upload. Review the preview, reposition the card, then Rescan; Accept is unavailable."
+                : active
+                  ? "This target remains bound while the current operation finishes."
+                  : "Final scanning remains disabled until this server-owned card side is ready.";
 }
 
 function explainFailure(message) {
   const detail = String(message || "");
   const lower = detail.toLowerCase();
   if (lower.includes("expired")) return "Capture expired — retry this side in MintVault";
-  if (lower.includes("disconnect") || lower.includes("not detected")) return "Scanner disconnected — check the USB connection";
+  if (lower.includes("disconnect") || lower.includes("not detected"))
+    return "Scanner disconnected — check the USB connection";
   if (lower.includes("busy")) return "Scanner busy — wait briefly, then retry this side";
   if (lower.includes("timeout")) return "Scan timed out — retry this side";
   if (lower.includes("keeping this accepted side")) return "Upload pending — reconnecting";
-  if (lower.includes("upload") || lower.includes("network") || lower.includes("http")) return "Upload interrupted — retrying may be required";
-  if (lower.includes("dpi") || lower.includes("dimension") || lower.includes("profile") || lower.includes("tiff")) return "Image rejected — invalid locked capture";
+  if (lower.includes("upload") || lower.includes("network") || lower.includes("http"))
+    return "Upload interrupted — retrying may be required";
+  if (lower.includes("dpi") || lower.includes("dimension") || lower.includes("profile") || lower.includes("tiff"))
+    return "Image rejected — invalid locked capture";
   return detail || "Scanner service needs attention — see service logs";
 }
 
@@ -958,15 +1145,18 @@ function renderState(state) {
   const activeState = String(lastState.state || "idle");
   els.dot.className = `dot ${activeState}`;
   els.statusText.textContent = STATE_LABELS[activeState] || toTitle(activeState);
-  els.statusSub.textContent = actionError || (activeState === "error"
-    ? explainFailure(lastState.lastError)
-    : activeState === "success"
-      ? "The original TIFF was accepted for the selected card side."
-      : lastState.activeCapture?.side
-        ? `${toTitle(lastState.activeCapture.side)} • ${lastState.activeCapture.certId || "server target"}`
-        : "");
+  els.statusSub.textContent =
+    actionError ||
+    (activeState === "error"
+      ? explainFailure(lastState.lastError)
+      : activeState === "success"
+        ? "The original TIFF was accepted for the selected card side."
+        : lastState.activeCapture?.side
+          ? `${toTitle(lastState.activeCapture.side)} • ${lastState.activeCapture.certId || "server target"}`
+          : "");
 
   renderCaptureActions(lastState);
+  renderBillingLock(lastState);
 
   renderRecent(lastState.recent);
 
@@ -1025,7 +1215,7 @@ function renderMissingImages(items) {
     info.className = "orphan-info";
     info.append(
       createText("orphan-id", `${item.mvNumber} — ${item.missingLabel}`),
-      createText("orphan-meta", item.cardName || "(unnamed card)"),
+      createText("orphan-meta", item.cardName || "(unnamed card)")
     );
     const actions = document.createElement("div");
     actions.className = "orphan-actions";
@@ -1065,16 +1255,20 @@ function renderMissingImages(items) {
      *
      * This is the list a mis-pressed NEW ends up in, so this is where it has to be closable.
      */
-    const cancellable = item.status === "NEEDS_SCAN" && Array.isArray(item.missingSides) && item.missingSides.length === 2;
+    const cancellable =
+      item.status === "NEEDS_SCAN" && Array.isArray(item.missingSides) && item.missingSides.length === 2;
     if (cancellable) {
       const cancelBtn = document.createElement("button");
       cancelBtn.className = "btn ghost";
       cancelBtn.textContent = "CANCEL CARD";
       cancelBtn.addEventListener("click", async () => {
-        if (!confirm(
-          `Cancel ${item.mvNumber}?\n\nIts Grading Credit is returned to the shop and the card is closed.\n` +
-          `${item.mvNumber} keeps its number for ever — it is never deleted and never reissued.\n\nThis cannot be undone.`
-        )) return;
+        if (
+          !confirm(
+            `Cancel ${item.mvNumber}?\n\nIts Grading Credit is returned to the shop and the card is closed.\n` +
+              `${item.mvNumber} keeps its number for ever — it is never deleted and never reissued.\n\nThis cannot be undone.`
+          )
+        )
+          return;
         cancelBtn.disabled = true;
         fixBtn.disabled = true;
         try {
@@ -1126,15 +1320,16 @@ function renderEnvironment(descriptor) {
   if (!descriptor) return;
   const label = descriptor.label || "UNCONFIGURED";
   els.environmentName.textContent = label;
-  els.environmentApi.textContent = descriptor.apiBase
-    ? String(descriptor.apiBase).replace(/^https?:\/\//, "")
-    : "—";
+  els.environmentApi.textContent = descriptor.apiBase ? String(descriptor.apiBase).replace(/^https?:\/\//, "") : "—";
 
   // The badge is loud for anything that is not production, and loudest when nothing is configured.
   const isProduction = descriptor.environment === "production";
   els.environmentBadge.hidden = isProduction && descriptor.ok;
   els.environmentBadge.textContent = label;
-  els.environmentBadge.setAttribute("data-environment", descriptor.ok ? descriptor.environment || "unknown" : "invalid");
+  els.environmentBadge.setAttribute(
+    "data-environment",
+    descriptor.ok ? descriptor.environment || "unknown" : "invalid"
+  );
 
   const showWarning = !descriptor.ok;
   els.environmentWarning.hidden = !showWarning;
@@ -1199,7 +1394,8 @@ els.stationRegisterBtn.addEventListener("click", () => {
 });
 
 els.signOutBtn.addEventListener("click", async () => {
-  if (!confirm("Sign out the current scanner user?\n\nThis Mac remains registered as the same MintVault station.")) return;
+  if (!confirm("Sign out the current scanner user?\n\nThis Mac remains registered as the same MintVault station."))
+    return;
   const result = await window.scanner.stationSignOut();
   if (!result?.ok) {
     alert(result?.error || "Unable to switch user safely");
@@ -1209,13 +1405,21 @@ els.signOutBtn.addEventListener("click", async () => {
 });
 
 if (els.appVersion) {
-  window.scanner.getVersion?.().then((result) => {
-    if (result?.ok) els.appVersion.textContent = `v${result.version}`;
-  }).catch(() => {});
+  window.scanner
+    .getVersion?.()
+    .then((result) => {
+      if (result?.ok) els.appVersion.textContent = `v${result.version}`;
+    })
+    .catch(() => {});
 }
 
 els.updateBtn.addEventListener("click", async () => {
-  if (!confirm("Scanner updates are installed only from an approved signed MintVault package. Open the release instructions?")) return;
+  if (
+    !confirm(
+      "Scanner updates are installed only from an approved signed MintVault package. Open the release instructions?"
+    )
+  )
+    return;
   const result = await window.scanner.updateApp();
   alert(result?.error || "Install the current signed MintVault Scanner package through the approved release channel.");
 });
@@ -1238,7 +1442,9 @@ els.diagnosticsRow.addEventListener("toggle", () => {
     requestAnimationFrame(() => renderPositioningOverlays(lastState.positioningPreview));
   }
 });
-els.autoOpenOnError.addEventListener("change", () => window.scanner.setSetting("autoOpenOnError", els.autoOpenOnError.checked));
+els.autoOpenOnError.addEventListener("change", () =>
+  window.scanner.setSetting("autoOpenOnError", els.autoOpenOnError.checked)
+);
 els.soundEnabled.addEventListener("change", () => window.scanner.setSetting("soundEnabled", els.soundEnabled.checked));
 els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.scanTarget()));
 /*
@@ -1341,7 +1547,11 @@ function drawCaptureWindow() {
   const end = (event) => {
     if (!dragging) return;
     dragging = null;
-    try { els.platenWindow.releasePointerCapture(event.pointerId); } catch { /* pointer already gone */ }
+    try {
+      els.platenWindow.releasePointerCapture(event.pointerId);
+    } catch {
+      /* pointer already gone */
+    }
   };
   els.platenWindow.addEventListener("pointerup", end);
   els.platenWindow.addEventListener("pointercancel", end);
@@ -1422,10 +1632,22 @@ els.positioningPreviewBtn.addEventListener("click", () => {
   }
   void runCaptureAction(() => window.scanner.runPositioningPreview());
 });
-els.acceptPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId)));
-els.rescanPreviewBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
-els.rescanErrorBtn.addEventListener("click", () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId)));
-els.nextCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.acknowledgeCardRegistered()));
+els.acceptPreviewBtn.addEventListener(
+  "click",
+  () => void runCaptureAction((previewId) => window.scanner.acceptCapturePreview(previewId))
+);
+els.rescanPreviewBtn.addEventListener(
+  "click",
+  () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId))
+);
+els.rescanErrorBtn.addEventListener(
+  "click",
+  () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId))
+);
+els.nextCardBtn.addEventListener(
+  "click",
+  () => void runCaptureAction(() => window.scanner.acknowledgeCardRegistered())
+);
 
 /**
  * P6 — NEW CARD.
@@ -1455,8 +1677,10 @@ async function startNewCard() {
   try {
     const result = await window.scanner.startNewCard({});
     if (!result?.ok) {
+      if (result?.code === "INSUFFICIENT_CREDITS") billingModalDismissedAtZero = false;
       els.newCardError.textContent = result?.error || "Could not start a new card";
       els.newCardError.hidden = false;
+      renderBillingLock(lastState);
       return;
     }
     els.cardCompletePanel.hidden = true;
@@ -1483,6 +1707,46 @@ async function startNewCard() {
 }
 
 els.newCardBtn.addEventListener("click", () => void startNewCard());
+els.topUpNowBtn.addEventListener("click", () => {
+  billingModalDismissedAtZero = false;
+  els.newCardError.hidden = true;
+  openModal(els.billingLockModal);
+  void ensureBillingPacks();
+});
+
+els.billingLockClose.addEventListener("click", () => {
+  billingModalDismissedAtZero = billingLocked(lastState);
+  closeModal(els.billingLockModal);
+});
+
+els.billingPackGrid.addEventListener("click", async (event) => {
+  const button = event.target?.closest?.("[data-credits]");
+  if (!button || button.disabled || billingCheckoutInFlight) return;
+  const packCode = button.dataset.packCode;
+  if (!packCode) {
+    setBillingError("TOP-UP PACKS NOT YET CONFIGURED");
+    return;
+  }
+  billingCheckoutInFlight = true;
+  setBillingError("");
+  els.billingLockStatus.textContent = "Starting Stripe Checkout…";
+  renderBillingPacks();
+  try {
+    const result = await window.scanner.creditCheckout({ packCode });
+    if (!result?.ok) {
+      setBillingError(result?.error || "Checkout could not start");
+      return;
+    }
+    els.billingLockStatus.textContent =
+      "Checkout opened. This station unlocks only after the verified Stripe webhook updates the wallet.";
+    startBillingPoll();
+  } catch (error) {
+    setBillingError(error?.message || "Checkout could not start");
+  } finally {
+    billingCheckoutInFlight = false;
+    renderBillingPacks();
+  }
+});
 
 /**
  * P6c — the two honest ways out of an unresolved card.
@@ -1518,19 +1782,26 @@ async function runOpenCardAction(action) {
   }
 }
 
-els.retryArmBtn.addEventListener("click", () =>
-  void runOpenCardAction((cardJobId) => window.scanner.armCapture({ cardJobId }))
+els.retryArmBtn.addEventListener(
+  "click",
+  () => void runOpenCardAction((cardJobId) => window.scanner.armCapture({ cardJobId }))
 );
 
 els.cancelCardBtn.addEventListener("click", () => {
   const open = lastState?.openCardJob;
   const label = open?.mvNumber || "this card";
-  if (!confirm(
-    `Cancel ${label}?\n\nIts Grading Credit is returned to the shop and the card is closed.\n` +
-    `${label} keeps its number for ever — it is never deleted and never reissued.\n\nThis cannot be undone.`
-  )) return;
+  if (
+    !confirm(
+      `Cancel ${label}?\n\nIts Grading Credit is returned to the shop and the card is closed.\n` +
+        `${label} keeps its number for ever — it is never deleted and never reissued.\n\nThis cannot be undone.`
+    )
+  )
+    return;
   void runOpenCardAction((cardJobId) =>
-    window.scanner.cancelCardJob({ cardJobId, reason: "Cancelled at the station: the card was started but never photographed." })
+    window.scanner.cancelCardJob({
+      cardJobId,
+      reason: "Cancelled at the station: the card was started but never photographed.",
+    })
   );
 });
 
@@ -1543,16 +1814,24 @@ els.completeNextCardBtn.addEventListener("click", async () => {
 });
 
 els.restartServiceBtn.addEventListener("click", async () => {
-  if (!confirm("Restart the scanner service?\n\nUse this only when the service is unresponsive. An active capture may be interrupted.")) return;
+  if (
+    !confirm(
+      "Restart the scanner service?\n\nUse this only when the service is unresponsive. An active capture may be interrupted."
+    )
+  )
+    return;
   const original = els.restartServiceBtn.textContent;
   els.restartServiceBtn.disabled = true;
   els.restartServiceBtn.textContent = "Restarting…";
   const result = await window.scanner.resetScanner();
   els.restartServiceBtn.textContent = result?.status || (result?.ok ? "Restarted" : "Manual fix needed");
-  setTimeout(() => {
-    els.restartServiceBtn.disabled = false;
-    els.restartServiceBtn.textContent = original;
-  }, result?.escalated ? 4_000 : 1_800);
+  setTimeout(
+    () => {
+      els.restartServiceBtn.disabled = false;
+      els.restartServiceBtn.textContent = original;
+    },
+    result?.escalated ? 4_000 : 1_800
+  );
 });
 
 window.scanner.onStateUpdate(renderState);
@@ -1566,6 +1845,11 @@ window.addEventListener("resize", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (els.billingLockModal.classList.contains("visible")) {
+    billingModalDismissedAtZero = billingLocked(lastState);
+    closeModal(els.billingLockModal);
+    return;
+  }
   for (const modal of [els.orphanModal]) {
     if (modal.classList.contains("visible")) {
       closeModal(modal);

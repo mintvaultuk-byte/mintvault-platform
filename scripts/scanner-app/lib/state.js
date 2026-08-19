@@ -109,6 +109,20 @@ const DEFAULT = Object.freeze({
    */
   availableCredits: null,
   /*
+   * Incremented only after the main process has asked MintVault for the wallet
+   * again. The renderer uses this to distinguish a freshly confirmed zero
+   * balance (including reconnect) from a temporarily dismissed billing prompt.
+   * It is display state, never an authority to spend or reserve a credit.
+   */
+  walletRefreshGeneration: 0,
+  /*
+   * The one idempotency key for a NEW CARD press. It is persisted before the
+   * request leaves the Mac and remains until MintVault returns a definitive
+   * success or refusal. A crash after a remote success can therefore replay
+   * the same operation rather than manufacture a second paid-card request.
+   */
+  pendingNewCardStart: null,
+  /*
    * THE UNRESOLVED CARD JOB — what makes NEW CARD safe to press exactly once.
    *
    * Set the moment the server confirms a NEW, and cleared only when that card is genuinely finished

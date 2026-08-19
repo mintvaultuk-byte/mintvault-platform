@@ -90,6 +90,9 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // The Grading Credit pack catalogue. Needed by any suite exercising a purchase, and harmless
   // elsewhere — it is global reference data with no tenant column.
   "0083_partner_credit_packs",
+  // Canonical currency accompanies the Stripe Price ID. A wallet grant now fails closed without
+  // both values, so every real-money harness must construct this additive pack shape too.
+  "0093_partner_credit_pack_currency",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -311,6 +314,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // RENUMBERED 0078 -> 0089: main landed a different 0078. Self-contained table, so the later
   // position changes nothing. PARTNER scope — touches no core table.
   "0089_partner_shared_rate_limit_buckets",
+  // PARTNER scope: additive canonical Stripe currency beside the existing global pack Price ID.
+  // It touches no core table and preserves every legacy row as NULL until owner configuration.
+  "0093_partner_credit_pack_currency",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

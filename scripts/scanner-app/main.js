@@ -16,9 +16,9 @@
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, powerMonitor } = require("electron");
 const { spawn } = require("node:child_process");
-const fs    = require("node:fs");
-const path  = require("node:path");
-const os    = require("node:os");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
 const { randomUUID } = require("node:crypto");
 
 /**
@@ -32,7 +32,7 @@ const { randomUUID } = require("node:crypto");
 let pendingNewCardOpId = null;
 
 const stateMod = require("./lib/state");
-const server   = require("./lib/server-client");
+const server = require("./lib/server-client");
 const { Watcher } = require("./lib/watcher");
 const stationClient = require("./lib/station-client");
 const stationIdentity = require("./lib/station-identity");
@@ -44,16 +44,18 @@ if (process.platform === "darwin" && app.dock) app.dock.hide();
 
 // Prevent multiple instances stacking up if launchd misbehaves.
 const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) { app.quit(); }
+if (!gotLock) {
+  app.quit();
+}
 
 // Force the GPU off in this process — tray-only Electron apps
 // occasionally hang on GPU init under launchd.
 app.disableHardwareAcceleration();
 
-let tray         = null;
-let popover      = null;
-let watcher      = null;
-let isQuitting   = false;
+let tray = null;
+let popover = null;
+let watcher = null;
+let isQuitting = false;
 
 const ASSETS = path.join(__dirname, "assets");
 
@@ -90,9 +92,15 @@ const RESET_HELPER = path.join(__dirname, "reset-agent.sh");
 // instance keeps its own log/marker in its isolated dir, not the live scanner's.
 // agent-plist is intentionally left alone — it drives the LIVE launchd agent's
 // plist (don't run "Reset scanner" on a test instance; it targets the prod agent).
-const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
-const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
-const APP_VERSION  = (() => { try { return require("./package.json").version; } catch { return "?"; } })();
+const SCANS_BASE = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
+const SCANNER_LOG = path.join(SCANS_BASE, "scanner-app.log");
+const APP_VERSION = (() => {
+  try {
+    return require("./package.json").version;
+  } catch {
+    return "?";
+  }
+})();
 
 function versionTuple(raw) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(String(raw || "").trim());
@@ -106,7 +114,7 @@ function versionSatisfies(installed, minimum) {
   if (!a || !b) return false;
   return a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2])));
 }
-const LAST_RESET   = path.join(SCANS_BASE, "last-reset.json");
+const LAST_RESET = path.join(SCANS_BASE, "last-reset.json");
 
 // Append a timestamped line to the operator log (tray "Show logs" target).
 function logToFile(msg) {
@@ -197,20 +205,20 @@ function trayImageForState(s) {
   // / M+exclamation). The scanner has one target-bound capture mode, so the
   // tray never presents a paused/manual/watch-folder state as normal work.
   const map = {
-    idle:            "tray-idle.png",
-    starting:        "tray-busy.png",
-    scanning_front:  "tray-busy.png",
-    scanning_back:   "tray-busy.png",
-    awaiting_scan:   "tray-idle.png",
-    preview_ready:   "tray-idle.png",
-    preview_error:   "tray-error.png",
-    expired:         "tray-error.png",
-    finalising:      "tray-busy.png",
-    uploading:       "tray-busy.png",
-    validating:      "tray-busy.png",
-    retrying:        "tray-busy.png",
-    success:         "tray-idle.png",
-    error:           "tray-error.png",
+    idle: "tray-idle.png",
+    starting: "tray-busy.png",
+    scanning_front: "tray-busy.png",
+    scanning_back: "tray-busy.png",
+    awaiting_scan: "tray-idle.png",
+    preview_ready: "tray-idle.png",
+    preview_error: "tray-error.png",
+    expired: "tray-error.png",
+    finalising: "tray-busy.png",
+    uploading: "tray-busy.png",
+    validating: "tray-busy.png",
+    retrying: "tray-busy.png",
+    success: "tray-idle.png",
+    error: "tray-error.png",
   };
   const file = map[s] || "tray-idle.png";
   const img = loadTrayPng(file);
@@ -220,20 +228,20 @@ function trayImageForState(s) {
 
 function trayTooltipForState(s) {
   const stateLabels = {
-    idle:           "Ready — waiting for a server-owned capture",
-    starting:       "Starting scanner…",
+    idle: "Ready — waiting for a server-owned capture",
+    starting: "Starting scanner…",
     scanning_front: "Scanning front…",
-    scanning_back:  "Scanning back…",
-    awaiting_scan:  "Target armed — waiting for operator Scan",
-    preview_ready:  "Preview ready — accept or rescan",
-    preview_error:  "Preview needs attention",
-    expired:        "Capture target expired",
-    finalising:     "Processing image…",
-    uploading:      "Uploading original TIFF…",
-    validating:     "Validating evidence…",
-    retrying:       "Retrying current side…",
-    success:        "Capture accepted",
-    error:          "Capture needs attention",
+    scanning_back: "Scanning back…",
+    awaiting_scan: "Target armed — waiting for operator Scan",
+    preview_ready: "Preview ready — accept or rescan",
+    preview_error: "Preview needs attention",
+    expired: "Capture target expired",
+    finalising: "Processing image…",
+    uploading: "Uploading original TIFF…",
+    validating: "Validating evidence…",
+    retrying: "Retrying current side…",
+    success: "Capture accepted",
+    error: "Capture needs attention",
   };
   const label = stateLabels[s.state] || s.state;
   return `MintVault Scanner — ${label}`;
@@ -268,7 +276,9 @@ function setupTray() {
   let img;
   try {
     img = trayImageForState(s.state);
-    console.log(`[tray] created with image (empty=${img.isEmpty()}, template=${img.isTemplateImage()}, size=${JSON.stringify(img.getSize())})`);
+    console.log(
+      `[tray] created with image (empty=${img.isEmpty()}, template=${img.isTemplateImage()}, size=${JSON.stringify(img.getSize())})`
+    );
   } catch (err) {
     console.error(`[tray] image load failed entirely: ${err.message} — using inline fallback`);
     img = getFallbackImage();
@@ -321,24 +331,26 @@ function createPopover() {
 function positionPopoverNearTray() {
   if (!tray || !popover) return;
   const trayBounds = tray.getBounds();
-  const winBounds  = popover.getBounds();
-  const display    = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
+  const winBounds = popover.getBounds();
+  const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
   // A menu-bar item can be at the top *or* bottom of a display. The previous
   // unconditional "under" placement put the Scanner window below a bottom
   // menu bar, making the app appear to have vanished just when the operator
   // needed to review a positioning scan.
-  const x = Math.round(Math.min(
-    Math.max(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2, display.workArea.x + 8),
-    display.workArea.x + display.workArea.width - winBounds.width - 8,
-  ));
+  const x = Math.round(
+    Math.min(
+      Math.max(trayBounds.x + trayBounds.width / 2 - winBounds.width / 2, display.workArea.x + 8),
+      display.workArea.x + display.workArea.width - winBounds.width - 8
+    )
+  );
   const trayAtTop = trayBounds.y <= display.workArea.y + 32;
-  const preferredY = trayAtTop
-    ? trayBounds.y + trayBounds.height + 4
-    : trayBounds.y - winBounds.height - 4;
-  const y = Math.round(Math.min(
-    Math.max(preferredY, display.workArea.y + 8),
-    display.workArea.y + display.workArea.height - winBounds.height - 8,
-  ));
+  const preferredY = trayAtTop ? trayBounds.y + trayBounds.height + 4 : trayBounds.y - winBounds.height - 4;
+  const y = Math.round(
+    Math.min(
+      Math.max(preferredY, display.workArea.y + 8),
+      display.workArea.y + display.workArea.height - winBounds.height - 8
+    )
+  );
   popover.setPosition(x, y, false);
 }
 
@@ -350,7 +362,10 @@ function showPopover() {
 }
 
 function togglePopover() {
-  if (!popover) { showPopover(); return; }
+  if (!popover) {
+    showPopover();
+    return;
+  }
   if (popover.isVisible()) popover.hide();
   else showPopover();
 }
@@ -430,7 +445,10 @@ async function availableCreditsOrNull() {
  */
 async function refreshAvailableCredits() {
   const available = await availableCreditsOrNull();
-  stateMod.set({ availableCredits: available });
+  stateMod.set({
+    availableCredits: available,
+    walletRefreshGeneration: Number(stateMod.get().walletRefreshGeneration || 0) + 1,
+  });
   pushStateToRenderer();
   return available;
 }
@@ -514,7 +532,11 @@ async function stationSetupState() {
   }
   if (!session.ok || !session.body?.mfaPassed) {
     if (session.status === 503) {
-      return { ok: true, stage: "station_unavailable", error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin." };
+      return {
+        ok: true,
+        stage: "station_unavailable",
+        error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin.",
+      };
     }
     return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
   }
@@ -529,18 +551,23 @@ async function stationSetupState() {
         ok: true,
         stage: "station_unavailable",
         summary,
-        error: locations.status === 503
-          ? "MintVault station enrolment is temporarily unavailable. Contact a MintVault Super Admin."
-          : "MintVault could not confirm this station’s authorised location.",
+        error:
+          locations.status === 503
+            ? "MintVault station enrolment is temporarily unavailable. Contact a MintVault Super Admin."
+            : "MintVault could not confirm this station’s authorised location.",
       };
     }
     return {
       ok: true,
       stage: "register",
       summary,
-      locations: locations.ok && Array.isArray(locations.body?.locations) ? locations.body.locations.map((location) => ({
-        id: String(location.id), name: String(location.name),
-      })) : [],
+      locations:
+        locations.ok && Array.isArray(locations.body?.locations)
+          ? locations.body.locations.map((location) => ({
+              id: String(location.id),
+              name: String(location.name),
+            }))
+          : [],
     };
   }
   const status = await stationClient.enrolmentStatus(code);
@@ -577,7 +604,9 @@ async function stationSetupState() {
       error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
     };
   }
-  try { stationIdentity.setStationStatus(station.status); } catch {}
+  try {
+    stationIdentity.setStationStatus(station.status);
+  } catch {}
   return {
     ok: true,
     stage: String(station.status || "PENDING").toLowerCase(),
@@ -699,7 +728,22 @@ function setupIpc() {
    */
   ipcMain.handle("start-new-card", async (_event, payload) => {
     const cardName = payload && typeof payload.cardName === "string" ? payload.cardName : "";
-    if (!pendingNewCardOpId) pendingNewCardOpId = `new-${randomUUID()}`;
+    const persistedStart = stateMod.get().pendingNewCardStart;
+    if (!pendingNewCardOpId && persistedStart?.clientOpId) pendingNewCardOpId = persistedStart.clientOpId;
+    if (!pendingNewCardOpId) {
+      pendingNewCardOpId = `new-${randomUUID()}`;
+      // Persist BEFORE the first network attempt. If the app dies after MintVault
+      // commits the Card Job but before this process receives the response, the
+      // next press repeats this exact operation and receives the same job.
+      stateMod.set({
+        pendingNewCardStart: {
+          clientOpId: pendingNewCardOpId,
+          cardName,
+          startedAt: new Date().toISOString(),
+        },
+      });
+      pushStateToRenderer();
+    }
     let result;
     try {
       result = await server.startNewCard(pendingNewCardOpId, cardName);
@@ -709,6 +753,7 @@ function setupIpc() {
     }
     if (result.ok) {
       pendingNewCardOpId = null;
+      stateMod.set({ pendingNewCardStart: null });
       const job = result.body && result.body.cardJob ? result.body.cardJob : {};
       /*
        * THE CARD IS RECORDED AS OPEN BEFORE ANYTHING ELSE CAN FAIL.
@@ -765,7 +810,9 @@ function setupIpc() {
        * rediscover it up to 35 seconds later.
        */
       if (capture && !captureError) {
-        const adopted = watcher ? await watcher.adoptArmedCapture(capture) : { ok: false, error: "Scanner service is starting" };
+        const adopted = watcher
+          ? await watcher.adoptArmedCapture(capture)
+          : { ok: false, error: "Scanner service is starting" };
         if (!adopted.ok) captureError = adopted.error;
       }
       if (captureError) {
@@ -782,11 +829,17 @@ function setupIpc() {
     // A refusal the operator can act on (no credits, suspended, station not approved) is final for
     // this press: the token is released so their NEXT press is a genuinely new request.
     pendingNewCardOpId = null;
+    stateMod.set({ pendingNewCardStart: null });
     const error = (result.body && result.body.error) || {};
     // A refusal is exactly when the true balance matters most — "no credits" must be shown with the
     // real figure beside it, not with whatever the wallet held at sign-in.
     await refreshAvailableCredits();
-    return { ok: false, retryable: false, code: error.code || "error", error: error.message || "Could not start a new card" };
+    return {
+      ok: false,
+      retryable: false,
+      code: error.code || "error",
+      error: error.message || "Could not start a new card",
+    };
   });
 
   /**
@@ -865,9 +918,10 @@ function setupIpc() {
   ipcMain.handle("cancel-card-job", async (_event, payload) => {
     const cardJobId = payload && typeof payload.cardJobId === "string" ? payload.cardJobId : "";
     if (!cardJobId) return { ok: false, error: "A card is required" };
-    const reason = payload && typeof payload.reason === "string" && payload.reason.trim()
-      ? payload.reason.trim()
-      : "Cancelled at the station before any image was captured.";
+    const reason =
+      payload && typeof payload.reason === "string" && payload.reason.trim()
+        ? payload.reason.trim()
+        : "Cancelled at the station before any image was captured.";
     let result;
     try {
       result = await server.cancelCardJob(cardJobId, reason);
@@ -906,6 +960,59 @@ function setupIpc() {
     const url = `${base}/admin?search=${encodeURIComponent(String(certId).toUpperCase())}`;
     shell.openExternal(url);
     return { ok: true, url };
+  });
+
+  /*
+   * TOP UP NOW opens the partner wallet page for this declared environment. That web page, not the
+   * scanner, reads `/api/partner/credits/packs` and starts `/api/partner/credits/checkout`, so the
+   * station never hard-codes pack prices and never grants credits from a redirect.
+   */
+  ipcMain.handle("open-partner-billing", () => {
+    const resolved = environment.resolveEnvironment();
+    if (!resolved.ok) return { ok: false, error: resolved.message };
+    const url = `${resolved.apiBase.replace(/\/$/, "")}/partner/billing`;
+    shell.openExternal(url);
+    return { ok: true, url };
+  });
+
+  ipcMain.handle("refresh-available-credits", async () => {
+    const available = await refreshAvailableCredits();
+    return { ok: true, availableCredits: available };
+  });
+
+  ipcMain.handle("credit-packs", async () => {
+    try {
+      const result = await stationClient.creditPacks();
+      if (!result.ok) {
+        const error = result.body?.error || {};
+        return {
+          ok: false,
+          status: result.status,
+          error: error.message || error || "Credit packs are unavailable",
+        };
+      }
+      return { ok: true, packs: Array.isArray(result.body?.packs) ? result.body.packs : [] };
+    } catch (error) {
+      return { ok: false, error: error?.message || "Credit packs are unavailable" };
+    }
+  });
+
+  ipcMain.handle("credit-checkout", async (_event, payload) => {
+    const packCode = typeof payload?.packCode === "string" ? payload.packCode : "";
+    if (!packCode) return { ok: false, error: "Select a credit pack" };
+    try {
+      const result = await stationClient.creditCheckout(packCode);
+      if (!result.ok) {
+        const error = result.body?.error || {};
+        return { ok: false, status: result.status, error: error.message || error || "Checkout could not start" };
+      }
+      const url = result.body?.url;
+      if (!url) return { ok: false, error: "Checkout did not return a Stripe URL" };
+      shell.openExternal(url);
+      return { ok: true, url, packCode: result.body?.packCode || packCode, credits: result.body?.credits ?? null };
+    } catch (error) {
+      return { ok: false, error: error?.message || "Checkout could not start" };
+    }
   });
 
   ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
@@ -975,7 +1082,9 @@ function setupIpc() {
     const recoveryCode = typeof payload?.recoveryCode === "string" ? payload.recoveryCode.trim() : "";
     if (!code && !recoveryCode) return { ok: false, error: "Authentication code or recovery code is required" };
     const result = await stationClient.completeMfa({ code, recoveryCode });
-    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error || "Authentication code was not accepted" };
+    return result.ok
+      ? stationSetupState()
+      : { ok: false, error: result.body?.error || "Authentication code was not accepted" };
   });
   ipcMain.handle("register-station", async (_event, payload) => {
     const locationId = typeof payload?.locationId === "string" && payload.locationId ? payload.locationId : undefined;
@@ -984,7 +1093,9 @@ function setupIpc() {
       if (!selected.ok) return { ok: false, error: selected.body?.error || "Selected location is not available" };
     }
     const result = await stationClient.registerThisMac({ locationId, appVersion: APP_VERSION });
-    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
+    return result.ok
+      ? stationSetupState()
+      : { ok: false, error: result.body?.error?.message || result.body?.error || "Station registration failed" };
   });
   ipcMain.handle("station-sign-out", async () => {
     // `openCardJob` is included deliberately: a started-but-unfinished card is exactly the state in
@@ -1095,7 +1206,8 @@ function setupIpc() {
     return {
       ok: false,
       code: "signed_release_required",
-      error: "Install the current signed MintVault Scanner package through the approved release channel. This station will not self-update from Git.",
+      error:
+        "Install the current signed MintVault Scanner package through the approved release channel. This station will not self-update from Git.",
     };
   });
 
@@ -1126,7 +1238,10 @@ function setupIpc() {
     return { ok: true, tier: "reload", status: "Reloading agent…", escalated: true };
   });
 
-  ipcMain.handle("hide-popover", () => { if (popover) popover.hide(); return { ok: true }; });
+  ipcMain.handle("hide-popover", () => {
+    if (popover) popover.hide();
+    return { ok: true };
+  });
 
   ipcMain.handle("open-logs", () => {
     shell.openPath(SCANNER_LOG);
@@ -1174,7 +1289,7 @@ app.whenReady().then(async () => {
   watcher.on("state-changed", () => {
     pushStateToRenderer();
     const s = stateMod.get();
-    const isError   = s.state === "error";
+    const isError = s.state === "error";
     const isSuccess = s.state === "success";
     // Auto-open popover on error transition (idle→error edge only).
     if (isError && !lastErrorState && s.autoOpenOnError && popover && !popover.isVisible()) {
@@ -1196,7 +1311,7 @@ app.whenReady().then(async () => {
     // is ~300ms, plenty of head-room before the next state-change tick.
     if (s.soundEnabled !== false) {
       if (isSuccess && !lastSuccessState) playSystemSound("Glass.aiff");
-      if (isError   && !lastErrorState)   playSystemSound("Sosumi.aiff");
+      if (isError && !lastErrorState) playSystemSound("Sosumi.aiff");
     }
 
     /*
@@ -1207,15 +1322,20 @@ app.whenReady().then(async () => {
      */
     const accepted = s.lastAcceptedCapture;
     if (
-      accepted && accepted.acceptedAt && accepted.acceptedAt !== lastArmedForAcceptance &&
-      !accepted.cardRegistered && !s.activeCapture && s.openCardJob && s.openCardJob.cardJobId
+      accepted &&
+      accepted.acceptedAt &&
+      accepted.acceptedAt !== lastArmedForAcceptance &&
+      !accepted.cardRegistered &&
+      !s.activeCapture &&
+      s.openCardJob &&
+      s.openCardJob.cardJobId
     ) {
       lastArmedForAcceptance = accepted.acceptedAt;
       void armNextOutstandingSide("accepted side");
     }
 
-    lastErrorState     = isError;
-    lastSuccessState   = isSuccess;
+    lastErrorState = isError;
+    lastSuccessState = isSuccess;
   });
 
   setupTray();
@@ -1285,8 +1405,11 @@ app.whenReady().then(async () => {
       if (!lide400._private.jigOrigin()) await stationSetupState();
       const result = await stationClient.heartbeat(heartbeatPayload());
       if (!result.ok) {
-        console.warn(`[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`);
-        if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked") await stationSetupState();
+        console.warn(
+          `[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`
+        );
+        if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked")
+          await stationSetupState();
       }
     } catch (error) {
       console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
@@ -1330,7 +1453,9 @@ app.whenReady().then(async () => {
         if (!fs.existsSync(dir)) return 0;
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
           const fp = path.join(dir, entry.name);
-          try { total += entry.isDirectory() ? duDir(fp) : fs.statSync(fp).size; } catch {}
+          try {
+            total += entry.isDirectory() ? duDir(fp) : fs.statSync(fp).size;
+          } catch {}
         }
         return total;
       };
@@ -1351,7 +1476,12 @@ app.whenReady().then(async () => {
   // long sleep — restart the folder watcher and immediately sweep the inbox.
   powerMonitor.on("resume", async () => {
     console.log("[maintenance] system resumed from sleep — restarting watcher + sweeping inbox");
-    try { await watcher.stop(); await watcher.start(); } catch (err) { console.error(`[maintenance] resume restart failed: ${err?.message}`); }
+    try {
+      await watcher.stop();
+      await watcher.start();
+    } catch (err) {
+      console.error(`[maintenance] resume restart failed: ${err?.message}`);
+    }
     watcher.drainInbox().catch(() => {});
   });
   // Belt-and-braces: sweep the inbox every 10 min for anything chokidar
@@ -1366,4 +1496,6 @@ app.on("window-all-closed", (e) => {
   e.preventDefault();
 });
 
-app.on("before-quit", () => { isQuitting = true; });
+app.on("before-quit", () => {
+  isQuitting = true;
+});

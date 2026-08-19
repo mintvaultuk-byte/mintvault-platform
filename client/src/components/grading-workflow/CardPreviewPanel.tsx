@@ -2,8 +2,9 @@
  * Read-only card viewer for the Card Details stage.
  *
  * A plain <img> fed by (a) the object URL of a just-uploaded file, or (b) the
- * existing signed display URLs from GET /api/admin/certificates/:id/images
- * (front_display / back_display). Front/Back tabs, button-only zoom (+/−/Fit),
+ * existing signed evidence URLs from GET /api/admin/certificates/:id/images
+ * (front_working / back_working, falling back to front_display / back_display).
+ * Front/Back tabs, button-only zoom (+/−/Fit),
  * click-and-drag panning while zoomed, and a full-screen modal. The mouse wheel
  * is NOT captured — it scrolls the page/panel normally. Deliberately NOT the
  * grading tool: no grading coordinates, no click-to-grade, no crop/centering
@@ -13,7 +14,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from "lucide-react";
-import { normaliseCardInspectionState, updateCardInspectionView, type CardInspectionState } from "./card-inspection-state";
+import {
+  normaliseCardInspectionState,
+  updateCardInspectionView,
+  type CardInspectionState,
+} from "./card-inspection-state";
 
 interface ImagesResponse {
   urls?: Record<string, string | null>;
@@ -85,8 +90,8 @@ export function CardPreviewPanel({
     [frontObjectUrl, backObjectUrl]
   );
 
-  const frontUrl = frontObjectUrl ?? data?.urls?.front_display ?? null;
-  const backUrl = backObjectUrl ?? data?.urls?.back_display ?? null;
+  const frontUrl = frontObjectUrl ?? data?.urls?.front_working ?? data?.urls?.front_display ?? null;
+  const backUrl = backObjectUrl ?? data?.urls?.back_working ?? data?.urls?.back_display ?? null;
   const url = side === "front" ? frontUrl : backUrl;
 
   // Reset only when an already-loaded image is actually replaced. Initial load,

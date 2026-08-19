@@ -33,13 +33,13 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-const VIEWER = fs.readFileSync(
-  path.resolve(process.cwd(), "client/src/components/grading/image-viewer.tsx"),
-  "utf8"
-);
+const VIEWER = fs.readFileSync(path.resolve(process.cwd(), "client/src/components/grading/image-viewer.tsx"), "utf8");
 
 /** The frame's inspection-mode style branch — where the fit is actually applied. */
-const FIT_BRANCH = VIEWER.slice(VIEWER.indexOf("const cardFrame = ("), VIEWER.indexOf("data-testid=\"grading-image-viewport\""));
+const FIT_BRANCH = VIEWER.slice(
+  VIEWER.indexOf("const cardFrame = ("),
+  VIEWER.indexOf('data-testid="grading-image-viewport"')
+);
 
 describe("the rail fits the WHOLE source scan, measured, with a safety margin", () => {
   it("keeps a bottom safety inset at or above the owner's 12px floor", () => {
@@ -136,6 +136,35 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     expect(VIEWER).toMatch(/const railFitEnabled = fillHost && !markMode;/);
   });
 
+  it("uses canonical full-resolution working evidence for FRONT and BACK pixel inspection", () => {
+    expect(VIEWER).toMatch(/function getPixelInspectionAsset/);
+    const inspectionHelper = VIEWER.slice(
+      VIEWER.indexOf("function getPixelInspectionAsset"),
+      VIEWER.indexOf("function hasAny")
+    );
+    // The production helper is dynamic. Expand that exact contract for Front and Back so the
+    // precedence proof cannot accidentally cover one side only.
+    for (const side of ["front", "back"]) {
+      const sideContract = inspectionHelper.replaceAll("${side}", side);
+      expect(sideContract.indexOf(`record[\`${side}_working\`]`)).toBeGreaterThan(-1);
+      expect(sideContract.indexOf(`record[\`${side}_original\`]`)).toBeGreaterThan(-1);
+      expect(sideContract.indexOf(`record[\`${side}_working\`]`)).toBeLessThan(
+        sideContract.indexOf(`record[\`${side}_original\`]`)
+      );
+    }
+    expect(VIEWER).toMatch(/const PIXEL_INSPECTION_MAX_ZOOM = 12/);
+    expect(VIEWER).toContain('"working-evidence"');
+    expect(VIEWER).toContain("data-inspection-source={");
+    expect(VIEWER).toContain(
+      'pixelInspection ? `${pixelInspectionAsset?.source ?? "unavailable"}-no-smoothing` : "display"'
+    );
+    expect(VIEWER).toMatch(/imageRendering: "pixelated"/);
+    expect(VIEWER).toMatch(/data-pixel-inspection=\{pixelInspection \? "no-smoothing" : undefined\}/);
+    expect(VIEWER).toMatch(/function pixelInspectionLabel/);
+    expect(VIEWER).toMatch(/Full-Resolution Working Evidence/);
+    expect(VIEWER).toMatch(/Legacy Original Inspection/);
+  });
+
   it("reports the clearances it computed, for runtime acceptance", () => {
     for (const edge of ["top", "bottom", "left", "right"]) {
       expect(VIEWER).toContain(`"data-card-clearance-${edge}"`);
@@ -156,7 +185,7 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
 
   it("does NOT render the zoom toolbar beside or beneath the card in the rail", () => {
     // Beside the card it took ~110px of rail width; beneath it, ~36px of height.
-    expect(VIEWER).toMatch(/railFitEnabled \? null : \(/);
+    expect(VIEWER).toMatch(/railFitEnabled \? null : <div className="mt-2 flex shrink-0 items-center justify-end">/);
     expect(VIEWER).toMatch(/<div className="flex min-h-0 flex-1 flex-col">\{renderImageArea\("100%"\)\}<\/div>/);
   });
 

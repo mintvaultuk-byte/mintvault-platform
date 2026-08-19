@@ -157,4 +157,37 @@ describe("mounted controlled card inspection", () => {
     expect(observed.views.front).toEqual({ zoom: 1.5, focusX: 0.25, focusY: 0.75 });
     expect(added.map((defect) => defect.image_side)).toEqual(["front", "back"]);
   });
+
+  it("shows the actual FRONT/BACK pixel-inspection source and never calls a legacy fallback full-resolution evidence", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: {
+            front_working: "https://evidence.test/front-working.jpg",
+            front_original: "https://legacy.test/front-original.jpg",
+            back_original: "https://legacy.test/back-original.jpg",
+          },
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    const buttonByText = (text) =>
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === text);
+    const viewport = host.querySelector('[data-testid="grading-image-viewport"]');
+
+    const frontEvidence = buttonByText("Full-Resolution Working Evidence");
+    expect(frontEvidence).toBeDefined();
+    await act(async () => frontEvidence.click());
+    expect(viewport.dataset.inspectionSource).toBe("working-evidence-no-smoothing");
+    expect(host.querySelector("img").getAttribute("src")).toBe("https://evidence.test/front-working.jpg");
+
+    await act(async () => buttonByText("back").click());
+    const backLegacy = buttonByText("Legacy Original Inspection");
+    expect(backLegacy).toBeDefined();
+    expect(viewport.dataset.inspectionSource).toBe("legacy-original-no-smoothing");
+    expect(host.querySelector("img").getAttribute("src")).toBe("https://legacy.test/back-original.jpg");
+    expect(host.textContent).not.toContain("Full-Resolution Evidence");
+  });
 });

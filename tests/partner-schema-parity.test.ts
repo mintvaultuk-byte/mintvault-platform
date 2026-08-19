@@ -269,6 +269,7 @@ describe("partner schema ↔ migration parity", () => {
       "0090_lineage_convergence_scanner.sql",
       "0091_capture_session_calibration_snapshot.sql",
       "0092_partner_station_calibrate_permission.sql",
+      "0093_partner_credit_pack_currency.sql",
     ]);
   });
 

@@ -34,6 +34,7 @@ const renderer = fs.readFileSync(path.join(APP, "renderer", "app.js"), "utf8");
 const html = fs.readFileSync(path.join(APP, "renderer", "index.html"), "utf8");
 const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
 const serverClient = fs.readFileSync(path.join(APP, "lib", "server-client.js"), "utf8");
+const stationClient = fs.readFileSync(path.join(APP, "lib", "station-client.js"), "utf8");
 
 /** A real Watcher over an isolated scans directory, so the durable queue is genuinely on disk. */
 function isolatedWatcher(t) {
@@ -65,7 +66,13 @@ function isolatedWatcher(t) {
   for (const dir of ["capture-staging", "processed", "failed", "discarded"]) {
     fs.mkdirSync(path.join(tempDir, dir), { recursive: true });
   }
-  state.set({ state: "idle", activeCapture: null, openCardJob: null, scannerHealth: { status: "ready" }, lastError: null });
+  state.set({
+    state: "idle",
+    activeCapture: null,
+    openCardJob: null,
+    scannerHealth: { status: "ready" },
+    lastError: null,
+  });
   t.after(() => {
     lide.deviceId = originalDeviceId;
     lide.stationId = originalStationId;
@@ -79,8 +86,20 @@ function isolatedWatcher(t) {
   const watcher = new Watcher();
   // Adoption asks the server to hand this station the target. Route the fixture's expectation
   // through the same call so every adoption in this file is a genuine claim.
-  const adopt = async (capture) => { nextClaim = capture; return watcher.adoptArmedCapture(capture); };
-  return { tempDir, watcher, state, server, adopt, setClaim: (c) => { nextClaim = c; } };
+  const adopt = async (capture) => {
+    nextClaim = capture;
+    return watcher.adoptArmedCapture(capture);
+  };
+  return {
+    tempDir,
+    watcher,
+    state,
+    server,
+    adopt,
+    setClaim: (c) => {
+      nextClaim = c;
+    },
+  };
 }
 
 function armedCapture(overrides = {}) {
@@ -93,6 +112,35 @@ function armedCapture(overrides = {}) {
     ...overrides,
   };
 }
+
+test("a pending NEW CARD operation survives state reload and keeps its original idempotency key", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-pending-new-card-"));
+  const priorScansDir = process.env.MINTVAULT_SCANS_DIR;
+  const statePath = require.resolve("../lib/state");
+  process.env.MINTVAULT_SCANS_DIR = tempDir;
+  delete require.cache[statePath];
+  const first = require("../lib/state");
+  first.load();
+  first.set({
+    pendingNewCardStart: {
+      clientOpId: "new-restart-safe-operation",
+      cardName: "",
+      startedAt: "2026-08-19T05:00:00.000Z",
+    },
+  });
+
+  delete require.cache[statePath];
+  const restarted = require("../lib/state");
+  restarted.load();
+  assert.equal(restarted.get().pendingNewCardStart?.clientOpId, "new-restart-safe-operation");
+
+  t.after(() => {
+    if (priorScansDir === undefined) delete process.env.MINTVAULT_SCANS_DIR;
+    else process.env.MINTVAULT_SCANS_DIR = priorScansDir;
+    delete require.cache[statePath];
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+});
 
 // ── FIX 1 — the armed capture reaches shared state immediately ────────────────────────────────
 
@@ -191,7 +239,10 @@ test("RETRY on a card this station already holds re-adopts it instead of failing
   const { watcher, state } = isolatedWatcher(t);
   const server = require("../lib/server-client");
   let claims = 0;
-  server.claimNextCapture = async () => { claims++; return { ok: true, status: 200, body: { capture: null } }; };
+  server.claimNextCapture = async () => {
+    claims++;
+    return { ok: true, status: 200, body: { capture: null } };
+  };
 
   const readopted = await watcher.adoptArmedCapture(
     armedCapture({ state: "claimed", workstationId: "mintvault-station-a" })
@@ -209,9 +260,7 @@ test("RETRY on a card this station already holds re-adopts it instead of failing
 test("a session claimed by ANOTHER station is never taken off that station's glass", async (t) => {
   const { watcher, state } = isolatedWatcher(t);
 
-  const refused = await watcher.adoptArmedCapture(
-    armedCapture({ state: "claimed", workstationId: "some-other-mac" })
-  );
+  const refused = await watcher.adoptArmedCapture(armedCapture({ state: "claimed", workstationId: "some-other-mac" }));
 
   assert.equal(refused.ok, false);
   assert.match(refused.error, /another station/i);
@@ -230,7 +279,10 @@ test("a live target suppresses a stale arm error — the red NOT ARMED panel can
   assert.match(renderer, /const awaitingNextSide =/);
   assert.match(renderer, /els\.openCardPanel\.hidden = !needsArming;/);
   // And main must not RECORD a blocking arm error while the station holds a target.
-  assert.match(main, /if \(open && !stateMod\.get\(\)\.activeCapture && \(!open\.cardJobId \|\| open\.cardJobId === cardJobId\)\)/);
+  assert.match(
+    main,
+    /if \(open && !stateMod\.get\(\)\.activeCapture && \(!open\.cardJobId \|\| open\.cardJobId === cardJobId\)\)/
+  );
 });
 
 test("a claim the server refuses leaves NOTHING adopted, so no scan can start against it", async (t) => {
@@ -267,7 +319,9 @@ test("an armed session that lapses before the claim is reported, not adopted", a
 test("a network failure during the claim is retryable and adopts nothing", async (t) => {
   const { watcher, state } = isolatedWatcher(t);
   const server = require("../lib/server-client");
-  server.claimNextCapture = async () => { throw new Error("fetch failed"); };
+  server.claimNextCapture = async () => {
+    throw new Error("fetch failed");
+  };
 
   const refused = await watcher.adoptArmedCapture(armedCapture());
 
@@ -350,7 +404,12 @@ test("a live target overrides persisted error text — session state beats remem
   state.set({
     state: "error",
     lastError: "LiDE 400 capture must decode as RGB colour evidence",
-    openCardJob: { cardJobId: "job-1", mvNumber: "MV272", certificateId: 469, armError: "Station request could not be completed" },
+    openCardJob: {
+      cardJobId: "job-1",
+      mvNumber: "MV272",
+      certificateId: 469,
+      armError: "Station request could not be completed",
+    },
   });
 
   watcher.setTargetState(watcher.targetEntryFromCapture(armedCapture()), "awaiting_scan", "awaiting_scan");
@@ -366,7 +425,12 @@ test("a successful RETRY clears the prior error state on the same card", async (
   state.set({
     state: "error",
     lastError: "Capture rejected — restart this side",
-    openCardJob: { cardJobId: "job-1", mvNumber: "MV272", certificateId: 469, armError: "Station request could not be completed" },
+    openCardJob: {
+      cardJobId: "job-1",
+      mvNumber: "MV272",
+      certificateId: 469,
+      armError: "Station request could not be completed",
+    },
   });
 
   const retried = await adopt(armedCapture());
@@ -389,11 +453,16 @@ test("a background placement re-analysis must not erase a real capture failure r
    * Re-measuring a placement photograph says nothing about whether a capture failure was resolved.
    */
   const { watcher, state } = isolatedWatcher(t);
-  const reason = "Detected card geometry is implausible for a complete standard card; rescan with all four edges visible";
+  const reason =
+    "Detected card geometry is implausible for a complete standard card; rescan with all four edges visible";
   state.set({
     state: "error",
     lastError: reason,
-    positioningPreview: { id: "prev-1", status: "detected", capture: { areaMm: { x: 0, y: 0, width: 216, height: 297 } } },
+    positioningPreview: {
+      id: "prev-1",
+      status: "detected",
+      capture: { areaMm: { x: 0, y: 0, width: 216, height: 297 } },
+    },
   });
   // Drive the real re-analysis, with only the image work stubbed — the state write is the subject.
   watcher.storedPositioningPreviewSource = () => "/dev/null";
@@ -493,7 +562,7 @@ test("cancelling a DIFFERENT card never clears the target on the glass", async (
 
 test("FIX 1: the NEW and ARM handlers commit the armed capture into shared state", () => {
   // Returning `capture` to the renderer is NOT enough — the window and the Scan gate read stateMod.
-  assert.match(main, /const adopted = watcher \? await watcher\.adoptArmedCapture\(capture\)/);
+  assert.match(main, /const adopted = watcher\s*\?\s*await watcher\.adoptArmedCapture\(capture\)/);
   assert.match(main, /const adopted = await watcher\.adoptArmedCapture\(capture\)/);
   assert.match(main, /pushStateToRenderer\(\);\n\s+await refreshAvailableCredits\(\);/);
 });
@@ -520,9 +589,10 @@ test("authorising a FIX also ARMS and commits it — the only recovery for a lap
 
 test("FIX 2: every reservation-affecting action re-asks the server for the balance", () => {
   assert.match(main, /async function refreshAvailableCredits\(\)/);
-  assert.match(main, /stateMod\.set\(\{ availableCredits: available \}\)/);
+  assert.match(main, /availableCredits: available,/);
+  assert.match(main, /walletRefreshGeneration: Number\(stateMod\.get\(\)\.walletRefreshGeneration \|\| 0\) \+ 1/);
   // Including a refusal: "no credits" must be shown beside the real figure.
-  assert.match(main, /await refreshAvailableCredits\(\);\n\s+return \{ ok: false, retryable: false/);
+  assert.match(main, /await refreshAvailableCredits\(\);\n\s+return \{\s+ok: false,\s+retryable: false/);
   // Cancellation returns a credit, so it must refresh too.
   assert.match(main, /await refreshAvailableCredits\(\);\n\s+return \{ ok: true, cancellation \}/);
   // The renderer prefers the live figure over the sign-in snapshot, and never renders 0 for unknown.
@@ -536,8 +606,18 @@ test("FIX 2: every reservation-affecting action re-asks the server for the balan
 test("FIX 4: NEW CARD is gated on the server-confirmed open card, not on activeCapture alone", () => {
   assert.match(
     renderer,
-    /els\.newCardBtn\.disabled = Boolean\(active\) \|\| Boolean\(openCard\) \|\| actionInFlight \|\| newCardInFlight/
+    /Boolean\(active\) \|\| Boolean\(openCard\) \|\| noAvailableCredits \|\| actionInFlight \|\| newCardInFlight/
   );
+  assert.match(renderer, /const noAvailableCredits = billingLocked\(state\);/);
+  assert.match(renderer, /els\.creditEmptyPanel\.hidden = !noAvailableCredits;/);
+  assert.match(html, /NO GRADING CREDITS AVAILABLE/);
+  assert.match(html, /TOP UP NOW/);
+  assert.match(html, /id="billingLockModal"/);
+  assert.match(renderer, /function shouldShowBillingLock\(state\)/);
+  assert.match(renderer, /billingLocked\(state\) && !stationHasReservedCardInProgress\(state\)/);
+  assert.match(renderer, /billingModalDismissedAtZero = billingLocked\(lastState\)/);
+  assert.match(renderer, /let renderedWalletRefreshGeneration = null/);
+  assert.match(renderer, /walletRefreshGeneration !== renderedWalletRefreshGeneration/);
   // The in-flight guard is a module flag checked before the first await — reading `disabled` alone
   // lost the race against the state-update that re-rendered the button mid-request.
   assert.match(renderer, /if \(newCardInFlight \|\| els\.newCardBtn\.disabled\) return;/);
@@ -548,6 +628,57 @@ test("FIX 4: NEW CARD is gated on the server-confirmed open card, not on activeC
   // The record is set BEFORE arming, so an arm failure leaves the button disabled.
   assert.match(main, /stateMod\.set\(\{\n\s+openCardJob: \{/);
   assert.match(main, /armError: captureError/);
+  assert.match(main, /const persistedStart = stateMod\.get\(\)\.pendingNewCardStart/);
+  assert.match(main, /if \(!pendingNewCardOpId && persistedStart\?\.clientOpId\) pendingNewCardOpId = persistedStart\.clientOpId/);
+  assert.match(main, /pendingNewCardStart: \{\s*clientOpId: pendingNewCardOpId,/);
+  assert.match(main, /stateMod\.set\(\{ pendingNewCardStart: null \}\)/);
+});
+
+test("ZERO-CREDIT billing lock opens automatically, survives manual close, and unlocks only from wallet refresh", () => {
+  /*
+   * Startup/restart/reconnect all feed either stationSetup.summary.availableCredits or
+   * state.availableCredits, and every render runs the billing lock decision. Closing the modal is
+   * only visual: `billingLocked` remains true and NEW CARD remains disabled until the server reports
+   * available credits greater than zero.
+   */
+  assert.match(renderer, /function availableCreditsFromState\(state\)/);
+  assert.match(
+    renderer,
+    /const credits = typeof live === "number" \? live : stationSetup\?\.summary\?\.availableCredits/
+  );
+  assert.match(renderer, /renderBillingLock\(lastState \|\| \{\}\)/);
+  assert.match(renderer, /renderBillingLock\(lastState\);/);
+  assert.match(renderer, /if \(!locked\) \{\s*billingModalDismissedAtZero = false;/);
+  assert.match(renderer, /walletRefreshGeneration !== renderedWalletRefreshGeneration/);
+  assert.match(renderer, /billingModalDismissedAtZero = false;/);
+  assert.match(renderer, /closeModal\(els\.billingLockModal\)/);
+  assert.match(renderer, /startBillingPoll\(\)/);
+  assert.match(renderer, /window\.scanner\.refreshAvailableCredits\(\)/);
+  assert.match(renderer, /if \(result\?\.code === "INSUFFICIENT_CREDITS"\) billingModalDismissedAtZero = false;/);
+});
+
+test("TOP-UP modal uses server packs and Stripe Checkout only; it never invents price or grants credits", () => {
+  for (const label of ["5 CREDITS", "10 CREDITS", "25 CREDITS", "50 CREDITS", "100 CREDITS"]) {
+    assert.match(html, new RegExp(label));
+  }
+  assert.match(renderer, /const REQUIRED_BILLING_PACK_CREDITS = \[5, 10, 25, 50, 100\]/);
+  assert.match(renderer, /window\.scanner\.creditPacks\(\)/);
+  assert.match(renderer, /packForCredits\(credits\)/);
+  assert.match(renderer, /button\.dataset\.packCode = pack\?\.code \|\| ""/);
+  assert.match(renderer, /window\.scanner\.creditCheckout\(\{ packCode \}\)/);
+  assert.match(renderer, /TOP-UP PACKS NOT YET CONFIGURED/);
+  assert.match(preload, /creditPacks: \(\) => ipcRenderer\.invoke\("credit-packs"\)/);
+  assert.match(preload, /creditCheckout: \(payload\) => ipcRenderer\.invoke\("credit-checkout", payload\)/);
+  assert.match(preload, /refreshAvailableCredits: \(\) => ipcRenderer\.invoke\("refresh-available-credits"\)/);
+  assert.match(main, /ipcMain\.handle\("credit-packs"/);
+  assert.match(main, /ipcMain\.handle\("credit-checkout"/);
+  assert.match(main, /shell\.openExternal\(url\)/);
+  assert.match(stationClient, /creditPacks\(\)/);
+  assert.match(stationClient, /operatorJson\("GET", "\/api\/partner\/credits\/packs"\)/);
+  assert.match(stationClient, /creditCheckout\(packCode\)/);
+  assert.match(stationClient, /operatorJson\("POST", "\/api\/partner\/credits\/checkout", \{ packCode \}\)/);
+  assert.doesNotMatch(renderer, /£|GBP|VAT|pricePence|stripePriceId/);
+  assert.doesNotMatch(renderer, /appendFoundationCredit|fulfilPartnerCreditPurchase|availableCredits\s*[-+]=/);
 });
 
 test("FIX 5: cancellation is a Card Job authority, never submission cancellation", () => {
@@ -556,7 +687,10 @@ test("FIX 5: cancellation is a Card Job authority, never submission cancellation
   assert.match(main, /ipcMain\.handle\("cancel-card-job"/);
   // A lost response must NOT clear the open-card record — the outcome is unknown, and the operation
   // is idempotent server-side, so the correct answer is "retry", not "assume it worked".
-  assert.match(main, /return \{ ok: false, retryable: true, error: err && err\.message \? err\.message : "Could not reach MintVault" \};/);
+  assert.match(
+    main,
+    /return \{ ok: false, retryable: true, error: err && err\.message \? err\.message : "Could not reach MintVault" \};/
+  );
   /*
    * The station cancels a CARD JOB and nothing else. Submission cancellation is the wrong authority
    * here — it releases the credit through the submission and leaves the Card Job stranded in
@@ -582,7 +716,10 @@ test("a placement saved to the station config is still provisioned after a resta
    */
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-station-config-"));
   const configPath = path.join(dir, "station.env");
-  fs.writeFileSync(configPath, "MINTVAULT_STATION_LABEL=staging\nMINTVAULT_LIDE_SCAN_X_MM=20\nMINTVAULT_LIDE_SCAN_Y_MM=20\n");
+  fs.writeFileSync(
+    configPath,
+    "MINTVAULT_STATION_LABEL=staging\nMINTVAULT_LIDE_SCAN_X_MM=20\nMINTVAULT_LIDE_SCAN_Y_MM=20\n"
+  );
   const priorConfig = process.env.MINTVAULT_STATION_CONFIG_PATH;
   const priorX = process.env.MINTVAULT_LIDE_SCAN_X_MM;
   const priorY = process.env.MINTVAULT_LIDE_SCAN_Y_MM;
@@ -653,7 +790,10 @@ test("a placement saved to the station config is still provisioned after a resta
   assert.equal(lide._private.jigOrigin(), null);
 
   // The file is operator-editable, so it must never be a channel for arbitrary process environment.
-  fs.writeFileSync(configPath, "MINTVAULT_API_BASE=https://evil.test\nMINTVAULT_LIDE_SCAN_X_MM=25\nMINTVAULT_LIDE_SCAN_Y_MM=25\n");
+  fs.writeFileSync(
+    configPath,
+    "MINTVAULT_API_BASE=https://evil.test\nMINTVAULT_LIDE_SCAN_X_MM=25\nMINTVAULT_LIDE_SCAN_Y_MM=25\n"
+  );
   assert.deepEqual(lide._private.jigOrigin(), { x: 25, y: 25 });
   assert.notEqual(process.env.MINTVAULT_API_BASE, "https://evil.test");
 });
@@ -695,7 +835,8 @@ test("it fires on the ACCEPT edge exactly once per accepted side", () => {
   assert.match(main, /accepted\.acceptedAt !== lastArmedForAcceptance/);
   assert.match(main, /lastArmedForAcceptance = accepted\.acceptedAt;/);
   // A finished card is never re-armed — the server's own card_registered is the completion signal.
-  assert.match(main, /!accepted\.cardRegistered && !s\.activeCapture/);
+  assert.match(main, /!accepted\.cardRegistered/);
+  assert.match(main, /!s\.activeCapture/);
   // And a single-flight guard stops the edge and the reconciler racing each other.
   assert.match(main, /if \(!cardJobId \|\| state\.activeCapture \|\| armNextInFlight\) return/);
 });
@@ -706,7 +847,10 @@ test("RESTART / RECONNECT resolves to the outstanding side, not to nothing", () 
    * accepted FRONT no back session exists to claim. The reconciler on the same loop is what makes a
    * restarted or reconnected station arrive at BACK rather than sitting at NOT ARMED for ever.
    */
-  assert.match(main, /if \(!stateMod\.get\(\)\.activeCapture && stateMod\.get\(\)\.openCardJob\) \{\s*\n\s*await armNextOutstandingSide\("poll reconcile"\);/);
+  assert.match(
+    main,
+    /if \(!stateMod\.get\(\)\.activeCapture && stateMod\.get\(\)\.openCardJob\) \{\s*\n\s*await armNextOutstandingSide\("poll reconcile"\);/
+  );
 });
 
 test("a finished card stops the reconciler instead of asking for ever", () => {
