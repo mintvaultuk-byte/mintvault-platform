@@ -131,7 +131,10 @@ function flagState(data: PartnerPilotFlagState | undefined, flag: PartnerPilotDi
 }
 
 export default function PartnerManagementPage() {
-  const [, navigate] = useLocation();
+  const [pathname, navigate] = useLocation();
+  // Fleet lifecycle controls stay on the retained legacy screen only. Canonical network-wide
+  // Stations is observation-only; its Partner-scoped successor owns these privileged controls.
+  const showLegacyFleetControls = pathname.startsWith("/admin/partner-network/partners");
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [filter, setFilter] = useState<Filter>({ page: 1 });
   const [searchInput, setSearchInput] = useState("");
@@ -246,7 +249,7 @@ export default function PartnerManagementPage() {
       if (fleetStatus !== "ALL") search.set("status", fleetStatus);
       return apiRequest("GET", `${FLEET_BASE}/stations?${search.toString()}`).then((r) => r.json());
     },
-    enabled: authed === true,
+    enabled: authed === true && showLegacyFleetControls,
   });
 
   const fleetMutation = useMutation({
@@ -600,7 +603,7 @@ export default function PartnerManagementPage() {
           </div>
         </Panel>
 
-        <Panel title="Station Fleet" sub="Super Admin approval, rejection and safety state" className="mb-4">
+        {showLegacyFleetControls && <Panel title="Station Fleet" sub="Super Admin approval, rejection and safety state" className="mb-4">
           <div data-testid="pm-station-fleet" style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(["PENDING", "ACTIVE", "SUSPENDED", "REVOKED", "ALL"] as const).map((status) => (
@@ -708,7 +711,7 @@ export default function PartnerManagementPage() {
               </table>
             )}
           </div>
-        </Panel>
+        </Panel>}
 
         <Panel
           title="Partners"
@@ -1028,7 +1031,7 @@ export default function PartnerManagementPage() {
             </div>
           </div>
         )}
-        {fleetAction && (
+        {showLegacyFleetControls && fleetAction && (
           <div
             role="dialog"
             aria-modal="true"

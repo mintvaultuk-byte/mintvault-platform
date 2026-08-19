@@ -267,7 +267,15 @@ function PartnerNetworkRoute({
 }
 
 function PartnerNetworkLegacyRoute({ canonical, children }: { canonical: string; children: React.ReactNode }) {
+  const [pathname] = useLocation();
   const suffix = `${window.location.search}${window.location.hash}`;
+  useEffect(() => {
+    if (PARTNER_NETWORK_CONSOLIDATION_ENABLED) {
+      // Route telemetry is an application log only. It is intentionally not an audit event:
+      // following an old bookmark does not mutate partner, wallet, station or grading data.
+      console.info("[partner-network] legacy route redirected", { from: pathname, to: canonical });
+    }
+  }, [canonical, pathname]);
   return PARTNER_NETWORK_CONSOLIDATION_ENABLED ? <Redirect to={`${canonical}${suffix}`} /> : <>{children}</>;
 }
 
@@ -470,6 +478,9 @@ function Router() {
             <PartnerNetworkRoute legacy="/admin/partner-network"><AdminPartnerNetworkPage /></PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/settings">
+            <PartnerNetworkRoute legacy="/admin/partner-network/partners"><AdminPartnerManagementPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/directory">
             <PartnerNetworkRoute legacy="/admin/partner-network/partners"><AdminPartnerManagementPage /></PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/dashboard"><PartnerNetworkLegacyRoute canonical="/admin/partners"><AdminPartnerDashboardPage /></PartnerNetworkLegacyRoute></Route>
