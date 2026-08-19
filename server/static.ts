@@ -54,6 +54,14 @@ export function renderPublicHtml(baseHtml: string, pathname: string): { status: 
   return { status: 404, html: injectMeta(baseHtml, notFound), noindex: true };
 }
 
+// Express removes the matched portion of a mounted wildcard route from
+// `req.path`. The original URL is the only stable pathname at this boundary.
+export function publicRequestPath(originalUrl: string): string {
+  return originalUrl || "/";
+}
+
+export const staticAssetOptions = { index: false };
+
 export function serveStatic(app: Express) {
   const distPath = path.resolve(__dirname, "public");
   if (!fs.existsSync(distPath)) {
@@ -62,7 +70,9 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  // HTML routes, including `/`, must fall through to the renderer so initial
+  // responses receive their route-specific canonical and robots policy.
+  app.use(express.static(distPath, staticAssetOptions));
 
   // Cache the base HTML at startup — it doesn't change between requests
   const indexPath = path.resolve(distPath, "index.html");
@@ -71,7 +81,7 @@ export function serveStatic(app: Express) {
   // Fall through only for recognised client routes. Unknown paths are a real
   // 404 with noindex rather than an indexable SPA soft-404.
   app.use("/{*path}", (req: Request, res: Response) => {
-    const rendered = renderPublicHtml(baseHtml, req.path);
+    const rendered = renderPublicHtml(baseHtml, publicRequestPath(req.originalUrl));
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     if (rendered.noindex) res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.status(rendered.status).send(rendered.html);
