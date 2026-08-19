@@ -750,7 +750,7 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
-        {workspaceTab === "overview" && !administrationTab && (
+        {((workspaceTab === "overview" && !administrationTab) || (isLegacyPath && tab === "overview")) && (
           <Panel title="Overview">
             <div data-testid="pm-overview">
               <div>Legal name: {org.legal_name}</div>
@@ -803,7 +803,7 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
-        {(workspaceTab === "onboarding" || workspaceTab === "staff") && (
+        {(workspaceTab === "onboarding" || workspaceTab === "staff" || (isLegacyPath && tab === "users")) && (
           <Panel
             title={workspaceTab === "onboarding" ? "Onboarding access" : "Staff"}
             sub={workspaceTab === "onboarding" ? "Owner invitation and login readiness." : "Partner membership and invitation management"}
@@ -878,7 +878,7 @@ export default function PartnerManagementDetailPage() {
           last-active-location guard and no partner_management_audit row — and a test asserts this
           file never names it.
         */}
-        {workspaceTab === "locations" && (
+        {(workspaceTab === "locations" || (isLegacyPath && tab === "locations")) && (
           <Panel
             title="Locations"
             sub="Shop floors belonging to this partner. A location id is never reissued — stations, Card Jobs, certificate origin snapshots and audit rows all point at it."
@@ -1114,7 +1114,7 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
-        {workspaceTab === "activity" && (
+        {(workspaceTab === "activity" || (isLegacyPath && tab === "activity")) && (
           <Panel title="Activity">
             <div data-testid="pm-activity">
               {(activity.data?.activity ?? []).length === 0 ? (
@@ -1167,7 +1167,7 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
-        {workspaceTab === "security" && (
+        {(workspaceTab === "security" || (isLegacyPath && tab === "audit")) && (
           <Panel title="Audit">
             <div data-testid="pm-audit">
               {(audit.data?.audit ?? []).length === 0 ? (

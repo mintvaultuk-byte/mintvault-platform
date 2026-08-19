@@ -44,4 +44,11 @@ describe("Partner Network P8 workspace contract", () => {
     expect(workspace).toContain('<PartnerDrilldown partnerId={partnerId} tab="submissions" />');
     expect(workspace).toContain('<PartnerDrilldown partnerId={partnerId} tab="wallet" />');
   });
+
+  it("keeps the retained flag-off detail tabs renderable for rollback", () => {
+    expect(workspace).toContain('isLegacyPath && tab === "users"');
+    expect(workspace).toContain('isLegacyPath && tab === "locations"');
+    expect(workspace).toContain('isLegacyPath && tab === "activity"');
+    expect(workspace).toContain('isLegacyPath && tab === "audit"');
+  });
 });
