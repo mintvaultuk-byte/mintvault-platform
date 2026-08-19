@@ -156,6 +156,16 @@ export type PartnerApplicationPersistence = {
 };
 
 /**
+ * Bind text[] values as ARRAY[$1, $2, …]::text[]. Interpolating a JavaScript
+ * array as one parameter makes the Neon driver serialize a single category as
+ * `Pokemon`, which PostgreSQL rejects as a malformed text-array literal.
+ */
+function textArray(values: string[]): SQL {
+  if (!values.length) return sql`ARRAY[]::text[]`;
+  return sql`ARRAY[${sql.join(values.map((value) => sql`${value}`), sql`, `)}]::text[]`;
+}
+
+/**
  * Performs only the durable, auditable lead write. Notification is deliberately
  * outside this transaction and handled afterward so a Resend failure cannot
  * lose an accepted application.
@@ -168,6 +178,7 @@ export async function persistPartnerApplication(
   const dedupeKey = partnerApplicationDedupeKey(application);
   return persistence.transaction(async (execute) => {
     const leadId = createPartnerApplicationId();
+    const categories = textArray(application.categories);
     const inserted = await execute(sql`
       INSERT INTO partner_applications (
         id, business_name, contact_name, email, city, postcode, business_type,
@@ -178,7 +189,7 @@ export async function persistPartnerApplication(
         ${leadId}, ${application.businessName}, ${application.contactName}, ${application.email},
         ${application.city}, ${application.postcode.toUpperCase().replace(/\s+/g, " ")}, ${application.businessType},
         ${application.webPresence}, ${application.interestReason}, ${application.phone || null},
-        ${application.physicalRetail ?? null}, ${application.categories}, ${application.demandBand ?? null},
+        ${application.physicalRetail ?? null}, ${categories}, ${application.demandBand ?? null},
         ${application.existingGradingSubmissions ?? null}, NOW(), ${PARTNER_APPLICATION_PRIVACY_NOTICE_VERSION},
         'partners_page', ${JSON.stringify(attribution)}::jsonb, 'NEW', ${dedupeKey}
       )

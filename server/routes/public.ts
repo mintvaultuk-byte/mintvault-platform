@@ -312,8 +312,10 @@ export function registerPublicRoutes(app: Express): void {
       // Keep the exact same public response for new and duplicate submissions:
       // otherwise a known business/email pair becomes an application oracle.
       return res.status(201).json({ ok: true, leadId: result.leadId });
-    } catch (err: any) {
-      console.error("[partner-application] route error:", err?.message || err);
+    } catch {
+      // Database-driver errors can include bound values. Do not emit applicant
+      // PII to logs while returning the same generic public failure.
+      console.error("[partner-application] route error");
       return res.status(500).json({ error: "We couldn't process your application. Please try again." });
     }
   });

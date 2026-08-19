@@ -152,6 +152,8 @@ describe("GB-03 public Partner acquisition contract", () => {
     expect(PUBLIC_ROUTES.indexOf("persistPartnerApplication")).toBeLessThan(PUBLIC_ROUTES.indexOf("sendPartnerApplicationNotification"));
     expect(PUBLIC_ROUTES).toContain("notification_error");
     expect(PUBLIC_ROUTES).not.toContain("notificationErr?.message");
+    expect(PUBLIC_ROUTES).not.toContain('console.error("[partner-application] route error:", err?.message || err)');
+    expect(PUBLIC_ROUTES).toContain('console.error("[partner-application] route error")');
     expect(EMAIL).toContain("subject: `MintVault Partner Application ${data.leadId}`");
     expect(EMAIL).toContain("escapeHtmlForEmail");
   });
