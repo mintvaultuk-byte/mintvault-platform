@@ -275,6 +275,9 @@ describe("partner schema ↔ migration parity", () => {
       // same station captures BACK for the same card. Index-only replacement; owner approval is
       // still required at apply time because the migration runner flags DROP INDEX.
       "0094_scanner_capture_physical_release.sql",
+      // 0096 widens partner_management_audit's action_type CHECK for the protected Card Job void
+      // wrapper. Raw-SQL migration-authoritative; no Drizzle model owns this CHECK.
+      "0096_partner_card_job_void_management_audit.sql",
     ]);
   });
 

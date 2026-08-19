@@ -26,12 +26,12 @@ const stationRoutes = read("server/partner/station-routes.ts");
  * indexOf() of the path string lands inside that comment and silently truncates every assertion
  * below — which is the exact class of false-green this file exists to prevent.
  */
-const ARM_ROUTE = '\n  r.post("/card-jobs/:cardJobId/capture-sessions"';
+const ARM_ROUTE = '\n  r.post(\n    "/card-jobs/:cardJobId/capture-sessions"';
 const armRouteSlice = (chars: number) =>
   stationRoutes.slice(stationRoutes.indexOf(ARM_ROUTE), stationRoutes.indexOf(ARM_ROUTE) + chars);
 const armRouteHandler = () => {
   const from = stationRoutes.slice(stationRoutes.indexOf(ARM_ROUTE));
-  return from.slice(0, from.indexOf("\n  });"));
+  return from.slice(0, from.indexOf("\n  );"));
 };
 const captureAuthority = read("server/partner/capture-authority.ts");
 const submissionService = read("server/partner/submission-service.ts");
@@ -91,9 +91,7 @@ describe("B1 — a station can arm its own capture session", () => {
   });
 
   it("only arms from states that are genuinely waiting for a photograph", () => {
-    expect(captureAuthority).toMatch(
-      /CAPTURABLE_STATUSES = new Set\(\["NEEDS_SCAN", "CAPTURING", "FIX_REQUIRED"\]\)/
-    );
+    expect(captureAuthority).toMatch(/CAPTURABLE_STATUSES = new Set\(\["NEEDS_SCAN", "CAPTURING", "FIX_REQUIRED"\]\)/);
     // READY_TO_GRADE and GRADING must NOT be armable: both sides are present, so arming there would
     // overwrite an accepted image without the invalidation that is supposed to precede it.
     const setLine = captureAuthority.slice(
@@ -211,7 +209,9 @@ describe("B3 — Scanner-origin cards are visible in the Partner certificate his
   });
 
   it("the detail query has BOTH lineage arms", () => {
-    const detail = certificateHistory.slice(certificateHistory.indexOf("export async function getPartnerCertificateDetail"));
+    const detail = certificateHistory.slice(
+      certificateHistory.indexOf("export async function getPartnerCertificateDetail")
+    );
     expect(detail).toContain("partner_connector_imports");
     expect(detail).toContain("FROM partner_card_jobs job");
     expect(detail).toContain("UNION ALL");

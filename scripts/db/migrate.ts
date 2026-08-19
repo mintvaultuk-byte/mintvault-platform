@@ -47,6 +47,14 @@ const FILE_RE = /^(\d{4,})_.+\.sql$/;
 // Fixed advisory-lock key for the migration runner (arbitrary constant, namespaced).
 const ADVISORY_LOCK_KEY = 4_150_205; // "P0.5" mnemonic; any stable int works.
 
+function approvedDestructiveSuffix(filename: string): string {
+  if (filename === "0094_scanner_capture_physical_release.sql") return " (approved protected index replacement)";
+  if (filename === "0096_partner_card_job_void_management_audit.sql") {
+    return " (approved protected constraint replacement)";
+  }
+  return " (approved protected migration replacement)";
+}
+
 /**
  * The migration runner MUST own a dedicated backend for the whole run.
  *
@@ -815,7 +823,7 @@ export async function applyScopedMigration(
     log(
       `${approved ? "✅" : f.severity === "block" ? "🚫" : "⚠️ "} ` +
         `${target.filename}:${f.line} [${f.kind}] ${f.match}` +
-        `${approved ? " (approved protected index replacement)" : ""}`
+        `${approved ? approvedDestructiveSuffix(target.filename) : ""}`
     );
   }
   if (!opts.allowDestructive && unapprovedBlockingFindings(target.filename, target.sql, findings).length > 0) {
@@ -1020,7 +1028,7 @@ async function main(): Promise<void> {
         const approved = isApprovedDestructiveFinding(d.filename, sql, fd);
         console.log(
           `${approved ? "✅" : fd.severity === "block" ? "🚫" : "⚠️ "} ${d.filename}:${fd.line} [${fd.kind}] ${fd.match}` +
-            `${approved ? " (approved protected index replacement)" : ""}`
+            `${approved ? approvedDestructiveSuffix(d.filename) : ""}`
         );
       }
     }

@@ -135,6 +135,8 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
 export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
   "0033_partner_audit_action_precision",
+  // 0096 widens the same management-audit CHECK for the protected Card Job void wrapper.
+  "0096_partner_card_job_void_management_audit",
 ] as const;
 
 /**
@@ -321,6 +323,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: additive canonical Stripe currency beside the existing global pack Price ID.
   // It touches no core table and preserves every legacy row as NULL until owner configuration.
   "0093_partner_credit_pack_currency",
+  // PARTNER scope: one-value CHECK widen on partner_management_audit for the protected Card Job
+  // void wrapper. No core table dependency.
+  "0096_partner_card_job_void_management_audit",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -442,6 +447,8 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0086_partner_session_step_up",
   // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
   "0087_partner_grading_edit_lease",
+  // PARTNER scope: one-value CHECK widen on partner_management_audit for Card Job voids.
+  "0096_partner_card_job_void_management_audit",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only

@@ -1,7 +1,8 @@
 /**
  * Canon CanoScan LiDE 400 controller for the existing scanner-app process.
- * It compiles/runs the small ImageCaptureCore adapter locally; no Canon GUI is
- * automated and the result still travels through the canonical server ingest.
+ * Development checkouts may build the small ImageCaptureCore adapter locally, but a packaged
+ * Partner station app must run the nested prebuilt adapter shipped inside the app bundle. No Canon
+ * GUI is automated and the result still travels through the canonical server ingest.
  */
 const fs = require("node:fs");
 const os = require("node:os");
@@ -19,6 +20,7 @@ const PROFILE_VERSION = "mintvault-canon-lide-400-v3";
 const MODEL = "CanoScan LiDE 400";
 const APP_DIR = path.resolve(__dirname, "..");
 const SOURCE = path.join(APP_DIR, "native", "mintvault-lide-bridge.m");
+const PACKAGED_BRIDGE = path.join(APP_DIR, "native", "mintvault-lide-bridge");
 const SUPPORT = process.env.MINTVAULT_SCANS_DIR
   ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
   : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
@@ -365,8 +367,37 @@ function runCommand(command, args, timeoutMs) {
   });
 }
 
+function isPackagedRuntime(env = process.env, appDir = APP_DIR, resourcesPath = process.resourcesPath) {
+  if (env.MINTVAULT_SCANNER_PACKAGED === "1") return true;
+  if (!resourcesPath) return false;
+  const resourcesRoot = path.resolve(String(resourcesPath));
+  const packagedAppRoot = path.join(resourcesRoot, "app");
+  const resolvedAppDir = path.resolve(String(appDir));
+  return resolvedAppDir === packagedAppRoot || resolvedAppDir.startsWith(`${packagedAppRoot}${path.sep}`);
+}
+
+function validatePackagedBridge(candidate = PACKAGED_BRIDGE) {
+  const resolved = path.resolve(candidate);
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    throw new Error("Packaged LiDE ImageCaptureCore bridge is missing; reinstall the current MintVault Scanner app");
+  }
+  if (!stat.isFile()) {
+    throw new Error("Packaged LiDE ImageCaptureCore bridge is not a file; reinstall the current MintVault Scanner app");
+  }
+  try {
+    fs.accessSync(resolved, fs.constants.X_OK);
+  } catch {
+    throw new Error("Packaged LiDE ImageCaptureCore bridge is not executable; reinstall the current MintVault Scanner app");
+  }
+  return resolved;
+}
+
 async function ensureBridge() {
   if (process.platform !== "darwin") throw new Error("Canon LiDE control requires macOS Image Capture");
+  if (isPackagedRuntime()) return validatePackagedBridge(PACKAGED_BRIDGE);
   // Rebuild after an app update as well as on the first launch.  Otherwise a
   // LaunchAgent can keep an older native adapter indefinitely even though its
   // JavaScript wrapper has been upgraded.
@@ -719,9 +750,12 @@ module.exports = {
     stationConfigValues,
     CANONICAL_STATION_CONFIG_PATH,
     LEGACY_STATION_CONFIG_PATH,
+    PACKAGED_BRIDGE,
     calibrationRegion,
     diagnosticExperimentRegion,
     ensureBridge,
+    isPackagedRuntime,
+    validatePackagedBridge,
     CALIBRATION_MIN_MM,
     PLATEN_MAX_MM,
     PROFILE_AREA_MM,

@@ -686,6 +686,11 @@ describe("audit-action contract (database CHECK constraint)", () => {
     expect(declared.filter((a) => !permitted.includes(a))).toEqual([]);
   });
 
+  it("the protected Card Job void management audit action is declared and permitted", () => {
+    expect(latestPermittedActions()).toContain("partner_card_job_voided");
+    expect(declaredActions()).toContain("partner_card_job_voided");
+  });
+
   it("the four owner-approved 0033 actions are BOTH declared in code and permitted by the migration", () => {
     const permitted = latestPermittedActions();
     const declared = declaredActions();

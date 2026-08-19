@@ -170,7 +170,37 @@ function normaliseMigrationFilename(filePath: string): string {
  * - canonical index name is restored by rename inside the same transactional file.
  */
 export function isApprovedDestructiveFinding(filePath: string, sql: string, finding: DestructiveFinding): boolean {
-  if (normaliseMigrationFilename(filePath) !== "0094_scanner_capture_physical_release.sql") return false;
+  const filename = normaliseMigrationFilename(filePath);
+  if (filename === "0096_partner_card_job_void_management_audit.sql") {
+    if (finding.severity !== "block" || finding.kind !== "drop_constraint") return false;
+    const cleaned = stripSqlNoise(sql);
+    const drop =
+      /\bALTER\s+TABLE\s+partner_management_audit\s+DROP\s+CONSTRAINT\s+IF\s+EXISTS\s+chk_partner_management_audit_action\s*;/i.exec(
+        cleaned
+      );
+    const add =
+      /\bALTER\s+TABLE\s+partner_management_audit\s+ADD\s+CONSTRAINT\s+chk_partner_management_audit_action\s+CHECK\s*\(\s*action_type\s+IN\s*\(/i.exec(
+        cleaned
+      );
+    if (!drop || !add || drop.index > add.index) return false;
+    const rawAdd =
+      /\bALTER\s+TABLE\s+partner_management_audit\s+ADD\s+CONSTRAINT\s+chk_partner_management_audit_action\s+CHECK\s*\(\s*action_type\s+IN\s*\(/i.exec(
+        sql
+      );
+    if (!rawAdd) return false;
+    const blockEnd = sql.indexOf("));", rawAdd.index);
+    if (blockEnd < 0) return false;
+    const block = sql.slice(rawAdd.index, blockEnd);
+    return [
+      "partner_card_job_voided",
+      "partner_location_created",
+      "partner_wallet_backfilled",
+      "partner_user_mfa_reset",
+      "partner_created",
+    ].every((action) => block.includes(`'${action}'`));
+  }
+
+  if (filename !== "0094_scanner_capture_physical_release.sql") return false;
   if (finding.severity !== "block" || finding.kind !== "drop_index") return false;
 
   const cleaned = stripSqlNoise(sql);
@@ -211,6 +241,15 @@ export function unapprovedBlockingFindings(
   );
 }
 
+function approvedDestructiveFindingSuffix(filePath: string): string {
+  const filename = normaliseMigrationFilename(filePath);
+  if (filename === "0094_scanner_capture_physical_release.sql") return " (approved protected index replacement)";
+  if (filename === "0096_partner_card_job_void_management_audit.sql") {
+    return " (approved protected constraint replacement)";
+  }
+  return " (approved protected migration replacement)";
+}
+
 function isMain(): boolean {
   return typeof process !== "undefined" && !!process.argv[1] && process.argv[1].endsWith("lint-destructive-sql.ts");
 }
@@ -232,7 +271,7 @@ if (isMain()) {
     for (const fd of findings) {
       const approved = isApprovedDestructiveFinding(f, sql, fd);
       const icon = approved ? "✅" : fd.severity === "block" ? "🚫" : "⚠️ ";
-      const suffix = approved ? " (approved protected 0094 index replacement)" : "";
+      const suffix = approved ? approvedDestructiveFindingSuffix(f) : "";
       console.log(`${icon} ${f}:${fd.line} [${fd.kind}] ${fd.match}${suffix}`);
     }
     if (unapprovedBlockingFindings(f, sql, findings).length > 0) blocking = true;

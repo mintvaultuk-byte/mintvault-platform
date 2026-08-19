@@ -7,6 +7,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
+    "package:mac": "node scripts/package-macos.js",
+    "verify:package": "node scripts/verify-package.js",
+    "simulate:control-plane": "node scripts/control-plane-load-sim.js",
     "test": "node --test test/*.test.js",
     "experiment:lide400-quality": "node experiment-lide400-quality.js"
   },
