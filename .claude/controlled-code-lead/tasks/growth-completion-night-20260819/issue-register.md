@@ -1,0 +1,18 @@
+# Issue Register — Growth Completion Night 2026-08-19
+
+| ID | Summary | Source | Severity | Reachability/reproduction | Impact | Class | Proof level | Repair/test | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| GROWTH-F1 | ONBOARDING handoff sends an unconsumed `growthLead` query | Growth/UI reviewer + Lead `rg` | HIGH | Every onboarding lead; destination never reads parameter | Active dead control and false handoff claim | B | Confirmed | Remove selected-context claim/control; UI contract test | IN_PROGRESS |
+| REVIEW-F1 | Manual delivery can be set before completed/shipped | Reviews reviewer + Lead source inspection | HIGH | Authenticated admin route updates any submission ID | False delivery and premature review eligibility | A | Confirmed | Atomic completed+shipped predicate; negative matrix/concurrency tests | IN_PROGRESS |
+| REVIEW-F2 | Lifecycle email logs contain raw recipient PII | Reviews reviewer + Lead `rg` | HIGH | Every relevant send/failure | Customer email leakage to logs | A | Confirmed | PII-free logs/provider-error sanitisation test | IN_PROGRESS |
+| REVIEW-F3 | No durable idempotent review lifecycle | Reviews reviewer + schema/job inspection | HIGH | Any send retry/provider failure | Duplicate/unauditable review solicitation risk | E | Confirmed missing feature | Additive outbox/attempt/suppression schema and worker tests | IN_PROGRESS |
+| REVIEW-F4 | No approved public review destination | Secret-name/repository inspection | HIGH | No server-owned destination exists | Review sending cannot activate | F | Confirmed external | Disabled-safe `NOT_CONFIGURED`; exact owner action | EXTERNAL_BLOCKER |
+| EXT-F1 | No dedicated external Growth transport/identity/provider authority | External reviewer + source/secrets | HIGH | No MCP route or relevant secrets | GB-04C/provider reads cannot activate | F | Confirmed | Bounded MCP; providers remain blocked | IN_PROGRESS |
+| EXT-F2 | No durable idempotent funnel-start events | External reviewer + checkout/schema inspection | HIGH | Retry/double-click cannot be counted truthfully | Funnel/drop-off unavailable | E | Confirmed | Additive privacy-minimised events; fail-open checkout hook | IN_PROGRESS |
+| EXT-F3 | JSON-LD is client-only | External reviewer + raw production HTML | HIGH | All schema-bearing public routes | Crawler-visible authority incomplete | B | Confirmed | Allowlisted initial-HTML JSON-LD and injection tests | IN_PROGRESS |
+| EXT-F4 | Population aggregates lack minimum-sample/cache/limit protection | External reviewer + public route/source | MEDIUM | Public endpoint on every request | Misleading small samples and avoidable load | B | Confirmed | Suppression, cache and limiter tests | IN_PROGRESS |
+| EXT-F5 | Exact-SHA product CI requires protected push/PR/main path | External reviewer + workflow/`gh` | HIGH | Any local-only candidate | Release cannot be proven remotely | G | Confirmed gate | Request authority only after local hostile-review green | OWNER_DECISION |
+| GROWTH-F2 | GB-04B handover names nonexistent `getCapacityStatus` | Growth/UI reviewer + Lead `rg` | MEDIUM | Any later contract consumer | Divergent capacity logic risk | H | Confirmed | Reconcile docs/export contract test | IN_PROGRESS |
+| GROWTH-F3 | No rendered desktop/mobile acceptance proof | Growth/UI reviewer + test inspection | MEDIUM | Source-string tests pass without rendering | UI release requirement unproven | C | Confirmed | Browser/render proof at 1440/390 | IN_PROGRESS |
+
+Allowed status: `OPEN`, `IN_PROGRESS`, `FIXED`, `PROVEN`, `FOLLOW_UP`, `OWNER_DECISION`, `EXTERNAL_BLOCKER`.
