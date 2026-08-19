@@ -357,7 +357,9 @@ export interface PartnerCreditPack {
   code: string;
   credits: number;
   stripePriceId: string | null;
+  stripeCurrency: string | null;
   purchasable: boolean;
+  unavailableReason: "pricing_not_configured" | "stripe_environment_undeclared" | "stripe_environment_mismatch" | null;
 }
 
 export const partnerCredits = {

@@ -26,6 +26,15 @@
 - `scripts/scanner-app/scripts/package-macos.js`
 - `scripts/scanner-app/scripts/verify-package.js`
 - `scripts/scanner-app/scripts/control-plane-load-sim.js`
+- `scripts/scanner-app/scripts/payment-credit-load-sim.js`
+- `scripts/payment-control-plane-load-sim.mjs`
+- `package.json`
+- `server/partner/credit-purchase-service.ts`
+- `server/partner/routes.ts`
+- `client/src/lib/partner-api.ts`
+- `client/src/pages/partner/billing.tsx`
+- `migrations/0097_partner_credit_checkout_sessions.sql`
+- `migrations/rollback-0097-partner-credit-checkout-sessions.sql`
 
 ## Included tests
 
@@ -43,6 +52,11 @@
 - `tests/partner-management-ux.test.ts`
 - `scripts/scanner-app/test/scanner-packaging.test.js`
 - `scripts/scanner-app/test/control-plane-load-sim.test.js`
+- `scripts/scanner-app/test/payment-credit-load-sim.test.js`
+- `tests/payment-control-plane-load-sim.test.ts`
+- `tests/partner-credit-purchase.test.ts`
+- `tests/partner-credit-presentation.test.ts`
+- `tests/partner-at21-grant-boundary.test.ts`
 - Fixture updates in partner Card Job/output/reconciliation/pilot helper tests for `physical_released`.
 
 ## Behavioural changes
@@ -65,6 +79,20 @@
 11. The owner-independent control-plane simulator covers 5k/10k workflow runs, 20k event bursts,
     reordered side finalisation, network retries, stale preview, cross-MV/cross-side/cross-tenant/
     cross-station attacks, zero-credit attempts, and independent upload progress samples.
+12. Partner credit Checkout now requires declared deployment Stripe mode before a Session can be
+    created; staging refuses LIVE mode and production refuses TEST mode.
+13. Checkout validates the configured Stripe Price ID, currency, active state and livemode before a
+    buyer can reach Stripe.
+14. The verified webhook must match a locally recorded server-created Checkout intent
+    (`0097_partner_credit_checkout_sessions.sql`) for the same tenant, pack, Price, currency and
+    Stripe mode before the append-only ledger can grant purchase credits.
+15. The purchase ledger append and Checkout-intent `created -> granted` transition share one
+    partner-admin transaction, so transaction failure remains safely retryable and same-session
+    distinct-event replay grants zero.
+16. The payment/top-up load simulators cover 5k/10k/20k workflows, 20k hostile/replay bursts,
+    zero-credit lock/unlock, browser redirect no-grant, wrong Price/currency/environment, incomplete
+    payment, unverified Checkout, missing intent, wrong tenant, duplicate event and retryable
+    transaction failure.
 
 ## Staging status
 
@@ -75,6 +103,10 @@
   reports `c3e1c295`; `/health` passed.
 - `0096_partner_card_job_void_management_audit.sql` has been applied to staging only through scoped
   migration mode; journal 84→85, checksum `c927209413365215222a7b1093d9a647fb3855fec0bfb416a3d80b861d7ccf46`.
+- `0097_partner_credit_checkout_sessions.sql` is the additive staging-only payment provenance
+  migration for this pass. It is ready for scoped staging apply with no production mutation.
+- Current staging payment config remains fail-closed: TEST-shaped Stripe keys are present, but
+  `STRIPE_ENV` is undeclared and the five credit packs have no canonical TEST Price IDs/currency.
 - Production was not targeted by this scanner pass. Read-only reconciliation observed a separate
   production release; production has no scanner `0094` or `0096` journal row and no
   `scanner_capture_sessions.physical_released` column.
@@ -84,6 +116,7 @@
 - No grading maths change.
 - No immutable TIFF master mutation.
 - No live Stripe payment.
+- No invented Stripe prices, VAT treatment, or manual wallet-balance edit.
 - No production mutation.
 - No physical Canon run.
 - No signed/notarised Scanner build. An unsigned local production-shaped `.app` exists and passed

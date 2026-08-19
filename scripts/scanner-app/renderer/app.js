@@ -207,9 +207,17 @@ function packForCredits(credits) {
   return Array.isArray(billingPacks) ? billingPacks.find((pack) => Number(pack.credits) === Number(credits)) : null;
 }
 
+function billingUnavailableMessage(reason) {
+  if (reason === "stripe_environment_undeclared") return "STRIPE TEST/LIVE MODE NOT CONFIGURED";
+  if (reason === "stripe_environment_mismatch") return "STRIPE MODE DOES NOT MATCH THIS SCANNER ENVIRONMENT";
+  return "TOP-UP PACKS NOT YET CONFIGURED";
+}
+
 function renderBillingPacks() {
   const buttons = Array.from(els.billingPackGrid.querySelectorAll("[data-credits]"));
   const anyPurchasable = buttons.some((button) => packForCredits(button.dataset.credits)?.purchasable === true);
+  const firstUnavailableReason =
+    Array.isArray(billingPacks) && billingPacks.length > 0 ? billingPacks[0]?.unavailableReason : null;
   for (const button of buttons) {
     const credits = Number(button.dataset.credits);
     const pack = packForCredits(credits);
@@ -221,8 +229,9 @@ function renderBillingPacks() {
     els.billingLockStatus.textContent = "Loading credit packs…";
     setBillingError("");
   } else if (billingPacks && !anyPurchasable) {
-    els.billingLockStatus.textContent = "TOP-UP PACKS NOT YET CONFIGURED";
-    setBillingError("TOP-UP PACKS NOT YET CONFIGURED");
+    const message = billingUnavailableMessage(firstUnavailableReason);
+    els.billingLockStatus.textContent = message;
+    setBillingError(message);
   } else {
     els.billingLockStatus.textContent =
       "Credits are added only after Stripe confirms payment through the verified webhook.";
@@ -364,7 +373,8 @@ function renderTarget(state) {
     els.targetCert.textContent = state.openCardJob.mvNumber || "Card started";
     const accepted = state.lastAcceptedCapture;
     const queued = state.lastQueuedCapture;
-    const nextSideComing = state.armingNextSide || (queued && !queued.cardRegistered) || (accepted && !accepted.cardRegistered);
+    const nextSideComing =
+      state.armingNextSide || (queued && !queued.cardRegistered) || (accepted && !accepted.cardRegistered);
     if (nextSideComing) {
       // A side can be locally captured/queued before it is server-saved. Name that state precisely:
       // queued means BACK may proceed, saved means MintVault has already accepted immutable evidence.
@@ -978,7 +988,9 @@ function uploadProgressText(progress) {
     Number.isFinite(total) && total > 0 && Number.isFinite(sent)
       ? ` (${Math.min(sent, total).toLocaleString()} / ${total.toLocaleString()} bytes)`
       : "";
-  const phase = String(progress.phase || "uploading").replace(/_/g, " ").toUpperCase();
+  const phase = String(progress.phase || "uploading")
+    .replace(/_/g, " ")
+    .toUpperCase();
   return `${phase}${percent ? ` ${percent}` : ""}${bytes}`;
 }
 
@@ -992,11 +1004,14 @@ function renderBackgroundUploads(state) {
       return false;
     }
     const label = side === "back" ? "BACK" : "FRONT";
-    const status = entry.status ? String(entry.status).replace(/_/g, " ").toUpperCase() : uploadProgressText(entry.uploadProgress);
+    const status = entry.status
+      ? String(entry.status).replace(/_/g, " ").toUpperCase()
+      : uploadProgressText(entry.uploadProgress);
     const retryAt = Number(entry.retryAfter);
-    const retry = Number.isFinite(retryAt) && retryAt > Date.now()
-      ? ` • retry in ${Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))}s`
-      : "";
+    const retry =
+      Number.isFinite(retryAt) && retryAt > Date.now()
+        ? ` • retry in ${Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))}s`
+        : "";
     const error = entry.error ? ` • ${entry.error}` : "";
     el.hidden = false;
     el.textContent = `${label} ${entry.certId || "MV—"} — ${status}${retry}${error}`;
@@ -1014,7 +1029,8 @@ function renderCaptureActions(state) {
   const scanning = ["scanning", "retrying_scan", "processing_preview"].includes(stage);
   const uploading = stage === "uploading" && Boolean(active?.previewId);
   const previewError = stage === "preview_error" && Boolean(active?.previewId);
-  const queuedPreview = !uploading && !previewError && state.lastQueuedCapture?.previewId ? state.lastQueuedCapture : null;
+  const queuedPreview =
+    !uploading && !previewError && state.lastQueuedCapture?.previewId ? state.lastQueuedCapture : null;
   const previewVisible = uploading || previewError || Boolean(queuedPreview);
   const awaitingScan = stage === "awaiting_scan";
   const hasTarget = Boolean(active?.certId && active?.side);

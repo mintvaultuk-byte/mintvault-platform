@@ -93,6 +93,9 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // Canonical currency accompanies the Stripe Price ID. A wallet grant now fails closed without
   // both values, so every real-money harness must construct this additive pack shape too.
   "0093_partner_credit_pack_currency",
+  // Local Checkout provenance: the verified webhook must match a server-created Stripe Session
+  // before it can grant wallet capacity.
+  "0097_partner_credit_checkout_sessions",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -326,6 +329,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: one-value CHECK widen on partner_management_audit for the protected Card Job
   // void wrapper. No core table dependency.
   "0096_partner_card_job_void_management_audit",
+  // PARTNER scope: tenant-owned payment provenance with RLS; depends only on partner organisations
+  // and the global credit-pack catalogue.
+  "0097_partner_credit_checkout_sessions",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

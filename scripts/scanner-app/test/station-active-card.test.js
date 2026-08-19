@@ -193,8 +193,13 @@ test("an ENOSPC capture-journal failure prevents ImageCaptureCore from starting 
   const originalScan = lide.scan;
   const originalWrite = watcher.writeTargetedQueue;
   let physicalScans = 0;
-  lide.scan = async () => { physicalScans++; throw new Error("must not run"); };
-  watcher.writeTargetedQueue = () => { throw new Error("ENOSPC: capture journal full"); };
+  lide.scan = async () => {
+    physicalScans++;
+    throw new Error("must not run");
+  };
+  watcher.writeTargetedQueue = () => {
+    throw new Error("ENOSPC: capture journal full");
+  };
   t.after(() => {
     lide.scan = originalScan;
     watcher.writeTargetedQueue = originalWrite;
@@ -682,7 +687,10 @@ test("FIX 4: NEW CARD is gated on the server-confirmed open card, not on activeC
   assert.match(main, /stateMod\.set\(\{\n\s+openCardJob: \{/);
   assert.match(main, /armError: captureError/);
   assert.match(main, /const persistedStart = stateMod\.get\(\)\.pendingNewCardStart/);
-  assert.match(main, /if \(!pendingNewCardOpId && persistedStart\?\.clientOpId\) pendingNewCardOpId = persistedStart\.clientOpId/);
+  assert.match(
+    main,
+    /if \(!pendingNewCardOpId && persistedStart\?\.clientOpId\) pendingNewCardOpId = persistedStart\.clientOpId/
+  );
   assert.match(main, /pendingNewCardStart: \{\s*clientOpId: pendingNewCardOpId,/);
   assert.match(main, /stateMod\.set\(\{ pendingNewCardStart: null \}\)/);
 });
@@ -720,6 +728,9 @@ test("TOP-UP modal uses server packs and Stripe Checkout only; it never invents 
   assert.match(renderer, /button\.dataset\.packCode = pack\?\.code \|\| ""/);
   assert.match(renderer, /window\.scanner\.creditCheckout\(\{ packCode \}\)/);
   assert.match(renderer, /TOP-UP PACKS NOT YET CONFIGURED/);
+  assert.match(renderer, /STRIPE TEST\/LIVE MODE NOT CONFIGURED/);
+  assert.match(renderer, /STRIPE MODE DOES NOT MATCH THIS SCANNER ENVIRONMENT/);
+  assert.match(renderer, /billingUnavailableMessage\(firstUnavailableReason\)/);
   assert.match(preload, /creditPacks: \(\) => ipcRenderer\.invoke\("credit-packs"\)/);
   assert.match(preload, /creditCheckout: \(payload\) => ipcRenderer\.invoke\("credit-checkout", payload\)/);
   assert.match(preload, /refreshAvailableCredits: \(\) => ipcRenderer\.invoke\("refresh-available-credits"\)/);

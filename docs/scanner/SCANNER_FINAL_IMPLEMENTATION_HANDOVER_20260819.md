@@ -442,3 +442,86 @@ again. It must be an acceptance session only, not an engineering/design session:
 10. Scanner restart during pending upload.
 11. Image-quality visual check.
 12. Measured scan timing/countdown accuracy.
+
+## Zero-credit top-up + Stripe TEST payment red-team pass — 2026-08-19
+
+This pass completed all owner-independent payment/top-up hardening without mutating production,
+without creating a live Stripe payment, and without inventing commercial pricing.
+
+### Current staging truth
+
+- Staging app: `mintvault-v2`, Fly version 509 at the start of the pass, healthy on both machines.
+- Staging `/api/version` before this pass: `c3e1c295`.
+- Staging Stripe key shape: TEST secret/publishable keys present; `STRIPE_ENV` is not declared.
+- Staging credit packs: `PACK_5`, `PACK_10`, `PACK_25`, `PACK_50`, `PACK_100` active, but all have
+  `stripe_price_id=NULL` and `stripe_currency=NULL`.
+- Result: the top-up catalogue is visible but intentionally not purchasable; Checkout and webhook
+  grants remain fail-closed until the owner supplies canonical TEST Price/currency/VAT decisions.
+- Production was read-only checked only; no production deploy, migration, Stripe config mutation,
+  payment, or wallet edit was performed.
+
+### Implementation completed
+
+- Checkout now refuses to create a Stripe Session unless the deployment explicitly declares Stripe
+  mode and that mode matches the deployment: staging must be TEST; production must be LIVE.
+- Checkout retrieves the configured Stripe Price before returning a URL and rejects inactive Price,
+  wrong Price ID, wrong currency, or wrong Stripe environment before any buyer can pay.
+- Migration `0097_partner_credit_checkout_sessions.sql` adds an append-only Checkout provenance
+  table for Partner credit purchases. The verified webhook must match a server-created Checkout
+  intent for the same tenant, pack, Price, currency and Stripe mode before reaching the ledger.
+- Webhook fulfilment now locks the Checkout-intent row and appends the Stripe purchase ledger row in
+  the same partner-admin transaction. Same-event replay remains idempotent through the ledger key;
+  same-session/different-event replay is blocked by the intent status moving from `created` to
+  `granted`.
+- Scanner and Partner billing UI now report why packs are unavailable: pricing missing, Stripe mode
+  undeclared, or Stripe mode mismatched. The scanner still opens only server-returned Checkout URLs
+  and unlocks only from authoritative wallet refresh.
+- A new scanner-app payment load simulator covers zero-credit lock, top-up unlock, local Checkout
+  intent, browser redirect no-grant, verified paid webhook, wrong Price/currency/environment,
+  incomplete/unverified/missing-intent/wrong-tenant hostile deliveries, duplicate/replayed events,
+  and retryable transaction failure.
+
+### Local proof
+
+- `npm run check` — PASS.
+- `npx vitest run tests/partner-credit-purchase.test.ts tests/partner-credit-presentation.test.ts
+tests/partner-portal-credit-ui.test.ts tests/partner-step-up-ui.test.ts
+tests/partner-schema-parity.test.ts` — **74 passed**.
+- `npx vitest run tests/stripe-environment-isolation.test.ts tests/partner-wallet-service.test.ts
+tests/partner-credit-reservation-service.test.ts tests/partner-station-new-card.test.ts
+tests/partner-at21-grant-boundary.test.ts tests/partner-card-job-authority.test.ts` —
+  **90 passed**.
+- `npx vitest run tests/db-migration-safety.test.ts tests/migration-scope-contract.test.ts
+tests/stripe-environment-isolation.test.ts` — **85 passed**.
+- `npm test` in `scripts/scanner-app` — **177 passed**.
+- `npm run simulate:payment-control-plane -- --workflows=5000 --burst=20000 --seed=190826` —
+  PASS; 5,000 grants, 5,000 zero-credit rejections, 20,000 burst events.
+- `npm run simulate:payment-control-plane -- --workflows=10000 --burst=20000 --seed=190827` —
+  PASS; 10,000 grants, 10,000 zero-credit rejections, 20,000 burst events.
+- `npm run simulate:payment-control-plane -- --workflows=20000 --burst=20000 --seed=190828` —
+  PASS; 20,000 grants, 20,000 zero-credit rejections, 20,000 burst events.
+- `npm run simulate:payments -- --workflows=5000 --burst=20000 --zero-credit-attempts=1000
+--seed=501` — PASS; 5,000/5,000 workflows, 20,000/20,000 burst events.
+- `npm run simulate:payments -- --workflows=10000 --burst=20000 --zero-credit-attempts=1000
+--seed=1001` — PASS; 10,000/10,000 workflows, 20,000/20,000 burst events.
+- `npm run simulate:payments -- --workflows=20000 --burst=20000 --zero-credit-attempts=1000
+--seed=2001` — PASS; 20,000/20,000 workflows, 20,000/20,000 burst events.
+- `npm run simulate:control-plane` at 5,000 and 10,000 scanner workflows with 20,000 burst events
+  — PASS.
+- `npm run build` — PASS with the existing PostCSS `from` warning.
+- Touched-file ESLint — PASS.
+- `git diff --check` — PASS.
+- Forward migration SQL lint for `0097_partner_credit_checkout_sessions.sql` — PASS. The guarded
+  rollback is deliberately flagged by the destructive SQL heuristic because it contains `DROP TABLE`;
+  it refuses to run once any payment provenance row exists.
+
+### Exact owner action still required
+
+Owner must provide/approve the staging commercial Stripe TEST configuration:
+
+1. declare staging Stripe mode as `STRIPE_ENV=test`;
+2. provide the five TEST Stripe Price IDs for `PACK_5`, `PACK_10`, `PACK_25`, `PACK_50`, `PACK_100`;
+3. confirm `stripe_currency='gbp'` and VAT treatment/prices;
+4. complete one human Stripe TEST Checkout on staging.
+
+Until that happens, the correct state is **no purchasable packs and no purchase credit grants**.

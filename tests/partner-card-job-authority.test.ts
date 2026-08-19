@@ -329,6 +329,66 @@ describe("P4 Grading Credit authority (real PostgreSQL)", () => {
     expect(await availableFor(f.tenantId)).toBe(0); // never negative
   });
 
+  it("ZERO credits rejects a 20-click NEW spray with no Card Jobs, reservations or MV identities", async () => {
+    const f = await makeTenant("zero-spray");
+    await addCredits(f.tenantId, 0, "zero-spray-seed"); // wallet exists, no credits
+    await admin.query(`UPDATE partner_submission_cards SET quantity=20 WHERE id=$1`, [f.cardId]);
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        settle(start(f, { clientOpId: `op-zero-spray-${String(i).padStart(3, "0")}`, ordinal: i + 1 }))
+      )
+    );
+
+    expect(results.every((r) => !r.ok && r.code === "INSUFFICIENT_CREDITS")).toBe(true);
+    expect(await availableFor(f.tenantId)).toBe(0);
+    const counts = await admin.query<{
+      jobs: string;
+      reservations: string;
+      ops: string;
+      mv_numbers: string;
+    }>(
+      `SELECT (SELECT count(*) FROM partner_card_jobs WHERE tenant_id=$1)::text AS jobs,
+              (SELECT count(*) FROM partner_credit_reservations WHERE tenant_id=$1)::text AS reservations,
+              (SELECT count(*) FROM partner_card_job_op_keys WHERE tenant_id=$1)::text AS ops,
+              (SELECT count(*) FROM partner_card_jobs WHERE tenant_id=$1 AND mv_number IS NOT NULL)::text AS mv_numbers`,
+      [f.tenantId]
+    );
+    expect(counts.rows[0]).toEqual({ jobs: "0", reservations: "0", ops: "0", mv_numbers: "0" });
+  });
+
+  it("ONE credit under a 100-way NEW race yields exactly one authorised Card Job", async () => {
+    const f = await makeTenant("hundred-way");
+    await addCredits(f.tenantId, 1, "hundred-way-seed");
+    await admin.query(`UPDATE partner_submission_cards SET quantity=100 WHERE id=$1`, [f.cardId]);
+
+    const results = await Promise.all(
+      Array.from({ length: 100 }, (_, i) =>
+        settle(start(f, { clientOpId: `op-hundred-way-${String(i).padStart(3, "0")}`, ordinal: i + 1 }))
+      )
+    );
+
+    const winners = results.filter((r) => r.ok);
+    const losers = results.filter((r) => !r.ok) as Array<{ ok: false; code: string }>;
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(99);
+    expect(losers.every((r) => r.code === "INSUFFICIENT_CREDITS")).toBe(true);
+    expect(await availableFor(f.tenantId)).toBe(0);
+    const counts = await admin.query<{
+      jobs: string;
+      reservations: string;
+      active: string;
+      mv_numbers: string;
+    }>(
+      `SELECT (SELECT count(*) FROM partner_card_jobs WHERE tenant_id=$1)::text AS jobs,
+              (SELECT count(*) FROM partner_credit_reservations WHERE tenant_id=$1)::text AS reservations,
+              (SELECT count(*) FROM partner_credit_reservations WHERE tenant_id=$1 AND status='active')::text AS active,
+              (SELECT count(*) FROM partner_card_jobs WHERE tenant_id=$1 AND mv_number IS NOT NULL)::text AS mv_numbers`,
+      [f.tenantId]
+    );
+    expect(counts.rows[0]).toEqual({ jobs: "1", reservations: "1", active: "1", mv_numbers: "0" });
+  });
+
   it("SUSPENSION overrides remaining credits", async () => {
     const f = await makeTenant("susp");
     await addCredits(f.tenantId, 10, "susp-seed"); // plenty of credits

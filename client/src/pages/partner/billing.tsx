@@ -17,6 +17,12 @@ function entryLabel(entry: PartnerCreditLedgerEntry) {
   return entry.type.replaceAll("_", " ").replace(/^./, (value) => value.toUpperCase());
 }
 
+function unavailablePackLabel(reason: string | null | undefined) {
+  if (reason === "stripe_environment_undeclared") return "Stripe TEST/LIVE mode not configured";
+  if (reason === "stripe_environment_mismatch") return "Stripe mode does not match this environment";
+  return "Pricing not yet configured";
+}
+
 export default function PartnerBillingPage() {
   const { hasPermission } = usePartnerSession();
   const canPurchase = hasPermission("partner.credits.purchase");
@@ -208,7 +214,7 @@ export default function PartnerBillingPage() {
                           className="text-xs text-muted-foreground"
                           data-testid={`billing-pack-unavailable-${pack.code}`}
                         >
-                          Pricing not yet configured
+                          {unavailablePackLabel(pack.unavailableReason)}
                         </p>
                       )}
                     </CardContent>

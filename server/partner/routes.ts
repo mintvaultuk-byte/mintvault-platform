@@ -58,7 +58,13 @@ import {
   verifyStepUp,
 } from "./mfa-service";
 import { recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
-import { canPurchaseCredits, listCreditPacks, resolvePackForCheckout } from "./credit-purchase-service";
+import {
+  canPurchaseCredits,
+  listCreditPacks,
+  recordPartnerCreditCheckoutIntent,
+  resolvePackForCheckout,
+  validateStripePriceForCheckout,
+} from "./credit-purchase-service";
 import { getPartnerOperations } from "./dashboard-operations-service";
 import {
   getPartnerCreditView,
@@ -428,6 +434,19 @@ export function partnerApiRouter(): Router {
 
         const { getUncachableStripeClient } = await import("../stripeClient");
         const stripe = await getUncachableStripeClient();
+        const stripePrice = await stripe.prices.retrieve(pack.stripePriceId!);
+        const priceFields = stripePrice as {
+          id?: unknown;
+          currency?: unknown;
+          livemode?: unknown;
+          active?: unknown;
+        };
+        const stripeEnvironment = validateStripePriceForCheckout(pack, {
+          id: typeof priceFields.id === "string" ? priceFields.id : null,
+          currency: typeof priceFields.currency === "string" ? priceFields.currency : null,
+          livemode: typeof priceFields.livemode === "boolean" ? priceFields.livemode : null,
+          active: typeof priceFields.active === "boolean" ? priceFields.active : null,
+        });
         const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
@@ -453,12 +472,35 @@ export function partnerApiRouter(): Router {
           success_url: `${appUrl}/partner/billing?purchase=processing`,
           cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
         });
+        if (!session.url) throw new Error("Stripe Checkout did not return a URL.");
+        await recordPartnerCreditCheckoutIntent({
+          stripeSessionId: session.id,
+          tenantId: principal.tenantId,
+          packCode: pack.code,
+          initiatingUserId: principal.userId,
+          stripePriceId: pack.stripePriceId!,
+          stripeCurrency: pack.stripeCurrency!,
+          stripeEnvironment,
+        });
 
         res.json({ url: session.url, packCode: pack.code, credits: pack.credits });
       } catch (err) {
         const code = (err as { code?: string })?.code;
         if (code === "PACK_NOT_FOUND" || code === "PACK_NOT_PURCHASABLE") {
           res.status(400).json({ error: { code, message: (err as Error).message } });
+          return;
+        }
+        if (code === "STRIPE_ENV_UNDECLARED" || code === "STRIPE_ENV_MISMATCH") {
+          res.status(503).json({ error: { code, message: (err as Error).message } });
+          return;
+        }
+        if (
+          code === "STRIPE_PRICE_MISMATCH" ||
+          code === "STRIPE_CURRENCY_MISMATCH" ||
+          code === "STRIPE_PRICE_INACTIVE" ||
+          code === "CHECKOUT_INTENT_CONFLICT"
+        ) {
+          res.status(503).json({ error: { code, message: (err as Error).message } });
           return;
         }
         console.error("[partner credits] checkout failed:", (err as Error).message);

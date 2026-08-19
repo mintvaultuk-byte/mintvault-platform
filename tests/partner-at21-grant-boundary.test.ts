@@ -193,7 +193,16 @@ function pressNew(shop: Shop, stationId: string, clientOpId: string): Promise<Ne
 }
 
 /** The REAL webhook grant, exactly as the verified handler calls it. */
-function deliverWebhook(shop: Shop, eventId: string, sessionId: string) {
+async function deliverWebhook(shop: Shop, eventId: string, sessionId: string) {
+  await purchase.recordPartnerCreditCheckoutIntent({
+    stripeSessionId: sessionId,
+    tenantId: shop.tenantId,
+    packCode: PACK_CODE,
+    initiatingUserId: shop.userId,
+    stripePriceId: "price_test_pack_10",
+    stripeCurrency: "gbp",
+    stripeEnvironment: "test",
+  });
   return purchase.fulfilPartnerCreditPurchase(
     {
       id: sessionId,

@@ -10,6 +10,30 @@ Last updated: 2026-08-13 (P0 complete, P1 archaeology 3/5 agents reported).
 
 ---
 
+## 2026-08-19 payment/top-up reconciliation
+
+### PAY-1 — Staging credit packs cannot become purchasable until owner supplies Stripe TEST commercial config. OWNER-DECISION
+
+**Status:** OWNER-DECISION · **Phase:** zero-credit top-up / Stripe TEST acceptance
+
+Read-only staging reconciliation on 2026-08-19 found the safe starting state:
+
+- Staging (`mintvault-v2`) has TEST-shaped Stripe secret/publishable keys and a webhook secret, but
+  `STRIPE_ENV` is not declared.
+- `partner_credit_packs` contains the five active pilot packs (`PACK_5`, `PACK_10`, `PACK_25`,
+  `PACK_50`, `PACK_100`) but all five have `stripe_price_id=NULL` and `stripe_currency=NULL`.
+
+Code now fails closed in this state. Checkout refuses undeclared/mismatched Stripe mode, validates
+the configured Stripe Price ID/currency/livemode before returning a Checkout URL, and the verified
+webhook requires matching local Checkout provenance (`0097_partner_credit_checkout_sessions.sql`)
+before the append-only credit ledger can grant purchase credits.
+
+Owner action required: approve/set staging `STRIPE_ENV=test`, provide the five TEST Stripe Price IDs,
+confirm `stripe_currency='gbp'` and VAT/prices, then perform one human Stripe TEST Checkout. Until
+that happens, no purchase credits should be granted.
+
+---
+
 ## A. ARCHITECTURE-LEVEL FINDINGS (change the shape of the work)
 
 ### A-1 — There is no "Card Job" record. BLOCKER (scope-defining)

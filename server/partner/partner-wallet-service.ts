@@ -14,6 +14,7 @@
  * route, an admin adjustment UI, reserve/consume/release semantics, Stripe, or submission linkage.
  */
 import { createHash } from "node:crypto";
+import type pg from "pg";
 import { partnerAdminQuery } from "./db";
 import {
   WalletRequestError,
@@ -97,6 +98,14 @@ const WALLET_COLS = "id, tenant_id, status, credit_unit, created_at, updated_at,
 const LEDGER_COLS =
   "id, wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason, actor_type, actor_user_id, actor_email, external_ref, metadata, request_fingerprint, created_at";
 
+type Queryable = {
+  query<T extends pg.QueryResultRow = pg.QueryResultRow>(sql: string, params?: unknown[]): Promise<pg.QueryResult<T>>;
+};
+
+const partnerAdminQueryable: Queryable = {
+  query: (sql: string, params?: unknown[]) => partnerAdminQuery(sql, params ?? []),
+};
+
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -141,11 +150,13 @@ export async function ensureWallet(_actor: WalletActor, tenantIdRaw: string): Pr
 
 export async function getWallet(tenantIdRaw: string): Promise<PartnerWallet> {
   const tenantId = requireTenantId(tenantIdRaw);
-  const r = await partnerAdminQuery<PartnerWallet>(`SELECT ${WALLET_COLS} FROM partner_wallets WHERE tenant_id = $1`, [
-    tenantId,
-  ]);
+  const r = await queryWallet(partnerAdminQueryable, tenantId);
   if (r.rowCount === 0) throw new WalletRequestError("WALLET_NOT_FOUND", "Wallet not found for this organisation.");
   return r.rows[0];
+}
+
+async function queryWallet(client: Queryable, tenantId: string): Promise<pg.QueryResult<PartnerWallet>> {
+  return client.query<PartnerWallet>(`SELECT ${WALLET_COLS} FROM partner_wallets WHERE tenant_id = $1`, [tenantId]);
 }
 
 /** Ledger-derived balance (authoritative). Reads the derived view; never a stored balance. */
@@ -207,6 +218,21 @@ export async function appendFoundationCredit(
   actor: WalletActor,
   input: AppendFoundationCreditInput
 ): Promise<{ entry: LedgerEntry; alreadyApplied: boolean }> {
+  return appendFoundationCreditWithClient(partnerAdminQueryable, actor, input);
+}
+
+/**
+ * The same ledger append boundary, but pinned to an already-open admin transaction.
+ *
+ * This exists for domain services that need another authoritative state transition to commit or roll
+ * back with the append-only ledger row. It keeps the same validation, wallet-status check and
+ * producer-scoped idempotency contract as appendFoundationCredit().
+ */
+export async function appendFoundationCreditWithClient(
+  client: Queryable,
+  actor: WalletActor,
+  input: AppendFoundationCreditInput
+): Promise<{ entry: LedgerEntry; alreadyApplied: boolean }> {
   const tenantId = requireTenantId(input.tenantId);
   const amount = validateCreditAmount(input.amount);
   const entryType = validateEntryType(input.entryType);
@@ -221,7 +247,11 @@ export async function appendFoundationCredit(
   const actorEmail = optionalText(actor.actorEmail, "actorEmail", 320);
 
   // Resolve the wallet from the trusted tenant id; it must exist and be active.
-  const wallet = await getWallet(tenantId);
+  const walletResult = await queryWallet(client, tenantId);
+  if (walletResult.rowCount === 0) {
+    throw new WalletRequestError("WALLET_NOT_FOUND", "Wallet not found for this organisation.");
+  }
+  const wallet = walletResult.rows[0];
   if (wallet.status !== "active") {
     throw new WalletRequestError(
       "VALIDATION_ERROR",
@@ -244,50 +274,48 @@ export async function appendFoundationCredit(
     metadata,
   });
 
-  try {
-    const r = await partnerAdminQuery<Record<string, unknown>>(
-      `INSERT INTO partner_credit_ledger
-         (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
-          actor_type, actor_user_id, actor_email, external_ref, metadata, request_fingerprint)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
-       RETURNING ${LEDGER_COLS}`,
-      [
-        wallet.id,
-        wallet.tenant_id, // server-derived — the wallet's own tenant, never a client value
-        amount,
-        entryType,
-        idempotencyKey,
-        correlationId,
-        source,
-        reason,
-        actorType,
-        actorUserId,
-        actorEmail,
-        externalRef,
-        JSON.stringify(metadata),
-        fingerprint,
-      ]
-    );
-    return { entry: normalizeEntry(r.rows[0]), alreadyApplied: false };
-  } catch (err) {
-    const pg = err as { code?: string };
-    if (pg?.code === "23505") {
-      // Resolve a producer-scoped race. Only an identical canonical request returns the original.
-      const existing = await partnerAdminQuery<Record<string, unknown>>(
-        `SELECT ${LEDGER_COLS} FROM partner_credit_ledger WHERE source = $1 AND idempotency_key = $2`,
-        [source, idempotencyKey]
-      );
-      if (existing.rowCount && existing.rows[0]) {
-        const e = normalizeEntry(existing.rows[0]);
-        if (e.request_fingerprint === fingerprint) {
-          return { entry: e, alreadyApplied: true };
-        }
-        throw new WalletRequestError(
-          "IDEMPOTENCY_CONFLICT",
-          "idempotencyKey was already used by this source for a different request."
-        );
-      }
-    }
-    throw err;
+  const inserted = await client.query<Record<string, unknown>>(
+    `INSERT INTO partner_credit_ledger
+       (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
+        actor_type, actor_user_id, actor_email, external_ref, metadata, request_fingerprint)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
+     ON CONFLICT (source, idempotency_key) DO NOTHING
+     RETURNING ${LEDGER_COLS}`,
+    [
+      wallet.id,
+      wallet.tenant_id, // server-derived: the wallet's own tenant, never a client value.
+      amount,
+      entryType,
+      idempotencyKey,
+      correlationId,
+      source,
+      reason,
+      actorType,
+      actorUserId,
+      actorEmail,
+      externalRef,
+      JSON.stringify(metadata),
+      fingerprint,
+    ]
+  );
+  if (inserted.rowCount && inserted.rows[0]) {
+    return { entry: normalizeEntry(inserted.rows[0]), alreadyApplied: false };
   }
+
+  // Resolve a producer-scoped race. Only an identical canonical request returns the original.
+  const existing = await client.query<Record<string, unknown>>(
+    `SELECT ${LEDGER_COLS} FROM partner_credit_ledger WHERE source = $1 AND idempotency_key = $2`,
+    [source, idempotencyKey]
+  );
+  if (existing.rowCount && existing.rows[0]) {
+    const e = normalizeEntry(existing.rows[0]);
+    if (e.request_fingerprint === fingerprint) {
+      return { entry: e, alreadyApplied: true };
+    }
+    throw new WalletRequestError(
+      "IDEMPOTENCY_CONFLICT",
+      "idempotencyKey was already used by this source for a different request."
+    );
+  }
+  throw new WalletRequestError("INTERNAL_ERROR", "idempotency check failed after ledger conflict.");
 }

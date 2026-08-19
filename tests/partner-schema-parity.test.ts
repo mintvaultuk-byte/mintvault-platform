@@ -278,6 +278,9 @@ describe("partner schema ↔ migration parity", () => {
       // 0096 widens partner_management_audit's action_type CHECK for the protected Card Job void
       // wrapper. Raw-SQL migration-authoritative; no Drizzle model owns this CHECK.
       "0096_partner_card_job_void_management_audit.sql",
+      // 0097 records server-created Partner credit Checkout Sessions so the verified webhook can
+      // reject wrong-session and wrong-tenant metadata. Raw-SQL payment authority; no Drizzle model.
+      "0097_partner_credit_checkout_sessions.sql",
     ]);
   });
 
