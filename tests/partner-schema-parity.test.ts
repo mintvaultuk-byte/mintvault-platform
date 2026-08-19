@@ -289,7 +289,7 @@ describe("partner schema ↔ migration parity", () => {
       "0098_scanner_operator_credit_view.sql",
       // GB-04 first-party attribution is application-scoped and uses the
       // canonical post-credit migration identity.
-      "0099_growth_commercial_attribution.sql",
+      "0100_growth_commercial_attribution.sql",
     ]);
   });
 

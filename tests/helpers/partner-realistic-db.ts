@@ -262,7 +262,7 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // indexes the verified paid-payment timestamp. It cannot truthfully run in a
   // partner-only harness which has neither the MintVault submission shape nor
   // the production payment authority columns.
-  "0099_growth_commercial_attribution",
+  "0100_growth_commercial_attribution",
 ] as const;
 
 /**

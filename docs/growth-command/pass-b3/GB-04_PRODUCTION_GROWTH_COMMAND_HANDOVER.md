@@ -2,7 +2,7 @@
 
 ## Scope and canonical lineage
 
-GB-04 is a semantic reconciliation of the earlier Growth Command work onto canonical release `cf891246890fd18bc8dfdca90e5bbf44001b5f5e`. It keeps the Partner, Scanner, B1, GB-03 and current Partner credit authority untouched. The former conflicting Growth migration identity is not retained: the additive canonical migration is `0099_growth_commercial_attribution.sql`.
+GB-04 is a semantic reconciliation of the earlier Growth Command work onto canonical release `cf891246890fd18bc8dfdca90e5bbf44001b5f5e`. It keeps the Partner, Scanner, B1, GB-03 and current Partner credit authority untouched. Production's immutable journal already owns `0099_partner_credit_checkout_operation_idempotency.sql`; Growth therefore uses the next free forward identity, `0100_growth_commercial_attribution.sql`.
 
 The scope is deliberately limited to a first-party commercial control surface:
 
@@ -66,7 +66,7 @@ No external MCP endpoint, credentials, authentication, or transport is present i
 
 ## Migration and release checks
 
-`0099_growth_commercial_attribution.sql` is additive. It adds `submission_acquisition` and paid-query indexes only. It has no destructive statement and does not alter `0094` through `0098`. It is classified as application-scope because it references core `submissions` payment fields.
+`0100_growth_commercial_attribution.sql` is additive. It adds `submission_acquisition` and paid-query indexes only. It has no destructive statement and does not alter `0094` through `0099`. It is classified as application-scope because it references core `submissions` payment fields.
 
 The production-shaped rehearsal uses the real migration runner with the exact canonical `62 applied` journal state. It proves `0099` is the only pending migration, applies only `0099`, and leaves `63 applied`, zero pending, zero inconsistencies, and zero checksum mismatches. Production migration and deployment evidence are recorded only after the authorised release stage completes.
 

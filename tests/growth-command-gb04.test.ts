@@ -11,9 +11,10 @@ import { getGrowthSummary, isGrowthPeriod, isPartnerLeadStatus } from "../server
 import { attributionFromSearch } from "../client/src/lib/commercial-attribution";
 import { safeExternalUrl } from "../client/src/pages/admin/growth";
 import { isBodyLogSuppressed } from "../server/lib/request-logger";
+import { listMigrationFiles } from "../scripts/db/migrate";
 
 const dialect = new PgDialect();
-const migration = fs.readFileSync("migrations/0099_growth_commercial_attribution.sql", "utf8");
+const migration = fs.readFileSync("migrations/0100_growth_commercial_attribution.sql", "utf8");
 const growthRoute = fs.readFileSync("server/routes/admin/commercial-growth.ts", "utf8");
 const growthService = fs.readFileSync("server/commercial-growth-service.ts", "utf8");
 const growthPage = fs.readFileSync("client/src/pages/admin/growth.tsx", "utf8");
@@ -24,24 +25,64 @@ const submissions = fs.readFileSync("server/routes/submissions.ts", "utf8");
 const storage = fs.readFileSync("server/storage.ts", "utf8");
 
 describe("GB-04 Growth Command commercial authority", () => {
+  it("keeps Growth in the next forward migration identity after immutable Partner 0099", () => {
+    const names = listMigrationFiles().map((file) => file.filename);
+    expect(names).toContain("0100_growth_commercial_attribution.sql");
+    expect(names).not.toContain("0099_growth_commercial_attribution.sql");
+  });
+
   it("accepts only MintVault-owned campaign tokens and rejects PII-shaped values on both boundaries", () => {
     const campaigns = new Set(["medway_cataclysm"]);
-    for (const unsafe of ["alice@example.com", "07700900123", "Jane Smith", "alice-smith", "https://campaign.example/private", "<img>"]) {
+    for (const unsafe of [
+      "alice@example.com",
+      "07700900123",
+      "Jane Smith",
+      "alice-smith",
+      "https://campaign.example/private",
+      "<img>",
+    ]) {
       expect(cleanAttributionValue(unsafe, campaigns)).toBeUndefined();
     }
     expect(cleanAttributionValue("medway_cataclysm", campaigns)).toBe("medway_cataclysm");
-    expect(normaliseAttribution({ utm_source: "outreach", utm_medium: "email", utm_campaign: "medway_cataclysm" })).toMatchObject({
-      source: "outreach", medium: "email", campaign: "medway_cataclysm", category: "PARTNER_OUTREACH",
+    expect(
+      normaliseAttribution({ utm_source: "outreach", utm_medium: "email", utm_campaign: "medway_cataclysm" })
+    ).toMatchObject({
+      source: "outreach",
+      medium: "email",
+      campaign: "medway_cataclysm",
+      category: "PARTNER_OUTREACH",
     });
-    expect(attributionFromSearch("?utm_source=alice%40example.com&utm_term=07700900123&utm_campaign=Jane%20Smith&utm_medium=email")).toEqual({ utm_medium: "email" });
+    expect(
+      attributionFromSearch(
+        "?utm_source=alice%40example.com&utm_term=07700900123&utm_campaign=Jane%20Smith&utm_medium=email"
+      )
+    ).toEqual({ utm_medium: "email" });
   });
 
   it("does not manufacture Direct attribution when a paid submission has no approved reference", async () => {
     const calls: unknown[] = [];
-    await recordSubmissionAttribution(42, { utm_source: "alice@example.com" }, { execute: async (query) => { calls.push(query); return { rows: [] }; } });
+    await recordSubmissionAttribution(
+      42,
+      { utm_source: "alice@example.com" },
+      {
+        execute: async (query) => {
+          calls.push(query);
+          return { rows: [] };
+        },
+      }
+    );
     expect(calls).toHaveLength(0);
 
-    await recordSubmissionAttribution(42, { utm_source: "outreach", utm_medium: "email", utm_campaign: "medway_cataclysm" }, { execute: async (query) => { calls.push(dialect.sqlToQuery(query)); return { rows: [] }; } });
+    await recordSubmissionAttribution(
+      42,
+      { utm_source: "outreach", utm_medium: "email", utm_campaign: "medway_cataclysm" },
+      {
+        execute: async (query) => {
+          calls.push(dialect.sqlToQuery(query));
+          return { rows: [] };
+        },
+      }
+    );
     expect(calls).toHaveLength(1);
     const query = calls[0] as { sql: string; params: unknown[] };
     expect(query.sql).toContain("INSERT INTO submission_acquisition");
@@ -50,36 +91,90 @@ describe("GB-04 Growth Command commercial authority", () => {
   });
 
   it("generates the approved Medway Cataclysm Partner outreach link on server-owned targets", () => {
-    const link = generateTrackedCampaignLink({ target: "partner", source: "outreach", medium: "email", campaign: "medway_cataclysm" });
+    const link = generateTrackedCampaignLink({
+      target: "partner",
+      source: "outreach",
+      medium: "email",
+      campaign: "medway_cataclysm",
+    });
     expect(link.url).toMatch(/\/partners\?utm_source=outreach/);
     expect(link.url).toContain("utm_medium=email");
     expect(link.url).toContain("utm_campaign=medway_cataclysm");
-    expect(() => generateTrackedCampaignLink({ target: "https://evil.example", source: "outreach", medium: "email", campaign: "medway_cataclysm" })).toThrow();
+    expect(() =>
+      generateTrackedCampaignLink({
+        target: "https://evil.example",
+        source: "outreach",
+        medium: "email",
+        campaign: "medway_cataclysm",
+      })
+    ).toThrow();
     expect(attributionFromSearch(new URL(link.url).search)).toMatchObject({
-      utm_source: "outreach", utm_medium: "email", utm_campaign: "medway_cataclysm",
+      utm_source: "outreach",
+      utm_medium: "email",
+      utm_campaign: "medway_cataclysm",
     });
     expect(partnersPage).toContain("const params = attributionFromSearch(window.location.search)");
   });
 
   it("reports only verified paid rows and labels legacy/unapproved values as unattributed", async () => {
     const replies = [
-      { rows: [{ paid_submissions: "2", paid_cards: "7", revenue_pence: "4400", avg_cards: "3.5", unattributed: "1" }] },
-      { rows: [
-        { category: "EMAIL", campaign: "email-pilot", paid_submissions: "1", paid_cards: "2", revenue_pence: "1900", partner_applications: "0" },
-        { category: "UNATTRIBUTED", campaign: "alice-smith", paid_submissions: "1", paid_cards: "5", revenue_pence: "2500", partner_applications: "0" },
-      ] },
-      { rows: [{ total: "3", new_count: "1", contacted_count: "1", qualified_count: "1", not_a_fit_count: "0", onboarding_count: "0" }] },
+      {
+        rows: [{ paid_submissions: "2", paid_cards: "7", revenue_pence: "4400", avg_cards: "3.5", unattributed: "1" }],
+      },
+      {
+        rows: [
+          {
+            category: "EMAIL",
+            campaign: "email-pilot",
+            paid_submissions: "1",
+            paid_cards: "2",
+            revenue_pence: "1900",
+            partner_applications: "0",
+          },
+          {
+            category: "UNATTRIBUTED",
+            campaign: "alice-smith",
+            paid_submissions: "1",
+            paid_cards: "5",
+            revenue_pence: "2500",
+            partner_applications: "0",
+          },
+        ],
+      },
+      {
+        rows: [
+          {
+            total: "3",
+            new_count: "1",
+            contacted_count: "1",
+            qualified_count: "1",
+            not_a_fit_count: "0",
+            onboarding_count: "0",
+          },
+        ],
+      },
       { rows: [{ source: "outreach", medium: "email", campaign: "founding-partners", partner_applications: "3" }] },
       { rows: [{ active_count: "4" }] },
     ];
     let index = 0;
     const summary = await getGrowthSummary("30d", { execute: async () => replies[index++] as { rows: unknown[] } });
-    expect(summary.paid).toMatchObject({ paidSubmissions: { value: 2 }, paidCards: { value: 7 }, revenuePence: { value: 4400 }, unattributedPaidSubmissions: { value: 1 } });
-    expect(summary.campaignPerformance).toEqual(expect.arrayContaining([
-      expect.objectContaining({ category: "EMAIL", campaign: "email-pilot", paidSubmissions: 1 }),
-      expect.objectContaining({ category: "UNATTRIBUTED", campaign: "UNATTRIBUTED", paidSubmissions: 1 }),
-      expect.objectContaining({ category: "PARTNER_OUTREACH", campaign: "founding-partners", partnerApplications: 3 }),
-    ]));
+    expect(summary.paid).toMatchObject({
+      paidSubmissions: { value: 2 },
+      paidCards: { value: 7 },
+      revenuePence: { value: 4400 },
+      unattributedPaidSubmissions: { value: 1 },
+    });
+    expect(summary.campaignPerformance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: "EMAIL", campaign: "email-pilot", paidSubmissions: 1 }),
+        expect.objectContaining({ category: "UNATTRIBUTED", campaign: "UNATTRIBUTED", paidSubmissions: 1 }),
+        expect.objectContaining({
+          category: "PARTNER_OUTREACH",
+          campaign: "founding-partners",
+          partnerApplications: 3,
+        }),
+      ])
+    );
     expect(summary.partnerRevenue.state).toBe("NOT_INSTRUMENTED");
     expect(summary.repeatCustomerRate.state).toBe("NOT_INSTRUMENTED");
     expect(summary.historical.state).toBe("NOT_INSTRUMENTED");
@@ -114,8 +209,14 @@ describe("GB-04 Growth Command commercial authority", () => {
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS submission_acquisition");
     expect(migration).toContain("idx_submissions_paid_growth_window");
     expect(migration).not.toMatch(/\n\s*(cookie|referrer|ip_address|email|phone)\s/i);
-    const numbered = fs.readdirSync("migrations").filter((file) => /^\d{4}_.*\.sql$/.test(file)).map((file) => file.slice(0, 4));
-    expect(numbered.filter((number) => number === "0099")).toHaveLength(1);
+    const numbered = fs
+      .readdirSync("migrations")
+      .filter((file) => /^\d{4}_.*\.sql$/.test(file))
+      .map((file) => file.slice(0, 4));
+    // Production's immutable journal owns 0099 for Partner checkout hardening;
+    // this never-applied Growth migration must occupy the next forward slot.
+    expect(numbered.filter((number) => number === "0099")).toHaveLength(0);
+    expect(numbered.filter((number) => number === "0100")).toHaveLength(1);
     expect(new Set(numbered).size).toBe(numbered.length);
   });
 

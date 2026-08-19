@@ -116,12 +116,12 @@ describe("every migration is deliberately classified", () => {
   });
 
   it("keeps commercial attribution application-scoped because it indexes paid core submissions", () => {
-    const SQL = readFileSync(join(process.cwd(), "migrations", "0099_growth_commercial_attribution.sql"), "utf8");
+    const SQL = readFileSync(join(process.cwd(), "migrations", "0100_growth_commercial_attribution.sql"), "utf8");
     expect(SQL).toContain("REFERENCES submissions(id)");
     expect(SQL).toContain("idx_submissions_paid_growth_window");
-    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0099_growth_commercial_attribution");
-    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0099_growth_commercial_attribution");
-    expect(requiresCoreSchema(["0099_growth_commercial_attribution"])).toBe(true);
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0100_growth_commercial_attribution");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0100_growth_commercial_attribution");
+    expect(requiresCoreSchema(["0100_growth_commercial_attribution"])).toBe(true);
   });
 
   it("NEGATIVE: neither newly-classified migration leaked into the partner glob", () => {
@@ -169,7 +169,7 @@ describe("the partner harness applies a declared allowlist, not a glob", () => {
   it("NEGATIVE: an unrelated future migration does not join partner scope automatically", () => {
     // Simulate the exact 0073 situation: a new numbered migration appears that the
     // partner lists have never heard of. It must NOT be treated as partner-scope.
-    const future = "0099_vault_quest_artwork_ledger";
+    const future = "0101_vault_quest_artwork_ledger";
     const partner = new Set<string>(PARTNER_SCHEMA_MIGRATIONS);
     expect(partner.has(future), "an undeclared migration must never be partner-scope").toBe(false);
     expect(requiresCoreSchema([future]), "an undeclared migration is not silently application-scope either").toBe(
