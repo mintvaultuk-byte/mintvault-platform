@@ -17,29 +17,30 @@
 
 ## Stage progress
 
-| Stage | Status | Date | Notes |
-| --- | --- | --- | --- |
-| 0 — Baseline | COMPLETE | 2026-08-19 | Canonical facts and baseline gates captured |
-| 1 — Review plan | COMPLETE | 2026-08-19 | Three non-overlapping read-only scopes dispatched |
-| 2 — Investigation | COMPLETE | 2026-08-19 | Three independent read-only reports received |
-| 3 — Lead verification | COMPLETE | 2026-08-19 | Accepted high findings personally reproduced; worktree unchanged by reviewers |
-| 4 — Implementation authorisation | COMPLETE | 2026-08-19 | Runtime manifest, architecture-after and budget frozen |
-| 5 — Implementation | IN PROGRESS | 2026-08-19 | Controller edits only |
-| 6 — Regression | PENDING | | |
-| 7 — Final report | PENDING | | |
+| Stage                            | Status      | Date       | Notes                                                                                                                       |
+| -------------------------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Baseline                     | COMPLETE    | 2026-08-19 | Canonical facts and baseline gates captured                                                                                 |
+| 1 — Review plan                  | COMPLETE    | 2026-08-19 | Three non-overlapping read-only scopes dispatched                                                                           |
+| 2 — Investigation                | COMPLETE    | 2026-08-19 | Three independent read-only reports received                                                                                |
+| 3 — Lead verification            | COMPLETE    | 2026-08-19 | Accepted high findings personally reproduced; worktree unchanged by reviewers                                               |
+| 4 — Implementation authorisation | COMPLETE    | 2026-08-19 | Runtime manifest, architecture-after and budget frozen                                                                      |
+| 5 — Implementation               | COMPLETE    | 2026-08-19 | Packages A–G in `079d5336`; hostile privacy closure in `c2d18aea`                                                           |
+| 6 — Regression                   | COMPLETE    | 2026-08-19 | TypeScript, build, lint, full/focused/migration/high-risk suites, rendered UI and Graphify green; hostile review reconciled |
+| 7 — Final report                 | IN PROGRESS | 2026-08-19 | Durable evidence reconciled; remote CI/release/live proof blocked on protected publication and connection actions           |
 
 ## Reviewer assignments
 
-| Reviewer | Scope | Status | Report |
-| --- | --- | --- | --- |
-| `/root/growth_ui_audit` | Existing Growth code/UI/tests and control inventory | COMPLETE | agent mailbox report |
-| `/root/reviews_data_audit` | Completion authority, review lifecycle, email, DB/migrations | COMPLETE | agent mailbox report |
-| `/root/external_search_audit` | MCP, providers, conversion, SEO/public authority, CI/deploy | COMPLETE | agent mailbox report |
+| Reviewer                       | Scope                                                          | Status   | Report                                                        |
+| ------------------------------ | -------------------------------------------------------------- | -------- | ------------------------------------------------------------- |
+| `/root/growth_ui_audit`        | Existing Growth code/UI/tests and control inventory            | COMPLETE | agent mailbox report                                          |
+| `/root/reviews_data_audit`     | Completion authority, review lifecycle, email, DB/migrations   | COMPLETE | agent mailbox report                                          |
+| `/root/external_search_audit`  | MCP, providers, conversion, SEO/public authority, CI/deploy    | COMPLETE | agent mailbox report                                          |
+| `/root/hostile_release_review` | Independent hostile release/security/data review at `079d5336` | COMPLETE | no runtime BLOCKER/HIGH; release evidence findings reconciled |
 
 ## Next authorised action
 
-Implement only the frozen runtime manifest, starting with the single additive migration and service boundaries. Run focused tests at each logical checkpoint.
+Finish the local final-SHA gates and hand over the exact clean branch for owner-authorized push/PR and terminal remote CI.
 
 ## Protected actions not yet authorised
 
-Git push, migration application, secret/config writes, dependency changes, provider writes, auth/payment/grading edits, staging/production writes and deployment pending release-gate approval validation.
+Git push/PR, migration application, secret/config writes, dependency changes, provider writes, auth/payment/grading edits and staging/production writes remain protected. Deployment is conditionally authorized only after every prerequisite gate and separate migration/configuration authority are proven; those prerequisites are not yet met.

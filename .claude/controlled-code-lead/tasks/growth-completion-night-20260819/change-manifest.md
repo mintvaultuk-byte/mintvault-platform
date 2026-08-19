@@ -6,15 +6,15 @@
 
 ## Accepted application changes
 
-| Package | Runtime contract | Expected files |
-| --- | --- | --- |
-| A | Remove the unconsumed Partner lead-context claim; reconcile the documented capacity read contract | Growth page and GB-04B handover/test |
-| B | Add a stateless Streamable-HTTP-compatible MCP JSON-RPC endpoint with dedicated SHA-256 bearer-token identity, fixed aggregate tool allowlist, IP/token rate limiting and PII-free audit | new MCP route/service, route registration, tests/docs |
-| C | Add an additive review outbox/lifecycle, neutral email, bounded retries, deterministic provider idempotency, suppression/cancellation and aggregate-only Growth reporting; tighten manual delivery authority | migration `0101`, schema, review service, email, admin delivery route, scheduler, Growth route/UI, tests |
-| D | Strengthen the existing Population authority surface with minimum-sample suppression, bounded cache/rate controls and crawler-visible allowlisted JSON-LD; do not create doorway pages | public population route/storage, SEO config/static/page, tests |
-| E | Keep Fly and Search Console `NOT_CONNECTED`; update exact server-only connection contract because no credentials or property authority exists | provider/blocker docs and truthful UI text only |
-| F | Persist privacy-minimised, idempotent submission/checkout-start events; checkout event is best-effort after real PaymentIntent creation and cannot affect payment | migration `0101`, schema, conversion service, checkout route, Growth aggregates/tests |
-| G | Add one real Reviews tab to `/admin/growth`; preserve existing shell/router compatibility and black/gold admin system | Growth page/routes/tests |
+| Package | Runtime contract                                                                                                                                                                                             | Expected files                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| A       | Remove the unconsumed Partner lead-context claim; reconcile the documented capacity read contract                                                                                                            | Growth page and GB-04B handover/test                                                                     |
+| B       | Add a stateless Streamable-HTTP-compatible MCP JSON-RPC endpoint with dedicated SHA-256 bearer-token identity, fixed aggregate tool allowlist, IP/token rate limiting and PII-free audit                     | new MCP route/service, route registration, tests/docs                                                    |
+| C       | Add an additive review outbox/lifecycle, neutral email, bounded retries, deterministic provider idempotency, suppression/cancellation and aggregate-only Growth reporting; tighten manual delivery authority | migration `0101`, schema, review service, email, admin delivery route, scheduler, Growth route/UI, tests |
+| D       | Strengthen the existing Population authority surface with minimum-sample suppression, bounded cache/rate controls and crawler-visible allowlisted JSON-LD; do not create doorway pages                       | public population route/storage, SEO config/static/page, tests                                           |
+| E       | Keep Fly and Search Console `NOT_CONNECTED`; update exact server-only connection contract because no credentials or property authority exists                                                                | provider/blocker docs and truthful UI text only                                                          |
+| F       | Persist privacy-minimised, idempotent submission/checkout-start events; checkout event is best-effort after real PaymentIntent creation and cannot affect payment                                            | migration `0101`, schema, conversion service, checkout route, Growth aggregates/tests                    |
+| G       | Add one real Reviews tab to `/admin/growth`; preserve existing shell/router compatibility and black/gold admin system                                                                                        | Growth page/routes/tests                                                                                 |
 
 ## Explicit exclusions
 

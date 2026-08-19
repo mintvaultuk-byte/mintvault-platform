@@ -1,7 +1,7 @@
 # Morning Handover — Live Working Summary
 
-**Last updated:** 2026-08-19 21:35 BST  
-**State:** Bootstrap and canonical reconciliation in progress.
+**Last updated:** 2026-08-19 22:35 BST
+**State:** Local implementation and hostile-review closure complete; protected release actions remain.
 
 ## What is already live
 
@@ -9,25 +9,26 @@ GB-04B Growth Command is live at production SHA `facfd36f`: authoritative paid/r
 
 ## What this program has built so far
 
-The clean isolated branch and durable control/governance pack only. No runtime code or external system has changed.
+Packages A–G are implemented on the clean isolated branch: GB-04B contract/UI closeout, a dedicated aggregate-only Growth MCP transport, server-observed conversion events, a durable neutral review lifecycle, public population authority/initial-HTML structured data, and integrated Growth reporting. The runtime candidate is `c2d18aea`; the final branch tip adds evidence documentation only.
 
 ## What is not live
 
-GB-04C external ChatGPT/MCP, GB-05 reviews, GB-06 public authority MVP, provider telemetry/Search Console and conversion-start instrumentation are not yet implemented by this program.
+None of the new packages is live. Production has not received migration `0101` or the candidate application. The review destination, MCP credential, provider telemetry and Search Console remain unconfigured, so their runtime truth states are disabled/unknown rather than fabricated.
 
 ## External actions
 
-Still under investigation. No credential value has been requested or exposed.
+The owner must authorize exact-branch push/PR, wait for terminal exact-SHA CI, separately authorize migration `0101`, approve the review destination/allowlist and configuration writes, and choose whether to configure a dedicated MCP credential. No credential value was requested or exposed.
 
 ## Migrations
 
-Production has 63 applied journal entries through `0100`. This program has created/applied none. Next free identity is `0101`.
+Production has 63 verified applied journal entries through `0100`. This program authored additive `0101_growth_reviews_and_conversion.sql` but did not apply it anywhere outside throwaway test databases.
 
 ## Canonical SHAs
 
 - Main at start: `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`
 - Production at start/current: `facfd36f`
-- Program branch: same baseline; no commit yet
+- Program runtime candidate: `c2d18aea` on `codex/growth-completion-night-20260819`
+- Program release candidate: final clean branch HEAD after documentation-only closeout; not pushed
 
 ## Commercial status
 
@@ -35,5 +36,4 @@ Medway/Cataclysm Partner outreach remains ready to begin under the existing comm
 
 ## Next action
 
-Complete three bounded read-only investigations, reconcile evidence, and write the first application change manifest.
-
+Authorize publication of the exact candidate branch and obtain terminal remote CI; do not migrate or deploy until that SHA and the separately protected release prerequisites are green.

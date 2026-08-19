@@ -2,36 +2,35 @@
 
 ## Current release state
 
-No Growth Completion Night code, migration, push or deployment has occurred. Production remains `facfd36f`, Fly v1109.
+Growth Completion Night is implemented locally through runtime candidate `c2d18aea`; a documentation-only evidence closeout follows it. No migration, push, pull request, configuration write or deployment has occurred. Production remains `facfd36f`, Fly v1109.
 
 ## Intended release order
 
-1. Clean local candidate from canonical main; no protected-system edit.
-2. Focused behavioural proof per package.
-3. Integrated full gates, Graphify and rendered desktop/mobile acceptance.
-4. Independent hostile review; repair only reproduced BLOCKER/HIGH; targeted re-review changed surfaces.
-5. Freeze exact SHA and obtain terminal remote CI proof.
-6. If a migration is required: separately authorized staging rehearsal, journal/schema verification and rollback/containment proof.
-7. Serialized safe-deploy path only after approval record validation.
-8. Verify `/api/version`, served bundle marker, real API contracts and public routes.
+1. Completed: clean local candidate from canonical main with no protected-system write.
+2. Completed: focused and integrated executable proof, Engineering OS graph, rendered desktop/mobile acceptance and independent hostile review/repair.
+3. Owner authorizes push/PR of the exact clean branch; freeze the resulting SHA and obtain terminal remote CI proof.
+4. Reconcile production SHA/release/machines and migration identity immediately before release.
+5. Separately authorize and apply additive migration `0101`, then verify journal and schema.
+6. Separately authorize any review/MCP/provider configuration writes; unavailable connections remain safely disabled.
+7. Use the serialized safe-deploy path only after prerequisite gates and approval records validate.
+8. Verify `/api/version`, served bundle marker, real API contracts, scheduler state, public routes, Fly machines and database identity.
 
 ## Migration gates
 
-- Highest production identity is `0100`; next free is `0101` until allocated here and in `01_CURRENT_CANONICAL_STATE.md`.
+- Highest verified production identity is `0100`; candidate `0101_growth_reviews_and_conversion.sql` is allocated but not applied.
 - Prefer additive, resume-safe SQL. Never infer schema from fixtures.
 - Inventory target DB columns before authoring and after applying.
 - No production or staging migration is authorized by creation of a SQL file.
 
 ## Rollback principles
 
-- Application: revert the exact Growth commits and deploy the last known-good SHA through `scripts/safe-deploy.sh`.
+- Application: disable review scheduling, revert runtime commits `c2d18aea` and `079d5336`, and deploy the last known-good SHA through `scripts/safe-deploy.sh` after approval validation.
 - Database: retain harmless additive structures when old code ignores them; never delete review/customer records as an application rollback.
 - Providers: fail closed to `NOT CONNECTED`/`UNKNOWN`; disable adapter via existing safe configuration only after authorization.
-- Email/reviews: suppress future scheduling before rollback; sent email cannot be recalled.
+- Email/reviews: remove/disable approved destination verification before rollback; sent email cannot be recalled and suppression/audit records remain.
 - Public authority pages: remove routes/sitemap entries together; cached third-party search copies may persist.
 - MCP: revoke dedicated credential/identity; no database credential is shared with the connection.
 
 ## Release vetoes
 
 Security/privacy, payment integrity, protected grading, migration proof, rollback/containment, exact-SHA CI, dead UI, fake data and owner approval can veto release. Unproven speculation and unrelated MEDIUM/LOW findings cannot.
-

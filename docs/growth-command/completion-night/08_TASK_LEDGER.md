@@ -1,18 +1,19 @@
 # Growth Completion Night — Task Ledger
 
-| Package | Task | Agent | Worktree | Status | SHA | Tests | Blocker | Next action |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Controller | Canonical repo/prod/DB baseline | Sol controller | Growth clean worktree | COMPLETE | `facfd36f` | Read-only git/Fly/DB proof | None | Freeze control pack |
-| Controller | Nine durable control files | Sol controller | Growth clean worktree | COMPLETE | uncommitted | diff/governance/graph/check/lint/build/55 tests green | None | Await reviewers |
-| A | GB-04B closeout/current contracts | `/root/growth_ui_audit` + Sol verification | Read-only | REVIEW COMPLETE | `facfd36f` | 28 baseline tests green | Dead handoff accepted | Implement bounded closeout |
-| B/E/F/D | MCP/providers/conversion/search surfaces | `/root/external_search_audit` + Sol verification | Read-only | REVIEW COMPLETE | `facfd36f` | Source/live proof | External credentials absent | Implement safe internal scope; retain blockers |
-| C | Review eligibility/email/schema | `/root/reviews_data_audit` + Sol verification | Read-only | REVIEW COMPLETE | `facfd36f` | Source proof | Review destination absent | Implement disabled-safe lifecycle/reporting |
-| G | Integrated Growth Command | Sol controller | Growth clean worktree | READY | — | — | Depends on local B-F | Integrate after core services |
-| Release | Hostile review/exact-SHA CI/live proof | Independent reviewer + controller | Read-only/controller | NOT STARTED | — | — | Candidate absent | Run after integration |
+| Package    | Task                                          | Agent                                            | Worktree              | Status                          | SHA                    | Tests                                                       | Blocker                            | Next action                                   |
+| ---------- | --------------------------------------------- | ------------------------------------------------ | --------------------- | ------------------------------- | ---------------------- | ----------------------------------------------------------- | ---------------------------------- | --------------------------------------------- |
+| Controller | Canonical repo/prod/DB baseline               | Sol controller                                   | Growth clean worktree | COMPLETE                        | `facfd36f`             | Read-only git/Fly/DB proof                                  | None                               | Freeze control pack                           |
+| Controller | Nine durable control files                    | Sol controller                                   | Growth clean worktree | COMPLETE                        | `333fbfd9` + closeout  | Governance/graph/static/build/test evidence                 | None                               | Keep synchronized with exact candidate        |
+| A          | GB-04B closeout/current contracts             | `/root/growth_ui_audit` + Sol verification       | Growth clean worktree | COMPLETE                        | `079d5336`             | Contract/UI/focused/browser proof                           | None                               | Preserve through release                      |
+| B/E/F/D    | MCP/conversion/search/provider truth surfaces | `/root/external_search_audit` + Sol verification | Growth clean worktree | COMPLETE LOCALLY                | `079d5336`, `c2d18aea` | Auth/HTTP/fail-open/SEO/public-boundary tests               | Connection values absent by design | Owner connection actions after CI             |
+| C          | Review eligibility/email/schema               | `/root/reviews_data_audit` + Sol verification    | Growth clean worktree | COMPLETE LOCALLY                | `079d5336`, `c2d18aea` | Eligibility/idempotency/suppression/privacy/migration tests | Approved destination absent        | Owner approves and configures after migration |
+| G          | Integrated Growth Command                     | Sol controller                                   | Growth clean worktree | COMPLETE LOCALLY                | `079d5336`             | Growth regression, 1440px/390px rendered acceptance         | None                               | Exact-SHA remote CI                           |
+| Release    | Hostile review/exact-SHA CI/live proof        | `/root/hostile_release_review` + controller      | Read-only/controller  | LOCAL COMPLETE / REMOTE BLOCKED | runtime `c2d18aea`     | No runtime hostile BLOCKER/HIGH; evidence findings fixed    | Owner-authorized push/PR absent    | Publish exact branch; run remote CI           |
 
 ## Checkpoints
 
 - A — baseline and control pack: complete
-- B-F — package implementation: manifest frozen; starting
-- G — integration: not started
-- H-J — hostile review, CI, release, live proof: not started
+- B-F — package implementation: complete locally
+- G — integration: complete locally
+- H — hostile review: complete and reconciled
+- I-J — exact-SHA remote CI, migration, release and live proof: blocked on owner-protected actions; not started

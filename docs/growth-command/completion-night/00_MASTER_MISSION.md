@@ -21,15 +21,19 @@ Feature count, vanity metrics, fake data, generic AI content, speculative integr
 
 ## Overnight packages
 
-| Package | Mission | Initial state |
-| --- | --- | --- |
-| A | GB-04B closeout and shared-contract reconciliation | Live baseline; inspect only |
-| B | GB-04C bounded read-only ChatGPT/MCP connection | Internal read contracts exist; external transport absent |
-| C | GB-05 genuine customer review engine | Investigation required |
-| D | GB-06 privacy-safe public authority/search MVP | Investigation required |
-| E | Fly telemetry and Search Console provider intelligence | Not connected in GB-04B |
-| F | Submission-start and checkout-start instrumentation | Not instrumented in GB-04B |
-| G | Reconcile successful work into existing Growth Command | Depends on B-F |
+| Package | Mission                                                | Initial state                                            |
+| ------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| A       | GB-04B closeout and shared-contract reconciliation     | Live baseline; inspect only                              |
+| B       | GB-04C bounded read-only ChatGPT/MCP connection        | Internal read contracts exist; external transport absent |
+| C       | GB-05 genuine customer review engine                   | Investigation required                                   |
+| D       | GB-06 privacy-safe public authority/search MVP         | Investigation required                                   |
+| E       | Fly telemetry and Search Console provider intelligence | Not connected in GB-04B                                  |
+| F       | Submission-start and checkout-start instrumentation    | Not instrumented in GB-04B                               |
+| G       | Reconcile successful work into existing Growth Command | Depends on B-F                                           |
+
+## Completion-night outcome
+
+Packages A–G are complete locally through runtime candidate `c2d18aea`. Independent hostile review found no runtime BLOCKER/HIGH; its release-evidence HIGH findings and public-discovery MEDIUM were repaired. Remote exact-SHA CI, migration, configuration, deployment and live proof have not occurred and remain governed by the release gates.
 
 ## Execution rules
 
@@ -49,4 +53,3 @@ After any compaction, restart or handoff, reread files `00` through `05` and `08
 ## Stop rules
 
 Stop globally only for a proven production security/payment/privacy risk, destructive migration uncertainty, canonical-lineage conflict that prevents safe integration, an unavailable external dependency that blocks every useful package, or a hard system limit. Optional provider/account gaps do not stop the program.
-

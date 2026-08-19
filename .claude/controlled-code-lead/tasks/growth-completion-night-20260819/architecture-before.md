@@ -26,4 +26,3 @@ flowchart LR
 ## Constraints
 
 No payment, auth, MVGS, Partner operational, Scanner or secret boundary may change. Provider/data additions require bounded caches, privacy-safe aggregates and truthful failure states.
-

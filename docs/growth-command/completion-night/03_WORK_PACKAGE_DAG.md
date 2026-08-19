@@ -19,11 +19,11 @@ flowchart LR
 
 ## Parallel lanes
 
-| Lane | Initial investigation ownership | File/domain boundary | Dependency |
-| --- | --- | --- | --- |
-| 1 | Growth/UI reviewer | Existing Growth page, services, routes, tests and control inventory | A |
-| 2 | Reviews/data reviewer | Completion authority, email delivery, schema and migrations | A |
-| 3 | External/search reviewer | MCP/provider/config/conversion/public SEO surfaces and CI/deploy | A |
+| Lane | Initial investigation ownership | File/domain boundary                                                | Dependency |
+| ---- | ------------------------------- | ------------------------------------------------------------------- | ---------- |
+| 1    | Growth/UI reviewer              | Existing Growth page, services, routes, tests and control inventory | A          |
+| 2    | Reviews/data reviewer           | Completion authority, email delivery, schema and migrations         | A          |
+| 3    | External/search reviewer        | MCP/provider/config/conversion/public SEO surfaces and CI/deploy    | A          |
 
 Reviewers are read-only. The controller verifies and de-duplicates evidence before preparing any application change manifest.
 
@@ -36,3 +36,6 @@ Reviewers are read-only. The controller verifies and de-duplicates evidence befo
 - D must use only approved/public grades, minimum sample sizes and search-visible canonical output.
 - G cannot release until existing Command Centre branch compatibility and every visible control are reconciled.
 
+## Current checkpoint
+
+A–G and integrated hostile review H are complete locally. I (remote exact-SHA CI) has not started because the reviewed branch is not pushed and no pull request exists. J (migration/release/live proof) therefore remains closed.
