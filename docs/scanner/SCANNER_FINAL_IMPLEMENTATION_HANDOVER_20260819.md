@@ -2,18 +2,18 @@
 
 ## Execution baseline
 
-| Field                                 | Verified value                                                                                        |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Repository                            | `/Users/cornelius/mintvault-platform`                                                                 |
-| Branch                                | `fix/canonical-card-detector-20260817`                                                                |
-| Release candidate                     | Resolve with `git rev-parse HEAD` immediately before staging deployment.                              |
-| `origin/main`                         | `f64e67fbfd9e8b5a5b647dd78265ada4478b485d`                                                            |
-| Staging `/api/version`                | `f024f938` at 2026-08-19T06:09:37Z (pre-deploy baseline)                                              |
-| Production `/api/version` (read-only) | `36699531` at 2026-08-19T05:32:53Z                                                                    |
-| Staging Fly latest release            | version 502, completed 2026-08-17T20:14:10Z                                                           |
-| Production Fly latest release         | version 1084, completed 2026-08-15T11:35:02Z                                                          |
-| Scanner runtime                       | Source checkout Electron process is running from `scripts/scanner-app`; no packaged app proof exists. |
-| Production                            | Untouched.                                                                                            |
+| Field                                 | Verified value                                                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Repository                            | `/Users/cornelius/mintvault-platform`                                                                             |
+| Branch                                | `fix/canonical-card-detector-20260817`                                                                            |
+| Release candidate                     | `873666508d6d413eb35bceb4b1e680c435ef4b31`                                                                        |
+| `origin/main`                         | `5a45ff9eba28de287306c5efe2634f9dbd9860f6`                                                                        |
+| Staging `/api/version`                | `87366650` at 2026-08-19T09:49:25Z                                                                                |
+| Production `/api/version` (read-only) | `e689389b` at 2026-08-19T09:49:33Z; external/current production state, not this scanner pass.                     |
+| Staging Fly latest release            | version 508, both `lhr` machines healthy                                                                          |
+| Production Fly latest release         | version 1101, read-only observed; not deployed by this pass                                                       |
+| Scanner runtime                       | Production-shaped unsigned local `.app` built and verified; physical launch/signing/notary not proved.            |
+| Production                            | Untouched by this pass; read-only DB check found no scanner `0094`/`0096` rows and no `physical_released` column. |
 
 ## Authority and scope
 
@@ -322,3 +322,119 @@ Use an authorised staging grader session to inspect an existing Scanner capture 
 both sides, recording the visible source identity and returned working-image dimensions. Stripe TEST
 configuration, payment, and scanner restart remain explicitly out of scope until separately
 authorised.
+
+## Owner-independent completion pass — physical Canon unavailable — 2026-08-19
+
+The owner explicitly stated that the Canon LiDE 400 is unavailable and instructed this pass to finish
+every owner-independent phase without weakening the later physical gate. This pass therefore did not
+claim ImageCaptureCore callback reliability, physical placement, scan quality, cable recovery, or
+clean-Mac launch. It did complete the remaining software/provenance work that can be proved without
+the scanner.
+
+### New implementation in this pass
+
+- `scripts/scanner-app` now has a production-shaped macOS package path:
+  `npm run package:mac` builds `dist/mac-arm64/MintVault Scanner.app`, compiles
+  `native/mintvault-lide-bridge.m` at package time, nests the executable bridge in
+  `Contents/Resources/app/native/mintvault-lide-bridge`, copies the shared LiDE geometry/profile
+  modules to `Contents/shared`, and writes
+  `dist/mac-arm64/mintvault-scanner-package-manifest.json`.
+- Packaged runtime now fails closed to the nested bridge. The packaged branch is evaluated before
+  the development `/usr/bin/xcrun clang` fallback, so a normal Partner Mac does not need Node, npm,
+  Git, Xcode, clang, Command Line Tools, or a source checkout for the native bridge.
+- The package verifier asserts the bundle identifier/executable, main/preload/renderer files,
+  runtime `sharp`, nested bridge executable, shared Canon modules, manifest, and absence of nested
+  `scripts`, `test`, `dist`, and dev Electron dependency.
+- `scripts/scanner-app/scripts/control-plane-load-sim.js` adds an owner-independent load simulator
+  for overlapping FRONT/BACK release/finalisation, duplicate callbacks, network drops/retries,
+  stale preview, cross-side, cross-tenant, cross-station, zero-credit attempts, and 0/63/100 upload
+  progress samples.
+- Migration `0096_partner_card_job_void_management_audit.sql` widens the
+  `partner_management_audit.action_type` CHECK constraint to permit the already-declared
+  `partner_card_job_voided` management audit action. This keeps the protected Card Job void path
+  auditable instead of failing at its audit envelope. The destructive-SQL linter/runner approval is
+  exact-file/exact-constraint only; generic `DROP CONSTRAINT` remains blocked.
+
+### Local proof after commit `87366650`
+
+- `npx vitest run tests/scanner-physical-release-migration.test.ts tests/db-migration-safety.test.ts
+tests/partner-core-release-blockers.test.ts tests/partner-management-ux.test.ts
+tests/partner-schema-parity.test.ts` — **207 passed, 0 failed**.
+- Wider scanner/payment/authority slice before commit formatting:
+  `npx vitest run tests/db-migration-safety.test.ts tests/migration-scope-contract.test.ts
+tests/partner-schema-parity.test.ts tests/scanner-physical-release-migration.test.ts
+tests/scanner-evidence-staging-service.integration.test.ts tests/partner-card-job-grading-bridge.test.ts
+tests/partner-card-job-authority.test.ts tests/partner-card-job-cancellation.test.ts
+tests/partner-credit-purchase.test.ts tests/partner-at21-grant-boundary.test.ts
+tests/partner-management-ux.test.ts tests/partner-core-release-blockers.test.ts` —
+  **311 passed, 2 skipped**.
+- Auth/onboarding/viewer/downstream slice:
+  `npx vitest run tests/partner-reset-delivery.test.ts tests/partner-reset-delivery-integration.test.ts
+tests/partner-mfa-factor-hardening.test.ts tests/partner-mfa-enrolment-mandatory.test.ts
+tests/partner-admin-control-shell-integration.test.ts tests/partner-step-up-auth.test.ts
+tests/partner-station-identity.test.ts tests/partner-station-fleet-control.test.ts
+tests/partner-onboarding-matrix.test.ts tests/partner-onboarding-controls-source.test.ts
+tests/grading-rail-card-safe-fit.test.ts tests/card-inspection-mounted.test.ts
+tests/image-evidence.test.ts tests/partner-card-job-output.test.ts
+tests/approval-grade-preservation.test.ts tests/print-workflow-service.test.ts
+tests/print-workflow-routes.test.ts` — **144 passed, 65 skipped**.
+- `npm test` in `scripts/scanner-app` — **176 passed, 0 failed**.
+- `npm run package:mac && npm run verify:package` in `scripts/scanner-app` — **passed**.
+  Manifest bridge SHA-256:
+  `54f31967ef76119e5bbeeca54c1b099737ccbb28a7b15e4aec7330af4f0d2f2d`;
+  tracked tree clean: `true`; runtime requirements for Node/npm/Git/Xcode/clang: all `false`.
+- `npm run simulate:control-plane -- --workflows=5000 --burst=20000 --zero-credit-attempts=1000
+--seed=50819` — **PASS**, 5,000/5,000 workflows, 20,000/20,000 burst events, 81,405 events
+  processed, 10,000 evidence rows, 5,000 reservations, 1,000 zero-credit attempts rejected.
+- `npm run simulate:control-plane -- --workflows=10000 --burst=20000 --zero-credit-attempts=1000
+--seed=100819` — **PASS**, 10,000/10,000 workflows, 20,000/20,000 burst events, 142,806 events
+  processed, 20,000 evidence rows, 10,000 reservations, 1,000 zero-credit attempts rejected.
+- `npm run check` — **passed**.
+- `npm run build` — **passed** with the existing PostCSS `from` warning.
+- Changed-file ESLint — **0 errors**, warnings only for the scanner app's existing CommonJS script
+  style.
+- Full root `npm test` was attempted post-commit: **292 test files passed, 54 skipped, 5 suites
+  failed only because external DB env vars are absent** (`TEST_DATABASE_URL` for two migration
+  suites and `MINTVAULT_DATABASE_URL` for three Vault Quest suites). No actionable scanner/payment/
+  viewer/auth source-contract failures remained.
+- Signing boundary: `security find-identity -v -p codesigning` returned **0 valid identities**.
+  Signing/notarisation therefore stops at the external Developer ID/notary credential boundary.
+
+### Staging proof
+
+- Staging deployment used `scripts/safe-deploy.sh staging --allow-behind --yes`. The live-ancestry
+  guard proved candidate `87366650` contains the prior staging live commit
+  `8e7ab8f3338e1ff3bc4aeb1988585e72a8ec7fec`; rollback image
+  `registry.fly.io/mintvault-v2:deployment-01M0CMTGHC8DTAADE4R94CSDBP` was recorded before rollout.
+- Fly deployed image `registry.fly.io/mintvault-v2:deployment-01M0CPEN2QCNS8V48R5D4CP7RS`.
+  Staging Fly version **508** is healthy on both `lhr` machines. `/api/version` reports
+  `87366650`; `/health` reports `ok`.
+- Staging scoped migration dry-run for `0096_partner_card_job_void_management_audit.sql` reported
+  checksum `c927209413365215222a7b1093d9a647fb3855fec0bfb416a3d80b861d7ccf46` and journal entries
+  `84`.
+- Staging scoped migration apply ran **only** `0096_partner_card_job_void_management_audit.sql`;
+  the runner logged `DROP CONSTRAINT` as the approved protected constraint replacement and moved the
+  journal **84 -> 85**. Postcheck shows the journal row `applied`, completed at
+  `2026-08-19T09:49:08.660Z`, the CHECK includes `partner_card_job_voided`, and there are zero
+  existing `partner_card_job_voided` audit rows.
+- Production was not deployed or migrated. Read-only production checks observed `/api/version`
+  `e689389b`, Fly version **1101**, no `0094` or `0096` journal rows, and no
+  `scanner_capture_sessions.physical_released` column.
+
+### Physical Canon gate retained
+
+The following is the exact hardware-only acceptance checklist for when the owner has the Canon
+again. It must be an acceptance session only, not an engineering/design session:
+
+1. Launch packaged staging Scanner.
+2. Canon READY.
+3. PREVIEW FRONT.
+4. SCAN FRONT.
+5. Verify FRONT upload runs in background.
+6. Immediately PREVIEW BACK while FRONT still uploads.
+7. SCAN BACK.
+8. Both sides authoritative.
+9. Cable disconnect/reconnect recovery.
+10. Scanner restart during pending upload.
+11. Image-quality visual check.
+12. Measured scan timing/countdown accuracy.

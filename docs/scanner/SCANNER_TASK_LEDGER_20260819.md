@@ -27,3 +27,36 @@
 Perform the physical Canon acceptance script on staging:
 
 `Preview FRONT → GREEN → Scan FRONT → wait only for physical capture + upload-task acceptance → Preview BACK while FRONT still uploads`.
+
+## Owner-independent completion pass — physical Canon unavailable
+
+| Task                                                            | Result                 | Evidence                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Re-run protected 0094 safety proof                              | PASS                   | `tests/scanner-physical-release-migration.test.ts` plus `tests/db-migration-safety.test.ts` included in the 207/207 post-commit focused gate; 0094 linter label remains `approved protected index replacement`.                                                                                 |
+| Add protected 0096 audit-constraint migration                   | PASS / staged          | `0096_partner_card_job_void_management_audit.sql` widens only `chk_partner_management_audit_action`; local linter/runner proof passed; staging scoped migration applied journal 84→85 with checksum `c9272094…`.                                                                                |
+| Deploy owner-independent package to staging                     | DEPLOYED               | `scripts/safe-deploy.sh staging --allow-behind --yes`; live-ancestry guard passed; Fly version 508 healthy; `/api/version` = `87366650`; `/health` = `ok`.                                                                                                                                      |
+| Production-shaped Scanner `.app`                                | PASS unsigned          | `npm run package:mac && npm run verify:package` passed; bridge SHA-256 `54f31967…2d2f2d`; manifest says Partner Mac requires no Node/npm/Git/Xcode/clang; Developer ID signing identity unavailable.                                                                                            |
+| Background Front→Back state-machine source proof                | PASS                   | Scanner suite 176/176; server scanner/payment/authority slice 311 passed / 2 skipped; simulator proves FRONT release → BACK arm while FRONT pending, reordered finalisation, no READY_TO_GRADE until both sides.                                                                                |
+| Durable queue / restart / disk-full / lost-TIFF safety          | PASS source/mocked     | Scanner tests include ENOSPC pre-scan refusal, restart recovery retention, explicit terminal proof before deleting lost-TIFF tasks, and post-evidence reconciliation retry.                                                                                                                     |
+| Independent upload progress                                     | PASS source/mocked     | Scanner tests and simulator cover per-side upload state and 0/63/100 progress samples; physical upload timing still requires hardware/staging operator run.                                                                                                                                     |
+| Retry/reconnect/idempotency / stale preview / MV-side binding   | PASS source/mocked     | Scanner/server gates cover timeout reconciliation, duplicate callback rejection, stale preview rejection, same Card Job/MV/session/side/station binding, and no extra credit on BACK.                                                                                                           |
+| One-card-one-credit / zero-credit UX / packs / Stripe authority | PASS except config     | Server and scanner gates prove consume-once, zero-credit hard block/modal/reconnect, 5/10/25/50/100 pack plumbing, Stripe TEST mode/Price/currency/environment verification, unpaid/wrong/replayed event rejection; staging packs remain fail-closed until owner supplies TEST prices/currency. |
+| Auth/MFA/onboarding/station/viewer/downstream                   | PASS source/local      | Auth/onboarding/viewer/downstream slice 144 passed / 65 skipped; viewer pixel source labels remain explicit; grading maths and immutable TIFF master unchanged.                                                                                                                                 |
+| 5k / 10k / 20k control-plane load                               | PASS simulated         | 5,000 workflows + 20,000 burst PASS; 10,000 workflows + 20,000 burst PASS; zero cross-MV contamination, duplicate evidence, duplicate reservation, double consume, negative wallet, zero-credit bypass, or stale current Preview in the simulator.                                              |
+| Full root gate                                                  | FAIL external-env only | Post-commit `npm test`: 292 files passed / 54 skipped / 5 suites failed because `TEST_DATABASE_URL` or `MINTVAULT_DATABASE_URL` was absent; no actionable scanner/payment/viewer/auth source-contract failure remained.                                                                         |
+| Production isolation                                            | PASS read-only         | No production deployment/migration by this pass; read-only prod check found no scanner `0094`/`0096` rows and no `physical_released` column.                                                                                                                                                    |
+
+## Physical Canon acceptance-only checklist
+
+1. Launch packaged staging Scanner.
+2. Canon READY.
+3. PREVIEW FRONT.
+4. SCAN FRONT.
+5. Verify FRONT upload runs in background.
+6. Immediately PREVIEW BACK while FRONT still uploads.
+7. SCAN BACK.
+8. Both sides authoritative.
+9. Cable disconnect/reconnect recovery.
+10. Scanner restart during pending upload.
+11. Image-quality visual check.
+12. Measured scan timing/countdown accuracy.
