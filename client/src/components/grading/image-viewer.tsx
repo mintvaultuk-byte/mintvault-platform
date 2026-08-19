@@ -24,7 +24,6 @@ import type { Defect, MvgsCode } from "./defect-annotation";
 import DefectTypePicker from "./defect-type-picker";
 import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 import {
-  CARD_INSPECTION_MAX_ZOOM,
   inspectionViewToPercentFocus,
   normaliseCardInspectionState,
   percentFocusToInspectionView,
@@ -63,6 +62,14 @@ interface ImageUrls {
   closeup_cropped?: string | null;
 }
 
+interface WorkingEvidenceStatus {
+  available: boolean;
+  reason: string | null;
+  recovery: string | null;
+  master: { dpi: number | null; width: number | null; height: number | null } | null;
+  working: { width: number | null; height: number | null; format: string | null } | null;
+}
+
 interface FrameRect {
   left_pct: number;
   right_pct: number;
@@ -79,6 +86,8 @@ export interface CenteringOverlayData {
 
 interface Props {
   urls: ImageUrls;
+  /** Server-verified 1200-DPI/master-dimension admission state. Never inferred from a URL. */
+  workingEvidence?: Partial<Record<"front" | "back", WorkingEvidenceStatus>>;
   defects: Defect[];
   onDefectAdded: (defect: Defect) => void;
   /** Opens the 8-dot Card Tool for a side. When provided, "Card Tool (Front)"
@@ -213,77 +222,44 @@ export function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCo
 }
 
 const SIDES: Side[] = ["front", "back"];
-function getUrl(urls: ImageUrls, side: Side, variant: Variant): string | null {
-  // Main colour view prefers the 1600px display derivative (front/back only —
-  // angled/closeup have no derivative and fall through to cropped/original).
-  if (variant === "original")
-    return (
-      (urls as Record<string, string | null | undefined>)[`${side}_display`] ||
-      urls[`${side}_cropped`] ||
-      urls[`${side}_original`] ||
-      null
-    );
-  const key = `${side}_${variant}` as keyof ImageUrls;
-  return (urls[key] as string | null) || urls[`${side}_cropped`] || urls[`${side}_original`] || null;
-}
 
-type PixelInspectionSource =
-  | "working-evidence"
-  | "working-cropped-evidence"
-  | "legacy-original"
-  | "legacy-cropped"
-  | "display-derivative";
+type WorkingEvidenceSource = "working-evidence";
 
-interface PixelInspectionAsset {
+interface WorkingEvidenceAsset {
   url: string;
-  source: PixelInspectionSource;
+  source: WorkingEvidenceSource;
 }
 
 /**
- * Pixel inspection must begin with the native-resolution working evidence.  For LiDE capture this
- * is the canonical evidence-derived image the grading workflow uses; `*_original` is a legacy
- * upload field and can be a lower-resolution historical derivative.  The immutable TIFF evidence
- * master remains server-side and is deliberately not represented as a browser image URL here.
+ * Every normal grading inspection is bound to the native-resolution working evidence. For LiDE
+ * capture this is the canonical evidence-derived image the grading workflow uses; `*_original`
+ * and `*_display` can be legacy or viewer derivatives and are never interchangeable inspection
+ * sources. The immutable TIFF master remains server-side and is deliberately not represented as a
+ * browser image URL here.
  *
- * Fallbacks retain legacy certificate access, but are labelled as such at the viewport so a
- * derivative can never silently masquerade as the grading-evidence source.
+ * Do not add a fallback here. An unavailable working asset must remain an explicit unavailable
+ * state, rather than allowing a grader to mistake a low-resolution derivative for evidence.
  */
-function getPixelInspectionAsset(urls: ImageUrls, side: Side): PixelInspectionAsset | null {
+function getWorkingEvidenceAsset(urls: ImageUrls, side: Side): WorkingEvidenceAsset | null {
   if (side !== "front" && side !== "back") return null;
   const record = urls as Record<string, string | null | undefined>;
-  const candidates: Array<[PixelInspectionSource, string | null | undefined]> = [
-    ["working-evidence", record[`${side}_working`]],
-    ["working-cropped-evidence", record[`${side}_working_cropped`]],
-    ["legacy-original", record[`${side}_original`]],
-    ["legacy-cropped", record[`${side}_cropped`]],
-    ["display-derivative", record[`${side}_display`]],
-  ];
-  const found = candidates.find(([, url]) => Boolean(url));
-  return found ? { source: found[0], url: found[1]! } : null;
-}
-
-/** The control itself names the selected asset class; a data attribute alone is not enough for a grader. */
-function pixelInspectionLabel(asset: PixelInspectionAsset): string {
-  switch (asset.source) {
-    case "working-evidence":
-      return "Full-Resolution Working Evidence";
-    case "working-cropped-evidence":
-      return "Working Evidence Crop";
-    case "legacy-original":
-      return "Legacy Original Inspection";
-    case "legacy-cropped":
-      return "Legacy Cropped Inspection";
-    case "display-derivative":
-      return "Display Derivative Inspection";
-  }
+  const url = record[`${side}_working`];
+  return url ? { source: "working-evidence", url } : null;
 }
 
 function hasAny(urls: ImageUrls, side: Side): boolean {
-  return !!(urls[`${side}_original`] || urls[`${side}_cropped`]);
+  const record = urls as Record<string, string | null | undefined>;
+  return !!(
+    record[`${side}_working`] ||
+    record[`${side}_working_cropped`] ||
+    record[`${side}_original`] ||
+    record[`${side}_cropped`] ||
+    record[`${side}_display`]
+  );
 }
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8, 12];
-const PIXEL_INSPECTION_MAX_ZOOM = 12;
+const WORKING_EVIDENCE_MAX_ZOOM = 12;
 
 /**
  * Grading-rail SAFE FIT insets, in CSS pixels, applied symmetrically on each
@@ -417,6 +393,7 @@ const PIN_CURSOR = `url("data:image/svg+xml,${PIN_CURSOR_SVG}") 12 12, crosshair
 
 export default function ImageViewer({
   urls,
+  workingEvidence,
   defects,
   onDefectAdded,
   onDefectsChange,
@@ -506,7 +483,6 @@ export default function ImageViewer({
   // Card Tool has always used the simpler one-element pattern; mark mode
   // now matches.)
   const [showReference, setShowReference] = useState(false);
-  const [pixelInspection, setPixelInspection] = useState(false);
   const [zoom, setZoomRaw] = useState(1);
   /** Normal inspection mode stores the image-relative focal point as percent.
    * Mark mode still uses its existing native-scroll geometry below. */
@@ -544,8 +520,8 @@ export default function ImageViewer({
   const canDrawCrease = mutationsEnabled && !!onCreaseLinesChange;
 
   function maxZoom() {
-    if (pixelInspection && !markMode) return PIXEL_INSPECTION_MAX_ZOOM;
-    return inspectionState && !markMode ? CARD_INSPECTION_MAX_ZOOM : 6;
+    if (!markMode) return WORKING_EVIDENCE_MAX_ZOOM;
+    return 6;
   }
 
   const publishInspection = (nextZoom: number, nextPan: { x: number; y: number }) => {
@@ -1005,10 +981,21 @@ export default function ImageViewer({
   void railFitRevision;
   const railFit = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
 
-  const pixelInspectionAsset = getPixelInspectionAsset(urls, side);
-  const currentUrl = pixelInspection
-    ? pixelInspectionAsset?.url || getUrl(urls, side, variant)
-    : getUrl(urls, side, variant);
+  const workingEvidenceAsset = getWorkingEvidenceAsset(urls, side);
+  const workingEvidenceStatus = workingEvidence?.[side as "front" | "back"];
+  // A URL alone is not an admission decision. Requiring the companion server
+  // proof prevents stale query data, an older endpoint, or a UI race from
+  // presenting an otherwise plausible derivative as verified working evidence.
+  const workingEvidenceAvailable = Boolean(workingEvidenceAsset) && workingEvidenceStatus?.available === true;
+  const currentUrl = workingEvidenceAvailable ? (workingEvidenceAsset?.url ?? null) : null;
+  const unavailableReason =
+    workingEvidenceStatus?.reason ?? `${side.toUpperCase()} cannot be graded from a display derivative.`;
+  const unavailableRecovery =
+    workingEvidenceStatus?.recovery ?? "Restore the canonical working evidence for this side.";
+  const frontWorkingEvidenceAvailable =
+    Boolean(getWorkingEvidenceAsset(urls, "front")) && workingEvidence?.front?.available === true;
+  const backWorkingEvidenceAvailable =
+    Boolean(getWorkingEvidenceAsset(urls, "back")) && workingEvidence?.back?.available === true;
   const sideDefects = defects.filter((d) => d.image_side === side);
   const frontDefectCount = defects.filter((d) => d.image_side === "front").length;
   const backDefectCount = defects.filter((d) => d.image_side === "back").length;
@@ -1453,9 +1440,7 @@ export default function ImageViewer({
         data-testid="grading-image-viewport"
         data-coordinate-mode={markMode ? "measurement" : "inspection"}
         data-inspection-side={side}
-        data-inspection-source={
-          pixelInspection ? `${pixelInspectionAsset?.source ?? "unavailable"}-no-smoothing` : "display"
-        }
+        data-inspection-source={workingEvidenceAsset?.source ?? "working-evidence-unavailable"}
         data-inspection-zoom={zoom}
         data-inspection-focus-x={pan.x / 100}
         data-inspection-focus-y={pan.y / 100}
@@ -1498,7 +1483,7 @@ export default function ImageViewer({
             <img
               ref={imgElRef}
               src={currentUrl}
-              alt={`${side} ${variant}`}
+              alt={`${side} full-resolution working evidence`}
               className={markMode ? "block" : "w-full h-full object-contain"}
               style={
                 markMode
@@ -1517,11 +1502,9 @@ export default function ImageViewer({
                         width: "auto",
                         height: "auto",
                       }
-                  : pixelInspection
-                    ? { imageRendering: "pixelated" }
-                    : undefined
+                  : undefined
               }
-              data-pixel-inspection={pixelInspection ? "no-smoothing" : undefined}
+              data-working-evidence="full-resolution"
               data-testid={railFitEnabled ? "grading-card-image" : undefined}
               onLoad={(e) => {
                 const w = e.currentTarget.naturalWidth;
@@ -1968,11 +1951,21 @@ export default function ImageViewer({
               ))}
           </div>
         ) : certId && mutationsEnabled ? (
-          /* Inline drop zone for missing side */
-          <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
+          <InlineDropZone
+            side={side}
+            certId={certId}
+            reason={unavailableReason}
+            recovery={unavailableRecovery}
+            onUploaded={() => onImageDeleted?.()}
+          />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-[var(--admin-ink-faint)] text-xs">No image</p>
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center"
+            data-testid="working-evidence-unavailable"
+          >
+            <p className="text-sm font-bold text-amber-300">FULL-RESOLUTION EVIDENCE UNAVAILABLE</p>
+            <p className="text-xs text-[var(--admin-ink-dim)]">{unavailableReason}</p>
+            <p className="text-xs text-[var(--admin-ink-dim)]">{unavailableRecovery}</p>
           </div>
         )}
       </div>
@@ -2289,15 +2282,11 @@ export default function ImageViewer({
               Your Scan (Front)
             </p>
             <div className="rounded-lg overflow-hidden" style={{ aspectRatio: "5/7" }}>
-              {urls.front_cropped || urls.front_original ? (
-                <img
-                  src={urls.front_display || urls.front_cropped || urls.front_original || ""}
-                  alt="scan front"
-                  className="w-full h-full object-contain"
-                />
+              {urls.front_working && workingEvidence?.front?.available === true ? (
+                <img src={urls.front_working} alt="scan front" className="w-full h-full object-contain" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
-                  <p className="text-[var(--admin-ink-dim)] text-xs">No scan</p>
+                  <p className="text-[var(--admin-ink-dim)] text-xs">Working evidence unavailable</p>
                 </div>
               )}
             </div>
@@ -2341,24 +2330,41 @@ export default function ImageViewer({
         className="flex shrink-0 flex-wrap items-center gap-2"
         data-testid="grading-card-controls"
       >
-        {/* Gated on !readOnly to match the old sidebar behaviour: the card
-            tool must not open on an approved (locked) cert outside edit mode. */}
+        <p
+          className={`text-[9px] font-bold uppercase tracking-widest ${
+            workingEvidenceAvailable ? "text-emerald-300" : "text-amber-300"
+          }`}
+          data-testid="working-evidence-status"
+        >
+          {workingEvidenceAvailable
+            ? `Full-resolution working evidence · ${side}`
+            : `Working evidence unavailable · ${side}`}
+        </p>
+        {/* Side-specific centering/defect tools remain directly available in the
+            workstation. A side without canonical working evidence is visibly
+            disabled rather than being allowed to use a derivative by accident. */}
         {onOpenCardTool && mutationsEnabled && !readOnly && (
           <>
-            <button
-              type="button"
-              onClick={() => onOpenCardTool("front")}
-              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3.5 py-1.5 rounded border border-[#B8960C] text-[#1A1400] [background:linear-gradient(135deg,#D4AF37_0%,#B8960C_100%)] shadow-[0_2px_8px_rgba(212,175,55,0.35)] transition-all hover:brightness-110 hover:shadow-[0_3px_12px_rgba(212,175,55,0.5)] hover:-translate-y-px active:translate-y-0"
-            >
-              Card Tool (Front)
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenCardTool("back")}
-              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3.5 py-1.5 rounded border border-[#B8960C] text-[#1A1400] [background:linear-gradient(135deg,#D4AF37_0%,#B8960C_100%)] shadow-[0_2px_8px_rgba(212,175,55,0.35)] transition-all hover:brightness-110 hover:shadow-[0_3px_12px_rgba(212,175,55,0.5)] hover:-translate-y-px active:translate-y-0"
-            >
-              Card Tool (Back)
-            </button>
+            {(["front", "back"] as const).map((toolSide) => {
+              const available = toolSide === "front" ? frontWorkingEvidenceAvailable : backWorkingEvidenceAvailable;
+              return (
+                <button
+                  key={toolSide}
+                  type="button"
+                  onClick={() => onOpenCardTool(toolSide)}
+                  disabled={!available}
+                  title={
+                    available
+                      ? `Open Card Tool — ${toolSide.toUpperCase()}`
+                      : "Working evidence is required before this side's Card Tool can open"
+                  }
+                  data-testid={`btn-card-tool-${toolSide}`}
+                  className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3.5 py-1.5 rounded border border-[#B8960C] text-[#1A1400] [background:linear-gradient(135deg,#D4AF37_0%,#B8960C_100%)] shadow-[0_2px_8px_rgba(212,175,55,0.35)] transition-all hover:brightness-110 hover:shadow-[0_3px_12px_rgba(212,175,55,0.5)] hover:-translate-y-px active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Card Tool ({toolSide === "front" ? "Front" : "Back"})
+                </button>
+              );
+            })}
           </>
         )}
         <button
@@ -2370,22 +2376,6 @@ export default function ImageViewer({
           <Maximize2 size={11} />
           Mark Defects
         </button>
-        {(side === "front" || side === "back") && pixelInspectionAsset && (
-          <button
-            type="button"
-            onClick={() => {
-              setPixelInspection((value) => !value);
-              zoomReset();
-            }}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${
-              pixelInspection
-                ? "border-[var(--admin-gold)] text-[var(--admin-gold-deep)] bg-[var(--admin-gold)]/10"
-                : "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"
-            }`}
-          >
-            {pixelInspectionLabel(pixelInspectionAsset)}
-          </button>
-        )}
         {certId &&
           mutationsEnabled &&
           !readOnly &&
@@ -2446,8 +2436,20 @@ export default function ImageViewer({
   );
 }
 
-/** Inline drop zone for uploading a single missing side */
-function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: number; onUploaded: () => void }) {
+/** Inline recovery for a missing side. It never substitutes the uploaded/display asset for admitted evidence. */
+function InlineDropZone({
+  side,
+  certId,
+  reason,
+  recovery,
+  onUploaded,
+}: {
+  side: string;
+  certId: number;
+  reason: string;
+  recovery: string;
+  onUploaded: () => void;
+}) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -2475,6 +2477,7 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
   return (
     <div
       className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[var(--admin-gold)]/10" : ""}`}
+      data-testid="working-evidence-unavailable"
       onDragOver={(e) => {
         e.preventDefault();
         setIsDragging(true);
@@ -2505,6 +2508,9 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
         </>
       ) : (
         <>
+          <p className="text-sm font-bold text-amber-300">FULL-RESOLUTION EVIDENCE UNAVAILABLE</p>
+          <p className="max-w-sm px-5 text-center text-xs text-[var(--admin-ink-dim)]">{reason}</p>
+          <p className="max-w-sm px-5 text-center text-xs text-[var(--admin-ink-dim)]">{recovery}</p>
           <Upload size={24} className="text-[var(--admin-ink-dim)]" />
           <p className="text-[var(--admin-ink-dim)] text-xs font-bold">Drop new {side} image here</p>
           <p className="text-[var(--admin-ink-dim)] text-[10px]">or click to browse</p>

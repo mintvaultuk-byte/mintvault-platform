@@ -6,7 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardPreviewPanel } from "../client/src/components/grading-workflow/CardPreviewPanel";
 import { createCardInspectionState } from "../client/src/components/grading-workflow/card-inspection-state";
 import ImageViewer from "../client/src/components/grading/image-viewer";
+import ManualCardTool from "../client/src/components/grading/manual-card-tool";
 const IMAGE = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='500' height='700'/>";
+const ADMITTED_WORKING_EVIDENCE = {
+  front: {
+    available: true,
+    reason: null,
+    recovery: null,
+    master: { dpi: 1200, width: 4724, height: 6136 },
+    working: { width: 4724, height: 6136, format: "jpeg" },
+  },
+  back: {
+    available: true,
+    reason: null,
+    recovery: null,
+    master: { dpi: 1200, width: 4724, height: 6136 },
+    working: { width: 4724, height: 6136, format: "jpeg" },
+  },
+};
 let host;
 let root;
 beforeEach(() => {
@@ -82,7 +99,8 @@ describe("mounted controlled card inspection", () => {
     function Host() {
       const [inspection, setInspection] = useState(observed);
       return /* @__PURE__ */ React.createElement(ImageViewer, {
-        urls: { front_original: IMAGE, back_original: IMAGE },
+        urls: { front_working: IMAGE, back_working: IMAGE },
+        workingEvidence: ADMITTED_WORKING_EVIDENCE,
         defects: [],
         onDefectAdded: (defect) => added.push(defect),
         highlightId: null,
@@ -158,15 +176,19 @@ describe("mounted controlled card inspection", () => {
     expect(added.map((defect) => defect.image_side)).toEqual(["front", "back"]);
   });
 
-  it("shows the actual FRONT/BACK pixel-inspection source and never calls a legacy fallback full-resolution evidence", async () => {
+  it("automatically shows FRONT/BACK working evidence and has no full-resolution toggle", async () => {
     await act(async () =>
       root.render(
         /* @__PURE__ */ React.createElement(ImageViewer, {
           urls: {
             front_working: "https://evidence.test/front-working.jpg",
+            front_display: "https://display.test/front-display.jpg",
             front_original: "https://legacy.test/front-original.jpg",
+            back_working: "https://evidence.test/back-working.jpg",
+            back_display: "https://display.test/back-display.jpg",
             back_original: "https://legacy.test/back-original.jpg",
           },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
           defects: [],
           onDefectAdded: () => {},
           highlightId: null,
@@ -177,17 +199,216 @@ describe("mounted controlled card inspection", () => {
       [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === text);
     const viewport = host.querySelector('[data-testid="grading-image-viewport"]');
 
-    const frontEvidence = buttonByText("Full-Resolution Working Evidence");
-    expect(frontEvidence).toBeDefined();
-    await act(async () => frontEvidence.click());
-    expect(viewport.dataset.inspectionSource).toBe("working-evidence-no-smoothing");
+    expect(buttonByText("Full-Resolution Working Evidence")).toBeUndefined();
+    expect(viewport.dataset.inspectionSource).toBe("working-evidence");
     expect(host.querySelector("img").getAttribute("src")).toBe("https://evidence.test/front-working.jpg");
 
     await act(async () => buttonByText("back").click());
-    const backLegacy = buttonByText("Legacy Original Inspection");
-    expect(backLegacy).toBeDefined();
-    expect(viewport.dataset.inspectionSource).toBe("legacy-original-no-smoothing");
-    expect(host.querySelector("img").getAttribute("src")).toBe("https://legacy.test/back-original.jpg");
-    expect(host.textContent).not.toContain("Full-Resolution Evidence");
+    expect(viewport.dataset.inspectionSource).toBe("working-evidence");
+    expect(host.querySelector("img").getAttribute("src")).toBe("https://evidence.test/back-working.jpg");
+    expect(host.querySelector('[data-testid="working-evidence-status"]')?.textContent).toContain(
+      "Full-resolution working evidence · back"
+    );
+  });
+
+  it("fails visibly instead of silently substituting a display derivative when working evidence is absent", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: {
+            front_display: "https://display.test/front-display.jpg",
+            front_original: "https://legacy.test/front-original.jpg",
+          },
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    const viewport = host.querySelector('[data-testid="grading-image-viewport"]');
+    expect(viewport.dataset.inspectionSource).toBe("working-evidence-unavailable");
+    expect(host.querySelector('[data-testid="working-evidence-unavailable"]')).toBeTruthy();
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.textContent).toContain("FRONT cannot be graded from a display derivative");
+    expect(host.querySelector('[data-testid="working-evidence-status"]')?.textContent).toContain(
+      "Working evidence unavailable · front"
+    );
+  });
+
+  it("honours a server rejection even if a stale working URL remains in client state", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: "https://stale.test/front-working.jpg" },
+          workingEvidence: {
+            front: {
+              available: false,
+              reason: "Working evidence dimensions do not match the canonical master.",
+              recovery: "Regenerate the working evidence from the immutable 1200-DPI master.",
+              master: { dpi: 1200, width: 4724, height: 6136 },
+              working: { width: 1600, height: 2079, format: "jpeg" },
+            },
+          },
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
+    expect(host.textContent).toContain("dimensions do not match");
+    expect(host.textContent).toContain("immutable 1200-DPI master");
+  });
+
+  it("keeps the Card Details and Review preview fail-closed too", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          queryFn: async () => ({ urls: { front_display: "https://display.test/front-display.jpg" } }),
+          retry: false,
+        },
+      },
+    });
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          /* @__PURE__ */ React.createElement(CardPreviewPanel, {
+            certificateId: 99,
+            inspectionState: createCardInspectionState(),
+            onInspectionStateChange: () => {},
+          })
+        )
+      )
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(host.querySelector('[data-testid="card-preview-image"]')).toBeNull();
+    expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
+    expect(host.textContent).toContain("FRONT cannot be inspected from a display derivative");
+  });
+
+  it("keeps Card Details closed when a stale working URL is explicitly rejected", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          queryFn: async () => ({
+            urls: { front_working: "https://stale.test/front-working.jpg" },
+            workingEvidence: {
+              front: {
+                available: false,
+                reason: "Working evidence dimensions do not match the canonical master.",
+                recovery: "Regenerate the working evidence from the immutable 1200-DPI master.",
+              },
+            },
+          }),
+          retry: false,
+        },
+      },
+    });
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(
+          QueryClientProvider,
+          { client: queryClient },
+          /* @__PURE__ */ React.createElement(CardPreviewPanel, {
+            certificateId: 100,
+            inspectionState: createCardInspectionState(),
+            onInspectionStateChange: () => {},
+          })
+        )
+      )
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(host.querySelector('[data-testid="card-preview-image"]')).toBeNull();
+    expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
+    expect(host.textContent).toContain("dimensions do not match");
+  });
+
+  it("mounts the selected side's Card Tool directly and keeps FRONT/BACK actions isolated", async () => {
+    const opened: Array<"front" | "back"> = [];
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: IMAGE, back_working: IMAGE },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
+          defects: [],
+          onDefectAdded: () => {},
+          onOpenCardTool: (side) => opened.push(side),
+          highlightId: null,
+        })
+      )
+    );
+    await act(async () => host.querySelector('[data-testid="btn-card-tool-front"]').click());
+    await act(async () =>
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === "back").click()
+    );
+    await act(async () => host.querySelector('[data-testid="btn-card-tool-back"]').click());
+    expect(opened).toEqual(["front", "back"]);
+  });
+
+  it("disables a side's Card Tool when its working evidence is rejected", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: IMAGE, back_working: IMAGE },
+          workingEvidence: {
+            front: {
+              available: true,
+              reason: null,
+              recovery: null,
+              master: { dpi: 1200, width: 4724, height: 6136 },
+              working: { width: 4724, height: 6136, format: "jpeg" },
+            },
+            back: {
+              available: false,
+              reason: "The 1200-DPI master is unavailable.",
+              recovery: "Restore canonical evidence.",
+              master: null,
+              working: null,
+            },
+          },
+          defects: [],
+          onDefectAdded: () => {},
+          onOpenCardTool: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="btn-card-tool-front"]')?.disabled).toBe(false);
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="btn-card-tool-back"]')?.disabled).toBe(true);
+  });
+
+  it("runs each Card Tool side from its admitted full-resolution working source", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ManualCardTool, {
+          certId: 99,
+          side: "front",
+          workingImageUrl: "https://evidence.test/front-working.jpg",
+          onDone: () => {},
+          onCancel: () => {},
+        })
+      )
+    );
+    expect(host.querySelector("img")?.getAttribute("src")).toBe("https://evidence.test/front-working.jpg");
+
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ManualCardTool, {
+          certId: 99,
+          side: "back",
+          workingImageUrl: "https://evidence.test/back-working.jpg",
+          onDone: () => {},
+          onCancel: () => {},
+        })
+      )
+    );
+    expect(host.querySelector("img")?.getAttribute("src")).toBe("https://evidence.test/back-working.jpg");
   });
 });

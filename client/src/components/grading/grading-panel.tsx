@@ -414,7 +414,20 @@ export default function GradingPanel({
   const canonicalClassificationEditable = graderMode || adminReview;
 
   // Image URLs
-  const { data: imageData } = useQuery<{ urls: Record<string, string | null>; quality: Record<string, any> }>({
+  const { data: imageData } = useQuery<{
+    urls: Record<string, string | null>;
+    quality: Record<string, any>;
+    workingEvidence?: Record<
+      "front" | "back",
+      {
+        available: boolean;
+        reason: string | null;
+        recovery: string | null;
+        master: { dpi: number | null; width: number | null; height: number | null } | null;
+        working: { width: number | null; height: number | null; format: string | null } | null;
+      }
+    >;
+  }>({
     queryKey: [`${apiBase}/certificates/${certId}/images`],
     queryFn: async () => {
       const res = await fetch(`${apiBase}/certificates/${certId}/images`, { credentials: "include" });
@@ -3159,6 +3172,7 @@ export default function GradingPanel({
                 <ImageViewer
                   apiBase={apiBase}
                   urls={urls}
+                  workingEvidence={imageData?.workingEvidence}
                   defects={defects}
                   onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
                   onDefectsChange={(next) => active && setDefects(next)}
@@ -4099,22 +4113,18 @@ export default function GradingPanel({
         </div>
       </div>
 
-      {/* 8-dot Card Tool — crop + deskew + centering on the RAW original.
-          After Compute the tool stays open in the defects phase against the
-          freshly-cropped display image, using the same `onDefectAdded`
-          handler that image-viewer mark mode uses (so the auto-save path
-          is identical — no new server route, no divergent save semantics). */}
-      {active && manualCardToolSide && (manualCardToolSide === "front" ? urls.front_original : urls.back_original) && (
+      {/* 8-dot Card Tool — crop + deskew + centering always begin from the
+          side's server-admitted full-resolution working evidence. A display,
+          cropped, or legacy-original URL may never unlock this tool. */}
+      {active &&
+        manualCardToolSide &&
+        imageData?.workingEvidence?.[manualCardToolSide]?.available === true &&
+        (manualCardToolSide === "front" ? urls.front_working : urls.back_working) && (
         <ManualCardTool
           apiBase={apiBase}
           certId={certId}
           side={manualCardToolSide}
-          rawImageUrl={(manualCardToolSide === "front" ? urls.front_original : urls.back_original) as string}
-          workingImageUrl={
-            (manualCardToolSide === "front" ? urls.front_working : urls.back_working) ||
-            (manualCardToolSide === "front" ? urls.front_original : urls.back_original) ||
-            undefined
-          }
+          workingImageUrl={(manualCardToolSide === "front" ? urls.front_working : urls.back_working) as string}
           onCentering={(result) => {
             if (!active) return;
             if (result.side === "front") {
@@ -4163,27 +4173,6 @@ export default function GradingPanel({
           }}
           cropSyncStatus={cropSync[manualCardToolSide].status}
           onRetryCrop={() => retryCrop(manualCardToolSide)}
-          // Skip centering when this side ALREADY has a crop image: open straight
-          // to defect-marking on the existing crop. GATE ON CROP PRESENCE, not
-          // centering-done — a legacy side can have centering ratios but no crop
-          // image, where opening defects on the raw would misalign pins.
-          initialPhase={
-            (
-              manualCardToolSide === "front"
-                ? urls.front_display || urls.front_cropped
-                : urls.back_display || urls.back_cropped
-            )
-              ? "defects"
-              : "capture"
-          }
-          existingCroppedUrl={
-            (manualCardToolSide === "front"
-              ? urls.front_display || urls.front_cropped
-              : urls.back_display || urls.back_cropped) || undefined
-          }
-          workingCroppedUrl={
-            (manualCardToolSide === "front" ? urls.front_working_cropped : urls.back_working_cropped) || undefined
-          }
         />
       )}
 
