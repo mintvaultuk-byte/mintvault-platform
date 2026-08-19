@@ -1,6 +1,6 @@
 # Change manifest — MintVault Command Centre V1 final reconciliation
 
-**Date:** 2026-08-19  
+**Date:** 2026-08-19
 **Lead session:** `codex/command-centre-v1-reconciliation-20260819` at `c50617526d454eb1911b9d4dcd819fb296844424`
 
 ## Findings this manifest addresses
