@@ -38,7 +38,7 @@ export type PartnerReadVisibility =
   | { ok: false; code: VisibilityFailureCode; message: string };
 
 export type PartnerStationReadVisibility =
-  | { ok: true }
+  | { ok: true; profileRevisionSchema: boolean }
   | { ok: false; code: VisibilityFailureCode };
 
 /**
@@ -79,6 +79,7 @@ interface RelRow {
   relrowsecurity: boolean;
   relforcerowsecurity: boolean;
   owner: string;
+  profile_revision_schema?: boolean;
 }
 
 interface RoleRow {
@@ -225,7 +226,14 @@ export async function getPartnerStationReadVisibility(): Promise<PartnerStationR
       `SELECT c.relname::text AS relname, c.relkind::text AS relkind,
               COALESCE(c.relrowsecurity, false) AS relrowsecurity,
               COALESCE(c.relforcerowsecurity, false) AS relforcerowsecurity,
-              pg_get_userbyid(c.relowner)::text AS owner
+              pg_get_userbyid(c.relowner)::text AS owner,
+              EXISTS (
+                SELECT 1 FROM pg_attribute a
+                 WHERE a.attrelid = c.oid
+                   AND a.attname = 'current_profile_revision_id'
+                   AND a.attnum > 0
+                   AND NOT a.attisdropped
+              ) AS profile_revision_schema
          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public' AND c.relname = 'partner_stations'`,
     ),
@@ -235,5 +243,5 @@ export async function getPartnerStationReadVisibility(): Promise<PartnerStationR
   const role = roleRes.rows[0] ?? { role_name: "unknown", rolsuper: false, rolbypassrls: false };
   return rlsBlocks(relation, role)
     ? { ok: false, code: "PARTNER_ADMIN_RLS_VISIBILITY_UNAVAILABLE" }
-    : { ok: true };
+    : { ok: true, profileRevisionSchema: relation.profile_revision_schema === true };
 }

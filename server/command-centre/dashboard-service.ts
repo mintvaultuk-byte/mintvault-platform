@@ -204,7 +204,7 @@ async function composeDashboard(period: CommandCentrePeriod): Promise<CommandCen
       ? success("partner-onboarding-blocked", partner.onboardingBlocked.length, asOf)
       : failed(
           "partner-onboarding-blocked",
-          "UNAVAILABLE",
+          partner.onboardingFailureStatus ?? "UNAVAILABLE",
           partner.onboardingReasonCode ?? "PARTNER_ONBOARDING_UNAVAILABLE"
         );
     kpis["partner-credit-projection"] = partner.wallet

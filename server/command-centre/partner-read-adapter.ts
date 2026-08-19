@@ -26,6 +26,7 @@ export type PartnerReadResult =
       connectorReasonCode?: string;
       onboardingBlocked: Array<{ id: string; timestamp: string }> | null;
       onboardingReasonCode?: string;
+      onboardingFailureStatus?: "UNKNOWN" | "UNAVAILABLE" | "ERROR";
       connectorCandidates: Array<{ id: string; timestamp: string }>;
     }
   | { available: false; reasonCode: string; visibilityFailure: boolean; failureStatus: "UNAVAILABLE" | "ERROR" };
@@ -111,12 +112,19 @@ type ReadinessFactRow = {
   wallet_balance: number | string | null;
 };
 
-async function listReadinessFacts(partnerIds: readonly string[], walletSchema: boolean): Promise<ReadinessFactRow[]> {
+async function listReadinessFacts(
+  partnerIds: readonly string[],
+  walletSchema: boolean,
+  profileRevisionSchema: boolean
+): Promise<ReadinessFactRow[]> {
   if (partnerIds.length === 0) return [];
   const walletProjection = walletSchema
     ? "wallet.tenant_id::text AS wallet_tenant_id, wallet.balance AS wallet_balance"
     : "NULL::text AS wallet_tenant_id, NULL::numeric AS wallet_balance";
   const walletJoin = walletSchema ? "LEFT JOIN partner_wallet_balances wallet ON wallet.tenant_id=o.id" : "";
+  const profileRevisionProjection = profileRevisionSchema
+    ? "active.current_profile_revision_id"
+    : "NULL::uuid AS current_profile_revision_id";
   const result = await partnerAdminQuery<ReadinessFactRow>(
     `SELECT o.id::text AS partner_id, o.status AS org_status,
             owner.user_status AS owner_status,
@@ -126,7 +134,7 @@ async function listReadinessFacts(partnerIds: readonly string[], walletSchema: b
             COALESCE(station.approved_active, 0)::int AS station_approved_active,
             COALESCE(station.pending_approval, 0)::int AS station_pending,
             active.scanner_connected, active.last_seen_at, active.calibration_status,
-            active.current_calibration_id, active.current_profile_revision_id,
+            active.current_calibration_id, ${profileRevisionProjection},
             active.app_version, active.minimum_supported_version,
             ${walletProjection}
        FROM partner_organisations o
@@ -177,7 +185,8 @@ async function listReadinessFacts(partnerIds: readonly string[], walletSchema: b
        ) station ON true
        LEFT JOIN LATERAL (
          SELECT s.scanner_connected, s.last_seen_at, s.calibration_status,
-                s.current_calibration_id, s.current_profile_revision_id,
+                s.current_calibration_id,
+                ${profileRevisionSchema ? "s.current_profile_revision_id," : ""}
                 s.app_version, s.minimum_supported_version
            FROM partner_stations s
            JOIN partner_locations l ON l.id=s.location_id AND l.tenant_id=s.tenant_id AND l.status='ACTIVE'
@@ -213,7 +222,10 @@ async function readGlobalReadinessFlags(): Promise<{
   };
 }
 
-async function readOnboardingCandidates(walletSchema: boolean): Promise<Array<{ id: string; timestamp: string }>> {
+async function readOnboardingCandidates(
+  walletSchema: boolean,
+  profileRevisionSchema: boolean
+): Promise<Array<{ id: string; timestamp: string }> | null> {
   const partnerPage = await listPartnersForDashboard({ sort: "created_at", direction: "asc" }, 1, 100, walletSchema);
   if (partnerPage.total > partnerPage.rows.length) {
     throw new Error("PARTNER_ONBOARDING_SOURCE_TRUNCATED");
@@ -223,13 +235,15 @@ async function readOnboardingCandidates(walletSchema: boolean): Promise<Array<{ 
     readGlobalReadinessFlags(),
     listReadinessFacts(
       partnerPage.rows.map((partner) => partner.partnerId),
-      walletSchema
+      walletSchema,
+      profileRevisionSchema
     ),
   ]);
   const { portalEnabled, loginFlagEnabled, emergencyStop } = globalFlags;
   const factByPartner = new Map(facts.map((row) => [row.partner_id, row]));
   const nowMs = Date.now();
-  return partnerPage.rows.flatMap((partner) => {
+  let hasUnknownReadiness = false;
+  const blockedPartners = partnerPage.rows.flatMap((partner) => {
     const row = factByPartner.get(partner.partnerId);
     if (!row) throw new Error("PARTNER_ONBOARDING_FACT_MISSING");
     const activeStation =
@@ -240,7 +254,7 @@ async function readOnboardingCandidates(walletSchema: boolean): Promise<Array<{ 
             lastSeenAt: normaliseCommandCentreTimestamp(row.last_seen_at),
             calibrationStatus: row.calibration_status,
             currentCalibrationId: row.current_calibration_id,
-            currentProfileRevisionId: row.current_profile_revision_id,
+            currentProfileRevisionId: profileRevisionSchema ? row.current_profile_revision_id : undefined,
             appVersion: row.app_version,
             minimumSupportedVersion: row.minimum_supported_version,
           };
@@ -276,9 +290,14 @@ async function readOnboardingCandidates(walletSchema: boolean): Promise<Array<{ 
       nowMs,
     };
     const readiness = derivePartnerOperationalReadiness(factsForPartner);
+    if (Object.values(readiness.dimensions).some((dimension) => dimension.status === "UNKNOWN")) {
+      hasUnknownReadiness = true;
+      return [];
+    }
     const blocked = Object.values(readiness.dimensions).some((dimension) => dimension.status === "BLOCKED");
     return blocked ? [{ id: partner.partnerId, timestamp: partner.lastActivityAt ?? "" }] : [];
   });
+  return hasUnknownReadiness ? null : blockedPartners;
 }
 
 /**
@@ -340,7 +359,10 @@ async function readPartnerDashboardUnshared(): Promise<PartnerReadResult> {
         ),
       () =>
         observedPartnerRead("partner-onboarding", snapshotDeadlineAt, () =>
-          readOnboardingCandidates(visibility.walletSchema)
+          readOnboardingCandidates(
+            visibility.walletSchema,
+            stationVisibility.ok && stationVisibility.profileRevisionSchema
+          )
         ).then(
           (value) => ({ value }),
           () => ({ error: "PARTNER_ONBOARDING_ADAPTER_ERROR" })
@@ -387,7 +409,18 @@ async function readPartnerDashboardUnshared(): Promise<PartnerReadResult> {
       connectorReasonCode:
         "error" in connectorResult ? connectorResult.error : "error" in summaryResult ? summaryResult.error : undefined,
       onboardingBlocked: "value" in onboardingResult ? onboardingResult.value : null,
-      onboardingReasonCode: "error" in onboardingResult ? onboardingResult.error : undefined,
+      onboardingReasonCode:
+        "value" in onboardingResult && onboardingResult.value === null
+          ? "PARTNER_ONBOARDING_READINESS_UNKNOWN"
+          : "error" in onboardingResult
+            ? onboardingResult.error
+            : undefined,
+      onboardingFailureStatus:
+        "value" in onboardingResult && onboardingResult.value === null
+          ? "UNKNOWN"
+          : "error" in onboardingResult
+            ? "UNAVAILABLE"
+            : undefined,
       connectorCandidates: ("value" in connectorResult ? connectorResult.value : []).flatMap(
         (candidate: { id: string; updatedAt: unknown }) => {
           const timestamp = normaliseCommandCentreTimestamp(candidate.updatedAt);

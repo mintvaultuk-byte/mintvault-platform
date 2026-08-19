@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.budget.mockImplementation((operation: () => Promise<unknown>) => operation());
   mocks.visibility.mockResolvedValue({ ok: true, walletSchema: true });
-  mocks.stationVisibility.mockResolvedValue({ ok: true });
+  mocks.stationVisibility.mockResolvedValue({ ok: true, profileRevisionSchema: true });
   mocks.summary.mockResolvedValue({
     shops: { active: 1, onboarding: 0, suspended: 0 },
     security: { openAlerts: 0 },
@@ -215,5 +215,69 @@ describe("Command Centre Partner adapter boundary", () => {
     );
     expect(factsQuery).not.toContain("partner_wallet_balances");
     expect(factsQuery).toContain("NULL::text AS wallet_tenant_id");
+  });
+
+  it("omits the optional profile-revision column and passes UNKNOWN when migration 0091 is absent", async () => {
+    const id = "00000000-0000-0000-0000-000000000001";
+    mocks.stationVisibility.mockResolvedValue({ ok: true, profileRevisionSchema: false });
+    mocks.partners.mockResolvedValue({ rows: [partner(id)], total: 1, page: 1, pageSize: 100, totalPages: 1 });
+    mocks.partnerQuery.mockImplementation(async (query: string) =>
+      query.includes("FROM partner_feature_flags")
+        ? {
+            rows: [
+              { flag: "partner_portal_enabled", enabled: true },
+              { flag: "partner_login_enabled", enabled: true },
+              { flag: "partner_emergency_stop", enabled: false },
+            ],
+          }
+        : {
+            rows: [
+              {
+                partner_id: id,
+                org_status: "ACTIVE",
+                owner_status: "ACTIVE",
+                password_configured: true,
+                invitation_valid: false,
+                mfa_required: true,
+                mfa_configured: true,
+                location_eligible: true,
+                station_enrolled: 1,
+                station_approved_active: 1,
+                station_pending: 0,
+                scanner_connected: true,
+                last_seen_at: "2026-08-19T22:00:00.000Z",
+                calibration_status: "VALID",
+                current_calibration_id: "00000000-0000-0000-0000-000000000002",
+                current_profile_revision_id: null,
+                app_version: "1.0.0",
+                minimum_supported_version: "1.0.0",
+                wallet_tenant_id: id,
+                wallet_balance: 10,
+              },
+            ],
+          }
+    );
+
+    mocks.derive.mockReturnValue({ dimensions: { scanner: { status: "UNKNOWN" } } });
+    const result = await readPartnerDashboard();
+
+    const factsQuery = String(
+      mocks.partnerQuery.mock.calls.find(([query]) => String(query).includes("FROM partner_organisations"))?.[0]
+    );
+    expect(factsQuery).not.toContain("s.current_profile_revision_id");
+    expect(factsQuery).toContain("NULL::uuid AS current_profile_revision_id");
+    expect(mocks.derive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        station: expect.objectContaining({
+          active: expect.objectContaining({ currentProfileRevisionId: undefined }),
+        }),
+      })
+    );
+    expect(result).toMatchObject({
+      available: true,
+      onboardingBlocked: null,
+      onboardingReasonCode: "PARTNER_ONBOARDING_READINESS_UNKNOWN",
+      onboardingFailureStatus: "UNKNOWN",
+    });
   });
 });

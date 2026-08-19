@@ -94,6 +94,30 @@ describe("Command Centre dashboard composition", () => {
     expect(unavailable.attention.some((item) => item.ruleId === "ATT-STATION-PENDING")).toBe(false);
   });
 
+  it("preserves UNKNOWN when any Partner readiness fact is undecidable", async () => {
+    vi.mocked(readPartnerDashboard).mockResolvedValueOnce({
+      available: true,
+      network: { active: 1, pending: 0, suspended: 0, alerts: 0 },
+      wallet: { available: 10, reserved: 2, consumed: 1 },
+      station: { PENDING: 0, ACTIVE: 1, SUSPENDED: 0, REVOKED: 0 },
+      connectorCount: 0,
+      onboardingBlocked: null,
+      onboardingReasonCode: "PARTNER_ONBOARDING_READINESS_UNKNOWN",
+      onboardingFailureStatus: "UNKNOWN",
+      connectorCandidates: [],
+    });
+
+    const dashboard = await composeCommandCentreDashboard("today");
+
+    expect(dashboard.kpis["partner-onboarding-blocked"]).toEqual(
+      expect.objectContaining({
+        status: "UNKNOWN",
+        reasonCode: "PARTNER_ONBOARDING_READINESS_UNKNOWN",
+      })
+    );
+    expect(dashboard.kpis["partner-onboarding-blocked"]).not.toHaveProperty("value");
+  });
+
   it("degrades an individual core source without changing unrelated canonical KPI envelopes", async () => {
     vi.mocked(readCoreOperationalSnapshot).mockResolvedValueOnce({
       submissions: { value: { unknownStatus: false, nonTerminal: 2, paid: { count: 1, amount: 25, nonGbp: 0 } } },
