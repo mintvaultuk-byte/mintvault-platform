@@ -56,8 +56,7 @@ export const COMMAND_CENTRE_SOURCE_IDS = [
   "deterministic-attention-policy",
 ] as const;
 
-export type CommandCentreDepartmentId =
-  (typeof COMMAND_CENTRE_DEPARTMENTS)[number]["id"];
+export type CommandCentreDepartmentId = (typeof COMMAND_CENTRE_DEPARTMENTS)[number]["id"];
 export type CommandCentreKpiId = (typeof COMMAND_CENTRE_KPI_IDS)[number];
 export type CommandCentreSourceId = (typeof COMMAND_CENTRE_SOURCE_IDS)[number];
 
@@ -84,9 +83,7 @@ export type CommandCentrePolicyDescriptor = CommonDescriptor & {
   automation: "SYSTEM_DETERMINISTIC";
 };
 
-export type CommandCentreDescriptor =
-  | CommandCentreCapabilityDescriptor
-  | CommandCentrePolicyDescriptor;
+export type CommandCentreDescriptor = CommandCentreCapabilityDescriptor | CommandCentrePolicyDescriptor;
 
 export const COMMAND_CENTRE_REGISTRY: readonly CommandCentreDescriptor[] = [
   {
@@ -277,13 +274,7 @@ export const COMMAND_CENTRE_PERIODS = ["today", "month_to_date"] as const;
 export type CommandCentrePeriod = (typeof COMMAND_CENTRE_PERIODS)[number];
 
 export type CommandCentreKpiStatus =
-  | "VALUE"
-  | "ZERO"
-  | "UNKNOWN"
-  | "UNAVAILABLE"
-  | "STALE"
-  | "ERROR"
-  | "NOT_AUTHORISED";
+  "VALUE" | "ZERO" | "UNKNOWN" | "UNAVAILABLE" | "STALE" | "ERROR" | "NOT_AUTHORISED";
 
 export type CommandCentreKpiValue = number | Record<string, number>;
 
@@ -303,7 +294,7 @@ export type CommandCentreKpiEnvelope =
     })
   | (CommandCentreKpiBase & {
       status: "ZERO";
-      value: 0;
+      value: CommandCentreKpiValue;
       authoritativeZero: true;
       asOf: string;
       freshnessSeconds: number;

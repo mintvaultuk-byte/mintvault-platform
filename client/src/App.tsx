@@ -177,6 +177,7 @@ const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workfl
 function GoldBurstEffect() {
   useEffect(() => {
     function handlePointerDown(e: PointerEvent) {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       const target = e.target as Element | null;
       if (!target) return;
 
@@ -717,7 +718,15 @@ function Router() {
 function SubmitAttributionContinuity() {
   useEffect(() => {
     const preserveOnSubmitClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
       const target = event.target as Element | null;
       const anchor = target?.closest<HTMLAnchorElement>("a[href]");
       if (!anchor || anchor.target || anchor.hasAttribute("download")) return;
@@ -735,7 +744,11 @@ function SubmitAttributionContinuity() {
 function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
-    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false }}>{children}</FeatureFlagsContext.Provider>
+    <FeatureFlagsContext.Provider
+      value={data || { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false }}
+    >
+      {children}
+    </FeatureFlagsContext.Provider>
   );
 }
 

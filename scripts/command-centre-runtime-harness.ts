@@ -92,7 +92,7 @@ async function seedRuntimeDatabase(
   database: string,
   password: string,
   pin: string,
-  commandCentreEnabled: boolean,
+  commandCentreEnabled: boolean
 ): Promise<void> {
   assertDisposableRuntimeDatabaseUrl(database);
   const client = new Client({ connectionString: database });
@@ -171,24 +171,26 @@ async function seedRuntimeDatabase(
     await client.query(
       `INSERT INTO users (id, email, role, admin_passphrase_hash, pin_hash, credential_version)
        VALUES ($1, $2, 'admin', $3, $4, 1)`,
-      ["cc-runtime-super-admin", RUNTIME_ADMIN_EMAIL, passwordHash, pinHash],
+      ["cc-runtime-super-admin", RUNTIME_ADMIN_EMAIL, passwordHash, pinHash]
     );
     await client.query("INSERT INTO cert_counter (id, last_issued) VALUES (1, 0)");
     await client.query(
       `INSERT INTO submissions (user_id, status, tracking_number, card_count, payment_status, payment_amount, payment_currency, payment_timestamp, scan_status, received_at)
        VALUES
          ('cc-runtime-super-admin', 'received', 'CC-RUNTIME-RECEIVED', 1, 'paid', 25, 'GBP', now(), 'unassigned', now() - interval '15 minutes'),
-         ('cc-runtime-super-admin', 'completed', 'CC-RUNTIME-COMPLETED', 1, 'paid', 25, 'GBP', now(), 'assigned', now() - interval '1 hour')`,
+         ('cc-runtime-super-admin', 'completed', 'CC-RUNTIME-COMPLETED', 1, 'paid', 25, 'GBP', now(), 'assigned', now() - interval '1 hour')`
     );
     await client.query(
       `INSERT INTO certificates (certificate_number, grader_status, graded_at)
        VALUES ('CC-RUNTIME-REVIEW', 'pending_review', now() - interval '10 minutes'),
-              ('CC-RUNTIME-GRADING', 'unassigned', now() - interval '5 minutes')`,
+              ('CC-RUNTIME-GRADING', 'unassigned', now() - interval '5 minutes')`
     );
-    await client.query("INSERT INTO print_batches (status, created_at) VALUES ('failed', now() - interval '20 minutes')");
+    await client.query(
+      "INSERT INTO print_batches (status, created_at) VALUES ('failed', now() - interval '20 minutes')"
+    );
     await client.query(
       `INSERT INTO transfer_verifications (cert_id, from_email, to_email, owner_token_hash, owner_expires_at, disputed_at)
-       VALUES ('CC-RUNTIME-TRANSFER', 'from@example.test', 'to@example.test', 'synthetic-token', now() + interval '1 day', now() - interval '30 minutes')`,
+       VALUES ('CC-RUNTIME-TRANSFER', 'from@example.test', 'to@example.test', 'synthetic-token', now() + interval '1 day', now() - interval '30 minutes')`
     );
     await client.query(
       `INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ('cc-runtime-partner', 'CC-TEST-1', 'Synthetic Partner', 'ACTIVE');
@@ -197,12 +199,12 @@ async function seedRuntimeDatabase(
        INSERT INTO partner_connector_records (id, state, updated_at) VALUES ('cc-runtime-connector', 'manual_review', now() - interval '25 minutes');
       INSERT INTO partner_security_events (id, severity, created_at) VALUES ('cc-runtime-security', 'high', now() - interval '5 minutes');
       INSERT INTO partner_stations (id, status) VALUES ('cc-runtime-station', 'PENDING');
-      INSERT INTO command_centre_runtime_audit_marker DEFAULT VALUES;`,
+      INSERT INTO command_centre_runtime_audit_marker DEFAULT VALUES;`
     );
     await client.query(
       `INSERT INTO partner_feature_flags (id, tenant_id, location_id, flag, enabled)
        VALUES ('cc-runtime-command-centre-flag', NULL, NULL, $1, $2)`,
-      [COMMAND_CENTRE_PILOT_FLAG, commandCentreEnabled],
+      [COMMAND_CENTRE_PILOT_FLAG, commandCentreEnabled]
     );
   } finally {
     await client.end();
@@ -229,7 +231,10 @@ async function dropRuntimeDatabase(maintenanceUrl: string, database: string): Pr
   const admin = new Client({ connectionString: maintenanceUrl });
   await admin.connect();
   try {
-    await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", [database]);
+    await admin.query(
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+      [database]
+    );
     await admin.query(`DROP DATABASE IF EXISTS ${quoteIdentifier(database)}`);
   } finally {
     await admin.end();
@@ -247,7 +252,7 @@ async function verifyCommandCentreRuntime(
   port: number,
   commandCentreEnabled: boolean,
   password: string,
-  pin: string,
+  pin: string
 ): Promise<void> {
   const baseUrl = `http://127.0.0.1:${port}`;
   if (!commandCentreEnabled) {
@@ -276,11 +281,19 @@ async function verifyCommandCentreRuntime(
     headers: { cookie: authenticatedCookie },
   });
   if (dashboard.status !== 200) {
-    throw new Error(`Enabled Command Centre runtime returned ${dashboard.status}, expected 200 after Super Admin login.`);
+    throw new Error(
+      `Enabled Command Centre runtime returned ${dashboard.status}, expected 200 after Super Admin login.`
+    );
   }
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<number> {
+  const directTsxImport = process.execArgv.some(
+    (argument, index) => argument === "--import" && process.execArgv[index + 1] === "tsx"
+  );
+  if (!directTsxImport) {
+    throw new Error("Use `npm run command-centre:runtime`; wrapper CLIs cannot guarantee awaited signal cleanup.");
+  }
   if (process.env[COMMAND_CENTRE_RUNTIME_AUDIT_ENV] !== "1") {
     throw new Error(`${COMMAND_CENTRE_RUNTIME_AUDIT_ENV}=1 is required; this harness never runs implicitly.`);
   }
@@ -295,28 +308,52 @@ async function main(): Promise<void> {
   const maintenanceUrl = databaseUrl(role, "postgres");
   const runtimeUrl = databaseUrl(role, database);
   assertDisposableRuntimeDatabaseUrl(runtimeUrl);
-
-  const admin = new Client({ connectionString: maintenanceUrl });
-  await admin.connect();
-  try {
-    await admin.query(`CREATE DATABASE ${quoteIdentifier(database)}`);
-  } finally {
-    await admin.end();
-  }
-
   let app: ChildProcess | undefined;
-  const stop = async (exitCode: number) => {
-    if (app && app.exitCode === null) {
-      app.kill("SIGINT");
-      await Promise.race([once(app, "exit"), new Promise((resolve) => setTimeout(resolve, 10_000))]);
-    }
-    await dropRuntimeDatabase(maintenanceUrl, database);
-    process.exit(exitCode);
+  let databaseCreated = false;
+  let shutdownRequested = false;
+  let cleanupInProgress = false;
+  let requestShutdown!: (exitCode: number) => void;
+  const shutdown = new Promise<number>((resolve) => {
+    requestShutdown = resolve;
+  });
+  const onSignal = () => {
+    if (shutdownRequested) return;
+    shutdownRequested = true;
+    requestShutdown(0);
   };
-  process.once("SIGINT", () => void stop(0));
-  process.once("SIGTERM", () => void stop(0));
+  // Install before CREATE DATABASE: even an interrupt in the creation/seed gap
+  // is owned by the single awaited finally path below.
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
 
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = () =>
+    (cleanupPromise ??= (async () => {
+      cleanupInProgress = true;
+      if (app && app.exitCode === null && app.signalCode === null) {
+        app.kill("SIGINT");
+        const exited = await Promise.race([
+          once(app, "exit").then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000)),
+        ]);
+        if (!exited && app.exitCode === null && app.signalCode === null) {
+          app.kill("SIGKILL");
+          await once(app, "exit").catch(() => {});
+        }
+      }
+      if (databaseCreated) await dropRuntimeDatabase(maintenanceUrl, database);
+    })());
+
+  let exitCode: number;
   try {
+    const admin = new Client({ connectionString: maintenanceUrl });
+    await admin.connect();
+    try {
+      await admin.query(`CREATE DATABASE ${quoteIdentifier(database)}`);
+      databaseCreated = true;
+    } finally {
+      await admin.end();
+    }
     await seedRuntimeDatabase(runtimeUrl, runtimeAdminPassword, runtimeAdminPin, commandCentreEnabled);
     const port = await unusedPort();
     const { SUPER_ADMIN_COMMAND_CENTRE_ENABLED: _legacyCommandCentreFlag, ...parentEnvironment } = process.env;
@@ -348,17 +385,45 @@ async function main(): Promise<void> {
       env: childEnvironment,
       stdio: ["ignore", "inherit", "inherit"],
     });
+    app.once("exit", (code, signal) => {
+      if (shutdownRequested || cleanupInProgress) return;
+      shutdownRequested = true;
+      console.error(
+        `[command-centre-runtime-harness] child exited unexpectedly code=${code ?? "null"} signal=${signal ?? "none"}`
+      );
+      requestShutdown(1);
+    });
     await waitForHealth(port, app);
     await verifyCommandCentreRuntime(port, commandCentreEnabled, runtimeAdminPassword, runtimeAdminPin);
     console.log(`COMMAND_CENTRE_RUNTIME_READY=http://localhost:${port}`);
+    console.log(`COMMAND_CENTRE_RUNTIME_CHILD_PID=${app.pid}`);
     console.log(`COMMAND_CENTRE_RUNTIME_COMMAND_CENTRE_ENABLED=${commandCentreEnabled}`);
-    console.log("COMMAND_CENTRE_RUNTIME_AUTH=synthetic two-step Super Admin fixture (credentials intentionally not logged)");
+    console.log(
+      "COMMAND_CENTRE_RUNTIME_AUTH=synthetic two-step Super Admin fixture (credentials intentionally not logged)"
+    );
+    exitCode = await shutdown;
   } catch (error) {
     console.error(`[command-centre-runtime-harness] ${(error as Error).message}`);
-    await stop(1);
+    exitCode = 1;
+  } finally {
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    try {
+      await cleanup();
+    } catch (error) {
+      console.error(`[command-centre-runtime-harness] cleanup failed: ${(error as Error).message}`);
+      exitCode = 1;
+    }
   }
+  return exitCode;
 }
 
 if (process.argv[1]?.endsWith("command-centre-runtime-harness.ts")) {
-  void main();
+  void main().then(
+    (exitCode) => process.exit(exitCode),
+    (error) => {
+      console.error(`[command-centre-runtime-harness] ${(error as Error).message}`);
+      process.exit(1);
+    }
+  );
 }

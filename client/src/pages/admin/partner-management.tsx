@@ -333,6 +333,10 @@ export default function PartnerManagementPage() {
       ).json(),
     onSuccess: (_data, vars) => {
       setBanner(`${PARTNER_PILOT_FLAG_LABELS[vars.flag]} ${vars.enabled ? "enabled" : "disabled"}.`);
+      if (vars.flag === "super_admin_command_centre_enabled") {
+        queryClient.removeQueries({ queryKey: ["protected", "command-centre"] });
+        queryClient.removeQueries({ queryKey: ["/api/admin/db-info"] });
+      }
       queryClient.invalidateQueries({ queryKey: pmKeys.pilotFlags() });
       pilotFlags.refetch();
     },
@@ -469,7 +473,9 @@ export default function PartnerManagementPage() {
                           <div style={{ fontSize: 12, opacity: 0.7 }}>
                             {flag === "super_admin_command_centre_enabled"
                               ? "Super Admin only · hides navigation and fails the route/API closed"
-                              : mutable ? flag : "Read-only master switch"}
+                              : mutable
+                                ? flag
+                                : "Read-only master switch"}
                           </div>
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

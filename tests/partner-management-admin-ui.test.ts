@@ -73,7 +73,11 @@ describe("G5 UI pure helpers", () => {
 
   it("pilot flag helpers expose Command Centre/onboarding/login as mutable and portal as read-only", () => {
     expect(PARTNER_PILOT_READONLY_FLAG).toBe("partner_portal_enabled");
-    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual(["super_admin_command_centre_enabled", "partner_onboarding_enabled", "partner_login_enabled"]);
+    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual([
+      "super_admin_command_centre_enabled",
+      "partner_onboarding_enabled",
+      "partner_login_enabled",
+    ]);
     expect(isPartnerPilotMutableFlag("super_admin_command_centre_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_onboarding_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_login_enabled")).toBe(true);
@@ -132,6 +136,11 @@ describe("G5 list page source assertions", () => {
     expect(src).not.toContain("partner_connector_enabled");
     expect(src).not.toContain("partner_grading_enabled");
     expect(src).not.toContain("partner_payments_enabled");
+  });
+  it("evicts privileged Command Centre and shell availability caches on every Command Centre flag transition", () => {
+    expect(src).toContain('vars.flag === "super_admin_command_centre_enabled"');
+    expect(src).toContain('queryKey: ["protected", "command-centre"]');
+    expect(src).toContain('queryKey: ["/api/admin/db-info"]');
   });
 });
 

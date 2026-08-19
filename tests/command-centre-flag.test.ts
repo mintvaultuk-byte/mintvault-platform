@@ -1,6 +1,9 @@
 import express, { type Express } from "express";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { transform } from "esbuild";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const resolveGlobalFlag = vi.hoisted(() => vi.fn());
@@ -23,11 +26,8 @@ vi.mock("../server/partner/flags", () => ({
   resolveGlobalFlag,
 }));
 
-import {
-  COMMAND_CENTRE_FLAG_ENV,
-  isCommandCentreEnabled,
-} from "../server/command-centre/flag";
-import { requireCommandCentreEnabled } from "../server/command-centre/auth";
+import { COMMAND_CENTRE_FLAG_ENV, isCommandCentreEnabled } from "../server/command-centre/flag";
+import { isCommandCentreBuildCompatible, requireCommandCentreEnabled } from "../server/command-centre/auth";
 import { requireSuperAdmin } from "../server/auth";
 
 describe("Command Centre availability flag", () => {
@@ -49,43 +49,70 @@ describe("Command Centre availability flag", () => {
     }
   });
 
-  it.each(["true", "TRUE", "1", "yes", "on", "enabled"])(
-    "enables only explicit affirmative value %s",
-    (value) => {
-      expect(
-        isCommandCentreEnabled({ [COMMAND_CENTRE_FLAG_ENV]: value }),
-      ).toBe(true);
-    },
-  );
+  it.each(["true", "TRUE", "1", "yes", "on", "enabled"])("enables only explicit affirmative value %s", (value) => {
+    expect(isCommandCentreEnabled({ [COMMAND_CENTRE_FLAG_ENV]: value })).toBe(true);
+  });
 
   it.each([undefined, "", "false", "0", "no", "disabled", "anything"])(
     "keeps the Command Centre disabled for %s",
     (value) => {
-      expect(
-        isCommandCentreEnabled({ [COMMAND_CENTRE_FLAG_ENV]: value }),
-      ).toBe(false);
-    },
+      expect(isCommandCentreEnabled({ [COMMAND_CENTRE_FLAG_ENV]: value })).toBe(false);
+    }
   );
+
+  it("fails a production artifact closed unless canonical Partner destinations were compiled", () => {
+    expect(
+      isCommandCentreBuildCompatible({ NODE_ENV: "production", VITE_PARTNER_NETWORK_CONSOLIDATION: "false" })
+    ).toBe(false);
+    expect(isCommandCentreBuildCompatible({ NODE_ENV: "production", VITE_PARTNER_NETWORK_CONSOLIDATION: "true" })).toBe(
+      true
+    );
+    expect(isCommandCentreBuildCompatible({ NODE_ENV: "test" })).toBe(true);
+  });
+
+  it.each([true, false])("bakes canonical Partner compatibility into the server artifact (%s)", async (enabled) => {
+    const source = readFileSync(resolve(process.cwd(), "server/command-centre/build-compatibility.ts"), "utf8");
+    const built = await transform(source, {
+      loader: "ts",
+      format: "cjs",
+      define: {
+        "process.env.NODE_ENV": '"production"',
+        "process.env.VITE_PARTNER_NETWORK_CONSOLIDATION": JSON.stringify(String(enabled)),
+      },
+    });
+    const artifact = { exports: {} as Record<string, unknown> };
+    new Function("module", "exports", built.code)(artifact, artifact.exports);
+    const compatible = artifact.exports.isCommandCentreBuildCompatible as (environment?: NodeJS.ProcessEnv) => boolean;
+    expect(compatible()).toBe(enabled);
+  });
+
+  it("pins canonical Partner destinations in both the exact staging rollout and restore commands", () => {
+    const taskDir = resolve(
+      process.cwd(),
+      ".claude/controlled-code-lead/tasks/command-centre-v1-overnight-assurance-20260819"
+    );
+    for (const file of ["rollout.md", "rollback.md"]) {
+      const source = readFileSync(resolve(taskDir, file), "utf8");
+      expect(source, `${file} must compile canonical Command Centre Partner destinations`).toContain(
+        "safe-deploy.sh staging --yes --partner-network-consolidation true"
+      );
+    }
+  });
 
   it("returns a generic 404 without reaching a disabled route handler", async () => {
     resolveGlobalFlag.mockResolvedValue(false);
 
     const application: Express = express();
     let handlerCalls = 0;
-    application.get(
-      "/command-test",
-      requireCommandCentreEnabled,
-      (_request, response) => {
-        handlerCalls += 1;
-        response.status(200).json({ reached: true });
-      },
-    );
+    application.get("/command-test", requireCommandCentreEnabled, (_request, response) => {
+      handlerCalls += 1;
+      response.status(200).json({ reached: true });
+    });
 
     const server = await start(application);
 
     try {
-      const baseUrl =
-        "http://127.0.0.1:" + (server.address() as AddressInfo).port;
+      const baseUrl = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
       const response = await fetch(baseUrl + "/command-test");
 
       expect(response.status).toBe(404);
@@ -223,25 +250,17 @@ async function runBoundary(request: Record<string, unknown>): Promise<{
   let passedFlag = false;
   let reached = false;
 
-  await requireCommandCentreEnabled(
-    request as never,
-    response as never,
-    () => {
-      passedFlag = true;
-    },
-  );
+  await requireCommandCentreEnabled(request as never, response as never, () => {
+    passedFlag = true;
+  });
 
   if (!passedFlag) {
     return { statusCode: response.statusCode, reached };
   }
 
-  await requireSuperAdmin(
-    request as never,
-    response as never,
-    () => {
-      reached = true;
-    },
-  );
+  await requireSuperAdmin(request as never, response as never, () => {
+    reached = true;
+  });
 
   return { statusCode: response.statusCode, reached };
 }

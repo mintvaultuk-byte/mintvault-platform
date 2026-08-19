@@ -67,6 +67,9 @@ async function buildAll() {
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.GIT_SHA": JSON.stringify(GIT_SHA),
+      "process.env.VITE_PARTNER_NETWORK_CONSOLIDATION": JSON.stringify(
+        process.env.VITE_PARTNER_NETWORK_CONSOLIDATION ?? "false"
+      ),
     },
     minify: true,
     external: externals,

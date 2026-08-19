@@ -37,9 +37,7 @@ describe("Command Centre dashboard composition", () => {
       status: "VALUE",
       value: { PENDING: 2, ACTIVE: 1, SUSPENDED: 0, REVOKED: 0 },
     });
-    const stationAttention = dashboard.attention.find(
-      (item) => item.ruleId === "ATT-STATION-PENDING",
-    );
+    const stationAttention = dashboard.attention.find((item) => item.ruleId === "ATT-STATION-PENDING");
     expect(stationAttention).toEqual({
       ruleId: "ATT-STATION-PENDING",
       itemId: "station-lifecycle-pending",
@@ -52,7 +50,7 @@ describe("Command Centre dashboard composition", () => {
       deepLink: "/admin/partners/stations",
     });
     expect(JSON.stringify(stationAttention)).not.toMatch(
-      /stationCode|tenantId|locationId|device|appVersion|scannerConnected|secret/i,
+      /stationCode|tenantId|locationId|device|appVersion|scannerConnected|secret/i
     );
   });
 
@@ -90,7 +88,7 @@ describe("Command Centre dashboard composition", () => {
       expect.objectContaining({
         status: "UNAVAILABLE",
         reasonCode: "PARTNER_STATION_SCHEMA_UNAVAILABLE",
-      }),
+      })
     );
     expect(unavailable.kpis["station-lifecycle-state"]).not.toHaveProperty("value");
     expect(unavailable.attention.some((item) => item.ruleId === "ATT-STATION-PENDING")).toBe(false);
@@ -119,14 +117,15 @@ describe("Command Centre dashboard composition", () => {
       failureStatus: "ERROR",
     });
     const dashboard = await composeCommandCentreDashboard("today");
-    expect(dashboard.kpis["partner-network-state"]).toMatchObject({ status: "ERROR", reasonCode: "PARTNER_VISIBILITY_CHECK_ERROR" });
+    expect(dashboard.kpis["partner-network-state"]).toMatchObject({
+      status: "ERROR",
+      reasonCode: "PARTNER_VISIBILITY_CHECK_ERROR",
+    });
     expect(dashboard.attention.some((item) => item.ruleId === "ATT-PARTNER-VISIBILITY")).toBe(false);
   });
 
   it("returns a partial dashboard instead of hanging when a source exceeds the source budget", async () => {
-    vi.mocked(readPartnerDashboard).mockImplementationOnce(
-      () => new Promise(() => undefined),
-    );
+    vi.mocked(readPartnerDashboard).mockImplementationOnce(() => new Promise(() => undefined));
     const startedAt = performance.now();
     const dashboard = await composeCommandCentreDashboard("today");
 
@@ -156,10 +155,15 @@ describe("Command Centre dashboard composition", () => {
     });
     vi.mocked(readCoreOperationalSnapshot).mockResolvedValueOnce({
       submissions: { value: { unknownStatus: false, nonTerminal: 0, paid: { count: 0, amount: 0, nonGbp: 0 } } },
-      scan: { value: { queue: 0, candidates: [] } }, grading: { value: 0 }, review: { value: { count: 0, candidates: [] } },
-      print: { value: { count: 0, candidates: [] } }, transfer: { value: { count: 0, candidates: [] } },
+      scan: { value: { queue: 0, candidates: [] } },
+      grading: { value: 0 },
+      review: { value: { count: 0, candidates: [] } },
+      print: { value: { count: 0, candidates: [] } },
+      transfer: { value: { count: 0, candidates: [] } },
     });
-    const connectorItems = (await composeCommandCentreDashboard("today")).attention.filter((item) => item.ruleId === "ATT-CONNECTOR-EXCEPTION");
+    const connectorItems = (await composeCommandCentreDashboard("today")).attention.filter(
+      (item) => item.ruleId === "ATT-CONNECTOR-EXCEPTION"
+    );
     expect(connectorItems.map((item) => item.asOf)).toEqual(["2026-08-19T01:00:00.000Z", "2026-08-19T02:00:00.000Z"]);
   });
 
@@ -171,24 +175,80 @@ describe("Command Centre dashboard composition", () => {
       station: { PENDING: 0, ACTIVE: 1, SUSPENDED: 0, REVOKED: 0 },
       connectorCount: 1,
       onboardingBlocked: [],
-      connectorCandidates: [{ id: "connector", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T04:00:00.000Z"))! }],
+      connectorCandidates: [
+        { id: "connector", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T04:00:00.000Z"))! },
+      ],
     });
     vi.mocked(readCoreOperationalSnapshot).mockResolvedValueOnce({
       submissions: { value: { unknownStatus: false, nonTerminal: 0, paid: { count: 0, amount: 0, nonGbp: 0 } } },
       scan: { value: { queue: 0, candidates: [] } },
       grading: { value: 0 },
-      review: { value: { count: 1, candidates: [{ id: "review", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T02:00:00.000Z"))! }] } },
-      print: { value: { count: 1, candidates: [{ id: "print", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T01:00:00.000Z"))! }] } },
-      transfer: { value: { count: 1, candidates: [{ id: "transfer", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T03:00:00.000Z"))! }] } },
+      review: {
+        value: {
+          count: 1,
+          candidates: [
+            { id: "review", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T02:00:00.000Z"))! },
+          ],
+        },
+      },
+      print: {
+        value: {
+          count: 1,
+          candidates: [
+            { id: "print", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T01:00:00.000Z"))! },
+          ],
+        },
+      },
+      transfer: {
+        value: {
+          count: 1,
+          candidates: [
+            { id: "transfer", timestamp: normaliseCommandCentreTimestamp(new Date("2026-08-19T03:00:00.000Z"))! },
+          ],
+        },
+      },
     });
 
-    const highAttention = (await composeCommandCentreDashboard("today")).attention
-      .filter((item) => item.severity === "HIGH");
+    const highAttention = (await composeCommandCentreDashboard("today")).attention.filter(
+      (item) => item.severity === "HIGH"
+    );
     expect(highAttention.map((item) => item.asOf)).toEqual([
       "2026-08-19T01:00:00.000Z",
       "2026-08-19T02:00:00.000Z",
       "2026-08-19T03:00:00.000Z",
       "2026-08-19T04:00:00.000Z",
     ]);
+  });
+
+  it("labels every authoritative all-zero record envelope ZERO without flattening its value", async () => {
+    vi.mocked(readPartnerDashboard).mockResolvedValueOnce({
+      available: true,
+      network: { active: 0, pending: 0, suspended: 0, alerts: 0 },
+      wallet: { available: 0, reserved: 0, consumed: 0 },
+      station: { PENDING: 0, ACTIVE: 0, SUSPENDED: 0, REVOKED: 0 },
+      connectorCount: 0,
+      onboardingBlocked: [],
+      connectorCandidates: [],
+    });
+    vi.mocked(readCoreOperationalSnapshot).mockResolvedValueOnce({
+      submissions: { value: { unknownStatus: false, nonTerminal: 0, paid: { count: 0, amount: 0, nonGbp: 0 } } },
+      scan: { value: { queue: 0, candidates: [] } },
+      grading: { value: 0 },
+      review: { value: { count: 0, candidates: [] } },
+      print: { value: { count: 0, candidates: [] } },
+      transfer: { value: { count: 0, candidates: [] } },
+    });
+    const dashboard = await composeCommandCentreDashboard("today");
+    expect(dashboard.kpis["partner-network-state"]).toMatchObject({
+      status: "ZERO",
+      authoritativeZero: true,
+      value: { active: 0, pending: 0, suspended: 0, alerts: 0 },
+    });
+    expect(dashboard.kpis["partner-credit-projection"]).toMatchObject({ status: "ZERO", authoritativeZero: true });
+    expect(dashboard.kpis["paid-submissions-recorded"]).toMatchObject({
+      status: "ZERO",
+      authoritativeZero: true,
+      value: { count: 0, amount: 0 },
+    });
   });
 });
