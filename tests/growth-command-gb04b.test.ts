@@ -52,6 +52,12 @@ const summary: GrowthSummary = {
   historical: { state: "NOT_INSTRUMENTED", reason: "No link" },
 };
 
+const unavailableConversionExecutor = {
+  execute: async () => {
+    throw new Error("growth conversion event authority unavailable");
+  },
+};
+
 describe("GB-04B Growth intelligence authority", () => {
   it("never converts request rate alone into a capacity alert", () => {
     const result = deriveCapacityStatus({ requestRatePerMinute: 9999 }, thresholds);
@@ -171,7 +177,7 @@ describe("GB-04B Growth intelligence authority", () => {
   });
 
   it("does not calculate a checkout conversion percentage without an authoritative checkout event", async () => {
-    const conversion = await getConversionSummary("30d", summary);
+    const conversion = await getConversionSummary("30d", summary, unavailableConversionExecutor);
     expect(conversion.stages.find((stage) => stage.key === "CHECKOUT_STARTS")?.metric.state).toBe("NOT_INSTRUMENTED");
     expect(conversion.dropOff.state).toBe("NOT_INSTRUMENTED");
     expect(conversion.comparison.state).toBe("NOT_INSTRUMENTED");
@@ -180,7 +186,7 @@ describe("GB-04B Growth intelligence authority", () => {
   it("generates traceable deterministic insights without a provider or AI claim", async () => {
     const health = await getSiteHealth({ execute: async () => ({ rows: [{ ok: 1, certificates: "certificates" }] }) });
     const seo = getSeoSummary();
-    const conversion = await getConversionSummary("30d", summary);
+    const conversion = await getConversionSummary("30d", summary, unavailableConversionExecutor);
     const capacity = deriveCapacityStatus(null, null);
     const insights = getGrowthInsights({ period: "30d", summary, siteHealth: health, capacity, seo, conversion });
     expect(insights.map((insight) => insight.trace.ruleId)).toEqual(
