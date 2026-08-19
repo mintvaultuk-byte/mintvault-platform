@@ -200,6 +200,18 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     futureDisposition: "keep as view; document source query",
     evidenceSource: INSPECTION,
   },
+  {
+    schema: "public",
+    name: "public_slab_image_projection",
+    objectType: "view",
+    class: "numbered_migration",
+    purpose: "anonymous slab-image proxy lookup; its view definition enforces the certificate publication boundary",
+    active: true,
+    owningSubsystem: "partner-network/public",
+    reason: "created by historical migration 0064; deliberately outside the Drizzle table model",
+    futureDisposition: "preserve; retire only with the anonymous slab-image proxy",
+    evidenceSource: "historical migration 0064 and read-only production inspection 2026-08-19",
+  },
 
   // ---- Auth / sessions (dropping = lockout / broken login lockouts) ----
   {
@@ -325,6 +337,83 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     evidenceSource: INSPECTION,
   },
 
+  // ---- Project Control durable sync / seed state ----
+  // Production retains these migration-owned relations although this canonical line
+  // deliberately does not carry their historical 0039/0040 SQL files. They are
+  // protected inventory, never Drizzle- or runtime-managed.
+  {
+    schema: "public",
+    name: "pc_sync_runs",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control durable synchronisation-attempt audit ledger",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "created by historical migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as migration-owned; do not schema-sync or drop",
+    evidenceSource: "historical migration 0039 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "pc_sync_leases",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control cross-machine synchronisation lease state",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "created by historical migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as migration-owned; do not schema-sync or drop",
+    evidenceSource: "historical migration 0039 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "pc_sync_checkpoints",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control source synchronisation cursors and ETag checkpoints",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "created by historical migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as migration-owned; do not schema-sync or drop",
+    evidenceSource: "historical migration 0039 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "pc_evidence_snapshots",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control append-only evidence observations",
+    active: true,
+    owningSubsystem: "project-control/live-evidence",
+    reason: "created by historical migration 0039_project_control_live_evidence.sql",
+    futureDisposition: "preserve as migration-owned; do not schema-sync or drop",
+    evidenceSource: "historical migration 0039 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "pc_seed_state",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control singleton seed-manifest state",
+    active: true,
+    owningSubsystem: "project-control/seed-reconciliation",
+    reason: "created by historical migration 0040_project_control_seed_reconciliation.sql",
+    futureDisposition: "preserve as migration-owned; do not schema-sync or drop",
+    evidenceSource: "historical migration 0040 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "pc_seed_runs",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control seed-reconciliation run history",
+    active: true,
+    owningSubsystem: "project-control/seed-reconciliation",
+    reason: "created by historical migration 0040_project_control_seed_reconciliation.sql",
+    futureDisposition: "preserve as migration-owned; do not schema-sync or drop",
+    evidenceSource: "historical migration 0040 and read-only production inspection 2026-08-19",
+  },
+
   // ---- Catalogue / misc ----
   {
     schema: "public",
@@ -447,6 +536,46 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     reason: "bootstrapped by scripts/db/migrate.ts, never by schema.ts",
     futureDisposition: "keep runner-managed",
     evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
+  },
+  // ---- Legacy TIFF evidence lineage ----
+  // These records predate the current certificate_image_evidence ledger. They
+  // remain protected as migration-owned historical evidence until retention and
+  // any migration path are explicitly reviewed.
+  {
+    schema: "public",
+    name: "certificate_image_masters",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "content-addressed TIFF scanner masters",
+    active: true,
+    owningSubsystem: "scanner/evidence",
+    reason: "created by historical migration 0067_certificate_immutable_evidence_ledger.sql",
+    futureDisposition: "preserve as historical evidence; do not schema-sync or drop",
+    evidenceSource: "historical migration 0067 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "certificate_image_workings",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "browser and analysis derivatives linked to TIFF masters",
+    active: true,
+    owningSubsystem: "scanner/evidence",
+    reason: "created by historical migration 0067_certificate_immutable_evidence_ledger.sql",
+    futureDisposition: "preserve as historical evidence; do not schema-sync or drop",
+    evidenceSource: "historical migration 0067 and read-only production inspection 2026-08-19",
+  },
+  {
+    schema: "public",
+    name: "certificate_image_crops",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "crop and measurement derivatives linked to working images",
+    active: true,
+    owningSubsystem: "scanner/evidence",
+    reason: "created by historical migration 0067_certificate_immutable_evidence_ledger.sql",
+    futureDisposition: "preserve as historical evidence; do not schema-sync or drop",
+    evidenceSource: "historical migration 0067 and read-only production inspection 2026-08-19",
   },
   // ---- Distributed Grading Network: signed-station scanner evidence ----------
   //

@@ -33,7 +33,7 @@ import {
   unapprovedBlockingFindings,
 } from "../scripts/db/lint-destructive-sql";
 
-const PROD_UNMANAGED_TABLES_29 = [
+const PROD_UNMANAGED_TABLES_38 = [
   "ai_accuracy_log",
   "ai_grade_corrections",
   "ai_override_audit",
@@ -41,6 +41,9 @@ const PROD_UNMANAGED_TABLES_29 = [
   "bot_logs",
   "bot_seen",
   "bot_settings",
+  "certificate_image_crops",
+  "certificate_image_masters",
+  "certificate_image_workings",
   "custom_sets",
   "custom_variants",
   "estimate_credits",
@@ -49,6 +52,12 @@ const PROD_UNMANAGED_TABLES_29 = [
   "grading_sessions",
   "member_credits",
   "pending_switch_nonces",
+  "pc_evidence_snapshots",
+  "pc_seed_runs",
+  "pc_seed_state",
+  "pc_sync_checkpoints",
+  "pc_sync_leases",
+  "pc_sync_runs",
   "pin_attempts",
   "pin_reset_tokens",
   "promo_codes",
@@ -188,15 +197,20 @@ describe("fail-closed preflight (all object types)", () => {
 });
 
 describe("unmanaged inventory completeness & richness", () => {
-  it("classifies all 29 confirmed-unmanaged prod TABLES", () => {
-    const c = classifyLiveTables(PROD_UNMANAGED_TABLES_29);
+  it("classifies all 38 confirmed-unmanaged prod TABLES", () => {
+    const c = classifyLiveTables(PROD_UNMANAGED_TABLES_38);
     expect(c.unknown).toEqual([]);
-    expect(c.unmanaged.sort()).toEqual([...PROD_UNMANAGED_TABLES_29].sort());
+    expect(c.unmanaged.sort()).toEqual([...PROD_UNMANAGED_TABLES_38].sort());
   });
 
   it("reholder_credits is inventoried as a VIEW (not a table)", () => {
     expect(inventoriedViews()).toContain("reholder_credits");
     expect(inventoriedTables()).not.toContain("reholder_credits");
+  });
+
+  it("protects the public slab projection as a migration-owned view", () => {
+    expect(inventoriedViews()).toContain("public_slab_image_projection");
+    expect(inventoriedTables()).not.toContain("public_slab_image_projection");
   });
 
   it("population_report is inventoried as a materialized view", () => {
