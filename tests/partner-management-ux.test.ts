@@ -15,7 +15,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   canSuspendLocation,
+  EMPTY_PARTNER_LOCATION_ADDRESS,
   PROFILE_FIELD_DEFS,
+  PARTNER_LOCATION_CREATE_REASONS,
   PARTNER_USER_ROLES,
   isPartnerUserRole,
   profileFormFromRow,
@@ -25,6 +27,11 @@ import {
   normalisePostcode,
   normaliseName,
   normalisePhone,
+  normaliseUkPostcode,
+  isValidUkPostcode,
+  composePartnerLocationAddress,
+  locationCreationAuditReason,
+  validatePartnerLocationCreate,
   validateProfileForm,
   validateLegalName,
   validateInvitationForm,
@@ -1004,5 +1011,98 @@ describe("AG-1 locations — the last-active-location rule, client side", () => 
     // number we do not believe is worse than withholding it.
     expect(canSuspendLocation("ACTIVE", 0)).toBe(false);
     expect(canSuspendLocation("ACTIVE", -1)).toBe(false);
+  });
+});
+
+describe("location creation form contract", () => {
+  const ukAddress = {
+    ...EMPTY_PARTNER_LOCATION_ADDRESS,
+    line1: " 2 Temple Gardens ",
+    townCity: " Rochester ",
+    postcode: " me2  2ng ",
+  };
+
+  it("composes a valid UK address into the existing one-string location authority", () => {
+    expect(normaliseUkPostcode(ukAddress.postcode)).toBe("ME2 2NG");
+    expect(isValidUkPostcode(ukAddress.postcode)).toBe(true);
+    expect(composePartnerLocationAddress(ukAddress)).toBe("2 Temple Gardens, Rochester, ME2 2NG, United Kingdom");
+  });
+
+  it("uses only stable permitted audit reasons and requires an explanation for Other", () => {
+    expect(PARTNER_LOCATION_CREATE_REASONS.map((option) => option.label)).toEqual([
+      "New Partner location",
+      "Additional shop/site",
+      "Partner moved location",
+      "Address correction",
+      "Temporary location",
+      "Administrative correction",
+      "Other",
+    ]);
+    expect(locationCreationAuditReason("new_partner_location", "")).toBe("New Partner location");
+    expect(locationCreationAuditReason("other", "  temporary pop-up  ")).toBe("Other: temporary pop-up");
+    expect(
+      validatePartnerLocationCreate({
+        name: "Shop",
+        address: EMPTY_PARTNER_LOCATION_ADDRESS,
+        reason: "other",
+        otherExplanation: "",
+      })
+    ).toMatchObject({ otherExplanation: "Please explain the reason." });
+  });
+
+  it("fails closed on invalid reasons and incomplete started addresses but keeps address optional", () => {
+    expect(
+      validatePartnerLocationCreate({
+        name: "Shop",
+        address: EMPTY_PARTNER_LOCATION_ADDRESS,
+        reason: "forged",
+        otherExplanation: "",
+      })
+    ).toMatchObject({ reason: "Select a valid reason." });
+    expect(
+      validatePartnerLocationCreate({
+        name: "Shop",
+        address: { ...EMPTY_PARTNER_LOCATION_ADDRESS, postcode: "ME2 2NG" },
+        reason: "new_partner_location",
+        otherExplanation: "",
+      })
+    ).toMatchObject({ line1: "Address line 1 is required.", townCity: "Town / City is required." });
+    expect(
+      validatePartnerLocationCreate({
+        name: " Shop ",
+        address: EMPTY_PARTNER_LOCATION_ADDRESS,
+        reason: "new_partner_location",
+        otherExplanation: "",
+      })
+    ).toEqual({});
+    expect(
+      validatePartnerLocationCreate({
+        name: "S",
+        address: EMPTY_PARTNER_LOCATION_ADDRESS,
+        reason: "new_partner_location",
+        otherExplanation: "",
+      })
+    ).toMatchObject({ name: "Location name must be 2–120 characters." });
+    expect(
+      validatePartnerLocationCreate({
+        name: "S".repeat(121),
+        address: EMPTY_PARTNER_LOCATION_ADDRESS,
+        reason: "new_partner_location",
+        otherExplanation: "",
+      })
+    ).toMatchObject({ name: "Location name must be 2–120 characters." });
+    expect(composePartnerLocationAddress(EMPTY_PARTNER_LOCATION_ADDRESS)).toBeNull();
+  });
+
+  it("keeps the canonical route, audit action and encoded Maps link rather than introducing a new authority", () => {
+    const detail = readSrc(DETAIL_PAGE);
+    const routes = readSrc(SERVER_ROUTES);
+    const service = readSrc(SERVER_SERVICE);
+    expect(detail).toContain('data-testid="pm-location-reason"');
+    expect(detail).toContain("data-testid={`pm-location-maps-${l.id}`}");
+    expect(detail).toContain("googleMapsSearchUrl(l.address)");
+    expect(routes).toContain('r.post("/partners/:partnerId/locations"');
+    expect(service).toContain('withAudit(actor, org.id, "partner_location_created"');
+    expect(service).toContain("WHERE tenant_id = $1");
   });
 });

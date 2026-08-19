@@ -36,6 +36,7 @@ let admin: Client;
 let wallet: typeof import("../server/partner/partner-wallet-service");
 let authority: typeof import("../server/partner/card-job-authority");
 let fix: typeof import("../server/partner/fix-authority");
+let management: typeof import("../server/partner/partner-management-service");
 let savedEnv: Record<string, string | undefined> = {};
 
 const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail: "ops@mintvault.test" };
@@ -241,6 +242,7 @@ describe("AG-1 multi-location (real PostgreSQL)", () => {
     wallet = await import("../server/partner/partner-wallet-service");
     authority = await import("../server/partner/card-job-authority");
     fix = await import("../server/partner/fix-authority");
+    management = await import("../server/partner/partner-management-service");
     await admin.query(
       `INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled)
        VALUES ('partner_emergency_stop',NULL,NULL,false)`
@@ -256,6 +258,51 @@ describe("AG-1 multi-location (real PostgreSQL)", () => {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
+  });
+
+  it("LOC1b: canonical service creates one trimmed UK location, scoped and audited", async () => {
+    const f = await makeTwoLocationTenant("loc1b");
+    const other = await makeTwoLocationTenant("loc1c");
+    const actor = {
+      actorUserId: "00000000-0000-0000-0000-0000000000a5",
+      actorEmail: "ops@mintvault.test",
+      requestId: "loc1b-create",
+    };
+    const address = "2 Temple Gardens, Rochester, ME2 2NG, United Kingdom";
+    const created = await management.createPartnerLocation(
+      actor,
+      f.tenantId,
+      { name: "  Shop  ", address: ` ${address} ` },
+      "New Partner location"
+    );
+    expect(created.result).toMatchObject({ name: "Shop", address, status: "ACTIVE" });
+    expect(
+      (
+        await admin.query("SELECT count(*)::int n FROM partner_locations WHERE tenant_id=$1 AND name='Shop'", [
+          f.tenantId,
+        ])
+      ).rows[0].n
+    ).toBe(1);
+    expect(
+      (
+        await admin.query("SELECT count(*)::int n FROM partner_locations WHERE tenant_id=$1 AND name='Shop'", [
+          other.tenantId,
+        ])
+      ).rows[0].n
+    ).toBe(0);
+    expect(
+      (
+        await admin.query<{ result: string; reason: string }>(
+          `SELECT result, reason FROM partner_management_audit
+            WHERE tenant_id=$1 AND action_type='partner_location_created'
+            ORDER BY CASE result WHEN 'attempted' THEN 0 WHEN 'succeeded' THEN 1 ELSE 2 END, created_at, id`,
+          [f.tenantId]
+        )
+      ).rows
+    ).toEqual([
+      { result: "attempted", reason: "__attempt__" },
+      { result: "succeeded", reason: "New Partner location" },
+    ]);
   });
 
   // ---- LOC1 / LOC2: the schema now supports what the service exposes -------------------------

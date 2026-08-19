@@ -397,6 +397,50 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(audit.rows.map((x) => x.result).sort()).toEqual(["attempted", "succeeded"]);
   });
 
+  it("creates a trimmed UK location only for its named partner and preserves the existing audit shape", async () => {
+    const c = await cookie();
+    const address = "2 Temple Gardens, Rochester, ME2 2NG, United Kingdom";
+    const create = await post(
+      `${PM}/partners/${B}/locations`,
+      { name: "  Shop  ", address: `  ${address}  `, reason: "New Partner location" },
+      c
+    );
+    expect(create.status).toBe(200);
+    expect((await create.json()).result).toMatchObject({ name: "Shop", address, status: "ACTIVE" });
+
+    const stored = await admin.query<{ tenant_id: string; name: string; address: string; status: string }>(
+      "SELECT tenant_id, name, address, status FROM partner_locations WHERE tenant_id=$1 AND name='Shop'",
+      [B]
+    );
+    expect(stored.rows).toEqual([{ tenant_id: B, name: "Shop", address, status: "ACTIVE" }]);
+    expect(
+      (await admin.query("SELECT count(*)::int n FROM partner_locations WHERE tenant_id=$1 AND name='Shop'", [A]))
+        .rows[0].n
+    ).toBe(0);
+
+    const audit = await admin.query<{ result: string; reason: string; action_type: string }>(
+      `SELECT result, reason, action_type
+         FROM partner_management_audit
+        WHERE tenant_id=$1 AND action_type='partner_location_created' AND reason IN ('__attempt__','New Partner location')
+        ORDER BY CASE result WHEN 'attempted' THEN 0 WHEN 'succeeded' THEN 1 ELSE 2 END, created_at, id`,
+      [B]
+    );
+    expect(audit.rows).toEqual([
+      { result: "attempted", reason: "__attempt__", action_type: "partner_location_created" },
+      { result: "succeeded", reason: "New Partner location", action_type: "partner_location_created" },
+    ]);
+
+    const missing = await post(
+      `${PM}/partners/cccc3333-0000-0000-0000-0000000000d5/locations`,
+      { name: "Elsewhere", address, reason: "New Partner location" },
+      c
+    );
+    expect(missing.status).toBe(404);
+    expect((await admin.query("SELECT count(*)::int n FROM partner_locations WHERE name='Elsewhere'")).rows[0].n).toBe(
+      0
+    );
+  });
+
   it("WALLET-BACKFILL1 provisions only ACTIVE missing wallets through Super Admin audit", async () => {
     const c = await cookie();
     const active = "11111111-1111-4444-9444-111111111111";

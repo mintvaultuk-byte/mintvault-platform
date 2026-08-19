@@ -10,6 +10,53 @@ Last updated: 2026-08-13 (P0 complete, P1 archaeology 3/5 agents reported).
 
 ---
 
+## 2026-08-19 Partner Network production location form repair
+
+### PNL-LOCATION-001 — Production audit action constraint rejects canonical location creation. BLOCKER
+
+**Status:** OWNER-DECISION · **Source:** authenticated-production acceptance report; code/data-path trace at
+`client/src/pages/admin/partner-management-detail.tsx`,
+`server/partner/partner-management-routes.ts`,
+`server/partner/partner-management-service.ts`,
+`server/partner/partner-management-errors.ts`, and
+`migrations/0084_partner_location_management.sql`.
+
+**Reproduction / reachability:** a Super Admin submits `POST
+/api/super-admin/partner-management/partners/:partnerId/locations`. The route accepts the current
+free-text reason through `optionalReason`; the canonical service trims the one-string address and
+then calls `withAudit(..., 'partner_location_created', ...)`. On production's pre-0084 audit CHECK,
+the attempt audit insert fails with PostgreSQL `23514`; the generic mapper returns `VALIDATION_ERROR`
+and the UI displayed “A field value is not permitted.” The valid example fields are therefore not
+the rejected value; the rejected value is audit `action_type='partner_location_created'`.
+
+**Impact:** no additional Partner location can be created in production, despite the canonical UI,
+route, tenant scope and service being reachable.
+
+**Repair:** the UI now uses controlled, stable audit reasons; composes its structured UK address
+into the existing nullable string `address`; validates operator input before submission (including
+the server's 2–120 character location-name boundary); preserves
+the Super Admin route/service/scope; and reports the actual missing audit-schema dependency for the
+specific `23514` response. It also restores an encoded address-only Google Maps search action after
+a location is stored. No new endpoint, guard, table, column, geocoder, API key, or migration was
+created.
+
+**Required owner action:** separately approve applying existing additive migration
+`0084_partner_location_management.sql` through the approved production migration runner. It widens
+the existing audit action CHECK to include the canonical location actions and creates location
+indexes; it creates no table or column. Until it is applied, production creation remains correctly
+blocked rather than writing an un-audited location.
+
+**Proof / test:** the real PostgreSQL 17 service test executes locally against the migration lineage
+through 0084 and proves trimmed valid creation, tenant isolation, and attempted/succeeded audit rows.
+The separately wired real main-app HTTP/PostgreSQL test covers the same request surface when
+`PARTNER_MANAGEMENT_RT_ADMIN` points to a disposable loopback PostgreSQL 17 database; it is skipped
+locally because that shared database/container service is unavailable. `npm run check`, changed-file
+ESLint (zero errors), `npm run build`, and `git diff --check` pass for the candidate. The current
+repository-wide lint sweep is contaminated by an unrelated generated `.claude/worktrees` copy and
+is not a product-code finding.
+
+---
+
 ## 2026-08-19 payment/top-up reconciliation
 
 ### PAY-1 — Staging credit packs cannot become purchasable until owner supplies Stripe TEST commercial config. OWNER-DECISION
