@@ -1,5 +1,7 @@
 # MintVault Command Centre V1 — implementation evidence
 
+> **Historical artifact record.** This file describes staging artifact `60b9e268` and is not the current release decision. The authoritative overnight decision and exact-candidate evidence are in [`COMMAND_CENTRE_V1_OVERNIGHT_RELEASE_ASSURANCE.md`](./COMMAND_CENTRE_V1_OVERNIGHT_RELEASE_ASSURANCE.md). In particular, do not reuse this file's former production-ready conclusion or Pilot-Flag acceptance as proof for the repaired candidate.
+
 **Release decision date:** 2026-08-19
 **Staging artifact SHA:** `60b9e2683c6866a385496d14de1a780615858468`
 **Current-main parent:** `facfd36f4ec8f164d017aba7a4386bab04a4aa6d` (`origin/main` at reconciliation)

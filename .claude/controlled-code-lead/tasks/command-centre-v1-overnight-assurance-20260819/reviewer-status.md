@@ -5,7 +5,7 @@ Reviewer isolation is process-proven by `bash .claude/governance-tests/run-all.s
 | Reviewer | Scope | Status | Findings received | Lead disposition |
 |---|---|---|---|---|
 | Auth/security | A/C/L/O | final retest complete | `CC-OA-001` remains owner-blocked; cache/build/harness/rollback and protected grading clean | 80/80 focused; 69 passed/2 skipped protected grading; typecheck/diff pass |
-| Partner/domain | B/D/E/H/I/M | final retest complete | no open source defect; exact staging browser/viewport/control proof pending | 12 files, 86/86; typecheck/diff pass |
+| Partner/domain | B/D/E/H/I/M | final retest complete | no open source defect; schema-compatibility and mobile-overflow follow-ups cleared independently | focused matrices green; typecheck/diff pass |
 | Data/resilience | D/F/G/J/K | final retest complete | no open BLOCKER/HIGH/release-MED after exact-deadline and wallet SQL follow-up | 30/30 final focused; containment 7/7; typecheck/diff pass |
 
-All reviewers remained read-only. The Lead owns the protected-authority stop, candidate commit and all live staging state.
+All reviewers remained read-only. The Lead owns the protected-authority stop, candidate commit and all live staging state. Live responsive/keyboard/load/soak/rollback evidence passed; exact-candidate Pilot OFF/ON proof remains an open Lead-owned evidence gate.

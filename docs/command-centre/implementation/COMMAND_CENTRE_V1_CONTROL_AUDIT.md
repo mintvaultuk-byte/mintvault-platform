@@ -1,5 +1,7 @@
 # MintVault Command Centre V1 — live control audit
 
+> **Historical artifact record.** This inventory applies to staging artifact `60b9e268`. The repaired-candidate viewport, keyboard, view, filter and zero-dead-UI evidence is reconciled in [`COMMAND_CENTRE_V1_OVERNIGHT_RELEASE_ASSURANCE.md`](./COMMAND_CENTRE_V1_OVERNIGHT_RELEASE_ASSURANCE.md). It is not an exact-candidate Pilot-Flag proof.
+
 **Environment:** staging `mintvault-v2` version `532`
 **Artifact:** `60b9e2683c6866a385496d14de1a780615858468`
 **Method:** authenticated Super Admin DOM inventory and interaction on 2026-08-19; no browser storage, credentials or production state inspected.

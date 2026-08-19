@@ -1,5 +1,7 @@
 # MintVault Command Centre V1 — hostile finding reconciliation
 
+> **Historical six-finding reconciliation.** A later overnight hostile pass found and repaired additional defects. The current issue ledger and release decision are in [`COMMAND_CENTRE_V1_OVERNIGHT_RELEASE_ASSURANCE.md`](./COMMAND_CENTRE_V1_OVERNIGHT_RELEASE_ASSURANCE.md).
+
 This document closes the six findings in the independent hostile implementation review (`COMMAND_CENTRE_V1_HOSTILE_IMPLEMENTATION_REVIEW_5_5.md`) against staging artifact `60b9e2683c6866a385496d14de1a780615858468`.
 
 | ID | Severity | Verified defect | Corrective implementation | Verification | Final disposition |
