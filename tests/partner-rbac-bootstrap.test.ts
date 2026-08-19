@@ -806,8 +806,8 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
         "partner_location_created",
         "partner_location_status_changed",
         "partner_location_updated",
-        "partner_user_mfa_reset",
         "partner_user_locations_changed",
+        "partner_user_mfa_reset",
         "partner_wallet_backfilled",
       ]);
       expect(permitted).toHaveLength(28);
