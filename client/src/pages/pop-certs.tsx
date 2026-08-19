@@ -49,6 +49,7 @@ export default function PopCertsPage() {
         title={`${title} | Population | MintVault`}
         description={`All MintVault certificates for ${title}`}
         canonical="/population"
+        noindex
       />
 
       <div className="px-4 py-16 max-w-4xl mx-auto">

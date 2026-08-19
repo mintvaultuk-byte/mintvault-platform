@@ -47,14 +47,23 @@ ALLOW_BEHIND=0
 ASSUME_YES=0
 ALLOW_UNKNOWN_LIVE=0
 RECONCILED_FROM=""
+PARTNER_NETWORK_CONSOLIDATION="false"
 _next_is_reconciled=0
+_next_is_partner_network_consolidation=0
 for arg in "$@"; do
   if [ "$_next_is_reconciled" = "1" ]; then RECONCILED_FROM="$arg"; _next_is_reconciled=0; continue; fi
+  if [ "$_next_is_partner_network_consolidation" = "1" ]; then PARTNER_NETWORK_CONSOLIDATION="$arg"; _next_is_partner_network_consolidation=0; continue; fi
   [ "$arg" = "--allow-behind" ] && ALLOW_BEHIND=1
   [ "$arg" = "--yes" ] && ASSUME_YES=1
   [ "$arg" = "--allow-unknown-live" ] && ALLOW_UNKNOWN_LIVE=1
   [ "$arg" = "--reconciled-from" ] && _next_is_reconciled=1
+  [ "$arg" = "--partner-network-consolidation" ] && _next_is_partner_network_consolidation=1
 done
+
+case "$PARTNER_NETWORK_CONSOLIDATION" in
+  true|false) ;;
+  *) echo "usage: --partner-network-consolidation {true|false}" >&2; exit 2 ;;
+esac
 
 case "$TARGET" in
   staging) APP="mintvault-v2"; CONFIG="fly.v2.toml"; HOST="https://mintvault-v2.fly.dev" ;;
@@ -75,6 +84,7 @@ SHA="$(git rev-parse --short HEAD)"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 echo "── safe-deploy → $APP ($CONFIG) ──"
 echo "   branch=$BRANCH  commit=$SHA"
+echo "   VITE_PARTNER_NETWORK_CONSOLIDATION=$PARTNER_NETWORK_CONSOLIDATION"
 
 # ── GUARD 1: not behind origin/main ──────────────────────────────────────────
 git fetch origin --quiet
@@ -149,7 +159,8 @@ echo "✔ GUARD 1M: live commit unchanged during preflight (${LIVE_AT_DEPLOY:-<u
 
 # ── Deploy, embedding the SHA so the live server can prove itself ────────────
 echo "── deploying (embedding GIT_SHA=$SHA) ──"
-fly deploy -c "$CONFIG" --app "$APP" --build-arg "GIT_SHA=$SHA"
+fly deploy -c "$CONFIG" --app "$APP" --build-arg "GIT_SHA=$SHA" \
+  --build-arg "VITE_PARTNER_NETWORK_CONSOLIDATION=$PARTNER_NETWORK_CONSOLIDATION"
 
 # ── GUARD 2: verify the LIVE server reports our exact commit ─────────────────
 echo "── verifying live artifact (polling $HOST/api/version for commit=$SHA) ──"

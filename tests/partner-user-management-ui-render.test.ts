@@ -24,8 +24,8 @@ vi.mock("@/lib/queryClient", () => ({
 }));
 vi.mock("wouter", () => ({
   Link: ({ href, children, ...props }: any) => createElement("a", { href, ...props }, children),
-  useLocation: () => ["/admin/partner-network/partners/p1", vi.fn()],
-  useRoute: () => [true, { partnerId: "p1" }],
+  useLocation: () => ["/admin/partners/11111111-1111-4111-8111-111111111111/staff", vi.fn()],
+  useRoute: () => [true, { partnerId: "11111111-1111-4111-8111-111111111111", workspaceTab: "staff" }],
 }));
 
 interface Row {
@@ -116,7 +116,7 @@ async function mount(users: Row[]) {
   await act(async () => {
     root.render(createElement(QueryClientProvider, { client: qc }, createElement(Page)));
   });
-  const usersTab = await waitForTestId("pm-tab-users");
+  const usersTab = await waitForTestId("pm-workspace-tab-staff");
   await act(async () => {
     usersTab.click();
   });

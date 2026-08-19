@@ -195,6 +195,17 @@ export interface NetworkSummary {
   generatedAt: string;
 }
 
+/**
+ * R2: bounded consolidated data for the canonical Partner Network overview.
+ * The browser receives one projection, rather than composing a dashboard by fan-out requests.
+ */
+export interface PartnerNetworkOverview {
+  summary: NetworkSummary;
+  partners: Paged<PartnerTableRow>;
+  alerts: DashboardAlert[];
+  generatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // B. Partner table row
 // ---------------------------------------------------------------------------
@@ -215,6 +226,10 @@ export interface PartnerTableRow {
   openCorrections: number;
   approvedDevices: MetricUnavailable;
   activeStaff: number;
+  /** Existing physical sites in ACTIVE state. A zero is authoritative and links to Locations. */
+  activeLocations: number;
+  /** Existing station records with a non-active, disconnected, or non-valid calibration state. */
+  stationAttention: number;
   lastActivityAt: string | null;
   alertCount: number;
 }

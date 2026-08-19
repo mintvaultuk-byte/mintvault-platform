@@ -77,7 +77,7 @@ export interface PartnerOperationsView {
  * roughly five missed beats — long enough that a single lost request or a brief network blip does
  * not make a working Mac look dead on the shop's own console.
  */
-const STATION_STALE_MINUTES = 5;
+export const STATION_STALE_MINUTES = 5;
 
 /**
  * Card Job statuses grouped into the operator-facing buckets.

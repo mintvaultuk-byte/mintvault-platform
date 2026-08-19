@@ -88,7 +88,7 @@ describe("G5 list page source assertions", () => {
   it("uses the admin shell + admin session gate", () => {
     expect(src).toContain("AdminShell");
     expect(src).toContain("/api/admin/session");
-    expect(src).toContain("/admin/login?next=/admin/partner-network/partners");
+    expect(src).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
   });
   it("carries required data-testids (list, filters, table, create modal)", () => {
     for (const id of [
@@ -144,31 +144,31 @@ describe("shared admin API client source assertions", () => {
 
 describe("G5 detail page source assertions", () => {
   const src = readFileSync(join(process.cwd(), "client/src/pages/admin/partner-management-detail.tsx"), "utf8");
-  it("has the eight tabs (rendered from the TABS list) + admin session gate", () => {
-    expect(src).toContain("pm-tab-"); // tabs render via `pm-tab-${k}`
+  it("has the canonical Partner workspace navigation + admin session gate", () => {
+    expect(src).toContain("pm-workspace-tab-");
     for (const key of [
       "overview",
-      "users",
-      "profile",
-      "contacts",
-      "branding",
+      "onboarding",
+      "cards",
+      "staff",
+      "locations",
+      "stations",
+      "credits",
       "activity",
-      "notes",
-      "audit",
-      "connector",
+      "security",
     ]) {
       expect(src).toContain(`"${key}"`);
     }
     for (const label of [
       "Overview",
-      "Users",
-      "Company Profile",
-      "Contacts",
-      "Branding",
+      "Onboarding",
+      "Cards",
+      "Staff",
+      "Locations",
+      "Stations",
+      "Credits",
       "Activity",
-      "Internal Notes",
-      "Audit",
-      "Connector Summary",
+      "Security",
     ]) {
       expect(src).toContain(label);
     }
@@ -176,7 +176,7 @@ describe("G5 detail page source assertions", () => {
   });
   it("adds partner user management UI without password display or retrieval", () => {
     for (const id of [
-      "pm-tab-",
+      "pm-workspace-tab-",
       "pm-users",
       "pm-users-empty",
       "pm-user-modal",
@@ -233,7 +233,7 @@ describe("G5 detail page source assertions", () => {
     // A location id is referenced by stations, Card Jobs, certificate origin snapshots and audit
     // rows, so it is suspended and never removed. Offering a delete the server would refuse would
     // be a lie in the interface.
-    const locationsSection = src.slice(src.indexOf('tab === "locations"'), src.indexOf('tab === "profile"'));
+    const locationsSection = src.slice(src.indexOf('workspaceTab === "locations"'), src.indexOf('tab === "profile"'));
     expect(locationsSection).not.toMatch(/DELETE|Delete location|pm-location-delete/);
   });
 
@@ -294,8 +294,9 @@ describe("G5 nav + routes source assertions", () => {
     expect(detailIdx).toBeLessThan(listIdx); // :partnerId before the bare list
     expect(listIdx).toBeLessThan(opsIdx); // both before the existing G4 ops route (kept)
   });
-  it("adds one additive Partners NavLink and keeps Partner Connectors", () => {
-    expect(shell).toContain('label: "Partner Connectors"');
-    expect(shell).toContain('href: "/admin/partner-network/partners", label: "Partners"');
+  it("replaces the legacy Partner entries with the canonical Partner Network link", () => {
+    expect(shell).toContain('href: "/admin/partners", label: "Partner Network"');
+    expect(shell).not.toContain('href: "/admin/partner-network", label: "Partner Connectors"');
+    expect(shell).not.toContain('href: "/admin/partner-network/partners", label: "Partners"');
   });
 });

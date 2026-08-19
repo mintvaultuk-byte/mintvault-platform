@@ -25,6 +25,10 @@ COPY . .
 # /api/version can prove which commit is live. Defaults to "unknown".
 ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
+# This is a Vite compile-time flag, not a runtime secret.  Keep the default
+# fail-closed so an ordinary deploy preserves the legacy Partner admin surface.
+ARG VITE_PARTNER_NETWORK_CONSOLIDATION=false
+ENV VITE_PARTNER_NETWORK_CONSOLIDATION=$VITE_PARTNER_NETWORK_CONSOLIDATION
 RUN npm run build
 
 # ── Production stage ──────────────────────────────────────────────────────────

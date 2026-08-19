@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
@@ -90,9 +90,7 @@ const NAV: NavSection[] = [
       { key: "print-queue", label: "Print Queue", icon: PrinterCheck },
       { href: "/admin/staff", label: "Staff", icon: Users },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
-      { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },
-      { href: "/admin/partner-network/partners", label: "Partners", icon: Users },
-      { href: "/admin/partners/dashboard", label: "Partner Dashboard", icon: PackageCheck },
+      { href: "/admin/partners", label: "Partner Network", icon: PackageCheck },
     ],
   },
   {
@@ -133,6 +131,9 @@ const NAV: NavSection[] = [
   },
 ];
 
+const PARTNER_NETWORK_CONSOLIDATION_ENABLED = import.meta.env.VITE_PARTNER_NETWORK_CONSOLIDATION === "true";
+const PARTNER_NETWORK_HOME = PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners" : "/admin/partners/dashboard";
+
 // Topbar crumb path label per section the active tab belongs to.
 function crumbForTab(tab: AdminTab): { title: string; path: string } {
   for (const section of NAV) {
@@ -171,6 +172,7 @@ export default function AdminShell({
   focus,
   children,
 }: AdminShellProps) {
+  const [pathname] = useLocation();
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
     refetchInterval: 60000,
@@ -268,6 +270,16 @@ export default function AdminShell({
 
         {/* ── Main column ─────────────────────────────────────────────── */}
         <div className="admin-main">
+          {pathname.startsWith("/admin/partners") && (
+            <nav className="flex flex-wrap items-center gap-3 border-b border-[var(--admin-line)] px-5 py-2 text-sm" aria-label="Partner Network">
+              <span className="font-semibold">Partner Network</span>
+              <Link href={PARTNER_NETWORK_HOME} className="underline">Overview</Link>
+              <Link href={PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners/directory" : PARTNER_NETWORK_HOME} className="underline">Partners</Link>
+              <Link href="/admin/partners/stations" className="underline">Stations</Link>
+              <Link href="/admin/partners/infrastructure" className="underline">Infrastructure</Link>
+              <Link href="/admin/partners/settings" className="underline">Settings</Link>
+            </nav>
+          )}
           <header className="admin-top">
             <div className="admin-crumb">
               <div className="admin-crumb__t">{topTitle}</div>

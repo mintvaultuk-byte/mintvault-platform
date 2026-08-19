@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { Pencil, Trash2 } from "lucide-react";
 import { PokemonSetPicker } from "@/components/certificate-form";
@@ -43,6 +43,8 @@ type QueueRow = {
   hasImages: boolean;
   submissionRef: string | null;
   submissionId: number | null;
+  partnerId: string | null;
+  partnerName: string | null;
 };
 type PartnerReviewContext = {
   publicRef: string | null;
@@ -90,6 +92,12 @@ function adminBlockedMsg(status: number, err?: string): string | null {
 
 export default function AdminStaffPage() {
   const [, navigate] = useLocation();
+  const certIdRaw = new URLSearchParams(window.location.search).get("certId");
+  const requestedCertId = certIdRaw && /^\d+$/.test(certIdRaw) && Number.isSafeInteger(Number(certIdRaw)) && Number(certIdRaw) > 0
+    ? Number(certIdRaw)
+    : null;
+  const invalidRequestedCertId = certIdRaw !== null && requestedCertId === null;
+  const openedDeepLink = useRef<number | null>(null);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
   // Rate is a STRING buffer so decimals type cleanly. A controlled type=number
@@ -130,6 +138,11 @@ export default function AdminStaffPage() {
   useEffect(() => {
     if (authed) load();
   }, [authed, load]);
+  useEffect(() => {
+    if (authed && invalidRequestedCertId) {
+      setMsg("The requested certificate id is invalid. The normal Staff queue is shown instead.");
+    }
+  }, [authed, invalidRequestedCertId]);
 
   // create staff
   const [nEmail, setNEmail] = useState("");
@@ -314,7 +327,7 @@ export default function AdminStaffPage() {
   }
 
   // GRADE assignment — cross-submission grading queue (cert-level)
-  const [qFilter, setQFilter] = useState<string>("needs_grading");
+  const [qFilter, setQFilter] = useState<string>(requestedCertId ? "all" : "needs_grading");
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [qMeta, setQMeta] = useState<{ total: number; cap: number; capped: boolean } | null>(null);
   const [qLoading, setQLoading] = useState(false);
@@ -329,7 +342,9 @@ export default function AdminStaffPage() {
     setQLoading(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/admin/grading-queue?status=${encodeURIComponent(filter)}`, {
+      const params = new URLSearchParams({ status: filter });
+      if (requestedCertId) params.set("certId", String(requestedCertId));
+      const res = await fetch(`/api/admin/grading-queue?${params}`, {
         credentials: "include",
       });
       const d = await res.json().catch(() => ({}));
@@ -342,10 +357,19 @@ export default function AdminStaffPage() {
       setQueue(d.queue || []);
       setQMeta({ total: d.total ?? 0, cap: d.cap ?? 200, capped: !!d.capped });
       setGSel(new Set());
+      if (requestedCertId && openedDeepLink.current !== requestedCertId) {
+        openedDeepLink.current = requestedCertId;
+        const target = (d.queue ?? []).find((item: QueueRow) => item.certId === requestedCertId);
+        if (target?.graderStatus === "pending_review") {
+          openReview(target);
+        } else {
+          setMsg(`Certificate ${requestedCertId} is not available for Staff review in the current queue.`);
+        }
+      }
     } finally {
       setQLoading(false);
     }
-  }, []);
+  }, [requestedCertId]);
   useEffect(() => {
     if (authed) loadQueue(qFilter);
   }, [authed, qFilter, loadQueue]);

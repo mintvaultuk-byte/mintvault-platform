@@ -216,8 +216,10 @@ describe("page is shell-unified and correctly registered", () => {
     );
   });
 
-  it("registers the dashboard route", () => {
-    expect(APP).toContain('<Route path="/admin/partners/dashboard" component={AdminPartnerDashboardPage} />');
+  it("retains the dashboard URL as a flag-gated redirect to the canonical overview", () => {
+    expect(APP).toMatch(
+      /<Route path="\/admin\/partners\/dashboard">\s*<PartnerNetworkLegacyRoute canonical="\/admin\/partners">\s*<AdminPartnerDashboardPage \/>\s*<\/PartnerNetworkLegacyRoute>\s*<\/Route>/
+    );
   });
 
   it("keeps /admin/partners/dashboard above any future /admin/partners/:param route", () => {
@@ -237,20 +239,20 @@ describe("page is shell-unified and correctly registered", () => {
     if (notFoundAt > -1) expect(dashboardAt).toBeLessThan(notFoundAt);
   });
 
-  it("is registered in the admin navigation", () => {
-    expect(SHELL).toContain('href: "/admin/partners/dashboard"');
+  it("is reached through the canonical Partner Network admin navigation", () => {
+    expect(SHELL).toContain('href: "/admin/partners", label: "Partner Network"');
   });
 
-  it("preserves the two pre-existing partner nav entries", () => {
-    expect(SHELL).toContain('href: "/admin/partner-network"');
-    expect(SHELL).toContain('href: "/admin/partner-network/partners"');
+  it("does not expose retired legacy Partner entries in the canonical admin navigation", () => {
+    expect(SHELL).not.toContain('href: "/admin/partner-network", label: "Partner Connectors"');
+    expect(SHELL).not.toContain('href: "/admin/partner-network/partners", label: "Partners"');
   });
 });
 
 describe("page follows admin auth and data conventions", () => {
-  it("gates on the admin session with a correct ?next= for its own path", () => {
+  it("gates on the admin session while preserving its exact direct-link destination", () => {
     expect(PAGE).toContain('"/api/admin/session"');
-    expect(PAGE).toContain("/admin/login?next=/admin/partners/dashboard");
+    expect(PAGE).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
   });
 
   it("passes an explicit queryFn (the default fetcher would join the key array into a bad URL)", () => {

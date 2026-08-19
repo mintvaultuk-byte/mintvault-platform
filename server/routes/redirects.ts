@@ -29,6 +29,7 @@ export function registerRedirectRoutes(app: Express): void {
   // ── Cutover URL redirects → canonical v2 paths (SEO 301s) ─────────────────
   app.get("/how-it-works", (_req, res) => res.redirect(301, "/technology"));
   app.get("/about/the-mintvault-slab", (_req, res) => res.redirect(301, "/technology"));
+  app.get("/cert", (_req, res) => res.redirect(301, "/verify"));
   app.get("/guides", (_req, res) => res.redirect(301, "/journal"));
   app.get("/guides/:slug", (req, res) => res.redirect(301, `/journal/${req.params.slug}`));
 

@@ -195,6 +195,22 @@ export function partnerDashboardRouter(): Router {
   r.use(dashboardReadRateLimit);
   r.use(requirePartnerReadVisibility);
 
+  // R2: canonical Partner Network Overview. The existing guards above remain the sole
+  // cross-tenant read authority; the bounded service projection avoids browser fan-out.
+  r.get("/", async (req: Request, res: Response) => {
+    try {
+      const overview = await svc.getPartnerNetworkOverview(walletSchemaOf(req));
+      await auditRead(req, "dashboard_network_overview_viewed", "network", {
+        returnedPartners: overview.partners.rows.length,
+        totalPartners: overview.partners.total,
+        returnedAlerts: overview.alerts.length,
+      });
+      res.json({ overview });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   // ---- A. Network overview ----
   r.get("/summary", async (req: Request, res: Response) => {
     try {

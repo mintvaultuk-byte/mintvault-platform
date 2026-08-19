@@ -199,7 +199,7 @@ const td: React.CSSProperties = { padding: "6px 8px", fontSize: 13, verticalAlig
 // ---------------------------------------------------------------------------
 
 export default function AdminPartnerDashboardPage() {
-  const [, navigate] = useLocation();
+  const [pathname, navigate] = useLocation();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [filters, setFilters] = useState<PartnerListFilterState>(DEFAULT_FILTERS);
   const [searchDraft, setSearchDraft] = useState("");
@@ -220,8 +220,12 @@ export default function AdminPartnerDashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (authed === false) navigate("/admin/login?next=/admin/partners/dashboard", { replace: true });
-  }, [authed, navigate]);
+    if (authed === false)
+      navigate(
+        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
+        { replace: true }
+      );
+  }, [authed, navigate, pathname]);
 
   // Deep-link support: ?partner=<uuid>&tab=<tab>
   useEffect(() => {
@@ -261,9 +265,12 @@ export default function AdminPartnerDashboardPage() {
   // browser does exactly that) — route to login rather than show an empty cross-tenant grid.
   useEffect(() => {
     if (isAuthError(summary.error) || isAuthError(partners.error) || isAuthError(alerts.error)) {
-      navigate("/admin/login?next=/admin/partners/dashboard", { replace: true });
+      navigate(
+        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
+        { replace: true }
+      );
     }
-  }, [summary.error, partners.error, alerts.error, navigate]);
+  }, [summary.error, partners.error, alerts.error, navigate, pathname]);
 
   const rows = partners.data?.rows ?? [];
   const s = summary.data?.summary;

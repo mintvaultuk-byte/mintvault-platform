@@ -5,6 +5,7 @@
  * leaked into the UI as "[object Object]".
  */
 import { apiRequest } from "./queryClient";
+import type { PartnerOperationalReadiness } from "@shared/partner-readiness";
 
 export class PartnerApiError extends Error {
   code: string;
@@ -612,7 +613,8 @@ export interface PartnerFixQueueEntry {
   updatedAt: string;
 }
 
-export interface PartnerOnboardingReadiness {
+/** Per-user sign-in readiness, returned inside `users[]`. */
+export interface PartnerUserLoginReadiness {
   onboardingState: string;
   organisationActive: boolean;
   passwordConfigured: boolean;
@@ -622,6 +624,14 @@ export interface PartnerOnboardingReadiness {
   /** null = the station subsystem is absent on this deployment; NOT the same as "no station yet". */
   stationReady: boolean | null;
   blockedReasons?: string[];
+}
+
+/** The server-owned onboarding payload; readiness is rendered, never recomputed. */
+export interface PartnerOnboardingReadiness {
+  organisation: { id: string; legalName: string; status: string };
+  portalEnabled: boolean;
+  operational: PartnerOperationalReadiness;
+  users: Array<{ id: string; email: string; readiness: PartnerUserLoginReadiness }>;
 }
 
 export const partnerOperations = {
