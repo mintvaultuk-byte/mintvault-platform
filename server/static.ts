@@ -60,6 +60,8 @@ export function publicRequestPath(originalUrl: string): string {
   return originalUrl || "/";
 }
 
+export const staticAssetOptions = { index: false };
+
 export function serveStatic(app: Express) {
   const distPath = path.resolve(__dirname, "public");
   if (!fs.existsSync(distPath)) {
@@ -68,7 +70,9 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  // HTML routes, including `/`, must fall through to the renderer so initial
+  // responses receive their route-specific canonical and robots policy.
+  app.use(express.static(distPath, staticAssetOptions));
 
   // Cache the base HTML at startup — it doesn't change between requests
   const indexPath = path.resolve(distPath, "index.html");

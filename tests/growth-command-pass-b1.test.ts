@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { generatePdfToken, verifyPdfToken } from "../server/lib/pdf-token";
 import { paidSubmissionConfirmation } from "../server/lib/paid-submission-confirmation";
 import { getSeoMeta, getSitemapEntries, isKnownPublicRoute, isNoindexRoute } from "../server/seo-config";
-import { publicRequestPath, renderPublicHtml } from "../server/static";
+import { publicRequestPath, renderPublicHtml, staticAssetOptions } from "../server/static";
 
 const BASE_HTML = `<!doctype html><html><head><title>placeholder</title><meta name="description" content="x"><meta property="og:title" content="x"><meta property="og:description" content="x"><meta property="og:url" content="x"><meta name="twitter:title" content="x"><meta name="twitter:description" content="x"></head><body>app</body></html>`;
 const SUBMISSION_ROUTES = fs.readFileSync("server/routes/submissions.ts", "utf8");
@@ -148,6 +148,7 @@ describe("GB-02 rendered search policy", () => {
     const page = renderPublicHtml(BASE_HTML, publicRequestPath("/not-a-real-mv-path"));
     expect(page.status).toBe(404);
     expect(page.noindex).toBe(true);
+    expect(staticAssetOptions.index).toBe(false);
   });
 
   it("uses current Journal URLs and excludes redirected, private, and unbounded record routes from the deterministic sitemap", () => {
