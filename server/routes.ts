@@ -72,6 +72,7 @@ import { registerPartnerPublicRoutes } from "./partner/public-routes";
 import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
+import { registerCommandCentreRoutes } from "./command-centre/routes";
 import { registerCommercialGrowthRoutes } from "./routes/admin/commercial-growth";
 import { registerReviewRequestRoutes } from "./routes/reviews";
 import { registerGrowthMcpRoutes } from "./routes/growth-mcp";
@@ -2882,6 +2883,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
   registerPartnerStationAdminRoutes(app); // server-paginated station fleet control
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
+  registerCommandCentreRoutes(app); // Command Centre is feature-gated and Super-Admin read-only
   registerCommercialGrowthRoutes(app); // GB-04 aggregate/lead Super Admin Growth Command
   registerReviewRequestRoutes(app); // GB-05 signed review redirect + explicit suppression confirmation
   registerGrowthMcpRoutes(app); // GB-04C dedicated aggregate-only external MCP transport

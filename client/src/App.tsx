@@ -48,6 +48,7 @@ const TrackPage = lazy(() => import("@/pages/track"));
 const TermsPage = lazy(() => import("@/pages/terms"));
 const LiabilityPage = lazy(() => import("@/pages/liability"));
 const AdminPage = lazy(() => import("@/pages/admin"));
+const AdminCommandCentrePage = lazy(() => import("@/pages/admin-command-centre"));
 const AdminGrowthPage = lazy(() => import("@/pages/admin/growth"));
 const GraderLoginPage = lazy(() => import("@/pages/grader-login"));
 const GraderPage = lazy(() => import("@/pages/grader"));
@@ -443,6 +444,7 @@ function Router() {
           )}
           {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
           {import.meta.env.DEV && <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />}
+          <Route path="/admin/command" component={AdminCommandCentrePage} />
           <Route path="/admin/growth" component={AdminGrowthPage} />
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />

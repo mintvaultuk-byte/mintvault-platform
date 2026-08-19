@@ -71,9 +71,10 @@ describe("G5 UI pure helpers", () => {
     expect(pmKeys.walletBackfill()[0]).toBe("/api/super-admin/partner-management/wallet-backfills/WALLET-BACKFILL1");
   });
 
-  it("pilot flag helpers expose only onboarding/login as mutable and portal as read-only", () => {
+  it("pilot flag helpers expose Command Centre/onboarding/login as mutable and portal as read-only", () => {
     expect(PARTNER_PILOT_READONLY_FLAG).toBe("partner_portal_enabled");
-    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual(["partner_onboarding_enabled", "partner_login_enabled"]);
+    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual(["super_admin_command_centre_enabled", "partner_onboarding_enabled", "partner_login_enabled"]);
+    expect(isPartnerPilotMutableFlag("super_admin_command_centre_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_onboarding_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_login_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_portal_enabled")).toBe(false);

@@ -74,11 +74,16 @@ export const UNAVAILABLE_LABEL = "Unavailable — no tenant-linked source yet";
 
 export const PARTNER_PILOT_FLAG_BASE = "/api/super-admin/partner-flags";
 export const PARTNER_PILOT_READONLY_FLAG = "partner_portal_enabled" as const;
-export const PARTNER_PILOT_MUTABLE_FLAGS = ["partner_onboarding_enabled", "partner_login_enabled"] as const;
+export const PARTNER_PILOT_MUTABLE_FLAGS = [
+  "super_admin_command_centre_enabled",
+  "partner_onboarding_enabled",
+  "partner_login_enabled",
+] as const;
 export type PartnerPilotMutableFlag = (typeof PARTNER_PILOT_MUTABLE_FLAGS)[number];
 export type PartnerPilotDisplayFlag = PartnerPilotMutableFlag | typeof PARTNER_PILOT_READONLY_FLAG;
 
 export const PARTNER_PILOT_FLAG_LABELS: Record<PartnerPilotDisplayFlag, string> = {
+  super_admin_command_centre_enabled: "Command Centre",
   partner_portal_enabled: "Partner Portal",
   partner_onboarding_enabled: "Partner Onboarding",
   partner_login_enabled: "Partner Login",

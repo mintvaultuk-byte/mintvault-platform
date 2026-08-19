@@ -50,7 +50,8 @@ export type AdminTab =
   | "transfers"
   | "scans"
   | "sets"
-  | "growth";
+  | "growth"
+  | "command-centre";
 
 interface DbInfo {
   env: string;
@@ -59,6 +60,7 @@ interface DbInfo {
   card_master_active_count: number;
   card_sets_active_count: number;
   certificates_count: number;
+  command_centre_available?: boolean;
 }
 
 type NavLeaf = {
@@ -136,6 +138,32 @@ const NAV: NavSection[] = [
   },
 ];
 
+export function navigationForCommandCentre(
+  commandCentreAvailable: boolean,
+): NavSection[] {
+  if (!commandCentreAvailable) {
+    return NAV;
+  }
+
+  return NAV.map((section) => {
+    if (section.heading !== "Insight") {
+      return section;
+    }
+
+    return {
+      ...section,
+      items: [
+        ...section.items,
+        {
+          href: "/admin/command",
+          label: "Command Centre",
+          icon: Activity,
+        },
+      ],
+    };
+  });
+}
+
 const PARTNER_NETWORK_CONSOLIDATION_ENABLED = import.meta.env.VITE_PARTNER_NETWORK_CONSOLIDATION === "true";
 const PARTNER_NETWORK_HOME = PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners" : "/admin/partners/dashboard";
 
@@ -151,6 +179,10 @@ function crumbForTab(tab: AdminTab): { title: string; path: string } {
   return { title: "Admin", path: "MINTVAULT" };
 }
 
+function adminTabDestination(tab: AdminTab): string {
+  return tab === "dashboard" ? "/admin" : "/admin?tab=" + encodeURIComponent(tab);
+}
+
 interface AdminShellProps {
   activeTab: AdminTab;
   onTabChange: (t: AdminTab) => void;
@@ -164,6 +196,14 @@ interface AdminShellProps {
       viewport height so a full-height child (e.g. the grading workstation) can
       fill it. Non-focus rendering is unchanged. */
   focus?: boolean;
+  /** Command Centre is a snapshot surface: do not retain the shell's legacy
+      environment polling while it is mounted. */
+  disableEnvironmentPolling?: boolean;
+  /** Command Centre must not fetch or render the shell's unrelated database
+      metadata. Its own read-only endpoint is the only live domain payload. */
+  commandCentreMode?: boolean;
+  /** Set only after the protected Command Centre GET has returned successfully. */
+  commandCentreAvailable?: boolean;
   children: ReactNode;
 }
 
@@ -177,12 +217,16 @@ export default function AdminShell({
   title,
   crumb,
   focus,
+  disableEnvironmentPolling = false,
+  commandCentreMode = false,
+  commandCentreAvailable = false,
   children,
 }: AdminShellProps) {
   const [pathname] = useLocation();
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
-    refetchInterval: 60000,
+    enabled: !commandCentreMode,
+    refetchInterval: disableEnvironmentPolling ? false : 60000,
   });
   const { data: adminSession } = useQuery<AdminSession>({
     queryKey: ["/api/admin/session"],
@@ -201,6 +245,9 @@ export default function AdminShell({
   const derived = crumbForTab(activeTab);
   const topTitle = title ?? derived.title;
   const topCrumb = crumb ?? derived.path;
+  const navigation = navigationForCommandCentre(
+    commandCentreAvailable || (!commandCentreMode && dbInfo?.command_centre_available === true),
+  );
 
   // Focus mode (e.g. the grading workstation) drops BOTH the top header chrome
   // and the left sidebar so the workstation gets the full viewport width — just
@@ -234,7 +281,7 @@ export default function AdminShell({
             <div className="admin-brand__sub">Admin Console</div>
           </div>
 
-          {NAV.map((section) => (
+          {navigation.map((section) => (
             <nav className="admin-nav" key={section.heading}>
               <div className="admin-nav-h">{section.heading}</div>
               {section.items.map((item) => {
@@ -247,6 +294,19 @@ export default function AdminShell({
                       href={item.href}
                       className={`admin-nav-i ${pathname === item.href ? "is-on" : ""}`.trim()}
                       data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <Icon /> {item.label}
+                    </Link>
+                  );
+                }
+                if (commandCentreMode) {
+                  return (
+                    <Link
+                      key={item.key}
+                      href={adminTabDestination(item.key)}
+                      className="admin-nav-i"
+                      data-testid={`nav-${item.key}`}
+                      title={item.title}
                     >
                       <Icon /> {item.label}
                     </Link>
@@ -268,7 +328,7 @@ export default function AdminShell({
             </nav>
           ))}
 
-          <div className="admin-side-foot">
+          {!commandCentreMode && <div className="admin-side-foot">
             <span className={`admin-env ${envIsProd ? "" : "is-staging"}`.trim()} data-testid="badge-env">
               <span className="admin-env__dot" />
               ENV · {envLabel}
@@ -281,7 +341,7 @@ export default function AdminShell({
                 {dbInfo.certificates_count}
               </span>
             )}
-          </div>
+          </div>}
         </aside>
 
         {/* ── Main column ─────────────────────────────────────────────── */}
@@ -302,7 +362,7 @@ export default function AdminShell({
               <div className="admin-crumb__p">{topCrumb}</div>
             </div>
 
-            <div className="admin-pills" data-testid="env-banner">
+            {!commandCentreMode && <div className="admin-pills" data-testid="env-banner">
               <span className="admin-pill">
                 <Check size={11} /> DB
               </span>
@@ -319,7 +379,7 @@ export default function AdminShell({
                   </span>
                 </>
               )}
-            </div>
+            </div>}
 
             <div className="admin-topright">
               {search && (

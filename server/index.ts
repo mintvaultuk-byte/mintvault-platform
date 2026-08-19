@@ -18,6 +18,7 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+import "./command-centre/registry";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import { validatePartnerRbacAtBoot } from "./partner/permissions";
 import pg from "pg";
@@ -222,7 +223,10 @@ app.use(express.urlencoded({ extended: false }));
 const PgStore = connectPgSimple(session);
 const sessionPool = new pg.Pool({
   connectionString: getDatabaseUrl(),
-  ssl: { rejectUnauthorized: false },
+  // The disposable runtime harness runs the real application with NODE_ENV=test
+  // against loopback PostgreSQL, which has no TLS listener. Production, staging
+  // and normal development retain their existing TLS transport unchanged.
+  ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false },
   max: 8,
   // 30s tolerates Neon autosuspend cold-start (see server/db.ts for the
   // same rationale). Session reads/writes happen on nearly every request,

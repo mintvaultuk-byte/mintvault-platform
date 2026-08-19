@@ -37,6 +37,10 @@ export type PartnerReadVisibility =
   | { ok: true; walletSchema: boolean }
   | { ok: false; code: VisibilityFailureCode; message: string };
 
+export type PartnerStationReadVisibility =
+  | { ok: true }
+  | { ok: false; code: VisibilityFailureCode };
+
 /**
  * Relations the dashboard cannot work without. If one is missing the deployment is mid-migration
  * (or pointed at the wrong database) and zeros would again be a lie.
@@ -201,4 +205,35 @@ export async function getPartnerReadVisibility(): Promise<PartnerReadVisibility>
     });
 
   return inFlight;
+}
+
+/**
+ * Station lifecycle is intentionally an independent optional dashboard source.
+ * The main Partner dashboard predates stations and must not be made unavailable
+ * by an absent station migration; Command Centre nevertheless must prove this
+ * FORCE-RLS table is readable before an aggregate zero can be trusted.
+ */
+export async function getPartnerStationReadVisibility(): Promise<PartnerStationReadVisibility> {
+  const [roleRes, relationRes] = await Promise.all([
+    partnerAdminQuery<RoleRow>(
+      `SELECT current_user::text AS role_name,
+              COALESCE(rolsuper, false) AS rolsuper,
+              COALESCE(rolbypassrls, false) AS rolbypassrls
+         FROM pg_roles WHERE rolname = current_user`,
+    ),
+    partnerAdminQuery<RelRow>(
+      `SELECT c.relname::text AS relname, c.relkind::text AS relkind,
+              COALESCE(c.relrowsecurity, false) AS relrowsecurity,
+              COALESCE(c.relforcerowsecurity, false) AS relforcerowsecurity,
+              pg_get_userbyid(c.relowner)::text AS owner
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'partner_stations'`,
+    ),
+  ]);
+  const relation = relationRes.rows[0];
+  if (!relation) return { ok: false, code: "PARTNER_ADMIN_SCHEMA_UNAVAILABLE" };
+  const role = roleRes.rows[0] ?? { role_name: "unknown", rolsuper: false, rolbypassrls: false };
+  return rlsBlocks(relation, role)
+    ? { ok: false, code: "PARTNER_ADMIN_RLS_VISIBILITY_UNAVAILABLE" }
+    : { ok: true };
 }
