@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { normaliseAttribution } from "./commercial-attribution";
 
 export const PARTNER_APPLICATION_STATUSES = ["NEW", "CONTACTED", "QUALIFIED", "NOT_A_FIT", "ONBOARDING"] as const;
 export const PARTNER_APPLICATION_PRIVACY_NOTICE_VERSION = "v1.0-2026-08-19";
@@ -90,7 +91,7 @@ export type PartnerApplicationInput = {
   };
 };
 
-export type SafeAttribution = {
+export type SafePartnerAttribution = {
   route: "/partners";
   utmSource?: string;
   utmMedium?: string;
@@ -98,21 +99,6 @@ export type SafeAttribution = {
   utmContent?: string;
   referrerOrigin?: string;
 };
-
-function cleanAttributionValue(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const withoutControls = Array.from(value)
-    .filter((character) => {
-      const code = character.charCodeAt(0);
-      return code >= 32 && code !== 127;
-    })
-    .join("");
-  const cleaned = withoutControls
-    .replace(/[^\p{L}\p{N} ._\-/]/gu, "")
-    .trim()
-    .slice(0, 120);
-  return cleaned || undefined;
-}
 
 function safeReferrerOrigin(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -129,13 +115,19 @@ function safeReferrerOrigin(value: string | undefined): string | undefined {
  * Source data is treated as untrusted. The public route is fixed server-side;
  * query strings, hashes and referrer paths are deliberately never retained.
  */
-export function sanitizePartnerAttribution(input: PartnerApplicationInput["attribution"]): SafeAttribution {
+export function sanitizePartnerAttribution(input: PartnerApplicationInput["attribution"]): SafePartnerAttribution {
+  const attribution = normaliseAttribution({
+    utm_source: input?.utmSource,
+    utm_medium: input?.utmMedium,
+    utm_campaign: input?.utmCampaign,
+    utm_content: input?.utmContent,
+  });
   return {
     route: "/partners",
-    ...(cleanAttributionValue(input?.utmSource) ? { utmSource: cleanAttributionValue(input?.utmSource) } : {}),
-    ...(cleanAttributionValue(input?.utmMedium) ? { utmMedium: cleanAttributionValue(input?.utmMedium) } : {}),
-    ...(cleanAttributionValue(input?.utmCampaign) ? { utmCampaign: cleanAttributionValue(input?.utmCampaign) } : {}),
-    ...(cleanAttributionValue(input?.utmContent) ? { utmContent: cleanAttributionValue(input?.utmContent) } : {}),
+    ...(attribution.source ? { utmSource: attribution.source } : {}),
+    ...(attribution.medium ? { utmMedium: attribution.medium } : {}),
+    ...(attribution.campaign ? { utmCampaign: attribution.campaign } : {}),
+    ...(attribution.content ? { utmContent: attribution.content } : {}),
     ...(safeReferrerOrigin(input?.referrer) ? { referrerOrigin: safeReferrerOrigin(input?.referrer) } : {}),
   };
 }
@@ -173,7 +165,7 @@ function textArray(values: string[]): SQL {
 export async function persistPartnerApplication(
   persistence: PartnerApplicationPersistence,
   application: PartnerApplicationInput,
-  attribution: SafeAttribution
+  attribution: SafePartnerAttribution
 ): Promise<{ leadId: string; created: boolean }> {
   const dedupeKey = partnerApplicationDedupeKey(application);
   return persistence.transaction(async (execute) => {

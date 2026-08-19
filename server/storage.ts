@@ -128,7 +128,7 @@ export interface IStorage {
   createSubmission(data: any): Promise<any>;
   getSubmissionBySubmissionId(submissionId: string): Promise<any | undefined>;
   getSubmissionByPaymentIntentId(paymentIntentId: string): Promise<any | undefined>;
-  markSubmissionAsPaid(id: number): Promise<boolean>;
+  markSubmissionAsPaid(id: number, payment?: { amountPence: number; currency: string; paidAt: Date }): Promise<boolean>;
   updateSubmission(id: any, data: any): Promise<any | undefined>;
   getNextSubmissionId(): Promise<string>;
   listSubmissions(filters?: SubmissionFilters): Promise<any[]>;
@@ -570,7 +570,10 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async markSubmissionAsPaid(id: number): Promise<boolean> {
+  async markSubmissionAsPaid(
+    id: number,
+    payment?: { amountPence: number; currency: string; paidAt: Date }
+  ): Promise<boolean> {
     // Uses the admin bypass to step around the status-transition trigger, which
     // rejects the uppercase "DRAFT" stored at submission creation.  Transitions
     // to "paid" — the correct next state per the trigger's own transition map.
@@ -581,6 +584,12 @@ export class DatabaseStorage implements IStorage {
     // race gets false. This is the idempotency gate for fulfilment (credit
     // consume + promo redeem must run exactly once).
     const numId = id;
+    // Only the confirmed PaymentIntent/webhook callers supply this data. An
+    // older maintenance/test caller cannot manufacture historical revenue:
+    // Growth excludes rows without a verified payment timestamp.
+    const amountPence = payment ? Math.max(0, Math.trunc(payment.amountPence)) : null;
+    const currency = payment ? payment.currency.trim().toUpperCase().slice(0, 3) || "GBP" : null;
+    const paidAt = payment?.paidAt ?? null;
     let won = false;
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL mintvault.admin_bypass = 'true'`);
@@ -588,6 +597,9 @@ export class DatabaseStorage implements IStorage {
         UPDATE submissions
         SET status = 'paid',
             payment_status = 'paid',
+            payment_amount = CASE WHEN ${amountPence}::integer IS NULL THEN payment_amount ELSE ${amountPence}::numeric / 100 END,
+            payment_currency = COALESCE(${currency}, payment_currency),
+            payment_timestamp = COALESCE(${paidAt}, payment_timestamp),
             updated_at = NOW()
         WHERE id = ${numId}
           AND LOWER(status) = 'draft'

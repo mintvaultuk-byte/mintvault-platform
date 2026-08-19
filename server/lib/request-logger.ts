@@ -42,6 +42,9 @@ export const BODY_LOG_SUPPRESSED_PREFIXES = [
   // returns an opaque receipt today, but suppress it defensively so a later
   // response-shape change cannot put applicant PII into Fly logs.
   "/api/partner-applications",
+  // Growth lead detail includes the minimum business-contact information a
+  // Super Admin needs to act. Never write that response into Fly logs.
+  "/api/super-admin/growth",
   "/api/super-admin/partner-dashboard",
   // Same reasoning as the dashboard above: these responses carry partner contact details — email,
   // telephone, postal address, company/VAT numbers — for one or many partners at a time. The

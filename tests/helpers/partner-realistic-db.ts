@@ -258,6 +258,11 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // though they have no `partner_*` foreign key: a partner-only harness must
   // never claim it exercised public lead retention, consent or notification.
   "0095_growth_partner_applications",
+  // GB-04 attaches first-party campaign records to core grading submissions and
+  // indexes the verified paid-payment timestamp. It cannot truthfully run in a
+  // partner-only harness which has neither the MintVault submission shape nor
+  // the production payment authority columns.
+  "0099_growth_commercial_attribution",
 ] as const;
 
 /**

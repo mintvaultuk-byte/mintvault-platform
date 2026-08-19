@@ -23,6 +23,7 @@ import { Link } from "wouter";
 import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import SeoHead from "@/components/seo-head";
 import GradientButton from "@/components/ui/gradient-button";
+import { attributionFromSearch } from "@/lib/commercial-attribution";
 
 interface CardItem {
   game: string;
@@ -1419,6 +1420,9 @@ function Step5Payment({
         authConcerns: state.type === "authentication" ? state.authConcerns || undefined : undefined,
         revealWrap: state.revealWrap,
         marketingFeatureConsent: marketingConsent,
+        // Query-only campaign context. It is optional and checkout proceeds if
+        // it is absent or ignored by the server's bounded registry.
+        attribution: attributionFromSearch(window.location.search),
       });
       return res.json();
     },

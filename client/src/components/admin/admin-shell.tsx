@@ -49,7 +49,8 @@ export type AdminTab =
   | "divergence"
   | "transfers"
   | "scans"
-  | "sets";
+  | "sets"
+  | "growth";
 
 interface DbInfo {
   env: string;
@@ -73,6 +74,9 @@ type NavLink = {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
+  /** Links carrying operationally sensitive aggregate data remain hidden unless
+   * the server has confirmed the current admin is a Super Admin. */
+  superAdminOnly?: boolean;
 };
 type NavItem = NavLeaf | NavLink;
 type NavSection = { heading: string; items: NavItem[] };
@@ -98,6 +102,7 @@ const NAV: NavSection[] = [
     items: [
       { href: "/admin/vault-quest", label: "Vault Quest", icon: Sparkles },
       { href: "/admin/vault-quest/card-factory", label: "Card Factory", icon: PackageCheck },
+      { href: "/admin/growth", label: "Growth Command", icon: BarChart3, superAdminOnly: true },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "divergence", label: "AI Divergence", icon: TrendingUp },
       {
@@ -162,6 +167,8 @@ interface AdminShellProps {
   children: ReactNode;
 }
 
+type AdminSession = { authenticated: boolean; isSuperAdmin?: boolean };
+
 export default function AdminShell({
   activeTab,
   onTabChange,
@@ -176,6 +183,14 @@ export default function AdminShell({
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
     refetchInterval: 60000,
+  });
+  const { data: adminSession } = useQuery<AdminSession>({
+    queryKey: ["/api/admin/session"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/session", { credentials: "include" });
+      return response.ok ? ((await response.json()) as AdminSession) : { authenticated: false };
+    },
+    staleTime: 60_000,
   });
 
   const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
@@ -225,11 +240,12 @@ export default function AdminShell({
               {section.items.map((item) => {
                 const Icon = item.icon;
                 if ("href" in item) {
+                  if (item.superAdminOnly && adminSession?.isSuperAdmin !== true) return null;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className="admin-nav-i"
+                      className={`admin-nav-i ${pathname === item.href ? "is-on" : ""}`.trim()}
                       data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                     >
                       <Icon /> {item.label}

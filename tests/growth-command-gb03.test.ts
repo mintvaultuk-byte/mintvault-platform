@@ -39,7 +39,7 @@ const validApplication: PartnerApplicationInput = {
   privacyAcknowledged: true,
   attribution: {
     route: "/partners",
-    utmSource: "shop-outreach",
+    utmSource: "outreach",
     utmMedium: "email",
     utmCampaign: "founding-partners",
     referrer: "https://search.example/results?q=private-query#fragment",
@@ -107,7 +107,7 @@ describe("GB-03 public Partner acquisition contract", () => {
     const attribution = sanitizePartnerAttribution(validApplication.attribution);
     expect(attribution).toEqual({
       route: "/partners",
-      utmSource: "shop-outreach",
+      utmSource: "outreach",
       utmMedium: "email",
       utmCampaign: "founding-partners",
       referrerOrigin: "https://search.example",

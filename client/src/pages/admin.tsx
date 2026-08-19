@@ -1,13 +1,27 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import AdminDashboard from "./admin-dashboard";
+import type { AdminTab } from "@/components/admin";
+
+const DASHBOARD_TABS: readonly AdminTab[] = [
+  "dashboard", "certs", "submissions", "intake", "pricing", "promotions", "capacity", "printing", "print-queue",
+  "grading", "learning", "capture-health", "divergence", "transfers", "scans", "sets",
+];
+
+function initialDashboardTab(location: string): AdminTab | undefined {
+  if (location === "/admin/promotions") return "promotions";
+  if (typeof window === "undefined") return undefined;
+  const candidate = new URLSearchParams(window.location.search).get("tab");
+  return candidate && DASHBOARD_TABS.includes(candidate as AdminTab) ? (candidate as AdminTab) : undefined;
+}
 
 export default function AdminPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [authReason, setAuthReason] = useState<string>("");
   const [location, navigate] = useLocation();
-  // Deep-link: /admin/promotions opens the dashboard on the Promotions tab.
-  const initialTab = location === "/admin/promotions" ? ("promotions" as const) : undefined;
+  // Deep-link support keeps shared AdminShell navigation authoritative even when
+  // an operator starts on a separately routed Super Admin page such as Growth.
+  const initialTab = initialDashboardTab(location);
 
   useEffect(() => {
     let cancelled = false;

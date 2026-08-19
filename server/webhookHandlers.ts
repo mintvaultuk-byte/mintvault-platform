@@ -227,7 +227,10 @@ export class WebhookHandlers {
       // email); the other caller is a logged no-op. This closes the inverse gap
       // where a webhook-only completion previously never consumed the credit or
       // redeemed the promo code.
-      await fulfilPaidSubmission(submission, pi.metadata || {}, pi.amount || 0);
+      await fulfilPaidSubmission(submission, pi.metadata || {}, pi.amount || 0, {}, {
+        currency: pi.currency,
+        paidAt: new Date(),
+      });
       console.log(`[webhook] Submission ${submission.submissionId} fulfilment dispatched (paymentStatus=paid)`);
     }
 

@@ -311,6 +311,18 @@ export const submissions = pgTable("submissions", {
   scanAssignedAt: timestamp("scan_assigned_at", { withTimezone: true }),
 });
 
+/** GB-04: privacy-minimised first-party campaign context for a submission. */
+export const submissionAcquisition = pgTable("submission_acquisition", {
+  submissionId: integer("submission_id").primaryKey(),
+  acquisitionCategory: text("acquisition_category").notNull(),
+  utmSource: text("utm_source"),
+  utmMedium: text("utm_medium"),
+  utmCampaign: text("utm_campaign"),
+  utmContent: text("utm_content"),
+  utmTerm: text("utm_term"),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const submissionItems = pgTable("submission_items", {
   id: serial("id").primaryKey(),
   submissionId: integer("submission_id").notNull(),
