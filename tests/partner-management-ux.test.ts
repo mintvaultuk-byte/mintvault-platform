@@ -1100,6 +1100,7 @@ describe("location creation form contract", () => {
     const service = readSrc(SERVER_SERVICE);
     expect(detail).toContain('data-testid="pm-location-reason"');
     expect(detail).toContain("data-testid={`pm-location-maps-${l.id}`}");
+    expect(detail).toContain("aria-label={`Open ${l.name} address in Google Maps`}");
     expect(detail).toContain("googleMapsSearchUrl(l.address)");
     expect(routes).toContain('r.post("/partners/:partnerId/locations"');
     expect(service).toContain('withAudit(actor, org.id, "partner_location_created"');

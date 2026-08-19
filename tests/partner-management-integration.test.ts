@@ -84,8 +84,7 @@ let capturedInvites: Array<{
   expiresAt: Date;
 }> = [];
 let setInvitationDeliveryAdapter:
-  | ((a: null | ((d: (typeof capturedInvites)[number]) => Promise<void>)) => void)
-  | null = null;
+  ((a: null | ((d: (typeof capturedInvites)[number]) => Promise<void>)) => void) | null = null;
 
 const PM = "/api/super-admin/partner-management";
 

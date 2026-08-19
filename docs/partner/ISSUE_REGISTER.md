@@ -14,7 +14,7 @@ Last updated: 2026-08-13 (P0 complete, P1 archaeology 3/5 agents reported).
 
 ### PNL-LOCATION-001 — Production audit action constraint rejects canonical location creation. BLOCKER
 
-**Status:** OWNER-DECISION · **Source:** authenticated-production acceptance report; code/data-path trace at
+**Status:** PROVEN · **Source:** authenticated-production acceptance report; code/data-path trace at
 `client/src/pages/admin/partner-management-detail.tsx`,
 `server/partner/partner-management-routes.ts`,
 `server/partner/partner-management-service.ts`,
@@ -40,20 +40,18 @@ specific `23514` response. It also restores an encoded address-only Google Maps 
 a location is stored. No new endpoint, guard, table, column, geocoder, API key, or migration was
 created.
 
-**Required owner action:** separately approve applying existing additive migration
-`0084_partner_location_management.sql` through the approved production migration runner. It widens
-the existing audit action CHECK to include the canonical location actions and creates location
-indexes; it creates no table or column. Until it is applied, production creation remains correctly
-blocked rather than writing an un-audited location.
+**Production migration proof:** the owner-approved scoped runner applied only existing additive
+`0084_partner_location_management.sql` atomically (journal 41 → 42). A rollback-only transaction
+proved its widened CHECK accepts the canonical location action while retaining current audit actions.
+No 0091/0092/0093 migration was applied.
 
 **Proof / test:** the real PostgreSQL 17 service test executes locally against the migration lineage
 through 0084 and proves trimmed valid creation, tenant isolation, and attempted/succeeded audit rows.
 The separately wired real main-app HTTP/PostgreSQL test covers the same request surface when
 `PARTNER_MANAGEMENT_RT_ADMIN` points to a disposable loopback PostgreSQL 17 database; it is skipped
-locally because that shared database/container service is unavailable. `npm run check`, changed-file
-ESLint (zero errors), `npm run build`, and `git diff --check` pass for the candidate. The current
-repository-wide lint sweep is contaminated by an unrelated generated `.claude/worktrees` copy and
-is not a product-code finding.
+locally because that shared database/container service is unavailable. Authenticated production
+acceptance verified the stored active location and its encoded Google Maps destination. `npm run
+check`, ESLint (zero errors), `npm run build`, and `git diff --check` pass for the candidate.
 
 ---
 
