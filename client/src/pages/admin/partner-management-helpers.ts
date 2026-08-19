@@ -624,3 +624,113 @@ export function canSuspendLocation(status: string, activeLocationCount: number):
   if (status !== "ACTIVE") return false;
   return activeLocationCount > 1;
 }
+
+// ---- Partner location creation ---------------------------------------------------------------
+// `partner_locations.address` is deliberately one nullable string in the existing authority. The
+// form is structured for operators, then composed here before it reaches that unchanged contract.
+export const PARTNER_LOCATION_CREATE_REASONS = [
+  { value: "new_partner_location", label: "New Partner location", auditReason: "New Partner location" },
+  { value: "additional_shop_site", label: "Additional shop/site", auditReason: "Additional shop/site" },
+  { value: "partner_moved_location", label: "Partner moved location", auditReason: "Partner moved location" },
+  { value: "address_correction", label: "Address correction", auditReason: "Address correction" },
+  { value: "temporary_location", label: "Temporary location", auditReason: "Temporary location" },
+  { value: "administrative_correction", label: "Administrative correction", auditReason: "Administrative correction" },
+  { value: "other", label: "Other", auditReason: null },
+] as const;
+
+export type PartnerLocationCreateReason = (typeof PARTNER_LOCATION_CREATE_REASONS)[number]["value"];
+
+export interface PartnerLocationAddressInput {
+  line1: string;
+  line2: string;
+  townCity: string;
+  county: string;
+  postcode: string;
+  country: string;
+}
+
+export const EMPTY_PARTNER_LOCATION_ADDRESS: PartnerLocationAddressInput = {
+  line1: "",
+  line2: "",
+  townCity: "",
+  county: "",
+  postcode: "",
+  country: "United Kingdom",
+};
+
+/** Safe presentation normalisation only; this does not look an address up or change its meaning. */
+export function normaliseUkPostcode(value: string): string {
+  const compact = (value ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  return compact.length > 3 ? `${compact.slice(0, -3)} ${compact.slice(-3)}` : compact;
+}
+
+export function isValidUkPostcode(value: string): boolean {
+  return /^(?:GIR 0AA|[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2})$/.test(normaliseUkPostcode(value));
+}
+
+export function composePartnerLocationAddress(input: PartnerLocationAddressInput): string | null {
+  const parts = [
+    input.line1.trim(),
+    input.line2.trim(),
+    input.townCity.trim(),
+    input.county.trim(),
+    normaliseUkPostcode(input.postcode),
+    input.country.trim(),
+  ].filter(Boolean);
+  return parts.length === 0 || (parts.length === 1 && parts[0] === "United Kingdom") ? null : parts.join(", ");
+}
+
+export function locationCreationAuditReason(reason: string, otherExplanation: string): string | null {
+  const option = PARTNER_LOCATION_CREATE_REASONS.find((candidate) => candidate.value === reason);
+  if (!option) return null;
+  if (option.auditReason) return option.auditReason;
+  const explanation = otherExplanation.trim();
+  return explanation.length > 0 && explanation.length <= 1900 ? `Other: ${explanation}` : null;
+}
+
+export interface PartnerLocationCreateValidationInput {
+  name: string;
+  address: PartnerLocationAddressInput;
+  reason: string;
+  otherExplanation: string;
+}
+
+/** Client guidance mirrors the existing string-address authority; the server still validates every write. */
+export function validatePartnerLocationCreate(input: PartnerLocationCreateValidationInput): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const locationName = input.name.trim();
+  if (locationName === "") errors.name = "Enter a location name.";
+  else if (locationName.length < 2 || locationName.length > 120) {
+    errors.name = "Location name must be 2–120 characters.";
+  }
+
+  const addressStarted = [
+    input.address.line1,
+    input.address.line2,
+    input.address.townCity,
+    input.address.county,
+    input.address.postcode,
+  ].some((value) => value.trim() !== "");
+  if (addressStarted) {
+    if (input.address.line1.trim() === "") errors.line1 = "Address line 1 is required.";
+    if (input.address.townCity.trim() === "") errors.townCity = "Town / City is required.";
+    if (!isValidUkPostcode(input.address.postcode)) errors.postcode = "Enter a valid postcode.";
+    if (input.address.country.trim() === "") errors.country = "Country is required.";
+  }
+  if ((composePartnerLocationAddress(input.address)?.length ?? 0) > 500) {
+    errors.address = "Address must be 500 characters or fewer.";
+  }
+
+  if (!PARTNER_LOCATION_CREATE_REASONS.some((option) => option.value === input.reason)) {
+    errors.reason = "Select a valid reason.";
+  } else if (input.reason === "other" && locationCreationAuditReason(input.reason, input.otherExplanation) === null) {
+    errors.otherExplanation = "Please explain the reason.";
+  }
+  return errors;
+}
+
+/** No SDK, key, lookup or coordinate persistence — just the existing address in an encoded search URL. */
+export function googleMapsSearchUrl(address: string | null | undefined): string | null {
+  const query = address?.trim();
+  return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : null;
+}
