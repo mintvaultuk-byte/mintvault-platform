@@ -46,7 +46,6 @@ import {
   EMPTY_PARTNER_LOCATION_ADDRESS,
   PARTNER_LOCATION_CREATE_REASONS,
   composePartnerLocationAddress,
-  googleMapsSearchUrl,
   locationCreationAuditReason,
   validatePartnerLocationCreate,
   type ProfileValues,

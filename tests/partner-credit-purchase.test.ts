@@ -293,6 +293,20 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
         }),
       "STRIPE_TAX_BEHAVIOR_MISMATCH"
     );
+    // `unspecified` defers to Stripe account defaults, which could add VAT on top of the advertised
+    // inclusive amount. Only an explicit inclusive Price can enter Checkout.
+    expectCreditPurchaseError(
+      () =>
+        purchase.validateStripePriceForCheckout(pack, {
+          id: "price_test_pack_25",
+          currency: "gbp",
+          unitAmount: 25000,
+          taxBehavior: "unspecified",
+          livemode: false,
+          active: true,
+        }),
+      "STRIPE_TAX_BEHAVIOR_MISMATCH"
+    );
   });
 
   it("refuses checkout creation when Stripe mode is undeclared", async () => {
@@ -623,6 +637,19 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     );
     expect(taxOutcome).toMatchObject({ granted: false, reason: "checkout_tax_behavior_mismatch" });
     expect(await availableFor(taxTenant)).toBe(0);
+
+    const unspecifiedTaxTenant = await makeTenant("unspecified-tax");
+    await configureCanonicalPack("PACK_25", "gbp");
+    await recordCheckoutIntent(unspecifiedTaxTenant, "PACK_25", "cs_unspecified_tax");
+    const unspecifiedTaxOutcome = await purchase.fulfilPartnerCreditPurchase(
+      {
+        ...session(unspecifiedTaxTenant, "PACK_25", "cs_unspecified_tax"),
+        lineItems: [{ priceId: "price_test_pack_25", currency: "gbp", unitAmount: 25000, taxBehavior: null }],
+      },
+      "evt_unspecified_tax_1"
+    );
+    expect(unspecifiedTaxOutcome).toMatchObject({ granted: false, reason: "checkout_tax_behavior_mismatch" });
+    expect(await availableFor(unspecifiedTaxTenant)).toBe(0);
   });
 
   it("a failed grant transaction leaves Checkout provenance retryable", async () => {
@@ -791,6 +818,10 @@ describe("P5 integration surfaces", () => {
   it("routes refunds and disputes to audited exception handling, never to a wallet debit", () => {
     expect(webhook).toContain('event.type === "charge.refunded"');
     expect(webhook).toContain('event.type === "charge.dispute.created"');
+    // A dispute event carries a Dispute, not a Charge, so it must resolve the referenced Charge
+    // before reading the server-copied PaymentIntent metadata.
+    expect(webhook).toContain("stripe.charges.retrieve");
+    expect(webhook).toContain("const dispute = event.data.object");
     expect(webhook).toContain("recordPurchaseException");
     // No negative ledger write anywhere on the refund path.
     const refundBranch = webhook.slice(webhook.indexOf('event.type === "charge.refunded"'));
@@ -824,6 +855,16 @@ describe("P5 integration surfaces", () => {
     // Quantity is resolved server-side from the pack code at grant time. Putting it in metadata
     // would make a tampered session able to mint capacity.
     expect(checkout).not.toMatch(/metadata:\s*\{[^}]*credits/s);
+  });
+
+  it("copies the same server-derived attribution to the PaymentIntent for refund and dispute audit", () => {
+    const checkout = routes.slice(routes.indexOf('"/credits/checkout"'));
+    // Stripe does not copy Checkout Session metadata to the underlying PaymentIntent. Charges inherit
+    // PaymentIntent metadata, and the refund/dispute branch reads Charge metadata, so both nested
+    // metadata targets must use the exact same server-built object.
+    expect(checkout).toMatch(/metadata:\s*checkoutAttribution/);
+    expect(checkout).toMatch(/payment_intent_data:\s*\{\s*metadata:\s*checkoutAttribution\s*\}/s);
+    expect(checkout).not.toMatch(/payment_intent_data:\s*\{[^}]*credits/s);
   });
 
   it("hard-blocks a grading role even if the purchase permission was granted", () => {

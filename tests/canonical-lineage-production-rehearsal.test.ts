@@ -91,6 +91,7 @@ const CANONICAL_PENDING = [
   "0094_scanner_capture_physical_release.sql",
   "0096_partner_card_job_void_management_audit.sql",
   "0097_partner_credit_checkout_sessions.sql",
+  "0098_scanner_operator_credit_view.sql",
 ] as const;
 
 const sha256 = (sql: string): string => createHash("sha256").update(sql).digest("hex");
@@ -217,7 +218,7 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(61);
+    expect(after.alreadyApplied).toHaveLength(62);
   });
 
   it("delivers the missing Partner, Scanner, and project-control structures without replacing existing data", async () => {
@@ -299,5 +300,27 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
        ORDER BY r.code
     `);
     expect(grants.rows.map((r) => r.role)).toEqual(["MVGS_ASSESSMENT_TECHNICIAN", "PARTNER_MANAGER", "PARTNER_OWNER"]);
+
+    const scannerCreditView = await admin.query<{ role: string }>(`
+      SELECT r.code AS role
+        FROM partner_permissions p
+        JOIN partner_role_permissions rp ON rp.permission_id=p.id
+        JOIN partner_roles r ON r.id=rp.role_id
+       WHERE p.code='partner.credits.view'
+         AND r.code='SCANNER_OPERATOR'
+    `);
+    expect(scannerCreditView.rows).toEqual([{ role: "SCANNER_OPERATOR" }]);
+
+    const forbiddenScannerCredits = await admin.query<{ n: string }>(`
+      SELECT count(*)::text AS n
+        FROM partner_role_permissions rp
+        JOIN partner_roles r ON r.id=rp.role_id
+        JOIN partner_permissions p ON p.id=rp.permission_id
+       WHERE r.code='SCANNER_OPERATOR'
+         AND p.code IN ('partner.cards.assess', 'partner.credits.purchase', 'partner.users.manage',
+                        'partner.users.view', 'partner.sessions.revoke', 'partner.stations.enrol',
+                        'partner.cards.fix')
+    `);
+    expect(forbiddenScannerCredits.rows).toEqual([{ n: "0" }]);
   });
 });

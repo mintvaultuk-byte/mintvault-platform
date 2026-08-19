@@ -316,12 +316,22 @@ export class WebhookHandlers {
      * exception for a human to resolve with a Super Admin adjustment.
      */
     if (event.type === "charge.refunded" || event.type === "charge.dispute.created") {
-      const charge = event.data.object as { id?: string; metadata?: Record<string, string> | null };
-      const tenantId = charge.metadata?.partner_tenant_id ?? null;
+      // Refund events carry their Charge directly. A dispute event carries a Dispute instead, so
+      // re-read its referenced Charge through Stripe's authenticated API before relying on the
+      // PaymentIntent metadata copied at Checkout creation.
+      const charge =
+        event.type === "charge.refunded"
+          ? (event.data.object as { id?: string; metadata?: Record<string, string> | null })
+          : await (async () => {
+              const dispute = event.data.object as { charge?: string | { id?: string } | null };
+              const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id;
+              return chargeId ? await stripe.charges.retrieve(chargeId) : null;
+            })();
+      const tenantId = charge?.metadata?.partner_tenant_id ?? null;
       if (tenantId) {
         await recordPurchaseException(event.id, {
           tenantId,
-          sessionId: charge.id ?? null,
+          sessionId: charge?.id ?? null,
           kind: event.type === "charge.refunded" ? "refund" : "chargeback",
         });
         console.log(`[webhook] partner credit ${event.type} recorded as an accounting exception`);

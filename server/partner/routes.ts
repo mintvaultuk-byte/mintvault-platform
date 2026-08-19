@@ -452,17 +452,22 @@ export function partnerApiRouter(): Router {
           active: typeof priceFields.active === "boolean" ? priceFields.active : null,
         });
         const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
+        // Checkout Session metadata serves the successful purchase fulfilment webhook. A charge
+        // refund/dispute is emitted from the PaymentIntent/Charge object instead, so copy the same
+        // server-derived identifiers there as well. No quantity or price is ever client-provided.
+        const checkoutAttribution = {
+          partner_tenant_id: principal.tenantId,
+          partner_pack_code: pack.code,
+          partner_initiating_user_id: principal.userId,
+        };
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
           line_items: [{ price: pack.stripePriceId!, quantity: 1 }],
           // The webhook reads ONLY these keys to attribute the payment. The credit quantity is
           // deliberately absent: it is resolved from partner_credit_packs by pack code at grant
           // time, so tampered metadata cannot mint capacity.
-          metadata: {
-            partner_tenant_id: principal.tenantId,
-            partner_pack_code: pack.code,
-            partner_initiating_user_id: principal.userId,
-          },
+          metadata: checkoutAttribution,
+          payment_intent_data: { metadata: checkoutAttribution },
           // MUST match a real client route. `/partner/credits` is not registered in App.tsx, so the
           // partner catch-all route silently redirected the returning buyer to the dashboard and
           // threw the `?purchase=` signal away — the one moment the shop most needs to be told

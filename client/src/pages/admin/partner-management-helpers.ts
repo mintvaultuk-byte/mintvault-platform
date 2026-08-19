@@ -716,9 +716,3 @@ export function validatePartnerLocationCreate(input: PartnerLocationCreateValida
   }
   return errors;
 }
-
-/** No SDK, key, lookup or coordinate persistence — just the existing address in an encoded search URL. */
-export function googleMapsSearchUrl(address: string | null | undefined): string | null {
-  const query = address?.trim();
-  return query ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : null;
-}

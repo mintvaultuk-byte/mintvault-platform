@@ -291,11 +291,11 @@ export function validateStripePriceForCheckout(pack: CreditPack, price: StripePr
       "The configured Stripe Price amount does not match this pack."
     );
   }
-  if (price.taxBehavior === "exclusive") {
-    throw new CreditPurchaseError(
-      "STRIPE_TAX_BEHAVIOR_MISMATCH",
-      "The configured Stripe Price would add tax on top of the VAT-inclusive pack price."
-    );
+  // The commercial policy is a VAT-inclusive amount. Stripe's `unspecified` defers to the account
+  // default, which may be exclusive, so only the explicit inclusive setting proves the displayed
+  // amount is the charged amount.
+  if (price.taxBehavior !== "inclusive") {
+    throw new CreditPurchaseError("STRIPE_TAX_BEHAVIOR_MISMATCH", "The configured Stripe Price must be VAT-inclusive.");
   }
   if (price.livemode !== (status.environment === "live")) {
     throw new CreditPurchaseError(
@@ -589,7 +589,7 @@ export async function fulfilPartnerCreditPurchase(
     if (lineItem.unitAmount !== pricing.pricePence) {
       return { granted: false, credits: 0, reason: "checkout_amount_mismatch" };
     }
-    if (lineItem.taxBehavior === "exclusive") {
+    if (lineItem.taxBehavior !== "inclusive") {
       return { granted: false, credits: 0, reason: "checkout_tax_behavior_mismatch" };
     }
 
