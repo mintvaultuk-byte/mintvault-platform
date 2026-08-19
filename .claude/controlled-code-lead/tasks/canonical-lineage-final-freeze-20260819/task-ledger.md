@@ -27,8 +27,8 @@
 | 3 — Lead verification | done | 2026-08-19 | Lead reproduced, traced callers, and accepted P5-TAX-001 and P5-EXC-001. |
 | 4 — Implementation authorisation | done | 2026-08-19 | User's explicit reconciliation brief authorised local source/test reconciliation only; no protected external action was authorised. |
 | 5 — Implementation | done | 2026-08-19 | Semantic replay plus contained payment repairs committed through `12c9a641`. |
-| 6 — Regression | in progress | 2026-08-19 | Targeted suites, migration rehearsal, build/check/lint and hostile re-review are green; final clean-tree postflight remains. |
-| 7 — Final report | pending | 2026-08-19 | Requires final refetch/head movement check and postflight result. |
+| 6 — Regression | done | 2026-08-19 | 95 release-scoped Vitest tests and 152 Scanner tests passed; production-shaped PostgreSQL rehearsal, mutation, hostile re-review, check/lint/build, graph and clean-tree postflight validation passed. Broader Vitest ran 5,099 passing tests; five DB-dependent suites could not initialise because the expected disposable local PostgreSQL services are absent. |
+| 7 — Final report | done | 2026-08-19 | Final refetch kept `origin/main` at `5a45ff9e`, Partner/Scanner at `72f57963`, and live production at `158dbf53`; the candidate is frozen pending separate owner-authorised CI/migration/release. |
 
 ## Reviewer assignments (Stage 1)
 
