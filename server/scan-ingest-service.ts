@@ -48,6 +48,54 @@ export function pgErrorDetail(err: any): string {
   return parts.length ? ` [${parts.join(" ")}]` : "";
 }
 
+export type NativeWorkingEvidence = {
+  buffer: Buffer;
+  width: number;
+  height: number;
+  sha256: string;
+};
+
+/**
+ * A LiDE 400 working JPEG may rotate the master for the human viewer, but it may never resize it.
+ * This guard makes any accidental thumbnail/compact derivative construction fail before its ledger
+ * pointer can be published to a grading workstation.
+ */
+export function assertLide400WorkingDimensions(
+  master: { width?: number; height?: number },
+  working: { width?: number; height?: number }
+): void {
+  if (
+    !Number.isInteger(master.width) ||
+    !Number.isInteger(master.height) ||
+    !Number.isInteger(working.width) ||
+    !Number.isInteger(working.height) ||
+    master.width! <= 0 ||
+    master.height! <= 0 ||
+    working.width !== master.width ||
+    working.height !== master.height
+  ) {
+    throw new Error("Refusing resized LiDE 400 working evidence: dimensions must equal the immutable master");
+  }
+}
+
+/** Browser-safe JPEG made directly from the immutable master, with no crop or resampling. */
+export async function makeNativeWorkingEvidence(master: Buffer, isLide400: boolean): Promise<NativeWorkingEvidence> {
+  const sharp = (await import("sharp")).default;
+  const source = sharp(master, { limitInputPixels: 30_000_000, failOn: "error" });
+  const metadata = await source.metadata();
+  const oriented = isLide400 ? orientLide400Presentation(source) : source.rotate();
+  const result = await oriented
+    .jpeg({ quality: 95, chromaSubsampling: "4:4:4", progressive: false })
+    .toBuffer({ resolveWithObject: true });
+  if (isLide400) assertLide400WorkingDimensions(metadata, result.info);
+  return {
+    buffer: result.data,
+    width: result.info.width,
+    height: result.info.height,
+    sha256: createHash("sha256").update(result.data).digest("hex"),
+  };
+}
+
 /** Elapsed ms since a process.hrtime.bigint() mark. */
 function elapsedMs(start: bigint): number {
   return Number(process.hrtime.bigint() - start) / 1e6;
@@ -777,8 +825,7 @@ async function uploadImagesToCertUnlocked(
   // (the cert was hard-deleted mid-pipeline) must abort the image write, never
   // invent an identity.
   const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`)).rows[0] as
-    | { certificate_number?: string }
-    | undefined;
+    { certificate_number?: string } | undefined;
   const certNumber = certRow?.certificate_number;
   if (!certNumber) {
     throw new Error(
@@ -829,24 +876,9 @@ async function uploadImagesToCertUnlocked(
   const isLide400Master = (side: "front" | "back") =>
     masterRows.find((row) => row.side === side)?.scannerProfileVersion === CANON_LIDE_400_PROFILE.version;
 
-  const makeNativeWorkingAsset = async (buf: Buffer, isLide400: boolean) => {
-    const source = sharp(buf, { limitInputPixels: 30_000_000, failOn: "error" });
-    // Scanner evidence preserves its source TIFF untouched. Its working and
-    // display derivatives, however, are always upright for the operator.
-    const oriented = isLide400 ? orientLide400Presentation(source) : source.rotate();
-    const result = await oriented
-      .jpeg({ quality: 95, chromaSubsampling: "4:4:4", progressive: false })
-      .toBuffer({ resolveWithObject: true });
-    return {
-      buffer: result.data,
-      width: result.info.width,
-      height: result.info.height,
-      sha256: createHash("sha256").update(result.data).digest("hex"),
-    };
-  };
   const [frontWorking, backWorking] = await Promise.all([
-    makeNativeWorkingAsset(frontBuffer, isLide400Master("front")),
-    backBuffer ? makeNativeWorkingAsset(backBuffer, isLide400Master("back")) : Promise.resolve(null),
+    makeNativeWorkingEvidence(frontBuffer, isLide400Master("front")),
+    backBuffer ? makeNativeWorkingEvidence(backBuffer, isLide400Master("back")) : Promise.resolve(null),
   ]);
 
   // WORKING resolution for the legacy variant pipeline. This is deliberately

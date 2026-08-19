@@ -100,6 +100,7 @@ import {
   migratePerOperatorSchema,
   isGraderLocked,
   checkGradePublishGates,
+  buildWorkingEvidencePayload,
 } from "./grader";
 
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
@@ -7944,37 +7945,15 @@ Defects (admin-confirmed): ${defectLines}`;
         })
       );
 
-      // New scanner evidence has a native-geometry browser working asset in
-      // the additive ledger. It is intentionally distinct from both the TIFF
-      // master and the 1600px display derivative. Absence is normal for
-      // legacy JPEG-only certificates.
-      try {
-        const evidence = (
-          await db.execute(sql`
-            SELECT side, working_object_key
-            FROM certificate_image_evidence
-            WHERE certificate_id = ${id}
-              AND evidence_class = 'NEW_IMMUTABLE_MASTER'
-              AND is_current = true
-          `)
-        ).rows as Array<{ side: string; working_object_key: string | null }>;
-        await Promise.all(
-          evidence.map(async (row) => {
-            if ((row.side !== "front" && row.side !== "back") || !row.working_object_key) return;
-            try {
-              urls[`${row.side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
-            } catch {
-              urls[`${row.side}_working`] = null;
-            }
-          })
-        );
-      } catch {
-        // The table is introduced additively; retain legacy compatibility
-        // during rolling deployment or for records without a master.
-      }
+      // One shared admission gate serves both admin and restricted-grader UI.
+      // It signs a working key only when the ledger proves it preserves the
+      // Canon master's dimensions with no resize; otherwise the viewer shows a
+      // side-specific unavailable/recovery state rather than a display fallback.
+      const working = await buildWorkingEvidencePayload(id);
+      Object.assign(urls, working.urls);
 
       const quality = c.imageQualityChecks || {};
-      res.json({ urls, quality });
+      res.json({ urls, quality, workingEvidence: working.workingEvidence });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to get images" });
     }

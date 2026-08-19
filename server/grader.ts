@@ -23,6 +23,7 @@ import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
 import { resolveDraftGradeAuthority } from "./lib/draft-grade-authority";
+import { CANON_LIDE_400_PROFILE } from "./lib/lide400-profile";
 
 /**
  * AUTO-PUBLISH FLIP. When false (default) a grader's submit moves the card to
@@ -639,10 +640,162 @@ const IMAGE_KEY_MAP: Array<[string, (c: any) => string | null]> = [
   ["back_display", (c) => c.gradingBackDisplay || c.gradingBackCropped || c.backImagePath || null],
 ];
 
+type Side = "front" | "back";
+export type WorkingEvidenceStatus = {
+  available: boolean;
+  reason: string | null;
+  recovery: string | null;
+  master: { dpi: number | null; width: number | null; height: number | null } | null;
+  working: { width: number | null; height: number | null; format: string | null } | null;
+};
+
+type WorkingEvidenceRow = {
+  side: string;
+  working_object_key: string | null;
+  pixel_width: number | null;
+  pixel_height: number | null;
+  dpi: number | null;
+  working_width: number | null;
+  working_height: number | null;
+  working_format: string | null;
+  working_settings: unknown;
+  scanner_profile_version: string | null;
+};
+
+const sides: Side[] = ["front", "back"];
+
+function unavailable(reason: string, recovery: string, row?: WorkingEvidenceRow): WorkingEvidenceStatus {
+  return {
+    available: false,
+    reason,
+    recovery,
+    master: row ? { dpi: row.dpi, width: row.pixel_width, height: row.pixel_height } : null,
+    working: row ? { width: row.working_width, height: row.working_height, format: row.working_format } : null,
+  };
+}
+
+function parseWorkingSettings(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * This admission gate is intentionally stricter than "a key exists". A grading browser may receive
+ * a working image only if the evidence ledger proves it has the same raster dimensions as the
+ * current Canon 1200-DPI TIFF and was built with no resize. Otherwise the UI must show its visible,
+ * recoverable unavailable state — a small derivative must never masquerade as inspection evidence.
+ */
+export function assessWorkingEvidence(row: WorkingEvidenceRow): WorkingEvidenceStatus {
+  const recovery = "Regenerate the working evidence from the immutable 1200-DPI master.";
+  if (!row.working_object_key)
+    return unavailable("Full-resolution working evidence has not been generated for this side.", recovery, row);
+  if (row.scanner_profile_version !== CANON_LIDE_400_PROFILE.version || row.dpi !== 1200) {
+    return unavailable(
+      "The current master is not verified Canon 1200-DPI evidence.",
+      "Recapture this side with the locked Canon 1200-DPI profile.",
+      row
+    );
+  }
+  if (
+    !Number.isInteger(row.pixel_width) ||
+    !Number.isInteger(row.pixel_height) ||
+    row.pixel_width! <= 0 ||
+    row.pixel_height! <= 0 ||
+    row.working_width !== row.pixel_width ||
+    row.working_height !== row.pixel_height
+  ) {
+    return unavailable("Working evidence dimensions do not match the canonical master.", recovery, row);
+  }
+  const settings = parseWorkingSettings(row.working_settings);
+  if (row.working_format !== "jpeg" || !settings || settings.resize !== null) {
+    return unavailable("Working evidence is not recorded as an undownsampled canonical derivative.", recovery, row);
+  }
+  return {
+    available: true,
+    reason: null,
+    recovery: null,
+    master: { dpi: row.dpi, width: row.pixel_width, height: row.pixel_height },
+    working: { width: row.working_width, height: row.working_height, format: row.working_format },
+  };
+}
+
+/** Signed full-resolution assets plus safe, side-specific admission status for the workstation. */
+export async function buildWorkingEvidencePayload(certId: number): Promise<{
+  urls: Record<string, string | null>;
+  workingEvidence: Record<Side, WorkingEvidenceStatus>;
+}> {
+  const urls: Record<string, string | null> = {};
+  const workingEvidence: Record<Side, WorkingEvidenceStatus> = {
+    front: unavailable(
+      "No current immutable Canon master is recorded for FRONT.",
+      "Capture or restore FRONT at the locked Canon 1200-DPI profile."
+    ),
+    back: unavailable(
+      "No current immutable Canon master is recorded for BACK.",
+      "Capture or restore BACK at the locked Canon 1200-DPI profile."
+    ),
+  };
+  try {
+    const rows = (
+      await db.execute(sql`
+        SELECT side, working_object_key, pixel_width, pixel_height, dpi,
+               working_width, working_height, working_format, working_settings,
+               COALESCE(capture_metadata->>'scannerProfileVersion', capture_metadata->>'profileVersion')
+                 AS scanner_profile_version
+        FROM certificate_image_evidence
+        WHERE certificate_id = ${certId}
+          AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+          AND is_current = true
+      `)
+    ).rows as WorkingEvidenceRow[];
+    await Promise.all(
+      rows.map(async (row) => {
+        if (!sides.includes(row.side as Side)) return;
+        const side = row.side as Side;
+        const status = assessWorkingEvidence(row);
+        workingEvidence[side] = status;
+        if (!status.available || !row.working_object_key) {
+          urls[`${side}_working`] = null;
+          return;
+        }
+        try {
+          urls[`${side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
+        } catch {
+          urls[`${side}_working`] = null;
+          workingEvidence[side] = unavailable(
+            "Validated full-resolution working evidence could not be opened.",
+            "Restore the working evidence from the immutable 1200-DPI master.",
+            row
+          );
+        }
+      })
+    );
+  } catch {
+    for (const side of sides) {
+      urls[`${side}_working`] = null;
+      workingEvidence[side] = unavailable(
+        "The immutable evidence ledger is unavailable, so full-resolution evidence cannot be verified.",
+        "Restore the evidence ledger connection, then reload this card."
+      );
+    }
+  }
+  return { urls, workingEvidence };
+}
+
 /** Signed image URLs for a certificate. NO customer PII — card images only. */
 export async function buildCertImagesPayload(
   certId: number
-): Promise<{ urls: Record<string, string | null>; quality: any } | null> {
+): Promise<{
+  urls: Record<string, string | null>;
+  quality: any;
+  workingEvidence: Record<Side, WorkingEvidenceStatus>;
+} | null> {
   const cert = await storage.getCertificate(certId);
   if (!cert) return null;
   const c = cert as any;
@@ -662,36 +815,9 @@ export async function buildCertImagesPayload(
     })
   );
 
-  // Phase 58A: the immutable-evidence ledger owns native-geometry browser
-  // working assets. Keep this additive and fail closed to the established
-  // legacy URL map while a rolling deployment is creating the new table.
-  // A TIFF master is deliberately never handed to the browser workstation.
-  try {
-    const rows = (
-      await db.execute(sql`
-        SELECT side, working_object_key
-        FROM certificate_image_evidence
-        WHERE certificate_id = ${certId}
-          AND evidence_class = 'NEW_IMMUTABLE_MASTER'
-          AND is_current = true
-      `)
-    ).rows as Array<{ side: string; working_object_key: string | null }>;
-    await Promise.all(
-      rows.map(async (row) => {
-        if ((row.side !== "front" && row.side !== "back") || !row.working_object_key) return;
-        try {
-          urls[`${row.side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
-        } catch {
-          urls[`${row.side}_working`] = null;
-        }
-      })
-    );
-  } catch {
-    // The evidence table is additive and may not exist during a rolling
-    // deployment. Legacy image URLs remain available; new evidence does not
-    // silently fall back until its working derivative has been recorded.
-  }
-  return { urls, quality: c.imageQualityChecks || {} };
+  const working = await buildWorkingEvidencePayload(certId);
+  Object.assign(urls, working.urls);
+  return { urls, quality: c.imageQualityChecks || {}, workingEvidence: working.workingEvidence };
 }
 
 /** The grading state for a certificate. NO customer PII — grade/measurement data only. */

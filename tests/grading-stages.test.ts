@@ -153,8 +153,9 @@ describe("stage navigation is UI-state only (spec: no save/grade/issue)", () => 
 });
 
 describe("card preview is read-only (spec 3)", () => {
-  it("plain <img> from signed display URLs / uploaded files — no coordinates, no protected imports", () => {
-    expect(PREVIEW).toContain("front_display");
+  it("plain <img> from signed full-resolution working URLs / uploaded files — no coordinates, no protected imports", () => {
+    expect(PREVIEW).toContain("front_working");
+    expect(PREVIEW).not.toContain("?? data?.urls?.front_display");
     expect(PREVIEW).toContain("URL.createObjectURL");
     // Check CODE only (comments deliberately mention what is NOT done).
     const code = stripComments(PREVIEW);
