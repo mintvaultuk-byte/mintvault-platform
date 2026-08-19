@@ -16,8 +16,9 @@
 - Branch: `codex/growth-completion-night-20260819`
 - Baseline: exact `origin/main` `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`
 - Runtime candidate: `c2d18aea` (control `333fbfd9`, implementation `079d5336`, hostile closure `c2d18aea`)
-- Release candidate: final clean branch HEAD after evidence and CI-environment test-isolation closeout (`e877032b`)
-- Infrastructure addendum candidate: local descendant adding GBP/infrastructure/readiness/incident/velocity contracts; exact SHA pending final local commit
+- Release candidate before addendum: evidence and CI-environment test-isolation closeout (`e877032b`)
+- Infrastructure addendum implementation: `fe0588da5b92131998d88b79779e8a9b6b468e96`
+- Exact local candidate: final clean branch HEAD after this evidence-only closeout; not published
 - Pushed: no
 - Remote CI: no branch run exists because the workflows trigger on pull request or `main`
 - Migration applied: no; `0101_growth_reviews_and_conversion.sql` is authored only
