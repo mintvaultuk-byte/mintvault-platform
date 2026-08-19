@@ -276,10 +276,12 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     const completionRelations = await admin.query<{ relname: string }>(`
       SELECT relname FROM pg_class
        WHERE relnamespace='public'::regnamespace
-         AND relname IN ('review_requests','review_delivery_attempts','review_suppressions','growth_conversion_events')
+         AND relname IN ('review_requests','review_delivery_attempts','review_suppressions','growth_conversion_events',
+                         'growth_commercial_targets')
        ORDER BY relname
     `);
     expect(completionRelations.rows.map((row) => row.relname)).toEqual([
+      "growth_commercial_targets",
       "growth_conversion_events",
       "review_delivery_attempts",
       "review_requests",

@@ -20,6 +20,7 @@ import {
   getSiteHealth,
 } from "../growth-intelligence-service";
 import { getReviewSummary } from "../review-request-service";
+import { getCommercialScoreboard } from "../growth-scoreboard-service";
 
 export const GROWTH_MCP_PATH = "/mcp/growth";
 export const GROWTH_MCP_PROTOCOL_VERSION = "2025-03-26";
@@ -90,6 +91,11 @@ export const GROWTH_MCP_TOOLS = [
     PERIOD_SCHEMA,
   ],
   ["get_review_summary", "Aggregate neutral review-request lifecycle without customer identity.", PERIOD_SCHEMA],
+  [
+    "get_commercial_scoreboard",
+    "Read-only owner-set monthly targets, authoritative actuals and deterministic pace status; never changes a target.",
+    EMPTY_SCHEMA,
+  ],
   ["get_growth_insights", "Deterministic, traceable Growth insights for a bounded period.", PERIOD_SCHEMA],
 ] as const;
 
@@ -202,6 +208,10 @@ export async function executeGrowthMcpTool(name: string, args: unknown): Promise
       await auditMcpTool(name, period);
       return getReviewSummary(period);
     }
+    case "get_commercial_scoreboard":
+      requireEmptyArgs(args);
+      await auditMcpTool(name);
+      return getCommercialScoreboard();
     case "get_growth_insights": {
       const period = parsePeriod(args);
       await auditMcpTool(name, period);
@@ -247,7 +257,7 @@ export function registerGrowthMcpRoutes(app: Express): void {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "mintvault-growth-read", version: "1.0.0" },
           instructions:
-            "Aggregate Growth reads only. No customer detail, mutation, payment, Partner, Scanner, infrastructure write, spend or deployment access.",
+            "Aggregate Growth reads only. Commercial targets are owner-set and MCP may read but never set, clear or change them. No customer detail, mutation, payment, Partner, Scanner, infrastructure write, spend or deployment access.",
         },
       });
     }

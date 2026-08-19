@@ -10,7 +10,9 @@ After an authorized release, contain new review scheduling by removing/disabling
 
 ## Database
 
-Migration `0101_growth_reviews_and_conversion.sql` is additive. On application rollback, retain its tables, indexes and data so the old application ignores them. Never drop review, suppression, delivery-attempt or conversion-event data as an emergency rollback. Verify the journal and schema inventory after containment; any later removal requires a separately reviewed forward migration.
+Migration `0101_growth_reviews_and_conversion.sql` is additive. On application rollback, retain its tables, indexes and data so the old application ignores them. Never drop review, suppression, delivery-attempt, conversion-event or commercial-target revision data as an emergency rollback. Verify the journal and schema inventory after containment; any later removal requires a separately reviewed forward migration.
+
+The commercial target store is append-only metadata. Reverting the application removes its editor/read surface but must retain every target and null-clear revision plus its generic audit rows. No rollback may replace that history with a destructive delete or down migration.
 
 ## Email and reviews
 

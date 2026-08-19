@@ -75,3 +75,25 @@ CREATE TABLE IF NOT EXISTS growth_conversion_events (
 
 CREATE INDEX IF NOT EXISTS idx_growth_conversion_events_window
   ON growth_conversion_events (event_kind, occurred_at DESC);
+
+-- Commercial targets are owner-authored metadata, never inferred actuals.
+-- Revisions are append-only. A null target_value is a non-destructive clear.
+CREATE TABLE IF NOT EXISTS growth_commercial_targets (
+  id bigserial PRIMARY KEY,
+  metric text NOT NULL,
+  period text NOT NULL,
+  period_start timestamptz NOT NULL,
+  target_value bigint,
+  set_by text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_growth_commercial_target_metric CHECK (
+    metric IN ('PAID_CARDS', 'REVENUE_GBP', 'PARTNER_APPLICATIONS', 'QUALIFIED_PARTNERS', 'GENUINE_REVIEWS')
+  ),
+  CONSTRAINT chk_growth_commercial_target_period CHECK (period = 'MONTHLY'),
+  CONSTRAINT chk_growth_commercial_target_value CHECK (
+    target_value IS NULL OR (target_value > 0 AND target_value <= 1000000000000)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_growth_commercial_targets_latest
+  ON growth_commercial_targets (period, period_start, metric, created_at DESC, id DESC);

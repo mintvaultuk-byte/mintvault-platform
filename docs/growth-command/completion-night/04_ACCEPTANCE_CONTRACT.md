@@ -9,6 +9,9 @@
 - [x] Paid state and revenue remain server-authoritative and are never double-counted.
 - [x] Review requests are neutral, genuine, idempotent, suppression-aware and never gated by sentiment.
 - [x] Public authority output uses approved/public, privacy-safe facts and minimum sample rules.
+- [x] Commercial targets are explicitly owner/Super Admin-set monthly values; no example, forecast, AI or MCP target is seeded or inferred.
+- [x] Scoreboard status compares actual progress with elapsed `Europe/London` calendar-month progress and renders no-target/unavailable authority grey.
+- [x] Genuine published-review actuals remain unavailable until an approved provider proves them; sent/clicked requests are not substituted.
 
 ## Security and privacy
 
@@ -19,10 +22,13 @@
 - [x] Partner tenant, Scanner, grading, payment and auth boundaries are unchanged.
 - [x] Fly/Neon/billing authority is absent-safe; no machine, cost, FX, budget or provider-secret value is invented or sent to the browser.
 - [x] Infrastructure control remains manual monitor/detect/recommend; Growth MCP and UI contain no infrastructure mutation.
+- [x] Target revisions are append-only, actor-attributed and audited in the same database transaction; clearing does not delete history.
+- [x] Growth MCP exposes scoreboard read only and no set/update/clear target tool.
 
 ## UI and search
 
 - [x] One existing `/admin/growth` product; no decorative duplicate dashboard.
+- [x] The commercial scoreboard records and renders period, target, authoritative actual and deterministic status, with a real Super Admin editor.
 - [x] Every active control has a real authority/action/result; `BROKEN = 0` on desktop and mobile.
 - [x] Campaign Readiness is deterministic or unknown, and a red revenue-path Incident Mode renders ahead of ordinary insights.
 - [x] Revenue velocity uses the exact verified-GBP rolling hour and withholds samples below three paid submissions.

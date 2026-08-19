@@ -112,6 +112,48 @@ type LinkOptions = {
   campaigns: string[];
   contents: string[];
 };
+type CommercialMetricKey =
+  "PAID_CARDS" | "REVENUE_GBP" | "PARTNER_APPLICATIONS" | "QUALIFIED_PARTNERS" | "GENUINE_REVIEWS";
+type CommercialScoreboard = {
+  period: {
+    kind: "MONTHLY";
+    timezone: "Europe/London";
+    start: string;
+    end: string;
+    progressPercent: number;
+  };
+  targetAuthority:
+    | { state: "READY"; mutationAuthority: "SUPER_ADMIN_ONLY"; mcpMutationEnabled: false }
+    | {
+        state: "NOT_INSTRUMENTED";
+        mutationAuthority: "SUPER_ADMIN_ONLY";
+        mcpMutationEnabled: false;
+        reason: string;
+      };
+  metrics: Array<{
+    key: CommercialMetricKey;
+    label: string;
+    unit: "COUNT" | "GBP_PENCE";
+    actual: { state: "REAL"; value: number } | { state: "NOT_INSTRUMENTED"; reason: string };
+    target:
+      | { state: "SET"; value: number; authority: "SUPER_ADMIN"; lastSetAt: string }
+      | { state: "NOT_SET"; authority: "SUPER_ADMIN"; lastSetAt: string | null };
+    status: "GREEN" | "AMBER" | "RED" | "GREY";
+    statusLabel: "ON_TRACK" | "ATTENTION" | "MATERIALLY_BEHIND" | "NO_TARGET_SET" | "INSUFFICIENT_DATA";
+    actualProgressPercent: number | null;
+    expectedProgressPercent: number;
+    paceRatio: number | null;
+    explanation: string;
+  }>;
+  insights: Array<{
+    id: string;
+    kind: "ON_TRACK" | "ACTION";
+    metric: CommercialMetricKey;
+    message: string;
+  }>;
+  definition: string;
+  lastUpdated: string;
+};
 type Intelligence = {
   period: Period;
   summary: Summary;
@@ -248,6 +290,7 @@ type Intelligence = {
     comparison: Metric;
     definition: string;
   };
+  scoreboard: CommercialScoreboard;
   insights: Array<{
     id: string;
     priority: "CRITICAL" | "ACTION" | "OPPORTUNITY" | "INFO";
@@ -278,6 +321,23 @@ type GrowthReviewSummary = {
 
 export const formatGrowthMoneyGBP = (pence: number) =>
   new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(pence / 100);
+export function parseGbpTargetToPence(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return undefined;
+  const [wholeText, fractionText = ""] = trimmed.split(".");
+  const whole = Number(wholeText);
+  const fraction = Number(fractionText.padEnd(2, "0"));
+  const pence = whole * 100 + fraction;
+  return Number.isSafeInteger(pence) && pence > 0 && pence <= 1_000_000_000_000 ? pence : undefined;
+}
+export function parseCountTarget(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const count = Number(trimmed);
+  return Number.isSafeInteger(count) && count > 0 && count <= 1_000_000_000_000 ? count : undefined;
+}
 export function formatProviderMoney(amountMajor: number, sourceCurrency: string): string | null {
   if (!Number.isFinite(amountMajor) || !/^[A-Z]{3}$/.test(sourceCurrency)) return null;
   try {
@@ -423,6 +483,199 @@ function IncidentBanner({ incident }: { incident: Intelligence["incident"] }) {
       <p className="mt-2 text-sm text-red-100">{incident.detail}</p>
       <p className="mt-2 text-xs font-medium uppercase text-red-200">{incident.recommendation}</p>
     </section>
+  );
+}
+
+const commercialTargetInput = (metric: CommercialScoreboard["metrics"][number]): string => {
+  if (metric.target.state !== "SET") return "";
+  if (metric.unit === "COUNT") return String(metric.target.value);
+  const whole = Math.floor(metric.target.value / 100);
+  return `${whole}.${String(metric.target.value % 100).padStart(2, "0")}`;
+};
+
+function CommercialScoreboardPanel({
+  scoreboard,
+  selectedPeriod,
+}: {
+  scoreboard: CommercialScoreboard;
+  selectedPeriod: Period;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<CommercialMetricKey, string>>({
+    PAID_CARDS: "",
+    REVENUE_GBP: "",
+    PARTNER_APPLICATIONS: "",
+    QUALIFIED_PARTNERS: "",
+    GENUINE_REVIEWS: "",
+  });
+  const updateTargets = useMutation<
+    { update: { changed: boolean; changedMetrics: CommercialMetricKey[] }; scoreboard: CommercialScoreboard },
+    Error,
+    Record<CommercialMetricKey, number | null>
+  >({
+    mutationFn: async (targets) => (await apiRequest("PUT", `${BASE}/scoreboard/targets`, targets)).json(),
+    onSuccess: ({ scoreboard: next }) => {
+      queryClient.setQueryData<Intelligence>([BASE, "intelligence", selectedPeriod], (current) =>
+        current ? { ...current, scoreboard: next } : current
+      );
+      void queryClient.invalidateQueries({ queryKey: [BASE, "intelligence"] });
+      setEditing(false);
+      setError(null);
+    },
+  });
+  const beginEdit = () => {
+    setDraft(
+      Object.fromEntries(scoreboard.metrics.map((metric) => [metric.key, commercialTargetInput(metric)])) as Record<
+        CommercialMetricKey,
+        string
+      >
+    );
+    setError(null);
+    setEditing(true);
+  };
+  const submit = () => {
+    const payload = {} as Record<CommercialMetricKey, number | null>;
+    for (const metric of scoreboard.metrics) {
+      const value =
+        metric.unit === "GBP_PENCE" ? parseGbpTargetToPence(draft[metric.key]) : parseCountTarget(draft[metric.key]);
+      if (value === undefined) {
+        setError(
+          `${metric.label} must be a positive whole count${metric.unit === "GBP_PENCE" ? " or GBP amount with at most two decimal places" : ""}.`
+        );
+        return;
+      }
+      payload[metric.key] = value;
+    }
+    setError(null);
+    updateTargets.mutate(payload);
+  };
+  const month = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: scoreboard.period.timezone,
+  }).format(new Date(scoreboard.period.start));
+  return (
+    <Panel
+      title="Commercial Growth Targets"
+      sub={`${month} · ${scoreboard.period.progressPercent.toFixed(1)}% of calendar month elapsed · owner-authoritative targets`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--admin-line,#333)] p-4">
+        <div>
+          <p className="text-xs font-medium uppercase text-[var(--admin-gold-hi,#ecd585)]">Monthly scoreboard</p>
+          <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
+            Target pace compares actual progress with elapsed month progress. MCP is read-only and cannot change
+            targets.
+          </p>
+        </div>
+        {scoreboard.targetAuthority.state === "READY" ? (
+          <AdminButton
+            size="sm"
+            onClick={editing ? () => setEditing(false) : beginEdit}
+            disabled={updateTargets.isPending}
+          >
+            {editing ? "Cancel" : "Edit targets"}
+          </AdminButton>
+        ) : (
+          <Badge variant="wait">TARGET STORE NOT INSTRUMENTED</Badge>
+        )}
+      </div>
+      {scoreboard.targetAuthority.state === "NOT_INSTRUMENTED" && (
+        <p
+          role="status"
+          className="mx-4 mt-4 rounded border border-amber-400/35 bg-amber-400/10 p-3 text-sm text-amber-100"
+        >
+          {scoreboard.targetAuthority.reason}
+        </p>
+      )}
+      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5" data-testid="commercial-scoreboard">
+        {scoreboard.metrics.map((metric) => (
+          <article
+            key={metric.key}
+            className={`min-w-0 rounded border p-3 ${tone(metric.status === "GREY" ? "UNKNOWN" : metric.status)}`}
+            data-testid={`commercial-score-${metric.key.toLowerCase().replaceAll("_", "-")}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-medium uppercase">{metric.label}</p>
+              <span className="text-right text-[10px] font-semibold">{metric.statusLabel.replaceAll("_", " ")}</span>
+            </div>
+            <p className="mt-3 text-xl font-semibold">
+              {metric.actual.state === "REAL"
+                ? metric.unit === "GBP_PENCE"
+                  ? formatGrowthMoneyGBP(metric.actual.value)
+                  : number(metric.actual.value)
+                : "NOT INSTRUMENTED"}
+            </p>
+            <p className="mt-1 text-xs opacity-80">
+              Actual · target{" "}
+              {metric.target.state === "SET"
+                ? metric.unit === "GBP_PENCE"
+                  ? formatGrowthMoneyGBP(metric.target.value)
+                  : number(metric.target.value)
+                : "not set"}
+            </p>
+            {editing ? (
+              <label className="mt-3 block text-xs font-medium">
+                {metric.unit === "GBP_PENCE" ? "Target (£)" : "Target"}
+                <input
+                  inputMode={metric.unit === "GBP_PENCE" ? "decimal" : "numeric"}
+                  value={draft[metric.key]}
+                  onChange={(event) => setDraft((current) => ({ ...current, [metric.key]: event.target.value }))}
+                  placeholder="Blank clears"
+                  className="mt-1 w-full rounded border border-current/30 bg-black/25 px-2 py-1.5 text-sm text-white"
+                  aria-label={`${metric.label} monthly target`}
+                />
+              </label>
+            ) : (
+              <>
+                <div className="mt-3 h-1.5 overflow-hidden rounded bg-black/30" aria-hidden="true">
+                  <div
+                    className="h-full bg-current"
+                    style={{ width: `${Math.min(metric.actualProgressPercent ?? 0, 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs opacity-80">
+                  {metric.actualProgressPercent == null
+                    ? metric.explanation
+                    : `${metric.actualProgressPercent.toFixed(1)}% actual · ${metric.expectedProgressPercent.toFixed(1)}% expected`}
+                </p>
+              </>
+            )}
+          </article>
+        ))}
+      </div>
+      {editing && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--admin-line,#333)] p-4">
+          <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+            Blank clears a target by adding a revision; prior revisions remain auditable. No target is inferred.
+          </p>
+          <AdminButton size="sm" onClick={submit} disabled={updateTargets.isPending}>
+            {updateTargets.isPending ? "Saving…" : "Save monthly targets"}
+          </AdminButton>
+        </div>
+      )}
+      {(error || updateTargets.isError) && (
+        <p role="alert" className="mx-4 mb-4 rounded border border-red-400/45 bg-red-400/10 p-3 text-sm text-red-100">
+          {error ?? updateTargets.error?.message ?? "Commercial targets could not be saved."}
+        </p>
+      )}
+      {scoreboard.insights.length > 0 && !editing && (
+        <div className="border-t border-[var(--admin-line,#333)] p-4">
+          <p className="text-xs font-medium uppercase text-[var(--admin-muted,#8a8a8a)]">Scoreboard insights</p>
+          <ul className="mt-2 grid gap-2 md:grid-cols-2">
+            {scoreboard.insights.map((insight) => (
+              <li key={insight.id} className="rounded border border-[var(--admin-line,#333)] p-2 text-sm">
+                <strong>{insight.kind === "ACTION" ? "Action" : "On track"}:</strong> {insight.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="border-t border-[var(--admin-line,#333)] px-4 py-3 text-xs text-[var(--admin-muted,#8a8a8a)]">
+        {scoreboard.definition} Qualified Partners means applications currently in QUALIFIED or ONBOARDING that were
+        received this month.
+      </p>
+    </Panel>
   );
 }
 function Value({ label, value }: { label: string; value: Count | undefined }) {
@@ -640,6 +893,7 @@ export default function GrowthCommandPage() {
             <IncidentBanner incident={data.incident} />
             {tab === "overview" && (
               <section className="space-y-4">
+                <CommercialScoreboardPanel scoreboard={data.scoreboard} selectedPeriod={period} />
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                   <StatCard
                     label="Paid cards"

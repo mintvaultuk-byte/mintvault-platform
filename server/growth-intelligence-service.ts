@@ -12,6 +12,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { getSitemapEntries, isKnownPublicRoute } from "./seo-config";
 import { getGrowthSummary, type GrowthPeriod, type GrowthSummary } from "./commercial-growth-service";
 import { getConversionEventSummary, type GrowthConversionExecutor } from "./growth-conversion-service";
+import { getCommercialScoreboard, type CommercialScoreboard } from "./growth-scoreboard-service";
 import {
   buildInfrastructureIntelligence,
   deriveCampaignReadiness,
@@ -159,6 +160,7 @@ export type GrowthIntelligence = {
   revenueVelocity: RevenueVelocity;
   seo: SeoSummary;
   conversion: ConversionSummary;
+  scoreboard: CommercialScoreboard;
   insights: GrowthInsight[];
   freshness: "CURRENT" | "STALE";
   generatedAt: string;
@@ -760,10 +762,11 @@ export async function getGrowthIntelligence(
   if (!options.force && cached && cached.expiresAt > now) return cached.value;
   try {
     const summary = await getGrowthSummary(period);
-    const [livePulse, siteHealth, conversion] = await Promise.all([
+    const [livePulse, siteHealth, conversion, scoreboard] = await Promise.all([
       getLivePulse(),
       getSiteHealth(),
       getConversionSummary(period, summary),
+      getCommercialScoreboard(),
     ]);
     const seo = getSeoSummary();
     const capacity = deriveCapacityStatus(null, null);
@@ -799,6 +802,7 @@ export async function getGrowthIntelligence(
       revenueVelocity: livePulse.revenueVelocity,
       seo,
       conversion,
+      scoreboard,
       insights: getGrowthInsights({ period, summary, siteHealth, capacity, seo, conversion }),
       freshness: "CURRENT",
       generatedAt,

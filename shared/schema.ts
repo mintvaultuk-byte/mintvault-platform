@@ -388,6 +388,38 @@ export const growthConversionEvents = pgTable(
   ]
 );
 
+/**
+ * Owner-set commercial targets. Every change is a new revision; a null value
+ * clears a target without erasing its history. Actuals remain in their
+ * authoritative operational tables and are never copied here.
+ */
+export const GROWTH_TARGET_METRICS = [
+  "PAID_CARDS",
+  "REVENUE_GBP",
+  "PARTNER_APPLICATIONS",
+  "QUALIFIED_PARTNERS",
+  "GENUINE_REVIEWS",
+] as const;
+export const GROWTH_TARGET_PERIODS = ["MONTHLY"] as const;
+export type GrowthTargetMetric = (typeof GROWTH_TARGET_METRICS)[number];
+export type GrowthTargetPeriod = (typeof GROWTH_TARGET_PERIODS)[number];
+
+export const growthCommercialTargets = pgTable(
+  "growth_commercial_targets",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    metric: text("metric").$type<GrowthTargetMetric>().notNull(),
+    period: text("period").$type<GrowthTargetPeriod>().notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    targetValue: bigint("target_value", { mode: "number" }),
+    setBy: text("set_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_growth_commercial_targets_latest").on(table.period, table.periodStart, table.metric, table.createdAt),
+  ]
+);
+
 export const submissionItems = pgTable("submission_items", {
   id: serial("id").primaryKey(),
   submissionId: integer("submission_id").notNull(),
@@ -597,21 +629,7 @@ export const certificates = pgTable("certificates", {
         // MVGS fields — present on new classified pins.
         id?: string;
         mvgsCode?:
-          | "WH"
-          | "CH"
-          | "FR"
-          | "SC"
-          | "SP"
-          | "PI"
-          | "PL"
-          | "PS"
-          | "SV"
-          | "ST"
-          | "GL"
-          | "CR"
-          | "RD"
-          | "DG"
-          | "OC";
+          "WH" | "CH" | "FR" | "SC" | "SP" | "PI" | "PL" | "PS" | "SV" | "ST" | "GL" | "CR" | "RD" | "DG" | "OC";
         tier?: "D1" | "D2" | "D3";
         zone?:
           | "FA"
@@ -1161,6 +1179,7 @@ export const waitlistSignups = pgTable("waitlist_signups", {
 export type CardSet = typeof cardSets.$inferSelect;
 export type CardMaster = typeof cardMaster.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
+export type GrowthCommercialTarget = typeof growthCommercialTargets.$inferSelect;
 export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 
 export const insertCertificateSchema = createInsertSchema(certificates).omit({
