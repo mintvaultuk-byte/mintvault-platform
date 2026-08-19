@@ -14,6 +14,7 @@ import {
   updatePartnerLeadStatus,
 } from "../../commercial-growth-service";
 import { getGrowthIntelligence } from "../../growth-intelligence-service";
+import { getReviewSummary } from "../../review-request-service";
 import { PARTNER_APPLICATION_STATUSES } from "../../partner-applications";
 import { storage } from "../../storage";
 
@@ -100,6 +101,22 @@ export function registerCommercialGrowthRoutes(app: Express): void {
     } catch {
       console.error("[commercial-growth] intelligence query failed");
       return res.status(500).json({ error: "Growth Command intelligence is unavailable" });
+    }
+  });
+
+  router.get("/reviews", async (req: Request, res: Response) => {
+    const period = req.query.period ?? "30d";
+    if (!isGrowthPeriod(period)) return res.status(400).json({ error: "period must be today, 7d, 30d, 90d, or all" });
+    try {
+      const reviews = await getReviewSummary(period);
+      await audit(req, period, "growth_reviews_viewed", {
+        period,
+        configuration: reviews.configuration.state,
+      });
+      return res.set("Cache-Control", "private, no-store").json(reviews);
+    } catch {
+      console.error("[commercial-growth] review aggregate query failed");
+      return res.status(500).json({ error: "Review reporting is unavailable" });
     }
   });
 

@@ -14,6 +14,7 @@ import {
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { PartnerSubmissionCreditLifecycleError } from "../partner/partner-submission-credit-lifecycle";
+import { cancelPendingReviewRequest, queueReviewRequest } from "../review-request-service";
 
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
@@ -581,6 +582,14 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           UPDATE submissions
           SET delivered_at = NOW(), updated_at = NOW()
           WHERE id = ${numId}
+            AND delivered_at IS NULL
+            AND shipped_at IS NOT NULL
+            AND LOWER(status) = 'completed'
+            AND payment_status = 'paid'
+            AND deleted_at IS NULL
+            AND payment_intent_id IS NOT NULL
+            AND payment_timestamp IS NOT NULL
+            AND payment_currency = 'GBP'
           RETURNING delivered_at
         `);
         // Drizzle returns timestamps as strings on some pool paths and as
@@ -589,6 +598,8 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         const raw = (r.rows[0] as any)?.delivered_at;
         deliveredAt =
           raw instanceof Date ? raw.toISOString() : raw != null ? new Date(String(raw)).toISOString() : null;
+        if (!deliveredAt) throw new Error("DELIVERY_STATE_CONFLICT");
+        await queueReviewRequest(numId, new Date(deliveredAt), tx);
         await tx.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
           VALUES (
@@ -605,8 +616,13 @@ export function registerAdminSubmissionRoutes(app: Express): void {
       console.log(`[dispatch] delivery_confirmed_manual submissionId=${submission.submissionId}`);
       res.json({ success: true, unchanged: false, deliveredAt });
     } catch (error: any) {
+      if (error?.message === "DELIVERY_STATE_CONFLICT") {
+        return res.status(409).json({
+          error: "Delivery can only be confirmed for a paid, completed submission that has been shipped",
+        });
+      }
       console.error("Mark delivered error:", error.message);
-      res.status(500).json({ error: "Failed to mark delivered" });
+      return res.status(500).json({ error: "Failed to mark delivered" });
     }
   });
 
@@ -631,6 +647,7 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           SET delivered_at = NULL, updated_at = NOW()
           WHERE id = ${numId}
         `);
+        await cancelPendingReviewRequest(numId, tx);
         await tx.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
           VALUES (

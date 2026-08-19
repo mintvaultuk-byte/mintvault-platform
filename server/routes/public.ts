@@ -671,16 +671,27 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── Population report (public) ─────────────────────────────────────────────
-  app.get("/api/population", async (req, res) => {
+  const populationRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: "Too many population requests. Please try again shortly." },
+  });
+  const populationCache = new Map<string, { expiresAt: number; data: unknown }>();
+  app.get("/api/population", populationRateLimit, async (req, res) => {
     try {
       const game = typeof req.query.game === "string" ? req.query.game.trim() : undefined;
       const set = typeof req.query.set === "string" ? req.query.set.trim() : undefined;
       const card = typeof req.query.card === "string" ? req.query.card.trim() : undefined;
-      const rows = await storage.getGlobalPopulation({
-        game: game || undefined,
-        set: set || undefined,
-        card: card || undefined,
-      });
+      if ([game, set, card].some((value) => value && value.length > 100)) {
+        return res.status(400).json({ error: "Population filters must be 100 characters or fewer." });
+      }
+      const cacheKey = JSON.stringify([game?.toLowerCase() ?? "", set?.toLowerCase() ?? "", card?.toLowerCase() ?? ""]);
+      const cached = populationCache.get(cacheKey);
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      if (cached && cached.expiresAt > Date.now()) return res.json(cached.data);
 
       // Counters + recent certs for the showcase hero
       const countersResult = await db.execute(sql`
@@ -691,14 +702,25 @@ export function registerPublicRoutes(app: Express): void {
           COUNT(CASE WHEN ownership_status = 'claimed' THEN 1 END)::int as claimed_count,
           ROUND(AVG(grade::numeric), 1) as avg_grade
         FROM certificates
-        WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
+        WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric'
+          AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
       `);
       const counters = countersResult.rows[0] as any;
+      const totalGraded = Number(counters.total_graded || 0);
+      const authorityAvailable = totalGraded >= 20;
+      const rows = authorityAvailable
+        ? await storage.getGlobalPopulation({
+            game: game || undefined,
+            set: set || undefined,
+            card: card || undefined,
+          })
+        : [];
 
       const recentResult = await db.execute(sql`
         SELECT certificate_number, card_name, set_name, grade, label_type, front_image_path, grade_approved_at
         FROM certificates
-        WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
+        WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric'
+          AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
         ORDER BY grade_approved_at DESC
         LIMIT 12
       `);
@@ -724,9 +746,16 @@ export function registerPublicRoutes(app: Express): void {
         })
       );
 
-      res.json({
+      const data = {
+        authority: {
+          state: authorityAvailable ? "PUBLISHED" : "INSUFFICIENT_DATA",
+          minimumGlobalSample: 20,
+          minimumGroupSample: 5,
+          source: "MintVault active certificates with approved numeric grades",
+          asOf: new Date().toISOString(),
+        },
         counters: {
-          total_graded: counters.total_graded || 0,
+          total_graded: authorityAvailable ? totalGraded : null,
           unique_cards: counters.unique_cards || 0,
           unique_sets: counters.unique_sets || 0,
           claimed_count: counters.claimed_count || 0,
@@ -734,7 +763,10 @@ export function registerPublicRoutes(app: Express): void {
         },
         recent,
         population: rows,
-      });
+      };
+      if (populationCache.size >= 100) populationCache.delete(populationCache.keys().next().value!);
+      populationCache.set(cacheKey, { expiresAt: Date.now() + 60_000, data });
+      return res.json(data);
     } catch (err) {
       console.error("[population] error:", err);
       res.status(500).json({ error: "Failed to load population data." });

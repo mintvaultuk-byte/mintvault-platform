@@ -263,6 +263,10 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // partner-only harness which has neither the MintVault submission shape nor
   // the production payment authority columns.
   "0100_growth_commercial_attribution",
+  // Growth completion records attach to core submissions and submission
+  // payment/fulfilment authority. A partner-only harness has neither the
+  // canonical submission lifecycle nor the review/conversion ownership model.
+  "0101_growth_reviews_and_conversion",
 ] as const;
 
 /**

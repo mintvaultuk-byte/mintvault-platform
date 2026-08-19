@@ -9,6 +9,7 @@ import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../ema
 import { computeGradingQuote } from "../services/gradingQuote";
 import { redeemPromoCode, reservePromoCodeUse } from "../services/promoCodeService";
 import { recordSubmissionAttribution } from "../commercial-attribution";
+import { recordGrowthConversionEvent } from "../growth-conversion-service";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -730,6 +731,9 @@ export function registerSubmissionRoutes(app: Express): void {
       await recordSubmissionAttribution(Number(submission.id), attribution).catch(() => {
         console.warn("[commercial-attribution] submission context unavailable");
       });
+      await recordGrowthConversionEvent(Number(submission.id), "SUBMISSION_START").catch(() => {
+        console.warn("[growth-conversion] submission-start event unavailable");
+      });
 
       // Audit log for terms acceptance
       if (FEATURE_FLAGS.LEGAL_PAGES_LIVE) {
@@ -872,6 +876,9 @@ export function registerSubmissionRoutes(app: Express): void {
 
       await storage.updateSubmission(submission.id, {
         stripePaymentId: paymentIntent.id,
+      });
+      await recordGrowthConversionEvent(Number(submission.id), "CHECKOUT_START").catch(() => {
+        console.warn("[growth-conversion] checkout-start event unavailable");
       });
 
       const submissionDbId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;

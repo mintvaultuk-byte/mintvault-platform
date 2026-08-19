@@ -464,6 +464,18 @@ async function runTransferV2Sweep() {
   trackTimeout(guardedTransferV2Sweep, 30_000);
   trackInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
 
+  // GB-05 neutral review outbox. The service remains a no-op while its
+  // destination/allowlist/token/email authority is not configured. Advisory
+  // locking plus SKIP LOCKED claims and Resend idempotency prevent duplicates
+  // across the two-machine fleet and crash retries.
+  const guardedReviewRequests = guard("growth-review-requests", async () => {
+    const { processReviewRequestBatch } = await import("./review-request-service");
+    const result = await processReviewRequestBatch();
+    if (result.processed > 0) log(`processed=${result.processed}`, "growth-review-requests");
+  });
+  trackTimeout(guardedReviewRequests, 45_000);
+  trackInterval(guardedReviewRequests, 15 * 60 * 1000);
+
   // Partner credit reservations are a temporary hold, never a manual-maintenance obligation. The
   // domain service treats a pre-0017 database as a no-op for application-first rollout; once G6B
   // exists this hourly, advisory-locked tick expires every due reservation automatically.

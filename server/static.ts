@@ -16,6 +16,14 @@ function injectMeta(html: string, meta: SeoMeta): string {
   const desc  = escapeHtml(meta.description);
   const canon = escapeHtml(meta.canonical);
   const image = meta.ogImage ? escapeHtml(meta.ogImage) : "";
+  const structuredData = meta.structuredData?.length
+    ? JSON.stringify({ "@context": "https://schema.org", "@graph": meta.structuredData })
+        .replace(/</g, "\\u003c")
+        .replace(/>/g, "\\u003e")
+        .replace(/&/g, "\\u0026")
+        .replace(/\u2028/g, "\\u2028")
+        .replace(/\u2029/g, "\\u2029")
+    : "";
 
   let out = html
     .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
@@ -33,6 +41,7 @@ function injectMeta(html: string, meta: SeoMeta): string {
     image ? `  <meta property="og:image" content="${image}" />` : "",
     image ? `  <meta name="twitter:image" content="${image}" />` : "",
     meta.noindex ? `  <meta name="robots" content="noindex, nofollow" />` : "",
+    structuredData ? `  <script type="application/ld+json">${structuredData}</script>` : "",
   ].filter(Boolean).join("\n");
 
   out = out.replace("</head>", `${extras}\n  </head>`);

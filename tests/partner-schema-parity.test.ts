@@ -290,6 +290,9 @@ describe("partner schema ↔ migration parity", () => {
       // GB-04 first-party attribution is application-scoped and uses the
       // canonical post-credit migration identity.
       "0100_growth_commercial_attribution.sql",
+      // Review delivery and conversion instrumentation are application-scoped
+      // because both are anchored to canonical grading submissions.
+      "0101_growth_reviews_and_conversion.sql",
     ]);
   });
 

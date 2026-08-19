@@ -14,6 +14,7 @@ const TABS = [
   ["partners", "Partners"],
   ["seo", "SEO & Traffic"],
   ["conversion", "Conversion"],
+  ["reviews", "Reviews"],
   ["health", "Site Health"],
   ["campaigns", "Campaigns"],
 ] as const;
@@ -22,7 +23,7 @@ type Period = (typeof PERIODS)[number];
 type Tab = (typeof TABS)[number][0];
 type LeadState = (typeof LEAD_STATES)[number];
 type Health = "GREEN" | "AMBER" | "RED" | "UNKNOWN";
-type State = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "STALE" | "ERROR";
+type State = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "INSUFFICIENT_DATA" | "STALE" | "ERROR";
 type Metric = {
   state: State;
   status: Health;
@@ -155,6 +156,21 @@ type Intelligence = {
   generatedAt: string;
 };
 type AdminSession = { authenticated: boolean; isSuperAdmin?: boolean };
+type GrowthReviewSummary = {
+  period: Period;
+  configuration: { state: "READY" | "NOT_CONFIGURED" | "INVALID"; reason?: string };
+  eligible: number;
+  scheduled: number;
+  sent: number;
+  deliveryFailed: number;
+  deliveryUncertain: number;
+  suppressed: number;
+  cancelled: number;
+  clicked: number;
+  publicReviews: { state: "NOT_CONNECTED"; reason: string };
+  definition: string;
+  lastUpdated: string;
+};
 
 const money = (pence: number) =>
   new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(pence / 100);
@@ -296,7 +312,7 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={`rounded-full border px-3 py-1.5 text-xs font-medium ${active ? "border-[var(--admin-gold,#d4af37)] bg-[rgba(212,175,55,.12)] text-[var(--admin-gold-hi,#ecd585)]" : "border-[var(--admin-line,#333)] text-[var(--admin-muted,#8a8a8a)]"}`}
+      className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium ${active ? "border-[var(--admin-gold,#d4af37)] bg-[rgba(212,175,55,.12)] text-[var(--admin-gold-hi,#ecd585)]" : "border-[var(--admin-line,#333)] text-[var(--admin-muted,#8a8a8a)]"}`}
     >
       {label}
     </button>
@@ -343,11 +359,6 @@ export default function GrowthCommandPage() {
     enabled: allowed,
     refetchInterval: tab === "overview" || tab === "health" ? 30_000 : 120_000,
   });
-  const refreshCommand = () => {
-    manualRefresh.current = true;
-    setRefreshing(true);
-    void command.refetch().finally(() => setRefreshing(false));
-  };
   const leads = useQuery<{ leads: Lead[] }>({
     queryKey: [BASE, "leads"],
     queryFn: async () => {
@@ -375,6 +386,22 @@ export default function GrowthCommandPage() {
     },
     enabled: allowed && tab === "campaigns",
   });
+  const reviews = useQuery<GrowthReviewSummary>({
+    queryKey: [BASE, "reviews", period],
+    queryFn: async () => {
+      const response = await fetch(`${BASE}/reviews?period=${period}`, { credentials: "include" });
+      if (!response.ok) throw new Error();
+      return response.json() as Promise<GrowthReviewSummary>;
+    },
+    enabled: allowed && tab === "reviews",
+  });
+  const refreshCommand = () => {
+    manualRefresh.current = true;
+    setRefreshing(true);
+    const requests: Array<Promise<unknown>> = [command.refetch()];
+    if (tab === "reviews") requests.push(reviews.refetch());
+    void Promise.all(requests).finally(() => setRefreshing(false));
+  };
   const statusChange = useMutation<{ changed: boolean; status: LeadState }, Error, { id: string; status: LeadState }>({
     mutationFn: async (input) =>
       (await apiRequest("POST", `${BASE}/leads/${input.id}/status`, { status: input.status })).json(),
@@ -416,7 +443,7 @@ export default function GrowthCommandPage() {
         <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-sm text-[var(--admin-muted,#8a8a8a)]">
-              Revenue, paid cards, Partner leads, site evidence and controlled campaigns.
+              Revenue, paid cards, Partner leads, genuine review lifecycle, site evidence and controlled campaigns.
             </p>
             <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
               No request count is called a visitor. Provider absence is never shown as healthy.
@@ -441,14 +468,18 @@ export default function GrowthCommandPage() {
             <AdminButton
               size="sm"
               onClick={refreshCommand}
-              disabled={command.isFetching || refreshing}
+              disabled={command.isFetching || reviews.isFetching || refreshing}
               data-testid="growth-refresh"
             >
-              <RefreshCw size={14} /> {command.isFetching || refreshing ? "Refreshing" : "Refresh"}
+              <RefreshCw size={14} /> {command.isFetching || reviews.isFetching || refreshing ? "Refreshing" : "Refresh"}
             </AdminButton>
           </div>
         </header>
-        <nav aria-label="Growth Command sections" className="flex gap-2 overflow-x-auto pb-1" data-testid="growth-tabs">
+        <nav
+          aria-label="Growth Command sections"
+          className="flex flex-wrap gap-2 pb-1 sm:flex-nowrap sm:overflow-x-auto"
+          data-testid="growth-tabs"
+        >
           {TABS.map(([key, label]) => (
             <TabButton key={key} active={tab === key} label={label} onClick={() => selectTab(key)} />
           ))}
@@ -586,6 +617,65 @@ export default function GrowthCommandPage() {
                 </div>
                 <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">{data.conversion.definition}</p>
               </Panel>
+            )}
+            {tab === "reviews" && (
+              <section className="space-y-4" data-testid="growth-reviews">
+                {reviews.isError ? (
+                  <Retry message="Review reporting could not be loaded." retry={() => void reviews.refetch()} />
+                ) : !reviews.data ? (
+                  <Empty>Loading aggregate review lifecycle…</Empty>
+                ) : (
+                  <>
+                    <Panel
+                      title="Reviews & Reputation"
+                      sub="Neutral requests after genuine delivered completion. Grade, sentiment and marketing consent are never eligibility inputs."
+                    >
+                      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                        <StatCard label="Eligible" value={number(reviews.data.eligible)} foot="Delivered completion" />
+                        <StatCard label="Scheduled" value={number(reviews.data.scheduled)} foot="Durable outbox" />
+                        <StatCard label="Sent" value={number(reviews.data.sent)} foot="Provider accepted" />
+                        <StatCard label="Clicked" value={number(reviews.data.clicked)} foot="Request link only" />
+                        <StatCard
+                          label="Failed"
+                          value={number(reviews.data.deliveryFailed)}
+                          foot="Bounded retry lifecycle"
+                        />
+                        <StatCard
+                          label="Uncertain"
+                          value={number(reviews.data.deliveryUncertain)}
+                          foot="No invented delivery state"
+                        />
+                        <StatCard label="Suppressed" value={number(reviews.data.suppressed)} foot="Customer/admin preference" />
+                        <StatCard label="Cancelled" value={number(reviews.data.cancelled)} foot="Eligibility withdrawn" />
+                      </div>
+                    </Panel>
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <Panel title="Request delivery" sub="Activation is server-owned and fail-closed.">
+                        <div className="p-4">
+                          <Badge variant={reviews.data.configuration.state === "READY" ? "prog" : "wait"}>
+                            {reviews.data.configuration.state.replaceAll("_", " ")}
+                          </Badge>
+                          <p className="mt-3 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">
+                            {reviews.data.configuration.reason ??
+                              "Approved HTTPS destination, verified MintVault sender and token authority are configured."}
+                          </p>
+                        </div>
+                      </Panel>
+                      <Panel title="Public reputation authority" sub="No rating or public-review count is inferred.">
+                        <div className="p-4">
+                          <Badge variant="neu">{reviews.data.publicReviews.state.replaceAll("_", " ")}</Badge>
+                          <p className="mt-3 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">
+                            {reviews.data.publicReviews.reason}
+                          </p>
+                        </div>
+                      </Panel>
+                    </div>
+                    <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      {reviews.data.definition} · Updated {date(reviews.data.lastUpdated)}
+                    </p>
+                  </>
+                )}
+              </section>
             )}
             {tab === "health" && (
               <section className="space-y-4">
@@ -800,15 +890,15 @@ export default function GrowthCommandPage() {
                         )}
                         {selected.status === "ONBOARDING" && (
                           <div className="rounded border border-amber-400/35 bg-amber-400/5 p-3">
-                            <p className="font-medium">Ready for manual Partner Management handoff</p>
+                            <p className="font-medium">Ready for manual Partner Management review</p>
                             <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                              No tenant, user, location, station, credit or approval has been created.
+                              No selected-lead context is transferred. No tenant, user, location, station, credit or approval has been created.
                             </p>
                             <Link
                               className={`${adminButtonClass({ size: "sm", variant: "gold", className: "mt-2 inline-flex" })}`}
-                              href={`/admin/partners/settings?growthLead=${encodeURIComponent(selected.id)}`}
+                              href="/admin/partners/settings"
                             >
-                              Open Partner Management <ArrowUpRight size={14} />
+                              Open Partner Management settings <ArrowUpRight size={14} />
                             </Link>
                           </div>
                         )}

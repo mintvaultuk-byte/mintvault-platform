@@ -13,6 +13,7 @@ import {
   index,
   jsonb,
   bigint,
+  bigserial,
   uuid,
   customType,
 } from "drizzle-orm/pg-core";
@@ -322,6 +323,70 @@ export const submissionAcquisition = pgTable("submission_acquisition", {
   utmTerm: text("utm_term"),
   capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** GB-05: one neutral review solicitation lifecycle per delivered submission. */
+export const reviewRequests = pgTable(
+  "review_requests",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    submissionId: integer("submission_id").notNull().unique(),
+    status: text("status").notNull().default("ELIGIBLE"),
+    eligibleAt: timestamp("eligible_at", { withTimezone: true }).notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    providerMessageId: text("provider_message_id"),
+    failureCode: text("failure_code"),
+    clickTokenHash: text("click_token_hash"),
+    suppressTokenHash: text("suppress_token_hash"),
+    clickedAt: timestamp("clicked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("uq_review_requests_click_token_hash").on(table.clickTokenHash),
+    uniqueIndex("uq_review_requests_suppress_token_hash").on(table.suppressTokenHash),
+    index("idx_review_requests_due").on(table.nextAttemptAt, table.id),
+  ]
+);
+
+export const reviewDeliveryAttempts = pgTable(
+  "review_delivery_attempts",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    reviewRequestId: bigint("review_request_id", { mode: "number" }).notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    outcome: text("outcome").notNull(),
+    providerMessageId: text("provider_message_id"),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("uq_review_delivery_attempt").on(table.reviewRequestId, table.attemptNumber)]
+);
+
+export const reviewSuppressions = pgTable("review_suppressions", {
+  submissionId: integer("submission_id").primaryKey(),
+  reason: text("reason").notNull().default("CUSTOMER_REQUEST"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Privacy-minimised server events; payment authority remains in submissions/Stripe. */
+export const growthConversionEvents = pgTable(
+  "growth_conversion_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    submissionId: integer("submission_id").notNull(),
+    eventKind: text("event_kind").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("uq_growth_conversion_event").on(table.submissionId, table.eventKind),
+    index("idx_growth_conversion_events_window").on(table.eventKind, table.occurredAt),
+  ]
+);
 
 export const submissionItems = pgTable("submission_items", {
   id: serial("id").primaryKey(),

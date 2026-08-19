@@ -11,8 +11,15 @@
 import { sql, type SQL } from "drizzle-orm";
 import { getSitemapEntries, isKnownPublicRoute } from "./seo-config";
 import { getGrowthSummary, type GrowthPeriod, type GrowthSummary } from "./commercial-growth-service";
+import { getConversionEventSummary, type GrowthConversionExecutor } from "./growth-conversion-service";
 
-export type IntelligenceState = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "STALE" | "ERROR";
+export type IntelligenceState =
+  | "REAL"
+  | "NOT_CONNECTED"
+  | "NOT_INSTRUMENTED"
+  | "INSUFFICIENT_DATA"
+  | "STALE"
+  | "ERROR";
 export type HealthStatus = "GREEN" | "AMBER" | "RED" | "UNKNOWN";
 
 export type IntelligenceMetric = {
@@ -308,6 +315,11 @@ export function deriveCapacityStatus(
   };
 }
 
+/** Aggregate-only boundary for MCP/internal consumers; never enables scaling. */
+export function getCapacityStatus(): CapacityStatus {
+  return deriveCapacityStatus(null, null);
+}
+
 export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse> {
   const runner = executor ?? (await import("./db")).db;
   const now = new Date().toISOString();
@@ -326,6 +338,27 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
   `);
   const row = (result.rows[0] ?? {}) as Record<string, unknown>;
   const partner = (partnerResult.rows[0] ?? {}) as Record<string, unknown>;
+  let checkoutStarts = unavailable(
+    "NOT_INSTRUMENTED",
+    "MintVault growth_conversion_events",
+    "The checkout-start event migration is not available in this environment."
+  );
+  try {
+    const checkoutResult = await runner.execute(sql`
+      SELECT COUNT(*)::int AS checkout_starts
+      FROM growth_conversion_events
+      WHERE event_kind = 'CHECKOUT_START' AND occurred_at >= NOW() - INTERVAL '60 minutes'
+    `);
+    checkoutStarts = real(
+      numberValue((checkoutResult.rows[0] as Record<string, unknown> | undefined)?.checkout_starts),
+      "server-created checkouts",
+      "MintVault growth_conversion_events after Stripe PaymentIntent creation",
+      now
+    );
+  } catch {
+    // Mixed-version safety: an app node may start before migration 0101 is
+    // applied. The dashboard remains truthful and checkout never depends on it.
+  }
   return {
     window: "60m",
     submissionStarts: real(
@@ -334,11 +367,7 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
       "MintVault submissions.created_at (record creation)",
       now
     ),
-    checkoutStarts: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault submissions",
-      "No canonical checkout-start event timestamp exists; created_at is not used as a checkout event."
-    ),
+    checkoutStarts,
     paidSubmissions: real(
       numberValue(row.paid_submissions),
       "paid submissions",
@@ -479,29 +508,75 @@ export function getSeoSummary(): SeoSummary {
   };
 }
 
-export async function getConversionSummary(period: GrowthPeriod, summary?: GrowthSummary): Promise<ConversionSummary> {
+export async function getConversionSummary(
+  period: GrowthPeriod,
+  summary?: GrowthSummary,
+  executor?: GrowthConversionExecutor
+): Promise<ConversionSummary> {
   const growth = summary ?? (await getGrowthSummary(period));
   const now = new Date().toISOString();
+  let events: Awaited<ReturnType<typeof getConversionEventSummary>> | null = null;
+  try {
+    events = await getConversionEventSummary(period, executor);
+  } catch {
+    // An unavailable additive event table must never take down paid reporting.
+  }
+  const submissionStarts = events
+    ? real(
+        events.submissionStarts,
+        "persisted submission starts",
+        "Server-observed growth_conversion_events",
+        now
+      )
+    : unavailable(
+        "NOT_INSTRUMENTED",
+        "MintVault growth_conversion_events",
+        "The submission-start event migration is not available in this environment."
+      );
+  const checkoutStarts = events
+    ? real(
+        events.checkoutStarts,
+        "server-created checkouts",
+        "Stripe PaymentIntent creation followed by growth_conversion_events",
+        now
+      )
+    : unavailable(
+        "NOT_INSTRUMENTED",
+        "MintVault growth_conversion_events",
+        "The checkout-start event migration is not available in this environment."
+      );
+  const dropOff = !events
+    ? unavailable(
+        "NOT_INSTRUMENTED",
+        "MintVault conversion authority",
+        "No authoritative checkout-start cohort is available."
+      )
+    : events.checkoutStarts === 0
+      ? unavailable(
+          "INSUFFICIENT_DATA",
+          "MintVault checkout cohort",
+          "No checkout starts occurred in this period, so checkout-to-paid drop-off is not calculated.",
+          now
+        )
+      : real(
+          Number((((events.checkoutStarts - events.checkoutCohortPaid) / events.checkoutStarts) * 100).toFixed(1)),
+          "% checkout-to-paid drop-off",
+          "Server-created checkout cohort joined to verified Stripe-paid submission authority",
+          now,
+          events.checkoutCohortPaid < events.checkoutStarts ? "AMBER" : "GREEN"
+        );
   return {
     period,
     stages: [
       {
         key: "SUBMISSION_STARTS",
         label: "Submission starts",
-        metric: unavailable(
-          "NOT_INSTRUMENTED",
-          "MintVault submission workflow",
-          "A stable submission-start event and uniqueness rule are not instrumented for funnel conversion."
-        ),
+        metric: submissionStarts,
       },
       {
         key: "CHECKOUT_STARTS",
         label: "Checkout starts",
-        metric: unavailable(
-          "NOT_INSTRUMENTED",
-          "MintVault checkout workflow",
-          "No canonical checkout-start event timestamp exists."
-        ),
+        metric: checkoutStarts,
       },
       {
         key: "PAID_SUBMISSIONS",
@@ -514,18 +589,14 @@ export async function getConversionSummary(period: GrowthPeriod, summary?: Growt
         metric: real(growth.paid.paidCards.value, "cards", "Verified Stripe payment_timestamp", now),
       },
     ],
-    dropOff: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault conversion authority",
-      "No authoritative checkout-start cohort exists, so drop-off percentages are not calculated."
-    ),
+    dropOff,
     comparison: unavailable(
       "NOT_INSTRUMENTED",
       "MintVault conversion authority",
       "Previous-period conversion comparison needs the same canonical funnel events."
     ),
     definition:
-      "Paid stages count only verified Stripe-paid submissions in the selected calendar window. Unpaid drafts and failed/cancelled outcomes are excluded.",
+      "Submission start is a persisted server submission. Checkout start is recorded only after Stripe creates a PaymentIntent. Checkout drop-off follows that period's checkout cohort to current verified paid state. Paid headline stages remain verified Stripe payments in the selected calendar window.",
     lastUpdated: now,
   };
 }

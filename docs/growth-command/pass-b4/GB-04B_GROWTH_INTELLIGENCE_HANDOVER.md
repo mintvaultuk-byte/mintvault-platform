@@ -45,7 +45,7 @@ Search Console is explicitly `NOT_CONNECTED`; impressions, clicks, CTR, position
 
 ## Internal MCP contract
 
-The internal aggregate-only service contracts are `getGrowthSummary`, `getAcquisitionPerformance`, `getCampaignPerformance`, `getPartnerPipeline`, `getLivePulse`, `getSiteHealth`, `getCapacityStatus`, `getSeoSummary`, `getConversionSummary`, and `getGrowthInsights`.
+The internal aggregate-only service contracts are `getGrowthSummary`, `getAcquisitionPerformance`, `getCampaignPerformance`, `getPartnerPipeline`, `getLivePulse`, `getSiteHealth`, `getCapacityStatus`, `getSeoSummary`, `getConversionSummary`, and `getGrowthInsights`. `getCapacityStatus` is an exported read contract over the same deterministic capacity model; it never enables scaling.
 
 No external MCP runtime is introduced. `listPartnerApplications` and `getPartnerApplication` are Super Admin lead-workflow functions and are explicitly outside the future MCP aggregate contract because they contain lead business/contact data.
 

@@ -68,7 +68,8 @@ const PRODUCTION_SOURCE_HISTORY = [
 ] as const;
 
 const ALREADY_APPLIED_GB03 = "0095_growth_partner_applications";
-const GROWTH_MIGRATION = "0100_growth_commercial_attribution.sql";
+const ATTRIBUTION_MIGRATION = "0100_growth_commercial_attribution.sql";
+const COMPLETION_MIGRATION = "0101_growth_reviews_and_conversion.sql";
 
 /** The expected ordered plan after canonical Partner/Scanner integration. */
 const CANONICAL_PENDING = [
@@ -149,6 +150,7 @@ let admin: pg.Client;
 let migrator: pg.Client;
 let applied: string[];
 let growthApplied: string[];
+let completionApplied: string[];
 
 describe("canonical Partner/Scanner production-journal rehearsal", () => {
   beforeAll(async () => {
@@ -195,7 +197,9 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     }
 
     const files = listMigrationFiles();
-    const preGrowthFiles = files.filter((file) => file.filename !== GROWTH_MIGRATION);
+    const preGrowthFiles = files.filter(
+      (file) => file.filename !== ATTRIBUTION_MIGRATION && file.filename !== COMPLETION_MIGRATION
+    );
     const before = await planMigrations(migrator as never, preGrowthFiles);
     expect(before.alreadyApplied).toHaveLength(41);
     expect(before.pending).toEqual([...CANONICAL_PENDING]);
@@ -212,12 +216,23 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
 
     // GB-04 release rehearsal starts from the current production journal shape:
     // 62 immutable applied entries and exactly one new canonical migration.
-    const growthBefore = await planMigrations(migrator as never, files);
+    const attributionFiles = files.filter((file) => file.filename !== COMPLETION_MIGRATION);
+    const growthBefore = await planMigrations(migrator as never, attributionFiles);
     expect(growthBefore.alreadyApplied).toHaveLength(62);
-    expect(growthBefore.pending).toEqual([GROWTH_MIGRATION]);
+    expect(growthBefore.pending).toEqual([ATTRIBUTION_MIGRATION]);
     expect(growthBefore.inconsistent).toEqual([]);
     expect(growthBefore.checksumMismatches).toEqual([]);
-    growthApplied = (await applyMigrations(migrator as never, files)).applied;
+    growthApplied = (await applyMigrations(migrator as never, attributionFiles)).applied;
+
+    // Completion Night starts from the exact observed 63-entry production
+    // journal and has one additive, non-destructive migration to apply.
+    const completionBefore = await planMigrations(migrator as never, files);
+    expect(completionBefore.alreadyApplied).toHaveLength(63);
+    expect(completionBefore.pending).toEqual([COMPLETION_MIGRATION]);
+    expect(completionBefore.inconsistent).toEqual([]);
+    expect(completionBefore.checksumMismatches).toEqual([]);
+    expect(completionBefore.destructive).toEqual([]);
+    completionApplied = (await applyMigrations(migrator as never, files)).applied;
   }, 180_000);
 
   afterAll(async () => {
@@ -228,15 +243,16 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
 
   it("uses the canonical ordered plan and leaves a complete, consistent journal", async () => {
     expect(applied).toEqual([...CANONICAL_PENDING]);
-    expect(growthApplied).toEqual([GROWTH_MIGRATION]);
+    expect(growthApplied).toEqual([ATTRIBUTION_MIGRATION]);
+    expect(completionApplied).toEqual([COMPLETION_MIGRATION]);
     const after = await planMigrations(migrator as never, listMigrationFiles());
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(63);
+    expect(after.alreadyApplied).toHaveLength(64);
   });
 
-  it("applies only 0100 from the exact 62-entry production journal shape", async () => {
+  it("applies 0100 and then only 0101 from the exact 63-entry production journal shape", async () => {
     const acquisition = await admin.query<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='submission_acquisition'
@@ -256,6 +272,19 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       SELECT indexname FROM pg_indexes WHERE schemaname='public' AND indexname='idx_submissions_paid_growth_window'
     `);
     expect(growthIndex.rows).toEqual([{ indexname: "idx_submissions_paid_growth_window" }]);
+
+    const completionRelations = await admin.query<{ relname: string }>(`
+      SELECT relname FROM pg_class
+       WHERE relnamespace='public'::regnamespace
+         AND relname IN ('review_requests','review_delivery_attempts','review_suppressions','growth_conversion_events')
+       ORDER BY relname
+    `);
+    expect(completionRelations.rows.map((row) => row.relname)).toEqual([
+      "growth_conversion_events",
+      "review_delivery_attempts",
+      "review_requests",
+      "review_suppressions",
+    ]);
   });
 
   it("delivers the missing Partner, Scanner, and project-control structures without replacing existing data", async () => {
