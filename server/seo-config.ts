@@ -369,7 +369,12 @@ export function getSitemapEntries(): SitemapEntry[] {
 export function getSeoMeta(pathname: string): SeoMeta {
   const clean = cleanPath(pathname);
 
-  if (SEO_MAP[clean]) return SEO_MAP[clean];
+  // A route can retain useful descriptive metadata while still being an
+  // operational/customer flow that must not be indexed. Apply the route
+  // policy here rather than allowing the SEO map lookup to bypass it.
+  if (SEO_MAP[clean]) {
+    return { ...SEO_MAP[clean], noindex: isNoindexRoute(clean) || SEO_MAP[clean].noindex };
+  }
 
   const journalSlug = clean.match(/^\/journal\/([^/]+)$/)?.[1];
   const guide = journalSlug ? guides.find((entry) => entry.slug === journalSlug) : undefined;

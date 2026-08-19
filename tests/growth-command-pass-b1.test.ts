@@ -121,6 +121,16 @@ describe("GB-02 rendered search policy", () => {
     expect(reportMeta.noindex).toBe(true);
   });
 
+  it("keeps customer ownership workflows out of indexes even when they have descriptive metadata", () => {
+    for (const route of ["/ownership", "/claim", "/transfer", "/dashboard"]) {
+      const page = renderPublicHtml(BASE_HTML, route);
+      expect(page.status).toBe(200);
+      expect(page.noindex).toBe(true);
+      expect(page.html).toContain('<meta name="robots" content="noindex, nofollow" />');
+      expect(getSeoMeta(route).noindex).toBe(true);
+    }
+  });
+
   it("injects search-visible title, description and canonical tags into rendered public HTML", () => {
     const page = renderPublicHtml(BASE_HTML, "/pokemon-card-grading-uk?utm_source=test");
     expect(page.status).toBe(200);
