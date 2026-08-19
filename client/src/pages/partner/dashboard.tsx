@@ -13,6 +13,7 @@ import {
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { AlertTriangle, ArrowRight, PlusCircle, ScanLine, Wrench } from "lucide-react";
+import { ReadinessPanel } from "@/components/partner/readiness-panel";
 
 function metric(value: number | null | undefined, empty = "Not available") {
   return value == null ? empty : value.toLocaleString("en-GB");
@@ -477,16 +478,7 @@ export default function PartnerDashboardPage() {
               </h2>
               <Card className="rounded-md" data-testid="card-onboarding-readiness">
                 <CardContent className="pt-6 space-y-2 text-sm">
-                  <p className="font-medium" data-testid="text-onboarding-state">
-                    {READINESS_COPY[readiness.data.onboardingState] ?? readiness.data.onboardingState}
-                  </p>
-                  {readiness.data.blockedReasons && readiness.data.blockedReasons.length > 0 && (
-                    <ul className="text-xs text-muted-foreground list-disc pl-4" data-testid="list-readiness-reasons">
-                      {readiness.data.blockedReasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  )}
+                  <ReadinessPanel readiness={readiness.data.operational} audience="PARTNER" />
                 </CardContent>
               </Card>
             </section>
@@ -678,21 +670,6 @@ export default function PartnerDashboardPage() {
     </div>
   );
 }
-
-/**
- * Plain-English readiness. The server's states are deliberately precise; a shop owner needs to know
- * what to DO next, so each one is rendered as the next action rather than as a status code.
- */
-const READINESS_COPY: Record<string, string> = {
-  INVITED: "Invited — the owner needs to open their setup link",
-  AWAITING_PASSWORD_SETUP: "Waiting for a password to be set",
-  AWAITING_MFA_SETUP: "Waiting for two-step security to be set up",
-  STATION_SETUP_REQUIRED: "Register and approve a Scanner station to start scanning",
-  READY_TO_LOG_IN: "Ready",
-  LOGIN_BLOCKED: "Sign-in is blocked — contact MintVault",
-  SUSPENDED: "Suspended — contact MintVault",
-  REVOKED: "Revoked — contact MintVault",
-};
 
 const STATUS_COPY: Record<string, string> = {
   draft: "Draft",

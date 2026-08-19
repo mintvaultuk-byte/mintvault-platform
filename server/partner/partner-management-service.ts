@@ -14,6 +14,7 @@ import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatu
 import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { ensureWallet } from "./partner-wallet-service";
+import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from "./operational-readiness";
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
@@ -1556,14 +1557,24 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
   const org = await loadPartner(partnerId);
   let portalEnabled = false;
   let loginFlagEnabled = false;
+  /*
+   * Tracked separately from the values themselves. resolveGlobalFlag() already fails closed to
+   * false, which is correct for a gate but wrong as an input to readiness: `partner_emergency_stop`
+   * reading false would mean "nothing is stopped", so an unreadable flag table would be reported as
+   * calm. Readiness therefore distinguishes "read it, it was off" from "could not read it".
+   */
+  let flagsReadable = true;
+  let emergencyStop = false;
   try {
     const { resolveGlobalFlag } = await import("./flags");
-    [portalEnabled, loginFlagEnabled] = await Promise.all([
+    [portalEnabled, loginFlagEnabled, emergencyStop] = await Promise.all([
       resolveGlobalFlag("partner_portal_enabled"),
       resolveGlobalFlag("partner_login_enabled"),
+      resolveGlobalFlag("partner_emergency_stop"),
     ]);
   } catch {
     portalEnabled = false;
+    flagsReadable = false;
   }
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status AS user_status,
@@ -1618,22 +1629,148 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
    * (the partner has done nothing wrong) nor silently treated as ready.
    */
   let stationReady: boolean | null = null;
+  let stationFacts: PartnerReadinessFacts["station"];
   try {
-    const stationRows = await partnerAdminQuery<{ present: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM partner_stations
-          WHERE tenant_id = $1 AND status = 'ACTIVE' AND approved_at IS NOT NULL
-       ) AS present`,
-      [org.id]
-    );
-    stationReady = stationRows.rows[0]?.present === true;
+    /*
+     * ONE query for the whole station picture — counts plus the single best qualifying station —
+     * rather than a count query followed by a per-station health read. Readiness is rendered on
+     * every dashboard load, so an N+1 here would be paid constantly.
+     *
+     * The health row is the most recently seen APPROVED + ACTIVE station: if a shop has several,
+     * the one that can actually work now is the right one to report on. Every predicate is
+     * explicitly scoped by tenant_id — the admin pool bypasses RLS, so the tenant filter is the
+     * only thing standing between this and another shop's fleet.
+     */
+    /*
+     * Built in two tiers because `current_profile_revision_id` may be absent on an older database.
+     * The reduced probe marks that fact as `undefined`; the decision contract treats it as UNKNOWN,
+     * never as a pass, because capture readiness cannot be established without the revision.
+     */
+    const stationSql = (withProfileRevision: boolean) => `
+      SELECT
+        (SELECT count(*)::int FROM partner_stations WHERE tenant_id = $1 AND status <> 'REVOKED') AS enrolled,
+        (SELECT count(*)::int FROM partner_stations s2
+           JOIN partner_locations l2 ON l2.id = s2.location_id AND l2.tenant_id = s2.tenant_id
+          WHERE s2.tenant_id = $1 AND s2.status = 'ACTIVE' AND s2.approved_at IS NOT NULL
+            AND l2.status = 'ACTIVE') AS approved_active,
+        (SELECT count(*)::int FROM partner_stations
+           WHERE tenant_id = $1 AND status = 'PENDING' AND approved_at IS NULL) AS pending_approval,
+        a.scanner_connected, a.last_seen_at, a.calibration_status, a.current_calibration_id,
+        ${withProfileRevision ? "a.current_profile_revision_id" : "NULL::uuid AS current_profile_revision_id"},
+        a.app_version, a.minimum_supported_version
+      FROM (SELECT 1) _
+      LEFT JOIN LATERAL (
+        SELECT s.scanner_connected, s.last_seen_at, s.calibration_status, s.current_calibration_id,
+               ${withProfileRevision ? "s.current_profile_revision_id," : ""}
+               s.app_version, s.minimum_supported_version
+          FROM partner_stations s
+          JOIN partner_locations l ON l.id = s.location_id AND l.tenant_id = s.tenant_id AND l.status = 'ACTIVE'
+         WHERE s.tenant_id = $1 AND s.status = 'ACTIVE' AND s.approved_at IS NOT NULL
+         ORDER BY s.last_seen_at DESC NULLS LAST
+         LIMIT 1
+      ) a ON true`;
+    type StationProbeRow = {
+      enrolled: number;
+      approved_active: number;
+      pending_approval: number;
+      scanner_connected: boolean | null;
+      last_seen_at: string | null;
+      calibration_status: string | null;
+      current_calibration_id: string | null;
+      current_profile_revision_id: string | null;
+      app_version: string | null;
+      minimum_supported_version: string | null;
+    };
+    let hasProfileRevision = true;
+    let stationRows;
+    try {
+      stationRows = await partnerAdminQuery<StationProbeRow>(stationSql(true), [org.id]);
+    } catch {
+      stationRows = await partnerAdminQuery<StationProbeRow>(stationSql(false), [org.id]);
+      hasProfileRevision = false;
+    }
+    const s = stationRows.rows[0];
+    stationReady = (s?.approved_active ?? 0) > 0;
+    stationFacts = {
+      enrolledCount: s?.enrolled ?? 0,
+      approvedActiveCount: s?.approved_active ?? 0,
+      pendingApprovalCount: s?.pending_approval ?? 0,
+      active:
+        s && s.calibration_status !== null
+          ? {
+              scannerConnected: s.scanner_connected === true,
+              lastSeenAt: s.last_seen_at,
+              calibrationStatus: s.calibration_status,
+              currentCalibrationId: s.current_calibration_id,
+              currentProfileRevisionId: hasProfileRevision ? s.current_profile_revision_id : undefined,
+              appVersion: s.app_version,
+              minimumSupportedVersion: s.minimum_supported_version,
+            }
+          : null,
+    };
   } catch {
-    stationReady = null; // station subsystem absent on this database — report unknown, not blocked
+    // station subsystem absent on this database — report unknown, not blocked
+    stationReady = null;
+    stationFacts = null;
   }
+
+  /*
+   * CREDITS come from the canonical ledger-derived balance, never a stored or cached figure.
+   * WALLET_NOT_FOUND is a real, actionable answer (a legacy partner that predates wallet
+   * provisioning) and is distinguished from "the wallet authority could not be consulted", which is
+   * UNKNOWN. Collapsing the two would let an outage read as "no credits", or worse, as zero-is-fine.
+   */
+  let credits: PartnerReadinessFacts["credits"];
+  try {
+    const { getBalance } = await import("./partner-wallet-service");
+    credits = (await getBalance(org.id)).balance;
+  } catch (err) {
+    credits = (err as { code?: string })?.code === "WALLET_NOT_FOUND" ? "NO_WALLET" : null;
+  }
+
+  /*
+   * The OWNER row backing the readiness decision. Chosen deterministically: the PARTNER_OWNER if
+   * there is one, else the first listed user, so both audiences reason about the same account
+   * rather than "whichever row happened to sort first" differing between callers.
+   */
+  const ownerRow =
+    rows.find((u: any) => (u.role_codes ?? []).includes("PARTNER_OWNER") && u.user_status !== "REVOKED") ??
+    rows.find((u: any) => u.user_status !== "REVOKED") ??
+    rows[0];
+
+  const operational = derivePartnerOperationalReadiness({
+    orgStatus: org.status,
+    portalEnabled: flagsReadable ? portalEnabled : null,
+    loginFlagEnabled: flagsReadable ? loginFlagEnabled : null,
+    emergencyStop: flagsReadable ? emergencyStop : null,
+    owner: ownerRow
+      ? {
+          userStatus: ownerRow.user_status,
+          passwordConfigured: ownerRow.password_configured === true,
+          invitationValid:
+            !!ownerRow.invitation_status &&
+            ["PENDING", "SENT", "DELIVERY_FAILED"].includes(ownerRow.invitation_status) &&
+            !!ownerRow.invitation_expires_at &&
+            new Date(ownerRow.invitation_expires_at).getTime() > Date.now(),
+          mfaRequired: ownerRow.mfa_required === true,
+          mfaConfigured: ownerRow.mfa_configured === true,
+        }
+      : null,
+    locationEligible: ownerRow?.location_eligible === true,
+    station: stationFacts,
+    credits,
+    nowMs: Date.now(),
+  });
 
   return {
     organisation: { id: org.id, legalName: org.legal_name, status: org.status },
     portalEnabled,
+    /**
+     * THE authoritative operational verdict, consumed verbatim by both the Partner Portal dashboard
+     * and the Super Admin partner workspace. Added alongside the existing fields rather than
+     * replacing them, so every current consumer of `users[].readiness` keeps working unchanged.
+     */
+    operational,
     users: rows.map((u: any) => ({
       id: u.id,
       email: u.email,

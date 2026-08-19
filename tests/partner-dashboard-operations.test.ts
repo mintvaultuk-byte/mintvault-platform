@@ -430,22 +430,13 @@ describe("P8 integration surfaces", () => {
   });
 
   it("readiness reuses the Super Admin computation rather than a second one", () => {
-    // Two definitions of "is this shop set up" would drift, which is the failure the original was
-    // written to end.
+    // Both audiences render the server-owned operational verdict, so this cannot become a second
+    // browser-side readiness calculation.
     expect(routes).toContain("getPartnerOnboardingReadiness(req.partner!.tenantId)");
-    expect(dashboard).toContain("READINESS_COPY");
-    for (const state of [
-      "INVITED",
-      "AWAITING_PASSWORD_SETUP",
-      "AWAITING_MFA_SETUP",
-      "STATION_SETUP_REQUIRED",
-      "READY_TO_LOG_IN",
-      "LOGIN_BLOCKED",
-      "SUSPENDED",
-      "REVOKED",
-    ]) {
-      expect(dashboard, `readiness state ${state} not surfaced`).toContain(state);
-    }
+    expect(dashboard).toContain("ReadinessPanel");
+    expect(dashboard).toContain("readiness.data.operational");
+    const code = dashboard.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((line) => !/^\s*\/\//.test(line)).join("\n");
+    expect(code).not.toContain("READINESS_COPY");
   });
 
   it("no hard-coded 'Main location' assumption survives in the UI", () => {

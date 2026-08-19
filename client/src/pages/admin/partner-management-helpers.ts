@@ -444,12 +444,8 @@ export interface ChecklistItemView {
  * not "owner login created" (an INVITED user cannot log in), and "Invitation sent" must not tick for
  * a DELIVERY_FAILED invitation. The caller is responsible for feeding those distinctions in.
  *
- * HONESTY RULE 2: this checklist does not receive a per-partner station projection. Scanner
- * enrolment is available in the MintVault Scanner, but this view cannot honestly claim that a
- * particular Mac is configured. The previous UI rendered it as a
- * permanently unticked circle, which reads as "you still have to do this" when in fact it cannot be
- * done. They are reported as `unavailable` instead, and are EXCLUDED from the percentage so the bar
- * can actually reach 100%. A progress bar that can never complete is a bug, not a motivator.
+ * It is administrative record-keeping only. Operational readiness belongs to the server contract;
+ * station and credit state must never be inferred here.
  */
 export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
   const b = (v: boolean): ChecklistState => (v ? "done" : "todo");
@@ -460,27 +456,19 @@ export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
     { key: "location", label: "Grading location", state: b(input.locationCount > 0) },
     { key: "profile", label: "Company profile completed", state: b(input.hasProfileDetail) },
     { key: "branding", label: "Branding configured", state: b(input.hasBranding) },
-    {
-      key: "device",
-      label: "Scanner station",
-      state: "unavailable",
-      hint: "Set up in MintVault Scanner: sign in, register this Mac, then wait for Super Admin approval.",
-    },
-    {
-      key: "credits",
-      label: "Credits configured",
-      state: "unavailable",
-      hint: "Credit accounting is not enabled yet.",
-    },
   ];
 }
 
-/** Percentage complete over the ACHIEVABLE items only. Returns 0-100, integer. */
-export function checklistPercent(items: readonly ChecklistItemView[]): number {
+/** A count cannot be mistaken for a readiness verdict; a percentage can. */
+export function checklistProgress(items: readonly ChecklistItemView[]): { done: number; total: number } {
   const achievable = items.filter((i) => i.state !== "unavailable");
-  if (achievable.length === 0) return 0;
-  const done = achievable.filter((i) => i.state === "done").length;
-  return Math.round((done / achievable.length) * 100);
+  return { done: achievable.filter((i) => i.state === "done").length, total: achievable.length };
+}
+
+/** Existing location text is navigation-only: no coordinates, geocoding or Maps SDK are involved. */
+export function googleMapsSearchUrl(address: string | null | undefined): string | null {
+  const query = address?.trim() ?? "";
+  return query.length >= 3 ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}` : null;
 }
 
 /** Whether the profile carries enough detail to count as "completed" on the checklist. */

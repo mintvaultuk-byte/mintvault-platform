@@ -41,7 +41,8 @@ import {
   canCreateDespiteDuplicates,
   duplicateOverrideNote,
   computeChecklist,
-  checklistPercent,
+  checklistProgress,
+  googleMapsSearchUrl,
   profileHasDetail,
   invitationEditable,
   userInvitationReadOnly,
@@ -368,7 +369,7 @@ describe("duplicate detection", () => {
 // ---------------------------------------------------------------------------------------------
 // Setup checklist
 // ---------------------------------------------------------------------------------------------
-describe("setup checklist", () => {
+describe("administrative setup list", () => {
   const input = {
     companyCreated: true,
     hasOwner: false,
@@ -378,13 +379,10 @@ describe("setup checklist", () => {
     hasProfileDetail: false,
   };
 
-  it("marks device and credits unavailable rather than permanently unticked", () => {
-    const items = computeChecklist(input);
-    expect(items.find((i) => i.key === "device")!.state).toBe("unavailable");
-    expect(items.find((i) => i.key === "credits")!.state).toBe("unavailable");
-    // and each explains why, so the admin does not go looking for a button that does not exist
-    expect(items.find((i) => i.key === "device")!.hint).toBeTruthy();
-    expect(items.find((i) => i.key === "credits")!.hint).toBeTruthy();
+  it("does not claim station or credits as administrative readiness", () => {
+    const keys = computeChecklist(input).map((item) => item.key);
+    expect(keys).not.toContain("device");
+    expect(keys).not.toContain("credits");
   });
 
   it("reflects the real state of the achievable items", () => {
@@ -394,7 +392,7 @@ describe("setup checklist", () => {
     expect(items.find((i) => i.key === "owner")!.state).toBe("todo");
   });
 
-  it("excludes unavailable items from the percentage so the bar can reach 100", () => {
+  it("reports an administrative count, never a readiness percentage", () => {
     const complete = computeChecklist({
       companyCreated: true,
       hasOwner: true,
@@ -403,15 +401,14 @@ describe("setup checklist", () => {
       hasBranding: true,
       hasProfileDetail: true,
     });
-    expect(checklistPercent(complete)).toBe(100);
+    expect(checklistProgress(complete)).toEqual({ done: 6, total: 6 });
   });
 
-  it("computes an honest intermediate percentage", () => {
-    // 6 achievable items; company + location done = 2/6 = 33%
-    expect(checklistPercent(computeChecklist(input))).toBe(33);
+  it("reports the current administrative count", () => {
+    expect(checklistProgress(computeChecklist(input))).toEqual({ done: 2, total: 6 });
   });
 
-  it("reports 0% for a bare company", () => {
+  it("reports no completed records for a bare company", () => {
     const items = computeChecklist({
       companyCreated: false,
       hasOwner: false,
@@ -420,12 +417,12 @@ describe("setup checklist", () => {
       hasBranding: false,
       hasProfileDetail: false,
     });
-    expect(checklistPercent(items)).toBe(0);
+    expect(checklistProgress(items).done).toBe(0);
   });
 
-  it("never divides by zero when every item is unavailable", () => {
-    expect(checklistPercent([{ key: "x", label: "x", state: "unavailable" }])).toBe(0);
-    expect(checklistPercent([])).toBe(0);
+  it("handles empty administrative lists", () => {
+    expect(checklistProgress([{ key: "x", label: "x", state: "unavailable" }])).toEqual({ done: 0, total: 0 });
+    expect(checklistProgress([])).toEqual({ done: 0, total: 0 });
   });
 
   it("profileHasDetail requires a trading name, a way to make contact, and a postcode", () => {
@@ -436,6 +433,15 @@ describe("setup checklist", () => {
     expect(profileHasDetail({ trading_name: "MV", primary_phone: "01634 123456", address_postcode: "ME2" })).toBe(true);
     // whitespace is not detail
     expect(profileHasDetail({ trading_name: "  ", primary_email: "a@b.co", address_postcode: "ME2" })).toBe(false);
+  });
+});
+
+describe("location map navigation", () => {
+  it("uses a URL-encoded external Google Maps search only when an address exists", () => {
+    expect(googleMapsSearchUrl("12 High Street, London SW1A 1AA")).toBe(
+      "https://www.google.com/maps/search/?api=1&query=12%20High%20Street%2C%20London%20SW1A%201AA"
+    );
+    expect(googleMapsSearchUrl(" ")).toBeNull();
   });
 });
 
@@ -794,18 +800,18 @@ describe("detail page — invitation management", () => {
   });
 });
 
-describe("detail page — checklist", () => {
+describe("detail page — server readiness and administrative list", () => {
   const src = readSrc(DETAIL_PAGE);
 
-  it("renders the computed checklist with a percentage", () => {
+  it("renders the computed administrative list without a readiness percentage", () => {
     expect(src).toContain("computeChecklist(");
-    expect(src).toContain("checklistPercent(");
-    expect(src).toContain('data-testid="pm-checklist-percent"');
+    expect(src).toContain("checklistProgress(");
+    expect(src).toContain('data-testid="pm-checklist-progress"');
+    expect(src).toContain("ReadinessPanel");
   });
 
-  it("exposes progress to assistive technology, not colour alone", () => {
-    expect(src).toContain('role="progressbar"');
-    expect(src).toContain("aria-valuenow");
+  it("does not render the administrative list as a progress bar", () => {
+    expect(src).not.toContain('role="progressbar"');
   });
 });
 

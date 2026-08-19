@@ -8671,36 +8671,50 @@ Defects (admin-confirmed): ${defectLines}`;
     //  • no param          → legacy in-app grading queue (dashboard Grading tab).
     // Branching on the param keeps the legacy consumer byte-for-byte unchanged.
     const statusParam = typeof req.query.status === "string" ? req.query.status : null;
+    const partnerIdParam = typeof req.query.partnerId === "string" ? req.query.partnerId.trim() : "";
+    const certIdParam = typeof req.query.certId === "string" ? req.query.certId.trim() : "";
+    if (partnerIdParam && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(partnerIdParam)) {
+      return res.status(400).json({ error: "partnerId must be a Partner UUID" });
+    }
+    if (certIdParam && (!/^\d+$/.test(certIdParam) || !Number.isSafeInteger(Number(certIdParam)) || Number(certIdParam) < 1)) {
+      return res.status(400).json({ error: "certId must be a positive numeric certificate id" });
+    }
 
-    if (statusParam) {
+    if (statusParam || partnerIdParam || certIdParam) {
       try {
         const VALID = ["needs_grading", "assigned", "pending_review", "rejected", "all"];
-        const f = VALID.includes(statusParam) ? statusParam : "needs_grading";
+        const f = statusParam && VALID.includes(statusParam) ? statusParam : "all";
         const CAP = 200;
         // Gradeable = BOTH a front and a back source present (display or original).
         const hasImages = sql`((cert.front_image_path IS NOT NULL OR cert.grading_front_original IS NOT NULL) AND (cert.back_image_path IS NOT NULL OR cert.grading_back_original IS NOT NULL))`;
         // Server-side filter per view. Literals are constants (not user input);
         // the only external value (statusParam) is whitelisted above.
+        const partnerScope = partnerIdParam ? sql`cert.origin_partner_id = ${partnerIdParam}` : sql`TRUE`;
+        // A certId-scoped request is still this guarded, bounded queue read. It guarantees a
+        // deterministic Staff deep-link even when the normal 200-row operational view is full.
+        const certScope = certIdParam ? sql`cert.id = ${Number(certIdParam)}` : sql`TRUE`;
         const where =
           f === "needs_grading"
-            ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'unassigned' AND ${hasImages}`
+            ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'unassigned' AND ${hasImages} AND ${partnerScope} AND ${certScope}`
             : f === "assigned"
-              ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'assigned'`
+              ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'assigned' AND ${partnerScope} AND ${certScope}`
               : f === "pending_review"
-                ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'pending_review'`
+                ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'pending_review' AND ${partnerScope} AND ${certScope}`
                 : f === "rejected"
-                  ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'assigned' AND cert.redo_count > 0`
-                  : sql`cert.deleted_at IS NULL AND cert.grader_status IN ('unassigned','assigned','pending_review')`;
+                  ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'assigned' AND cert.redo_count > 0 AND ${partnerScope} AND ${certScope}`
+                  : sql`cert.deleted_at IS NULL AND cert.grader_status IN ('unassigned','assigned','pending_review') AND ${partnerScope} AND ${certScope}`;
         const rows = await db.execute(sql`
           SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.card_name, cert.set_name,
                  cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
                  cert.grader_status, cert.assigned_grader_id, cert.redo_count, cert.rejection_reason,
                  u.email AS grader_email, s.tracking_number AS submission_ref, s.service_tier, s.id AS submission_id,
+                 cert.origin_partner_id AS partner_id, partner.legal_name AS partner_name,
                  ${hasImages} AS has_images
           FROM certificates cert
           LEFT JOIN cards c ON cert.card_id = c.id
           LEFT JOIN submissions s ON s.id = c.submission_id
           LEFT JOIN users u ON u.id = cert.assigned_grader_id
+          LEFT JOIN partner_organisations partner ON partner.id = cert.origin_partner_id
           WHERE ${where}
           ORDER BY cert.id ASC
           LIMIT ${CAP}
@@ -8725,6 +8739,8 @@ Defects (admin-confirmed): ${defectLines}`;
           hasImages: !!r.has_images,
           submissionRef: r.submission_ref ?? null,
           submissionId: r.submission_id != null ? Number(r.submission_id) : null,
+          partnerId: r.partner_id ?? null,
+          partnerName: r.partner_name ?? null,
         }));
         return res.json({ queue, status: f, cap: CAP, total, capped: total > CAP });
       } catch (err: any) {

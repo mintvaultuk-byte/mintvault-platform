@@ -301,7 +301,7 @@ export default function PartnerManagementPage() {
       setBanner("Partner created.");
       closeCreate();
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
-      if (d?.result?.partnerId) navigate(`/admin/partner-network/partners/${d.result.partnerId}`);
+      if (d?.result?.partnerId) navigate(`/admin/partners/${d.result.partnerId}`);
     },
     onError: (err: unknown) => {
       setCreateState("error");

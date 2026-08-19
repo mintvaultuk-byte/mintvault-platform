@@ -35,7 +35,8 @@ import {
   isDirty,
   displayValue,
   computeChecklist,
-  checklistPercent,
+  checklistProgress,
+  googleMapsSearchUrl,
   profileHasDetail,
   invitationActions,
   submitAllowed,
@@ -46,6 +47,7 @@ import {
   type SubmitState,
   type FieldErrors,
 } from "./partner-management-helpers";
+import { ReadinessPanel } from "@/components/partner/readiness-panel";
 
 const BASE = "/api/super-admin/partner-management";
 const TABS = [
@@ -145,8 +147,9 @@ interface OnboardingUser {
 
 export default function PartnerManagementDetailPage() {
   const [, navigate] = useLocation();
-  const [, params] = useRoute("/admin/partner-network/partners/:partnerId");
-  const partnerId = params?.partnerId ?? "";
+  const [, canonicalParams] = useRoute("/admin/partners/:partnerId");
+  const [, legacyParams] = useRoute("/admin/partner-network/partners/:partnerId");
+  const partnerId = canonicalParams?.partnerId ?? legacyParams?.partnerId ?? "";
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [tab, setTab] = useState<TabKey>("overview");
   const [banner, setBanner] = useState<string | null>(null);
@@ -214,7 +217,7 @@ export default function PartnerManagementDetailPage() {
     };
   }, []);
   useEffect(() => {
-    if (authed === false) navigate(`/admin/login?next=/admin/partner-network/partners/${partnerId}`, { replace: true });
+    if (authed === false) navigate(`/admin/login?next=/admin/partners/${partnerId}`, { replace: true });
   }, [authed, navigate, partnerId]);
 
   const on = authed === true && !!partnerId;
@@ -679,39 +682,16 @@ export default function PartnerManagementDetailPage() {
               <div>Accreditation: {org.accreditation_level}</div>
               <div>Health: {org.health}</div>
               <div>Created: {new Date(org.created_at).toLocaleString()}</div>
+              <ReadinessPanel readiness={onboarding.data?.operational} audience="SUPER_ADMIN" />
               <div style={{ marginTop: 12 }} data-testid="pm-setup-checklist">
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <div style={{ fontWeight: 600 }}>Setup checklist</div>
-                  <span data-testid="pm-checklist-percent" style={{ fontSize: 12, opacity: 0.85 }}>
-                    {checklistPercent(checklist)}% complete
+                  <div style={{ fontWeight: 600 }}>Administrative setup</div>
+                  <span data-testid="pm-checklist-progress" style={{ fontSize: 12, opacity: 0.85 }}>
+                    {checklistProgress(checklist).done} of {checklistProgress(checklist).total} details recorded
                   </span>
                 </div>
-                {/*
-                  Progress is exposed via role="progressbar" + aria-valuenow, not colour alone, so a
-                  screen-reader user gets the same number a sighted user sees.
-                */}
-                <div
-                  role="progressbar"
-                  aria-valuenow={checklistPercent(checklist)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Partner setup completion"
-                  data-testid="pm-checklist-bar"
-                  style={{
-                    height: 6,
-                    borderRadius: 999,
-                    background: "var(--admin-bg, #0d0d0d)",
-                    overflow: "hidden",
-                    marginBottom: 8,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${checklistPercent(checklist)}%`,
-                      height: "100%",
-                      background: "var(--admin-gold, #D4AF37)",
-                    }}
-                  />
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
+                  Record-keeping only. These do not affect whether the shop can grade.
                 </div>
                 {checklist.map((item) => (
                   <ChecklistItem key={item.key} state={item.state} label={item.label} hint={item.hint} />
@@ -871,7 +851,20 @@ export default function PartnerManagementDetailPage() {
                       <tr key={l.id} data-testid={`pm-location-${l.id}`}>
                         <td>{l.name}</td>
                         <td>{l.publicRef}</td>
-                        <td>{l.address ?? "—"}</td>
+                        <td>
+                          {l.address ?? "—"}
+                          {googleMapsSearchUrl(l.address) && (
+                            <a
+                              href={googleMapsSearchUrl(l.address) ?? undefined}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${l.name} address in Google Maps`}
+                              className="ml-2 text-xs underline"
+                            >
+                              Open in Google Maps
+                            </a>
+                          )}
+                        </td>
                         <td>
                           <Badge variant={statusBadgeVariant(l.status)} testId={`pm-location-status-${l.id}`}>
                             {l.status}
