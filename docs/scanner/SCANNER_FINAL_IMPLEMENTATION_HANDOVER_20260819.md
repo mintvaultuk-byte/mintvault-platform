@@ -138,6 +138,10 @@ Read-only staging wallet aggregation found four wallets: one currently has zero 
 three have positive availability, and the total available balance is 601. This establishes a
 staging zero-credit state without identifying or modifying a partner. It does not prove the running
 Scanner window's user-facing modal because the available browser has no authorised station session.
+The anonymous zero row is ledger/reserved/available **0 / 0 / 0**. Across staging there are 18
+active reservations (18 credits) and three consumed reservations (three credits); Card Jobs are one
+`CAPTURING`, 12 `NEEDS_SCAN`, one `QA_REVIEW`, and five `READY_TO_GRADE`. These are read-only
+environment aggregates, not a claim about a particular Scanner operator.
 
 ## Known blocking conditions at takeover
 

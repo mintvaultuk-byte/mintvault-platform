@@ -47,6 +47,9 @@ has been applied; production remains untouched.
 - Read-only staging wallet aggregate: 4 wallets, 1 at zero availability, 3 positive, aggregate
   availability 601. This proves a zero-credit staging state but not the running Scanner modal,
   because no authorised station session is available in this browser.
+- The anonymous zero row is ledger/reserved/available 0/0/0. Staging has 18 active reservations
+  (18 credits), 3 consumed reservations (3 credits), and Card Jobs: 1 `CAPTURING`, 12
+  `NEEDS_SCAN`, 1 `QA_REVIEW`, 5 `READY_TO_GRADE`; all are read-only aggregates.
 - Full-suite baseline provenance: `partner-management-ux` fails because `HEAD f024f938` already
   contains `partner_card_job_voided` without a matching audit-constraint migration. This package
   did not create that condition; it is a separately scoped follow-up, not a reason to weaken tests.
