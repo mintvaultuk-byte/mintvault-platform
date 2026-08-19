@@ -588,11 +588,11 @@ export default function PartnerManagementPage() {
                   {walletBackfillMutation.isPending ? "Provisioning…" : "Provision Missing Partner Wallets"}
                 </AdminButton>
                 <Link
-                  href="/admin/partners/dashboard"
+                  href="/admin/partners/directory"
                   className={adminButtonClass({ variant: "ghost", size: "sm" })}
                   data-testid="pm-wallet-dashboard-link"
                 >
-                  Open Wallet & Ledger
+                  Open Partner Credits
                 </Link>
               </div>
               {walletBackfillMutation.isError && (
