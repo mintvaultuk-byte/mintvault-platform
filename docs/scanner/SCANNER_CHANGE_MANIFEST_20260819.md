@@ -71,8 +71,8 @@
 - `0094_scanner_capture_physical_release.sql` has been applied to staging only through scoped
   migration mode; post-apply index/data checks were clean.
 - The SFAP-015 successor has been deployed to `mintvault-v2`; Fly health checks and `/health` passed.
-- Commit `87366650` has been deployed to `mintvault-v2` as Fly version 508; `/api/version` reports
-  `87366650`; `/health` passed.
+- Final commit `c3e1c295` has been deployed to `mintvault-v2` as Fly version 509; `/api/version`
+  reports `c3e1c295`; `/health` passed.
 - `0096_partner_card_job_void_management_audit.sql` has been applied to staging only through scoped
   migration mode; journal 84→85, checksum `c927209413365215222a7b1093d9a647fb3855fec0bfb416a3d80b861d7ccf46`.
 - Production was not targeted by this scanner pass. Read-only reconciliation observed a separate

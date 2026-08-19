@@ -6,11 +6,11 @@
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Repository                            | `/Users/cornelius/mintvault-platform`                                                                             |
 | Branch                                | `fix/canonical-card-detector-20260817`                                                                            |
-| Release candidate                     | `873666508d6d413eb35bceb4b1e680c435ef4b31`                                                                        |
+| Release candidate                     | `c3e1c2956d1717f5cdccb3b118603f781fe98885`                                                                        |
 | `origin/main`                         | `5a45ff9eba28de287306c5efe2634f9dbd9860f6`                                                                        |
-| Staging `/api/version`                | `87366650` at 2026-08-19T09:49:25Z                                                                                |
+| Staging `/api/version`                | `c3e1c295` at 2026-08-19T09:54:25Z                                                                                |
 | Production `/api/version` (read-only) | `e689389b` at 2026-08-19T09:49:33Z; external/current production state, not this scanner pass.                     |
-| Staging Fly latest release            | version 508, both `lhr` machines healthy                                                                          |
+| Staging Fly latest release            | version 509, both `lhr` machines healthy                                                                          |
 | Production Fly latest release         | version 1101, read-only observed; not deployed by this pass                                                       |
 | Scanner runtime                       | Production-shaped unsigned local `.app` built and verified; physical launch/signing/notary not proved.            |
 | Production                            | Untouched by this pass; read-only DB check found no scanner `0094`/`0096` rows and no `physical_released` column. |
@@ -355,7 +355,7 @@ the scanner.
   auditable instead of failing at its audit envelope. The destructive-SQL linter/runner approval is
   exact-file/exact-constraint only; generic `DROP CONSTRAINT` remains blocked.
 
-### Local proof after commit `87366650`
+### Local proof after implementation commit `87366650`
 
 - `npx vitest run tests/scanner-physical-release-migration.test.ts tests/db-migration-safety.test.ts
 tests/partner-core-release-blockers.test.ts tests/partner-management-ux.test.ts
@@ -383,6 +383,8 @@ tests/print-workflow-routes.test.ts` — **144 passed, 65 skipped**.
   Manifest bridge SHA-256:
   `54f31967ef76119e5bbeeca54c1b099737ccbb28a7b15e4aec7330af4f0d2f2d`;
   tracked tree clean: `true`; runtime requirements for Node/npm/Git/Xcode/clang: all `false`.
+  After the documentation commit, the package was rebuilt and re-verified with manifest source
+  commit `c3e1c2956d1717f5cdccb3b118603f781fe98885` and the same bridge SHA-256.
 - `npm run simulate:control-plane -- --workflows=5000 --burst=20000 --zero-credit-attempts=1000
 --seed=50819` — **PASS**, 5,000/5,000 workflows, 20,000/20,000 burst events, 81,405 events
   processed, 10,000 evidence rows, 5,000 reservations, 1,000 zero-credit attempts rejected.
@@ -403,12 +405,14 @@ tests/print-workflow-routes.test.ts` — **144 passed, 65 skipped**.
 ### Staging proof
 
 - Staging deployment used `scripts/safe-deploy.sh staging --allow-behind --yes`. The live-ancestry
-  guard proved candidate `87366650` contains the prior staging live commit
+  guard first proved candidate `87366650` contained the prior staging live commit
   `8e7ab8f3338e1ff3bc4aeb1988585e72a8ec7fec`; rollback image
   `registry.fly.io/mintvault-v2:deployment-01M0CMTGHC8DTAADE4R94CSDBP` was recorded before rollout.
-- Fly deployed image `registry.fly.io/mintvault-v2:deployment-01M0CPEN2QCNS8V48R5D4CP7RS`.
-  Staging Fly version **508** is healthy on both `lhr` machines. `/api/version` reports
-  `87366650`; `/health` reports `ok`.
+  After the docs commit, the same deploy guard proved final candidate `c3e1c295` contained live
+  `87366650`.
+- Fly deployed final image `registry.fly.io/mintvault-v2:deployment-01M0CQ0DZAT6QE3S1WSXWRSNTE`.
+  Staging Fly version **509** is healthy on both `lhr` machines. `/api/version` reports
+  `c3e1c295`; `/health` reports `ok`.
 - Staging scoped migration dry-run for `0096_partner_card_job_void_management_audit.sql` reported
   checksum `c927209413365215222a7b1093d9a647fb3855fec0bfb416a3d80b861d7ccf46` and journal entries
   `84`.
