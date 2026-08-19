@@ -21,6 +21,7 @@ const PUBLIC_ROUTES = fs.readFileSync("server/routes/public.ts", "utf8");
 const EMAIL = fs.readFileSync("server/email.ts", "utf8");
 const MIGRATION = fs.readFileSync("migrations/0095_growth_partner_applications.sql", "utf8");
 const PRIVACY_NOTICE = fs.readFileSync("content/legal/privacy-policy.md", "utf8");
+const DOCKERFILE = fs.readFileSync("Dockerfile", "utf8");
 
 const validApplication: PartnerApplicationInput = {
   businessName: "North Kent Cards",
@@ -85,6 +86,7 @@ describe("GB-03 public Partner acquisition contract", () => {
     expect(PRIVACY_NOTICE).toContain("We do **not** add Partner applicants to a marketing list");
     expect(PRIVACY_NOTICE).toContain("withdrawal excludes the card from future reel selection");
     expect(PRIVACY_NOTICE).not.toMatch(/draft|pending solicitor|\[[A-Z _]+\]/i);
+    expect(DOCKERFILE).toContain("COPY --from=builder /app/content/legal ./content/legal");
   });
 
   it("validates the short application server-side and rejects malformed or unapproved input", () => {

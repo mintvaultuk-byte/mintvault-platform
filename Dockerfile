@@ -48,10 +48,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy compiled node_modules (includes native canvas binary), built app, brand assets,
-# and the numbered migration inventory needed by the one-off runner.
+# runtime legal content, and the numbered migration inventory needed by the one-off runner.
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/content/legal ./content/legal
 COPY --from=builder /app/migrations/[0-9][0-9][0-9][0-9]*_*.sql ./migrations/
 # Lineage exclusion declarations — the runner consults these at the identity guard; without
 # them a staging-lineage host fails closed on the three declared collisions.
