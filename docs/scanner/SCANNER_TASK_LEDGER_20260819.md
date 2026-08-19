@@ -69,6 +69,32 @@ five canonical TEST Stripe Price IDs, `stripe_currency='gbp'`, pack prices/VAT t
 is supplied and a human completes a Stripe TEST Checkout, staging correctly remains fail-closed and
 grants no purchase credits.
 
+## Final credit purchase / zero-credit / Stripe staging execution — 2026-08-19
+
+| Task                                              | Result                | Evidence                                                                                                                                                                                                                                                      |
+| ------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lock commercial pricing                           | PASS source/staging   | Commit `e6b82b2d13e81d75792a858b19bc26ea4a1d7e9c` encodes £10/credit, GBP, VAT-included display, and canonical packs £50/£100/£250/£500/£1,000.                                                                                                               |
+| Prevent noncanonical pack fallback                | PASS source/test      | Unknown active DB pack rows are filtered and cannot grant; `partner-credit-purchase` coverage includes noncanonical active pack rejection.                                                                                                                    |
+| Validate Stripe amount/tax behaviour              | PASS source/test      | Checkout/webhook reject wrong amount and `tax_behavior='exclusive'` in addition to wrong Price/currency/environment/paid-state/provenance checks.                                                                                                             |
+| Preserve redirect no-grant and exactly-once grant | PASS source/test/sim  | Verified webhook + Stripe API re-read + local Checkout intent + append-only ledger are the only grant path; duplicate/replayed events and same-session replays grant exactly once.                                                                            |
+| Scanner zero-credit modal and server lock         | PASS source/test      | Server `INSUFFICIENT_CREDITS` forces local zero-lock; modal uses server `displayPrice`/`vatIncluded`; `NEW CARD` stays disabled until authoritative wallet refresh.                                                                                           |
+| Least-privilege Scanner credit visibility         | PASS staged           | `0098_scanner_operator_credit_view.sql` grants only `SCANNER_OPERATOR                                                                                                                                                                                         | partner.credits.view`; staging post-check found exactly one grant and no purchase/admin widening. |
+| Technician purchase bypass                        | PASS source/test      | `MVGS_ASSESSMENT_TECHNICIAN` is hard-blocked from credit purchase even if `partner.credits.purchase` is present.                                                                                                                                              |
+| Local focused and wider gates                     | PASS                  | Typecheck passed; 6-file post-commit smoke 91/91; scanner node payment/active-card 42/42; wider payment/server authority 244/244; full Scanner app 177/177; build passed; SQL lint passed; 5 DB-required files passed 62/62 against disposable PostgreSQL 17. |
+| Payment/control-plane load                        | PASS simulated        | Server payment sims and scanner payment sims passed 5k, 10k and 20k workflow runs with 20k hostile/replay bursts; scanner sims also included 1,000 pure zero-credit attempts.                                                                                 |
+| Full root DB-env run                              | NOT A RELEASE PASS    | Running full `npm test` with the disposable DB opened unrelated Vault Quest integration suites without VQ schema bootstrap; 25 unrelated VQ files failed from missing VQ tables. Do not call full-repo DB integration green from this pass.                   |
+| Staging deploy                                    | PASS                  | `mintvault-v2` Fly release 513 deployed `e6b82b2d`; release 514 set `STRIPE_ENV=test`; `/api/version` reports `e6b82b2d`; `/health` ok; both `lhr` machines healthy.                                                                                          |
+| Staging migrations                                | PASS                  | Scoped apply: `0097` checksum `c1039b6f…` journal 85→86; `0098` checksum `55e27da…` journal 86→87; staging journal count 87 and checkout table exists.                                                                                                        |
+| Staging pack DB                                   | FAIL-CLOSED           | Active rows remain exactly `PACK_5/10/25/50/100`, but all have `stripe_price_id=NULL` and `stripe_currency=NULL`; packs are visible but not purchasable.                                                                                                      |
+| Staging Stripe TEST key                           | BLOCKED EXTERNAL      | Stripe API returned 401 `api_key_expired` for the TEST key; no raw secret recorded. Cannot create/reuse TEST prices, configure pack Price IDs, or run real TEST Checkout/webhook.                                                                             |
+| Production reconciliation                         | READ-ONLY / HARD STOP | Production `/api/version` = `8359e902`, Fly v1104 healthy, `STRIPE_ENV` unset with LIVE-shaped keys, migration count 41, no partner credit pack/checkout schema. No production mutation.                                                                      |
+
+### Next owner-controlled payment action
+
+Replace/rotate the staging Stripe **TEST** secret key with a valid TEST key. After that, the next
+owner-independent pass can reconcile or create the five canonical TEST Prices, update staging
+`partner_credit_packs`, and run the real TEST Checkout/webhook proof before any production action.
+
 ## Physical Canon acceptance-only checklist
 
 1. Launch packaged staging Scanner.

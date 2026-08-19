@@ -2,18 +2,18 @@
 
 ## Execution baseline
 
-| Field                                 | Verified value                                                                                                    |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Repository                            | `/Users/cornelius/mintvault-platform`                                                                             |
-| Branch                                | `fix/canonical-card-detector-20260817`                                                                            |
-| Release candidate                     | `c3e1c2956d1717f5cdccb3b118603f781fe98885`                                                                        |
-| `origin/main`                         | `5a45ff9eba28de287306c5efe2634f9dbd9860f6`                                                                        |
-| Staging `/api/version`                | `c3e1c295` at 2026-08-19T09:54:25Z                                                                                |
-| Production `/api/version` (read-only) | `e689389b` at 2026-08-19T09:49:33Z; external/current production state, not this scanner pass.                     |
-| Staging Fly latest release            | version 509, both `lhr` machines healthy                                                                          |
-| Production Fly latest release         | version 1101, read-only observed; not deployed by this pass                                                       |
-| Scanner runtime                       | Production-shaped unsigned local `.app` built and verified; physical launch/signing/notary not proved.            |
-| Production                            | Untouched by this pass; read-only DB check found no scanner `0094`/`0096` rows and no `physical_released` column. |
+| Field                                 | Verified value                                                                                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository                            | `/Users/cornelius/mintvault-platform`                                                                                                    |
+| Branch                                | `fix/canonical-card-detector-20260817`                                                                                                   |
+| Release candidate                     | Payment/staging code: `e6b82b2d13e81d75792a858b19bc26ea4a1d7e9c`                                                                         |
+| `origin/main`                         | `5a45ff9eba28de287306c5efe2634f9dbd9860f6`                                                                                               |
+| Staging `/api/version`                | `e6b82b2d` at 2026-08-19T11:32:52Z                                                                                                       |
+| Production `/api/version` (read-only) | `8359e902` at 2026-08-19T11:33:33Z; external/current production state, not this scanner pass.                                            |
+| Staging Fly latest release            | version 514, both `lhr` machines healthy                                                                                                 |
+| Production Fly latest release         | version 1104, read-only observed; not deployed by this pass                                                                              |
+| Scanner runtime                       | Production-shaped unsigned local `.app` built and verified; physical launch/signing/notary not proved.                                   |
+| Production                            | Untouched by this credit pass; read-only DB check found no partner-credit pack/checkout schema and no `0093`/`0097`/`0098` journal rows. |
 
 ## Authority and scope
 
@@ -525,3 +525,114 @@ Owner must provide/approve the staging commercial Stripe TEST configuration:
 4. complete one human Stripe TEST Checkout on staging.
 
 Until that happens, the correct state is **no purchasable packs and no purchase credit grants**.
+
+## Final credit purchase / zero-credit / Stripe staging pass — 2026-08-19
+
+This addendum supersedes the earlier payment notes above where runtime facts differ. It records the
+owner's locked commercial decision and the staging work completed from commit
+`e6b82b2d13e81d75792a858b19bc26ea4a1d7e9c`.
+
+### Locked commercial configuration
+
+- **£10 per Partner Grading Credit**
+- **GBP**
+- **VAT included** in the displayed/charged price; this pass does not add VAT on top.
+- `PACK_5` = 5 credits = **£50** total, VAT included.
+- `PACK_10` = 10 credits = **£100** total, VAT included.
+- `PACK_25` = 25 credits = **£250** total, VAT included.
+- `PACK_50` = 50 credits = **£500** total, VAT included.
+- `PACK_100` = 100 credits = **£1,000** total, VAT included.
+
+### Source repairs completed
+
+- Canonical pack pricing is now hard-coded as pence values plus `gbp` and VAT-included
+  presentation. Unknown active DB pack rows are ignored instead of falling back to `credits * £10`.
+- Checkout and verified webhook fulfilment now reject wrong Stripe Price ID, wrong currency, wrong
+  amount, Stripe `tax_behavior='exclusive'`, wrong TEST/LIVE mode, unpaid sessions, missing local
+  Checkout provenance, disabled/unknown packs, and duplicate/replayed events before any
+  append-only credit grant.
+- Scanner zero-credit UI uses server `displayPrice` / `vatIncluded`; server
+  `INSUFFICIENT_CREDITS` is an authoritative zero-lock signal even if a wallet refresh is delayed.
+- `SCANNER_OPERATOR` receives exactly one new additive permission,
+  `partner.credits.view`, through `0098_scanner_operator_credit_view.sql`; it still receives no
+  purchase, user, station-enrolment, card-fix, or admin permissions.
+- `MVGS_ASSESSMENT_TECHNICIAN` is hard-blocked from credit purchase even if a purchase permission
+  is mis-granted.
+
+### Local proof
+
+- `npm run check` — passed.
+- Post-commit focused smoke: 6 Vitest files, **91 passed / 0 failed**; scanner active-card/payment
+  node tests, **42 passed / 0 failed**.
+- Wider payment/server authority slice before commit: 14 Vitest files, **244 passed / 0 failed**.
+- Full Scanner app suite: **177 passed / 0 failed**.
+- `npm run build` — passed with the existing PostCSS `from` warning.
+- Destructive-SQL lint for `0097_partner_credit_checkout_sessions.sql` and
+  `0098_scanner_operator_credit_view.sql` — passed.
+- DB-required root files rerun against disposable local PostgreSQL 17 at
+  `127.0.0.1:55432/mintvault_vq_phase10_local`: 5 files, **62 passed / 0 failed**.
+- Payment/control-plane simulations passed at 5,000, 10,000 and 20,000 workflows, each with 20,000
+  hostile/replay burst events.
+- Scanner payment simulations passed at 5,000, 10,000 and 20,000 workflows, each with 20,000
+  hostile/replay burst events and 1,000 pure zero-credit attempts.
+- `git diff --check` — passed.
+
+Repository-wide `npm test` under the local DB environment is **not** claimed as green: enabling
+`TEST_DATABASE_URL` opened unrelated Vault Quest integration suites whose tables
+(`vq_generation_requests`, `vq_feature_flags`, `vq_artwork_revisions`, etc.) were not bootstrapped
+in that disposable database. That run reported 298 files passed, 29 skipped and 25 unrelated VQ
+files failed from missing VQ schema. No payment/scanner/RBAC regression remained in the focused
+release matrix.
+
+### Staging changes completed
+
+Staging was changed; production was not.
+
+- Deployed commit `e6b82b2d` to `mintvault-v2` from a detached clean worktree, excluding unrelated
+  dirty partner-management/location files in the shared checkout.
+- Fly staging release **513** deployed image
+  `registry.fly.io/mintvault-v2:deployment-01M0CWH725PNN74ZYGXYKPP46Q`.
+- Fly staging release **514** set `STRIPE_ENV=test` on the same image.
+- `https://mintvault-v2.fly.dev/api/version` reports `e6b82b2d`; `/health` reports `ok`.
+- Both staging machines are started in `lhr` on version 514 with 1/1 health check passing.
+- Scoped migration dry-run and apply:
+  - `0097_partner_credit_checkout_sessions.sql`, checksum
+    `c1039b6fbe3bf9d58ba52f3dc9a34cc2d294fe620918cf881a700561ba87644a`, journal **85 → 86**.
+  - `0098_scanner_operator_credit_view.sql`, checksum
+    `55e27da14c2343a7eae3a73f39836e5bcd20676122f71b4166a7f2721258d313`, journal **86 → 87**.
+
+Post-checks:
+
+- Staging environment: `STRIPE_ENV=test`; Stripe secret/publishable keys are TEST-shaped; webhook
+  secret present; database present.
+- Staging migration journal count: **87**; relevant rows present: `0093`, `0094`, `0096`, `0097`,
+  `0098`.
+- `partner_credit_checkout_sessions` table exists.
+- `stripe_webhook_events` table exists.
+- `SCANNER_OPERATOR|partner.credits.view` exists exactly once.
+- Wallet aggregate: 4 wallets, 1 zero-available wallet, ledger 619, reserved 18, available 601.
+- Active pack rows remain exactly `PACK_5`, `PACK_10`, `PACK_25`, `PACK_50`, `PACK_100`, but all
+  still have no `stripe_price_id` and no `stripe_currency`; they are visible but not purchasable.
+
+### Staging blocker
+
+The staging Stripe TEST secret is externally unusable: Stripe returned HTTP **401**
+`api_key_expired` when asked to list TEST prices. No raw secret was recorded. Because that key is
+expired, this pass could not safely search/reuse/create TEST Stripe Products/Prices, could not
+write canonical TEST Price IDs into `partner_credit_packs`, and could not run a real TEST Checkout
+or webhook grant. Staging therefore remains intentionally **fail-closed** rather than buyable.
+
+### Production status
+
+Production remained read-only and untouched:
+
+- `https://mintvault.fly.dev/api/version` reports `8359e902`; `/health` reports `ok`.
+- Fly production version **1104** is healthy on both `lhr` machines.
+- Production environment: `STRIPE_ENV` unset; Stripe keys are LIVE-shaped; webhook secret present.
+- Production migration journal count: **41**; no `0093`, `0094`, `0096`, `0097`, or `0098` journal
+  rows.
+- Production has no `partner_credit_packs` table and no `partner_credit_checkout_sessions` table.
+
+Production release is hard-stopped until staging has valid TEST Stripe credentials, canonical TEST
+prices configured, real TEST Checkout/webhook proof, and the owner completes the requested staging
+test purchase through the normal product UI.

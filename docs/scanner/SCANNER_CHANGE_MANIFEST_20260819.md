@@ -30,11 +30,14 @@
 - `scripts/payment-control-plane-load-sim.mjs`
 - `package.json`
 - `server/partner/credit-purchase-service.ts`
+- `server/partner/permissions.ts`
 - `server/partner/routes.ts`
 - `client/src/lib/partner-api.ts`
 - `client/src/pages/partner/billing.tsx`
 - `migrations/0097_partner_credit_checkout_sessions.sql`
 - `migrations/rollback-0097-partner-credit-checkout-sessions.sql`
+- `migrations/0098_scanner_operator_credit_view.sql`
+- `migrations/rollback-0098-scanner-operator-credit-view.sql`
 
 ## Included tests
 
@@ -57,6 +60,8 @@
 - `tests/partner-credit-purchase.test.ts`
 - `tests/partner-credit-presentation.test.ts`
 - `tests/partner-at21-grant-boundary.test.ts`
+- `tests/partner-rbac-parity.test.ts`
+- `tests/partner-scanner-operator-role.test.ts`
 - Fixture updates in partner Card Job/output/reconciliation/pilot helper tests for `physical_released`.
 
 ## Behavioural changes
@@ -93,6 +98,16 @@
     zero-credit lock/unlock, browser redirect no-grant, wrong Price/currency/environment, incomplete
     payment, unverified Checkout, missing intent, wrong tenant, duplicate event and retryable
     transaction failure.
+17. The owner-locked commercial model is now explicit in source: £10/credit, GBP, VAT included,
+    and packs 5/10/25/50/100 at £50/£100/£250/£500/£1,000.
+18. Noncanonical active pack rows are not silently priced; they are ignored/refused rather than used
+    as a fallback authority.
+19. Checkout and webhook fulfilment validate Stripe amount and reject `tax_behavior='exclusive'` so
+    a misconfigured Price cannot double-charge VAT.
+20. `SCANNER_OPERATOR` can read credit/packs through additive `partner.credits.view` only; purchase
+    and admin rights remain absent.
+21. `MVGS_ASSESSMENT_TECHNICIAN` is explicitly refused credit purchase even if a purchase permission
+    is accidentally present.
 
 ## Staging status
 
@@ -103,10 +118,16 @@
   reports `c3e1c295`; `/health` passed.
 - `0096_partner_card_job_void_management_audit.sql` has been applied to staging only through scoped
   migration mode; journal 84→85, checksum `c927209413365215222a7b1093d9a647fb3855fec0bfb416a3d80b861d7ccf46`.
-- `0097_partner_credit_checkout_sessions.sql` is the additive staging-only payment provenance
-  migration for this pass. It is ready for scoped staging apply with no production mutation.
-- Current staging payment config remains fail-closed: TEST-shaped Stripe keys are present, but
-  `STRIPE_ENV` is undeclared and the five credit packs have no canonical TEST Price IDs/currency.
+- Commit `e6b82b2d` was deployed to `mintvault-v2` from a detached clean worktree; `/api/version`
+  reports `e6b82b2d`; `/health` passed.
+- Staging Fly version 514 is healthy on both `lhr` machines after setting `STRIPE_ENV=test`.
+- `0097_partner_credit_checkout_sessions.sql` was applied in scoped convergence mode; checksum
+  `c1039b6fbe3bf9d58ba52f3dc9a34cc2d294fe620918cf881a700561ba87644a`; journal 85→86.
+- `0098_scanner_operator_credit_view.sql` was applied in scoped convergence mode; checksum
+  `55e27da14c2343a7eae3a73f39836e5bcd20676122f71b4166a7f2721258d313`; journal 86→87.
+- Current staging payment config remains fail-closed: `STRIPE_ENV=test` is declared and TEST-shaped
+  Stripe keys are present, but the TEST secret returns `api_key_expired`, so the five credit packs
+  still have no canonical TEST Price IDs/currency and no real TEST Checkout/webhook proof exists.
 - Production was not targeted by this scanner pass. Read-only reconciliation observed a separate
   production release; production has no scanner `0094` or `0096` journal row and no
   `scanner_capture_sessions.physical_released` column.
