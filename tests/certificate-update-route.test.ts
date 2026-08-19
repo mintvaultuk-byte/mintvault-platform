@@ -271,7 +271,13 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  await new Promise((r) => server?.close(() => r(null)));
+  if (server) {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeIdleConnections?.();
+      server.closeAllConnections?.();
+    });
+  }
   await pool?.end().catch(() => {});
   await cluster?.stop().catch(() => {});
 }, 180_000);

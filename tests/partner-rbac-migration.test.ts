@@ -119,6 +119,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
    *   0073 — adds partner.cards.preview
    *   0083 — adds partner.credits.purchase (P5 Grading Credit packs)
    *   0085 — adds the SCANNER_OPERATOR role plus partner.stations.enrol / partner.cards.fix (AG-2)
+   *   0092 — adds partner.stations.calibrate
    *
    * ORDER IS LOAD-BEARING. 0083's permission seed is guarded by
    * `IF to_regclass('public.partner_permissions') IS NOT NULL`, so applying it BEFORE 0034 would
@@ -132,7 +133,8 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
         f.filename === "0034_partner_rbac_seed.sql" ||
         f.filename === "0073_lineage_convergence.sql" ||
         f.filename === "0083_partner_credit_packs.sql" ||
-        f.filename === "0085_partner_scanner_operator_role.sql"
+        f.filename === "0085_partner_scanner_operator_role.sql" ||
+        f.filename === "0092_partner_station_calibrate_permission.sql"
     );
     expect(
       files.map((f) => f.filename),
@@ -142,6 +144,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
       "0073_lineage_convergence.sql",
       "0083_partner_credit_packs.sql",
       "0085_partner_scanner_operator_role.sql",
+      "0092_partner_station_calibrate_permission.sql",
     ]);
     return applyMigrations(admin as never, files);
   };
@@ -283,6 +286,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
       "0073_lineage_convergence.sql",
       "0083_partner_credit_packs.sql",
       "0085_partner_scanner_operator_role.sql",
+      "0092_partner_station_calibrate_permission.sql",
     ]);
     const afterFirst = await counts();
 

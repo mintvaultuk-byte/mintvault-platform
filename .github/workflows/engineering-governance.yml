@@ -47,7 +47,7 @@ jobs:
           node-version: "24"
       - name: Install Node dependencies
         if: ${{ hashFiles('package-lock.json') != '' }}
-        run: npm ci --ignore-scripts
+        run: npm ci
       - name: Install PostgreSQL client
         run: |
           if ! command -v psql >/dev/null 2>&1; then
