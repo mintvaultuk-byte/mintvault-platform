@@ -27,6 +27,14 @@ describe("Partner Network P10 parity and retirement contract", () => {
     }
   });
 
+  it("does not send a canonical control through a legacy Partner Network URL", () => {
+    expect(management).toContain('href="/admin/partners/directory"');
+    expect(management).toContain("Open Partner Credits");
+    expect(management).not.toContain('href="/admin/partners/dashboard"');
+    expect(detail).toContain('navigate("/admin/partners/infrastructure")');
+    expect(detail).toContain('isLegacyPath ? "/admin/partner-network/partners" : "/admin/partners/directory"');
+  });
+
   it("records every required legacy surface and its authority outcome", () => {
     for (const surface of [
       "Partner Master Dashboard",

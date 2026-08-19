@@ -727,7 +727,12 @@ export default function PartnerManagementDetailPage() {
           </div>
         )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
-          <AdminButton size="sm" variant="ghost" onClick={() => navigate("/admin/partners")} data-testid="pm-back">
+          <AdminButton
+            size="sm"
+            variant="ghost"
+            onClick={() => navigate(isLegacyPath ? "/admin/partner-network/partners" : "/admin/partners/directory")}
+            data-testid="pm-back"
+          >
             ← Partners
           </AdminButton>
           <Badge variant={statusBadgeVariant(org.status)} testId="pm-detail-status">
@@ -1326,7 +1331,7 @@ export default function PartnerManagementDetailPage() {
                 <AdminButton
                   size="sm"
                   variant="ghost"
-                  onClick={() => navigate("/admin/partner-network")}
+                  onClick={() => navigate("/admin/partners/infrastructure")}
                   data-testid="pm-connector-ops-link"
                 >
                   Open Connector Operations
