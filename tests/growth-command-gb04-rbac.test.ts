@@ -20,8 +20,10 @@ function app(): Express {
   instance.use(express.json());
   instance.use((req, _res, next) => {
     const raw = req.headers["x-test-session"];
-    (req as unknown as { session: FakeSession }).session = typeof raw === "string" ? JSON.parse(raw) as FakeSession : {};
-    if (req.headers["x-test-grader-proxy"] === "true") (req as unknown as { __graderProxy: boolean }).__graderProxy = true;
+    (req as unknown as { session: FakeSession }).session =
+      typeof raw === "string" ? (JSON.parse(raw) as FakeSession) : {};
+    if (req.headers["x-test-grader-proxy"] === "true")
+      (req as unknown as { __graderProxy: boolean }).__graderProxy = true;
     next();
   });
   registerCommercialGrowthRoutes(instance);
@@ -40,20 +42,28 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
 }
 
 beforeAll(async () => {
-  ({ registerCommercialGrowthRoutes, COMMERCIAL_GROWTH_BASE } = await import("../server/routes/admin/commercial-growth"));
+  ({ registerCommercialGrowthRoutes, COMMERCIAL_GROWTH_BASE } =
+    await import("../server/routes/admin/commercial-growth"));
   const instance = app();
-  await new Promise<void>((resolve) => { server = instance.listen(0, "127.0.0.1", resolve); });
+  await new Promise<void>((resolve) => {
+    server = instance.listen(0, "127.0.0.1", resolve);
+  });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
   base = `http://127.0.0.1:${port}`;
 });
 
-afterAll(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); });
+afterAll(async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
 
 describe("GB-04 Super Admin Growth API boundary", () => {
-  it.each(["/summary", "/leads", "/link-options"])("returns 401 to an unauthenticated request for %s", async (path) => {
-    expect((await request(path)).status).toBe(401);
-  });
+  it.each(["/summary", "/intelligence", "/leads", "/link-options"])(
+    "returns 401 to an unauthenticated request for %s",
+    async (path) => {
+      expect((await request(path)).status).toBe(401);
+    }
+  );
 
   it("rejects customer, Partner and staff principals before any Growth handler runs", async () => {
     for (const session of [
@@ -66,12 +76,22 @@ describe("GB-04 Super Admin Growth API boundary", () => {
   });
 
   it("returns 403, not data, to a grader and forged Super Admin claims", async () => {
-    expect((await request("/summary", { headers: headers({ isGrader: true, graderId: "grader-1" }) })).status).toBe(403);
+    expect((await request("/summary", { headers: headers({ isGrader: true, graderId: "grader-1" }) })).status).toBe(
+      403
+    );
     expect((await request("/summary", { headers: { "x-super-admin": "true", "x-role": "admin" } })).status).toBe(401);
   });
 
   it("allows the real Super Admin gate to reach strict request validation without calling Growth data", async () => {
     const response = await request("/summary?period=not-a-period", {
+      headers: headers({ isAdmin: true, adminEmail: "growth-super-admin@example.test" }, true),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "period must be today, 7d, 30d, 90d, or all" });
+  });
+
+  it("applies the same bounded period validation to the intelligence surface", async () => {
+    const response = await request("/intelligence?period=not-a-period", {
       headers: headers({ isAdmin: true, adminEmail: "growth-super-admin@example.test" }, true),
     });
     expect(response.status).toBe(400);

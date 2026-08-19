@@ -13,6 +13,7 @@ import {
   listPartnerApplications,
   updatePartnerLeadStatus,
 } from "../../commercial-growth-service";
+import { getGrowthIntelligence } from "../../growth-intelligence-service";
 import { PARTNER_APPLICATION_STATUSES } from "../../partner-applications";
 import { storage } from "../../storage";
 
@@ -77,6 +78,31 @@ export function registerCommercialGrowthRoutes(app: Express): void {
     }
   });
 
+  /**
+   * GB-04B aggregate command-centre snapshot. It is intentionally separate
+   * from the stable GB-04 summary endpoint so existing consumers retain their
+   * narrow commercial contract. `refresh=1` bypasses only the bounded server
+   * cache; it never reaches external provider APIs in this release.
+   */
+  router.get("/intelligence", async (req: Request, res: Response) => {
+    const period = req.query.period ?? "30d";
+    if (!isGrowthPeriod(period)) return res.status(400).json({ error: "period must be today, 7d, 30d, 90d, or all" });
+    const refresh = req.query.refresh === "1";
+    try {
+      const intelligence = await getGrowthIntelligence(period, { force: refresh });
+      await audit(req, period, "growth_intelligence_viewed", {
+        period,
+        refresh,
+        freshness: intelligence.freshness,
+        insightCount: intelligence.insights.length,
+      });
+      return res.set("Cache-Control", "private, no-store").json(intelligence);
+    } catch {
+      console.error("[commercial-growth] intelligence query failed");
+      return res.status(500).json({ error: "Growth Command intelligence is unavailable" });
+    }
+  });
+
   router.get("/leads", async (req: Request, res: Response) => {
     const status = req.query.status;
     if (status !== undefined && !isPartnerLeadStatus(status)) {
@@ -84,7 +110,10 @@ export function registerCommercialGrowthRoutes(app: Express): void {
     }
     try {
       const leads = await listPartnerApplications(status);
-      await audit(req, status ?? "all", "growth_partner_leads_listed", { status: status ?? "all", rowCount: leads.length });
+      await audit(req, status ?? "all", "growth_partner_leads_listed", {
+        status: status ?? "all",
+        rowCount: leads.length,
+      });
       return res.set("Cache-Control", "private, no-store").json({ leads });
     } catch {
       console.error("[commercial-growth] Partner lead list failed");
@@ -100,7 +129,8 @@ export function registerCommercialGrowthRoutes(app: Express): void {
       await audit(req, parsedId.data, "growth_partner_lead_viewed", { scope: "growth_command" });
       return res.set("Cache-Control", "private, no-store").json({ lead });
     } catch (error) {
-      if (error instanceof GrowthLeadNotFoundError) return res.status(404).json({ error: "Partner application not found" });
+      if (error instanceof GrowthLeadNotFoundError)
+        return res.status(404).json({ error: "Partner application not found" });
       console.error("[commercial-growth] Partner lead detail failed");
       return res.status(500).json({ error: "Partner application is unavailable" });
     }
@@ -112,10 +142,15 @@ export function registerCommercialGrowthRoutes(app: Express): void {
     const parsedBody = leadStatusSchema.safeParse(req.body);
     if (!parsedBody.success) return res.status(400).json({ error: "A valid Partner lead status is required" });
     try {
-      const result = await updatePartnerLeadStatus(parsedId.data, parsedBody.data.status, req.session.adminEmail ?? null);
+      const result = await updatePartnerLeadStatus(
+        parsedId.data,
+        parsedBody.data.status,
+        req.session.adminEmail ?? null
+      );
       return res.set("Cache-Control", "private, no-store").json(result);
     } catch (error) {
-      if (error instanceof GrowthLeadNotFoundError) return res.status(404).json({ error: "Partner application not found" });
+      if (error instanceof GrowthLeadNotFoundError)
+        return res.status(404).json({ error: "Partner application not found" });
       console.error("[commercial-growth] Partner lead status change failed");
       return res.status(500).json({ error: "Partner application status could not be changed" });
     }
@@ -136,7 +171,8 @@ export function registerCommercialGrowthRoutes(app: Express): void {
       });
       return res.set("Cache-Control", "private, no-store").json({ url: link.url });
     } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ error: "Use the controlled Growth Command link values" });
+      if (error instanceof z.ZodError)
+        return res.status(400).json({ error: "Use the controlled Growth Command link values" });
       console.error("[commercial-growth] tracked link generation failed");
       return res.status(500).json({ error: "Tracked link generation is unavailable" });
     }

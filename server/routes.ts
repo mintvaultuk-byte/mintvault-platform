@@ -99,6 +99,7 @@ import {
   isGraderLocked,
   checkGradePublishGates,
 } from "./grader";
+
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
@@ -279,6 +280,19 @@ import { FEATURE_FLAGS } from "./config/feature-flags";
  * to lose the original error to a second one.
  */
 import { CaptureGeometryError } from "./lib/lide400-capture-authority";
+
+// `/api/health` remains a generic public readiness probe only. Detailed
+// database/infrastructure intelligence belongs exclusively behind the Super
+// Admin Growth boundary, never in a public response or raw error message.
+const publicHealthRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  message: { status: "unavailable" },
+});
 
 /** Count unused, unexpired credits of a given type */
 async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
@@ -2916,28 +2930,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Applied to /api/cert/:id, /api/cert/:id/population, /api/logbook/:certId,
   // and (via parallel definition in server/showroom.ts) the showroom GETs.
 
-  // ── Health check — tests DB connectivity for Fly/monitoring ───────────────
-  // No auth, no rate limit. Returns 503 if DB unreachable.
-  const serverStartedAt = Date.now();
-  app.get("/api/health", async (_req, res) => {
+  // ── Public generic readiness probe ────────────────────────────────────────
+  // Detailed database state, uptime and provider errors are sensitive
+  // operational telemetry. Super Admin Growth reads a separate, sanitised
+  // server-side check; this public route reveals only a bounded liveness state.
+  app.get("/api/health", publicHealthRateLimit, async (_req, res) => {
     try {
       const result = await db.execute(sql`SELECT 1 AS ok`);
       const dbOk = result.rows.length > 0;
       if (!dbOk) throw new Error("DB returned empty result for SELECT 1");
-      res.json({
-        status: "ok",
-        db: "ok",
-        uptime_ms: Date.now() - serverStartedAt,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err: any) {
-      console.error("[health] DB ping failed:", err.message);
-      res.status(503).json({
-        status: "degraded",
-        db: "failed",
-        error: err.message?.slice(0, 200) ?? "unknown",
-        timestamp: new Date().toISOString(),
-      });
+      res.set("Cache-Control", "no-store").json({ status: "ok" });
+    } catch {
+      console.error("[health] readiness check failed");
+      res.set("Cache-Control", "no-store").status(503).json({ status: "unavailable" });
     }
   });
 
