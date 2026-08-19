@@ -336,6 +336,8 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: tenant-owned payment provenance with RLS; depends only on partner organisations
   // and the global credit-pack catalogue.
   "0097_partner_credit_checkout_sessions",
+  // PARTNER scope: one additive RBAC grant so SCANNER_OPERATOR can read wallet/catalogue state.
+  "0098_scanner_operator_credit_view",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

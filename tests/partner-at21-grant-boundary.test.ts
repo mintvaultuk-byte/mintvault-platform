@@ -210,7 +210,8 @@ async function deliverWebhook(shop: Shop, eventId: string, sessionId: string) {
       verifiedCheckout: true as const,
       livemode: false,
       currency: "gbp",
-      lineItems: [{ priceId: "price_test_pack_10", currency: "gbp" }],
+      amountTotal: 10000,
+      lineItems: [{ priceId: "price_test_pack_10", currency: "gbp", unitAmount: 10000, taxBehavior: "inclusive" }],
       metadata: {
         partner_tenant_id: shop.tenantId,
         partner_pack_code: PACK_CODE,

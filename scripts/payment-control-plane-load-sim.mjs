@@ -40,11 +40,51 @@ const int = (max) => Math.floor(rand() * max);
 const pick = (items) => items[int(items.length)];
 
 const PACKS = [
-  { code: "PACK_5", credits: 5, priceId: "price_test_pack_5", currency: "gbp", env: "test", active: true },
-  { code: "PACK_10", credits: 10, priceId: "price_test_pack_10", currency: "gbp", env: "test", active: true },
-  { code: "PACK_25", credits: 25, priceId: "price_test_pack_25", currency: "gbp", env: "test", active: true },
-  { code: "PACK_50", credits: 50, priceId: "price_test_pack_50", currency: "gbp", env: "test", active: true },
-  { code: "PACK_100", credits: 100, priceId: "price_test_pack_100", currency: "gbp", env: "test", active: true },
+  {
+    code: "PACK_5",
+    credits: 5,
+    amountPence: 5_000,
+    priceId: "price_test_pack_5",
+    currency: "gbp",
+    env: "test",
+    active: true,
+  },
+  {
+    code: "PACK_10",
+    credits: 10,
+    amountPence: 10_000,
+    priceId: "price_test_pack_10",
+    currency: "gbp",
+    env: "test",
+    active: true,
+  },
+  {
+    code: "PACK_25",
+    credits: 25,
+    amountPence: 25_000,
+    priceId: "price_test_pack_25",
+    currency: "gbp",
+    env: "test",
+    active: true,
+  },
+  {
+    code: "PACK_50",
+    credits: 50,
+    amountPence: 50_000,
+    priceId: "price_test_pack_50",
+    currency: "gbp",
+    env: "test",
+    active: true,
+  },
+  {
+    code: "PACK_100",
+    credits: 100,
+    amountPence: 100_000,
+    priceId: "price_test_pack_100",
+    currency: "gbp",
+    env: "test",
+    active: true,
+  },
 ];
 
 class PaymentControlPlaneSimulation {
@@ -68,6 +108,8 @@ class PaymentControlPlaneSimulation {
       wrongSignatureRejected: 0,
       wrongPriceRejected: 0,
       wrongCurrencyRejected: 0,
+      wrongAmountRejected: 0,
+      wrongTaxBehaviorRejected: 0,
       wrongEnvironmentRejected: 0,
       unpaidRejected: 0,
       disabledPackRejected: 0,
@@ -111,6 +153,7 @@ class PaymentControlPlaneSimulation {
       packCode: pack.code,
       priceId: pack.priceId,
       currency: pack.currency,
+      amountPence: pack.amountPence,
       env: pack.env,
       status: "created",
     });
@@ -118,8 +161,21 @@ class PaymentControlPlaneSimulation {
   }
 
   deliverWebhook(event) {
-    const { sessionId, eventId, signed, paid, priceId, currency, env, tenantId, packCode, disabled, transient } =
-      event.payload;
+    const {
+      sessionId,
+      eventId,
+      signed,
+      paid,
+      priceId,
+      currency,
+      amountPence,
+      taxBehavior,
+      env,
+      tenantId,
+      packCode,
+      disabled,
+      transient,
+    } = event.payload;
     if (!signed) {
       this.stats.wrongSignatureRejected += 1;
       return;
@@ -153,6 +209,17 @@ class PaymentControlPlaneSimulation {
     }
     if (currency !== intent.currency || currency !== pack.currency) {
       this.stats.wrongCurrencyRejected += 1;
+      return;
+    }
+    if (
+      (amountPence ?? pack.amountPence) !== intent.amountPence ||
+      (amountPence ?? pack.amountPence) !== pack.amountPence
+    ) {
+      this.stats.wrongAmountRejected += 1;
+      return;
+    }
+    if ((taxBehavior ?? "inclusive") === "exclusive") {
+      this.stats.wrongTaxBehaviorRejected += 1;
       return;
     }
     if (env !== intent.env || env !== pack.env) {
@@ -260,14 +327,128 @@ class PaymentControlPlaneSimulation {
         tenantId,
         packCode: pack.code,
       });
-      if (i % 5 === 0) this.schedule(20 + int(1_000), "webhook", { sessionId, eventId: `${eventId}_price`, signed: true, paid: true, priceId: "price_test_other", currency: pack.currency, env: pack.env, tenantId, packCode: pack.code });
-      if (i % 7 === 0) this.schedule(21 + int(1_000), "webhook", { sessionId, eventId: `${eventId}_currency`, signed: true, paid: true, priceId: pack.priceId, currency: "usd", env: pack.env, tenantId, packCode: pack.code });
-      if (i % 11 === 0) this.schedule(22 + int(1_000), "webhook", { sessionId, eventId: `${eventId}_env`, signed: true, paid: true, priceId: pack.priceId, currency: pack.currency, env: "live", tenantId, packCode: pack.code });
-      if (i % 13 === 0) this.schedule(23 + int(1_000), "webhook", { sessionId, eventId: `${eventId}_unpaid`, signed: true, paid: false, priceId: pack.priceId, currency: pack.currency, env: pack.env, tenantId, packCode: pack.code });
-      if (i % 17 === 0) this.schedule(24 + int(1_000), "webhook", { sessionId, eventId: `${eventId}_disabled`, signed: true, paid: true, priceId: pack.priceId, currency: pack.currency, env: pack.env, tenantId, packCode: pack.code, disabled: true });
-      if (i % 19 === 0) this.schedule(25 + int(1_000), "webhook", { sessionId: `${sessionId}_missing`, eventId: `${eventId}_missing`, signed: true, paid: true, priceId: pack.priceId, currency: pack.currency, env: pack.env, tenantId, packCode: pack.code });
-      if (i % 23 === 0) this.schedule(26 + int(1_000), "webhook", { sessionId, eventId: `${eventId}_wrong_partner`, signed: true, paid: true, priceId: pack.priceId, currency: pack.currency, env: pack.env, tenantId: `${tenantId}_other`, packCode: pack.code });
-      this.schedule(1_050 + int(25), "webhook", { sessionId, eventId: `${eventId}_same_session_new_event`, signed: true, paid: true, priceId: pack.priceId, currency: pack.currency, env: pack.env, tenantId, packCode: pack.code });
+      if (i % 5 === 0)
+        this.schedule(20 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_price`,
+          signed: true,
+          paid: true,
+          priceId: "price_test_other",
+          currency: pack.currency,
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 7 === 0)
+        this.schedule(21 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_currency`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: "usd",
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 11 === 0)
+        this.schedule(22 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_env`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          env: "live",
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 29 === 0)
+        this.schedule(22 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_amount`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          amountPence: pack.amountPence - 1000,
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 31 === 0)
+        this.schedule(22 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_tax`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          taxBehavior: "exclusive",
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 13 === 0)
+        this.schedule(23 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_unpaid`,
+          signed: true,
+          paid: false,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 17 === 0)
+        this.schedule(24 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_disabled`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+          disabled: true,
+        });
+      if (i % 19 === 0)
+        this.schedule(25 + int(1_000), "webhook", {
+          sessionId: `${sessionId}_missing`,
+          eventId: `${eventId}_missing`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          env: pack.env,
+          tenantId,
+          packCode: pack.code,
+        });
+      if (i % 23 === 0)
+        this.schedule(26 + int(1_000), "webhook", {
+          sessionId,
+          eventId: `${eventId}_wrong_partner`,
+          signed: true,
+          paid: true,
+          priceId: pack.priceId,
+          currency: pack.currency,
+          env: pack.env,
+          tenantId: `${tenantId}_other`,
+          packCode: pack.code,
+        });
+      this.schedule(1_050 + int(25), "webhook", {
+        sessionId,
+        eventId: `${eventId}_same_session_new_event`,
+        signed: true,
+        paid: true,
+        priceId: pack.priceId,
+        currency: pack.currency,
+        env: pack.env,
+        tenantId,
+        packCode: pack.code,
+      });
 
       this.schedule(1_100 + int(1_000), "refresh", { tenantId });
       this.schedule(1_200 + int(1_000), "new", { tenantId, cardIndex: i });
@@ -313,7 +494,9 @@ class PaymentControlPlaneSimulation {
       this.fail(`expected NEW enable per workflow, got ${this.stats.newCardEnabled}`);
     }
     if (this.stats.sameSessionReplayRejected < this.workflows) {
-      this.fail(`expected at least ${this.workflows} same-session replay rejections, got ${this.stats.sameSessionReplayRejected}`);
+      this.fail(
+        `expected at least ${this.workflows} same-session replay rejections, got ${this.stats.sameSessionReplayRejected}`
+      );
     }
     this.stats.retriesConverged = this.stats.stripeApiTransientFailures + this.stats.dbTransientFailures;
     return {

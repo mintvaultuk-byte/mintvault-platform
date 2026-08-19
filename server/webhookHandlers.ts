@@ -284,6 +284,8 @@ export class WebhookHandlers {
           return {
             priceId: typeof item.price === "string" ? item.price : (price?.id ?? null),
             currency: price?.currency ?? null,
+            unitAmount: price?.unit_amount ?? null,
+            taxBehavior: price?.tax_behavior ?? null,
           };
         });
         const outcome = await fulfilPartnerCreditPurchase(
@@ -294,6 +296,7 @@ export class WebhookHandlers {
             verifiedCheckout: true,
             livemode: verifiedSession.livemode,
             currency: verifiedSession.currency,
+            amountTotal: verifiedSession.amount_total,
             lineItems,
           },
           event.id

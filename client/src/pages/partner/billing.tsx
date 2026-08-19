@@ -200,6 +200,10 @@ export default function PartnerBillingPage() {
                     <CardContent className="space-y-3">
                       <p className="text-2xl font-semibold">{pack.credits.toLocaleString("en-GB")}</p>
                       <p className="text-xs text-muted-foreground">Grading Credits</p>
+                      <p className="text-sm font-medium" data-testid={`billing-pack-price-${pack.code}`}>
+                        {pack.displayPrice}
+                        {pack.vatIncluded ? " VAT included" : ""}
+                      </p>
                       {pack.purchasable ? (
                         <Button
                           className="w-full"

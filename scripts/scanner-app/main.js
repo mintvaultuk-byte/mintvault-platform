@@ -831,7 +831,17 @@ function setupIpc() {
     const error = (result.body && result.body.error) || {};
     // A refusal is exactly when the true balance matters most — "no credits" must be shown with the
     // real figure beside it, not with whatever the wallet held at sign-in.
-    await refreshAvailableCredits();
+    const refreshedAvailable = await refreshAvailableCredits();
+    if (error.code === "INSUFFICIENT_CREDITS" && typeof refreshedAvailable !== "number") {
+      // The refusal itself is authoritative: the server just attempted the reservation and said
+      // available capacity is below one. If a follow-up wallet read is unavailable/forbidden, keep
+      // the zero-credit lock visible instead of rendering "unknown" and hiding the top-up modal.
+      stateMod.set({
+        availableCredits: 0,
+        walletRefreshGeneration: Number(stateMod.get().walletRefreshGeneration || 0) + 1,
+      });
+      pushStateToRenderer();
+    }
     return {
       ok: false,
       retryable: false,

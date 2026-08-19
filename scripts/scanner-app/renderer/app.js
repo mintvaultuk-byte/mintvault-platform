@@ -221,7 +221,9 @@ function renderBillingPacks() {
   for (const button of buttons) {
     const credits = Number(button.dataset.credits);
     const pack = packForCredits(credits);
-    button.textContent = `${credits} CREDITS`;
+    const priceLabel = pack?.displayPrice ? ` — ${pack.displayPrice}` : "";
+    const vatLabel = pack?.vatIncluded ? " VAT included" : "";
+    button.textContent = `${credits} CREDITS${priceLabel}${vatLabel}`;
     button.disabled = billingPacksLoading || billingCheckoutInFlight || !pack?.purchasable;
     button.dataset.packCode = pack?.code || "";
   }
@@ -1762,7 +1764,14 @@ async function startNewCard() {
   try {
     const result = await window.scanner.startNewCard({});
     if (!result?.ok) {
-      if (result?.code === "INSUFFICIENT_CREDITS") billingModalDismissedAtZero = false;
+      if (result?.code === "INSUFFICIENT_CREDITS") {
+        billingModalDismissedAtZero = false;
+        lastState = {
+          ...(lastState || {}),
+          availableCredits: 0,
+          walletRefreshGeneration: Number(lastState?.walletRefreshGeneration || 0) + 1,
+        };
+      }
       els.newCardError.textContent = result?.error || "Could not start a new card";
       els.newCardError.hidden = false;
       renderBillingLock(lastState);

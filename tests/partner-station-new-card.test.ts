@@ -791,7 +791,8 @@ describe("P6 integration surfaces", () => {
     expect(scannerMain).toContain("async function refreshAvailableCredits()");
     expect(scannerMain).toMatch(/stateMod\.set\(\{\s*availableCredits: available,/);
     expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{ ok: true, cardJob: job/);
-    expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{\s*ok: false,\s*retryable: false/);
+    expect(scannerMain).toContain("const refreshedAvailable = await refreshAvailableCredits()");
+    expect(scannerMain).toContain('error.code === "INSUFFICIENT_CREDITS" && typeof refreshedAvailable !== "number"');
     // Still never a local counter: nothing in the app increments or decrements the displayed figure.
     expect(scannerMain).not.toMatch(/availableCredits\s*(\+\+|--|\+=|-=)/);
     expect(scannerApp).not.toMatch(/availableCredits\s*(\+\+|--|\+=|-=)/);

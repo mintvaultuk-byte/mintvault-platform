@@ -107,6 +107,10 @@ describe("PRES-3 — the buy control obeys the server", () => {
     expect(partnerApi).toContain('"GET", "/api/partner/credits/packs"');
     expect(billing).toContain("partnerCredits.packs()");
     expect(billing).toContain("pack.purchasable");
+    expect(partnerApi).toContain("displayPrice: string");
+    expect(partnerApi).toContain("vatIncluded: true");
+    expect(billing).toContain("pack.displayPrice");
+    expect(billing).toContain("pack.vatIncluded");
     // Catalogued-but-not-priced must say so rather than offering a button that 400s.
     expect(billing).toContain("Pricing not yet configured");
     expect(billing).toContain("Stripe TEST/LIVE mode not configured");
