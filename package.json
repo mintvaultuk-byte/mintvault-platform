@@ -18,6 +18,7 @@
     "db:lint-sql": "tsx scripts/db/lint-destructive-sql.ts",
     "simulate:payment-control-plane": "node scripts/payment-control-plane-load-sim.mjs",
     "command-centre:runtime": "node --import tsx scripts/command-centre-runtime-harness.ts",
+    "test:command-centre-mobile-layout": "node scripts/command-centre-mobile-layout-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "graph:build": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify extract . --code-only",
