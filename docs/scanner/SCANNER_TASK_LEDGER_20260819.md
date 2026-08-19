@@ -15,12 +15,14 @@
 | Preserve independent upload progress                                                            | Preserved            | Per-side `captureUploads` state and renderer upload panel.                                                                                               |
 | Hostile specialist review                                                                       | Done                 | Native/Electron PASS; capture/session PASS; auth/payment PASS after fixes.                                                                               |
 | Focused/wider gates                                                                             | Done locally         | Scanner 166/166; wider server 194 passed / 2 skipped; typecheck/build/diff passed.                                                                       |
-| Staging deploy                                                                                  | Not done             | Blocked by protected migration `0094` requiring approved index replacement (`DROP INDEX`).                                                               |
+| Protected 0094 migration path                                                                   | Done                 | Linter/runner approval is exact-file/exact-index-replacement only; disposable PostgreSQL 0093→0094/idempotency/invariant proof passed.                   |
+| Staging 0094 migration                                                                          | Done on staging      | Scoped migration applied only `0094_scanner_capture_physical_release.sql`; checksum `4918f58e72da…`; journal 83→84; post-checks clean.                   |
+| Staging deploy                                                                                  | Pending              | Staging database is ready; deploy the SFAP-015 successor to `mintvault-v2` only.                                                                         |
 | Physical Canon acceptance                                                                       | Not done             | Requires owner to operate staging Scanner after migration/deploy.                                                                                        |
 | 5,000 scanner-overlap scale run                                                                 | Not done             | Existing 5,000 one-credit NEW storm is credit/idempotency proof only, not scanner-overlap load proof.                                                    |
 
 ## Next owner-controlled task
 
-Approve and run the protected staging migration path for `0094_scanner_capture_physical_release.sql`, then deploy staging and perform the physical Canon acceptance script:
+Deploy the SFAP-015 successor to staging and perform the physical Canon acceptance script:
 
 `Preview FRONT → GREEN → Scan FRONT → wait only for physical capture + upload-task acceptance → Preview BACK while FRONT still uploads`.

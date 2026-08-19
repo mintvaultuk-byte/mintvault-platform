@@ -25,7 +25,13 @@ import {
   UNMANAGED_INVENTORY,
   type LiveObjects,
 } from "../scripts/db/schema-registry";
-import { lintSql, hasBlocking, stripSqlNoise } from "../scripts/db/lint-destructive-sql";
+import {
+  lintSql,
+  hasBlocking,
+  stripSqlNoise,
+  isApprovedDestructiveFinding,
+  unapprovedBlockingFindings,
+} from "../scripts/db/lint-destructive-sql";
 
 const PROD_UNMANAGED_TABLES_29 = [
   "ai_accuracy_log",
@@ -342,6 +348,32 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
     expect(migration).toContain("ADD COLUMN IF NOT EXISTS stripe_currency");
     expect(migration).toContain("ADD CONSTRAINT chk_partner_credit_packs_stripe_currency");
     expect(hasBlocking(lintSql(migration))).toBe(false);
+  });
+
+  it("approves only the protected 0094 physical-release index replacement", () => {
+    const migrationPath = "migrations/0094_scanner_capture_physical_release.sql";
+    const migration = readFileSync(migrationPath, "utf8");
+    const findings = lintSql(migration);
+    const dropIndex = findings.find((x) => x.kind === "drop_index");
+
+    expect(dropIndex, "0094 must keep the index replacement explicit").toBeDefined();
+    expect(hasBlocking(findings), "raw DROP INDEX remains destructive to the generic linter").toBe(true);
+    expect(isApprovedDestructiveFinding(migrationPath, migration, dropIndex!)).toBe(true);
+    expect(unapprovedBlockingFindings(migrationPath, migration, findings)).toEqual([]);
+  });
+
+  it("does not let the 0094 approval become a general DROP INDEX bypass", () => {
+    const migration = readFileSync("migrations/0094_scanner_capture_physical_release.sql", "utf8");
+    const findings = lintSql(migration);
+
+    expect(unapprovedBlockingFindings("migrations/0095_other.sql", migration, findings).map((x) => x.kind)).toContain(
+      "drop_index"
+    );
+
+    const weakened = migration.replace("physical_released = false", "state IS NOT NULL");
+    expect(
+      unapprovedBlockingFindings("migrations/0094_scanner_capture_physical_release.sql", weakened).map((x) => x.kind)
+    ).toContain("drop_index");
   });
 });
 

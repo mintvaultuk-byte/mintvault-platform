@@ -17,6 +17,8 @@
 - `scripts/scanner-app/renderer/index.html`
 - `scripts/scanner-app/renderer/styles.css`
 - `migrations/0094_scanner_capture_physical_release.sql`
+- `scripts/db/lint-destructive-sql.ts`
+- `scripts/db/migrate.ts`
 
 ## Included tests
 
@@ -28,6 +30,8 @@
 - `tests/scanner-station-capture-boundary.test.ts`
 - `tests/scanner-evidence-staging-service.integration.test.ts`
 - `tests/partner-schema-parity.test.ts`
+- `tests/db-migration-safety.test.ts`
+- `tests/scanner-physical-release-migration.test.ts`
 - Fixture updates in partner Card Job/output/reconciliation/pilot helper tests for `physical_released`.
 
 ## Behavioural changes
@@ -39,6 +43,8 @@
 5. Lost-local-TIFF recovery is fail-closed unless the server proves terminal failure or accepted evidence.
 6. Cancellation and arming share a per-certificate transaction advisory lock.
 7. Generic Partner browser station arming cannot request recapture; repair must use the exact-side invalidation/FIX authority.
+8. The destructive-SQL linter and migration runner allow `0094` only when the exact protected
+   create-before-drop index replacement is present; the generic `DROP INDEX` rule remains blocked.
 
 ## Exclusions
 
@@ -48,4 +54,5 @@
 - No production mutation.
 - No physical Canon run.
 - No packaged/notarised Scanner build.
-- No staging deploy in this pass because `0094` is intentionally blocked by migration safety until protected index replacement is approved.
+- Staging physical acceptance is not complete until the owner runs the Canon Scanner script against
+  the staging deployment.

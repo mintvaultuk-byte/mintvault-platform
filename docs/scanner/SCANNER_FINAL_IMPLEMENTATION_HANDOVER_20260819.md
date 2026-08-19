@@ -233,8 +233,8 @@ Key implementation points:
 - `scanner_capture_sessions.physical_released` separates physical scanner ownership from network
   upload/finalisation ownership.
 - The station unique index is replaced so only non-released active sessions occupy the physical
-  station slot. This replacement is intentionally protected by migration `0094` and currently
-  requires the owner-approved destructive/index-replacement migration path.
+  station slot. Migration `0094` now has a narrow protected linter/runner approval for this exact
+  create-before-drop index replacement; generic `DROP INDEX` remains blocked.
 - Capture authority and capture-session creation count same-station released sides as present for
   the purpose of arming the remaining side, but do not count them as grading evidence.
 - Same Card Job/MV/certificate/location/station affinity is enforced in both directions and across
@@ -262,8 +262,13 @@ Focused and wider local proof after the hostile re-attack repairs:
 - Changed-file ESLint — **0 errors**, 59 legacy warnings in CommonJS/large scanner files.
 - `git diff --check` — **passed**.
 - `npx tsx scripts/db/lint-destructive-sql.ts migrations/0094_scanner_capture_physical_release.sql`
-  — **blocked as expected**: `DROP INDEX` is required to replace the old station uniqueness
-  invariant.
+  — **passed through the protected 0094 approval only**: `DROP INDEX` remains destructive to the
+  generic linter, but this file's replacement creates the new `physical_released=false` unique
+  index before dropping and renaming the canonical index.
+- `npx vitest run tests/db-migration-safety.test.ts tests/scanner-physical-release-migration.test.ts`
+  — **53 passed, 0 failed**. This includes disposable PostgreSQL proof for a 0093 journal moving to
+  0094, replay/idempotency, old duplicate physical target rejection, released FRONT + physical BACK
+  allowance, and continued rejection of another non-released physical target at the same station.
 
 Hostile re-attack results:
 
@@ -274,10 +279,25 @@ Hostile re-attack results:
   orchestrated PostgreSQL interleaving test is stronger future proof than the current source/DB
   service coverage.
 
+Protected staging migration update:
+
+- Staging read-only preflight before `0094`: journal high-water `0093_partner_credit_pack_currency.sql`;
+  `physical_released` absent; old `uq_scanner_capture_one_active_station` present; no active station
+  duplicates; no active scanner sessions; core counts were `scanner_capture_sessions=21`,
+  `certificate_image_evidence=14`, `partner_card_jobs=19`, `partner_credit_reservations=21`,
+  `certificates=283`; scanner/evidence orphan checks were zero.
+- Staging `0094_scanner_capture_physical_release.sql` applied through scoped migration mode only:
+  checksum `4918f58e72da444c2cac949952a4502d396ae63747fb364dbe2298257ccbb8cb`, journal
+  `83 -> 84`, completed at `2026-08-19T09:02:01.896Z`.
+- Staging post-apply proof: `physical_released BOOLEAN NOT NULL DEFAULT false`; canonical
+  `uq_scanner_capture_one_active_station` predicate now includes `physical_released = false`;
+  `idx_scanner_capture_released_station_certificate` and `idx_scanner_capture_expiry_physical`
+  exist; core counts unchanged; duplicate active physical station and orphan checks remain zero.
+
 Not claimed by this pass:
 
-- No staging deployment was performed because migration `0094` is intentionally blocked by the
-  destructive SQL linter until the protected index replacement is separately authorised.
+- Staging code deployment is pending at the time of this handover update; deploy only after the
+  protected migration has been verified on staging.
 - No physical Canon acceptance was run.
 - No clean packaged Scanner application exists yet.
 - No 5,000-station/5,000-overlap scanner load run was executed. The existing real-PostgreSQL

@@ -14,6 +14,7 @@
  * clean result as "no obvious destructive statement", not "provably non-destructive".
  */
 import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 
 export type DestructiveKind =
   | "drop_database"
@@ -150,6 +151,66 @@ export function hasBlocking(findings: DestructiveFinding[]): boolean {
   return findings.some((f) => f.severity === "block");
 }
 
+function normaliseMigrationFilename(filePath: string): string {
+  return basename(filePath.replace(/\\/g, "/"));
+}
+
+/**
+ * Narrow, owner-approved protected migration exception.
+ *
+ * 0094 replaces a *defence-in-depth* partial unique index so SFAP-015 can release
+ * the physical scanner glass after a local TIFF has been durably bound, without
+ * relaxing the single physical target invariant. The linter's DROP INDEX rule is
+ * intentionally broad, so this approval is intentionally tiny:
+ *
+ * - exact migration filename only;
+ * - exact DROP INDEX kind only;
+ * - replacement unique index must be created before the drop;
+ * - replacement predicate must include physical_released=false;
+ * - canonical index name is restored by rename inside the same transactional file.
+ */
+export function isApprovedDestructiveFinding(filePath: string, sql: string, finding: DestructiveFinding): boolean {
+  if (normaliseMigrationFilename(filePath) !== "0094_scanner_capture_physical_release.sql") return false;
+  if (finding.severity !== "block" || finding.kind !== "drop_index") return false;
+
+  const cleaned = stripSqlNoise(sql);
+  const addColumn =
+    /\bALTER\s+TABLE\s+scanner_capture_sessions\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+physical_released\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+false\b/i.exec(
+      cleaned
+    );
+  const createReplacement =
+    /\bCREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+uq_scanner_capture_one_active_station_physical\s+ON\s+scanner_capture_sessions\s*\(\s*station_id\s*\)/i.exec(
+      cleaned
+    );
+  const dropCanonical = /\bDROP\s+INDEX\s+IF\s+EXISTS\s+uq_scanner_capture_one_active_station\s*;/i.exec(cleaned);
+  const renameCanonical =
+    /\bALTER\s+INDEX\s+IF\s+EXISTS\s+uq_scanner_capture_one_active_station_physical\s+RENAME\s+TO\s+uq_scanner_capture_one_active_station\s*;/i.exec(
+      cleaned
+    );
+
+  if (!addColumn || !createReplacement || !dropCanonical || !renameCanonical) return false;
+  if (!(addColumn.index < createReplacement.index && createReplacement.index < dropCanonical.index)) return false;
+  if (!(dropCanonical.index < renameCanonical.index)) return false;
+
+  const replacementStatement = cleaned.slice(createReplacement.index, dropCanonical.index);
+  return (
+    /\bWHERE\b/i.test(replacementStatement) &&
+    /\bstation_id\s+IS\s+NOT\s+NULL\b/i.test(replacementStatement) &&
+    /\bphysical_released\s*=\s*false\b/i.test(replacementStatement) &&
+    /\bstate\s+IN\s*\(/i.test(replacementStatement)
+  );
+}
+
+export function unapprovedBlockingFindings(
+  filePath: string,
+  sql: string,
+  findings: DestructiveFinding[] = lintSql(sql)
+): DestructiveFinding[] {
+  return findings.filter(
+    (finding) => finding.severity === "block" && !isApprovedDestructiveFinding(filePath, sql, finding)
+  );
+}
+
 function isMain(): boolean {
   return typeof process !== "undefined" && !!process.argv[1] && process.argv[1].endsWith("lint-destructive-sql.ts");
 }
@@ -169,10 +230,12 @@ if (isMain()) {
       continue;
     }
     for (const fd of findings) {
-      const icon = fd.severity === "block" ? "🚫" : "⚠️ ";
-      console.log(`${icon} ${f}:${fd.line} [${fd.kind}] ${fd.match}`);
+      const approved = isApprovedDestructiveFinding(f, sql, fd);
+      const icon = approved ? "✅" : fd.severity === "block" ? "🚫" : "⚠️ ";
+      const suffix = approved ? " (approved protected 0094 index replacement)" : "";
+      console.log(`${icon} ${f}:${fd.line} [${fd.kind}] ${fd.match}${suffix}`);
     }
-    if (hasBlocking(findings)) blocking = true;
+    if (unapprovedBlockingFindings(f, sql, findings).length > 0) blocking = true;
   }
   process.exit(blocking ? 1 : 0);
 }
