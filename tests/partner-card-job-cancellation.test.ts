@@ -20,6 +20,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { readFileSync } from "node:fs";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -113,6 +114,7 @@ async function seedMintVaultTables(): Promise<void> {
     side text not null,
     state varchar(16) not null CHECK (state IN ('armed','claimed','capturing','captured','failed','expired','cancelled')),
     failure_reason text,
+    physical_released boolean not null default false,
     station_id uuid,
     workstation_id text,
     expires_at timestamptz not null default now() + interval '10 minutes'
@@ -402,6 +404,21 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
       [finalising.certificateId]
     );
     expect(await settle(cancel(f, finalising.cardJobId))).toEqual({ ok: false, code: "CAPTURE_IN_PROGRESS" });
+  });
+
+  it("serializes cancellation against a concurrent scanner finalisation before refunding", () => {
+    const src = readFileSync("server/partner/card-job-cancellation.ts", "utf8");
+    const advisory = src.indexOf("pg_advisory_xact_lock");
+    const lock = src.indexOf("await lockActiveCaptureSessionsForCancellation(client, job.certificateId)");
+    const assert = src.indexOf("await assertNothingCaptured(client, { certificateId: job.certificateId");
+    const release = src.indexOf("await releaseReservationOnce(client");
+    expect(src).toContain("hashLockKey(`scanner-capture-certificate:${certificateId}`)");
+    expect(src).toMatch(/state IN \('armed', 'claimed', 'capturing'\)[\s\S]*FOR UPDATE/);
+    expect(advisory).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(-1);
+    expect(advisory).toBeLessThan(lock);
+    expect(assert).toBeGreaterThan(lock);
+    expect(release).toBeGreaterThan(assert);
   });
 
   // ---- CANCEL4b -----------------------------------------------------------------------------

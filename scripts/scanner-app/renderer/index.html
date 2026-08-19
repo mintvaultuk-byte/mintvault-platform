@@ -1,95 +1,97 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title>MintVault Scanner</title>
-<link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <header class="hdr" id="hdr">
-    <span class="hdr-title">MintVault Scanner</span>
-    <div class="hdr-spacer"></div>
-    <span class="hdr-env" id="environmentBadge" hidden data-tip="Which MintVault this Scanner is signed in to"></span>
-    <span class="hdr-version" id="appVersion" data-tip="Installed app version"></span>
-    <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <title>MintVault Scanner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hdr" id="hdr">
+      <span class="hdr-title">MintVault Scanner</span>
+      <div class="hdr-spacer"></div>
+      <span class="hdr-env" id="environmentBadge" hidden data-tip="Which MintVault this Scanner is signed in to"></span>
+      <span class="hdr-version" id="appVersion" data-tip="Installed app version"></span>
+      <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
+    </header>
 
-  <section class="row device" id="deviceRow">
-    <span class="row-label">Canon LiDE 400</span>
-    <span class="row-value" id="scannerHealth">Checking device…</span>
-  </section>
+    <section class="row device" id="deviceRow">
+      <span class="row-label">Canon LiDE 400</span>
+      <span class="row-value" id="scannerHealth">Checking device…</span>
+    </section>
 
-  <section class="row station-identity" id="stationIdentityRow" hidden>
-    <div class="station-identity-cell">
-      <span class="identity-key">LOCATION</span>
-      <span class="identity-value" id="stationOrganisation">—</span>
-    </div>
-    <div class="station-identity-cell">
-      <span class="identity-key">STATION</span>
-      <span class="identity-value" id="stationIdentity">—</span>
-    </div>
-    <div class="station-identity-cell">
-      <span class="identity-key">SIGNED IN</span>
-      <span class="identity-value" id="stationUser">—</span>
-    </div>
-    <!--
+    <section class="row station-identity" id="stationIdentityRow" hidden>
+      <div class="station-identity-cell">
+        <span class="identity-key">LOCATION</span>
+        <span class="identity-value" id="stationOrganisation">—</span>
+      </div>
+      <div class="station-identity-cell">
+        <span class="identity-key">STATION</span>
+        <span class="identity-value" id="stationIdentity">—</span>
+      </div>
+      <div class="station-identity-cell">
+        <span class="identity-key">SIGNED IN</span>
+        <span class="identity-value" id="stationUser">—</span>
+      </div>
+      <!--
       Server-reported capacity. Deliberately shows an em dash rather than 0 until the server has
       actually answered: "0 Grading Credits" and "we have not asked yet" are different facts, and a
       shop that reads the second as the first stops working for no reason.
     -->
-    <div class="station-identity-cell">
-      <span class="identity-key">GRADING CREDITS</span>
-      <span class="identity-value" id="stationCredits">—</span>
-    </div>
-  </section>
-
-  <section class="row capture-target" id="captureTargetRow">
-    <div class="row-header">CURRENT CARD</div>
-    <div class="capture-target-grid">
-      <div>
-        <span class="capture-key">CARD</span>
-        <span class="capture-value" id="targetCert">No target armed</span>
+      <div class="station-identity-cell">
+        <span class="identity-key">GRADING CREDITS</span>
+        <span class="identity-value" id="stationCredits">—</span>
       </div>
-      <div>
-        <span class="capture-key">REQUIRED SIDE</span>
-        <span class="capture-value" id="targetSide">—</span>
+    </section>
+
+    <section class="row capture-target" id="captureTargetRow">
+      <div class="row-header">CURRENT CARD</div>
+      <div class="capture-target-grid">
+        <div>
+          <span class="capture-key">CARD</span>
+          <span class="capture-value" id="targetCert">No target armed</span>
+        </div>
+        <div>
+          <span class="capture-key">REQUIRED SIDE</span>
+          <span class="capture-value" id="targetSide">—</span>
+        </div>
       </div>
-    </div>
-    <p class="hint capture-hint" id="targetHint">Arm a card side in MintVault. This station will only scan that server-owned target.</p>
-  </section>
+      <p class="hint capture-hint" id="targetHint">
+        Arm a card side in MintVault. This station will only scan that server-owned target.
+      </p>
+    </section>
 
-  <section class="row workflow-guide" id="workflowGuide" data-guide-state="setup">
-    <div class="placement-visual" id="placementVisual" data-asset-slot="scanner-placement-guide" aria-hidden="true">
-      <div class="placement-zone"><div class="guide-card"></div></div>
-      <div class="flip-mark">↻</div>
-    </div>
-    <div class="workflow-guide-copy">
-      <span class="row-header" id="workflowGuideStep">SETUP — CHECK PLACEMENT</span>
-      <strong id="workflowGuideTitle">Place a card, then Preview</strong>
-      <p class="hint" id="workflowGuideHint">Preview checks that the complete card is visible before a final scan.</p>
-    </div>
-  </section>
+    <section class="row workflow-guide" id="workflowGuide" data-guide-state="setup">
+      <div class="placement-visual" id="placementVisual" data-asset-slot="scanner-placement-guide" aria-hidden="true">
+        <div class="placement-zone"><div class="guide-card"></div></div>
+        <div class="flip-mark">↻</div>
+      </div>
+      <div class="workflow-guide-copy">
+        <span class="row-header" id="workflowGuideStep">SETUP — CHECK PLACEMENT</span>
+        <strong id="workflowGuideTitle">Place a card, then Preview</strong>
+        <p class="hint" id="workflowGuideHint">Preview checks that the complete card is visible before a final scan.</p>
+      </div>
+    </section>
 
-  <section class="row" id="statusRow">
-    <div class="status-text">
-      <span class="dot" id="dot"></span>
-      <span id="statusText">Idle — waiting for scan</span>
-    </div>
-    <div class="status-sub" id="statusSub"></div>
-  </section>
+    <section class="row" id="statusRow">
+      <div class="status-text">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">Idle — waiting for scan</span>
+      </div>
+      <div class="status-sub" id="statusSub"></div>
+    </section>
 
-  <!--
+    <!--
     P6 — NEW CARD. Pressing this asks the SERVER to authorise one new Card Job against one Grading
     Credit. The station never invents a card, never chooses an MV number and never decides whether
     it can afford one: it sends a retry token and renders whatever the server returns, including a
     refusal. The credit line below is a read-out of the server's answer, not a local balance.
   -->
-  <section class="row capture-actions" id="captureActionsRow">
-    <div class="action-grid" aria-label="Scanner actions">
-      <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
-      <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
-      <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
-      <!--
+    <section class="row capture-actions" id="captureActionsRow">
+      <div class="action-grid" aria-label="Scanner actions">
+        <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
+        <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
+        <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
+        <!--
         FOURTH PRIMARY ACTION. Recovering a card that is missing a side is normal shop work, not
         diagnostics: it happens when a scan fails or a station drops mid-card, which is exactly when
         an operator should not have to go hunting in a collapsed technical panel. It is NOT styled
@@ -97,42 +99,56 @@
         already exists, keeping its MV number and costing no Grading Credit. The server decides
         which jobs are eligible and which side is missing; this button only opens that list.
       -->
-      <button class="btn capture-primary" id="fixMissingImagesBtn">FIX MISSING IMAGES</button>
-    </div>
-    <p class="hint action-hint" id="captureActionHint">Press NEW CARD to start a card, or arm one in MintVault.</p>
-    <p class="hint" id="newCardError" hidden></p>
+        <button class="btn capture-primary" id="fixMissingImagesBtn">FIX MISSING IMAGES</button>
+      </div>
+      <p class="hint action-hint" id="captureActionHint">Press NEW CARD to start a card, or arm one in MintVault.</p>
+      <div class="upload-status-panel" id="uploadStatusPanel" hidden>
+        <p class="upload-status-line" id="uploadStatusFront" hidden></p>
+        <p class="upload-status-line" id="uploadStatusBack" hidden></p>
+      </div>
+      <p class="hint" id="newCardError" hidden></p>
+      <div class="credit-empty" id="creditEmptyPanel" hidden>
+        <strong class="credit-empty-title">NO GRADING CREDITS AVAILABLE</strong>
+        <button class="btn primary" id="topUpNowBtn">TOP UP NOW</button>
+      </div>
 
-    <!--
+      <!--
       P6c — THE UNRESOLVED CARD. Shown when this station holds a card that was paid for but whose
       scanner target could not be armed. It is a BLOCKING notice on purpose: NEW CARD stays disabled
       behind it, because the only two honest ways out are to arm this SAME card again or to cancel
       it and take the Grading Credit back. Pressing NEW again would buy a second card for the one
       already sitting on the counter.
     -->
-    <div class="card-blocked" id="openCardPanel" hidden>
-      <strong class="card-blocked-title" id="openCardTitle">CARD NEEDS ATTENTION</strong>
-      <p class="card-blocked-detail" id="openCardDetail"></p>
-      <div class="action-grid">
-        <button class="btn primary" id="retryArmBtn">RETRY SCANNER</button>
-        <button class="btn ghost" id="cancelCardBtn">CANCEL THIS CARD</button>
+      <div class="card-blocked" id="openCardPanel" hidden>
+        <strong class="card-blocked-title" id="openCardTitle">CARD NEEDS ATTENTION</strong>
+        <p class="card-blocked-detail" id="openCardDetail"></p>
+        <div class="action-grid">
+          <button class="btn primary" id="retryArmBtn">RETRY SCANNER</button>
+          <button class="btn ghost" id="cancelCardBtn">CANCEL THIS CARD</button>
+        </div>
       </div>
-    </div>
 
-    <!-- Shown once BOTH sides are accepted. The MV number is the server's, echoed back verbatim. -->
-    <div class="card-complete" id="cardCompletePanel" hidden>
-      <strong class="card-complete-title" id="cardCompleteTitle">MV— COMPLETE</strong>
-      <p class="card-complete-instruction" id="cardCompleteInstruction">MARK CARD MV—</p>
-      <button class="btn primary" id="completeNextCardBtn">NEXT CARD</button>
-    </div>
-    <div class="positioning-panel" id="positioningPanel" hidden>
-      <div class="positioning-card-preview-viewport" id="positioningCardPreviewViewport">
-        <img class="positioning-card-preview" id="positioningCardPreview" alt="Detected card with surrounding scanner background" />
+      <!-- Shown once BOTH sides are accepted. The MV number is the server's, echoed back verbatim. -->
+      <div class="card-complete" id="cardCompletePanel" hidden>
+        <strong class="card-complete-title" id="cardCompleteTitle">MV— COMPLETE</strong>
+        <p class="card-complete-instruction" id="cardCompleteInstruction">MARK CARD MV—</p>
+        <button class="btn primary" id="completeNextCardBtn">NEXT CARD</button>
       </div>
-      <p class="positioning-result" id="positioningResult"></p>
-      <p class="hint" id="positioningHint">Preview is a local placement check only. It never becomes card evidence.</p>
-      <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
-    </div>
-    <!--
+      <div class="positioning-panel" id="positioningPanel" hidden>
+        <div class="positioning-card-preview-viewport" id="positioningCardPreviewViewport">
+          <img
+            class="positioning-card-preview"
+            id="positioningCardPreview"
+            alt="Detected card with surrounding scanner background"
+          />
+        </div>
+        <p class="positioning-result" id="positioningResult"></p>
+        <p class="hint" id="positioningHint">
+          Preview is a local placement check only. It never becomes card evidence.
+        </p>
+        <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
+      </div>
+      <!--
       THE PER-SIDE PLACEMENT GATE.
 
       The whole panel is one traffic light. `data-placement-state` is GREEN or RED and drives every
@@ -143,49 +159,45 @@
       drawn as a hairline hint inside the capture area, deliberately faint: it is the rule, but it is
       not a second box to aim at.
     -->
-    <div class="placement-panel" id="placementPanel" hidden>
-      <div class="placement-viewport" id="placementViewport">
-        <img class="placement-preview" id="placementPreview" alt="Placement preview of the scanner capture window" />
-        <div class="placement-box placement-box--outer" id="placementOuterBox" hidden></div>
-        <div class="placement-box placement-box--boundary" id="placementBoundaryBox" hidden></div>
-        <div class="placement-box placement-box--card" id="placementCardBox" hidden></div>
+      <div class="placement-panel" id="placementPanel" hidden>
+        <div class="placement-viewport" id="placementViewport">
+          <img class="placement-preview" id="placementPreview" alt="Placement preview of the scanner capture window" />
+          <div class="placement-box placement-box--outer" id="placementOuterBox" hidden></div>
+          <div class="placement-box placement-box--boundary" id="placementBoundaryBox" hidden></div>
+          <div class="placement-box placement-box--card" id="placementCardBox" hidden></div>
+        </div>
+        <p class="placement-message" id="placementMessage"></p>
+        <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
+        <!-- Millimetres live here and nowhere else. Normal staff never need to open this. -->
+        <details class="placement-diagnostics" id="placementDiagnostics">
+          <summary>Service &amp; Diagnostics</summary>
+          <pre class="placement-diagnostics-body" id="placementDiagnosticsBody"></pre>
+        </details>
       </div>
-      <p class="placement-message" id="placementMessage"></p>
-      <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
-      <!-- Millimetres live here and nowhere else. Normal staff never need to open this. -->
-      <details class="placement-diagnostics" id="placementDiagnostics">
-        <summary>Service &amp; Diagnostics</summary>
-        <pre class="placement-diagnostics-body" id="placementDiagnosticsBody"></pre>
-      </details>
-    </div>
-    <div class="preview-card" id="previewPanel" hidden>
-      <img class="capture-preview" id="capturePreview" alt="Non-authoritative scan preview" />
-      <p class="preview-note">CHECK THE WHOLE CARD, ALL EDGES AND ALL CORNERS</p>
-      <div class="preview-actions">
-        <button class="btn primary" id="acceptPreviewBtn">ACCEPT</button>
-        <button class="btn danger" id="rescanPreviewBtn">RESCAN</button>
+      <div class="preview-card" id="previewPanel" hidden>
+        <img class="capture-preview" id="capturePreview" alt="Non-authoritative scan preview" />
+        <p class="preview-note">SCAN ACCEPTED FROM GREEN PREVIEW — UPLOADING THIS TIFF</p>
       </div>
-    </div>
-    <button class="btn danger capture-rescan-only" id="rescanErrorBtn" hidden>RESCAN CARD</button>
-    <button class="btn primary" id="nextCardBtn" hidden>NEXT CARD</button>
-  </section>
+      <button class="btn danger capture-rescan-only" id="rescanErrorBtn" hidden>RESCAN CARD</button>
+      <button class="btn primary" id="nextCardBtn" hidden>NEXT CARD</button>
+    </section>
 
-  <details class="row secondary" id="recentRow">
-    <summary>Recent captures</summary>
-    <ul class="recent" id="recentList"></ul>
-  </details>
+    <details class="row secondary" id="recentRow">
+      <summary>Recent captures</summary>
+      <ul class="recent" id="recentList"></ul>
+    </details>
 
-  <!-- Service controls are intentionally separate from the one production
+    <!-- Service controls are intentionally separate from the one production
        target-bound capture flow. -->
-  <details class="row settings secondary" id="diagnosticsRow">
-    <summary id="settingsToggle">Service &amp; diagnostics</summary>
-    <div class="settings-body" id="settingsBody" hidden>
-      <div class="settings-test environment-panel" id="environmentPanel">
-        <span class="row-header">MintVault environment</span>
-        <p class="hint"><strong>ENVIRONMENT:</strong> <span id="environmentName">—</span></p>
-        <p class="hint"><strong>API:</strong> <span id="environmentApi">—</span></p>
-        <p class="hint" id="environmentWarning" hidden></p>
-        <!--
+    <details class="row settings secondary" id="diagnosticsRow">
+      <summary id="settingsToggle">Service &amp; diagnostics</summary>
+      <div class="settings-body" id="settingsBody" hidden>
+        <div class="settings-test environment-panel" id="environmentPanel">
+          <span class="row-header">MintVault environment</span>
+          <p class="hint"><strong>ENVIRONMENT:</strong> <span id="environmentName">—</span></p>
+          <p class="hint"><strong>API:</strong> <span id="environmentApi">—</span></p>
+          <p class="hint" id="environmentWarning" hidden></p>
+          <!--
           WHICH MINTVAULT THIS SCANNER BELONGS TO.
 
           The refusal message has always told the operator to choose STAGING or PRODUCTION here. Until
@@ -193,29 +205,33 @@
           sign in. The Scanner still refuses to GUESS — these buttons are the only way to tell it, and
           it will not let you move a station that is holding a card.
         -->
-        <div class="preview-actions environment-choice">
-          <button class="btn" id="environmentStagingBtn">USE STAGING</button>
-          <button class="btn" id="environmentProductionBtn">USE PRODUCTION</button>
+          <div class="preview-actions environment-choice">
+            <button class="btn" id="environmentStagingBtn">USE STAGING</button>
+            <button class="btn" id="environmentProductionBtn">USE PRODUCTION</button>
+          </div>
+          <p class="hint" id="environmentChoiceStatus"></p>
         </div>
-        <p class="hint" id="environmentChoiceStatus"></p>
-      </div>
-      <div class="settings-test full-platen-diagnostics" id="fullPlatenDiagnostics" hidden>
-        <span class="row-header">Full-platen placement diagnostic</span>
-        <div class="positioning-preview-viewport">
-          <img class="positioning-preview" id="positioningFullPreview" alt="Full platen placement diagnostic" />
-          <div class="card-boundary-overlay" id="cardBoundaryOverlay" hidden aria-hidden="true"><span>DETECTED CARD</span></div>
-          <div class="acquisition-boundary-overlay" id="acquisitionBoundaryOverlay" hidden aria-hidden="true"><span>CAPTURE AREA</span></div>
+        <div class="settings-test full-platen-diagnostics" id="fullPlatenDiagnostics" hidden>
+          <span class="row-header">Full-platen placement diagnostic</span>
+          <div class="positioning-preview-viewport">
+            <img class="positioning-preview" id="positioningFullPreview" alt="Full platen placement diagnostic" />
+            <div class="card-boundary-overlay" id="cardBoundaryOverlay" hidden aria-hidden="true">
+              <span>DETECTED CARD</span>
+            </div>
+            <div class="acquisition-boundary-overlay" id="acquisitionBoundaryOverlay" hidden aria-hidden="true">
+              <span>CAPTURE AREA</span>
+            </div>
+          </div>
+          <p class="hint positioning-geometry" id="positioningGeometry"></p>
         </div>
-        <p class="hint positioning-geometry" id="positioningGeometry"></p>
-      </div>
-      <!--
+        <!--
         PHASE C — the movable capture window.
 
         Station setup, not card capture: it lives inside Service & Diagnostics and refuses while a
         card is open, so an ordinary grader cannot nudge the capture area mid-job. Dragging the
         window is the deliberate act; the numbers below it are a readout, never the control.
       -->
-      <!--
+        <!--
         CAPTURE AREA — FIXED, AND NOT A NORMAL SHOP CONTROL.
 
         The 100 x 130 mm capture area sits in a proven physical position on the scanner bed. Normal
@@ -226,115 +242,156 @@
         fault) and appears only for an operator holding `partner.stations.calibrate`. Hiding the
         controls is presentation, NOT the gate: the server refuses the write regardless.
       -->
-      <div class="settings-test capture-window-setup" id="captureWindowSetup">
-        <span class="row-header">Capture area</span>
-        <div class="platen-viewport" id="platenViewport">
-          <div class="platen-window" id="platenWindow"><span>CAPTURE AREA</span></div>
-        </div>
-        <p class="hint" id="captureWindowReadout"></p>
-        <p class="hint" id="captureWindowFixedNote">
-          This is where cards are scanned on this station. It is fixed and does not move during normal
-          use — place the card inside it and press PREVIEW.
-        </p>
-        <div class="capture-window-maintenance" id="captureWindowMaintenance" hidden>
-          <p class="hint">
-            <strong>MAINTENANCE ONLY.</strong> Move this only when the scanner or Mac has been
-            replaced, the profile has changed, or a hardware alignment fault has been proven. Every
-            card captured afterwards is framed differently from every card captured before.
-          </p>
-          <div class="preview-actions">
-            <button class="btn" id="captureWindowResetBtn">RESET TO DEFAULT</button>
-            <button class="btn primary" id="captureWindowSaveBtn">SAVE NEW POSITION</button>
+        <div class="settings-test capture-window-setup" id="captureWindowSetup">
+          <span class="row-header">Capture area</span>
+          <div class="platen-viewport" id="platenViewport">
+            <div class="platen-window" id="platenWindow"><span>CAPTURE AREA</span></div>
           </div>
+          <p class="hint" id="captureWindowReadout"></p>
+          <p class="hint" id="captureWindowFixedNote">
+            This is where cards are scanned on this station. It is fixed and does not move during normal use — place the
+            card inside it and press PREVIEW.
+          </p>
+          <div class="capture-window-maintenance" id="captureWindowMaintenance" hidden>
+            <p class="hint">
+              <strong>MAINTENANCE ONLY.</strong> Move this only when the scanner or Mac has been replaced, the profile
+              has changed, or a hardware alignment fault has been proven. Every card captured afterwards is framed
+              differently from every card captured before.
+            </p>
+            <div class="preview-actions">
+              <button class="btn" id="captureWindowResetBtn">RESET TO DEFAULT</button>
+              <button class="btn primary" id="captureWindowSaveBtn">SAVE NEW POSITION</button>
+            </div>
+          </div>
+          <p class="hint" id="captureWindowStatus"></p>
         </div>
-        <p class="hint" id="captureWindowStatus"></p>
+        <label class="checkbox">
+          <input type="checkbox" id="autoOpenOnError" />
+          <span>Auto-open this window on error <span class="hint inline">(default on)</span></span>
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="soundEnabled" />
+          <span>Sound on scan events <span class="hint inline">(success / error chimes)</span></span>
+        </label>
+        <div class="settings-test">
+          <button class="btn" id="signOutBtn" hidden>SIGN OUT / SWITCH USER</button>
+          <p class="hint">Signs out the current person. This Mac stays registered as the same MintVault station.</p>
+        </div>
+        <div class="settings-test">
+          <button class="btn" id="updateBtn">Signed release instructions</button>
+          <p class="hint">
+            Scanner updates are installed only from an approved signed MintVault package. This Mac never pulls Git or
+            installs dependencies during capture operations.
+          </p>
+        </div>
+        <div class="settings-test">
+          <button class="btn" id="logsBtn">Show service logs</button>
+          <p class="hint">Technical details for hardware, network, validation, and capture-session failures.</p>
+        </div>
+        <div class="settings-test">
+          <button class="btn" id="lastCertBtn" disabled>Open latest certificate</button>
+          <p class="hint">Opens the most recently accepted card from this station for a quick visual check.</p>
+        </div>
+        <div class="settings-test">
+          <button class="btn danger" id="clearBufferedBtn">Restart scanner service</button>
+          <p class="hint">
+            Use only if the scanner service is unresponsive. It restarts this station service and may briefly interrupt
+            a capture.
+          </p>
+        </div>
+        <div class="settings-test">
+          <p class="hint">
+            Recovery only. MintVault derives this list from your own cards and authorises exactly the missing side — you
+            never type a card number. A card with no image yet can also be cancelled here, which returns its Grading
+            Credit and keeps its number for ever.
+          </p>
+        </div>
       </div>
-      <label class="checkbox">
-        <input type="checkbox" id="autoOpenOnError" />
-        <span>Auto-open this window on error <span class="hint inline">(default on)</span></span>
-      </label>
-      <label class="checkbox">
-        <input type="checkbox" id="soundEnabled" />
-        <span>Sound on scan events <span class="hint inline">(success / error chimes)</span></span>
-      </label>
-      <div class="settings-test">
-        <button class="btn" id="signOutBtn" hidden>SIGN OUT / SWITCH USER</button>
-        <p class="hint">Signs out the current person. This Mac stays registered as the same MintVault station.</p>
-      </div>
-      <div class="settings-test">
-        <button class="btn" id="updateBtn">Signed release instructions</button>
-        <p class="hint">Scanner updates are installed only from an approved signed MintVault package. This Mac never pulls Git or installs dependencies during capture operations.</p>
-      </div>
-      <div class="settings-test">
-        <button class="btn" id="logsBtn">Show service logs</button>
-        <p class="hint">
-          Technical details for hardware, network, validation, and capture-session failures.
-        </p>
-      </div>
-      <div class="settings-test">
-        <button class="btn" id="lastCertBtn" disabled>Open latest certificate</button>
-        <p class="hint">
-          Opens the most recently accepted card from this station for a quick visual check.
-        </p>
-      </div>
-      <div class="settings-test">
-        <button class="btn danger" id="clearBufferedBtn">Restart scanner service</button>
-        <p class="hint">
-          Use only if the scanner service is unresponsive. It restarts this station service and may briefly interrupt a capture.
-        </p>
-      </div>
-      <div class="settings-test">
-        <p class="hint">Recovery only. MintVault derives this list from your own cards and authorises exactly the missing side — you never type a card number. A card with no image yet can also be cancelled here, which returns its Grading Credit and keeps its number for ever.</p>
-      </div>
-    </div>
-  </details>
+    </details>
 
-  <!-- Exceptional recovery. The app never attaches an arbitrary TIFF: it
+    <!-- Exceptional recovery. The app never attaches an arbitrary TIFF: it
        opens the selected certificate in MintVault, where an authenticated
        operator arms the exact missing side as a server-owned session. -->
-  <div class="modal" id="orphanModal">
-    <div class="modal-card wide">
-      <div class="modal-title">Fix missing images</div>
-      <!--
+    <div class="modal" id="orphanModal">
+      <div class="modal-card wide">
+        <div class="modal-title">Fix missing images</div>
+        <!--
         P7 moved arming INTO this app and P6c added cancellation, but this line still described the
         old "go and do it in the browser" flow. Copy that tells an operator to do something the
         buttons beside it no longer do is worse than no copy at all.
       -->
-      <p class="modal-meta">FIX THIS CARD arms the missing side on this station straight away — the card keeps its number, and it costs no Grading Credit. CANCEL CARD is only for a card that has no image yet: it returns the Grading Credit and closes the card, keeping its number for ever.</p>
-      <div class="orphan-list" id="orphanList">Loading…</div>
-      <div class="modal-actions">
-        <button class="btn ghost" id="orphanClose">Close</button>
+        <p class="modal-meta">
+          FIX THIS CARD arms the missing side on this station straight away — the card keeps its number, and it costs no
+          Grading Credit. CANCEL CARD is only for a card that has no image yet: it returns the Grading Credit and closes
+          the card, keeping its number for ever.
+        </p>
+        <div class="orphan-list" id="orphanList">Loading…</div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="orphanClose">Close</button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- First-run access is deliberately an in-app, operator-specific flow.
+    <div class="modal billing-lock-modal" id="billingLockModal" aria-live="assertive">
+      <div class="modal-card wide">
+        <div class="modal-title">NO GRADING CREDITS AVAILABLE</div>
+        <p class="billing-lock-subtitle">TOP UP TO CONTINUE</p>
+        <div class="billing-pack-grid" id="billingPackGrid">
+          <button class="btn billing-pack" data-credits="5">5 CREDITS</button>
+          <button class="btn billing-pack" data-credits="10">10 CREDITS</button>
+          <button class="btn billing-pack" data-credits="25">25 CREDITS</button>
+          <button class="btn billing-pack" data-credits="50">50 CREDITS</button>
+          <button class="btn billing-pack" data-credits="100">100 CREDITS</button>
+        </div>
+        <p class="billing-lock-error" id="billingLockError" hidden></p>
+        <p class="modal-meta" id="billingLockStatus">
+          Credits are added only after Stripe confirms payment through the verified webhook.
+        </p>
+        <div class="modal-actions">
+          <button class="btn ghost" id="billingLockClose">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- First-run access is deliberately an in-app, operator-specific flow.
        Only sanitised identity/status crosses IPC; the Keychain session and
        Ed25519 private key never enter this renderer. -->
-  <div class="modal station-setup-modal" id="stationSetupModal" aria-live="polite">
-    <div class="modal-card wide">
-      <div class="modal-title" id="stationSetupTitle">Sign in to MintVault</div>
-      <p class="modal-meta" id="stationSetupText">Use your authorised MintVault account to set up this Mac.</p>
-      <form id="stationSignInForm" class="station-setup-form">
-        <label class="field"><span>Email</span><input type="email" id="stationEmail" autocomplete="username" required /></label>
-        <label class="field"><span>Password</span><input type="password" id="stationPassword" autocomplete="current-password" required /></label>
-        <button class="btn primary" type="submit" id="stationSignInBtn">SIGN IN</button>
-        <button class="linklike" type="button" id="stationForgotPasswordBtn">FORGOT PASSWORD?</button>
-      </form>
-      <form id="stationMfaForm" class="station-setup-form" hidden>
-        <label class="field"><span>Authentication code</span><input type="text" id="stationMfaCode" autocomplete="one-time-code" inputmode="numeric" /></label>
-        <label class="field"><span>Or recovery code</span><input type="text" id="stationRecoveryCode" autocomplete="off" /></label>
-        <button class="btn primary" type="submit" id="stationMfaBtn">VERIFY</button>
-      </form>
-      <div id="stationRegisterPanel" class="station-setup-form" hidden>
-        <label class="field" id="stationLocationField"><span>Location</span><select id="stationLocation"></select></label>
-        <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
+    <div class="modal station-setup-modal" id="stationSetupModal" aria-live="polite">
+      <div class="modal-card wide">
+        <div class="modal-title" id="stationSetupTitle">Sign in to MintVault</div>
+        <p class="modal-meta" id="stationSetupText">Use your authorised MintVault account to set up this Mac.</p>
+        <form id="stationSignInForm" class="station-setup-form">
+          <label class="field"
+            ><span>Email</span><input type="email" id="stationEmail" autocomplete="username" required
+          /></label>
+          <label class="field"
+            ><span>Password</span><input type="password" id="stationPassword" autocomplete="current-password" required
+          /></label>
+          <button class="btn primary" type="submit" id="stationSignInBtn">SIGN IN</button>
+          <button class="linklike" type="button" id="stationForgotPasswordBtn">FORGOT PASSWORD?</button>
+        </form>
+        <form id="stationMfaForm" class="station-setup-form" hidden>
+          <label class="field"
+            ><span>Authentication code</span
+            ><input type="text" id="stationMfaCode" autocomplete="one-time-code" inputmode="numeric"
+          /></label>
+          <label class="field"
+            ><span>Or recovery code</span><input type="text" id="stationRecoveryCode" autocomplete="off"
+          /></label>
+          <button class="btn primary" type="submit" id="stationMfaBtn">VERIFY</button>
+        </form>
+        <div id="stationRegisterPanel" class="station-setup-form" hidden>
+          <label class="field" id="stationLocationField"
+            ><span>Location</span
+            ><select id="stationLocation"></select
+          ></label>
+          <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
+        </div>
+        <p class="hint station-setup-error" id="stationSetupError"></p>
       </div>
-      <p class="hint station-setup-error" id="stationSetupError"></p>
     </div>
-  </div>
 
-  <script src="../lib/lide400-preview-transform.js"></script>
-  <script src="app.js"></script>
-</body>
+    <script src="../lib/lide400-preview-transform.js"></script>
+    <script src="app.js"></script>
+  </body>
 </html>

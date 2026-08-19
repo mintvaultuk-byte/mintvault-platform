@@ -1,7 +1,8 @@
 /**
  * Canon CanoScan LiDE 400 controller for the existing scanner-app process.
- * It compiles/runs the small ImageCaptureCore adapter locally; no Canon GUI is
- * automated and the result still travels through the canonical server ingest.
+ * Development checkouts may build the small ImageCaptureCore adapter locally, but a packaged
+ * Partner station app must run the nested prebuilt adapter shipped inside the app bundle. No Canon
+ * GUI is automated and the result still travels through the canonical server ingest.
  */
 const fs = require("node:fs");
 const os = require("node:os");
@@ -19,6 +20,7 @@ const PROFILE_VERSION = "mintvault-canon-lide-400-v3";
 const MODEL = "CanoScan LiDE 400";
 const APP_DIR = path.resolve(__dirname, "..");
 const SOURCE = path.join(APP_DIR, "native", "mintvault-lide-bridge.m");
+const PACKAGED_BRIDGE = path.join(APP_DIR, "native", "mintvault-lide-bridge");
 const SUPPORT = process.env.MINTVAULT_SCANS_DIR
   ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
   : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
@@ -37,7 +39,9 @@ function stationId() {
   // Explicit local-development compatibility only.  A production daemon must
   // be enrolled rather than deriving authority from a mutable hostname/env.
   if (process.env.NODE_ENV !== "production" && process.env.MINTVAULT_STATION_ID) {
-    return String(process.env.MINTVAULT_STATION_ID).replace(/[^a-zA-Z0-9._:-]/g, "-").slice(0, 128);
+    return String(process.env.MINTVAULT_STATION_ID)
+      .replace(/[^a-zA-Z0-9._:-]/g, "-")
+      .slice(0, 128);
   }
   return "unregistered-station";
 }
@@ -62,29 +66,95 @@ function deviceId() {
  * once at boot is how the app ends up disagreeing with its own configuration.
  */
 const STATION_CONFIG_KEYS = ["MINTVAULT_LIDE_SCAN_X_MM", "MINTVAULT_LIDE_SCAN_Y_MM"];
+
+/*
+ * WHERE THE PLACEMENT LIVES, WITHOUT ANYONE HAVING TO SAY SO.
+ *
+ * THE DEFECT THIS CLOSES. Persistence used to be enabled ONLY by an exported
+ * `MINTVAULT_STATION_CONFIG_PATH`. On 2026-08-18 the Scanner was relaunched without it, the operator
+ * moved the capture window, and the save half-landed: the SERVER recorded the new rectangle while
+ * `persistJigOrigin` threw, leaving the Mac still scanning the old one. The station had to be
+ * repaired before it could scan. A Partner shop launching from an app icon has no shell to export
+ * anything into, so "persistence is opt-in via the environment" is not a configuration — it is a
+ * latent split-brain waiting for someone to move the jig.
+ *
+ * So the path is DERIVED, and the environment variable becomes an override rather than a switch:
+ *
+ *   1. an absolute `MINTVAULT_STATION_CONFIG_PATH` still wins — existing installs and the isolated
+ *      per-instance paths the tests use keep working exactly as before;
+ *   2. otherwise the canonical file next to the station identity, which every launch can find.
+ *
+ * The canonical file is a DEDICATED NON-SECRET file, not `~/.mintvault-scanner.env`. That file holds
+ * SCANNER_API_TOKEN, and this module's long-standing rule — that the live token file is never an
+ * implicit write target — is worth more than the convenience of one fewer file.
+ */
+const CANONICAL_STATION_CONFIG_PATH = path.join(SUPPORT, "station-config.env");
+const LEGACY_STATION_CONFIG_PATH = path.join(os.homedir(), ".mintvault-scanner.env");
+
+function stationConfigPath() {
+  const configured = String(process.env.MINTVAULT_STATION_CONFIG_PATH || "").trim();
+  if (configured && path.isAbsolute(configured)) return path.resolve(configured);
+  return CANONICAL_STATION_CONFIG_PATH;
+}
+
+function readPlacementKeys(file) {
+  const values = {};
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    // Only the placement keys are honoured. This file is operator-editable, so it must never be a
+    // channel for setting arbitrary environment for this process.
+    if (match && STATION_CONFIG_KEYS.includes(match[1])) values[match[1]] = match[2];
+  }
+  return values;
+}
+
+/*
+ * One-way, read-only migration off the legacy env file.
+ *
+ * Stations provisioned by `install.sh` before the canonical path existed hold their placement in
+ * `~/.mintvault-scanner.env`. Reading it back means a Mac that stops exporting the variable keeps
+ * the rectangle it was already calibrated to, instead of coming up unprovisioned and waiting for a
+ * server round-trip to re-adopt. ONLY the two placement keys are read; no secret is read, copied or
+ * rewritten, and nothing is ever written back to that file.
+ *
+ * ONLY for the default instance. `MINTVAULT_SCANS_DIR` is how this app isolates a test or secondary
+ * instance from the live station, and a fallback that reaches into the real home directory anyway
+ * would punch through that isolation — an isolated instance would inherit the live Mac's placement
+ * and report itself provisioned when it is not.
+ */
+function legacyPlacementValues() {
+  if (process.env.MINTVAULT_SCANS_DIR) return {};
+  try {
+    return readPlacementKeys(LEGACY_STATION_CONFIG_PATH);
+  } catch {
+    return {};
+  }
+}
+
 let stationConfigCache = { path: null, mtimeMs: -1, values: {} };
 function stationConfigValues() {
-  const configured = String(process.env.MINTVAULT_STATION_CONFIG_PATH || "").trim();
-  if (!configured || !path.isAbsolute(configured)) return {};
+  const configured = stationConfigPath();
+  let values = null;
   try {
     const stat = fs.statSync(configured);
     if (stationConfigCache.path === configured && stationConfigCache.mtimeMs === stat.mtimeMs) {
       return stationConfigCache.values;
     }
-    const values = {};
-    for (const line of fs.readFileSync(configured, "utf8").split("\n")) {
-      const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-      // Only the placement keys are honoured. This file is operator-editable, so it must never be a
-      // channel for setting arbitrary environment for this process.
-      if (match && STATION_CONFIG_KEYS.includes(match[1])) values[match[1]] = match[2];
-    }
+    values = readPlacementKeys(configured);
     stationConfigCache = { path: configured, mtimeMs: stat.mtimeMs, values };
-    return values;
   } catch {
     // A missing or unreadable file means "no persisted placement", which `jigOrigin` already treats
     // as unprovisioned. It must never be an exception on the health path.
-    return {};
+    values = null;
   }
+  if (values && STATION_CONFIG_KEYS.some((key) => values[key] !== undefined)) return values;
+  // Nothing canonical yet — fall back to a legacy install's placement rather than reporting a
+  // calibrated station as unprovisioned.
+  if (configured === CANONICAL_STATION_CONFIG_PATH) {
+    const legacy = legacyPlacementValues();
+    if (STATION_CONFIG_KEYS.some((key) => legacy[key] !== undefined)) return legacy;
+  }
+  return values || {};
 }
 
 /**
@@ -142,14 +212,31 @@ function persistJigOrigin(origin) {
         `(X ${bounds.boundsMm.minX}-${bounds.boundsMm.maxX} mm, Y ${bounds.boundsMm.minY}-${bounds.boundsMm.maxY} mm)`
     );
   }
-  const configured = String(process.env.MINTVAULT_STATION_CONFIG_PATH || "").trim();
-  if (!configured || !path.isAbsolute(configured)) {
-    throw new Error("Station configuration persistence is not enabled for this Scanner instance");
-  }
-  const configPath = path.resolve(configured);
+  const configPath = stationConfigPath();
+  /*
+   * CREATE the canonical file rather than refusing. A first calibration on a new Mac necessarily
+   * happens before any placement file exists, and "the file is missing" was previously indistinguishable
+   * from "persistence is disabled" — both threw, and both stranded the operator with a server that had
+   * already recorded the move. Only the derived canonical path is created; an explicitly configured
+   * path that does not exist is still an operator error and still refuses.
+   */
   let current;
-  try { current = fs.readFileSync(configPath, "utf8"); }
-  catch { throw new Error("Configured station file is unavailable; placement was not persisted"); }
+  try {
+    current = fs.readFileSync(configPath, "utf8");
+  } catch {
+    if (configPath !== CANONICAL_STATION_CONFIG_PATH) {
+      throw new Error("Configured station file is unavailable; placement was not persisted");
+    }
+    try {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, "", { mode: 0o600, flag: "wx" });
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw new Error("Station configuration file could not be created; placement was not persisted");
+      }
+    }
+    current = fs.readFileSync(configPath, "utf8");
+  }
   const writeValue = (source, key, value) => {
     const line = `${key}=${Number(value.toFixed(2))}`;
     const expression = new RegExp(`^${key}=.*$`, "m");
@@ -214,7 +301,9 @@ function calibrationRegion(input) {
     throw new Error("LiDE calibration region must contain non-negative finite X/Y/width/height values");
   }
   if (width < CALIBRATION_MIN_MM.width || height < CALIBRATION_MIN_MM.height) {
-    throw new Error(`LiDE calibration region must be at least ${CALIBRATION_MIN_MM.width} x ${CALIBRATION_MIN_MM.height} mm`);
+    throw new Error(
+      `LiDE calibration region must be at least ${CALIBRATION_MIN_MM.width} x ${CALIBRATION_MIN_MM.height} mm`
+    );
   }
   if (x + width > PLATEN_MAX_MM.width || y + height > PLATEN_MAX_MM.height) {
     throw new Error("LiDE calibration region exceeds the physical platen");
@@ -233,7 +322,10 @@ function run(command, args, timeoutMs) {
     }, timeoutMs);
     child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
     child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       const out = Buffer.concat(stdout).toString("utf8").trim();
@@ -241,7 +333,11 @@ function run(command, args, timeoutMs) {
         const parsed = JSON.parse(out);
         resolve(parsed);
       } catch {
-        reject(new Error(`LiDE bridge exited ${code ?? "?"}: ${Buffer.concat(stderr).toString("utf8").trim() || out || "no result"}`));
+        reject(
+          new Error(
+            `LiDE bridge exited ${code ?? "?"}: ${Buffer.concat(stderr).toString("utf8").trim() || out || "no result"}`
+          )
+        );
       }
     });
   });
@@ -251,19 +347,57 @@ function runCommand(command, args, timeoutMs) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
     const stderr = [];
-    const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("LiDE bridge build timed out")); }, timeoutMs);
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("LiDE bridge build timed out"));
+    }, timeoutMs);
     child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`LiDE bridge build failed: ${Buffer.concat(stderr).toString("utf8").trim() || `exit ${code}`}`));
+      else
+        reject(
+          new Error(`LiDE bridge build failed: ${Buffer.concat(stderr).toString("utf8").trim() || `exit ${code}`}`)
+        );
     });
   });
 }
 
+function isPackagedRuntime(env = process.env, appDir = APP_DIR, resourcesPath = process.resourcesPath) {
+  if (env.MINTVAULT_SCANNER_PACKAGED === "1") return true;
+  if (!resourcesPath) return false;
+  const resourcesRoot = path.resolve(String(resourcesPath));
+  const packagedAppRoot = path.join(resourcesRoot, "app");
+  const resolvedAppDir = path.resolve(String(appDir));
+  return resolvedAppDir === packagedAppRoot || resolvedAppDir.startsWith(`${packagedAppRoot}${path.sep}`);
+}
+
+function validatePackagedBridge(candidate = PACKAGED_BRIDGE) {
+  const resolved = path.resolve(candidate);
+  let stat;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    throw new Error("Packaged LiDE ImageCaptureCore bridge is missing; reinstall the current MintVault Scanner app");
+  }
+  if (!stat.isFile()) {
+    throw new Error("Packaged LiDE ImageCaptureCore bridge is not a file; reinstall the current MintVault Scanner app");
+  }
+  try {
+    fs.accessSync(resolved, fs.constants.X_OK);
+  } catch {
+    throw new Error("Packaged LiDE ImageCaptureCore bridge is not executable; reinstall the current MintVault Scanner app");
+  }
+  return resolved;
+}
+
 async function ensureBridge() {
   if (process.platform !== "darwin") throw new Error("Canon LiDE control requires macOS Image Capture");
+  if (isPackagedRuntime()) return validatePackagedBridge(PACKAGED_BRIDGE);
   // Rebuild after an app update as well as on the first launch.  Otherwise a
   // LaunchAgent can keep an older native adapter indefinitely even though its
   // JavaScript wrapper has been upgraded.
@@ -276,10 +410,27 @@ async function ensureBridge() {
     buildPromise = (async () => {
       if (!fs.existsSync(SOURCE)) throw new Error("LiDE ImageCaptureCore bridge source is missing");
       fs.mkdirSync(SUPPORT, { recursive: true });
-      await runCommand("/usr/bin/xcrun", ["clang", "-fobjc-arc", "-fmodules", "-framework", "Foundation", "-framework", "ImageCaptureCore", SOURCE, "-o", BINARY], 60_000);
+      await runCommand(
+        "/usr/bin/xcrun",
+        [
+          "clang",
+          "-fobjc-arc",
+          "-fmodules",
+          "-framework",
+          "Foundation",
+          "-framework",
+          "ImageCaptureCore",
+          SOURCE,
+          "-o",
+          BINARY,
+        ],
+        60_000
+      );
       fs.chmodSync(BINARY, 0o700);
       return BINARY;
-    })().finally(() => { buildPromise = null; });
+    })().finally(() => {
+      buildPromise = null;
+    });
   }
   return buildPromise;
 }
@@ -291,13 +442,37 @@ async function health() {
     const result = await run(bridge, ["health"], 12_000);
     // The saved window travels with health so the setup UI opens on the placement this station is
     // actually using, rather than on the default with no way to tell the two apart.
-    const captureWindow = { originMm: origin, areaMm: PROFILE_AREA_MM, profileVersion: captureProfile.STANDARD_TCG.version };
+    const captureWindow = {
+      originMm: origin,
+      areaMm: PROFILE_AREA_MM,
+      profileVersion: captureProfile.STANDARD_TCG.version,
+    };
     if (result.status === "ready" && !origin) {
-      return { ...result, status: "profile_unprovisioned", error: "Canon is connected but the station capture window is not provisioned", profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId(), captureWindow };
+      return {
+        ...result,
+        status: "profile_unprovisioned",
+        error: "Canon is connected but the station capture window is not provisioned",
+        profileVersion: PROFILE_VERSION,
+        workstationId: stationId(),
+        deviceId: deviceId(),
+        captureWindow,
+      };
     }
-    return { ...result, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId(), captureWindow };
+    return {
+      ...result,
+      profileVersion: PROFILE_VERSION,
+      workstationId: stationId(),
+      deviceId: deviceId(),
+      captureWindow,
+    };
   } catch (error) {
-    return { status: "control_unavailable", error: error.message, profileVersion: PROFILE_VERSION, workstationId: stationId(), deviceId: deviceId() };
+    return {
+      status: "control_unavailable",
+      error: error.message,
+      profileVersion: PROFILE_VERSION,
+      workstationId: stationId(),
+      deviceId: deviceId(),
+    };
   }
 }
 
@@ -307,7 +482,8 @@ async function scan(outputDirectory) {
   const startedAt = new Date().toISOString();
   const bridge = await ensureBridge();
   const result = await run(bridge, ["scan", outputDirectory, String(origin.x), String(origin.y)], 360_000);
-  if (result.status !== "captured" || typeof result.path !== "string") throw new Error(result.error || "LiDE capture failed");
+  if (result.status !== "captured" || typeof result.path !== "string")
+    throw new Error(result.error || "LiDE capture failed");
   const root = path.resolve(outputDirectory) + path.sep;
   const capturedPath = path.resolve(result.path);
   if (!capturedPath.startsWith(root) || ![".tif", ".tiff"].includes(path.extname(capturedPath).toLowerCase())) {
@@ -346,8 +522,13 @@ async function positioningPreview(outputDirectory) {
   if (result.status !== "captured" || result.captureKind !== "positioning_preview" || typeof result.path !== "string") {
     throw new Error(result.error || "LiDE positioning preview failed");
   }
-  if (result.previewCoordinateSpace !== POSITIONING_PREVIEW_COORDINATE_SPACE || Number(result.previewRasterOrientation) !== 1) {
-    throw new Error("LiDE positioning Preview did not return the canonical upright ImageCaptureCore coordinate contract");
+  if (
+    result.previewCoordinateSpace !== POSITIONING_PREVIEW_COORDINATE_SPACE ||
+    Number(result.previewRasterOrientation) !== 1
+  ) {
+    throw new Error(
+      "LiDE positioning Preview did not return the canonical upright ImageCaptureCore coordinate contract"
+    );
   }
   const root = path.resolve(outputDirectory) + path.sep;
   const capturedPath = path.resolve(result.path);
@@ -393,7 +574,10 @@ async function placementPreview(outputDirectory) {
   if (result.status !== "captured" || result.captureKind !== "placement_preview" || typeof result.path !== "string") {
     throw new Error(result.error || "LiDE placement preview failed");
   }
-  if (result.previewCoordinateSpace !== POSITIONING_PREVIEW_COORDINATE_SPACE || Number(result.previewRasterOrientation) !== 1) {
+  if (
+    result.previewCoordinateSpace !== POSITIONING_PREVIEW_COORDINATE_SPACE ||
+    Number(result.previewRasterOrientation) !== 1
+  ) {
     throw new Error("LiDE placement Preview did not return the canonical upright ImageCaptureCore coordinate contract");
   }
   if (Number(result.driverResolutionDpi) !== PLACEMENT_PREVIEW_DPI) {
@@ -442,7 +626,14 @@ async function scanCalibrationRegion(outputDirectory, region) {
   const bridge = await ensureBridge();
   const result = await run(
     bridge,
-    ["calibrate", outputDirectory, String(measured.x), String(measured.y), String(measured.width), String(measured.height)],
+    [
+      "calibrate",
+      outputDirectory,
+      String(measured.x),
+      String(measured.y),
+      String(measured.width),
+      String(measured.height),
+    ],
     420_000
   );
   if (result.status !== "captured" || result.captureKind !== "calibration" || typeof result.path !== "string") {
@@ -470,6 +661,75 @@ async function scanCalibrationRegion(outputDirectory, region) {
   };
 }
 
+async function diagnosticCapabilities() {
+  const bridge = await ensureBridge();
+  return run(bridge, ["capabilities"], 30_000);
+}
+
+function diagnosticExperimentRegion(input) {
+  const x = Number(input?.x);
+  const y = Number(input?.y);
+  const width = Number(input?.width);
+  const height = Number(input?.height);
+  if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0) {
+    throw new Error("LiDE experiment region must contain finite X/Y/width/height millimetres");
+  }
+  if (x + width > PLATEN_MAX_MM.width || y + height > PLATEN_MAX_MM.height) {
+    throw new Error("LiDE experiment region exceeds the physical platen");
+  }
+  return { x, y, width, height };
+}
+
+async function diagnosticCapture(outputDirectory, options) {
+  const dpi = Number(options?.dpi);
+  if (!Number.isInteger(dpi) || dpi <= 0) throw new Error("LiDE experiment DPI must be a positive integer");
+  const region = diagnosticExperimentRegion(options?.region);
+  const bridge = await ensureBridge();
+  const startedAt = new Date().toISOString();
+  const result = await run(
+    bridge,
+    [
+      "experiment",
+      outputDirectory,
+      String(dpi),
+      String(region.x),
+      String(region.y),
+      String(region.width),
+      String(region.height),
+    ],
+    720_000
+  );
+  if (
+    result.status !== "captured" ||
+    result.captureKind !== "diagnostic_experiment" ||
+    typeof result.path !== "string"
+  ) {
+    throw new Error(result.error || "LiDE diagnostic experiment capture failed");
+  }
+  const root = path.resolve(outputDirectory) + path.sep;
+  const capturedPath = path.resolve(result.path);
+  if (!capturedPath.startsWith(root) || ![".tif", ".tiff"].includes(path.extname(capturedPath).toLowerCase())) {
+    throw new Error("LiDE bridge returned an unsafe or non-TIFF diagnostic output path");
+  }
+  const stat = fs.statSync(capturedPath);
+  if (!stat.isFile() || stat.size < 4) throw new Error("LiDE bridge returned an empty diagnostic TIFF");
+  return {
+    path: capturedPath,
+    sizeBytes: stat.size,
+    requestedRegionMm: region,
+    appliedRegionMm: result.scanAreaMm,
+    requestedDpi: dpi,
+    driverResolutionDpi: Number(result.driverResolutionDpi),
+    physicalScanDurationMs: Number(result.physicalScanDurationMs),
+    capturedAt: startedAt,
+    scanner: {
+      model: result.model || MODEL,
+      deviceId: result.deviceId || "",
+      serial: result.serial || null,
+    },
+  };
+}
+
 module.exports = {
   PROFILE_VERSION,
   stationId,
@@ -479,13 +739,23 @@ module.exports = {
   positioningPreview,
   placementPreview,
   scanCalibrationRegion,
+  diagnosticCapabilities,
+  diagnosticCapture,
   persistJigOrigin,
   adoptServerCaptureWindow,
   captureProfile,
+  stationConfigPath,
   _private: {
     jigOrigin,
+    stationConfigValues,
+    CANONICAL_STATION_CONFIG_PATH,
+    LEGACY_STATION_CONFIG_PATH,
+    PACKAGED_BRIDGE,
     calibrationRegion,
+    diagnosticExperimentRegion,
     ensureBridge,
+    isPackagedRuntime,
+    validatePackagedBridge,
     CALIBRATION_MIN_MM,
     PLATEN_MAX_MM,
     PROFILE_AREA_MM,

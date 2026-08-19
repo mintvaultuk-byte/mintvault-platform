@@ -90,6 +90,12 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // The Grading Credit pack catalogue. Needed by any suite exercising a purchase, and harmless
   // elsewhere — it is global reference data with no tenant column.
   "0083_partner_credit_packs",
+  // Canonical currency accompanies the Stripe Price ID. A wallet grant now fails closed without
+  // both values, so every real-money harness must construct this additive pack shape too.
+  "0093_partner_credit_pack_currency",
+  // Local Checkout provenance: the verified webhook must match a server-created Stripe Session
+  // before it can grant wallet capacity.
+  "0097_partner_credit_checkout_sessions",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -132,6 +138,8 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
 export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
   "0033_partner_audit_action_precision",
+  // 0096 widens the same management-audit CHECK for the protected Card Job void wrapper.
+  "0096_partner_card_job_void_management_audit",
 ] as const;
 
 /**
@@ -232,6 +240,10 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // because it genuinely depends on the core schema, not to make a list balance.
   "0091_capture_session_calibration_snapshot",
   "0092_partner_station_calibrate_permission",
+  // APPLICATION scope: replaces scanner_capture_sessions' physical-station partial unique index and
+  // adds the physical_released column. It cannot run on a partner-only database because the scanner
+  // capture table is a core-certificate dependency.
+  "0094_scanner_capture_physical_release",
   // GB-03 public acquisition records are deliberately application-scoped even
   // though they have no `partner_*` foreign key: a partner-only harness must
   // never claim it exercised public lead retention, consent or notification.
@@ -315,9 +327,15 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // RENUMBERED 0078 -> 0089: main landed a different 0078. Self-contained table, so the later
   // position changes nothing. PARTNER scope — touches no core table.
   "0089_partner_shared_rate_limit_buckets",
-  // Forward-only management-audit vocabulary repair for the super-admin Card Job void wrapper.
-  // It only rewrites the existing partner_management_audit CHECK as a strict superset.
-  "0094_partner_management_audit_card_job_void",
+  // PARTNER scope: additive canonical Stripe currency beside the existing global pack Price ID.
+  // It touches no core table and preserves every legacy row as NULL until owner configuration.
+  "0093_partner_credit_pack_currency",
+  // PARTNER scope: one-value CHECK widen on partner_management_audit for the protected Card Job
+  // void wrapper. No core table dependency.
+  "0096_partner_card_job_void_management_audit",
+  // PARTNER scope: tenant-owned payment provenance with RLS; depends only on partner organisations
+  // and the global credit-pack catalogue.
+  "0097_partner_credit_checkout_sessions",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -409,7 +427,7 @@ export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
   // The super-admin Card Job void wrapper records this precise management-audit action. Include
   // the forward-only vocabulary repair in every real-Postgres Card Job harness so the exercised
   // workflow runs against the same constraint contract as production will after migration.
-  "0094_partner_management_audit_card_job_void",
+  "0096_partner_card_job_void_management_audit",
 ] as const;
 /**
  * 0044 widens partner_submissions.status past the three states 0007 allowed (draft /
@@ -443,6 +461,8 @@ export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
   "0086_partner_session_step_up",
   // PARTNER scope: one new table (partner_grading_leases) with RLS, FK'd only to partner tables.
   "0087_partner_grading_edit_lease",
+  // PARTNER scope: one-value CHECK widen on partner_management_audit for Card Job voids.
+  "0096_partner_card_job_void_management_audit",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only

@@ -97,12 +97,18 @@ export async function grantScannerEvidenceStaging(input: {
       throw new Error("Capture session is not bound to this authenticated station");
     }
     if (sessionRow.state !== "claimed") throw new Error("Capture session is not awaiting scanner acceptance");
-    if (new Date(String(sessionRow.expires_at)).getTime() <= Date.now()) {
+    if (sessionRow.physical_released !== true && new Date(String(sessionRow.expires_at)).getTime() <= Date.now()) {
       await client.query("UPDATE scanner_capture_sessions SET state='expired' WHERE id=$1 AND state='claimed'", [
         input.sessionId,
       ]);
       throw new Error("Capture session expired");
     }
+    await client.query(
+      `UPDATE scanner_evidence_staging
+          SET state='expired', updated_at=NOW(), failure_reason='Upload grant expired before finalisation'
+        WHERE capture_session_id=$1 AND state='granted' AND expires_at <= NOW()`,
+      [input.sessionId]
+    );
     const existing = await client.query(
       `SELECT * FROM scanner_evidence_staging
         WHERE capture_session_id=$1 AND state='granted' AND expires_at > NOW()
@@ -144,7 +150,8 @@ export async function grantScannerEvidenceStaging(input: {
     }
     await client.query(
       `UPDATE scanner_capture_sessions
-          SET expires_at=GREATEST(expires_at, $2::timestamptz)
+          SET physical_released=true,
+              expires_at=GREATEST(expires_at, $2::timestamptz)
         WHERE id=$1 AND state='claimed'`,
       [input.sessionId, expiresAt]
     );

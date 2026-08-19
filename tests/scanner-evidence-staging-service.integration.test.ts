@@ -49,6 +49,7 @@ suite("scanner evidence staging service — real PostgreSQL", () => {
         actor_id text,
         state varchar(16) NOT NULL,
         claimed_by_device_id text,
+        physical_released boolean NOT NULL DEFAULT false,
         recapture boolean NOT NULL DEFAULT false,
         failure_reason text,
         created_at timestamptz NOT NULL DEFAULT now(),
@@ -119,6 +120,12 @@ suite("scanner evidence staging service — real PostgreSQL", () => {
       staging.grantScannerEvidenceStaging(request),
     ]);
     expect(first.staging.id).toBe(second.staging.id);
+    expect(first.session.physicalReleased).toBe(true);
+    const released = await admin.query<{ physical_released: boolean }>(
+      "SELECT physical_released FROM scanner_capture_sessions WHERE id=$1",
+      [request.sessionId]
+    );
+    expect(released.rows[0].physical_released).toBe(true);
     await expect(staging.grantScannerEvidenceStaging({ ...request, expectedSha256: "b".repeat(64) })).rejects.toThrow(
       /different TIFF candidate/i
     );

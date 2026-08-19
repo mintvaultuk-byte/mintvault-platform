@@ -193,11 +193,24 @@ function pressNew(shop: Shop, stationId: string, clientOpId: string): Promise<Ne
 }
 
 /** The REAL webhook grant, exactly as the verified handler calls it. */
-function deliverWebhook(shop: Shop, eventId: string, sessionId: string) {
+async function deliverWebhook(shop: Shop, eventId: string, sessionId: string) {
+  await purchase.recordPartnerCreditCheckoutIntent({
+    stripeSessionId: sessionId,
+    tenantId: shop.tenantId,
+    packCode: PACK_CODE,
+    initiatingUserId: shop.userId,
+    stripePriceId: "price_test_pack_10",
+    stripeCurrency: "gbp",
+    stripeEnvironment: "test",
+  });
   return purchase.fulfilPartnerCreditPurchase(
     {
       id: sessionId,
       payment_status: "paid",
+      verifiedCheckout: true as const,
+      livemode: false,
+      currency: "gbp",
+      lineItems: [{ priceId: "price_test_pack_10", currency: "gbp" }],
       metadata: {
         partner_tenant_id: shop.tenantId,
         partner_pack_code: PACK_CODE,
@@ -374,16 +387,25 @@ describe("AT-21 webhook grant under concurrent NEW (real PostgreSQL)", () => {
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
       PARTNER_CONNECTOR_DATABASE_URL: process.env.PARTNER_CONNECTOR_DATABASE_URL,
+      STRIPE_ENV: process.env.STRIPE_ENV,
     };
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
     delete process.env.PARTNER_CONNECTOR_DATABASE_URL;
+    process.env.STRIPE_ENV = "test";
 
     wallet = await import("../server/partner/partner-wallet-service");
     authority = await import("../server/partner/card-job-authority");
     purchase = await import("../server/partner/credit-purchase-service");
     drizzle = await import("../server/db");
+
+    await admin.query(
+      `UPDATE partner_credit_packs
+          SET stripe_price_id='price_test_pack_10', stripe_currency='gbp'
+        WHERE code=$1`,
+      [PACK_CODE]
+    );
 
     shopUnderTest = await makeShop("at21");
     otherShop = await makeShop("neighbour");

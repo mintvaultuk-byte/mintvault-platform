@@ -1213,7 +1213,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     await admin.query("UPDATE partner_users SET mfa_required=false WHERE email='enrol@a.com'");
   });
 
-  it("MFA disable requires password + a valid second factor; then revokes sessions", async () => {
+  it("MFA self-service removal is refused even with password + a valid second factor", async () => {
     const secret = await ensureActiveAuthenticator();
     // enrol@a has an ACTIVE totp method; login must challenge even if mfa_required drifted false.
     const { cookie } = await login("enrol@a.com");
@@ -1223,57 +1223,32 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
       [A, recoveryHash("disable-login-code")]
     );
     expect((await post("/api/partner/auth/mfa", { recoveryCode: "disable-login-code" }, cookie)).status).toBe(200);
-    // disable without second factor fails
-    expect((await post("/api/partner/mfa/disable", { password: "correct-horse-battery" }, cookie)).status).toBe(400);
-    // with a valid TOTP it succeeds (clear replay counter so a recent F3-test code doesn't collide)
+    const before = await admin.query<{ mfa_required: boolean; mfa_enabled: boolean; credential_version: number }>(
+      "SELECT mfa_required, mfa_enabled, credential_version FROM partner_users WHERE email='enrol@a.com'"
+    );
+    // A current TOTP does not turn an ordinary user into the MFA recovery authority.
     await admin.query(
       "UPDATE partner_mfa_methods SET last_totp_counter=NULL WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE'"
     );
     const { currentTotp } = await import("../server/partner/mfa");
     process.env.PARTNER_MFA_ENC_KEY = process.env.PARTNER_MFA_ENC_KEY || "0".repeat(64);
     const code = currentTotp(secret, Date.now());
-    const disabled = await post("/api/partner/mfa/disable", { password: "correct-horse-battery", code }, cookie);
-    expect(disabled.status).toBe(200);
-    // sessions revoked
-    expect((await get("/api/partner/session", cookie)).status).toBe(401);
-    // no active method remains
+    const denied = await post("/api/partner/mfa/disable", { password: "correct-horse-battery", code }, cookie);
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toBe("self-service MFA removal is not available");
+
+    // Active factor, policy, credentials, and current session remain intact.
     const active = await admin.query<{ n: number }>(
       "SELECT count(*)::int n FROM partner_mfa_methods WHERE user_id='11111111-0000-0000-0000-0000000000a4' AND status='ACTIVE'"
     );
-    expect(active.rows[0].n).toBe(0);
-
-    // F2 — THE REQUIREMENT SURVIVES THE METHOD.
-    //
-    // Disable removes the AUTHENTICATOR, never the account POLICY. mfa_required is the only flag
-    // the session layer reads; clearing it here would let a partner user self-revoke the mandate
-    // and sign in with a password alone, permanently. The 2026-08-11 mainline reconciliation did
-    // exactly that by taking the pre-fix side of a merge, which is why this is asserted at the
-    // database AND through a real login rather than trusted to a comment.
     const policy = await admin.query<{ mfa_required: boolean; mfa_enabled: boolean }>(
       "SELECT mfa_required, mfa_enabled FROM partner_users WHERE email='enrol@a.com'"
     );
-    expect(policy.rows[0].mfa_required, "disabling the method must never clear the requirement").toBe(true);
-    expect(policy.rows[0].mfa_enabled).toBe(false);
-
-    // …and the behaviour that flag controls: the next password-only login is NOT fully
-    // authenticated. GET /session is deliberately reachable while mfa-pending — it is how the
-    // client learns that enrolment is the next step — so the invariant is asserted on the POSTURE
-    // it reports and on a genuinely gated surface, not on /session's status code.
-    const after = await login("enrol@a.com");
-    expect(after.body.mfaRequired, "login must still report a second step outstanding").toBe(true);
-    const sess = await (await get("/api/partner/session", after.cookie)).json();
-    expect(sess.mfaPassed, "a password alone must not produce an mfa-passed session").toBe(false);
-    expect(sess.mfaEnrolmentRequired, "the user must be sent to enrolment, not a code prompt").toBe(true);
-    expect(
-      (await get("/api/partner/dashboard", after.cookie)).status,
-      "a gated surface must refuse a password-only session after disable"
-    ).toBe(401);
-
-    // The user is not stranded: bootstrap re-enrolment is still reachable with the password alone,
-    // because mfaEnrolStart only demands a current factor when one still EXISTS.
-    expect((await post("/api/partner/mfa/enrol", { password: "correct-horse-battery" }, after.cookie)).status).toBe(
-      200
-    );
-    await post("/api/partner/mfa/cancel", {}, after.cookie);
+    expect(active.rows[0].n).toBe(1);
+    expect(policy.rows[0]).toEqual({
+      mfa_required: before.rows[0].mfa_required,
+      mfa_enabled: before.rows[0].mfa_enabled,
+    });
+    expect((await get("/api/partner/dashboard", cookie)).status).toBe(200);
   });
 });

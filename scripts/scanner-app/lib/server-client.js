@@ -86,16 +86,18 @@ function fingerprintTiffMaster(filePath) {
 }
 
 /** PUT an exact TIFF stream to a server-minted R2 staging URL. */
-async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
+async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength, options = {}) {
   const fetch = await getFetch();
   const stream = fs.createReadStream(filePath);
   const controller = new AbortController();
   let lastProgressAt = Date.now();
   let sent = 0;
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const counter = new Transform({
     transform(chunk, _encoding, callback) {
       sent += chunk.length;
       lastProgressAt = Date.now();
+      if (onProgress) onProgress({ phase: "uploading", bytesSent: sent, totalBytes: byteLength });
       callback(null, chunk);
     },
   });
@@ -116,6 +118,7 @@ async function putStagedTiff(uploadUrl, suppliedHeaders, filePath, byteLength) {
       return { ok: false, status: response.status, body: { error: message || `R2 staging PUT failed — HTTP ${response.status}` } };
     }
     if (sent !== byteLength) return { ok: false, status: 0, body: { error: "R2 staging stream ended before all TIFF bytes were sent" } };
+    if (onProgress) onProgress({ phase: "uploaded", bytesSent: byteLength, totalBytes: byteLength });
     return { ok: true, status: response.status, body: {} };
   } catch (error) {
     return { ok: false, status: 0, body: { error: error?.name === "AbortError" ? "R2 staging upload stalled" : (error?.message || String(error)) } };
@@ -494,35 +497,99 @@ async function claimNextCapture(workstationId, deviceId) {
 }
 
 /**
- * Upload to a server-owned R2 staging key, then ask the server to validate and
- * promote that exact object. Older/local development servers retain the
- * bounded multipart route as a compatibility fallback only.
+ * Create the server-owned upload task for this exact TIFF candidate.
+ *
+ * This is the SFAP-015 hand-off boundary: the station may release the physical
+ * scanner only after this call succeeds. A local TIFF + hash without this grant
+ * is durable, but it is not yet a background upload task and must not unlock BACK.
  */
-async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance) {
+async function prepareCaptureEvidenceUpload(sessionId, deviceId, filePath, provenance, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
   const expected = await fingerprintTiffMaster(filePath);
+  if (onProgress) onProgress({ phase: "queued", bytesSent: 0, totalBytes: expected.byteLength });
   const grant = await postJson(`/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload`, {
     device_id: deviceId,
     sha256: expected.sha256,
     byte_length: expected.byteLength,
     capture_provenance: provenance,
   });
+  if (grant.ok && grant.body?.transport === "direct" && grant.body?.upload_url && grant.body?.staging_id) {
+    return {
+      ok: true,
+      status: grant.status,
+      body: {
+        transport: "direct",
+        staging_id: grant.body.staging_id,
+        expires_at: grant.body.expires_at,
+        upload_url: grant.body.upload_url,
+        headers: grant.body.headers || {},
+        expected_sha256: expected.sha256,
+        expected_bytes: expected.byteLength,
+      },
+    };
+  }
+  if (grant.ok) {
+    return {
+      ok: false,
+      status: 501,
+      body: { error: "MintVault did not grant a direct background upload task for this capture" },
+      fallbackToMultipart: true,
+    };
+  }
+  return grant;
+}
+
+async function finalisePreparedCaptureEvidenceUpload(sessionId, deviceId, filePath, prepared, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const task = prepared?.body || prepared || {};
+  const byteLength = Number(task.expected_bytes || task.expectedBytes);
+  if (task.transport !== "direct" || !task.upload_url || !task.staging_id || !Number.isSafeInteger(byteLength) || byteLength <= 0) {
+    return { ok: false, status: 409, body: { error: "Background upload task is incomplete or no longer usable" } };
+  }
+  const staged = await putStagedTiff(task.upload_url, task.headers || {}, filePath, byteLength, {
+    onProgress,
+  });
+  if (!staged.ok) return staged;
+  if (onProgress) onProgress({ phase: "server_validating", bytesSent: byteLength, totalBytes: byteLength });
+  return postJson(
+    `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload/${encodeURIComponent(task.staging_id)}/finalise`,
+    { device_id: deviceId }
+  );
+}
+
+async function finaliseStagedCaptureEvidence(sessionId, deviceId, stagingId, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  if (!stagingId || typeof stagingId !== "string") {
+    return { ok: false, status: 409, body: { error: "Background upload task has no staging id" } };
+  }
+  if (onProgress) onProgress({ phase: "server_validating", bytesSent: 0, totalBytes: 0 });
+  return postJson(
+    `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload/${encodeURIComponent(stagingId)}/finalise`,
+    { device_id: deviceId }
+  );
+}
+
+/**
+ * Upload to a server-owned R2 staging key, then ask the server to validate and
+ * promote that exact object. Older/local development servers retain the
+ * bounded multipart route as a compatibility fallback only.
+ */
+async function uploadCaptureEvidence(sessionId, deviceId, filePath, provenance, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  const prepared = await prepareCaptureEvidenceUpload(sessionId, deviceId, filePath, provenance, options);
+  if (prepared.ok) return finalisePreparedCaptureEvidenceUpload(sessionId, deviceId, filePath, prepared, options);
   // A local proof adapter intentionally has no presigned R2 endpoint, and a
   // rolling server can briefly lack migration 0047/routes. Both fall back to
   // the existing bounded receive path; production rejects static-token use and
-  // the current route always chooses direct staging.
-  if (grant.ok && grant.body?.transport === "direct" && grant.body?.upload_url && grant.body?.staging_id) {
-    const staged = await putStagedTiff(grant.body.upload_url, grant.body.headers || {}, filePath, expected.byteLength);
-    if (!staged.ok) return staged;
-    return postJson(
-      `/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/staged-upload/${encodeURIComponent(grant.body.staging_id)}/finalise`,
-      { device_id: deviceId }
-    );
-  }
-  if (!grant.ok && ![404, 405, 501].includes(grant.status)) return grant;
+  // the current route always chooses direct staging. The SFAP-015 scanner path
+  // does NOT use this fallback to release the physical target.
+  if (!prepared.fallbackToMultipart && ![404, 405, 501].includes(prepared.status)) return prepared;
+  const expected = await fingerprintTiffMaster(filePath);
   const form = new FormData();
   appendTiffMaster(form, "image", filePath);
   form.append("device_id", deviceId);
   form.append("capture_provenance", JSON.stringify(provenance));
+  if (onProgress) onProgress({ phase: "server_validating", bytesSent: expected.byteLength, totalBytes: expected.byteLength });
   return postForm(`${apiBase()}/api/admin/scanner/capture-sessions/${encodeURIComponent(sessionId)}/evidence`, form);
 }
 
@@ -580,6 +647,9 @@ module.exports = {
   uploadPair,
   attachImage,
   claimNextCapture,
+  prepareCaptureEvidenceUpload,
+  finalisePreparedCaptureEvidenceUpload,
+  finaliseStagedCaptureEvidence,
   uploadCaptureEvidence,
   getCaptureStatus,
   renewCapture,

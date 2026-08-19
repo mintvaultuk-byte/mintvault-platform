@@ -38,6 +38,13 @@ describe("§23 FRONT-before-BACK is enforced server-side", () => {
     expect(src).toMatch(/Back capture refused until an immutable front master exists/);
   });
 
+  it("the staged BACK-before-FRONT refusal is retryable, so a valid BACK upload is not discarded", () => {
+    const src = read("server/routes.ts");
+    expect(src).toMatch(/until an immutable front master exists/);
+    expect(src).toMatch(/failScannerEvidenceFinalisation\(stagingId, reason, retryable\)/);
+    expect(src).toMatch(/finishScannerCapture\(sessionId, false, reason, retryable\)/);
+  });
+
   it("the ordering check runs BEFORE the expensive TIFF decode, not after", () => {
     const src = read("server/scanner-evidence-finalisation.ts");
     const guard = src.indexOf("Back capture refused");
@@ -83,5 +90,35 @@ describe("§33 a committed FRONT survives a BACK failure", () => {
   it("the per-side advisory lock keys on the side, so the two sides never contend", () => {
     const src = read("server/scan-ingest-service.ts");
     expect(src).toMatch(/evidence:\$\{certId\}:\$\{side\}/);
+  });
+});
+
+describe("SFAP-015 staged finalise convergence is retryable after immutable evidence commit", () => {
+  it("the already-accepted staged path reconciles the post-commit tail before returning", () => {
+    const src = read("server/routes.ts");
+    const alreadyAccepted = src.indexOf("if (prepared.alreadyAccepted)");
+    const reconcile = src.indexOf("reconcileAcceptedScannerEvidence", alreadyAccepted);
+    const response = src.indexOf("return res.json", alreadyAccepted);
+    expect(alreadyAccepted).toBeGreaterThan(-1);
+    expect(reconcile).toBeGreaterThan(alreadyAccepted);
+    expect(response).toBeGreaterThan(reconcile);
+  });
+
+  it("the convergence helper reloads session-bound immutable evidence and replays every idempotent tail step", () => {
+    const src = read("server/scanner-evidence-finalisation.ts");
+    expect(src).toMatch(/capture_metadata\s*->>\s*'captureSessionId'\s*=\s*\$\{session\.id\}/);
+    expect(src).toMatch(/export async function reconcileAcceptedScannerEvidence/);
+    expect(src).toMatch(/enqueueScannerProcessing\(input\.session\.certificateId, input\.session\.stationId\)/);
+    expect(src).toMatch(/finishScannerCapture\(input\.session\.id, true\)/);
+    expect(src).toMatch(/recordAcceptedScannerEvidence/);
+    expect(src).toMatch(/completeScannerEvidenceFinalisation\(input\.stagingId\)/);
+  });
+
+  it("retry reconciliation does not write duplicate scanner-accepted audit rows", () => {
+    const src = read("server/scanner-evidence-finalisation.ts");
+    expect(src).toMatch(/scannerAcceptanceAuditExists/);
+    expect(src).toMatch(/action\s*=\s*'scanner_capture_accepted'/);
+    expect(src).toMatch(/details\s*->>\s*'capture_session_id'\s*=\s*\$\{session\.id\}/);
+    expect(src).toMatch(/if \(!\(await scannerAcceptanceAuditExists\(input\.session\)\)\)/);
   });
 });

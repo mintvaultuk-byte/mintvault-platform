@@ -109,6 +109,8 @@ describe("PRES-3 — the buy control obeys the server", () => {
     expect(billing).toContain("pack.purchasable");
     // Catalogued-but-not-priced must say so rather than offering a button that 400s.
     expect(billing).toContain("Pricing not yet configured");
+    expect(billing).toContain("Stripe TEST/LIVE mode not configured");
+    expect(billing).toContain("Stripe mode does not match this environment");
   });
 
   it("shows no buy control at all without the purchase permission", () => {

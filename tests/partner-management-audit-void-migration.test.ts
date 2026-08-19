@@ -1,5 +1,5 @@
 /**
- * Forward-only database proof for 0094.
+ * Forward-only database proof for canonical 0096.
  *
  * This suite starts an isolated PostgreSQL 17.10 cluster and applies the real SQL exactly as the
  * migration runner does (inside one transaction). It never reads any configured application
@@ -13,7 +13,7 @@ import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17
 
 const ROOT = process.cwd();
 const PRIOR_MIGRATION = join(ROOT, "migrations", "0084_partner_location_management.sql");
-const MIGRATION = join(ROOT, "migrations", "0094_partner_management_audit_card_job_void.sql");
+const MIGRATION = join(ROOT, "migrations", "0096_partner_card_job_void_management_audit.sql");
 const NEW_ACTION = "partner_card_job_voided";
 const UNKNOWN_ACTION = "partner_card_job_totally_invalid_test_event";
 
@@ -30,7 +30,7 @@ const migrationSql = readFileSync(MIGRATION, "utf8");
 let cluster: DisposablePostgres17;
 let admin: Client;
 
-describe("0094 Partner Card Job void audit vocabulary", () => {
+describe("0096 Partner Card Job void audit vocabulary", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-management-audit-void-migration");
     admin = new Client({ connectionString: cluster.url });

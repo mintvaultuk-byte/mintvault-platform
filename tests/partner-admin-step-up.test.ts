@@ -292,6 +292,7 @@ describe("AG-3b integration surfaces", () => {
       [management, '"/partners/:partnerId/status"'],
       [dashboard, '"/partners/:partnerId/credits/adjust"'],
       [adminRoutes, '"/:partnerId/emergency-stop"'],
+      [adminRoutes, '"/:partnerId/users/:userId/mfa-reset"'],
     ];
     for (const [source, path] of guarded) {
       const idx = source.indexOf(path);

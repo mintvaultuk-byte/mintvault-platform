@@ -219,8 +219,12 @@ body {
   gap: 8px;
   padding: 8px;
 }
-.placement-panel[data-placement-state="GREEN"] { border-color: var(--green); }
-.placement-panel[data-placement-state="RED"] { border-color: var(--red); }
+.placement-panel[data-placement-state="GREEN"] {
+  border-color: var(--green);
+}
+.placement-panel[data-placement-state="RED"] {
+  border-color: var(--red);
+}
 /*
  * The viewport is locked to the capture window's own aspect ratio, which is what lets every overlay
  * be expressed as a PERCENTAGE of the window rather than in raster pixels. Set inline from the
@@ -264,8 +268,12 @@ body {
   border: 1px solid var(--blue);
   box-shadow: 0 0 0 1px rgb(0 0 0 / 45%);
 }
-[data-placement-state="GREEN"] .placement-box--card { border-color: var(--green); }
-[data-placement-state="RED"] .placement-box--card { border-color: var(--red); }
+[data-placement-state="GREEN"] .placement-box--card {
+  border-color: var(--green);
+}
+[data-placement-state="RED"] .placement-box--card {
+  border-color: var(--red);
+}
 /*
  * THE CAPTURE AREA — the one outline the operator works to, so it is the one that reads as a target.
  * Still only 1px: "put the whole card inside the capture area" needs a clear edge, not a thick one.
@@ -282,8 +290,12 @@ body {
   margin: 0;
   text-align: center;
 }
-[data-placement-state="GREEN"] .placement-message { color: var(--green); }
-[data-placement-state="RED"] .placement-message { color: var(--red); }
+[data-placement-state="GREEN"] .placement-message {
+  color: var(--green);
+}
+[data-placement-state="RED"] .placement-message {
+  color: var(--red);
+}
 .placement-diagnostics {
   color: var(--muted);
   font-size: 10px;
@@ -337,8 +349,12 @@ body {
   justify-content: center;
   position: absolute;
 }
-.platen-window--movable { cursor: grab; }
-.platen-window--movable:active { cursor: grabbing; }
+.platen-window--movable {
+  cursor: grab;
+}
+.platen-window--movable:active {
+  cursor: grabbing;
+}
 .platen-window > span {
   color: var(--blue);
   font-size: 7px;
@@ -586,6 +602,21 @@ body {
   min-height: 14px;
   text-align: center;
 }
+.upload-status-panel {
+  background: rgba(76, 154, 255, 0.08);
+  border: 1px solid rgba(76, 154, 255, 0.25);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+}
+.upload-status-line {
+  color: var(--fg);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  margin: 0;
+}
 .capture-rescan-only {
   min-height: 42px;
   width: 100%;
@@ -665,6 +696,27 @@ body {
   border-color: #5b4b28;
   color: #b7a36e;
   opacity: 1;
+}
+
+.credit-empty {
+  align-items: center;
+  background: rgba(245, 158, 11, 0.09);
+  border: 1px solid rgba(245, 158, 11, 0.7);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+.credit-empty-title {
+  color: var(--orange);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+}
+.credit-empty .btn {
+  min-height: 36px;
+  white-space: nowrap;
 }
 
 .secondary {
@@ -818,6 +870,33 @@ body {
   justify-content: flex-end;
   margin-top: 4px;
 }
+.billing-lock-modal {
+  z-index: 120;
+}
+.billing-lock-subtitle {
+  color: var(--fg);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+.billing-pack-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.billing-pack-grid .billing-pack:last-child {
+  grid-column: 1 / -1;
+}
+.billing-pack {
+  min-height: 44px;
+}
+.billing-lock-error {
+  color: var(--orange);
+  font-size: 11px;
+  font-weight: 700;
+  margin: 0;
+}
 .hint {
   color: var(--muted);
   font-size: 10px;
@@ -938,13 +1017,22 @@ body {
   border-radius: 3px;
   margin-right: 8px;
   text-transform: uppercase;
-  background: #D4AF37;
-  color: #1A1400;
+  background: #d4af37;
+  color: #1a1400;
 }
-.hdr-env[data-environment="invalid"] { background: #b3261e; color: #fff; }
-.hdr-env[data-environment="development"] { background: #3a6ea5; color: #fff; }
+.hdr-env[data-environment="invalid"] {
+  background: #b3261e;
+  color: #fff;
+}
+.hdr-env[data-environment="development"] {
+  background: #3a6ea5;
+  color: #fff;
+}
 
-#environmentWarning { color: #b3261e; font-weight: 700; }
+#environmentWarning {
+  color: #b3261e;
+  font-weight: 700;
+}
 
 /* A button that reads as a link — keeps keyboard/focus semantics correct
    while sitting inside the sign-in form. */
@@ -959,7 +1047,9 @@ body {
   text-decoration: underline;
   cursor: pointer;
 }
-.linklike:hover { color: #1A1400; }
+.linklike:hover {
+  color: #1a1400;
+}
 
 /* Capture-window save outcome. A refusal used to render in the same grey as
    "Saving…" and as success, which is how an operator came to believe a refused
@@ -968,5 +1058,10 @@ body {
   color: #b3261e;
   font-weight: 800;
 }
-#captureWindowStatus[data-state="saved"] { color: #1f7a34; font-weight: 700; }
-#captureWindowStatus[data-state="pending"] { color: #7a7a7a; }
+#captureWindowStatus[data-state="saved"] {
+  color: #1f7a34;
+  font-weight: 700;
+}
+#captureWindowStatus[data-state="pending"] {
+  color: #7a7a7a;
+}

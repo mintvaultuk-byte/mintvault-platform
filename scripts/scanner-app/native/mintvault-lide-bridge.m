@@ -12,6 +12,26 @@
 // Canon's ICA module has shipped `CanoScan LiDE 400`, `Canon LiDE 400`, and
 // `LiDE 400` as the public ImageCaptureCore device name.  Accept only these
 // identifiers; this is an alias normalization, not a broad scanner-name match.
+/*
+ * THE PLATEN IS DEFINED ONCE, IN JAVASCRIPT, AND MIRRORED HERE.
+ *
+ * THE DEFECT THIS CLOSES (2026-08-18). This guard used to test the requested window against
+ * hardcoded 216.0 x 297.0 mm while `shared/lide400-capture-profile.cjs` — the module the JS layer
+ * AND the server both validate against — defines the platen as 215.9 x 297.0107 mm. The JS layer
+ * therefore published a maximum legal origin of y = 167.01 mm (297.0107 - 130), the operator saved
+ * exactly that origin, the server recorded it as VALID, and then every acquisition at that origin
+ * was refused here: 167.01 + 130 = 297.01, which is 0.01 mm past this file's 297.0.
+ *
+ * The station was left in a state where its own saved, server-approved capture window could not be
+ * scanned or even previewed, and the operator saw only a disabled PREVIEW button. Any origin at the
+ * bottom edge of the platen fell into the 0.0107 mm gap between the two definitions.
+ *
+ * These constants MUST equal `PLATEN_MM` in shared/lide400-capture-profile.cjs.
+ * `test/native-platen-bounds.test.js` fails if they ever drift again.
+ */
+static const double MV_PLATEN_WIDTH_MM = 215.9;
+static const double MV_PLATEN_HEIGHT_MM = 297.0107;
+
 static NSString *const kExpectedFullName = @"CanoScan LiDE 400";
 static NSString *const kExpectedCanonName = @"Canon LiDE 400";
 static NSString *const kExpectedShortName = @"LiDE 400";
@@ -27,6 +47,9 @@ static NSString *const kExpectedShortName = @"LiDE 400";
 @property(nonatomic) double scanHeightMm;
 @property(nonatomic) BOOL calibration;
 @property(nonatomic) BOOL positioningPreview;
+@property(nonatomic) BOOL capabilitiesProbe;
+@property(nonatomic) BOOL experimentScan;
+@property(nonatomic) NSUInteger requestedResolutionDpi;
 /*
  * The per-side PLACEMENT preview: the calibrated capture window only, at 300 DPI, as JPEG.
  *
@@ -39,6 +62,7 @@ static NSString *const kExpectedShortName = @"LiDE 400";
  */
 @property(nonatomic) BOOL placementPreview;
 @property(nonatomic, strong) NSDictionary *appliedScanAreaMm;
+@property(nonatomic, strong) NSDate *scanRequestedAt;
 @property(nonatomic) BOOL scanning;
 @property(nonatomic) BOOL complete;
 @property(nonatomic, strong) NSDictionary *result;
@@ -85,6 +109,88 @@ static NSString *const kExpectedShortName = @"LiDE 400";
     @"availableFunctionalUnitTypes": scanner.availableFunctionalUnitTypes ?: @[],
     @"selectedFunctionalUnitType": unit ? @(unit.type) : [NSNull null],
   };
+}
+
+- (NSArray *)indexSetValues:(NSIndexSet *)set {
+  NSMutableArray *values = [NSMutableArray array];
+  [set enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL *stop) {
+    (void)stop;
+    [values addObject:@(idx)];
+  }];
+  return values;
+}
+
+- (id)jsonValue:(id)value {
+  if (!value || value == (id)kCFNull) return [NSNull null];
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]]) return value;
+  if ([value isKindOfClass:[NSURL class]]) return [value absoluteString] ?: @"";
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *out = [NSMutableArray array];
+    for (id item in (NSArray *)value) [out addObject:[self jsonValue:item]];
+    return out;
+  }
+  if ([value isKindOfClass:[NSIndexSet class]]) return [self indexSetValues:(NSIndexSet *)value];
+  if ([value isKindOfClass:[NSValue class]]) {
+    const char *type = [(NSValue *)value objCType];
+    if (strcmp(type, @encode(NSRect)) == 0) {
+      NSRect r = [(NSValue *)value rectValue];
+      return @{ @"x": @(r.origin.x), @"y": @(r.origin.y), @"width": @(r.size.width), @"height": @(r.size.height) };
+    }
+    if (strcmp(type, @encode(NSSize)) == 0) {
+      NSSize s = [(NSValue *)value sizeValue];
+      return @{ @"width": @(s.width), @"height": @(s.height) };
+    }
+  }
+  return [value description] ?: @"";
+}
+
+- (id)valueForKeyIfAvailable:(NSString *)key on:(id)object {
+  @try {
+    id value = [object valueForKey:key];
+    return [self jsonValue:value];
+  } @catch (NSException *exception) {
+    return [NSNull null];
+  }
+}
+
+- (NSDictionary *)capabilitiesPayload:(ICScannerDevice *)scanner unit:(ICScannerFunctionalUnit *)unit {
+  NSMutableDictionary *unitProperties = [NSMutableDictionary dictionary];
+  NSArray *keys = @[
+    @"type", @"pixelDataType", @"supportedPixelDataTypes", @"bitDepth", @"supportedBitDepths",
+    @"resolution", @"supportedResolutions", @"nativeXResolution", @"nativeYResolution",
+    @"measurementUnit", @"supportedMeasurementUnits", @"physicalSize", @"scanArea",
+    @"scanAreaOrientation", @"documentType", @"supportedDocumentTypes", @"brightness",
+    @"contrast", @"threshold", @"templates"
+  ];
+  for (NSString *key in keys) unitProperties[key] = [self valueForKeyIfAvailable:key on:unit];
+
+  NSMutableDictionary *payload = [[self devicePayload:scanner ready:YES] mutableCopy];
+  payload[@"status"] = @"capabilities";
+  payload[@"capabilitySource"] = @"macos-imagecapturecore";
+  payload[@"currentProductionProfile"] = @{
+    @"resolutionDpi": @1200,
+    @"pixelDataType": @"RGB",
+    @"bitDepth": @8,
+    @"documentUTI": @"public.tiff",
+    @"captureAreaMm": @{ @"width": @100, @"height": @130 },
+  };
+  payload[@"supportedResolutionsDpi"] = unit.supportedResolutions ? [self indexSetValues:unit.supportedResolutions] : @[];
+  payload[@"supportedBitDepths"] = unit.supportedBitDepths ? [self indexSetValues:unit.supportedBitDepths] : @[];
+  payload[@"supportedMeasurementUnits"] = unit.supportedMeasurementUnits ? [self indexSetValues:unit.supportedMeasurementUnits] : @[];
+  payload[@"imageCaptureCoreFunctionalUnit"] = unitProperties;
+  payload[@"canonNativeQualityControlsExposedByCurrentPath"] = @{
+    @"sharpening": @NO,
+    @"autoDocumentFix": @NO,
+    @"descreen": @NO,
+    @"noiseReduction": @NO,
+    @"colorCorrectionProfileControls": @NO,
+    @"gamma": @NO,
+    @"brightness": unitProperties[@"brightness"] == [NSNull null] ? @NO : @YES,
+    @"contrast": unitProperties[@"contrast"] == [NSNull null] ? @NO : @YES,
+    @"colorDepth": unit.supportedBitDepths ? [self indexSetValues:unit.supportedBitDepths] : @[],
+  };
+  payload[@"notes"] = @"This reports controls exposed to MintVault's current macOS ImageCaptureCore acquisition path only. Canon IJ Scan Utility / ScanGear controls are not assumed invokable by the Scanner app.";
+  return payload;
 }
 
 - (void)finish:(NSDictionary *)payload {
@@ -154,7 +260,7 @@ static NSString *const kExpectedShortName = @"LiDE 400";
     [self finish:payload];
     return;
   }
-  if (!self.scanning) {
+  if (!self.scanning && !self.capabilitiesProbe) {
     [self finish:[self devicePayload:device ready:YES]];
     return;
   }
@@ -181,8 +287,12 @@ static NSString *const kExpectedShortName = @"LiDE 400";
     [self finish:payload];
     return;
   }
+  if (self.capabilitiesProbe) {
+    [self finish:[self capabilitiesPayload:scanner unit:unit]];
+    return;
+  }
   BOOL lowResolutionPreview = self.positioningPreview || self.placementPreview;
-  NSUInteger requestedResolution = lowResolutionPreview ? 300 : 1200;
+  NSUInteger requestedResolution = self.experimentScan ? self.requestedResolutionDpi : (lowResolutionPreview ? 300 : 1200);
   if (![unit.supportedResolutions containsIndex:requestedResolution]) {
     [self finish:@{ @"status": @"profile_unsupported", @"error": [NSString stringWithFormat:@"LiDE driver does not expose %lu DPI", (unsigned long)requestedResolution] }];
     return;
@@ -240,6 +350,7 @@ static NSString *const kExpectedShortName = @"LiDE 400";
     [self finish:@{ @"status": @"profile_unsupported", @"error": @"LiDE driver did not apply the locked MintVault profile" }];
     return;
   }
+  self.scanRequestedAt = [NSDate date];
   [scanner requestScan];
 }
 
@@ -260,7 +371,7 @@ static NSString *const kExpectedShortName = @"LiDE 400";
   NSMutableDictionary *payload = [[self devicePayload:scanner ready:YES] mutableCopy];
   payload[@"status"] = @"captured";
   payload[@"path"] = self.scanURL.path;
-  payload[@"requestedDpi"] = @((self.positioningPreview || self.placementPreview) ? 300 : 1200);
+  payload[@"requestedDpi"] = @(self.experimentScan ? self.requestedResolutionDpi : ((self.positioningPreview || self.placementPreview) ? 300 : 1200));
   payload[@"driverResolutionDpi"] = @(unit.resolution);
   payload[@"scanAreaMm"] = self.appliedScanAreaMm ?: @{
     @"x": @(self.originXmm), @"y": @(self.originYmm),
@@ -268,7 +379,10 @@ static NSString *const kExpectedShortName = @"LiDE 400";
   };
   payload[@"captureKind"] = self.positioningPreview
     ? @"positioning_preview"
-    : (self.placementPreview ? @"placement_preview" : (self.calibration ? @"calibration" : @"profile"));
+    : (self.placementPreview ? @"placement_preview" : (self.experimentScan ? @"diagnostic_experiment" : (self.calibration ? @"calibration" : @"profile")));
+  if (self.scanRequestedAt) {
+    payload[@"physicalScanDurationMs"] = @(llround([[NSDate date] timeIntervalSinceDate:self.scanRequestedAt] * 1000.0));
+  }
   if (self.positioningPreview || self.placementPreview) {
     // This bridges one explicit contract to the JavaScript detector/renderer:
     // requested ImageCaptureCore scan-area millimetres map to an upright
@@ -299,12 +413,14 @@ int main(int argc, const char * argv[]) {
   @autoreleasepool {
     BOOL profileScan = argc == 5 && strcmp(argv[1], "scan") == 0;
     BOOL calibrationScan = argc == 7 && strcmp(argv[1], "calibrate") == 0;
+    BOOL experimentScan = argc == 8 && strcmp(argv[1], "experiment") == 0;
     BOOL positioningPreview = argc == 3 && strcmp(argv[1], "preview") == 0;
+    BOOL capabilitiesProbe = argc == 2 && strcmp(argv[1], "capabilities") == 0;
     // The per-side placement gate. Same rectangle as `scan`, 300 DPI, JPEG out.
     BOOL placementPreview = argc == 5 && strcmp(argv[1], "place") == 0;
-    BOOL scanning = profileScan || calibrationScan || positioningPreview || placementPreview;
-    if (!scanning && !(argc == 2 && strcmp(argv[1], "health") == 0)) {
-      printJSON(@{ @"status": @"control_unavailable", @"error": @"Usage: health | preview <output-dir> | place <output-dir> <origin-x-mm> <origin-y-mm> | scan <output-dir> <origin-x-mm> <origin-y-mm> | calibrate <output-dir> <origin-x-mm> <origin-y-mm> <width-mm> <height-mm>" });
+    BOOL scanning = profileScan || calibrationScan || positioningPreview || placementPreview || experimentScan;
+    if (!scanning && !capabilitiesProbe && !(argc == 2 && strcmp(argv[1], "health") == 0)) {
+      printJSON(@{ @"status": @"control_unavailable", @"error": @"Usage: health | capabilities | preview <output-dir> | place <output-dir> <origin-x-mm> <origin-y-mm> | scan <output-dir> <origin-x-mm> <origin-y-mm> | calibrate <output-dir> <origin-x-mm> <origin-y-mm> <width-mm> <height-mm> | experiment <output-dir> <dpi> <origin-x-mm> <origin-y-mm> <width-mm> <height-mm>" });
       return 64;
     }
     MintVaultLideBridge *bridge = [MintVaultLideBridge new];
@@ -312,22 +428,25 @@ int main(int argc, const char * argv[]) {
     bridge.calibration = calibrationScan;
     bridge.positioningPreview = positioningPreview;
     bridge.placementPreview = placementPreview;
+    bridge.capabilitiesProbe = capabilitiesProbe;
+    bridge.experimentScan = experimentScan;
     bridge.discoveredDevices = [NSMutableArray array];
     if (scanning) {
       bridge.outputDirectory = [NSString stringWithUTF8String:argv[2]];
-      bridge.originXmm = positioningPreview ? 0.0 : strtod(argv[3], NULL);
-      bridge.originYmm = positioningPreview ? 0.0 : strtod(argv[4], NULL);
+      bridge.requestedResolutionDpi = experimentScan ? (NSUInteger)strtoul(argv[3], NULL, 10) : 1200;
+      bridge.originXmm = positioningPreview ? 0.0 : strtod(argv[experimentScan ? 4 : 3], NULL);
+      bridge.originYmm = positioningPreview ? 0.0 : strtod(argv[experimentScan ? 5 : 4], NULL);
       // A placement preview MUST request the identical 100 x 130 mm window a profile scan would.
       // Anything else would gate the operator on a frame the evidence capture will not reproduce.
-      bridge.scanWidthMm = (profileScan || placementPreview) ? 100.0 : (calibrationScan ? strtod(argv[5], NULL) : 0.0);
-      bridge.scanHeightMm = (profileScan || placementPreview) ? 130.0 : (calibrationScan ? strtod(argv[6], NULL) : 0.0);
+      bridge.scanWidthMm = (profileScan || placementPreview) ? 100.0 : (calibrationScan ? strtod(argv[5], NULL) : (experimentScan ? strtod(argv[6], NULL) : 0.0));
+      bridge.scanHeightMm = (profileScan || placementPreview) ? 130.0 : (calibrationScan ? strtod(argv[6], NULL) : (experimentScan ? strtod(argv[7], NULL) : 0.0));
       if (!positioningPreview && (
         bridge.originXmm < 0 || bridge.originYmm < 0 ||
         bridge.scanWidthMm <= 0 || bridge.scanHeightMm <= 0 ||
-        bridge.originXmm + bridge.scanWidthMm > 216.0 ||
-        bridge.originYmm + bridge.scanHeightMm > 297.0
+        bridge.originXmm + bridge.scanWidthMm > MV_PLATEN_WIDTH_MM ||
+        bridge.originYmm + bridge.scanHeightMm > MV_PLATEN_HEIGHT_MM
       )) {
-        printJSON(@{ @"status": @"control_unavailable", @"error": @"LiDE scan area is outside the 216 x 297 mm platen" });
+        printJSON(@{ @"status": @"control_unavailable", @"error": @"LiDE scan area is outside the platen" });
         return 64;
       }
       if (calibrationScan && (bridge.scanWidthMm < 110.0 || bridge.scanHeightMm < 140.0)) {
@@ -339,7 +458,7 @@ int main(int argc, const char * argv[]) {
     bridge.browser.delegate = bridge;
     bridge.browser.browsedDeviceTypeMask = ICDeviceTypeMaskScanner | ICDeviceLocationTypeMaskLocal;
     [bridge.browser start];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:scanning ? 300.0 : 4.0];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:scanning ? 300.0 : (capabilitiesProbe ? 12.0 : 4.0)];
     while (!bridge.complete && deadline.timeIntervalSinceNow > 0) {
       [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
     }

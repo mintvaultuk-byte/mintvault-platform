@@ -16,6 +16,7 @@
     "db:preflight": "tsx scripts/db/preflight-schema.ts",
     "db:migrate": "tsx scripts/db/migrate.ts",
     "db:lint-sql": "tsx scripts/db/lint-destructive-sql.ts",
+    "simulate:payment-control-plane": "node scripts/payment-control-plane-load-sim.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "graph:build": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify extract . --code-only",

@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld("scanner", {
   authoriseFix: (payload) => ipcRenderer.invoke("authorise-fix", payload),
   armCapture: (payload) => ipcRenderer.invoke("arm-capture", payload),
   cancelCardJob: (payload) => ipcRenderer.invoke("cancel-card-job", payload),
+  openPartnerBilling: () => ipcRenderer.invoke("open-partner-billing"),
+  refreshAvailableCredits: () => ipcRenderer.invoke("refresh-available-credits"),
+  creditPacks: () => ipcRenderer.invoke("credit-packs"),
+  creditCheckout: (payload) => ipcRenderer.invoke("credit-checkout", payload),
   openGradeCert: (certId) => ipcRenderer.invoke("open-grade-cert", certId),
   openForgotPassword: () => ipcRenderer.invoke("open-forgot-password"),
   getVersion: () => ipcRenderer.invoke("get-version"),
@@ -42,6 +46,5 @@ contextBridge.exposeInMainWorld("scanner", {
   getPlacementPreview: (previewId) => ipcRenderer.invoke("get-placement-preview", previewId),
   saveCaptureWindow: (originMm) => ipcRenderer.invoke("save-capture-window", originMm),
   getCapturePreview: (previewId) => ipcRenderer.invoke("get-capture-preview", previewId),
-  acceptCapturePreview: (previewId) => ipcRenderer.invoke("accept-capture-preview", previewId),
   rescanCapturePreview: (previewId) => ipcRenderer.invoke("rescan-capture-preview", previewId),
 });

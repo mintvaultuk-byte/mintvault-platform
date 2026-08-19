@@ -612,125 +612,44 @@ describe("MFA current-factor hardening coverage is wired up", () => {
   });
 
   // ==================================================================================
-  // A — MFA DISABLE RUNTIME PROOF
+  // A — SELF-SERVICE MFA REMOVAL IS FORBIDDEN
   // ==================================================================================
 
-  it("A1: disable requires a current factor, then clears the METHOD but never the REQUIREMENT", async () => {
+  it("A1: a current password and TOTP cannot remove MFA or mutate the account", async () => {
     resetLimits();
     jar = "a";
     await login(EMAIL_A);
     expect((await call("POST", "/api/partner/auth/mfa", { code: await totpFor(USER_A, secretA) })).status).toBe(200);
 
-    // Starting state: enrolled AND required.
-    const start = await admin.query<{ mfa_enabled: boolean; mfa_required: boolean }>(
-      "SELECT mfa_enabled, mfa_required FROM partner_users WHERE id=$1",
+    const before = await admin.query<{ mfa_enabled: boolean; mfa_required: boolean; credential_version: number }>(
+      "SELECT mfa_enabled, mfa_required, credential_version FROM partner_users WHERE id=$1",
       [USER_A]
     );
-    expect(start.rows[0]).toEqual({ mfa_enabled: true, mfa_required: true });
-
-    // Password alone cannot disable.
-    const passwordOnly = await call("POST", "/api/partner/mfa/disable", { password: PASSWORD });
-    expect(passwordOnly.status).toBe(400);
-    expect(passwordOnly.json.error).toBe("second_factor_required");
-
-    // The supported disable action, with a real current factor.
-    const disabled = await call("POST", "/api/partner/mfa/disable", {
-      password: PASSWORD,
-      code: await totpFor(USER_A, secretA),
-    });
-    expect(disabled.status, disabled.text).toBe(200);
-
-    // mfa_enabled flips; mfa_required MUST NOT.
-    const after = await admin.query<{ mfa_enabled: boolean; mfa_required: boolean }>(
-      "SELECT mfa_enabled, mfa_required FROM partner_users WHERE id=$1",
-      [USER_A]
-    );
-    expect(after.rows[0].mfa_enabled).toBe(false);
-    expect(after.rows[0].mfa_required, "disabling the method must never clear the requirement").toBe(true);
-
-    // No ACTIVE method survives, and the recovery codes went with it.
-    const active = await admin.query<{ n: string }>(
+    const activeBefore = await admin.query<{ n: string }>(
       "SELECT count(*)::text n FROM partner_mfa_methods WHERE user_id=$1 AND status='ACTIVE'",
       [USER_A]
     );
-    expect(Number(active.rows[0].n)).toBe(0);
-    expect(await unusedCodeHashes(USER_A)).toHaveLength(0);
+    const codesBefore = await unusedCodeHashes(USER_A);
 
-    // Every session is revoked.
-    const live = await admin.query<{ n: string }>(
-      "SELECT count(*)::text n FROM partner_sessions WHERE user_id=$1 AND revoked_at IS NULL",
+    const denied = await call("POST", "/api/partner/mfa/disable", {
+      password: PASSWORD,
+      code: await totpFor(USER_A, secretA),
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.json.error).toBe("self-service MFA removal is not available");
+
+    const after = await admin.query<{ mfa_enabled: boolean; mfa_required: boolean; credential_version: number }>(
+      "SELECT mfa_enabled, mfa_required, credential_version FROM partner_users WHERE id=$1",
       [USER_A]
     );
-    expect(Number(live.rows[0].n)).toBe(0);
-  });
-
-  it("A2: after disable, the user CANNOT gain unrestricted password-only access", async () => {
-    resetLimits();
-    jar = "a-post-disable";
-    const login1 = await login(EMAIL_A);
-    expect(login1.status).toBe(200);
-    // The login contract still reports an outstanding second factor.
-    expect(login1.json).toEqual({ ok: true, mfaRequired: true });
-
-    // Server-side the session is incomplete.
-    const s = await admin.query<{ mfa_passed: boolean }>(
-      "SELECT mfa_passed FROM partner_sessions WHERE user_id=$1 AND revoked_at IS NULL",
+    const activeAfter = await admin.query<{ n: string }>(
+      "SELECT count(*)::text n FROM partner_mfa_methods WHERE user_id=$1 AND status='ACTIVE'",
       [USER_A]
     );
-    expect(s.rows.map((r) => r.mfa_passed)).toEqual([false]);
-
-    // …and every normal partner API refuses it.
-    for (const path of [
-      "/api/partner/dashboard",
-      "/api/partner/users",
-      "/api/partner/locations",
-      "/api/partner/customers",
-      "/api/partner/submissions",
-    ]) {
-      const res = await call("GET", path);
-      expect([401, 403], `${path} answered ${res.status} to a disabled-MFA session`).toContain(res.status);
-    }
-
-    // There is no factor left to satisfy a code challenge with, either.
-    expect((await call("POST", "/api/partner/auth/mfa", { code: "000000" })).status).toBe(401);
-  });
-
-  it("A3: the next login is forced into RE-ENROLMENT, which is reachable and restores access", async () => {
-    const sess = await call("GET", "/api/partner/session");
-    expect(sess.status).toBe(200);
-    // enrolmentRequired — not a code challenge the user could never answer.
-    expect(sess.json).toEqual({ mfaPassed: false, mfaRequired: true, mfaEnrolmentRequired: true });
-
-    // Bootstrap remains password-only, so disable cannot strand the account.
-    const again = await enrolFresh();
-    expect(again.codes).toHaveLength(10);
-    secretA = again.secret;
-    codesA = again.codes;
+    expect(after.rows[0]).toEqual(before.rows[0]);
+    expect(activeAfter.rows[0].n).toBe(activeBefore.rows[0].n);
+    expect(await unusedCodeHashes(USER_A)).toEqual(codesBefore);
     expect((await call("GET", "/api/partner/dashboard")).status).toBe(200);
-
-    const state = await admin.query<{ mfa_enabled: boolean; mfa_required: boolean }>(
-      "SELECT mfa_enabled, mfa_required FROM partner_users WHERE id=$1",
-      [USER_A]
-    );
-    expect(state.rows[0]).toEqual({ mfa_enabled: true, mfa_required: true });
-    jar = "a";
-  });
-
-  it("A4: audit and Partner-visible security evidence exist for the disable", async () => {
-    const audit = await admin.query<{ n: string }>(
-      "SELECT count(*)::text n FROM partner_audit_events WHERE tenant_id=$1 AND action='partner_mfa_disabled'",
-      [TENANT_A]
-    );
-    expect(Number(audit.rows[0].n)).toBeGreaterThanOrEqual(1);
-
-    const sec = (await securityKinds(TENANT_A)).filter((e) => e.kind === "partner_mfa_disabled");
-    expect(sec.length).toBeGreaterThanOrEqual(1);
-    expect(sec[0].severity).toBe("medium");
-
-    // The replacement performed in B3/B4 is also on the record, at the same severity.
-    const replaced = (await securityKinds(TENANT_A)).filter((e) => e.kind === "partner_mfa_replaced");
-    expect(replaced.length).toBeGreaterThanOrEqual(1);
-    expect(replaced[0].severity).toBe("medium");
   });
 
   it("A5: an admin MFA reset lands in the same required-but-unenrolled state", async () => {

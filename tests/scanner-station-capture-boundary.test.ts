@@ -17,6 +17,7 @@ const stations = read("server/partner/station-service.ts");
 const partnerStationRoutes = read("server/partner/station-routes.ts");
 const partnerGrading = read("client/src/pages/partner/grading.tsx");
 const stationMigration = read("migrations/0075_partner_station_single_active_capture.sql");
+const physicalReleaseMigration = read("migrations/0094_scanner_capture_physical_release.sql");
 const escapedRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 describe("signed-station capture boundary", () => {
@@ -77,7 +78,7 @@ describe("signed-station capture boundary", () => {
     ]) {
       expect(routes).toMatch(
         new RegExp(
-          `app\\.(?:get|post)\\(\\s*\"${escapedRegex(path)}\",\\s*requireScannerOrAdmin,\\s*requireStationCaptureAgent`
+          `app\\.(?:get|post)\\(\\s*"${escapedRegex(path)}",\\s*requireScannerOrAdmin,\\s*requireStationCaptureAgent`
         )
       );
     }
@@ -108,13 +109,26 @@ describe("signed-station capture boundary", () => {
     expect(partnerGrading).not.toContain("mintvault-scanner-workstation-id");
   });
 
-  it("enforces exactly one live target per signed Partner station", () => {
+  it("enforces exactly one physical target per signed Partner station", () => {
     expect(sessions).toContain("SET state='expired'");
     expect(sessions).toContain("uq_scanner_capture_one_active_station");
     expect(sessions).toContain("This station already has an active capture target");
     expect(stationMigration).toContain("CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station");
     expect(stationMigration).toContain("ON scanner_capture_sessions (station_id)");
     expect(stationMigration).toContain("state IN ('armed', 'claimed', 'capturing')");
+    expect(physicalReleaseMigration).toContain("physical_released = false");
+    expect(physicalReleaseMigration).toContain("DROP INDEX IF EXISTS uq_scanner_capture_one_active_station");
+    expect(sessions).toContain("s.physical_released = true AND s.certificate_id <> $2");
+    expect(sessions).toContain("already being finished on another approved station");
+    expect(sessions).toContain("FOR UPDATE");
+    expect(read("server/partner/capture-authority.ts")).toContain("CAPTURE_HELD_BY_OTHER_STATION");
+    expect(read("scripts/scanner-app/lib/watcher.js")).toContain("Accepted local TIFF is missing");
+    expect(sessions).toContain("NOT EXISTS (");
+    expect(sessions).toContain("capture_metadata ->> 'captureSessionId' = scanner_capture_sessions.id");
+    expect(sessions).toContain("pg_advisory_xact_lock");
+    expect(read("server/partner/card-job-cancellation.ts")).toContain("pg_advisory_xact_lock");
+    expect(routes).toContain("return res.status(409).json({ ok: false, ...result })");
+    expect(partnerStationRoutes).toContain("recapture: false");
   });
 
   it("shows Next Card only from the server-persisted paired capture result", () => {

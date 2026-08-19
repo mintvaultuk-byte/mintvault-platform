@@ -98,7 +98,8 @@ async function seedMintVaultTables(): Promise<void> {
     side varchar(5) not null check (side in ('front','back')),
     workstation_id text not null, station_id uuid,
     scanner_profile_version text not null, actor_id text, state varchar(16) not null,
-    claimed_by_device_id text, recapture boolean not null default false, failure_reason text,
+    claimed_by_device_id text, physical_released boolean not null default false,
+    recapture boolean not null default false, failure_reason text,
     created_at timestamptz not null default now(), claimed_at timestamptz,
     captured_at timestamptz, expires_at timestamptz not null
   )`);

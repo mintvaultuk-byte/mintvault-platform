@@ -234,7 +234,7 @@ export function superAdminPartnerRouter(): Router {
    * existing integration-test contract; deleting a working URL is a bigger change than making it
    * correct. Both URLs now produce byte-identical state and exactly one security event.
    */
-  r.post("/:partnerId/users/:userId/mfa-reset", legacyMutationRateLimit, async (req, res) => {
+  r.post("/:partnerId/users/:userId/mfa-reset", legacyMutationRateLimit, requireAdminStepUp(), async (req, res) => {
     const reason = String(req.body?.reason ?? "").trim();
     if (!reason) {
       res.status(400).json({ error: "reason required" });

@@ -89,6 +89,22 @@ describe("a missing declaration fails safely — THE INCIDENT", () => {
     assert.strictEqual(resolved.ok, false);
     assert.strictEqual(resolved.code, "ENVIRONMENT_UNCONFIGURED");
   });
+
+  test("a declared STAGING station ignores a legacy production MINTVAULT_INGEST_URL", () => {
+    /*
+     * The live Mac on 2026-08-18: environment.json declares staging while ~/.mintvault-scanner.env
+     * still carries June's production ingest URL. The stale key must be inert — not merely
+     * outranked in a chain that could be reordered later, but incapable of contributing a host.
+     */
+    environment.persistEnvironment("staging");
+    const resolved = environment.resolveEnvironment({
+      env: { MINTVAULT_INGEST_URL: `${PRODUCTION_URL}/api/admin/scan-ingest` },
+    });
+    assert.strictEqual(resolved.ok, true);
+    assert.strictEqual(resolved.environment, "staging");
+    assert.strictEqual(resolved.apiBase, STAGING_URL);
+    assert.strictEqual(resolved.overridden, false);
+  });
 });
 
 describe("environment and URL must agree — refused in BOTH directions", () => {

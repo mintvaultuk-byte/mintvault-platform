@@ -269,10 +269,21 @@ describe("partner schema ↔ migration parity", () => {
       "0090_lineage_convergence_scanner.sql",
       "0091_capture_session_calibration_snapshot.sql",
       "0092_partner_station_calibrate_permission.sql",
-      "0094_partner_management_audit_card_job_void.sql",
+      "0093_partner_credit_pack_currency.sql",
+      // 0094 splits one physical scanner target from background upload/finalisation ownership.
+      // It replaces 0075's station partial-unique index so FRONT upload can continue while the
+      // same station captures BACK for the same card. Index-only replacement; owner approval is
+      // still required at apply time because the migration runner flags DROP INDEX.
+      "0094_scanner_capture_physical_release.sql",
       // GB-03 adds public business-lead retention only. It intentionally has
       // no partner tenant/account foreign key or operational Partner state.
       "0095_growth_partner_applications.sql",
+      // 0096 widens partner_management_audit's action_type CHECK for the protected Card Job void
+      // wrapper. Raw-SQL migration-authoritative; no Drizzle model owns this CHECK.
+      "0096_partner_card_job_void_management_audit.sql",
+      // 0097 records server-created Partner credit Checkout Sessions so the verified webhook can
+      // reject wrong-session and wrong-tenant metadata. Raw-SQL payment authority; no Drizzle model.
+      "0097_partner_credit_checkout_sessions.sql",
     ]);
   });
 

@@ -126,9 +126,24 @@ test("scanner client sends an exact TIFF only to a server-minted staging URL bef
     delete require.cache[clientPath];
   });
 
-  const result = await client.uploadCaptureEvidence("session-123", "mac-mintvault-station-a", source, { profileVersion: "mintvault-canon-lide-400-v3" });
+  const progress = [];
+  const result = await client.uploadCaptureEvidence(
+    "session-123",
+    "mac-mintvault-station-a",
+    source,
+    { profileVersion: "mintvault-canon-lide-400-v3" },
+    { onProgress: (event) => progress.push(event) },
+  );
   assert.equal(result.ok, true);
   assert.deepEqual(stagedBytes, tiff, "the R2 PUT receives the unmodified TIFF bytes");
+  assert.deepEqual(
+    progress.map((event) => event.phase),
+    ["queued", "uploading", "uploaded", "server_validating"],
+    "direct staging must publish byte progress before server validation",
+  );
+  assert.equal(progress[1].bytesSent, tiff.length);
+  assert.equal(progress[1].totalBytes, tiff.length);
+  assert.equal(progress[3].bytesSent, tiff.length);
   assert.equal(requests.length, 3);
   assert.equal(requests[0].url, "/api/admin/scanner/capture-sessions/session-123/staged-upload");
   assert.match(requests[0].body.toString("utf8"), /sha256/);
@@ -155,7 +170,11 @@ function isolatedTargetedWatcher(t) {
     claimNextCapture: server.claimNextCapture,
     renewCapture: server.renewCapture,
     getCaptureStatus: server.getCaptureStatus,
+    prepareCaptureEvidenceUpload: server.prepareCaptureEvidenceUpload,
+    finalisePreparedCaptureEvidenceUpload: server.finalisePreparedCaptureEvidenceUpload,
+    finaliseStagedCaptureEvidence: server.finaliseStagedCaptureEvidence,
     uploadCaptureEvidence: server.uploadCaptureEvidence,
+    failCapture: server.failCapture,
     hasToken: server.hasToken,
     scan: lide.scan,
     positioningPreview: lide.positioningPreview,
@@ -172,7 +191,11 @@ function isolatedTargetedWatcher(t) {
       claimNextCapture: originals.claimNextCapture,
       renewCapture: originals.renewCapture,
       getCaptureStatus: originals.getCaptureStatus,
+      prepareCaptureEvidenceUpload: originals.prepareCaptureEvidenceUpload,
+      finalisePreparedCaptureEvidenceUpload: originals.finalisePreparedCaptureEvidenceUpload,
+      finaliseStagedCaptureEvidence: originals.finaliseStagedCaptureEvidence,
       uploadCaptureEvidence: originals.uploadCaptureEvidence,
+      failCapture: originals.failCapture,
       hasToken: originals.hasToken,
     });
     lide.scan = originals.scan;
@@ -187,9 +210,25 @@ function isolatedTargetedWatcher(t) {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
   const watcher = new Watcher();
+  server.prepareCaptureEvidenceUpload = async (_sessionId, _deviceId, filePath, _provenance, options = {}) => {
+    const stat = fs.statSync(filePath);
+    options.onProgress?.({ phase: "queued", bytesSent: 0, totalBytes: stat.size });
+    return { ok: true, status: 201, body: { transport: "direct", staging_id: "stage-test", expected_bytes: stat.size } };
+  };
+  server.finalisePreparedCaptureEvidenceUpload = async (_sessionId, _deviceId, filePath, _prepared, options = {}) => {
+    const stat = fs.statSync(filePath);
+    options.onProgress?.({ phase: "uploading", bytesSent: stat.size, totalBytes: stat.size });
+    options.onProgress?.({ phase: "uploaded", bytesSent: stat.size, totalBytes: stat.size });
+    options.onProgress?.({ phase: "server_validating", bytesSent: stat.size, totalBytes: stat.size });
+    return { ok: true, body: { certId: "MV900" } };
+  };
+  server.finaliseStagedCaptureEvidence = async (_sessionId, _deviceId, _stagingId, options = {}) => {
+    options.onProgress?.({ phase: "server_validating", bytesSent: 0, totalBytes: 0 });
+    return { ok: true, body: { certId: "MV900" } };
+  };
   // Unit scan fixtures are deliberately tiny synthetic TIFFs. The dedicated
   // card-frame tests cover boundary math; ordinary state-machine tests inject
-  // a safe assessed frame so they remain about Scan/Accept/Rescan behaviour.
+  // a safe assessed frame so they remain about Scan/automatic-upload/Rescan behaviour.
   watcher.assessCaptureFrame = async () => ({ accepted: true, reason: null, evidenceMarginMm: { left: 8, top: 8, right: 8, bottom: 8 } });
   return { tempDir, watcher, state, server, lide };
 }
@@ -256,6 +295,17 @@ async function passPlacementGate(fixture, cardBoundsMm = { x: 18.25, y: 20.55, w
     verdict: evaluatePlacement(cardBoundsMm),
   });
   return fixture.watcher.runPlacementPreview();
+}
+
+async function waitForTestCondition(predicate, label, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  let value = predicate();
+  while (!value && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    value = predicate();
+  }
+  assert.ok(value, `timed out waiting for ${label}`);
+  return value;
 }
 
 function configureClaimedStation({ watcher, state, server, lide }) {
@@ -421,33 +471,51 @@ test("a GREEN placement grants exactly one approval, and it is spent by the scan
     path: await writeStationTiff(dir),
     provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
   });
+  fixture.server.uploadCaptureEvidence = async () => ({ ok: true, body: { certId: "MV900" } });
   assert.equal((await fixture.watcher.scanActiveTarget()).ok, true);
   // SINGLE USE. A standing approval would let a second capture happen from a placement nobody
   // re-checked — the card may have been moved or replaced in between.
   assert.equal(fixture.watcher.placementApproval(), null, "the approval must be consumed by its scan");
 });
 
-test("explicit Scan creates a JPEG derivative preview without uploading the TIFF", async (t) => {
+test("explicit Scan creates a JPEG derivative preview and automatically starts authoritative upload", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
   fixture.lide.scan = async (dir) => ({
     path: await writeStationTiff(dir),
     provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
   });
+  let resolveUpload;
   let uploads = 0;
-  fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: { certId: "MV900" } }; };
+  fixture.server.prepareCaptureEvidenceUpload = async (_sessionId, _deviceId, filePath, _provenance, options = {}) => {
+    const stat = fs.statSync(filePath);
+    options.onProgress?.({ phase: "queued", bytesSent: 0, totalBytes: stat.size });
+    return { ok: true, status: 201, body: { transport: "direct", staging_id: "stage-front", expected_bytes: stat.size } };
+  };
+  fixture.server.finalisePreparedCaptureEvidenceUpload = async (_sessionId, _deviceId, _filePath, _prepared, options = {}) => {
+    uploads++;
+    options.onProgress?.({ phase: "uploading", bytesSent: 5, totalBytes: 10 });
+    return new Promise((resolve) => { resolveUpload = resolve; });
+  };
 
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
-  const result = await fixture.watcher.scanActiveTarget();
-  assert.equal(result.ok, true);
-  assert.equal(uploads, 0, "preview creation must not cross the evidence-upload boundary");
+  const scan = await fixture.watcher.scanActiveTarget();
+  assert.equal(scan.ok, true);
+  assert.equal(scan.backgroundUpload, true);
+  const uploadResolver = await waitForTestCondition(() => resolveUpload, "automatic upload after the local safety gate");
+  assert.equal(uploads, 1);
   const entry = fixture.watcher.readTargetedQueue()[0];
-  assert.equal(entry.phase, "preview_ready");
+  assert.equal(entry.phase, "upload");
+  assert.equal(entry.uploadProgress.percent, 50);
+  assert.equal(fixture.state.get().activeCapture, null);
+  assert.equal(fixture.state.get().lastQueuedCapture.side, "front");
   assert.equal(fs.readFileSync(entry.filePath).subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])), true);
   const preview = fixture.watcher.previewData(entry.previewId);
   assert.equal(preview.ok, true);
   assert.match(preview.dataUrl, /^data:image\/jpeg;base64,/);
+  uploadResolver({ ok: true, body: { certId: "MV900" } });
+  await waitForTestCondition(() => fixture.state.get().lastAcceptedCapture?.side === "front", "background upload acceptance");
 });
 
 test("Front and Back preview derivatives rotate 180 degrees without changing either TIFF master", async (t) => {
@@ -489,7 +557,7 @@ test("a frame that lacks four-side evidence margin is previewed but can only be 
     evidenceMarginMm: { left: 1, top: 16, right: 12, bottom: 15 },
   });
   let uploads = 0;
-  fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: { certId: "MV900" } }; };
+  fixture.server.prepareCaptureEvidenceUpload = async () => { uploads++; return { ok: true, body: { transport: "direct", staging_id: "unsafe" } }; };
 
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
@@ -498,7 +566,7 @@ test("a frame that lacks four-side evidence margin is previewed but can only be 
   const previewId = fixture.state.get().activeCapture.previewId;
   assert.equal(fixture.watcher.readTargetedQueue()[0].phase, "preview_error");
   assert.equal(fixture.watcher.previewData(previewId).ok, true, "unsafe operator preview remains reviewable");
-  assert.equal((await fixture.watcher.acceptPreview(previewId)).ok, false, "unsafe frame cannot cross the authoritative upload boundary");
+  assert.equal(typeof fixture.watcher.acceptPreview, "undefined", "post-scan Accept is removed from the local workflow");
   assert.equal(uploads, 0);
   assert.equal((await fixture.watcher.rescanPreview(previewId)).ok, true);
   assert.equal(fixture.watcher.readTargetedQueue()[0].phase, "awaiting_scan");
@@ -515,6 +583,7 @@ test("rapid Scan clicks start exactly one physical capture", async (t) => {
     await new Promise((resolve) => { resolveScan = resolve; });
     return { path: await writeStationTiff(dir), provenance: { profileVersion: "mintvault-canon-lide-400-v3" } };
   };
+  fixture.server.uploadCaptureEvidence = async () => ({ ok: true, body: { certId: "MV900" } });
 
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
@@ -560,12 +629,12 @@ test("health polling shares and rate-limits ImageCaptureCore sessions so the sca
   assert.equal(healthCalls, 1, "rapid target polls must reuse the current physical health result");
 });
 
-test("a preview pins its exact card-side target until Accept, Rescan, or expiry", async (t) => {
+test("a FRONT upload running in the background does not block the same card's BACK target", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
   const targets = [
     claimedTarget({ id: "front-session", certificateNumber: "MV900", side: "front" }),
-    claimedTarget({ id: "other-card-session", certificateNumber: "MV901", side: "back" }),
+    claimedTarget({ id: "back-session", certificateNumber: "MV900", side: "back" }),
   ];
   let claims = 0;
   fixture.server.claimNextCapture = async () => ({ ok: true, body: { capture: targets[claims++] || null } });
@@ -573,21 +642,39 @@ test("a preview pins its exact card-side target until Accept, Rescan, or expiry"
     path: await writeStationTiff(dir),
     provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
   });
+  let resolveUpload;
+  fixture.server.prepareCaptureEvidenceUpload = async (_sessionId, _deviceId, filePath, _provenance, options = {}) => {
+    const stat = fs.statSync(filePath);
+    options.onProgress?.({ phase: "queued", bytesSent: 0, totalBytes: stat.size });
+    return { ok: true, status: 201, body: { transport: "direct", staging_id: "stage-front", expected_bytes: stat.size } };
+  };
+  fixture.server.finalisePreparedCaptureEvidenceUpload = async (_sessionId, _deviceId, _filePath, _prepared, options = {}) => {
+    options.onProgress?.({ phase: "uploading", bytesSent: 1, totalBytes: 10 });
+    return new Promise((resolve) => { resolveUpload = resolve; });
+  };
 
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
-  await fixture.watcher.scanActiveTarget();
-  const before = fixture.state.get().activeCapture;
+  const scan = await fixture.watcher.scanActiveTarget();
+  assert.equal(scan.ok, true);
+  assert.equal(fixture.state.get().activeCapture, null);
+  assert.equal(fixture.state.get().lastQueuedCapture.side, "front");
+  const frontPreviewId = fixture.state.get().lastQueuedCapture.previewId;
+  const uploadResolver = await waitForTestCondition(() => resolveUpload, "open background front upload");
   const repeatedPoll = await fixture.watcher.pollTargetedCapture();
-  assert.equal(repeatedPoll.resumed, true);
-  assert.equal(claims, 1, "the station must not claim a different card while a preview is open");
+  assert.equal(repeatedPoll.armed, true);
+  assert.equal(claims, 2, "the station may claim BACK for the same card while FRONT uploads");
   assert.deepEqual(
     { id: fixture.state.get().activeCapture.id, certId: fixture.state.get().activeCapture.certId, side: fixture.state.get().activeCapture.side },
-    { id: before.id, certId: "MV900", side: "front" },
+    { id: "back-session", certId: "MV900", side: "back" },
   );
+  assert.equal(fixture.watcher.previewData(frontPreviewId).ok, true, "queued FRONT preview remains retrievable while BACK is active");
+  uploadResolver({ ok: true, body: { certId: "MV900" } });
+  await waitForTestCondition(() => fixture.state.get().lastAcceptedCapture?.side === "front", "front upload completion");
+  assert.equal(fixture.state.get().activeCapture.id, "back-session", "late FRONT completion must not replace BACK UI");
 });
 
-test("stale or duplicate Accept and Rescan during upload cannot cross card sides or duplicate evidence", async (t) => {
+test("duplicate Scan and Rescan during automatic upload cannot cross card sides or duplicate evidence", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
   let scans = 0;
@@ -597,34 +684,22 @@ test("stale or duplicate Accept and Rescan during upload cannot cross card sides
   });
   let uploads = 0;
   let resolveUpload;
-  fixture.server.uploadCaptureEvidence = async () => {
+  fixture.server.finalisePreparedCaptureEvidenceUpload = async () => {
     uploads++;
     return new Promise((resolve) => { resolveUpload = resolve; });
   };
 
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
-  await fixture.watcher.scanActiveTarget();
-  const stalePreviewId = fixture.state.get().activeCapture.previewId;
-  assert.equal((await fixture.watcher.rescanPreview(stalePreviewId)).ok, true);
-  assert.equal((await fixture.watcher.acceptPreview(stalePreviewId)).ok, false, "a discarded preview cannot be accepted");
-  assert.equal(uploads, 0);
-
-  await passPlacementGate(fixture);
-
-  await fixture.watcher.scanActiveTarget();
-  const currentPreviewId = fixture.state.get().activeCapture.previewId;
-  const accepting = fixture.watcher.acceptPreview(currentPreviewId);
-  for (let attempt = 0; attempt < 20 && !resolveUpload; attempt++) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  assert.equal(typeof resolveUpload, "function", "Accept must enter the one permitted upload");
-  assert.equal((await fixture.watcher.acceptPreview(currentPreviewId)).ok, false, "double Accept must be single-flight");
+  const uploading = fixture.watcher.scanActiveTarget();
+  const uploadResolver = await waitForTestCondition(() => resolveUpload, "the one permitted upload");
+  const currentPreviewId = fixture.watcher.readTargetedQueue()[0]?.previewId;
+  assert.equal((await fixture.watcher.scanActiveTarget()).ok, false, "released FRONT has no second active target to scan");
   assert.equal((await fixture.watcher.rescanPreview(currentPreviewId)).ok, false, "Rescan must be blocked during upload");
-  resolveUpload({ ok: true, body: { certId: "MV900" } });
-  assert.equal((await accepting).ok, true);
+  uploadResolver({ ok: true, body: { certId: "MV900" } });
+  assert.equal((await uploading).ok, true);
   assert.equal(uploads, 1);
-  assert.equal(scans, 2, "only the explicit Rescan starts a second physical scan");
+  assert.equal(scans, 1, "automatic upload does not permit a duplicate physical scan");
 });
 
 test("an expired preview is never uploaded or rescanned", async (t) => {
@@ -635,21 +710,68 @@ test("an expired preview is never uploaded or rescanned", async (t) => {
     provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
   });
   let uploads = 0;
-  fixture.server.uploadCaptureEvidence = async () => { uploads++; return { ok: true, body: {} }; };
+  fixture.server.prepareCaptureEvidenceUpload = async () => { uploads++; return { ok: true, body: { transport: "direct", staging_id: "expired" } }; };
 
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
-  await fixture.watcher.scanActiveTarget();
   fixture.server.getCaptureStatus = async () => ({ ok: true, body: { accepted: false, capture: { state: "expired" } } });
-  const previewId = fixture.state.get().activeCapture.previewId;
-  assert.equal((await fixture.watcher.acceptPreview(previewId)).ok, false);
+  assert.equal((await fixture.watcher.scanActiveTarget()).ok, false);
+  const previewId = fixture.state.get().activeCapture?.previewId;
   assert.equal((await fixture.watcher.rescanPreview(previewId)).ok, false);
   assert.equal(fixture.watcher.readTargetedQueue().length, 0, "an expired preview releases the station but stays non-authoritative");
   assert.equal(fixture.state.get().activeCapture, null);
   assert.equal(uploads, 0);
 });
 
-test("accepting front leaves it untouched when a later back preview is rescanned", async (t) => {
+test("restart recovery fails a released upload task if the accepted local TIFF is missing", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  let failed = null;
+  fixture.server.failCapture = async (sessionId, deviceId, reason) => {
+    failed = { sessionId, deviceId, reason };
+    return { ok: true, status: 200, body: { ok: true, terminalized: true, accepted: false, state: "failed" } };
+  };
+  fixture.watcher.addTargetedPending({
+    sessionId: "released-missing-front",
+    certId: "MV903",
+    side: "front",
+    phase: "upload",
+    workstationId: "mintvault-station-a",
+    filePath: path.join(fixture.tempDir, "missing.tif"),
+    previewPath: path.join(fixture.tempDir, "missing.jpg"),
+    stagingId: "stage-lost",
+    serverUploadTaskAcceptedAt: new Date().toISOString(),
+    provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
+  });
+
+  assert.equal(await fixture.watcher.resumeTargetedCaptures(), true);
+  assert.equal(failed.sessionId, "released-missing-front");
+  assert.match(failed.reason, /local TIFF is missing/);
+  assert.equal(fixture.watcher.readTargetedQueue().length, 0);
+  assert.equal(fixture.state.get().captureUploads.front.status, "failed");
+});
+
+test("restart recovery keeps a released upload task if the lost-TIFF server failure cannot be recorded", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  fixture.server.failCapture = async () => ({ ok: false, status: 503, body: { error: "network unavailable" } });
+  fixture.watcher.addTargetedPending({
+    sessionId: "released-missing-retry",
+    certId: "MV904",
+    side: "front",
+    phase: "upload",
+    workstationId: "mintvault-station-a",
+    filePath: path.join(fixture.tempDir, "missing.tif"),
+    stagingId: "stage-retry",
+    serverUploadTaskAcceptedAt: new Date().toISOString(),
+    provenance: { profileVersion: "mintvault-canon-lide-400-v3" },
+  });
+
+  assert.equal(await fixture.watcher.resumeTargetedCaptures(), true);
+  const queued = fixture.watcher.readTargetedQueue()[0];
+  assert.equal(queued.sessionId, "released-missing-retry");
+  assert.equal(fixture.state.get().captureUploads.front.status, "lost_local_master");
+});
+
+test("automatic front upload leaves it untouched when a later back safety failure is rescanned", async (t) => {
   const fixture = isolatedTargetedWatcher(t);
   configureClaimedStation(fixture);
   const targets = [
@@ -660,6 +782,7 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   let frontPath;
   let scans = 0;
   let uploads = 0;
+  let backFirstFrame = true;
   fixture.server.claimNextCapture = async () => ({ ok: true, body: { capture: targets[claimIndex++] || null } });
   fixture.lide.scan = async (dir) => {
     const side = fixture.state.get().activeCapture.side;
@@ -667,7 +790,19 @@ test("accepting front leaves it untouched when a later back preview is rescanned
     if (side === "front") frontPath = filePath;
     return { path: filePath, provenance: { profileVersion: "mintvault-canon-lide-400-v3" } };
   };
-  fixture.server.uploadCaptureEvidence = async () => {
+  fixture.watcher.assessCaptureFrame = async () => {
+    const side = fixture.state.get().activeCapture.side;
+    if (side === "back" && backFirstFrame) {
+      backFirstFrame = false;
+      return {
+        accepted: false,
+        reason: "Back card is too close to the hardware acquisition boundary; rescan",
+        evidenceMarginMm: { left: 1, top: 16, right: 12, bottom: 15 },
+      };
+    }
+    return { accepted: true, reason: null, evidenceMarginMm: { left: 8, top: 8, right: 8, bottom: 8 } };
+  };
+  fixture.server.finalisePreparedCaptureEvidenceUpload = async () => {
     uploads++;
     return { ok: true, body: { certId: "MV902", card_registered: uploads === 2 } };
   };
@@ -675,7 +810,7 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   await fixture.watcher.pollTargetedCapture();
   await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
-  assert.equal((await fixture.watcher.acceptPreview(fixture.state.get().activeCapture.previewId)).ok, true);
+  await waitForTestCondition(() => fixture.state.get().lastAcceptedCapture?.side === "front", "front background acceptance");
   assert.deepEqual(fixture.state.get().lastAcceptedCapture?.side, "front");
   assert.equal(fixture.state.get().lastAcceptedCapture?.certId, "MV902");
   const acceptedFront = path.join(fixture.tempDir, "processed", new Date().toISOString().slice(0, 10), path.basename(frontPath));
@@ -688,9 +823,9 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   /*
    * A FRONT PREVIEW NEVER AUTHORISES BACK — proved on the live watcher, not just on the predicate.
    *
-   * Accepting FRONT cleared its approval, and BACK is a different session and side besides, so SCAN
-   * must refuse until the operator looks at the glass again. Without this the gate would be a rule
-   * that holds in a unit test and evaporates in the object that actually runs it.
+   * FRONT's automatic upload cleared its approval, and BACK is a different session and side besides,
+   * so SCAN must refuse until the operator looks at the glass again. Without this the gate would be
+   * a rule that holds in a unit test and evaporates in the object that actually runs it.
    */
   const withoutFreshPreview = await fixture.watcher.scanActiveTarget();
   assert.equal(withoutFreshPreview.ok, false, "BACK must not scan on the FRONT side's placement approval");
@@ -699,7 +834,7 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   await passPlacementGate(fixture);
   await fixture.watcher.scanActiveTarget();
   assert.equal((await fixture.watcher.rescanPreview(fixture.state.get().activeCapture.previewId)).ok, true);
-  assert.equal(uploads, 1, "only accepted front was uploaded");
+  assert.equal(uploads, 1, "only the accepted front was uploaded");
   assert.equal(fs.readFileSync(acceptedFront).equals(acceptedFrontBytes), true, "back Rescan never alters accepted front evidence");
   assert.equal(fixture.state.get().activeCapture.side, "back");
   assert.equal(fixture.watcher.readTargetedQueue()[0].phase, "awaiting_scan");
@@ -707,7 +842,7 @@ test("accepting front leaves it untouched when a later back preview is rescanned
   await passPlacementGate(fixture);
 
   await fixture.watcher.scanActiveTarget();
-  assert.equal((await fixture.watcher.acceptPreview(fixture.state.get().activeCapture.previewId)).ok, true);
+  await waitForTestCondition(() => fixture.state.get().lastAcceptedCapture?.side === "back", "back background acceptance");
   assert.equal(uploads, 2);
   assert.equal(fixture.state.get().lastAcceptedCapture?.side, "back");
   assert.equal(fixture.state.get().lastAcceptedCapture?.cardRegistered, true);
@@ -749,10 +884,16 @@ test("targeted upload treats a lost response as accepted when immutable session 
   const server = require("../lib/server-client");
   const originalStatus = server.getCaptureStatus;
   const originalUpload = server.uploadCaptureEvidence;
+  const originalPrepare = server.prepareCaptureEvidenceUpload;
+  const originalFinalise = server.finalisePreparedCaptureEvidenceUpload;
+  const originalFinaliseStaged = server.finaliseStagedCaptureEvidence;
   const originalDeviceId = require("../lib/lide400-controller").deviceId;
   t.after(() => {
     server.getCaptureStatus = originalStatus;
     server.uploadCaptureEvidence = originalUpload;
+    server.prepareCaptureEvidenceUpload = originalPrepare;
+    server.finalisePreparedCaptureEvidenceUpload = originalFinalise;
+    server.finaliseStagedCaptureEvidence = originalFinaliseStaged;
     require("../lib/lide400-controller").deviceId = originalDeviceId;
     if (previousScansDir === undefined) delete process.env.MINTVAULT_SCANS_DIR; else process.env.MINTVAULT_SCANS_DIR = previousScansDir;
     delete require.cache[watcherPath];
@@ -766,9 +907,10 @@ test("targeted upload treats a lost response as accepted when immutable session 
   watcher.completeTargetedCapture = (entry, capture) => { completed = { entry, capture }; return { ok: true }; };
   server.getCaptureStatus = async () => ({ ok: true, body: { accepted: true, capture: { state: "captured", certificateNumber: "MV700" } } });
   server.uploadCaptureEvidence = async () => { throw new Error("must not re-upload accepted evidence"); };
+  server.finaliseStagedCaptureEvidence = async () => ({ ok: true, body: { certId: "MV700", card_registered: false } });
 
   const result = await watcher.uploadTargetedCapture({
-    sessionId: "session-accepted", certId: "MV700", side: "front", workstationId: "mintvault-station-a", filePath: path.join(tempDir, "master.tif"), provenance: {}, uploadAttempts: 0,
+    sessionId: "session-accepted", certId: "MV700", side: "front", workstationId: "mintvault-station-a", filePath: path.join(tempDir, "master.tif"), provenance: {}, uploadAttempts: 0, stagingId: "stage-accepted",
   });
   assert.equal(result.ok, true);
   assert.equal(completed.capture.certificateNumber, "MV700");
@@ -786,9 +928,15 @@ test("targeted upload reconciles a timeout before any retry can duplicate eviden
   const server = require("../lib/server-client");
   const originalStatus = server.getCaptureStatus;
   const originalUpload = server.uploadCaptureEvidence;
+  const originalPrepare = server.prepareCaptureEvidenceUpload;
+  const originalFinalise = server.finalisePreparedCaptureEvidenceUpload;
+  const originalFinaliseStaged = server.finaliseStagedCaptureEvidence;
   t.after(() => {
     server.getCaptureStatus = originalStatus;
     server.uploadCaptureEvidence = originalUpload;
+    server.prepareCaptureEvidenceUpload = originalPrepare;
+    server.finalisePreparedCaptureEvidenceUpload = originalFinalise;
+    server.finaliseStagedCaptureEvidence = originalFinaliseStaged;
     if (previousScansDir === undefined) delete process.env.MINTVAULT_SCANS_DIR; else process.env.MINTVAULT_SCANS_DIR = previousScansDir;
     delete require.cache[watcherPath];
     delete require.cache[statePath];
@@ -804,13 +952,22 @@ test("targeted upload reconciles a timeout before any retry can duplicate eviden
     ok: true,
     body: uploads ? { accepted: true, capture: { state: "captured", certificateNumber: "MV701" } } : { accepted: false, capture: { state: "claimed" } },
   });
-  server.uploadCaptureEvidence = async () => { uploads++; return { ok: false, status: 504, body: { error: "server slow — no reply" } }; };
+  server.prepareCaptureEvidenceUpload = async () => ({ ok: true, status: 201, body: { transport: "direct", staging_id: "timeout", expected_bytes: 12 } });
+  server.finalisePreparedCaptureEvidenceUpload = async () => { uploads++; return { ok: false, status: 504, body: { error: "server slow — no reply" } }; };
+  server.finaliseStagedCaptureEvidence = async () => { uploads++; return { ok: true, body: { certId: "MV701", card_registered: true } }; };
 
-  const result = await watcher.uploadTargetedCapture({
+  const first = await watcher.uploadTargetedCapture({
     sessionId: "session-timeout", certId: "MV701", side: "back", workstationId: "mintvault-station-a", filePath: path.join(tempDir, "master.tif"), provenance: {}, uploadAttempts: 0,
   });
-  assert.equal(result.ok, true);
+  assert.equal(first.ok, false, "a failed finalise response must not be completed from status alone");
   assert.equal(uploads, 1, "ambiguous timeout must be reconciled before a second POST");
+  assert.equal(completed, 0);
+  const queued = watcher.readTargetedQueue()[0];
+  assert.equal(queued.stagingId, "timeout");
+
+  const second = await watcher.uploadTargetedCapture(queued);
+  assert.equal(second.ok, true);
+  assert.equal(uploads, 2, "the retry replays finalise for the same staging task, not a new upload");
   assert.equal(completed, 1);
 });
 
@@ -882,7 +1039,7 @@ test("calibration analysis reports a conservative standard-card physical candida
   assert.ok(candidate.surroundingBackgroundMm.left > 20 && candidate.surroundingBackgroundMm.top > 30);
 });
 
-test("station-side frame safety refuses an edge-touching TIFF before it exposes Accept", async (t) => {
+test("station-side frame safety refuses an edge-touching TIFF before upload", async (t) => {
   const { assessLide400CardFrame } = require("../lib/lide400-card-frame");
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mintvault-frame-safety-"));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));

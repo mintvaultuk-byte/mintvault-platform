@@ -43,6 +43,7 @@ import type { PoolClient } from "pg";
 import { withPartnerAdminTenantTransaction } from "./db";
 import { releaseReservedCreditInTransaction, CreditReservationError } from "./partner-credit-reservation-service";
 import { CARD_JOB_STATUS, lockCardJob, transitionCardJob, type CardJobStatus } from "./card-job-lifecycle";
+import { hashLockKey } from "../lib/advisory-lock";
 
 export class CardJobCancellationError extends Error {
   constructor(
@@ -182,6 +183,23 @@ async function assertNothingCaptured(
       );
     }
   }
+}
+
+async function lockActiveCaptureSessionsForCancellation(
+  client: PoolClient,
+  certificateId: number | null
+): Promise<void> {
+  if (certificateId === null) return;
+  await client.query("SELECT pg_advisory_xact_lock($1)", [hashLockKey(`scanner-capture-certificate:${certificateId}`)]);
+  if (!(await tablePresent(client, "public.scanner_capture_sessions"))) return;
+  await client.query(
+    `SELECT id FROM scanner_capture_sessions
+      WHERE certificate_id = $1
+        AND state IN ('armed', 'claimed', 'capturing')
+      ORDER BY id
+      FOR UPDATE`,
+    [certificateId]
+  );
 }
 
 /**
@@ -352,6 +370,7 @@ export async function cancelCardJob(input: CancelCardJobInput): Promise<CancelCa
         });
       }
 
+      await lockActiveCaptureSessionsForCancellation(client, job.certificateId);
       await assertNothingCaptured(client, { certificateId: job.certificateId, mvNumber: job.mvNumber });
 
       const cancelledCaptureSessions = await cancelOutstandingCaptureSessions(
@@ -471,9 +490,7 @@ const VOIDABLE_STATUSES: readonly CardJobStatus[] = [
   CARD_JOB_STATUS.FIX_REQUIRED,
 ];
 
-export async function voidCardJobUnrecoverableGeometry(
-  input: VoidCardJobInput
-): Promise<CancelCardJobResult> {
+export async function voidCardJobUnrecoverableGeometry(input: VoidCardJobInput): Promise<CancelCardJobResult> {
   const reason = String(input.reason ?? "").trim();
   if (!reason) {
     throw new CardJobCancellationError(

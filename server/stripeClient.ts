@@ -1,4 +1,4 @@
-import Stripe from 'stripe';
+import Stripe from "stripe";
 
 /*
  * STRIPE ENVIRONMENT ISOLATION — FAIL CLOSED.
@@ -44,19 +44,28 @@ import Stripe from 'stripe';
  * suffix, appears in an error, a log line, or a stack trace.
  */
 
-type StripeEnvironment = 'live' | 'test';
+export type StripeEnvironment = "live" | "test";
 
 /** The mode this deployment declares it is supposed to be in, or null when it declares nothing. */
 function expectedEnvironment(): StripeEnvironment | null {
-  const declared = (process.env.STRIPE_ENV || '').trim().toLowerCase();
-  if (declared === 'live' || declared === 'test') return declared;
+  const declared = (process.env.STRIPE_ENV || "").trim().toLowerCase();
+  if (declared === "live" || declared === "test") return declared;
   return null;
+}
+
+/**
+ * The explicitly declared Stripe mode, without constructing a client or reading key material.
+ * Partner-credit fulfilment uses this as a mandatory, fail-closed attribution input: a webhook
+ * event from the wrong Stripe account must never become wallet capacity.
+ */
+export function declaredStripeEnvironment(): StripeEnvironment | null {
+  return expectedEnvironment();
 }
 
 /** The environment a key declares about itself, or null if it is not a recognised Stripe key. */
 function declaredEnvironment(key: string): StripeEnvironment | null {
-  if (/^(sk|pk|rk)_live_/.test(key)) return 'live';
-  if (/^(sk|pk|rk)_test_/.test(key)) return 'test';
+  if (/^(sk|pk|rk)_live_/.test(key)) return "live";
+  if (/^(sk|pk|rk)_test_/.test(key)) return "test";
   return null;
 }
 
@@ -71,7 +80,7 @@ function assertEnvironmentMatches(varName: string, key: string): void {
   }
 
   // CHECK 1 — coherence. Wrong under every deployment story, so refused unconditionally.
-  const counterpartName = varName === 'STRIPE_SECRET_KEY' ? 'STRIPE_PUBLISHABLE_KEY' : 'STRIPE_SECRET_KEY';
+  const counterpartName = varName === "STRIPE_SECRET_KEY" ? "STRIPE_PUBLISHABLE_KEY" : "STRIPE_SECRET_KEY";
   const counterpart = process.env[counterpartName];
   if (counterpart) {
     const counterpartMode = declaredEnvironment(counterpart);
@@ -90,30 +99,30 @@ function assertEnvironmentMatches(varName: string, key: string): void {
     throw new Error(
       `Stripe environment mismatch: ${varName} is a ${declared}-mode key but STRIPE_ENV=${expected} ` +
         `requires a ${expected}-mode key. Refusing to construct a Stripe client. ` +
-        (declared === 'live'
-          ? 'This deployment must never hold live Stripe credentials — it would move real money.'
-          : 'A live deployment on test credentials would take orders that never collect payment.')
+        (declared === "live"
+          ? "This deployment must never hold live Stripe credentials — it would move real money."
+          : "A live deployment on test credentials would take orders that never collect payment.")
     );
   }
 }
 
 function getSecretKey(): string {
   const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error('STRIPE_SECRET_KEY env var is not set');
-  assertEnvironmentMatches('STRIPE_SECRET_KEY', key);
+  if (!key) throw new Error("STRIPE_SECRET_KEY env var is not set");
+  assertEnvironmentMatches("STRIPE_SECRET_KEY", key);
   return key;
 }
 
 export async function getUncachableStripeClient() {
   return new Stripe(getSecretKey(), {
-    apiVersion: '2025-08-27.basil' as any,
+    apiVersion: "2025-08-27.basil" as any,
   });
 }
 
 export async function getStripePublishableKey(): Promise<string> {
   const key = process.env.STRIPE_PUBLISHABLE_KEY;
-  if (!key) throw new Error('STRIPE_PUBLISHABLE_KEY env var is not set');
-  assertEnvironmentMatches('STRIPE_PUBLISHABLE_KEY', key);
+  if (!key) throw new Error("STRIPE_PUBLISHABLE_KEY env var is not set");
+  assertEnvironmentMatches("STRIPE_PUBLISHABLE_KEY", key);
   return key;
 }
 
@@ -130,7 +139,7 @@ export function describeStripeEnvironmentMismatch(): string | null {
   const expected = expectedEnvironment();
   const modes: Partial<Record<string, StripeEnvironment>> = {};
 
-  for (const varName of ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY'] as const) {
+  for (const varName of ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY"] as const) {
     const key = process.env[varName];
     if (!key) continue;
     const declared = declaredEnvironment(key);

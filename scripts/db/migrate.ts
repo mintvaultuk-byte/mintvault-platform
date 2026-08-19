@@ -33,7 +33,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { toDirectEndpoint } from "./read-only-session";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
-import { lintSql, hasBlocking } from "./lint-destructive-sql";
+import { lintSql, isApprovedDestructiveFinding, unapprovedBlockingFindings } from "./lint-destructive-sql";
 
 function defaultMigrationsDir(): string {
   const entry = process.argv[1] ?? "";
@@ -46,6 +46,14 @@ const MIGRATIONS_DIR = defaultMigrationsDir();
 const FILE_RE = /^(\d{4,})_.+\.sql$/;
 // Fixed advisory-lock key for the migration runner (arbitrary constant, namespaced).
 const ADVISORY_LOCK_KEY = 4_150_205; // "P0.5" mnemonic; any stable int works.
+
+function approvedDestructiveSuffix(filename: string): string {
+  if (filename === "0094_scanner_capture_physical_release.sql") return " (approved protected index replacement)";
+  if (filename === "0096_partner_card_job_void_management_audit.sql") {
+    return " (approved protected constraint replacement)";
+  }
+  return " (approved protected migration replacement)";
+}
 
 /**
  * The migration runner MUST own a dedicated backend for the whole run.
@@ -106,7 +114,7 @@ export function resolveMigrationEndpoint(url: string): { url: string; pooled: bo
         "could not be derived, so single-runner concurrency cannot be guaranteed."
     );
   }
-  let rewrittenHost = effectiveHost;
+  let rewrittenHost: string;
   try {
     rewrittenHost = new URL(direct.url).hostname.toLowerCase();
   } catch {
@@ -619,8 +627,12 @@ export async function applyMigrations(
       plan.pending = plan.pending.filter((n) => !excludedNames.has(n));
       plan.destructive = plan.destructive.filter((d) => !excludedNames.has(d.filename));
     }
+    const byName = new Map(files.map((f) => [f.filename, f]));
     if (!opts.allowDestructive) {
-      const blocking = plan.destructive.filter((d) => hasBlocking(d.findings));
+      const blocking = plan.destructive.filter((d) => {
+        const sql = byName.get(d.filename)?.sql ?? "";
+        return unapprovedBlockingFindings(d.filename, sql, d.findings).length > 0;
+      });
       if (blocking.length > 0) {
         throw new Error(
           `Destructive SQL detected in pending migration(s): ${blocking
@@ -630,7 +642,6 @@ export async function applyMigrations(
       }
     }
     const applied: string[] = [];
-    const byName = new Map(files.map((f) => [f.filename, f]));
     for (const filename of plan.pending) {
       // Re-prove exclusivity before EVERY file. If the connection were ever replaced or
       // recycled mid-run (the pooled-multiplexing hazard), the run stops between files
@@ -807,9 +818,15 @@ export async function applyScopedMigration(
 
   // (5)/(2) Destructive-SQL lint, same gate and same opt-in as the normal path.
   const findings = lintSql(target.sql);
-  for (const f of findings)
-    log(`${f.severity === "block" ? "🚫" : "⚠️ "} ${target.filename}:${f.line} [${f.kind}] ${f.match}`);
-  if (!opts.allowDestructive && hasBlocking(findings)) {
+  for (const f of findings) {
+    const approved = isApprovedDestructiveFinding(target.filename, target.sql, f);
+    log(
+      `${approved ? "✅" : f.severity === "block" ? "🚫" : "⚠️ "} ` +
+        `${target.filename}:${f.line} [${f.kind}] ${f.match}` +
+        `${approved ? approvedDestructiveSuffix(target.filename) : ""}`
+    );
+  }
+  if (!opts.allowDestructive && unapprovedBlockingFindings(target.filename, target.sql, findings).length > 0) {
     throw new Error(
       `Destructive SQL detected in '${target.filename}'. Re-run with --allow-destructive only with owner approval.`
     );
@@ -1006,8 +1023,14 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     for (const d of plan.destructive) {
-      for (const fd of d.findings)
-        console.log(`${fd.severity === "block" ? "🚫" : "⚠️ "} ${d.filename}:${fd.line} [${fd.kind}] ${fd.match}`);
+      const sql = files.find((f) => f.filename === d.filename)?.sql ?? "";
+      for (const fd of d.findings) {
+        const approved = isApprovedDestructiveFinding(d.filename, sql, fd);
+        console.log(
+          `${approved ? "✅" : fd.severity === "block" ? "🚫" : "⚠️ "} ${d.filename}:${fd.line} [${fd.kind}] ${fd.match}` +
+            `${approved ? approvedDestructiveSuffix(d.filename) : ""}`
+        );
+      }
     }
     if (!apply) {
       console.log(`(dry-run) pending: ${plan.pending.join(", ") || "none"}. Re-run with --apply to execute.`);

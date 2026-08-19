@@ -21,16 +21,21 @@ function baseUrl() {
 }
 
 function cookieTokenFrom(response) {
-  const raw = typeof response.headers.getSetCookie === "function"
-    ? response.headers.getSetCookie().join("; ")
-    : response.headers.get("set-cookie") || "";
+  const raw =
+    typeof response.headers.getSetCookie === "function"
+      ? response.headers.getSetCookie().join("; ")
+      : response.headers.get("set-cookie") || "";
   const match = /(?:^|[,;]\s*)mv\.partner\.sid=([^;]+)/.exec(raw);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
 async function readJson(response) {
   const raw = await response.text();
-  try { return JSON.parse(raw); } catch { return { raw }; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { raw };
+  }
 }
 
 async function operatorJson(method, apiPath, payload) {
@@ -56,6 +61,14 @@ async function operatorJson(method, apiPath, payload) {
  */
 async function creditSummary() {
   return operatorJson("GET", "/api/partner/credits");
+}
+
+async function creditPacks() {
+  return operatorJson("GET", "/api/partner/credits/packs");
+}
+
+async function creditCheckout(packCode) {
+  return operatorJson("POST", "/api/partner/credits/checkout", { packCode });
 }
 
 async function signedJson(method, apiPath, payload) {
@@ -129,6 +142,8 @@ async function saveCalibration(payload) {
 
 module.exports = {
   creditSummary,
+  creditPacks,
+  creditCheckout,
   signIn,
   completeMfa,
   stationSession,

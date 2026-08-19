@@ -149,7 +149,8 @@ async function seedMintVaultTables(): Promise<void> {
     workstation_id text not null, station_id uuid,
     scanner_profile_version text not null, actor_id text,
     state varchar(16) not null check (state in ('armed','claimed','capturing','captured','failed','expired','cancelled')),
-    claimed_by_device_id text, recapture boolean not null default false, failure_reason text,
+    claimed_by_device_id text, physical_released boolean not null default false,
+    recapture boolean not null default false, failure_reason text,
     created_at timestamptz not null default now(), claimed_at timestamptz,
     captured_at timestamptz, expires_at timestamptz not null,
     -- Mirrors migration 0091. The server snapshots the station's authoritative capture window here
@@ -388,7 +389,7 @@ async function captureSide(
       side,
       `evidence/${certificateId}/${side}/${evidenceSeq}.tif`,
       "a".repeat(64),
-      JSON.stringify({ captureSessionId: sessionId }),
+      JSON.stringify({ captureSessionId: sessionId, stationId: stationId ?? f.stationA }),
     ]
   );
 }
@@ -605,7 +606,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     // 0075's one-active-per-station invariant, which the service verifies before arming.
     await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
       ON scanner_capture_sessions (station_id)
-      WHERE station_id IS NOT NULL AND state IN ('armed', 'claimed', 'capturing')`);
+      WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
     const captures = await import("../server/scanner-capture-service");
     const card = await scannerNew(shopA);
 
@@ -678,7 +679,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
   it("AT-B1d: re-arming the card a station already holds replays it; another card is a named refusal", async () => {
     await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
       ON scanner_capture_sessions (station_id)
-      WHERE station_id IS NOT NULL AND state IN ('armed', 'claimed', 'capturing')`);
+      WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
     const captures = await import("../server/scanner-capture-service");
     const card = await scannerNew(shopA);
     const arm = (certificateId: number) =>
@@ -728,6 +729,267 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [first.id]);
   });
 
+  it("SFAP-015: a released FRONT upload task frees the Canon only for the same card's BACK", async () => {
+    await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
+      ON scanner_capture_sessions (station_id)
+      WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
+    const captures = await import("../server/scanner-capture-service");
+    const captureAuthority = await import("../server/partner/capture-authority");
+    const card = await scannerNew(shopA);
+
+    const front = await captures.createScannerCaptureSession({
+      certificateId: card.certificateId,
+      side: "front",
+      workstationId: "MV-STN-SFAP015AA22",
+      stationId: shopA.stationA,
+      actorId: shopA.graderOne,
+      recapture: false,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+    });
+    const claimedFront = await captures.claimNextScannerCapture(
+      "MV-STN-SFAP015AA22",
+      "MV-STN-SFAP015AA22",
+      shopA.stationA
+    );
+    expect(claimedFront?.id).toBe(front.id);
+
+    // This is the server-side effect of grantScannerEvidenceStaging(): the FRONT side still owns its
+    // upload/finalisation retries, but no longer occupies the single physical Canon.
+    await admin.query("UPDATE scanner_capture_sessions SET physical_released=true WHERE id=$1", [front.id]);
+
+    // Same tenant/location but a DIFFERENT approved station still cannot take over the card while
+    // Station A's released FRONT owns the unresolved upload/finalisation task.
+    await admin.query("UPDATE partner_stations SET location_id=$2 WHERE id=$1", [shopA.stationB, shopA.locationA]);
+    await admin.query("UPDATE partner_station_calibrations SET location_id=$2 WHERE station_id=$1", [
+      shopA.stationB,
+      shopA.locationA,
+    ]);
+    await expect(
+      captureAuthority.authoriseStationCapture({
+        tenantId: shopA.tenantId,
+        locationId: shopA.locationA,
+        cardJobId: card.cardJobId,
+        stationId: shopA.stationB,
+        actorUserId: shopA.graderOne,
+        requestedSide: "back",
+      })
+    ).rejects.toThrow(/another approved station/i);
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "back",
+        workstationId: "MV-STN-SFAP015BB22",
+        stationId: shopA.stationB,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/another approved station/i);
+
+    const next = await captureAuthority.authoriseStationCapture({
+      tenantId: shopA.tenantId,
+      locationId: shopA.locationA,
+      cardJobId: card.cardJobId,
+      stationId: shopA.stationA,
+      actorUserId: shopA.graderOne,
+    });
+    expect(next.side).toBe("back");
+    expect(next.missingSides).toEqual(["back"]);
+
+    const back = await captures.createScannerCaptureSession({
+      certificateId: card.certificateId,
+      side: next.side,
+      workstationId: "MV-STN-SFAP015AA22",
+      stationId: shopA.stationA,
+      actorId: shopA.graderOne,
+      recapture: false,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+    });
+    expect(back.side).toBe("back");
+    expect(back.state).toBe("armed");
+
+    const other = await scannerNew(shopA);
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: other.certificateId,
+        side: "front",
+        workstationId: "MV-STN-SFAP015AA22",
+        stationId: shopA.stationA,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/already holding/i);
+
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id IN ($1,$2)", [front.id, back.id]);
+  });
+
+  it("SFAP-015: an immutable FRONT also pins the BACK to the same approved station", async () => {
+    await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
+      ON scanner_capture_sessions (station_id)
+      WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
+    const captures = await import("../server/scanner-capture-service");
+    const captureAuthority = await import("../server/partner/capture-authority");
+    const card = await scannerNew(shopA);
+
+    await captureSide(shopA, card.certificateId, "front", shopA.stationA);
+    await lifecycle.advanceCardJobAfterCapture(card.certificateId);
+
+    // Same tenant/location is still not enough: FRONT and BACK for a Card Job must come from the
+    // same physical station unless the FRONT is deliberately invalidated and recaptured.
+    await admin.query("UPDATE partner_stations SET location_id=$2 WHERE id=$1", [shopA.stationB, shopA.locationA]);
+    await admin.query("UPDATE partner_station_calibrations SET location_id=$2 WHERE station_id=$1", [
+      shopA.stationB,
+      shopA.locationA,
+    ]);
+    await expect(
+      captureAuthority.authoriseStationCapture({
+        tenantId: shopA.tenantId,
+        locationId: shopA.locationA,
+        cardJobId: card.cardJobId,
+        stationId: shopA.stationB,
+        actorUserId: shopA.graderOne,
+        requestedSide: "back",
+      })
+    ).rejects.toThrow(/front was captured on another approved station/i);
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "back",
+        workstationId: "MV-STN-SFAP015IMMBB22",
+        stationId: shopA.stationB,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/front was captured on another approved station/i);
+
+    const next = await captureAuthority.authoriseStationCapture({
+      tenantId: shopA.tenantId,
+      locationId: shopA.locationA,
+      cardJobId: card.cardJobId,
+      stationId: shopA.stationA,
+      actorUserId: shopA.graderOne,
+    });
+    expect(next.side).toBe("back");
+    const back = await captures.createScannerCaptureSession({
+      certificateId: card.certificateId,
+      side: next.side,
+      workstationId: "MV-STN-SFAP015IMMAA22",
+      stationId: shopA.stationA,
+      actorId: shopA.graderOne,
+      recapture: false,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+    });
+    expect(back.side).toBe("back");
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [back.id]);
+    await captureSide(shopA, card.certificateId, "back", shopA.stationA);
+    await lifecycle.advanceCardJobAfterCapture(card.certificateId);
+
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "back",
+        workstationId: "MV-STN-SFAP015RECAPBB22",
+        stationId: shopA.stationB,
+        actorId: shopA.graderOne,
+        recapture: true,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/captured on another approved station/i);
+  });
+
+  it("SFAP-015: a current BACK pins replacement FRONT to the same approved station", async () => {
+    await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
+      ON scanner_capture_sessions (station_id)
+      WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
+    const captures = await import("../server/scanner-capture-service");
+    const captureAuthority = await import("../server/partner/capture-authority");
+    const card = await scannerNew(shopA);
+
+    // This is the FIX shape: FRONT is missing/invalidated, but BACK remains canonical. The missing
+    // side must be repaired at the station that produced the retained side.
+    await captureSide(shopA, card.certificateId, "back", shopA.stationA);
+    await admin.query("UPDATE partner_stations SET location_id=$2 WHERE id=$1", [shopA.stationB, shopA.locationA]);
+    await admin.query("UPDATE partner_station_calibrations SET location_id=$2 WHERE station_id=$1", [
+      shopA.stationB,
+      shopA.locationA,
+    ]);
+
+    await expect(
+      captureAuthority.authoriseStationCapture({
+        tenantId: shopA.tenantId,
+        locationId: shopA.locationA,
+        cardJobId: card.cardJobId,
+        stationId: shopA.stationB,
+        actorUserId: shopA.graderOne,
+        requestedSide: "front",
+      })
+    ).rejects.toThrow(/back was captured on another approved station/i);
+    await expect(
+      captures.createScannerCaptureSession({
+        certificateId: card.certificateId,
+        side: "front",
+        workstationId: "MV-STN-SFAP015FIXBB22",
+        stationId: shopA.stationB,
+        actorId: shopA.graderOne,
+        recapture: false,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      })
+    ).rejects.toThrow(/back was captured on another approved station/i);
+
+    const next = await captureAuthority.authoriseStationCapture({
+      tenantId: shopA.tenantId,
+      locationId: shopA.locationA,
+      cardJobId: card.cardJobId,
+      stationId: shopA.stationA,
+      actorUserId: shopA.graderOne,
+    });
+    expect(next.side).toBe("front");
+    const front = await captures.createScannerCaptureSession({
+      certificateId: card.certificateId,
+      side: next.side,
+      workstationId: "MV-STN-SFAP015FIXAA22",
+      stationId: shopA.stationA,
+      actorId: shopA.graderOne,
+      recapture: false,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+    });
+    expect(front.side).toBe("front");
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [front.id]);
+    await captureSide(shopA, card.certificateId, "front", shopA.stationA);
+    await lifecycle.advanceCardJobAfterCapture(card.certificateId);
+  });
+
+  it("SFAP-015: lost-local-TIFF recovery keeps its journal while server finalisation is in flight", async () => {
+    const captures = await import("../server/scanner-capture-service");
+    const card = await scannerNew(shopA);
+    const session = await captures.createScannerCaptureSession({
+      certificateId: card.certificateId,
+      side: "front",
+      workstationId: "MV-STN-SFAP015FAILAA22",
+      stationId: shopA.stationA,
+      actorId: shopA.graderOne,
+      recapture: false,
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+    });
+    await captures.claimNextScannerCapture("MV-STN-SFAP015FAILAA22", "MV-STN-SFAP015FAILAA22", shopA.stationA);
+    await admin.query("UPDATE scanner_capture_sessions SET state='capturing', physical_released=true WHERE id=$1", [
+      session.id,
+    ]);
+    const failed = await captures.failScannerCapture(
+      session.id,
+      "MV-STN-SFAP015FAILAA22",
+      "Accepted local TIFF is missing after restart"
+    );
+    expect(failed).toMatchObject({ terminalized: false, accepted: false, state: "capturing" });
+    const row = await admin.query<{ state: string }>("SELECT state FROM scanner_capture_sessions WHERE id=$1", [
+      session.id,
+    ]);
+    expect(row.rows[0].state).toBe("capturing");
+    await admin.query("UPDATE scanner_capture_sessions SET state='cancelled' WHERE id=$1", [session.id]);
+  });
+
   it("AT-B1f: the calibration write boundary refuses geometry the arm path would reject", async () => {
     /*
      * The defect this closes: `saveStationCalibration` validated only that the four numbers were
@@ -764,7 +1026,9 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     // Wrong SIZE — finite, in range, and not a capture window.
     await expect(save({ x: 20, y: 20, width: 216, height: 297 })).rejects.toThrow(/Capture window must be 100 x 130/);
     // Right size, off the far edge of the glass.
-    await expect(save({ x: 200, y: 20, width: 100, height: 130 })).rejects.toThrow(/not a valid position on the platen/);
+    await expect(save({ x: 200, y: 20, width: 100, height: 130 })).rejects.toThrow(
+      /not a valid position on the platen/
+    );
     // Refused as a VALIDATION error, not a 500-shaped internal fault.
     await expect(save({ x: 200, y: 20, width: 100, height: 130 })).rejects.toBeInstanceOf(StationServiceError);
 
@@ -798,7 +1062,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     // Same precondition AT-B1d installs: the arm path refuses outright without this invariant.
     await admin.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_station
       ON scanner_capture_sessions (station_id)
-      WHERE station_id IS NOT NULL AND state IN ('armed', 'claimed', 'capturing')`);
+      WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
     const captures = await import("../server/scanner-capture-service");
     const card = await scannerNew(shopA);
     const armBack = () =>

@@ -49,6 +49,12 @@ export type ScannerCaptureSession = {
   /** THE authoritative capture window, snapshotted at arm time. Evidence is validated against this. */
   acquisitionRegion: AcquisitionRegionMm | null;
   state: "armed" | "claimed" | "capturing" | "captured" | "failed" | "expired" | "cancelled";
+  /**
+   * True after the physical TIFF is durably accepted locally and the server has minted this
+   * session's staging upload task. The row still owns the side and its retries, but no longer
+   * occupies the single physical Canon target.
+   */
+  physicalReleased: boolean;
   expiresAt: Date;
   recapture: boolean;
   failureReason: string | null;
@@ -83,6 +89,7 @@ function mapRow(row: Record<string, unknown>): ScannerCaptureSession {
     workstationId: String(row.workstation_id),
     scannerProfileVersion: String(row.scanner_profile_version),
     state: row.state as ScannerCaptureSession["state"],
+    physicalReleased: row.physical_released === true,
     expiresAt: new Date(String(row.expires_at)),
     recapture: row.recapture === true,
     failureReason: row.failure_reason == null ? null : String(row.failure_reason),
@@ -241,6 +248,7 @@ export async function ensureScannerCaptureSchema(): Promise<void> {
       actor_id TEXT,
       state VARCHAR(16) NOT NULL CHECK (state IN ('armed','claimed','capturing','captured','failed','expired','cancelled')),
       claimed_by_device_id TEXT,
+      physical_released BOOLEAN NOT NULL DEFAULT false,
       recapture BOOLEAN NOT NULL DEFAULT false,
       failure_reason TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -259,6 +267,9 @@ export async function ensureScannerCaptureSchema(): Promise<void> {
       ON scanner_capture_sessions (state, expires_at, workstation_id, created_at)
     `);
     await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS station_id UUID`);
+    await client.query(
+      `ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS physical_released BOOLEAN NOT NULL DEFAULT false`
+    );
     /*
      * The server-owned capture window, snapshotted when a side is armed. Mirrored here as idempotent
      * runtime DDL for the same reason `station_id` above is — this table is created by this function
@@ -274,7 +285,7 @@ export async function ensureScannerCaptureSchema(): Promise<void> {
     `);
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_scanner_capture_expiry
-        ON scanner_capture_sessions (expires_at, id) WHERE state IN ('armed','claimed')
+        ON scanner_capture_sessions (expires_at, id) WHERE state IN ('armed','claimed') AND physical_released = false
     `);
   } finally {
     client.release();
@@ -295,6 +306,9 @@ export async function createScannerCaptureSession(input: {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock($1)", [
+      hashLockKey(`scanner-capture-certificate:${input.certificateId}`),
+    ]);
     // A station-target expiry must be made terminal in the SAME transaction as
     // the next arm. Otherwise an expired `armed` row can indefinitely occupy
     // the station's partial-unique slot until a background sweeper happens to
@@ -311,6 +325,7 @@ export async function createScannerCaptureSession(input: {
             SET state='expired'
           WHERE station_id=$1
             AND state IN ('armed','claimed')
+            AND physical_released = false
             AND expires_at <= NOW()`,
         [input.stationId]
       );
@@ -431,6 +446,83 @@ export async function createScannerCaptureSession(input: {
         [input.certificateId, side]
       );
       if (evidence.rows.length) throw new Error(`${side} already has a current master; use controlled recapture`);
+    } else if (input.stationId) {
+      const sameSideOwner = await client.query<{ station_id: string | null }>(
+        `SELECT COALESCE(capture_metadata ->> 'stationId', capture_metadata ->> 'station_id') AS station_id
+           FROM certificate_image_evidence
+          WHERE certificate_id = $1 AND side = $2 AND is_current = true
+          LIMIT 1`,
+        [input.certificateId, side]
+      );
+      const sameSideStationId = sameSideOwner.rows[0]?.station_id ?? null;
+      if (sameSideStationId && sameSideStationId !== input.stationId) {
+        throw new ScannerCaptureConflictError(
+          `${String(row.certificate_number)} ${side} was captured on another approved station. Use that station or deliberately invalidate the side before continuing.`,
+          String(row.certificate_number),
+          side
+        );
+      }
+    }
+    const oppositeSide: CaptureSide = side === "front" ? "back" : "front";
+    const oppositeEvidence = await client.query<{ station_id: string | null }>(
+      `SELECT COALESCE(capture_metadata ->> 'stationId', capture_metadata ->> 'station_id') AS station_id
+         FROM certificate_image_evidence
+        WHERE certificate_id = $1 AND side = $2 AND is_current = true
+        LIMIT 1`,
+      [input.certificateId, oppositeSide]
+    );
+    const oppositeReleased = await client.query<{ station_id: string | null }>(
+      `SELECT station_id
+         FROM scanner_capture_sessions
+        WHERE certificate_id = $1
+          AND side = $2
+          AND state IN ('claimed','capturing')
+          AND physical_released = true
+        ORDER BY created_at
+        LIMIT 1`,
+      [input.certificateId, oppositeSide]
+    );
+    if (side === "back" && !oppositeEvidence.rows.length && !oppositeReleased.rows.length) {
+      throw new Error("Scan the front before arming the back.");
+    }
+    const oppositeStationId = oppositeReleased.rows[0]?.station_id ?? oppositeEvidence.rows[0]?.station_id ?? null;
+    if (input.stationId && oppositeStationId && oppositeStationId !== input.stationId) {
+      throw new ScannerCaptureConflictError(
+        `${String(row.certificate_number)} ${oppositeSide} was captured on another approved station. Use that station or deliberately invalidate the ${oppositeSide} before continuing.`,
+        String(row.certificate_number),
+        oppositeSide
+      );
+    }
+    if (input.stationId) {
+      const releasedOwner = await client.query(
+        `SELECT s.*, c.certificate_number
+           FROM scanner_capture_sessions s
+           JOIN certificates c ON c.id = s.certificate_id
+          WHERE s.certificate_id = $1
+            AND s.state IN ('claimed','capturing')
+            AND s.physical_released = true
+          ORDER BY s.created_at
+          FOR UPDATE
+          LIMIT 1`,
+        [input.certificateId]
+      );
+      const owner = releasedOwner.rows[0] as Record<string, unknown> | undefined;
+      if (owner) {
+        if (String(owner.station_id ?? "") !== input.stationId) {
+          throw new ScannerCaptureConflictError(
+            `${String(owner.certificate_number)} is already being finished on another approved station. Finish or cancel it there before continuing.`,
+            String(owner.certificate_number),
+            String(owner.side)
+          );
+        }
+        if (String(owner.side) === side) {
+          throw new ScannerCaptureConflictError(
+            `${String(owner.certificate_number)} ${side} is already captured locally and queued for MintVault validation.`,
+            String(owner.certificate_number),
+            String(owner.side)
+          );
+        }
+      }
     }
     /*
      * RE-ARMING A STATION THAT ALREADY HOLDS A LIVE TARGET IS A REPLAY, NOT A SECOND SESSION.
@@ -450,6 +542,12 @@ export async function createScannerCaptureSession(input: {
      * Returning the session the station already holds is the correct answer to "arm this card":
      * SAME certificate, SAME side, SAME station, so the caller's request is already satisfied. It
      * costs nothing, creates nothing and mints nothing — this branch cannot reach the INSERT below.
+     *
+     * SFAP-015 splits that physical hold from a background upload task. Once the scanner has
+     * durably accepted a TIFF and MintVault has granted its staging task, that row still owns the
+     * certificate side and its retries, but no longer blocks the glass from moving to the SAME
+     * card's remaining side. It still blocks a DIFFERENT card: release is not permission to start
+     * another paid unit while this one is unresolved.
      */
     if (input.stationId) {
       const held = await client.query(
@@ -458,9 +556,12 @@ export async function createScannerCaptureSession(input: {
            JOIN certificates c ON c.id = s.certificate_id
           WHERE s.station_id = $1
             AND s.state IN ('armed','claimed','capturing')
-            AND s.expires_at > NOW()
+            AND (
+              (s.physical_released = false AND s.expires_at > NOW())
+              OR (s.physical_released = true AND s.certificate_id <> $2)
+            )
           LIMIT 1`,
-        [input.stationId]
+        [input.stationId, input.certificateId]
       );
       const live = held.rows[0] as Record<string, unknown> | undefined;
       if (live) {
@@ -561,7 +662,7 @@ export async function claimNextScannerCapture(
       await client.query(
         `WITH expired AS (
            SELECT id FROM scanner_capture_sessions
-            WHERE station_id = $1 AND state IN ('armed','claimed') AND expires_at <= NOW()
+            WHERE station_id = $1 AND state IN ('armed','claimed') AND physical_released = false AND expires_at <= NOW()
             ORDER BY expires_at, id FOR UPDATE SKIP LOCKED LIMIT 50
          )
          UPDATE scanner_capture_sessions s SET state = 'expired'
@@ -572,7 +673,7 @@ export async function claimNextScannerCapture(
       await client.query(
         `WITH expired AS (
            SELECT id FROM scanner_capture_sessions
-            WHERE workstation_id = $1 AND state IN ('armed','claimed') AND expires_at <= NOW()
+            WHERE workstation_id = $1 AND state IN ('armed','claimed') AND physical_released = false AND expires_at <= NOW()
             ORDER BY expires_at, id FOR UPDATE SKIP LOCKED LIMIT 50
          )
          UPDATE scanner_capture_sessions s SET state = 'expired'
@@ -624,7 +725,7 @@ export async function expireScannerCaptureSessions(limit = 100): Promise<number>
   const result = await pool.query(
     `WITH expired AS (
        SELECT id FROM scanner_capture_sessions
-        WHERE state IN ('armed','claimed') AND expires_at <= NOW()
+        WHERE state IN ('armed','claimed') AND physical_released = false AND expires_at <= NOW()
         ORDER BY expires_at, id FOR UPDATE SKIP LOCKED LIMIT $1
      )
      UPDATE scanner_capture_sessions s SET state='expired'
@@ -656,7 +757,7 @@ export async function renewScannerCapture(sessionId: string, deviceIdInput: unkn
     );
     const row = found.rows[0] as Record<string, unknown> | undefined;
     if (!row) throw new Error("Capture session not found for this scanner");
-    if (new Date(String(row.expires_at)).getTime() <= Date.now()) {
+    if (row.physical_released !== true && new Date(String(row.expires_at)).getTime() <= Date.now()) {
       await client.query(`UPDATE scanner_capture_sessions SET state = 'expired' WHERE id = $1 AND state = 'claimed'`, [
         sessionId,
       ]);
@@ -701,7 +802,7 @@ export async function beginScannerCapture(sessionId: string, deviceIdInput: unkn
     );
     const row = found.rows[0] as Record<string, unknown> | undefined;
     if (!row) throw new Error("Capture session not found");
-    if (new Date(String(row.expires_at)).getTime() <= Date.now()) {
+    if (row.physical_released !== true && new Date(String(row.expires_at)).getTime() <= Date.now()) {
       await client.query("UPDATE scanner_capture_sessions SET state = 'expired' WHERE id = $1", [sessionId]);
       // The expiry itself is an audit-relevant terminal transition; preserve
       // it before returning the fail-closed response to a late Accept.
@@ -810,10 +911,12 @@ export async function getScannerCaptureStatus(
       [sessionId, deviceId]
     );
     const row = found.rows[0] as
-      (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean }) | undefined;
+      | (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean })
+      | undefined;
     if (!row) throw new Error("Capture session not found for this scanner");
     if (
       (row.state === "armed" || row.state === "claimed") &&
+      row.physical_released !== true &&
       new Date(String(row.expires_at)).getTime() <= Date.now()
     ) {
       await client.query(
@@ -845,17 +948,77 @@ export async function getScannerCaptureStatus(
   }
 }
 
-/** Fail only a claim that could not reach the physical device before upload starts. */
-export async function failScannerCapture(sessionId: string, deviceIdInput: unknown, reason: string): Promise<void> {
+/** Fail a claimed station session only while no immutable evidence exists for it. */
+export async function failScannerCapture(
+  sessionId: string,
+  deviceIdInput: unknown,
+  reason: string
+): Promise<{ terminalized: boolean; accepted: boolean; state: string; reason?: string }> {
   const deviceId = cleanStationId(deviceIdInput);
   const client = await pool.connect();
   try {
-    await client.query(
-      `UPDATE scanner_capture_sessions
-          SET state = 'failed', failure_reason = LEFT($3, 1000)
-        WHERE id = $1 AND claimed_by_device_id = $2 AND state = 'claimed'`,
-      [sessionId, deviceId, reason]
+    await client.query("BEGIN");
+    const found = await client.query<Record<string, unknown> & { evidence_accepted?: boolean }>(
+      `SELECT s.*, c.certificate_number,
+              EXISTS (
+                SELECT 1
+                  FROM certificate_image_evidence e
+                 WHERE e.certificate_id = s.certificate_id
+                   AND e.side = s.side
+                   AND e.capture_metadata ->> 'captureSessionId' = s.id
+              ) AS evidence_accepted
+         FROM scanner_capture_sessions s
+         JOIN certificates c ON c.id = s.certificate_id
+        WHERE s.id = $1
+          AND s.claimed_by_device_id = $2
+        FOR UPDATE`,
+      [sessionId, deviceId]
     );
+    const row = found.rows[0];
+    if (!row) throw new Error("Capture session not found for this scanner");
+    if (row.evidence_accepted === true) {
+      await client.query(
+        `UPDATE scanner_capture_sessions
+            SET state='captured', captured_at=COALESCE(captured_at, NOW()), failure_reason=NULL
+          WHERE id=$1`,
+        [sessionId]
+      );
+      await client.query("COMMIT");
+      return { terminalized: true, accepted: true, state: "captured" };
+    }
+    if (row.state === "claimed") {
+      await client.query(
+        `UPDATE scanner_capture_sessions
+            SET state = 'failed', failure_reason = LEFT($3, 1000)
+          WHERE id = $1
+            AND claimed_by_device_id = $2
+            AND state = 'claimed'
+            AND NOT EXISTS (
+            SELECT 1
+              FROM certificate_image_evidence e
+             WHERE e.certificate_id = scanner_capture_sessions.certificate_id
+               AND e.side = scanner_capture_sessions.side
+               AND e.capture_metadata ->> 'captureSessionId' = scanner_capture_sessions.id
+            )`,
+        [sessionId, deviceId, reason]
+      );
+      await client.query("COMMIT");
+      return { terminalized: true, accepted: false, state: "failed" };
+    }
+    if (row.state === "failed" || row.state === "expired" || row.state === "cancelled" || row.state === "captured") {
+      await client.query("COMMIT");
+      return { terminalized: true, accepted: row.state === "captured", state: String(row.state) };
+    }
+    await client.query("COMMIT");
+    return {
+      terminalized: false,
+      accepted: false,
+      state: String(row.state),
+      reason: "Capture session is in server finalisation; keep the local recovery record and retry.",
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
   } finally {
     client.release();
   }

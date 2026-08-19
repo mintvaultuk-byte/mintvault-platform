@@ -38,6 +38,8 @@ export class CaptureAuthorityError extends Error {
       | "STATION_NOT_ACTIVE"
       | "SIDE_INVALID"
       | "SIDE_ALREADY_PRESENT"
+      | "FRONT_REQUIRED"
+      | "CAPTURE_HELD_BY_OTHER_STATION"
       | "NOTHING_TO_CAPTURE",
     message: string
   ) {
@@ -167,12 +169,49 @@ export async function authoriseStationCapture(input: {
 
       // Which sides are genuinely outstanding, read from the evidence ledger rather than inferred
       // from the job status — the ledger is what `bothSidesCaptured` and the grading loader read.
-      const current = await client.query<{ side: string }>(
-        `SELECT side FROM certificate_image_evidence
+      const current = await client.query<{ side: string; station_id: string | null }>(
+        `SELECT side,
+                COALESCE(capture_metadata ->> 'stationId', capture_metadata ->> 'station_id') AS station_id
+           FROM certificate_image_evidence
           WHERE certificate_id = $1 AND is_current = true`,
         [job.certificate_id]
       );
-      const present = new Set(current.rows.map((r) => r.side));
+      const present = new Set<CaptureSide>();
+      const ownerStationBySide: Partial<Record<CaptureSide, string>> = {};
+      for (const row of current.rows) {
+        if (row.side === "front" || row.side === "back") present.add(row.side);
+        if ((row.side === "front" || row.side === "back") && row.station_id) {
+          ownerStationBySide[row.side] = row.station_id;
+        }
+      }
+      /*
+       * SFAP-015: a side that this same station has already physically captured and handed to a
+       * server-minted staging task no longer occupies the Canon, but it also must not be offered as
+       * another physical target. This is deliberately NOT evidence for READY_TO_GRADE — only
+       * certificate_image_evidence above is — it is just the authority that lets the operator flip to
+       * BACK while FRONT uploads/finalises in the background.
+       */
+      const pendingPhysical = await client.query<{ side: string; station_id: string | null }>(
+        `SELECT DISTINCT side, station_id
+           FROM scanner_capture_sessions
+          WHERE certificate_id = $1
+            AND state IN ('claimed','capturing')
+            AND physical_released = true`,
+        [job.certificate_id]
+      );
+      const otherStation = pendingPhysical.rows.find((row) => row.station_id !== input.stationId);
+      if (otherStation) {
+        throw new CaptureAuthorityError(
+          "CAPTURE_HELD_BY_OTHER_STATION",
+          `${job.mv_number} is already being finished on another approved station. Finish or cancel it there before continuing.`
+        );
+      }
+      for (const row of pendingPhysical.rows) {
+        if (row.side === "front" || row.side === "back") present.add(row.side);
+        if ((row.side === "front" || row.side === "back") && row.station_id) {
+          ownerStationBySide[row.side] = row.station_id;
+        }
+      }
       const missing = SIDES.filter((s) => !present.has(s));
 
       if (missing.length === 0) {
@@ -185,6 +224,12 @@ export async function authoriseStationCapture(input: {
       let side = missing[0];
       if (input.requestedSide !== undefined && input.requestedSide !== null) {
         const requested = cleanSide(input.requestedSide);
+        if (requested === "back" && missing.includes("front")) {
+          throw new CaptureAuthorityError(
+            "FRONT_REQUIRED",
+            `Scan the front of ${job.mv_number} before arming the back.`
+          );
+        }
         // Narrowing only. Asking for a side that is already present is refused outright rather than
         // quietly redirected — silently arming a different side than was asked for is how an
         // operator ends up overwriting the image they meant to keep.
@@ -195,6 +240,14 @@ export async function authoriseStationCapture(input: {
           );
         }
         side = requested;
+      }
+      const oppositeSide: CaptureSide = side === "front" ? "back" : "front";
+      const oppositeOwnerStationId = ownerStationBySide[oppositeSide];
+      if (oppositeOwnerStationId && oppositeOwnerStationId !== input.stationId) {
+        throw new CaptureAuthorityError(
+          "CAPTURE_HELD_BY_OTHER_STATION",
+          `${job.mv_number} ${oppositeSide} was captured on another approved station. Use that station or deliberately invalidate the ${oppositeSide} before continuing.`
+        );
       }
 
       await writePartnerAudit(client, {
