@@ -402,6 +402,9 @@ function stationSummary(sessionBody, availableCredits) {
     canCalibrate: Array.isArray(sessionBody.permissions)
       ? sessionBody.permissions.includes("partner.stations.calibrate")
       : false,
+    canPurchaseCredits: Array.isArray(sessionBody.permissions)
+      ? sessionBody.permissions.includes("partner.credits.purchase")
+      : false,
   };
 }
 

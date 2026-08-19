@@ -116,7 +116,7 @@ body {
 }
 .station-identity {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 0.95fr);
   gap: 10px;
 }
 .station-identity-cell {
@@ -136,6 +136,20 @@ body {
   font-weight: 650;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.credit-low-warning {
+  color: var(--orange);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+}
+.credit-buy-more {
+  align-self: start;
+  font-size: 9px;
+  min-height: 26px;
+  padding: 4px 8px;
   white-space: nowrap;
 }
 
