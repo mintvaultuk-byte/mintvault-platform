@@ -48,6 +48,28 @@ The worktree was already dirty at takeover. Modified scanner, viewer, server-aut
 
 ## Reconciled local repairs
 
+### Security and physical-journal hardening — locally proven
+
+The legacy compatible Super Admin MFA-reset route now requires the same fresh step-up proof as the
+canonical reset route. Station enrolment now obeys both existing emergency write controls
+(`view-only` and `sensitive-freeze`). The Partner self-service MFA-disable endpoint now refuses
+before touching factors, recovery codes, or sessions, preserving the owner-locked rule that users
+cannot remove their own mandatory MFA factor. These controls retain the existing audited,
+step-up-protected Super Admin recovery path.
+
+The Scanner targeted-capture journal now fsyncs its temporary file and containing directory before
+the physical LiDE capture may begin. A forced ENOSPC journal failure proves the hardware scan
+function is never called. If a process dies after the pre-scan journal but before a later queue
+transition, recovery retains a lone TIFF discovered in the already-journalled capture directory as
+an explicit upload-refused candidate; it cannot masquerade as accepted evidence. This changes no
+capture profile, TIFF bytes, server authority, or grading calculation.
+
+Focused local evidence: active-card scanner suite **41 passed, 0 failed** and the full Scanner
+suite **163 passed, 0 failed**; Partner auth/station suite **31 passed, 0 failed** with two
+disposable-Postgres integration suites correctly skipped in the absence of their explicit local
+URLs; `npm run check` and `git diff --check` passed. This is not physical-Canon or packaged-app
+acceptance proof.
+
 ### Restart-safe NEW CARD operation identity — locally proven
 
 `scripts/scanner-app/lib/state.js` now persists the one pending NEW CARD operation ID before the first request. `main.js` reuses that ID after a process restart and clears it only after a definitive success or refusal. The station therefore replays the same server idempotency key after an ambiguous crash window instead of creating a fresh request identity. This is a local client recovery improvement; the server remains the sole Card Job, MV, reservation, and wallet authority.

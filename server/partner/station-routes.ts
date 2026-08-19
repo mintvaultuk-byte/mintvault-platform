@@ -334,6 +334,8 @@ export function partnerStationRouter(): Router {
     "/stations/enrol",
     requirePartnerAuth,
     requirePartnerCapability("partner.stations.enrol"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
     async (req, res) => {
       try {
         const station = await requestStationEnrollment(req.partner!, {
@@ -464,20 +466,20 @@ export function partnerStationRouter(): Router {
     requireSignedStationOperator,
     partnerStationHeartbeatRateLimit,
     async (req, res) => {
-    try {
-      const result = await recordStationHeartbeat(req.station!, {
-        appVersion: req.body?.appVersion,
-        scannerConnected: req.body?.scannerConnected,
-        scannerHardware: req.body?.scannerHardware,
-        scannerProfileVersion: req.body?.scannerProfileVersion,
-        pendingUploadCount: req.body?.pendingUploadCount,
-        captureState: req.body?.captureState,
-        lastFailureCode: req.body?.lastFailureCode,
-      });
-      res.json({ ok: true, ...result });
-    } catch (error) {
-      stationError(res, error);
-    }
+      try {
+        const result = await recordStationHeartbeat(req.station!, {
+          appVersion: req.body?.appVersion,
+          scannerConnected: req.body?.scannerConnected,
+          scannerHardware: req.body?.scannerHardware,
+          scannerProfileVersion: req.body?.scannerProfileVersion,
+          pendingUploadCount: req.body?.pendingUploadCount,
+          captureState: req.body?.captureState,
+          lastFailureCode: req.body?.lastFailureCode,
+        });
+        res.json({ ok: true, ...result });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
   );
 
@@ -499,40 +501,46 @@ export function partnerStationRouter(): Router {
   // Kept on ONE line: tests/partner-station-new-card.test.ts locates this route with
   // `indexOf('r.post("/card-jobs"')`, so splitting the path onto its own line makes that slice
   // empty and silently voids three P6 security assertions rather than failing loudly.
-  r.post("/card-jobs", requireSignedStation, requireSignedStationOperator, partnerStationCardJobStartRateLimit, async (req, res) => {
-    const station = req.station!;
-    const operator = req.partner!;
-    try {
-      const result = await startNewCardJobAtStation({
-        tenantId: station.tenantId,
-        locationId: station.locationId,
-        stationId: station.id,
-        clientOpId: typeof req.body?.clientOpId === "string" ? req.body.clientOpId : "",
-        actorUserId: operator.userId,
-        actorEmail: req.body?.operatorEmail ?? operator.userId,
-        cardName: typeof req.body?.cardName === "string" ? req.body.cardName : null,
-      });
-      // 200 on replay, 201 on a genuinely new job: a retrying station can tell the difference
-      // without having to compare ids, and neither answer costs a second credit.
-      res.status(result.replayed ? 200 : 201).json({ cardJob: result });
-    } catch (error) {
-      if (error instanceof CardJobAuthorityError) {
-        const status =
-          error.code === "INSUFFICIENT_CREDITS"
-            ? 402
-            : error.code === "IDEMPOTENCY_CONFLICT"
-              ? 409
-              : error.code === "CARD_UNIT_INVALID"
-                ? 400
-                : error.code === "IDENTITY_UNAVAILABLE"
-                  ? 503
-                  : 403;
-        res.status(status).json({ error: { code: error.code, message: error.message } });
-        return;
+  r.post(
+    "/card-jobs",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCardJobStartRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      const operator = req.partner!;
+      try {
+        const result = await startNewCardJobAtStation({
+          tenantId: station.tenantId,
+          locationId: station.locationId,
+          stationId: station.id,
+          clientOpId: typeof req.body?.clientOpId === "string" ? req.body.clientOpId : "",
+          actorUserId: operator.userId,
+          actorEmail: req.body?.operatorEmail ?? operator.userId,
+          cardName: typeof req.body?.cardName === "string" ? req.body.cardName : null,
+        });
+        // 200 on replay, 201 on a genuinely new job: a retrying station can tell the difference
+        // without having to compare ids, and neither answer costs a second credit.
+        res.status(result.replayed ? 200 : 201).json({ cardJob: result });
+      } catch (error) {
+        if (error instanceof CardJobAuthorityError) {
+          const status =
+            error.code === "INSUFFICIENT_CREDITS"
+              ? 402
+              : error.code === "IDEMPOTENCY_CONFLICT"
+                ? 409
+                : error.code === "CARD_UNIT_INVALID"
+                  ? 400
+                  : error.code === "IDENTITY_UNAVAILABLE"
+                    ? 503
+                    : 403;
+          res.status(status).json({ error: { code: error.code, message: error.message } });
+          return;
+        }
+        stationError(res, error);
       }
-      stationError(res, error);
     }
-  });
+  );
 
   /**
    * P7 — the FIX queue, for the Scanner.
@@ -553,20 +561,26 @@ export function partnerStationRouter(): Router {
    */
   // One line, for the same reason: tests/partner-scanner-fix.test.ts slices from
   // `indexOf('r.get("/stations/fix-queue"')` and reads the next 300 characters.
-  r.get("/stations/fix-queue", requireSignedStation, requireSignedStationOperator, partnerStationFixQueueRateLimit, async (req, res) => {
-    const station = req.station!;
-    try {
-      // A Mac stands on ONE shop floor. Always confined — never the whole estate.
-      const items = await listFixQueue({
-        tenantId: station.tenantId,
-        locationId: station.locationId,
-        restrictToLocation: true,
-      });
-      res.json({ items });
-    } catch (error) {
-      fixError(res, error);
+  r.get(
+    "/stations/fix-queue",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationFixQueueRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      try {
+        // A Mac stands on ONE shop floor. Always confined — never the whole estate.
+        const items = await listFixQueue({
+          tenantId: station.tenantId,
+          locationId: station.locationId,
+          restrictToLocation: true,
+        });
+        res.json({ items });
+      } catch (error) {
+        fixError(res, error);
+      }
     }
-  });
+  );
 
   /**
    * P7 — authorise the replacement capture. COSTS ZERO GRADING CREDITS.
@@ -620,39 +634,45 @@ export function partnerStationRouter(): Router {
    */
   // Kept on ONE line for the same reason as /card-jobs above: the boundary suites locate this route
   // with `indexOf('r.post("/card-jobs/:cardJobId/cancel"')` and read the following characters.
-  r.post("/card-jobs/:cardJobId/cancel", requireSignedStation, requireSignedStationOperator, partnerStationCardJobCancelRateLimit, async (req, res) => {
-    const station = req.station!;
-    const operator = req.partner!;
-    try {
-      const cancellation = await cancelCardJob({
-        tenantId: station.tenantId,
-        locationId: station.locationId,
-        cardJobId: String(req.params.cardJobId),
-        stationId: station.id,
-        actorUserId: operator.userId,
-        actorEmail: req.body?.operatorEmail ?? operator.userId,
-        reason: typeof req.body?.reason === "string" ? req.body.reason : "",
-      });
-      res.json({ cancellation });
-    } catch (error) {
-      if (error instanceof CardJobCancellationError) {
-        const status =
-          error.code === "CARD_JOB_NOT_FOUND"
-            ? 404
-            : error.code === "JOB_NOT_CANCELLABLE" ||
-                error.code === "JOB_HAS_EVIDENCE" ||
-                error.code === "CAPTURE_IN_PROGRESS" ||
-                error.code === "CREDIT_ALREADY_SETTLED"
-              ? 409
-              : error.code === "REASON_REQUIRED"
-                ? 400
-                : 403;
-        res.status(status).json({ error: { code: error.code, message: error.message } });
-        return;
+  r.post(
+    "/card-jobs/:cardJobId/cancel",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCardJobCancelRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      const operator = req.partner!;
+      try {
+        const cancellation = await cancelCardJob({
+          tenantId: station.tenantId,
+          locationId: station.locationId,
+          cardJobId: String(req.params.cardJobId),
+          stationId: station.id,
+          actorUserId: operator.userId,
+          actorEmail: req.body?.operatorEmail ?? operator.userId,
+          reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+        });
+        res.json({ cancellation });
+      } catch (error) {
+        if (error instanceof CardJobCancellationError) {
+          const status =
+            error.code === "CARD_JOB_NOT_FOUND"
+              ? 404
+              : error.code === "JOB_NOT_CANCELLABLE" ||
+                  error.code === "JOB_HAS_EVIDENCE" ||
+                  error.code === "CAPTURE_IN_PROGRESS" ||
+                  error.code === "CREDIT_ALREADY_SETTLED"
+                ? 409
+                : error.code === "REASON_REQUIRED"
+                  ? 400
+                  : 403;
+          res.status(status).json({ error: { code: error.code, message: error.message } });
+          return;
+        }
+        stationError(res, error);
       }
-      stationError(res, error);
     }
-  });
+  );
 
   /**
    * B1 — ARM A CAPTURE SESSION FROM THE STATION ITSELF.
@@ -678,89 +698,95 @@ export function partnerStationRouter(): Router {
   // Kept on ONE line for the same reason as /card-jobs above: the boundary suite locates this route
   // with `indexOf('r.post("/card-jobs/:cardJobId/capture-sessions"')` and reads the following
   // characters, so splitting the path onto its own line would silently void those assertions.
-  r.post("/card-jobs/:cardJobId/capture-sessions", requireSignedStation, requireSignedStationOperator, partnerStationCaptureAuthoriseRateLimit, async (req, res) => {
-    const station = req.station!;
-    const operator = req.partner!;
-    try {
-      // Calibration and profile version are a capture precondition, not an arming one, but refusing
-      // here gives the operator the real reason at the moment they press the button rather than an
-      // opaque failure two steps later when the sheet is already on the glass.
-      const { CANON_LIDE_400_PROFILE } = await import("../lib/lide400-profile");
-      assertStationCaptureReady(station, CANON_LIDE_400_PROFILE.version);
+  r.post(
+    "/card-jobs/:cardJobId/capture-sessions",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationCaptureAuthoriseRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      const operator = req.partner!;
+      try {
+        // Calibration and profile version are a capture precondition, not an arming one, but refusing
+        // here gives the operator the real reason at the moment they press the button rather than an
+        // opaque failure two steps later when the sheet is already on the glass.
+        const { CANON_LIDE_400_PROFILE } = await import("../lib/lide400-profile");
+        assertStationCaptureReady(station, CANON_LIDE_400_PROFILE.version);
 
-      const authorisation = await authoriseStationCapture({
-        tenantId: station.tenantId,
-        locationId: station.locationId,
-        cardJobId: String(req.params.cardJobId),
-        stationId: station.id,
-        actorUserId: operator.userId,
-        requestedSide: req.body?.side,
-      });
+        const authorisation = await authoriseStationCapture({
+          tenantId: station.tenantId,
+          locationId: station.locationId,
+          cardJobId: String(req.params.cardJobId),
+          stationId: station.id,
+          actorUserId: operator.userId,
+          requestedSide: req.body?.side,
+        });
 
-      const { createScannerCaptureSession } = await import("../scanner-capture-service");
-      const capture = await createScannerCaptureSession({
-        certificateId: authorisation.certificateId,
-        side: authorisation.side,
-        workstationId: station.code,
-        stationId: station.id,
-        actorId: operator.userId,
-        // Always false. A side that already has a current image is refused by the authority above,
-        // so there is nothing here for a recapture flag to mean except "overwrite without the
-        // invalidation that is meant to precede it".
-        recapture: false,
-        scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
-      });
-
-      res.status(201).json({
-        capture,
-        cardJob: {
-          cardJobId: authorisation.cardJobId,
-          mvNumber: authorisation.mvNumber,
-          status: authorisation.status,
+        const { createScannerCaptureSession } = await import("../scanner-capture-service");
+        const capture = await createScannerCaptureSession({
+          certificateId: authorisation.certificateId,
           side: authorisation.side,
-          missingSides: authorisation.missingSides,
-        },
-      });
-    } catch (error) {
-      if (error instanceof CaptureAuthorityError) {
-        const status =
-          error.code === "CARD_JOB_NOT_FOUND"
-            ? 404
-            : error.code === "SIDE_INVALID"
-              ? 400
-              : error.code === "JOB_NOT_CAPTURABLE" ||
-                  error.code === "SIDE_ALREADY_PRESENT" ||
-                  error.code === "NOTHING_TO_CAPTURE"
-                ? 409
-                : 403;
-        res.status(status).json({ error: { code: error.code, message: error.message } });
-        return;
-      }
-      /*
-       * THE ARM PATH MUST NOT REDUCE A REAL, ACTIONABLE REFUSAL TO "Station request could not be
-       * completed". That generic 500 is what an operator saw when their station already held a live
-       * target: it named no card, suggested nothing, and was produced for a condition they could
-       * have cleared in one press had anyone told them what it was.
-       *
-       * `ScannerCaptureConflictError` is imported lazily for the same reason
-       * `createScannerCaptureSession` is — the HQ capture service pulls in the Drizzle pool, and the
-       * partner router must stay loadable on a partner-only deployment.
-       */
-      const { ScannerCaptureConflictError } = await import("../scanner-capture-service");
-      if (error instanceof ScannerCaptureConflictError) {
-        res.status(409).json({
-          error: {
-            code: error.code,
-            message: error.message,
-            holdingCertificateNumber: error.holdingCertificateNumber,
-            holdingSide: error.holdingSide,
+          workstationId: station.code,
+          stationId: station.id,
+          actorId: operator.userId,
+          // Always false. A side that already has a current image is refused by the authority above,
+          // so there is nothing here for a recapture flag to mean except "overwrite without the
+          // invalidation that is meant to precede it".
+          recapture: false,
+          scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
+        });
+
+        res.status(201).json({
+          capture,
+          cardJob: {
+            cardJobId: authorisation.cardJobId,
+            mvNumber: authorisation.mvNumber,
+            status: authorisation.status,
+            side: authorisation.side,
+            missingSides: authorisation.missingSides,
           },
         });
-        return;
+      } catch (error) {
+        if (error instanceof CaptureAuthorityError) {
+          const status =
+            error.code === "CARD_JOB_NOT_FOUND"
+              ? 404
+              : error.code === "SIDE_INVALID"
+                ? 400
+                : error.code === "JOB_NOT_CAPTURABLE" ||
+                    error.code === "SIDE_ALREADY_PRESENT" ||
+                    error.code === "NOTHING_TO_CAPTURE"
+                  ? 409
+                  : 403;
+          res.status(status).json({ error: { code: error.code, message: error.message } });
+          return;
+        }
+        /*
+         * THE ARM PATH MUST NOT REDUCE A REAL, ACTIONABLE REFUSAL TO "Station request could not be
+         * completed". That generic 500 is what an operator saw when their station already held a live
+         * target: it named no card, suggested nothing, and was produced for a condition they could
+         * have cleared in one press had anyone told them what it was.
+         *
+         * `ScannerCaptureConflictError` is imported lazily for the same reason
+         * `createScannerCaptureSession` is — the HQ capture service pulls in the Drizzle pool, and the
+         * partner router must stay loadable on a partner-only deployment.
+         */
+        const { ScannerCaptureConflictError } = await import("../scanner-capture-service");
+        if (error instanceof ScannerCaptureConflictError) {
+          res.status(409).json({
+            error: {
+              code: error.code,
+              message: error.message,
+              holdingCertificateNumber: error.holdingCertificateNumber,
+              holdingSide: error.holdingSide,
+            },
+          });
+          return;
+        }
+        stationError(res, error);
       }
-      stationError(res, error);
     }
-  });
+  );
 
   // From origin/main: `partnerStationCalibrationIngressRateLimit` runs BEFORE authentication on
   // purpose. requireSignedStation verifies a signed payload and resolves the operator session, so
@@ -777,19 +803,19 @@ export function partnerStationRouter(): Router {
     requireSignedStationMaintainer,
     partnerStationCalibrationRateLimit,
     async (req, res) => {
-    try {
-      const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
-        scannerHardware: req.body?.scannerHardware,
-        scannerProfileVersion: req.body?.scannerProfileVersion,
-        acquisitionRegion: req.body?.acquisitionRegion,
-        workingRegion: req.body?.workingRegion,
-        placementToleranceMm: req.body?.placementToleranceMm,
-        calibrationVersion: req.body?.calibrationVersion,
-      });
-      res.status(201).json({ calibration });
-    } catch (error) {
-      stationError(res, error);
-    }
+      try {
+        const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
+          scannerHardware: req.body?.scannerHardware,
+          scannerProfileVersion: req.body?.scannerProfileVersion,
+          acquisitionRegion: req.body?.acquisitionRegion,
+          workingRegion: req.body?.workingRegion,
+          placementToleranceMm: req.body?.placementToleranceMm,
+          calibrationVersion: req.body?.calibrationVersion,
+        });
+        res.status(201).json({ calibration });
+      } catch (error) {
+        stationError(res, error);
+      }
     }
   );
 

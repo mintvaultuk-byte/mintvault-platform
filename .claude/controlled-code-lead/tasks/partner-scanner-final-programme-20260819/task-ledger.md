@@ -17,6 +17,17 @@ personally reconciled by the Lead. The task now has four locally proven repairs,
 explicitly owner-approved protected changes. The owner-authorised, additive staging-only migration
 has been applied; production remains untouched.
 
+The 2026-08-19 final acceptance continuation accepted three verified, owner-specified auth/station
+security repairs (`SFAP-020` through `022`) for implementation. Stripe TEST acceptance remains
+fail-closed pending owner commercial/environment configuration (`SFAP-023`).
+
+The same pass repaired the local physical-scan durability barrier (`SFAP-024`): an fsync-confirmed
+journal now precedes ICA acquisition, and an interrupted journal can retain exactly one discovered
+TIFF only as an upload-refused recovery candidate. Focused proof: scanner active-card **41 passed**;
+full Scanner suite **163 passed, 0 failed**; auth/station/security focused gate **31 passed, 0
+failed** (two disposable-Postgres suites skipped without their explicit local database URLs);
+`npm run check` and `git diff --check` passed.
+
 ## Evidence
 
 - Focused scanner suite: 71 passed, 0 failed.

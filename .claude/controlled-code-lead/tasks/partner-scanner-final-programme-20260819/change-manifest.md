@@ -13,6 +13,35 @@ Current documentation-only additions:
 
 Future source edits require a superseding file-by-file manifest after reviewer findings are verified, including protected-system approval where applicable.
 
+## Security-authorised repair set — 2026-08-19
+
+The owner’s current programme explicitly requires mandatory Super Admin MFA step-up, emergency
+controls that stop station writes, and **no self-service MFA disable**. The following narrow auth
+repair set implements those existing requirements. It changes no password, secret, Stripe setting,
+grading calculation, staging data, or production state.
+
+| File                                                    | Class | Change                                                                                                                                          | Regression proof                                                                                    | Rollback                                                         |
+| ------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `server/partner/admin-routes.ts`                        | C     | Require fresh Super Admin step-up on the legacy compatible MFA-reset route before it can reset a Partner user.                                  | HTTP integration test: non-step-up rejected; step-up + reason succeeds.                             | Revert this guard only if an owner changes the security policy.  |
+| `server/partner/station-routes.ts`                      | C     | Apply the existing view-only and sensitive-freeze emergency guards before any station-enrolment write.                                          | Route test: emergency states return no station/event; normal authorised enrolment remains possible. | Revert only if emergency-control semantics are formally changed. |
+| `server/partner/routes.ts`                              | C     | Refuse the legacy self-service MFA-disable route; recovery remains Super-Admin step-up controlled and MFA enrolment/recovery remains available. | MFA route test: self-service call is refused and cannot mutate methods or sessions.                 | Restore only after explicit owner reversal of the locked rule.   |
+| `tests/partner-admin-control-shell-integration.test.ts` | A     | Cover legacy MFA reset step-up parity.                                                                                                          | Focused Vitest test.                                                                                | Revert with its guarded implementation.                          |
+| `tests/partner-mfa-factor-hardening.test.ts`            | A     | Replace the obsolete self-service-disable contract with a refusal/no-mutation contract.                                                         | Focused Vitest test.                                                                                | Revert with its guarded implementation.                          |
+| `tests/partner-runtime-integration.test.ts`             | A     | Replace the obsolete self-service-disable integration contract with a refusal/no-mutation contract.                                             | Focused real-HTTP Vitest test.                                                                      | Revert with its guarded implementation.                          |
+| `tests/partner-admin-step-up.test.ts`                   | A     | Include the legacy compatible MFA-reset route in the all-destructive-routes step-up guard.                                                      | Focused Vitest test.                                                                                | Revert with its guarded implementation.                          |
+| `tests/partner-scanner-operator-role.test.ts`           | A     | Pin station-enrolment emergency guards beside its capability guard.                                                                             | Focused Vitest test.                                                                                | Revert with its guarded implementation.                          |
+
+## Capture-journal durability repair — 2026-08-19
+
+This narrowly repairs the local pre-capture crash boundary. It changes neither ImageCaptureCore
+profile settings nor the immutable TIFF upload, server authority, payment, grading, staging, or
+production state.
+
+| File                                                   | Class | Change                                                                                                                                                                                                    | Regression proof                                                | Rollback                                                                            |
+| ------------------------------------------------------ | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `scripts/scanner-app/lib/watcher.js`                   | B     | Fsync the atomic capture journal and fail closed before hardware acquisition; preserve a lone TIFF found under a pre-written interrupted-scan directory as a retained, upload-refused recovery candidate. | Scanner behavioural ENOSPC and interrupted-TIFF recovery tests. | Revert with its tests only after replacing it with an equivalently durable journal. |
+| `scripts/scanner-app/test/station-active-card.test.js` | A     | Inject an ENOSPC journal failure and prove scan is never invoked; prove a pre-journalled TIFF path remains retained and cannot become upload-ready after restart recovery.                                | `node --test test/station-active-card.test.js`.                 | Revert with watcher behaviour.                                                      |
+
 ## Approved safe local repair set — 2026-08-19
 
 | File                                                   | Class | Change                                                                                                                                             | Regression proof                                 | Rollback          |

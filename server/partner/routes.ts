@@ -53,7 +53,6 @@ import {
   mfaEnrolRestart,
   mfaEnrolCancel,
   mfaRegenerateRecovery,
-  mfaDisable,
   verifyActiveTotpNoReplay,
   getMfaStatus,
   verifyStepUp,
@@ -912,22 +911,12 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
   });
 
-  r.post("/mfa/disable", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
-    const { password, code, recoveryCode } = req.body ?? {};
-    if (typeof password !== "string") {
-      res.status(400).json({ error: "elevated verification required" });
-      return;
-    }
-    const out = await mfaDisable({ tenantId: req.partner!.tenantId, userId: req.partner!.userId }, password, {
-      code,
-      recoveryCode,
-    });
-    if (!out.ok) {
-      res.status(out.reason === "second_factor_required" ? 400 : 401).json({ error: out.reason });
-      return;
-    }
-    clearPartnerCookie(res); // sessions revoked on disable
-    res.json({ ok: true });
+  // A Partner cannot remove their own second factor. Recovery is deliberately a distinct,
+  // audited Super Admin action protected by fresh step-up authentication; allowing a self-service
+  // password/current-code path here contradicts the locked recovery policy and turns loss of a
+  // device into an unreviewed credential-class change.
+  r.post("/mfa/disable", requirePartnerAuth, partnerMfaLimiter, (_req, res) => {
+    res.status(403).json({ error: "self-service MFA removal is not available" });
   });
 
   r.post(

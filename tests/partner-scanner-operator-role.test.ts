@@ -207,6 +207,8 @@ describe("AG-2 integration surfaces", () => {
   it("SOP4: station ENROLMENT is gated on the new capability, not on cards.scan", () => {
     const enrol = guardsFor(stationRoutes, '"/stations/enrol"');
     expect(enrol).toContain('requirePartnerCapability("partner.stations.enrol")');
+    expect(enrol).toContain("requireNotViewOnly");
+    expect(enrol).toContain("requireNotSensitiveFrozen");
     expect(enrol).not.toContain('requirePartnerCapability("partner.cards.scan")');
   });
 
@@ -225,7 +227,7 @@ describe("AG-2 integration surfaces", () => {
     expect(stationRoutes).toMatch(
       /async function requireSignedStationOperator[\s\S]{0,400}?capability: "partner\.cards\.scan"/
     );
-    expect(stationRoutes).toContain('operator.permissions.has(required.capability)');
+    expect(stationRoutes).toContain("operator.permissions.has(required.capability)");
   });
 
   it("SOP4d: MOVING the capture area is maintenance, and a Scanner Operator cannot do it", () => {

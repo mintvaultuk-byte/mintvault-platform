@@ -233,7 +233,9 @@ let ADMIN_USER_ID: string;
        * that the guard refuses, which tests/partner-admin-step-up.test.ts already proves directly —
        * including that a missing stamp, an expired one and a partner session are all refused.
        */
-      s.adminStepUpAt = new Date().toISOString();
+      // Allow the integration test to prove the route guard itself: a normal authenticated
+      // Super Admin session is not equivalent to a fresh destructive-action step-up.
+      if (req.body?.stepUp !== false) s.adminStepUpAt = new Date().toISOString();
       req.session.save(() => res.json({ ok: true }));
     });
     registerSuperAdminPartnerRoutes(app);
@@ -263,8 +265,12 @@ let ADMIN_USER_ID: string;
   });
 
   // ── helpers ──
-  async function adminCookie(): Promise<string> {
-    const r = await fetch(`${adminBase}/__test/admin-login`, { method: "POST" });
+  async function adminCookie(stepUp = true): Promise<string> {
+    const r = await fetch(`${adminBase}/__test/admin-login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ stepUp }),
+    });
     return r.headers.get("set-cookie")!.split(";")[0];
   }
   const aget = (p: string, cookie = "") => fetch(`${adminBase}${p}`, { headers: cookie ? { cookie } : {} });
@@ -525,6 +531,17 @@ let ADMIN_USER_ID: string;
 
   // ── super-admin MFA reset ──
   it("MFA reset: reason required; disables method + recovery + revokes sessions; secrets never in response/audit; B unchanged", async () => {
+    const noStepUp = await adminCookie(false);
+    const rejected = await apost(`${SA}/${A}/users/${UA_OWNER}/mfa-reset`, { reason: "lost device" }, noStepUp);
+    expect(rejected.status).toBe(403);
+    expect(
+      (
+        await admin.query("SELECT count(*)::int n FROM partner_mfa_methods WHERE user_id=$1 AND status='ACTIVE'", [
+          UA_OWNER,
+        ])
+      ).rows[0].n
+    ).toBe(1);
+
     const ac = await adminCookie();
     // owner@a already has the ACTIVE authenticator every fixture user now carries (uq_partner_mfa
     // _one_active permits exactly one, and inserting a second here is what this test used to do

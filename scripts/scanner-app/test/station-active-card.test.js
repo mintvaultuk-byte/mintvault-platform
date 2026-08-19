@@ -176,6 +176,59 @@ test("adopting the target this station already holds changes nothing", async (t)
   assert.equal(state.get().activeCapture.id, "capture-session-armed");
 });
 
+test("an ENOSPC capture-journal failure prevents ImageCaptureCore from starting a physical scan", async (t) => {
+  const { watcher, state, adopt } = isolatedWatcher(t);
+  await adopt(armedCapture());
+  const active = watcher.activeTargetEntry();
+  state.set({
+    placementApproval: {
+      state: "GREEN",
+      sessionId: active.sessionId,
+      certId: active.certId,
+      side: active.side,
+      approvedAtMs: Date.now(),
+    },
+  });
+  const lide = require("../lib/lide400-controller");
+  const originalScan = lide.scan;
+  const originalWrite = watcher.writeTargetedQueue;
+  let physicalScans = 0;
+  lide.scan = async () => { physicalScans++; throw new Error("must not run"); };
+  watcher.writeTargetedQueue = () => { throw new Error("ENOSPC: capture journal full"); };
+  t.after(() => {
+    lide.scan = originalScan;
+    watcher.writeTargetedQueue = originalWrite;
+  });
+
+  const result = await watcher.scanActiveTarget();
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /ENOSPC: capture journal full/i);
+  assert.equal(physicalScans, 0, "the LiDE must never start until the scan journal is durable");
+});
+
+test("a TIFF found in a pre-written scanning journal is retained and refused after restart recovery", (t) => {
+  const { watcher, tempDir } = isolatedWatcher(t);
+  const captureDir = path.join(tempDir, "capture-staging", "capture-session-armed", "interrupted-preview");
+  fs.mkdirSync(captureDir, { recursive: true });
+  const entry = {
+    ...watcher.targetEntryFromCapture(armedCapture()),
+    phase: "scanning",
+    previewId: "interrupted-preview",
+    captureDir,
+  };
+  watcher.addTargetedPending(entry);
+  const tiff = path.join(captureDir, "hardware-output.tiff");
+  fs.writeFileSync(tiff, "retained-but-not-authoritative");
+
+  const recovered = watcher.recoverInterruptedPhysicalScan(entry);
+
+  assert.equal(recovered.phase, "preview_error");
+  assert.equal(recovered.filePath, tiff);
+  assert.match(recovered.previewError, /cannot be uploaded/i);
+  assert.equal(watcher.readTargetedQueue()[0].filePath, tiff, "the restart journal retains the exact TIFF path");
+});
+
 test("adoption refuses to displace a DIFFERENT live target rather than overwriting it", async (t) => {
   const { watcher, state, adopt } = isolatedWatcher(t);
   await adopt(armedCapture());

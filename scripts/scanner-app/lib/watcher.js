@@ -351,11 +351,34 @@ class Watcher extends EventEmitter {
 
   writeTargetedQueue(entries) {
     const temp = `${TARGETED_QUEUE}.tmp`;
+    let tempFd = null;
+    let directoryFd = null;
     try {
-      fs.writeFileSync(temp, JSON.stringify(entries, null, 2));
+      fs.mkdirSync(path.dirname(TARGETED_QUEUE), { recursive: true });
+      tempFd = fs.openSync(temp, "w", 0o600);
+      fs.writeFileSync(tempFd, JSON.stringify(entries, null, 2), "utf8");
+      fs.fsyncSync(tempFd);
+      fs.closeSync(tempFd);
+      tempFd = null;
       fs.renameSync(temp, TARGETED_QUEUE);
+      // The file is durable before rename; synchronising its containing directory makes the
+      // replacement durable too. Without this, a power loss can discard the only mapping from a
+      // physical TIFF to its capture session even though the scanner was allowed to start.
+      directoryFd = fs.openSync(path.dirname(TARGETED_QUEUE), "r");
+      fs.fsyncSync(directoryFd);
+      fs.closeSync(directoryFd);
+      directoryFd = null;
+      return true;
     } catch (error) {
-      this.log(`targeted capture queue write failed: ${error.message}`, "warn");
+      if (tempFd !== null) {
+        try { fs.closeSync(tempFd); } catch {}
+      }
+      if (directoryFd !== null) {
+        try { fs.closeSync(directoryFd); } catch {}
+      }
+      try { fs.unlinkSync(temp); } catch {}
+      this.log(`targeted capture queue write failed: ${error.message}`, "error");
+      throw new Error(`Cannot safely journal this capture: ${error.message}`);
     }
   }
 
@@ -1320,6 +1343,42 @@ class Watcher extends EventEmitter {
     return restored;
   }
 
+  /**
+   * A scan journal is written before ICA is allowed to open. If the process dies after the TIFF
+   * lands but before a later queue transition is durable, that journal still names its private
+   * directory. Recover the single TIFF as a deliberately rejected candidate instead of silently
+   * forgetting it or treating an interrupted acquisition as acceptable evidence.
+   */
+  recoverInterruptedPhysicalScan(entry) {
+    const captureDir = typeof entry.captureDir === "string" ? entry.captureDir : "";
+    let tiffs = [];
+    try {
+      if (captureDir && fs.statSync(captureDir).isDirectory()) {
+        tiffs = fs.readdirSync(captureDir)
+          .map((name) => path.join(captureDir, name))
+          .filter((candidate) => /\.tiff?$/i.test(candidate) && fs.statSync(candidate).isFile());
+      }
+    } catch (error) {
+      this.log(`interrupted scan recovery could not inspect ${entry.sessionId}: ${error.message}`, "error");
+    }
+    if (tiffs.length !== 1) {
+      const waiting = { ...entry, phase: "awaiting_scan", previewId: null, previewPath: null, filePath: null, provenance: null };
+      this.addTargetedPending(waiting);
+      this.setTargetState(waiting, "awaiting_scan", "awaiting_scan", "Previous scan was interrupted before a TIFF was recoverable — take a fresh placement Preview and Scan");
+      return waiting;
+    }
+    const preserved = {
+      ...entry,
+      phase: "preview_error",
+      filePath: tiffs[0],
+      previewError: "A physical TIFF was recovered after an interrupted journal transition. It remains retained but cannot be uploaded; Rescan this side after a fresh placement Preview.",
+    };
+    this.addTargetedPending(preserved);
+    this.setTargetState(preserved, "preview_error", "preview_error", preserved.previewError);
+    this.logCaptureStage(preserved, "physical_tiff_recovered_after_journal_interruption", { filePath: preserved.filePath });
+    return preserved;
+  }
+
   async resumeTargetedCaptures() {
     const queue = this.readTargetedQueue();
     if (!queue.length || this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight) return false;
@@ -1347,6 +1406,9 @@ class Watcher extends EventEmitter {
         // Preserve the failed candidate exactly as-is. A restart must not
         // silently repair/regenerate a stale preview and make it acceptable.
         this.setTargetState(kept.entry, "preview_error", "preview_error", kept.entry.previewError || "Preview unavailable — Rescan this side");
+      } else if (entry.phase === "scanning") {
+        try { this.recoverInterruptedPhysicalScan(kept.entry); }
+        catch (error) { this.setTargetState(kept.entry, "journal_error", "error", error.message || "Cannot safely recover an interrupted scan journal"); }
       } else {
         this.setTargetState(kept.entry, "awaiting_scan", "awaiting_scan");
       }
@@ -1758,7 +1820,9 @@ class Watcher extends EventEmitter {
       const previewId = crypto.randomUUID();
       const captureDir = path.join(CAPTURE_STAGING, current.sessionId, previewId);
       const scanning = { ...kept.entry, phase: "scanning", previewId, captureDir, attempt: 1 };
-      this.addTargetedPending(scanning); // durable before a physical scan begins
+      // This is the physical-scan barrier. If the journal cannot be made durable, do not open
+      // ImageCaptureCore: a TIFF without a crash-recoverable session mapping is not acceptable.
+      this.addTargetedPending(scanning);
       fs.mkdirSync(captureDir, { recursive: true });
       this.setTargetState(scanning, "scanning", current.side === "front" ? "scanning_front" : "scanning_back");
       this.logCaptureStage(scanning, "scan_started");
@@ -1814,11 +1878,13 @@ class Watcher extends EventEmitter {
       const staged = this.activeTargetEntry();
       if (staged?.filePath && fs.existsSync(staged.filePath)) {
         const previewError = { ...staged, phase: "preview_error", previewError: reason };
-        this.addTargetedPending(previewError);
+        try { this.addTargetedPending(previewError); }
+        catch (journalError) { this.log(`could not persist preview failure for ${staged.sessionId}: ${journalError.message}`, "error"); }
         this.setTargetState(previewError, "preview_error", "preview_error", `${reason} — Rescan this side; the TIFF has not been uploaded`);
       } else {
         const waiting = { ...current, phase: "awaiting_scan", previewId: null, previewPath: null, filePath: null, provenance: null, frameAssessment: null };
-        this.addTargetedPending(waiting);
+        try { this.addTargetedPending(waiting); }
+        catch (journalError) { this.log(`could not restore awaiting-scan journal for ${current.sessionId}: ${journalError.message}`, "error"); }
         this.setTargetState(waiting, "awaiting_scan", "error", `${reason} — position the card and press Scan again`);
       }
       this.logCaptureStage(current, "scan_or_preview_failed", { reason });
