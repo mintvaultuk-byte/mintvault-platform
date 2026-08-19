@@ -45,3 +45,20 @@ silently bypassed with a superuser in the rehearsal.
 ## Production boundary
 
 No production journal row, schema object, release image, secret, Stripe configuration, or customer data was changed. Historical production backlog classification remains governed by the GB-04 forensic record and requires a production-shaped rehearsal before any owner-authorised migration run.
+
+## Live-lineage reconciliation during the freeze
+
+During this freeze, production advanced from `8359e902` to
+`158dbf53768187bb4176f3de0e9c23a26cff11fd` (`fix(partner): repair location creation form`).
+That commit is not an ancestor of this candidate: its location-form behaviour had already been
+semantically replayed from active Partner/Scanner commit `0c5c2209` as `a3616f8c` to avoid a
+wholesale merge of the divergent active lineage. A focused comparison of the six live-commit
+files confirms that the candidate retains the submitted structured address, canonical route,
+validated reason, tenant-scoped audited creation, and encoded Google Maps action. The remaining
+candidate delta is additive presentation/test hardening (`data-testid` and safer external-link
+attributes), not a removed live behaviour.
+
+Any owner-authorised release from this candidate must therefore use the deployment lineage
+reconciliation acknowledgement for live SHA `158dbf53768187bb4176f3de0e9c23a26cff11fd`; it must
+not claim ordinary commit ancestry. This is a provenance acknowledgement only and does not permit
+a deployment or a migration application.
