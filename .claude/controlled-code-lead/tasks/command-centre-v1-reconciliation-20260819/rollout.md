@@ -4,10 +4,10 @@
 
 ## Pre-rollout checklist
 
-- [ ] Exact candidate has no foreign Scanner, finance, webhook, migration or package paths.
-- [ ] All local gates in `change-manifest.md` pass.
-- [ ] Final local commit and candidate SHA are recorded.
-- [ ] Staging-only owner authorisation is recorded; production remains prohibited.
+- [x] Exact candidate has no foreign Scanner, finance, webhook, migration or package paths.
+- [x] All local gates in `change-manifest.md` pass for runnable affected scope; broad root-suite DB-provisioning limitation is explicitly recorded.
+- [x] Staging artifact SHA `60b9e268` and current-main parent `facfd36f` are recorded.
+- [x] Staging-only owner authorisation is recorded; production remains prohibited.
 
 ## Steps
 
@@ -19,7 +19,10 @@
 
 ## Staging verification evidence
 
-- Pending exact-SHA deployment and final 52-control ledger.
+- `scripts/safe-deploy.sh staging --yes --reconciled-from ad71baf6` completed for `60b9e268`.
+- Fly deployment version `532`: two LHR machines started, each with passing health check; `/health` returned `ok`; `/api/version` returned commit `60b9e268`.
+- Persisted Pilot Flag passed ON → OFF → ON and was left enabled after acceptance.
+- The live DOM contained 68 controls, recorded row-by-row in `COMMAND_CENTRE_V1_CONTROL_AUDIT.md`; 52 was an unsupported legacy assertion, not the actual count.
 
 ## Who/what is affected
 

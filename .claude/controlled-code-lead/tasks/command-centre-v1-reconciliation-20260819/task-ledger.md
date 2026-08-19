@@ -4,7 +4,7 @@
 
 - Repository: `/Users/cornelius/mintvault-command-centre-reconciled`
 - Branch: `codex/command-centre-v1-reconciliation-20260819`
-- Commit / current `origin/main`: `c50617526d454eb1911b9d4dcd819fb296844424`
+- Initial baseline / then-current `origin/main`: `c50617526d454eb1911b9d4dcd819fb296844424`; candidate was subsequently rebased onto current `origin/main` `facfd36f4ec8f164d017aba7a4386bab04a4aa6d` before staging.
 - `git status`: clean before this durable governance record.
 - Prior implementation evidence: `3ad2a900fb47cf9ec62713aae149257b3740d656`; hostile review HEAD `9f09f2721fdb777d15e89ed574ae291860c41cba`.
 - Primary workspace: `/Users/cornelius/mintvault-platform` is dirty with unrelated work and will remain untouched.
@@ -23,9 +23,9 @@
 | 2 — Investigation | complete | 2026-08-19 | All CC-HIR findings reproduced against the source/evidence; no speculative findings accepted. |
 | 3 — Lead verification | complete | 2026-08-19 | Candidate must exclude all unrelated Scanner, finance, webhook, migration and Partner route/service work. |
 | 4 — Implementation authorisation | complete | 2026-08-19 | `change-manifest.md`, rollback, rollout and budget written before code changes. |
-| 5 — Implementation | pending | | |
-| 6 — Regression | pending | | |
-| 7 — Final report | pending | | |
+| 5 — Implementation | complete | 2026-08-19 | Command Centre-only candidate committed as `35660236`; `60b9e268` is the exact deployed artifact after a manifest whitespace repair. |
+| 6 — Regression | complete | 2026-08-19 | Focused, protected-domain, Scanner, check/lint/build, mutation/restore, disposable enabled/disabled runtime harness and live staging acceptance complete. |
+| 7 — Final report | complete | 2026-08-19 | Exact-SHA evidence, live control audit, hostile finding reconciliation and owner-gated production handoff recorded. |
 
 ## Reviewer assignments (Stage 1)
 

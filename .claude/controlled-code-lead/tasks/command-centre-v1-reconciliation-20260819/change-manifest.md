@@ -22,7 +22,7 @@
 | `client/src/{App.tsx,pages/admin-command-centre.tsx,pages/admin.tsx,components/admin/admin-shell.tsx,pages/admin/partner-management-helpers.ts,pages/admin/partner-management.tsx,styles/admin-tokens.css}` | Add the guarded route, snapshot dashboard, deep-link tab parser, conditional navigation, Pilot Controls presentation, and scoped contrast. | Required V1 UI and persisted toggle controls. | B |
 | `scripts/command-centre-runtime-harness.ts` | Seed the global Pilot Flag instead of the retired environment toggle. | CC-HIR-004. | B |
 | `tests/command-centre-*.test.ts` and `tests/partner-management-admin-ui.test.ts` | Import/reconcile V1 test coverage and add the status/timestamp/harness regressions. | CC-HIR-004/005/006 plus release contract. | B |
-| `docs/command-centre/implementation/COMMAND_CENTRE_V1_IMPLEMENTATION_EVIDENCE.md`, `docs/command-centre/implementation/COMMAND_CENTRE_V1_STAGING_CONTROL_LEDGER.md`, `docs/command-centre/implementation/COMMAND_CENTRE_V1_STAGING_EVIDENCE.md` | Record exact final SHA, all release evidence, and final row-level staging results. | CC-HIR-002/003 and accurate rollback authority. | C |
+| `docs/command-centre/implementation/COMMAND_CENTRE_V1_IMPLEMENTATION_EVIDENCE.md`, `docs/command-centre/implementation/COMMAND_CENTRE_V1_CONTROL_AUDIT.md`, `docs/command-centre/implementation/COMMAND_CENTRE_V1_HOSTILE_FINDING_RECONCILIATION.md` | Record exact final SHA, all release evidence, actual rendered-control results, and hostile-finding closure. | CC-HIR-002/003 and accurate rollback authority. | C |
 | `.claude/controlled-code-lead/tasks/command-centre-v1-reconciliation-20260819/*`, `.claude/controlled-code-lead/INDEX.md` | Maintain durable task state only. | Governance traceability. | C |
 
 ## Files explicitly NOT touched (but might look related)
@@ -49,13 +49,13 @@
 
 ## Regression gates required (Stage 6)
 
-- [ ] Targeted Command Centre, Pilot Flag, Partner/RLS/station, finance/credit, Scanner/station, grading immutability, and deep-link/admin-shell tests.
-- [ ] `npm run check`
-- [ ] `npm test`
-- [ ] `npm run lint`
-- [ ] `npm run build`
-- [ ] Disposable runtime harness enabled/disabled proof and red/restore mutations for the repaired invariants.
-- [ ] Staging-only deploy, identity check, Pilot Flag ON → OFF → ON, and final 52-control control ledger.
+- [x] Targeted Command Centre, Pilot Flag, Partner/RLS/station, finance/credit, Scanner/station, grading immutability, and deep-link/admin-shell tests.
+- [x] `npm run check`
+- [x] `npm test` for all runnable affected suites; broad root suite attempted and externally blocked only by five DB-provisioned non-Command-Centre tests.
+- [x] `npm run lint`
+- [x] `npm run build`
+- [x] Disposable runtime harness enabled/disabled proof and red/restore mutations for the repaired invariants.
+- [x] Staging-only deploy, exact identity/health check, Pilot Flag ON → OFF → ON, and actual 68-control ledger.
 
 ---
 

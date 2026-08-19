@@ -24,10 +24,10 @@ If actuals exceed an estimate by more than about 25%, stop implementation, recor
 
 | Metric | Actual | Within 25%? |
 |---|---|---|
-| Files changed | pending | pending |
-| Lines changed (`git diff --stat`) | pending | pending |
-| Commits | pending | pending |
-| Tests | pending | pending |
-| Duration | pending | pending |
+| Files changed | 53 (50 implementation/governance files plus 3 required evidence files) | yes — 23.3% above 43 |
+| Lines changed (`git diff --stat`) | 3,612 insertions, 29 deletions; 3,641 total changed lines | yes — within the 3,300–4,900 line budget |
+| Commits | 3 local commits (implementation, manifest hygiene, final evidence) | yes |
+| Tests | 122 focused/rebase + 508 protected matrix + 152 Scanner; runtime enabled/disabled; staging control audit | yes |
+| Duration | one reconciliation pass plus staging acceptance | yes |
 
-**Overrun explanation (if any):** pending.
+**Overrun explanation (if any):** none. The actual file count remains within the 25% rule; the evidence-file count is exactly the three originally budgeted.

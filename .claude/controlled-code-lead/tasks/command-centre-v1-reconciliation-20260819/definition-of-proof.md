@@ -3,12 +3,12 @@
 | Dimension | Status |
 |---|---|
 | **Design Status** | final — locked V1 contracts plus hostile review corrections |
-| **Implementation Status** | not started in this worktree |
-| **Verification Status** | Design Only |
-| **Activation Status** | not wired in the reconciled candidate |
+| **Implementation Status** | complete — exact staging artifact `60b9e268` |
+| **Verification Status** | runtime + staging verified; all affected runnable gates green |
+| **Activation Status** | staging Pilot Flag enabled after authorised ON → OFF → ON; production untouched and owner-gated |
 
 ## Evidence
 
-- **What was run:** isolated worktree creation, `git fetch origin`, baseline/diff inspection, Engineering OS preflight, full locked contract and hostile-review/evidence reading.
-- **Observed result:** the old candidate has the six reproduced CC-HIR findings; fresh candidate begins at current `origin/main` without them.
-- **Where evidence lives:** this task ledger, issue register and the immutable hostile review at `9f09f272`.
+- **What was run:** isolated rebuild/current-main rebase, source-boundary diff audit, focused and protected-domain suites, Scanner suite, check/lint/build, two controlled red/restore mutations, enabled/disabled disposable runtime harness, staging safe deploy/identity/health checks, live rendered-control audit and Pilot Flag ON → OFF → ON.
+- **Observed result:** all six CC-HIR findings resolved; staging runs `60b9e268`; affected runnable suites and acceptance are green. The broad root suite has only five non-Command-Centre tests blocked by unavailable provisioned DB URLs.
+- **Where evidence lives:** this task ledger, issue register, `docs/command-centre/implementation/COMMAND_CENTRE_V1_{IMPLEMENTATION_EVIDENCE,CONTROL_AUDIT,HOSTILE_FINDING_RECONCILIATION}.md`, and the immutable hostile review at `9f09f272`.
