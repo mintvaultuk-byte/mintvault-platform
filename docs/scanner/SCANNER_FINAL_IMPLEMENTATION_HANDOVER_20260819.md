@@ -123,6 +123,17 @@ packs (`PACK_5`, `PACK_10`, `PACK_25`, `PACK_50`, `PACK_100`) still have both `s
 `stripe_currency` unset, so checkout/grant code remains fail-closed. No wallet, ledger, Card Job,
 Stripe configuration, payment, secret, or production database was mutated.
 
+### Staging deployment — proven
+
+The protected-repair application commit `78d5bb3403cbabc4e09ec01e08af84cbe6568d3a` was deployed
+from a detached clean worktree, so the shared checkout's unrelated untracked files were excluded.
+Fly release **504** is complete on both `lhr` machines and each reports its health check passing.
+`https://mintvault-v2.fly.dev/api/version` reports commit `78d5bb34`; `/health` reports `ok`.
+The first staging deploy was immediately superseded because it omitted the existing documented
+`GIT_SHA` build argument and correctly reported `unknown`; the replacement release supplies the
+exact commit value and is the sole accepted staging release. The production version endpoint still
+reports `36699531`; production was not deployed or otherwise changed.
+
 ## Known blocking conditions at takeover
 
 1. **Physical capture proof:** 18 August data-plane failures were recorded; direct ICA capability exists but persistent lifecycle proof does not. Do not attribute the failure solely to TCPIP/`ippusbd`.
@@ -149,6 +160,7 @@ Stripe configuration, payment, secret, or production database was mutated.
 
 ## Exact next action
 
-Deploy the reconciled protected-repair commit to staging from a clean worktree, then verify the
-release/version/health without touching production. Stripe TEST configuration, payment, and scanner
-restart remain explicitly out of scope until separately authorised.
+Use an authorised staging grader session to inspect an existing Scanner capture at 12× pixel mode on
+both sides, recording the visible source identity and returned working-image dimensions. Stripe TEST
+configuration, payment, and scanner restart remain explicitly out of scope until separately
+authorised.

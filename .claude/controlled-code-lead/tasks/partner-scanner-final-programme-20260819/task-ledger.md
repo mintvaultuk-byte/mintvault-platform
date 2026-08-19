@@ -39,11 +39,17 @@ has been applied; production remains untouched.
 - Targeted hostile-review repairs: 139 focused viewer/payment/migration/station tests passed; the
   production build passed. The viewer now visibly labels a legacy fallback as legacy, and 0093 is
   additive-only (no destructive constraint drop).
+- Staging deployment proof: release **504** deployed commit `78d5bb34` from a detached clean
+  worktree. Both `lhr` machines have passing health checks; `/api/version` reports `78d5bb34` and
+  `/health` reports `ok`. An initial release 503 lacked the documented `GIT_SHA` build argument and
+  therefore reported `unknown`; it was immediately replaced and is not accepted as evidence.
+  Production remains on `36699531` and was only read.
 - Full-suite baseline provenance: `partner-management-ux` fails because `HEAD f024f938` already
   contains `partner_card_job_voided` without a matching audit-constraint migration. This package
   did not create that condition; it is a separately scoped follow-up, not a reason to weaken tests.
 
 ## Next authorised action
 
-Deploy the exact reconciled commit to staging from a clean worktree and verify release health and
-version. Do not configure Stripe, make a payment, restart the Scanner, or touch production.
+Use an authorised staging grader session to inspect an existing Scanner capture at 12× on FRONT and
+BACK, recording the visible source identity and image dimensions. Do not configure Stripe, make a
+payment, restart the Scanner, or touch production.
