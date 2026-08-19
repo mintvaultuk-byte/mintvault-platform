@@ -17,16 +17,16 @@
 
 ## Stage progress
 
-| Stage                            | Status      | Date       | Notes                                                                                                                       |
-| -------------------------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
-| 0 — Baseline                     | COMPLETE    | 2026-08-19 | Canonical facts and baseline gates captured                                                                                 |
-| 1 — Review plan                  | COMPLETE    | 2026-08-19 | Three non-overlapping read-only scopes dispatched                                                                           |
-| 2 — Investigation                | COMPLETE    | 2026-08-19 | Three independent read-only reports received                                                                                |
-| 3 — Lead verification            | COMPLETE    | 2026-08-19 | Accepted high findings personally reproduced; worktree unchanged by reviewers                                               |
-| 4 — Implementation authorisation | COMPLETE    | 2026-08-19 | Runtime manifest, architecture-after and budget frozen                                                                      |
-| 5 — Implementation               | COMPLETE    | 2026-08-19 | Packages A–G in `079d5336`; hostile privacy closure in `c2d18aea`                                                           |
-| 6 — Regression                   | COMPLETE    | 2026-08-19 | TypeScript, build, lint, full/focused/migration/high-risk suites, rendered UI and Graphify green; hostile review reconciled |
-| 7 — Final report                 | IN PROGRESS | 2026-08-19 | Durable evidence reconciled; remote CI/release/live proof blocked on protected publication and connection actions           |
+| Stage                            | Status            | Date       | Notes                                                                                                                                                                                                                                 |
+| -------------------------------- | ----------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Baseline                     | COMPLETE          | 2026-08-19 | Canonical facts and baseline gates captured                                                                                                                                                                                           |
+| 1 — Review plan                  | COMPLETE          | 2026-08-19 | Three non-overlapping read-only scopes dispatched                                                                                                                                                                                     |
+| 2 — Investigation                | COMPLETE          | 2026-08-19 | Three independent read-only reports received                                                                                                                                                                                          |
+| 3 — Lead verification            | COMPLETE          | 2026-08-19 | Accepted high findings personally reproduced; worktree unchanged by reviewers                                                                                                                                                         |
+| 4 — Implementation authorisation | COMPLETE          | 2026-08-19 | Runtime manifest, architecture-after and budget frozen                                                                                                                                                                                |
+| 5 — Implementation               | COMPLETE          | 2026-08-19 | Packages A–G in `079d5336`; hostile privacy closure in `c2d18aea`                                                                                                                                                                     |
+| 6 — Regression                   | COMPLETE IN SCOPE | 2026-08-19 | TypeScript, build, lint, split full/focused/migration/high-risk suites, rendered UI and graph green; hostile review reconciled. Raw monolithic postflight test remains red only in out-of-scope Partner/Scanner local-topology suites |
+| 7 — Final report                 | IN PROGRESS       | 2026-08-19 | Durable evidence reconciled; remote CI/release/live proof blocked on protected publication and connection actions                                                                                                                     |
 
 ## Reviewer assignments
 

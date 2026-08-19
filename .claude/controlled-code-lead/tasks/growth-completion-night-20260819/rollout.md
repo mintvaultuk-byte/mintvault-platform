@@ -1,6 +1,6 @@
 # Rollout — Growth Completion Night
 
-No push, pull request, migration, secret/configuration write or deployment has occurred. The runtime candidate is `c2d18aea`; the release candidate is the final documentation-only descendant at branch HEAD.
+No push, pull request, migration, secret/configuration write or deployment has occurred. The runtime candidate is `c2d18aea`; the release candidate is the final clean descendant at branch HEAD, including evidence and CI-environment test isolation.
 
 1. Owner authorizes publication of the exact clean branch and creation of a pull request; do not rebase or mix unrelated work.
 2. Wait for terminal remote CI on the exact published SHA and reconcile every required check. A local green run is not a substitute.

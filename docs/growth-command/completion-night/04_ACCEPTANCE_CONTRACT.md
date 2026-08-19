@@ -36,7 +36,9 @@
 
 - [x] Focused behavioural tests execute non-vacuously.
 - [x] Critical negative/mutation checks bite.
-- [x] `npm run check`, `npm test`, `npm run lint`, `npm run build`, `git diff --check` pass locally.
+- [x] `npm run check`, `npm run lint`, `npm run build` and exact-range `git diff --check` pass locally.
+- [x] All runnable tests pass in the repository-safe split: 5,154 assertions in 311 no-database files plus 62 assertions in the five environment-owned files; focused Growth ordering passes after CI isolation repair.
+- [ ] Engineering OS monolithic `npm run test` is green; the prepared local CI topology still reports unrelated Partner/Scanner failures, so this is deferred to exact-SHA remote CI without editing excluded domains.
 - [x] Engineering OS graph is rebuilt and current for the release candidate.
 - [x] Partner/Admin, Scanner shared-boundary, payment authority, migration inventory/scope and schema-parity regressions pass.
 - [x] Rendered desktop 1440px and mobile 390px acceptance passes.

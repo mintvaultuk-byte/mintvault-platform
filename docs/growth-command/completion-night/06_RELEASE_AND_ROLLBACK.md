@@ -2,12 +2,12 @@
 
 ## Current release state
 
-Growth Completion Night is implemented locally through runtime candidate `c2d18aea`; a documentation-only evidence closeout follows it. No migration, push, pull request, configuration write or deployment has occurred. Production remains `facfd36f`, Fly v1109.
+Growth Completion Night is implemented locally through runtime candidate `c2d18aea`; evidence and CI-environment test-isolation closeout follow it through `e877032b`. No migration, push, pull request, configuration write or deployment has occurred. Production remains `facfd36f`, Fly v1109.
 
 ## Intended release order
 
 1. Completed: clean local candidate from canonical main with no protected-system write.
-2. Completed: focused and integrated executable proof, Engineering OS graph, rendered desktop/mobile acceptance and independent hostile review/repair.
+2. Completed in Growth scope: focused and split-full executable proof, Engineering OS graph, rendered desktop/mobile acceptance and independent hostile review/repair. Local monolithic postflight still reports excluded Partner/Scanner suite failures and is not represented as green.
 3. Owner authorizes push/PR of the exact clean branch; freeze the resulting SHA and obtain terminal remote CI proof.
 4. Reconcile production SHA/release/machines and migration identity immediately before release.
 5. Separately authorize and apply additive migration `0101`, then verify journal and schema.
