@@ -36,7 +36,16 @@ describe("GB-04C dedicated MCP Growth-read boundary", () => {
   it("publishes only aggregate read tools with explicit non-destructive annotations", () => {
     expect(GROWTH_MCP_PATH).toBe("/mcp/growth");
     const names = GROWTH_MCP_TOOLS.map(([name]) => name);
-    expect(names).toEqual(expect.arrayContaining(["get_growth_summary", "get_review_summary", "get_capacity_status"]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "get_growth_summary",
+        "get_review_summary",
+        "get_capacity_status",
+        "get_infrastructure_status",
+        "get_campaign_readiness",
+        "get_revenue_velocity",
+      ])
+    );
     expect(names.join(" ")).not.toMatch(/lead|customer|email|query|mutation|refund|deploy|scanner|grade_/i);
     const source = fs.readFileSync("server/routes/growth-mcp.ts", "utf8");
     expect(source).toContain("readOnlyHint: true");

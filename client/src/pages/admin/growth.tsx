@@ -33,6 +33,28 @@ type Metric = {
   reason?: string;
   lastUpdated: string | null;
 };
+type InfrastructureMachine = {
+  machineRef: string;
+  status: Health;
+  region: string;
+  cpu: Metric;
+  memory: Metric;
+  requestRate: Metric;
+  p95Latency: Metric;
+  fiveXErrorRate: Metric;
+  deployedVersion: Metric;
+  deployedSha: Metric;
+};
+type RevenueVelocity = {
+  window: "60m";
+  minimumPaidSample: 3;
+  paidSubmissionsPerHour: Metric;
+  paidCardsPerHour: Metric;
+  revenuePencePerHour: Metric;
+  comparison: Metric;
+  definition: string;
+  lastUpdated: string;
+};
 type Count = { state: "MEASURED"; value: number };
 type PartnerOperationalMetric = Count | { state: "NOT_INSTRUMENTED"; reason: string };
 type Performance = {
@@ -99,9 +121,11 @@ type Intelligence = {
     checkoutStarts: Metric;
     paidSubmissions: Metric;
     paidCards: Metric;
+    revenuePence: Metric;
     partnerApplications: Metric;
     requestsPerMinute: Metric;
     requestsLastHour: Metric;
+    revenueVelocity: RevenueVelocity;
     lastUpdated: string;
   };
   siteHealth: Record<
@@ -127,6 +151,86 @@ type Intelligence = {
     thresholdModel: string;
     automaticScalingEnabled: false;
   };
+  infrastructure: {
+    overallStatus: Health;
+    control: {
+      currentMode: "MANUAL";
+      currentAuthority: "MONITOR_DETECT_RECOMMEND";
+      mutationEnabled: false;
+      automaticScalingEnabled: false;
+      futureMode: "GUARDED_AUTO_REQUIRES_SEPARATE_APPROVAL";
+      futureModeAvailable: false;
+      safetyBoundary: string;
+    };
+    fly: {
+      connection: Metric;
+      overallStatus: Health;
+      machines: InfrastructureMachine[];
+      expectedMachineFields: string[];
+    };
+    neon: {
+      availability: Metric;
+      connectionPressure: Metric;
+      latency: Metric;
+      compute: Metric;
+      storage: Metric;
+      pointInTimeRecovery: Metric;
+      mutationEnabled: false;
+    };
+    costs: {
+      period: "MONTH_TO_DATE";
+      providers: Array<{
+        provider: "Fly" | "Neon" | "R2" | "Resend";
+        state: State;
+        status: Health;
+        period: "MONTH_TO_DATE";
+        sourceCurrency: string | null;
+        amountMajor?: number;
+        reason?: string;
+        lastUpdated: string | null;
+      }>;
+      trend: Metric;
+      normalisedTotalGBP: Metric;
+      costPerPaidCardGBP: Metric;
+      costPerPaidOrderGBP: Metric;
+      currencyPolicy: string;
+    };
+    budget: {
+      state: "NOT_CONFIGURED";
+      status: "UNKNOWN";
+      monthlyBudgetPence: null;
+      automaticShutdownEnabled: false;
+      automaticSpendEnabled: false;
+      reason: string;
+    };
+    lastUpdated: string;
+  };
+  campaignReadiness: {
+    status: Health;
+    label: "READY" | "CAUTION" | "NOT_READY" | "INSUFFICIENT_TELEMETRY";
+    recommendation: string;
+    evidence: string[];
+    advisoryOnly: true;
+    definition: string;
+  };
+  incident:
+    | {
+        status: "ACTIVE";
+        severity: "RED";
+        priorityKey: string;
+        title: string;
+        detail: string;
+        recommendation: string;
+      }
+    | {
+        status: "CLEAR";
+        severity: null;
+        priorityKey: null;
+        title: string;
+        detail: string;
+        recommendation: string;
+      };
+  revenueVelocity: RevenueVelocity;
   seo: {
     searchConsole: Metric;
     impressions: Metric;
@@ -172,8 +276,16 @@ type GrowthReviewSummary = {
   lastUpdated: string;
 };
 
-const money = (pence: number) =>
+export const formatGrowthMoneyGBP = (pence: number) =>
   new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(pence / 100);
+export function formatProviderMoney(amountMajor: number, sourceCurrency: string): string | null {
+  if (!Number.isFinite(amountMajor) || !/^[A-Z]{3}$/.test(sourceCurrency)) return null;
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: sourceCurrency }).format(amountMajor);
+  } catch {
+    return null;
+  }
+}
 const number = (value: number) => new Intl.NumberFormat("en-GB").format(value);
 const date = (value: string | null) =>
   value && !Number.isNaN(new Date(value).getTime())
@@ -281,6 +393,36 @@ function MetricCard({ label, metric }: { label: string; metric: Metric }) {
       <p className="mt-1 font-semibold">{text(metric)}</p>
       <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">{metric.reason ?? metric.source}</p>
     </div>
+  );
+}
+function MoneyMetricCard({ label, metric }: { label: string; metric: Metric }) {
+  return (
+    <div className="rounded border border-[var(--admin-line,#333)] p-3">
+      <p className="text-xs uppercase text-[var(--admin-muted,#8a8a8a)]">{label}</p>
+      <p className="mt-1 font-semibold">
+        {metric.state === "REAL" && typeof metric.value === "number"
+          ? formatGrowthMoneyGBP(metric.value)
+          : metric.state.replaceAll("_", " ")}
+      </p>
+      <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">{metric.reason ?? metric.source}</p>
+    </div>
+  );
+}
+function IncidentBanner({ incident }: { incident: Intelligence["incident"] }) {
+  if (incident.status !== "ACTIVE") return null;
+  return (
+    <section
+      role="alert"
+      data-testid="growth-incident-mode"
+      className="rounded border-2 border-red-400 bg-red-950/70 p-4 shadow-[0_0_24px_rgba(248,113,113,.18)]"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="red">INCIDENT MODE · RED</Badge>
+        <h2 className="text-lg font-semibold text-red-50">{incident.title}</h2>
+      </div>
+      <p className="mt-2 text-sm text-red-100">{incident.detail}</p>
+      <p className="mt-2 text-xs font-medium uppercase text-red-200">{incident.recommendation}</p>
+    </section>
   );
 }
 function Value({ label, value }: { label: string; value: Count | undefined }) {
@@ -471,7 +613,8 @@ export default function GrowthCommandPage() {
               disabled={command.isFetching || reviews.isFetching || refreshing}
               data-testid="growth-refresh"
             >
-              <RefreshCw size={14} /> {command.isFetching || reviews.isFetching || refreshing ? "Refreshing" : "Refresh"}
+              <RefreshCw size={14} />{" "}
+              {command.isFetching || reviews.isFetching || refreshing ? "Refreshing" : "Refresh"}
             </AdminButton>
           </div>
         </header>
@@ -494,6 +637,7 @@ export default function GrowthCommandPage() {
               Last updated: {date(data.generatedAt)} ·{" "}
               {data.freshness === "STALE" ? "STALE — last known valid snapshot" : "CURRENT"}
             </p>
+            <IncidentBanner incident={data.incident} />
             {tab === "overview" && (
               <section className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -504,9 +648,9 @@ export default function GrowthCommandPage() {
                     testId="growth-paid-cards"
                   />
                   <StatCard
-                    label="Grading revenue"
-                    value={money(summary.paid.revenuePence.value)}
-                    foot="Actual Stripe amount"
+                    label="Grading revenue (GBP)"
+                    value={formatGrowthMoneyGBP(summary.paid.revenuePence.value)}
+                    foot="Verified GBP Stripe amount"
                     testId="growth-revenue"
                   />
                   <StatCard
@@ -533,11 +677,12 @@ export default function GrowthCommandPage() {
                     title="Live Pulse"
                     sub="Recent persisted business activity; fleet request telemetry needs a secure provider adapter."
                   >
-                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
                       <MetricCard label="Submission records" metric={data.livePulse.submissionStarts} />
                       <MetricCard label="Checkout starts" metric={data.livePulse.checkoutStarts} />
                       <MetricCard label="Paid submissions" metric={data.livePulse.paidSubmissions} />
                       <MetricCard label="Paid cards" metric={data.livePulse.paidCards} />
+                      <MoneyMetricCard label="Revenue · last 60m (GBP)" metric={data.livePulse.revenuePence} />
                       <MetricCard label="Partner applications" metric={data.livePulse.partnerApplications} />
                       <MetricCard label="Requests / min" metric={data.livePulse.requestsPerMinute} />
                     </div>
@@ -560,6 +705,49 @@ export default function GrowthCommandPage() {
                       />
                       <p className="text-sm">
                         Recommendation: <strong>{data.capacity.recommendation.replaceAll("_", " ")}</strong>
+                      </p>
+                    </div>
+                  </Panel>
+                </div>
+                <div className="grid gap-4 xl:grid-cols-3">
+                  <Panel title="Campaign readiness" sub="Deterministic and advisory only; it never changes a campaign.">
+                    <div className="space-y-3 p-4">
+                      <Gauge
+                        label="Readiness"
+                        metric={{
+                          state: data.campaignReadiness.status === "UNKNOWN" ? "INSUFFICIENT_DATA" : "REAL",
+                          status: data.campaignReadiness.status,
+                          value: data.campaignReadiness.label.replaceAll("_", " "),
+                          source: data.campaignReadiness.definition,
+                          reason: data.campaignReadiness.evidence.join(" "),
+                          lastUpdated: data.generatedAt,
+                        }}
+                      />
+                      <p className="text-sm">{data.campaignReadiness.recommendation}</p>
+                    </div>
+                  </Panel>
+                  <Panel
+                    title="Revenue velocity"
+                    sub="Exact rolling hour, not a forecast or tiny-sample extrapolation."
+                  >
+                    <div className="grid gap-3 p-4 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+                      <MetricCard
+                        label="Paid submissions / hour"
+                        metric={data.revenueVelocity.paidSubmissionsPerHour}
+                      />
+                      <MetricCard label="Paid cards / hour" metric={data.revenueVelocity.paidCardsPerHour} />
+                      <MoneyMetricCard label="Revenue / hour (GBP)" metric={data.revenueVelocity.revenuePencePerHour} />
+                    </div>
+                  </Panel>
+                  <Panel title="Infrastructure control" sub="Current authority is monitor, detect and recommend.">
+                    <div className="space-y-3 p-4">
+                      <div className={`rounded border p-3 ${tone(data.infrastructure.overallStatus)}`}>
+                        <p className="text-xs font-medium uppercase">Mode</p>
+                        <p className="mt-2 text-xl font-semibold">{data.infrastructure.control.currentMode}</p>
+                        <p className="mt-2 text-xs opacity-80">No provider mutation · no automatic spend</p>
+                      </div>
+                      <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+                        Guarded auto is a future design requiring separate approval; it is unavailable now.
                       </p>
                     </div>
                   </Panel>
@@ -645,8 +833,16 @@ export default function GrowthCommandPage() {
                           value={number(reviews.data.deliveryUncertain)}
                           foot="No invented delivery state"
                         />
-                        <StatCard label="Suppressed" value={number(reviews.data.suppressed)} foot="Customer/admin preference" />
-                        <StatCard label="Cancelled" value={number(reviews.data.cancelled)} foot="Eligibility withdrawn" />
+                        <StatCard
+                          label="Suppressed"
+                          value={number(reviews.data.suppressed)}
+                          foot="Customer/admin preference"
+                        />
+                        <StatCard
+                          label="Cancelled"
+                          value={number(reviews.data.cancelled)}
+                          foot="Eligibility withdrawn"
+                        />
                       </div>
                     </Panel>
                     <div className="grid gap-4 xl:grid-cols-2">
@@ -718,8 +914,110 @@ export default function GrowthCommandPage() {
                     <p className="mt-3 text-sm">
                       Recommended next action: <strong>{data.capacity.recommendation.replaceAll("_", " ")}</strong>
                     </p>
+                    <p className="mt-2 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      Automatic scaling: DISABLED · Infrastructure mutation: UNAVAILABLE
+                    </p>
                   </div>
                 </Panel>
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <Panel
+                    title="Fly machine intelligence"
+                    sub="Machine detail appears only from an approved least-privilege server authority."
+                  >
+                    <div className="p-4">
+                      <Gauge label="Fly connection" metric={data.infrastructure.fly.connection} />
+                      {data.infrastructure.fly.machines.length === 0 ? (
+                        <p className="mt-3 text-sm text-[var(--admin-muted,#8a8a8a)]">
+                          No machine rows are shown because Fly telemetry is not connected. No machine count, health,
+                          version or SHA is inferred.
+                        </p>
+                      ) : (
+                        <div className="mt-3 grid gap-3">
+                          {data.infrastructure.fly.machines.map((machine) => (
+                            <article key={machine.machineRef} className={`rounded border p-3 ${tone(machine.status)}`}>
+                              <div className="flex flex-wrap justify-between gap-2">
+                                <strong>{machine.machineRef}</strong>
+                                <span>
+                                  {machine.region} · {machine.status}
+                                </span>
+                              </div>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                <MetricCard label="CPU" metric={machine.cpu} />
+                                <MetricCard label="RAM" metric={machine.memory} />
+                                <MetricCard label="Request rate" metric={machine.requestRate} />
+                                <MetricCard label="P95 latency" metric={machine.p95Latency} />
+                                <MetricCard label="5XX error rate" metric={machine.fiveXErrorRate} />
+                                <MetricCard label="Deployed version" metric={machine.deployedVersion} />
+                                <MetricCard label="Deployed SHA" metric={machine.deployedSha} />
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Panel>
+                  <Panel
+                    title="Neon database intelligence"
+                    sub="Availability is distinct from provider pressure and cost."
+                  >
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                      <Gauge label="Availability" metric={data.infrastructure.neon.availability} />
+                      <MetricCard label="Connection pressure" metric={data.infrastructure.neon.connectionPressure} />
+                      <MetricCard label="Latency" metric={data.infrastructure.neon.latency} />
+                      <MetricCard label="Compute" metric={data.infrastructure.neon.compute} />
+                      <MetricCard label="Storage" metric={data.infrastructure.neon.storage} />
+                      <MetricCard
+                        label="Point-in-time recovery"
+                        metric={data.infrastructure.neon.pointInTimeRecovery}
+                      />
+                    </div>
+                    <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      Neon mutation: UNAVAILABLE · Monitor and recommend only
+                    </p>
+                  </Panel>
+                </div>
+                <div className="grid gap-4 xl:grid-cols-[1.4fr_.6fr]">
+                  <Panel title="Infrastructure cost" sub="Month-to-date provider authority; estimates are forbidden.">
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                      {data.infrastructure.costs.providers.map((cost) => (
+                        <div key={cost.provider} className={`rounded border p-3 ${tone(cost.status)}`}>
+                          <p className="text-xs font-medium uppercase">{cost.provider} · MTD</p>
+                          <p className="mt-2 text-lg font-semibold">
+                            {cost.state === "REAL" && typeof cost.amountMajor === "number" && cost.sourceCurrency
+                              ? (formatProviderMoney(cost.amountMajor, cost.sourceCurrency) ?? "INVALID CURRENCY")
+                              : cost.state.replaceAll("_", " ")}
+                          </p>
+                          <p className="mt-2 text-xs opacity-80">{cost.reason ?? "Authoritative provider billing"}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid gap-3 border-t border-[var(--admin-line,#333)] p-4 sm:grid-cols-3">
+                      <MetricCard label="GBP-normalised total" metric={data.infrastructure.costs.normalisedTotalGBP} />
+                      <MetricCard label="Cost / paid card" metric={data.infrastructure.costs.costPerPaidCardGBP} />
+                      <MetricCard label="Cost / paid order" metric={data.infrastructure.costs.costPerPaidOrderGBP} />
+                    </div>
+                    <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      {data.infrastructure.costs.currencyPolicy}
+                    </p>
+                  </Panel>
+                  <Panel title="Monthly budget guardrail" sub="Owner-defined future boundary; no automatic shutdown.">
+                    <div className="p-4">
+                      <Gauge
+                        label="Budget"
+                        metric={{
+                          state: "NOT_INSTRUMENTED",
+                          status: data.infrastructure.budget.status,
+                          source: "Owner-approved infrastructure budget",
+                          reason: data.infrastructure.budget.reason,
+                          lastUpdated: null,
+                        }}
+                      />
+                      <p className="mt-3 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                        Automatic shutdown: DISABLED · Automatic spend: DISABLED
+                      </p>
+                    </div>
+                  </Panel>
+                </div>
               </section>
             )}
             {tab === "partners" && (
@@ -892,7 +1190,9 @@ export default function GrowthCommandPage() {
                           <div className="rounded border border-amber-400/35 bg-amber-400/5 p-3">
                             <p className="font-medium">Ready for manual Partner Management review</p>
                             <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                              No selected-lead context is transferred. No tenant, user, location, station, credit or approval has been created.
+                              {
+                                "No selected-lead context is transferred. No tenant, user, location, station, credit or approval has been created."
+                              }
                             </p>
                             <Link
                               className={`${adminButtonClass({ size: "sm", variant: "gold", className: "mt-2 inline-flex" })}`}
@@ -1092,7 +1392,7 @@ function PerformancePanel({ title, rows }: { title: string; rows: Performance[] 
                   <td className="p-3">{row.category.replaceAll("_", " ")}</td>
                   <td className="p-3">{number(row.paidSubmissions)}</td>
                   <td className="p-3">{number(row.paidCards)}</td>
-                  <td className="p-3">{money(row.revenuePence)}</td>
+                  <td className="p-3">{formatGrowthMoneyGBP(row.revenuePence)}</td>
                   <td className="p-3">{number(row.partnerApplications)}</td>
                 </tr>
               ))}
@@ -1126,7 +1426,7 @@ function CampaignPanel({ title, rows }: { title: string; rows: Campaign[] }) {
                   <td className="p-3">{row.campaign}</td>
                   <td className="p-3">{row.category.replaceAll("_", " ")}</td>
                   <td className="p-3">{number(row.paidSubmissions)}</td>
-                  <td className="p-3">{money(row.revenuePence)}</td>
+                  <td className="p-3">{formatGrowthMoneyGBP(row.revenuePence)}</td>
                   <td className="p-3">{number(row.partnerApplications)}</td>
                 </tr>
               ))}

@@ -3,6 +3,7 @@
 ## Product and truth
 
 - [x] Existing GB-04B capability is preserved; no needless dashboard rebuild.
+- [x] MintVault Growth monetary presentation is canonical GBP/`£`; no USD/AUD commercial formatter exists.
 - [x] Candidate contains zero fake Growth/review/SEO/telemetry/conversion data.
 - [x] Missing authority renders `NOT CONNECTED`, `UNKNOWN`, `NOT INSTRUMENTED` or `INSUFFICIENT DATA`.
 - [x] Paid state and revenue remain server-authoritative and are never double-counted.
@@ -16,11 +17,15 @@
 - [x] No customer enumeration, email leakage, PII logs, recipient injection, open redirect or arbitrary review URL.
 - [x] No provider token or credential reaches the browser, logs, docs or handover.
 - [x] Partner tenant, Scanner, grading, payment and auth boundaries are unchanged.
+- [x] Fly/Neon/billing authority is absent-safe; no machine, cost, FX, budget or provider-secret value is invented or sent to the browser.
+- [x] Infrastructure control remains manual monitor/detect/recommend; Growth MCP and UI contain no infrastructure mutation.
 
 ## UI and search
 
 - [x] One existing `/admin/growth` product; no decorative duplicate dashboard.
 - [x] Every active control has a real authority/action/result; `BROKEN = 0` on desktop and mobile.
+- [x] Campaign Readiness is deterministic or unknown, and a red revenue-path Incident Mode renders ahead of ordinary insights.
+- [x] Revenue velocity uses the exact verified-GBP rolling hour and withholds samples below three paid submissions.
 - [x] Admin UI preserves the existing black/gold dense command-centre language and canonical tokens/patterns.
 - [x] Public pages have self-canonical metadata, truthful structured data, search-visible output, correct sitemap policy and real 404 behaviour.
 - [x] No thin doorway pages, keyword stuffing, fake citations or mass content.
@@ -43,6 +48,7 @@
 - [x] Partner/Admin, Scanner shared-boundary, payment authority, migration inventory/scope and schema-parity regressions pass.
 - [x] Rendered desktop 1440px and mobile 390px acceptance passes.
 - [x] One independent hostile review is reconciled; all proven in-scope BLOCKER/HIGH are fixed and proven locally.
+- [x] The Infrastructure/GBP addendum hostile review covers the future scaling boundary and its result is reconciled.
 - [ ] Exact candidate SHA remote CI is terminal green before production.
 - [x] Rollback is recorded; deployment and any migration are separately authorized and serialized.
 - [ ] Production proof verifies the exact served artifact and real responses, not HTTP 200 alone.

@@ -20,6 +20,8 @@ Remove/disable `REVIEW_DESTINATION_URL`, its hostname allowlist or `RESEND_DOMAI
 
 Remove or rotate `GROWTH_MCP_TOKEN_SHA256` to fail the endpoint closed. Disconnect any custom app at the client/workspace side. No database credential is shared with MCP. Optional provider adapters remain `NOT CONNECTED`; if later configured, revoke their dedicated credentials separately.
 
+The Infrastructure/GBP addendum creates no provider configuration, mutation authority, autoscaling action or spend. Before activation, rejection needs no provider rollback. After an authorized application release, revert only the addendum application commit to restore the previous Growth UI/contracts; no Fly/Neon/billing side effect exists to undo.
+
 ## Public authority and cache
 
 Reverting the application removes the new population presentation and initial-HTML structured data. In-process public cache entries expire within 60 seconds; downstream search-engine caches may persist and must not be represented as immediately recallable.

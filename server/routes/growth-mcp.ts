@@ -10,9 +10,12 @@ import {
 } from "../commercial-growth-service";
 import {
   getCapacityStatus,
+  getCampaignReadinessStatus,
   getConversionSummary,
   getGrowthIntelligence,
+  getInfrastructureStatus,
   getLivePulse,
+  getRevenueVelocity,
   getSeoSummary,
   getSiteHealth,
 } from "../growth-intelligence-service";
@@ -56,6 +59,21 @@ export const GROWTH_MCP_TOOLS = [
   [
     "get_capacity_status",
     "Read-only capacity status; never scales infrastructure or changes configuration.",
+    EMPTY_SCHEMA,
+  ],
+  [
+    "get_infrastructure_status",
+    "Aggregate infrastructure connection, cost and manual-control states; no provider mutation authority.",
+    EMPTY_SCHEMA,
+  ],
+  [
+    "get_campaign_readiness",
+    "Deterministic advisory readiness from connected revenue-path signals; never changes a campaign.",
+    EMPTY_SCHEMA,
+  ],
+  [
+    "get_revenue_velocity",
+    "Rolling 60-minute verified GBP paid activity with minimum-sample protection.",
     EMPTY_SCHEMA,
   ],
   ["get_acquisition_performance", "Privacy-safe acquisition-category performance for a bounded period.", PERIOD_SCHEMA],
@@ -143,6 +161,18 @@ export async function executeGrowthMcpTool(name: string, args: unknown): Promise
       requireEmptyArgs(args);
       await auditMcpTool(name);
       return getCapacityStatus();
+    case "get_infrastructure_status":
+      requireEmptyArgs(args);
+      await auditMcpTool(name);
+      return getInfrastructureStatus();
+    case "get_campaign_readiness":
+      requireEmptyArgs(args);
+      await auditMcpTool(name);
+      return getCampaignReadinessStatus();
+    case "get_revenue_velocity":
+      requireEmptyArgs(args);
+      await auditMcpTool(name);
+      return getRevenueVelocity();
     case "get_acquisition_performance": {
       const period = parsePeriod(args);
       await auditMcpTool(name, period);
@@ -217,7 +247,7 @@ export function registerGrowthMcpRoutes(app: Express): void {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "mintvault-growth-read", version: "1.0.0" },
           instructions:
-            "Aggregate Growth reads only. No customer detail, mutation, payment, Partner, Scanner or deployment access.",
+            "Aggregate Growth reads only. No customer detail, mutation, payment, Partner, Scanner, infrastructure write, spend or deployment access.",
         },
       });
     }

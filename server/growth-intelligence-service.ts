@@ -12,14 +12,18 @@ import { sql, type SQL } from "drizzle-orm";
 import { getSitemapEntries, isKnownPublicRoute } from "./seo-config";
 import { getGrowthSummary, type GrowthPeriod, type GrowthSummary } from "./commercial-growth-service";
 import { getConversionEventSummary, type GrowthConversionExecutor } from "./growth-conversion-service";
+import {
+  buildInfrastructureIntelligence,
+  deriveCampaignReadiness,
+  deriveIncidentMode,
+  deriveRevenueVelocity,
+  type CampaignReadiness,
+  type IncidentMode,
+  type InfrastructureIntelligence,
+  type RevenueVelocity,
+} from "./growth-infrastructure-intelligence";
 
-export type IntelligenceState =
-  | "REAL"
-  | "NOT_CONNECTED"
-  | "NOT_INSTRUMENTED"
-  | "INSUFFICIENT_DATA"
-  | "STALE"
-  | "ERROR";
+export type IntelligenceState = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "INSUFFICIENT_DATA" | "STALE" | "ERROR";
 export type HealthStatus = "GREEN" | "AMBER" | "RED" | "UNKNOWN";
 
 export type IntelligenceMetric = {
@@ -78,9 +82,11 @@ export type LivePulse = {
   checkoutStarts: IntelligenceMetric;
   paidSubmissions: IntelligenceMetric;
   paidCards: IntelligenceMetric;
+  revenuePence: IntelligenceMetric;
   partnerApplications: IntelligenceMetric;
   requestsPerMinute: IntelligenceMetric;
   requestsLastHour: IntelligenceMetric;
+  revenueVelocity: RevenueVelocity;
   lastUpdated: string;
 };
 
@@ -147,6 +153,10 @@ export type GrowthIntelligence = {
   livePulse: LivePulse;
   siteHealth: SiteHealth;
   capacity: CapacityStatus;
+  infrastructure: InfrastructureIntelligence;
+  campaignReadiness: CampaignReadiness;
+  incident: IncidentMode;
+  revenueVelocity: RevenueVelocity;
   seo: SeoSummary;
   conversion: ConversionSummary;
   insights: GrowthInsight[];
@@ -329,7 +339,10 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
       COUNT(*) FILTER (WHERE payment_status = 'paid' AND deleted_at IS NULL AND payment_intent_id IS NOT NULL
         AND payment_timestamp IS NOT NULL AND payment_currency = 'GBP' AND payment_timestamp >= NOW() - INTERVAL '60 minutes') AS paid_submissions,
       COALESCE(SUM(card_count) FILTER (WHERE payment_status = 'paid' AND deleted_at IS NULL AND payment_intent_id IS NOT NULL
-        AND payment_timestamp IS NOT NULL AND payment_currency = 'GBP' AND payment_timestamp >= NOW() - INTERVAL '60 minutes'), 0) AS paid_cards
+        AND payment_timestamp IS NOT NULL AND payment_currency = 'GBP' AND payment_timestamp >= NOW() - INTERVAL '60 minutes'), 0) AS paid_cards,
+      COALESCE(SUM(ROUND(payment_amount * 100)) FILTER (WHERE payment_status = 'paid' AND deleted_at IS NULL
+        AND payment_intent_id IS NOT NULL AND payment_timestamp IS NOT NULL AND payment_currency = 'GBP'
+        AND payment_timestamp >= NOW() - INTERVAL '60 minutes'), 0) AS revenue_pence
     FROM submissions
   `);
   const partnerResult = await runner.execute(sql`
@@ -359,6 +372,10 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
     // Mixed-version safety: an app node may start before migration 0101 is
     // applied. The dashboard remains truthful and checkout never depends on it.
   }
+  const paidSubmissions = numberValue(row.paid_submissions);
+  const paidCards = numberValue(row.paid_cards);
+  const revenuePence = numberValue(row.revenue_pence);
+  const revenueVelocity = deriveRevenueVelocity({ paidSubmissions, paidCards, revenuePence }, now);
   return {
     window: "60m",
     submissionStarts: real(
@@ -368,13 +385,9 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
       now
     ),
     checkoutStarts,
-    paidSubmissions: real(
-      numberValue(row.paid_submissions),
-      "paid submissions",
-      "Verified Stripe payment_timestamp",
-      now
-    ),
-    paidCards: real(numberValue(row.paid_cards), "cards", "Verified Stripe payment_timestamp", now),
+    paidSubmissions: real(paidSubmissions, "paid submissions", "Verified Stripe payment_timestamp", now),
+    paidCards: real(paidCards, "cards", "Verified Stripe payment_timestamp", now),
+    revenuePence: real(revenuePence, "GBP pence", "Verified Stripe GBP payment_timestamp", now),
     partnerApplications: real(
       numberValue(partner.partner_applications),
       "applications",
@@ -391,8 +404,33 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
       "Fly fleet telemetry",
       "Fleet-wide request telemetry is not connected; per-machine logs are not presented as site-wide requests."
     ),
+    revenueVelocity,
     lastUpdated: now,
   };
+}
+
+export async function getInfrastructureStatus(executor?: QueryExecutor): Promise<InfrastructureIntelligence> {
+  const siteHealth = await getSiteHealth(executor);
+  return buildInfrastructureIntelligence(
+    { database: siteHealth.database, capacity: getCapacityStatus() },
+    siteHealth.lastUpdated
+  );
+}
+
+export async function getCampaignReadinessStatus(executor?: QueryExecutor): Promise<CampaignReadiness> {
+  const siteHealth = await getSiteHealth(executor);
+  return deriveCampaignReadiness({
+    site: siteHealth.site,
+    payments: siteHealth.payments,
+    database: siteHealth.database,
+    fiveXErrorRate: siteHealth.fiveXErrorRate,
+    flyMachines: siteHealth.flyMachines,
+    capacity: getCapacityStatus(),
+  });
+}
+
+export async function getRevenueVelocity(executor?: QueryExecutor): Promise<RevenueVelocity> {
+  return (await getLivePulse(executor)).revenueVelocity;
 }
 
 export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealth> {
@@ -522,12 +560,7 @@ export async function getConversionSummary(
     // An unavailable additive event table must never take down paid reporting.
   }
   const submissionStarts = events
-    ? real(
-        events.submissionStarts,
-        "persisted submission starts",
-        "Server-observed growth_conversion_events",
-        now
-      )
+    ? real(events.submissionStarts, "persisted submission starts", "Server-observed growth_conversion_events", now)
     : unavailable(
         "NOT_INSTRUMENTED",
         "MintVault growth_conversion_events",
@@ -735,6 +768,24 @@ export async function getGrowthIntelligence(
     const seo = getSeoSummary();
     const capacity = deriveCapacityStatus(null, null);
     const generatedAt = new Date().toISOString();
+    const infrastructure = buildInfrastructureIntelligence({ database: siteHealth.database, capacity }, generatedAt);
+    const campaignReadiness = deriveCampaignReadiness({
+      site: siteHealth.site,
+      payments: siteHealth.payments,
+      database: siteHealth.database,
+      fiveXErrorRate: siteHealth.fiveXErrorRate,
+      flyMachines: siteHealth.flyMachines,
+      capacity,
+    });
+    const incident = deriveIncidentMode({
+      site: siteHealth.site,
+      payments: siteHealth.payments,
+      database: siteHealth.database,
+      fiveXErrorRate: siteHealth.fiveXErrorRate,
+      flyMachines: siteHealth.flyMachines,
+      capacity,
+      partnerApi: siteHealth.partnerApi,
+    });
     const value: GrowthIntelligence = {
       period,
       summary,
@@ -742,6 +793,10 @@ export async function getGrowthIntelligence(
       livePulse,
       siteHealth,
       capacity,
+      infrastructure,
+      campaignReadiness,
+      incident,
+      revenueVelocity: livePulse.revenueVelocity,
       seo,
       conversion,
       insights: getGrowthInsights({ period, summary, siteHealth, capacity, seo, conversion }),

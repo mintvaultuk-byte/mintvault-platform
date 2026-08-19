@@ -126,13 +126,15 @@ describe("GB-04B Growth intelligence authority", () => {
 
   it("returns recent persisted activity but labels missing fleet request telemetry honestly", async () => {
     const replies = [
-      { rows: [{ submission_starts: "4", paid_submissions: "2", paid_cards: "5" }] },
+      { rows: [{ submission_starts: "4", paid_submissions: "2", paid_cards: "5", revenue_pence: "3800" }] },
       { rows: [{ partner_applications: "1" }] },
     ];
     let index = 0;
     const pulse = await getLivePulse({ execute: async () => replies[index++] });
     expect(pulse.submissionStarts).toMatchObject({ state: "REAL", value: 4 });
     expect(pulse.paidCards).toMatchObject({ state: "REAL", value: 5 });
+    expect(pulse.revenuePence).toMatchObject({ state: "REAL", value: 3800, unit: "GBP pence" });
+    expect(pulse.revenueVelocity.revenuePencePerHour.state).toBe("INSUFFICIENT_DATA");
     expect(pulse.checkoutStarts.state).toBe("NOT_INSTRUMENTED");
     expect(pulse.requestsPerMinute).toMatchObject({ state: "NOT_CONNECTED", status: "UNKNOWN" });
     expect(JSON.stringify(pulse)).not.toMatch(/"(?:email|phone|address|ipAddress)"/i);

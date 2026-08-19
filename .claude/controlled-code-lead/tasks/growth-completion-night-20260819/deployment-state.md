@@ -17,11 +17,14 @@
 - Baseline: exact `origin/main` `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`
 - Runtime candidate: `c2d18aea` (control `333fbfd9`, implementation `079d5336`, hostile closure `c2d18aea`)
 - Release candidate: final clean branch HEAD after evidence and CI-environment test-isolation closeout (`e877032b`)
+- Infrastructure addendum candidate: local descendant adding GBP/infrastructure/readiness/incident/velocity contracts; exact SHA pending final local commit
 - Pushed: no
 - Remote CI: no branch run exists because the workflows trigger on pull request or `main`
 - Migration applied: no; `0101_growth_reviews_and_conversion.sql` is authored only
 - Configuration/secrets changed: no
 - Deployed: no
+- Fly/Neon/billing configuration changed: no
+- Infrastructure mutation or spend action: no; runtime is `MANUAL` monitor/detect/recommend only
 
 ## Known divergence/concurrency
 
