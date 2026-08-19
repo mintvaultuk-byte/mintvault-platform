@@ -274,7 +274,7 @@ export default function AdminShell({
             <nav className="flex flex-wrap items-center gap-3 border-b border-[var(--admin-line)] px-5 py-2 text-sm" aria-label="Partner Network">
               <span className="font-semibold">Partner Network</span>
               <Link href={PARTNER_NETWORK_HOME} className="underline">Overview</Link>
-              <Link href={PARTNER_NETWORK_HOME} className="underline">Partners</Link>
+              <Link href={`${PARTNER_NETWORK_HOME}#partners`} className="underline">Partners</Link>
               <Link href="/admin/partners/stations" className="underline">Stations</Link>
               <Link href="/admin/partners/infrastructure" className="underline">Infrastructure</Link>
               <Link href="/admin/partners/settings" className="underline">Settings</Link>

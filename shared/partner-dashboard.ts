@@ -195,6 +195,17 @@ export interface NetworkSummary {
   generatedAt: string;
 }
 
+/**
+ * R2: bounded consolidated data for the canonical Partner Network overview.
+ * The browser receives one projection, rather than composing a dashboard by fan-out requests.
+ */
+export interface PartnerNetworkOverview {
+  summary: NetworkSummary;
+  partners: Paged<PartnerTableRow>;
+  alerts: DashboardAlert[];
+  generatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // B. Partner table row
 // ---------------------------------------------------------------------------

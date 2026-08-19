@@ -38,6 +38,7 @@ import {
   type Paged,
   type PartnerCorrectionsView,
   type PartnerDevicesView,
+  type PartnerNetworkOverview,
   type PartnerOverview,
   type PartnerQualityView,
   type PartnerRisk,
@@ -293,6 +294,19 @@ export async function getNetworkSummary(walletSchema = true): Promise<NetworkSum
     ],
     generatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * R2 canonical network projection. This deliberately composes bounded, set-based service reads
+ * on the server: one browser request, no per-partner fan-out, and no new business authority.
+ */
+export async function getPartnerNetworkOverview(walletSchema = true): Promise<PartnerNetworkOverview> {
+  const [summary, partners, alerts] = await Promise.all([
+    getNetworkSummary(walletSchema),
+    listPartnersForDashboard({ sort: "created_at", direction: "desc" }, 1, 50, walletSchema),
+    getAlerts(50, walletSchema),
+  ]);
+  return { summary, partners, alerts, generatedAt: new Date().toISOString() };
 }
 
 // ---------------------------------------------------------------------------

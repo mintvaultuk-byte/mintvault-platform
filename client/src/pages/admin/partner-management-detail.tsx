@@ -179,6 +179,13 @@ interface OnboardingUser {
   };
 }
 
+interface PartnerQueueItem {
+  certId: number;
+  certIdStr: string;
+  cardName: string | null;
+  graderStatus: string;
+}
+
 export default function PartnerManagementDetailPage() {
   const [pathname, navigate] = useLocation();
   const [, canonicalParams] = useRoute("/admin/partners/:partnerId");
@@ -315,6 +322,13 @@ export default function PartnerManagementDetailPage() {
     queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"],
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/onboarding-readiness`).then((r) => r.json()),
     enabled: on && (tab === "users" || tab === "overview"),
+  });
+  // R1 remains the only Partner-scoped QA read. The link carries the numeric cert id into the
+  // existing Staff workstation; this page never opens, approves, returns or rejects a grade.
+  const partnerQueue = useQuery<{ queue: PartnerQueueItem[] }>({
+    queryKey: ["/api/admin/grading-queue", { partnerId }],
+    queryFn: () => apiRequest("GET", `/api/admin/grading-queue?status=all&partnerId=${encodeURIComponent(partnerId)}`).then((r) => r.json()),
+    enabled: on && workspaceTab === "cards",
   });
 
   // Only meaningful for the final-owner warning; the server + the 0032 DB trigger are the real guards.
@@ -735,6 +749,16 @@ export default function PartnerManagementDetailPage() {
         {workspaceTab === "cards" && (
           <Panel title="Cards" sub="Current Partner pipeline. Grading and review remain in Staff.">
             <PartnerDrilldown partnerId={partnerId} tab="submissions" />
+            <div style={{ marginTop: 16 }} data-testid="pm-partner-qa">
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>QA review queue</div>
+              {partnerQueue.isLoading ? <div role="status">Loading Partner QA items…</div> : (partnerQueue.data?.queue ?? []).filter((item) => item.graderStatus === "pending_review").length === 0 ? <div>No Partner cards are awaiting QA review.</div> : (
+                <ul>
+                  {(partnerQueue.data?.queue ?? []).filter((item) => item.graderStatus === "pending_review").map((item) => (
+                    <li key={item.certId}><a href={`/admin/staff?certId=${item.certId}`} className="underline">Review {item.certIdStr} {item.cardName ? `— ${item.cardName}` : ""}</a></li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </Panel>
         )}
 

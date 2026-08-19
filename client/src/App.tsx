@@ -141,6 +141,7 @@ const AdminProjectControlShopLaunchPage = lazy(() => import("@/pages/admin/proje
 const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-control-scanner"));
 const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
 const AdminPartnerNetworkStationsPage = lazy(() => import("@/pages/admin/partner-network-stations"));
+const AdminPartnerNetworkOverviewPage = lazy(() => import("@/pages/admin/partner-network-overview"));
 
 // Exposure-only kill switch for the consolidated Super Admin IA. It does not alter APIs,
 // permissions or mutations: with the flag off, canonical URLs simply lead back to their legacy
@@ -500,7 +501,7 @@ function Router() {
             <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\//, "/admin/partner-network/partners/")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners">
-            <PartnerNetworkRoute legacy="/admin/partners/dashboard"><AdminPartnerDashboardPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute legacy="/admin/partners/dashboard"><AdminPartnerNetworkOverviewPage /></PartnerNetworkRoute>
           </Route>
           {/* Backward-compatible legacy surface. Query strings and fragments are preserved by the
               redirect component; route telemetry remains application logging, never audit_log. */}
