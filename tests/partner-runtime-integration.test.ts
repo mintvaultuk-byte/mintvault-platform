@@ -390,8 +390,11 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
    * stopped verifying the password, which is the one thing that must never silently break. These
    * tests therefore drive the same HTTP call the browser makes.
    */
-  const stepUp = (cookie: string, password = "correct-horse-battery", second?: { code?: string; recoveryCode?: string }) =>
-    post("/api/partner/auth/step-up", { password, ...(second ?? {}) }, cookie);
+  const stepUp = (
+    cookie: string,
+    password = "correct-horse-battery",
+    second?: { code?: string; recoveryCode?: string }
+  ) => post("/api/partner/auth/step-up", { password, ...(second ?? {}) }, cookie);
 
   /** Sign in and immediately satisfy the step-up challenge — for tests whose subject is not step-up. */
   async function loginStepped(email: string, password = "correct-horse-battery") {
@@ -965,11 +968,8 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect((await post("/api/partner/mfa/confirm", { code: "000000" }, cookie)).status).toBe(400);
     // correct code activates + returns recovery codes once
     const { currentTotp } = await import("../server/partner/mfa");
-    const confirm = await post(
-      "/api/partner/mfa/confirm",
-      { enrolmentId, code: currentTotp(secret, Date.now()) },
-      cookie
-    );
+    const activationCode = currentTotp(secret, Date.now());
+    const confirm = await post("/api/partner/mfa/confirm", { enrolmentId, code: activationCode }, cookie);
     expect(confirm.status).toBe(200);
     const { recoveryCodes } = await confirm.json();
     expect(Array.isArray(recoveryCodes) && recoveryCodes.length === 10).toBe(true);
@@ -994,9 +994,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(401);
     expect((await post("/api/partner/mfa/restart", { password: "correct-horse-battery" }, cookie)).status).toBe(403);
     const replaySession = await login("enrol@a.com");
-    expect(
-      (await post("/api/partner/auth/mfa", { code: currentTotp(secret, Date.now()) }, replaySession.cookie)).status
-    ).toBe(401);
+    expect((await post("/api/partner/auth/mfa", { code: activationCode }, replaySession.cookie)).status).toBe(401);
   });
 
   it("MFA setup restart invalidates the old QR/code and accepts only the fresh enrolment", async () => {
