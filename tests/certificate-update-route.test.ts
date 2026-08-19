@@ -274,7 +274,7 @@ afterAll(async () => {
   await new Promise((r) => server?.close(() => r(null)));
   await pool?.end().catch(() => {});
   await cluster?.stop().catch(() => {});
-});
+}, 180_000);
 
 /** A fully-populated certificate, so any accidental clear is visible. */
 const STORED = {

@@ -11,14 +11,51 @@ permissions:
 jobs:
   engineering-check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: mintvault_vq_phase10_local
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d mintvault_vq_phase10_local"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      postgres17:
+        image: postgres:17.10
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
       - name: Install Node dependencies
         if: ${{ hashFiles('package-lock.json') != '' }}
         run: npm ci --ignore-scripts
+      - name: Install PostgreSQL client
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+      - name: Prepare disposable CI databases
+        run: node scripts/ci/prepare-engineering-governance-db.mjs
       - name: Verify managed CI gate integrity
         run: node -e "const fs=require('node:fs'); const crypto=require('node:crypto'); const actual=crypto.createHash('sha256').update(fs.readFileSync('.engineering/cornelius-engineering-os-ci-gate.mjs')).digest('hex'); if (actual !== '7ad3231be4c5d17bf91c1260d1605665974b31c7e92974203c07bf4a464288a4') { console.error('managed CI gate drift'); process.exit(1); }"
       - name: Engineering anti-drift gate
