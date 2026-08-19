@@ -2,7 +2,7 @@
 
 **Baseline captured:** 2026-08-19 21:27-21:35 BST
 **Candidate reconciled:** 2026-08-19 22:35 BST
-**Repository:** `/Users/cornelius/mintvault-platform`  
+**Repository:** `/Users/cornelius/mintvault-platform`
 **Clean execution worktree:** `/Users/cornelius/mintvault-growth-completion-night-20260819`
 
 ## Git and production

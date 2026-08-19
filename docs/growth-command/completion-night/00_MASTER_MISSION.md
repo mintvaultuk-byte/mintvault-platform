@@ -1,8 +1,8 @@
 # MintVault Growth Completion Night — Master Mission
 
-**Program:** `growth-completion-night-20260819`  
-**Controller branch:** `codex/growth-completion-night-20260819`  
-**Authoritative baseline:** `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`  
+**Program:** `growth-completion-night-20260819`
+**Controller branch:** `codex/growth-completion-night-20260819`
+**Authoritative baseline:** `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`
 **Started:** 2026-08-19 21:27 BST
 
 ## Commercial objective

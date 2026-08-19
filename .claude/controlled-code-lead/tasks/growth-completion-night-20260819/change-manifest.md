@@ -1,7 +1,7 @@
 # Change Manifest — Runtime Candidate
 
-**Frozen:** 2026-08-19 21:45 BST  
-**Lead:** `codex/growth-completion-night-20260819@facfd36f`  
+**Frozen:** 2026-08-19 21:45 BST
+**Lead:** `codex/growth-completion-night-20260819@facfd36f`
 **Authority:** the owner explicitly authorised GB-04B closeout, a dedicated read-only MCP identity/transport, a genuine review engine, privacy-safe public authority, conversion instrumentation and integration into the existing Growth Command. This authorises local code, tests, additive migration authoring and documentation within those exact boundaries. It does **not** authorise applying a migration, writing a secret, pushing/merging, changing a provider account, or deploying before the separate release gates.
 
 ## Accepted application changes
