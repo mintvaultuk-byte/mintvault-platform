@@ -293,16 +293,20 @@ Protected staging migration update:
   `uq_scanner_capture_one_active_station` predicate now includes `physical_released = false`;
   `idx_scanner_capture_released_station_certificate` and `idx_scanner_capture_expiry_physical`
   exist; core counts unchanged; duplicate active physical station and orphan checks remain zero.
+- Staging code deployment completed to `mintvault-v2` after the verified migration. Fly reported both
+  machines healthy, `/health` returned `{"status":"ok"}`, and `/api/version` reported the deployed
+  SFAP-015 successor commit.
+- Production was not targeted by this scanner pass. A separate production release was observed during
+  reconciliation (`c6ae706f`, `0095_growth_partner_applications.sql`); production still has no
+  `0094_scanner_capture_physical_release.sql` journal row and no `physical_released` scanner column.
 
 Not claimed by this pass:
 
-- Staging code deployment is pending at the time of this handover update; deploy only after the
-  protected migration has been verified on staging.
 - No physical Canon acceptance was run.
 - No clean packaged Scanner application exists yet.
 - No 5,000-station/5,000-overlap scanner load run was executed. The existing real-PostgreSQL
   5,000-way one-credit NEW storm remains credit/idempotency proof, not scanner-overlap scale proof.
-- Production remains untouched.
+- No production scanner migration or scanner deployment was performed by this pass.
 
 ## Evidence recorded this turn
 

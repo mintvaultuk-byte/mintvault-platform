@@ -17,12 +17,13 @@
 | Focused/wider gates                                                                             | Done locally         | Scanner 166/166; wider server 194 passed / 2 skipped; typecheck/build/diff passed.                                                                       |
 | Protected 0094 migration path                                                                   | Done                 | Linter/runner approval is exact-file/exact-index-replacement only; disposable PostgreSQL 0093→0094/idempotency/invariant proof passed.                   |
 | Staging 0094 migration                                                                          | Done on staging      | Scoped migration applied only `0094_scanner_capture_physical_release.sql`; checksum `4918f58e72da…`; journal 83→84; post-checks clean.                   |
-| Staging deploy                                                                                  | Pending              | Staging database is ready; deploy the SFAP-015 successor to `mintvault-v2` only.                                                                         |
+| Staging deploy                                                                                  | Done                 | Deployed to `mintvault-v2` only after 0094; Fly machines healthy; `/health` OK; `/api/version` reports the SFAP-015 successor.                           |
+| Production isolation reconciliation                                                             | Read-only checked    | Scanner pass did not target production; production separately moved to `c6ae706f`/`0095_growth_partner_applications.sql`; no scanner `0094` present.     |
 | Physical Canon acceptance                                                                       | Not done             | Requires owner to operate staging Scanner after migration/deploy.                                                                                        |
 | 5,000 scanner-overlap scale run                                                                 | Not done             | Existing 5,000 one-credit NEW storm is credit/idempotency proof only, not scanner-overlap load proof.                                                    |
 
 ## Next owner-controlled task
 
-Deploy the SFAP-015 successor to staging and perform the physical Canon acceptance script:
+Perform the physical Canon acceptance script on staging:
 
 `Preview FRONT → GREEN → Scan FRONT → wait only for physical capture + upload-task acceptance → Preview BACK while FRONT still uploads`.

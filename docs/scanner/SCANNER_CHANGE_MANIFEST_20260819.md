@@ -46,6 +46,14 @@
 8. The destructive-SQL linter and migration runner allow `0094` only when the exact protected
    create-before-drop index replacement is present; the generic `DROP INDEX` rule remains blocked.
 
+## Staging status
+
+- `0094_scanner_capture_physical_release.sql` has been applied to staging only through scoped
+  migration mode; post-apply index/data checks were clean.
+- The SFAP-015 successor has been deployed to `mintvault-v2`; Fly health checks and `/health` passed.
+- Production was not targeted by this scanner pass. Read-only reconciliation observed a separate
+  production growth release; production has no scanner `0094` journal row.
+
 ## Exclusions
 
 - No grading maths change.
