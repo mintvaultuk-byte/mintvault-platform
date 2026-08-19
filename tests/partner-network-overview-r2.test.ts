@@ -44,4 +44,16 @@ describe("Partner Network R2 consolidated overview", () => {
     expect(workspace).toContain("/admin/staff?certId=${item.certId}");
     expect(workspace).toContain('item.graderStatus === "pending_review"');
   });
+
+  it("uses the stable alert source contract and authoritative location/station signals", () => {
+    expect(overview).toContain('alert.id.startsWith("sec-")');
+    expect(overview).toContain('alert.id.startsWith("credit-")');
+    expect(overview).toContain('alert.id.startsWith("lock-")');
+    expect(overview).toContain('alert.id.startsWith("esc-")');
+    expect(overview).toContain("/locations");
+    expect(overview).toContain("/stations");
+    expect(service).toContain("active_locations");
+    expect(service).toContain("station_attention");
+    expect(service).toContain("FROM partner_stations GROUP BY tenant_id");
+  });
 });

@@ -391,6 +391,15 @@ const AGGREGATE_CTES = `
      WHERE severity IN ('high','critical')
        AND created_at > now() - interval '30 days'
      GROUP BY tenant_id
+  ),
+  loc AS (
+    SELECT tenant_id, count(*) FILTER (WHERE status = 'ACTIVE')::int AS active_locations
+      FROM partner_locations GROUP BY tenant_id
+  ),
+  station AS (
+    SELECT tenant_id,
+           count(*) FILTER (WHERE status <> 'ACTIVE' OR scanner_connected IS NOT TRUE OR calibration_status <> 'VALID')::int AS station_attention
+      FROM partner_stations GROUP BY tenant_id
   )`;
 
 /**
@@ -440,6 +449,8 @@ export function buildPartnerListBase(
              COALESCE(conn.cards_in_pipeline, 0)  AS cards_in_pipeline,
              COALESCE(conn.open_corrections, 0)   AS open_corrections,
              COALESCE(sec.security_alerts, 0)     AS security_alerts,
+             COALESCE(loc.active_locations, 0)    AS active_locations,
+             COALESCE(station.station_attention, 0) AS station_attention,
              conn.last_activity                   AS last_activity,
              ${walletSelect}
         FROM partner_organisations o
@@ -448,6 +459,8 @@ export function buildPartnerListBase(
         LEFT JOIN subs  ON subs.tenant_id  = o.id
         LEFT JOIN conn  ON conn.tenant_id  = o.id
         LEFT JOIN sec   ON sec.tenant_id   = o.id
+        LEFT JOIN loc   ON loc.tenant_id   = o.id
+        LEFT JOIN station ON station.tenant_id = o.id
         ${walletJoin}
         ${where}
     ),
@@ -527,6 +540,8 @@ export async function listPartnersForDashboard(
       openCorrections: num(r.open_corrections),
       approvedDevices: DEVICES_UNAVAILABLE,
       activeStaff: num(r.active_staff),
+      activeLocations: num(r.active_locations),
+      stationAttention: num(r.station_attention),
       lastActivityAt: iso(r.last_activity),
       alertCount: num(r.security_alerts) + num(r.open_corrections) + (String(r.status) === "SUSPENDED" ? 1 : 0),
     };

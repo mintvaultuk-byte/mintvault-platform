@@ -226,6 +226,10 @@ export interface PartnerTableRow {
   openCorrections: number;
   approvedDevices: MetricUnavailable;
   activeStaff: number;
+  /** Existing physical sites in ACTIVE state. A zero is authoritative and links to Locations. */
+  activeLocations: number;
+  /** Existing station records with a non-active, disconnected, or non-valid calibration state. */
+  stationAttention: number;
   lastActivityAt: string | null;
   alertCount: number;
 }
