@@ -67,13 +67,23 @@ async function availableFor(tenantId: string): Promise<number> {
 }
 
 function session(tenantId: string, packCode: string, id = "cs_test_1", paid = true) {
+  const credits = Number(packCode.replace("PACK_", ""));
+  const amountPence = credits * 1_000;
   return {
     id,
     payment_status: paid ? "paid" : "unpaid",
     verifiedCheckout: true as const,
     livemode: false,
     currency: "gbp",
-    lineItems: [{ priceId: `price_test_${packCode.toLowerCase()}`, currency: "gbp" }],
+    amountTotal: amountPence,
+    lineItems: [
+      {
+        priceId: `price_test_${packCode.toLowerCase()}`,
+        currency: "gbp",
+        unitAmount: amountPence,
+        taxBehavior: "inclusive",
+      },
+    ],
     metadata: {
       partner_tenant_id: tenantId,
       partner_pack_code: packCode,
@@ -157,6 +167,9 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
   it("catalogues the five pilot packs, none purchasable until pricing is configured", async () => {
     const packs = await purchase.listCreditPacks();
     expect(packs.map((p) => p.credits)).toEqual([5, 10, 25, 50, 100]);
+    expect(packs.map((p) => p.pricePence)).toEqual([5000, 10000, 25000, 50000, 100000]);
+    expect(packs.map((p) => p.displayPrice)).toEqual(["£50", "£100", "£250", "£500", "£1,000"]);
+    expect(packs.every((p) => p.vatIncluded === true)).toBe(true);
     // This is the pilot state and it is deliberate: the flow is complete, the money is owner-gated.
     expect(packs.every((p) => p.purchasable === false)).toBe(true);
     await expect(purchase.resolvePackForCheckout("PACK_25")).rejects.toMatchObject({
@@ -176,6 +189,24 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     );
   });
 
+  it("ignores noncanonical active packs — only the five owner-approved packs can sell or grant", async () => {
+    await admin.query(
+      `INSERT INTO partner_credit_packs (code, credits, stripe_price_id, stripe_currency, active, sort_order)
+       VALUES ('PACK_250', 250, 'price_test_pack_250', 'gbp', true, 250)`
+    );
+    const packs = await purchase.listCreditPacks();
+    expect(packs.map((p) => p.code)).toEqual(["PACK_5", "PACK_10", "PACK_25", "PACK_50", "PACK_100"]);
+    await expect(purchase.resolvePackForCheckout("PACK_250")).rejects.toMatchObject({ code: "PACK_NOT_FOUND" });
+
+    const tenantId = await makeTenant("noncanonical-pack");
+    const outcome = await purchase.fulfilPartnerCreditPurchase(
+      session(tenantId, "PACK_250", "cs_noncanonical"),
+      "evt_noncanonical_1"
+    );
+    expect(outcome).toMatchObject({ granted: false, credits: 0, reason: "pack_not_found" });
+    expect(await availableFor(tenantId)).toBe(0);
+  });
+
   it("validates the Stripe Price before Checkout creation can take payment", async () => {
     await configureCanonicalPack("PACK_25", "gbp");
     const pack = await purchase.resolvePackForCheckout("PACK_25");
@@ -184,6 +215,8 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
       purchase.validateStripePriceForCheckout(pack, {
         id: "price_test_pack_25",
         currency: "gbp",
+        unitAmount: 25000,
+        taxBehavior: "inclusive",
         livemode: false,
         active: true,
       })
@@ -193,6 +226,8 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
         purchase.validateStripePriceForCheckout(pack, {
           id: "price_test_other",
           currency: "gbp",
+          unitAmount: 25000,
+          taxBehavior: "inclusive",
           livemode: false,
           active: true,
         }),
@@ -203,6 +238,8 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
         purchase.validateStripePriceForCheckout(pack, {
           id: "price_test_pack_25",
           currency: "usd",
+          unitAmount: 25000,
+          taxBehavior: "inclusive",
           livemode: false,
           active: true,
         }),
@@ -213,6 +250,8 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
         purchase.validateStripePriceForCheckout(pack, {
           id: "price_test_pack_25",
           currency: "gbp",
+          unitAmount: 25000,
+          taxBehavior: "inclusive",
           livemode: true,
           active: true,
         }),
@@ -223,10 +262,36 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
         purchase.validateStripePriceForCheckout(pack, {
           id: "price_test_pack_25",
           currency: "gbp",
+          unitAmount: 25000,
+          taxBehavior: "inclusive",
           livemode: false,
           active: false,
         }),
       "STRIPE_PRICE_INACTIVE"
+    );
+    expectCreditPurchaseError(
+      () =>
+        purchase.validateStripePriceForCheckout(pack, {
+          id: "price_test_pack_25",
+          currency: "gbp",
+          unitAmount: 20000,
+          taxBehavior: "inclusive",
+          livemode: false,
+          active: true,
+        }),
+      "STRIPE_AMOUNT_MISMATCH"
+    );
+    expectCreditPurchaseError(
+      () =>
+        purchase.validateStripePriceForCheckout(pack, {
+          id: "price_test_pack_25",
+          currency: "gbp",
+          unitAmount: 25000,
+          taxBehavior: "exclusive",
+          livemode: false,
+          active: true,
+        }),
+      "STRIPE_TAX_BEHAVIOR_MISMATCH"
     );
   });
 
@@ -517,7 +582,9 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
 
     const wrongPrice = {
       ...session(priceTenant, "PACK_25", "cs_wrong_price"),
-      lineItems: [{ priceId: "price_test_some_other_pack", currency: "gbp" }],
+      lineItems: [
+        { priceId: "price_test_some_other_pack", currency: "gbp", unitAmount: 25000, taxBehavior: "inclusive" },
+      ],
     };
     const priceOutcome = await purchase.fulfilPartnerCreditPurchase(wrongPrice, "evt_wrong_price_1");
     expect(priceOutcome).toMatchObject({ granted: false, reason: "checkout_price_mismatch" });
@@ -526,11 +593,36 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     const wrongCurrency = {
       ...session(currencyTenant, "PACK_25", "cs_wrong_currency"),
       currency: "usd",
-      lineItems: [{ priceId: "price_test_pack_25", currency: "usd" }],
+      lineItems: [{ priceId: "price_test_pack_25", currency: "usd", unitAmount: 25000, taxBehavior: "inclusive" }],
     };
     const currencyOutcome = await purchase.fulfilPartnerCreditPurchase(wrongCurrency, "evt_wrong_currency_1");
     expect(currencyOutcome).toMatchObject({ granted: false, reason: "checkout_currency_mismatch" });
     expect(await availableFor(currencyTenant)).toBe(0);
+  });
+
+  it("refuses a verified checkout with the wrong charged total or exclusive tax behaviour", async () => {
+    const amountTenant = await makeTenant("wrong-amount");
+    const taxTenant = await makeTenant("wrong-tax");
+    await configureCanonicalPack("PACK_25", "gbp");
+    await recordCheckoutIntent(amountTenant, "PACK_25", "cs_wrong_amount");
+    await recordCheckoutIntent(taxTenant, "PACK_25", "cs_wrong_tax");
+
+    const amountOutcome = await purchase.fulfilPartnerCreditPurchase(
+      { ...session(amountTenant, "PACK_25", "cs_wrong_amount"), amountTotal: 20000 },
+      "evt_wrong_amount_1"
+    );
+    expect(amountOutcome).toMatchObject({ granted: false, reason: "checkout_amount_mismatch" });
+    expect(await availableFor(amountTenant)).toBe(0);
+
+    const taxOutcome = await purchase.fulfilPartnerCreditPurchase(
+      {
+        ...session(taxTenant, "PACK_25", "cs_wrong_tax"),
+        lineItems: [{ priceId: "price_test_pack_25", currency: "gbp", unitAmount: 25000, taxBehavior: "exclusive" }],
+      },
+      "evt_wrong_tax_1"
+    );
+    expect(taxOutcome).toMatchObject({ granted: false, reason: "checkout_tax_behavior_mismatch" });
+    expect(await availableFor(taxTenant)).toBe(0);
   });
 
   it("a failed grant transaction leaves Checkout provenance retryable", async () => {
@@ -602,6 +694,7 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     expect(purchase.canPurchaseCredits("GRADER", none)).toBe(false);
     expect(purchase.canPurchaseCredits("GRADER", granted)).toBe(false);
     expect(purchase.canPurchaseCredits("PARTNER_GRADER", granted)).toBe(false);
+    expect(purchase.canPurchaseCredits("MVGS_ASSESSMENT_TECHNICIAN", granted)).toBe(false);
   });
 
   it("a refund is recorded as an audited exception and does NOT reduce capacity", async () => {
@@ -676,14 +769,23 @@ describe("P5 integration surfaces", () => {
     expect(branch).toContain("verifiedCheckout: true");
     expect(branch).toContain("livemode: verifiedSession.livemode");
     expect(branch).toContain("currency: verifiedSession.currency");
+    expect(branch).toContain("amountTotal: verifiedSession.amount_total");
+    expect(branch).toContain("unitAmount: price?.unit_amount");
+    expect(branch).toContain("taxBehavior: price?.tax_behavior");
     expect(routes).toContain("stripe.prices.retrieve");
     expect(routes).toContain("validateStripePriceForCheckout");
+    expect(routes).toContain("unitAmount:");
+    expect(routes).toContain("taxBehavior:");
     expect(routes).toContain("recordPartnerCreditCheckoutIntent");
     const service = read("server/partner/credit-purchase-service.ts");
     expect(service).toContain("loadPartnerCreditCheckoutIntent");
     expect(service).toContain("withPartnerAdminTransaction");
     expect(service).toContain("FOR UPDATE");
     expect(service).toContain("appendFoundationCreditWithClient");
+    expect(service).toContain("STRIPE_AMOUNT_MISMATCH");
+    expect(service).toContain("STRIPE_TAX_BEHAVIOR_MISMATCH");
+    expect(service).toContain("checkout_amount_mismatch");
+    expect(service).toContain("checkout_tax_behavior_mismatch");
   });
 
   it("routes refunds and disputes to audited exception handling, never to a wallet debit", () => {

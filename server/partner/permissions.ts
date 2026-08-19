@@ -136,11 +136,15 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
    * cards.view     the minimum operational Card Job information (the FIX queue)
    * cards.scan     operate an APPROVED station: NEW capture and FIX capture
    *
-   * NOT cards.assess (no grading), NOT credits.* (cannot buy or even see the wallet), NOT users.*
-   * (no staff management), NOT stations.enrol (cannot bring a new Mac into service), NOT cards.fix
-   * (cannot decide an image is unusable — that is a dashboard judgement, not a capture action).
+   * credits.view   display-only wallet/catalogue read so the Scanner can lock at zero credits and
+   *                show the top-up options. NOT credits.purchase: buying remains owner/manager
+   *                authority.
+   *
+   * NOT cards.assess (no grading), NOT credits.purchase (cannot spend), NOT users.* (no staff
+   * management), NOT stations.enrol (cannot bring a new Mac into service), NOT cards.fix (cannot
+   * decide an image is unusable — that is a dashboard judgement, not a capture action).
    */
-  SCANNER_OPERATOR: ["partner.location.view", "partner.cards.view", "partner.cards.scan"],
+  SCANNER_OPERATOR: ["partner.location.view", "partner.cards.view", "partner.cards.scan", "partner.credits.view"],
   PARTNER_TRAINEE: [
     "partner.dashboard.view",
     "partner.location.view",

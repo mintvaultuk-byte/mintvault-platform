@@ -281,6 +281,9 @@ describe("partner schema ↔ migration parity", () => {
       // 0097 records server-created Partner credit Checkout Sessions so the verified webhook can
       // reject wrong-session and wrong-tenant metadata. Raw-SQL payment authority; no Drizzle model.
       "0097_partner_credit_checkout_sessions.sql",
+      // 0098 grants SCANNER_OPERATOR balance/catalogue read authority for zero-credit lockout UX.
+      // Raw-SQL RBAC reference data; no Drizzle model.
+      "0098_scanner_operator_credit_view.sql",
     ]);
   });
 

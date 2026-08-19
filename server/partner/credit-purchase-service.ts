@@ -37,6 +37,8 @@ export class CreditPurchaseError extends Error {
       | "STRIPE_ENV_MISMATCH"
       | "STRIPE_PRICE_MISMATCH"
       | "STRIPE_CURRENCY_MISMATCH"
+      | "STRIPE_AMOUNT_MISMATCH"
+      | "STRIPE_TAX_BEHAVIOR_MISMATCH"
       | "STRIPE_PRICE_INACTIVE"
       | "CHECKOUT_INTENT_CONFLICT"
       | "FORBIDDEN"
@@ -55,11 +57,40 @@ export interface CreditPack {
   id: string;
   code: string;
   credits: number;
+  pricePence: number;
+  displayPrice: string;
+  vatIncluded: true;
   stripePriceId: string | null;
   stripeCurrency: string | null;
   /** False when the owner has not yet configured a Stripe Price — catalogued but not buyable. */
   purchasable: boolean;
   unavailableReason: CheckoutUnavailableReason | null;
+}
+
+export const PARTNER_CREDIT_PRICE_PENCE = 1_000;
+export const PARTNER_CREDIT_CURRENCY = "gbp";
+export const PARTNER_CREDIT_VAT_INCLUDED = true as const;
+
+export const CANONICAL_PARTNER_CREDIT_PACKS: Readonly<Record<string, { credits: number; pricePence: number }>> = {
+  PACK_5: { credits: 5, pricePence: 5_000 },
+  PACK_10: { credits: 10, pricePence: 10_000 },
+  PACK_25: { credits: 25, pricePence: 25_000 },
+  PACK_50: { credits: 50, pricePence: 50_000 },
+  PACK_100: { credits: 100, pricePence: 100_000 },
+};
+
+function canonicalPackPricing(code: string, credits: number): { pricePence: number; displayPrice: string } | null {
+  const configured = CANONICAL_PARTNER_CREDIT_PACKS[code];
+  if (!configured || configured.credits !== credits) return null;
+  const pricePence = configured.pricePence;
+  return {
+    pricePence,
+    displayPrice: new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: "GBP",
+      maximumFractionDigits: 0,
+    }).format(pricePence / 100),
+  };
 }
 
 export interface CheckoutStripeEnvironmentStatus {
@@ -139,24 +170,32 @@ export async function listCreditPacks(): Promise<CreditPack[]> {
       WHERE active
       ORDER BY sort_order, credits`
   );
-  return rows.map((r) => {
+  return rows.flatMap((r) => {
+    const credits = Number(r.credits);
+    const pricing = canonicalPackPricing(r.code, credits);
+    if (!pricing) return [];
     const hasConfiguredPrice = r.stripe_price_id !== null && r.stripe_currency !== null;
     const unavailableReason: CheckoutUnavailableReason | null = !hasConfiguredPrice
       ? "pricing_not_configured"
       : checkoutEnvironment.reason;
-    return {
-      id: r.id,
-      code: r.code,
-      credits: Number(r.credits),
-      stripePriceId: r.stripe_price_id,
-      stripeCurrency: r.stripe_currency,
-      // A Price without its canonical currency is intentionally not a buyable pack. Do not guess a
-      // currency from deployment convention: staging and production can only sell what the owner
-      // explicitly configured for that exact Stripe Price. A declared Stripe mode is equally
-      // required, otherwise Checkout could succeed while the verified webhook remains fail-closed.
-      purchasable: hasConfiguredPrice && checkoutEnvironment.ok,
-      unavailableReason,
-    };
+    return [
+      {
+        id: r.id,
+        code: r.code,
+        credits,
+        pricePence: pricing.pricePence,
+        displayPrice: pricing.displayPrice,
+        vatIncluded: PARTNER_CREDIT_VAT_INCLUDED,
+        stripePriceId: r.stripe_price_id,
+        stripeCurrency: r.stripe_currency,
+        // A Price without its canonical currency is intentionally not a buyable pack. Do not guess a
+        // currency from deployment convention: staging and production can only sell what the owner
+        // explicitly configured for that exact Stripe Price. A declared Stripe mode is equally
+        // required, otherwise Checkout could succeed while the verified webhook remains fail-closed.
+        purchasable: hasConfiguredPrice && checkoutEnvironment.ok,
+        unavailableReason,
+      },
+    ];
   });
 }
 
@@ -169,7 +208,7 @@ export async function listCreditPacks(): Promise<CreditPack[]> {
  * consulted at all.
  */
 export function canPurchaseCredits(role: string, permissions: ReadonlySet<string>): boolean {
-  if (role === "GRADER" || role === "PARTNER_GRADER") return false;
+  if (role === "GRADER" || role === "PARTNER_GRADER" || role === "MVGS_ASSESSMENT_TECHNICIAN") return false;
   if (role === "OWNER" || role === "PARTNER_OWNER") return true;
   return permissions.has("partner.credits.purchase");
 }
@@ -214,6 +253,8 @@ export async function resolvePackForCheckout(packCode: string): Promise<CreditPa
 export interface StripePriceForCheckout {
   id?: string | null;
   currency?: string | null;
+  unitAmount?: number | null;
+  taxBehavior?: string | null;
   livemode?: boolean | null;
   active?: boolean | null;
 }
@@ -240,6 +281,18 @@ export function validateStripePriceForCheckout(pack: CreditPack, price: StripePr
     throw new CreditPurchaseError(
       "STRIPE_CURRENCY_MISMATCH",
       "The configured Stripe Price currency does not match this pack."
+    );
+  }
+  if (price.unitAmount !== pack.pricePence) {
+    throw new CreditPurchaseError(
+      "STRIPE_AMOUNT_MISMATCH",
+      "The configured Stripe Price amount does not match this pack."
+    );
+  }
+  if (price.taxBehavior === "exclusive") {
+    throw new CreditPurchaseError(
+      "STRIPE_TAX_BEHAVIOR_MISMATCH",
+      "The configured Stripe Price would add tax on top of the VAT-inclusive pack price."
     );
   }
   if (price.livemode !== (status.environment === "live")) {
@@ -397,8 +450,15 @@ export interface PartnerCheckoutSession {
   livemode?: boolean | null;
   /** Stripe's Checkout Session currency, normalized by Stripe to lowercase ISO-4217. */
   currency?: string | null;
+  /** Stripe's final charged total, in minor units. Must equal the canonical VAT-inclusive pack price. */
+  amountTotal?: number | null;
   /** The server-observed Checkout line items, expanded from the re-read Stripe Session. */
-  lineItems?: ReadonlyArray<{ priceId?: string | null; currency?: string | null }>;
+  lineItems?: ReadonlyArray<{
+    priceId?: string | null;
+    currency?: string | null;
+    unitAmount?: number | null;
+    taxBehavior?: string | null;
+  }>;
 }
 
 export interface GrantOutcome {
@@ -453,7 +513,8 @@ export async function fulfilPartnerCreditPurchase(
   }>(`SELECT credits, stripe_price_id, stripe_currency, active FROM partner_credit_packs WHERE code=$1`, [packCode]);
   const pack = rows[0];
   const credits = Number(pack?.credits ?? 0);
-  if (!credits || credits <= 0) {
+  const pricing = canonicalPackPricing(packCode, credits);
+  if (!credits || credits <= 0 || !pricing) {
     return { granted: false, credits: 0, reason: "pack_not_found" };
   }
   if (pack.active !== true) {
@@ -501,6 +562,9 @@ export async function fulfilPartnerCreditPurchase(
     if (intent.stripeEnvironment !== expectedEnvironment) {
       return { granted: false, credits: 0, reason: "checkout_environment_mismatch" };
     }
+    if (session.amountTotal !== pricing.pricePence) {
+      return { granted: false, credits: 0, reason: "checkout_amount_mismatch" };
+    }
 
     const lineItems = session.lineItems ?? [];
     if (lineItems.length !== 1) {
@@ -519,6 +583,12 @@ export async function fulfilPartnerCreditPurchase(
       checkoutCurrency !== expectedCurrency
     ) {
       return { granted: false, credits: 0, reason: "checkout_currency_mismatch" };
+    }
+    if (lineItem.unitAmount !== pricing.pricePence) {
+      return { granted: false, credits: 0, reason: "checkout_amount_mismatch" };
+    }
+    if (lineItem.taxBehavior === "exclusive") {
+      return { granted: false, credits: 0, reason: "checkout_tax_behavior_mismatch" };
     }
 
     const { alreadyApplied } = await appendFoundationCreditWithClient(

@@ -438,12 +438,16 @@ export function partnerApiRouter(): Router {
         const priceFields = stripePrice as {
           id?: unknown;
           currency?: unknown;
+          unit_amount?: unknown;
+          tax_behavior?: unknown;
           livemode?: unknown;
           active?: unknown;
         };
         const stripeEnvironment = validateStripePriceForCheckout(pack, {
           id: typeof priceFields.id === "string" ? priceFields.id : null,
           currency: typeof priceFields.currency === "string" ? priceFields.currency : null,
+          unitAmount: typeof priceFields.unit_amount === "number" ? priceFields.unit_amount : null,
+          taxBehavior: typeof priceFields.tax_behavior === "string" ? priceFields.tax_behavior : null,
           livemode: typeof priceFields.livemode === "boolean" ? priceFields.livemode : null,
           active: typeof priceFields.active === "boolean" ? priceFields.active : null,
         });
@@ -483,7 +487,14 @@ export function partnerApiRouter(): Router {
           stripeEnvironment,
         });
 
-        res.json({ url: session.url, packCode: pack.code, credits: pack.credits });
+        res.json({
+          url: session.url,
+          packCode: pack.code,
+          credits: pack.credits,
+          pricePence: pack.pricePence,
+          displayPrice: pack.displayPrice,
+          vatIncluded: pack.vatIncluded,
+        });
       } catch (err) {
         const code = (err as { code?: string })?.code;
         if (code === "PACK_NOT_FOUND" || code === "PACK_NOT_PURCHASABLE") {
@@ -497,6 +508,8 @@ export function partnerApiRouter(): Router {
         if (
           code === "STRIPE_PRICE_MISMATCH" ||
           code === "STRIPE_CURRENCY_MISMATCH" ||
+          code === "STRIPE_AMOUNT_MISMATCH" ||
+          code === "STRIPE_TAX_BEHAVIOR_MISMATCH" ||
           code === "STRIPE_PRICE_INACTIVE" ||
           code === "CHECKOUT_INTENT_CONFLICT"
         ) {

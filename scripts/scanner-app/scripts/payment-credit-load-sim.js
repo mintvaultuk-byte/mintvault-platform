@@ -58,11 +58,46 @@ const int = (max) => Math.floor(rand() * max);
 
 const DECLARED_STRIPE_ENV = "test";
 const PACKS = [
-  { code: "PACK_5", credits: 5, stripePriceId: "price_test_pack_5", stripeCurrency: "gbp", active: true },
-  { code: "PACK_10", credits: 10, stripePriceId: "price_test_pack_10", stripeCurrency: "gbp", active: true },
-  { code: "PACK_25", credits: 25, stripePriceId: "price_test_pack_25", stripeCurrency: "gbp", active: true },
-  { code: "PACK_50", credits: 50, stripePriceId: "price_test_pack_50", stripeCurrency: "gbp", active: true },
-  { code: "PACK_100", credits: 100, stripePriceId: "price_test_pack_100", stripeCurrency: "gbp", active: true },
+  {
+    code: "PACK_5",
+    credits: 5,
+    amountPence: 5_000,
+    stripePriceId: "price_test_pack_5",
+    stripeCurrency: "gbp",
+    active: true,
+  },
+  {
+    code: "PACK_10",
+    credits: 10,
+    amountPence: 10_000,
+    stripePriceId: "price_test_pack_10",
+    stripeCurrency: "gbp",
+    active: true,
+  },
+  {
+    code: "PACK_25",
+    credits: 25,
+    amountPence: 25_000,
+    stripePriceId: "price_test_pack_25",
+    stripeCurrency: "gbp",
+    active: true,
+  },
+  {
+    code: "PACK_50",
+    credits: 50,
+    amountPence: 50_000,
+    stripePriceId: "price_test_pack_50",
+    stripeCurrency: "gbp",
+    active: true,
+  },
+  {
+    code: "PACK_100",
+    credits: 100,
+    amountPence: 100_000,
+    stripePriceId: "price_test_pack_100",
+    stripeCurrency: "gbp",
+    active: true,
+  },
 ];
 const packByCode = new Map(PACKS.map((pack) => [pack.code, pack]));
 
@@ -88,6 +123,8 @@ class PaymentCreditLoadSimulation {
       unverifiedRejected: 0,
       wrongPriceRejected: 0,
       wrongCurrencyRejected: 0,
+      wrongAmountRejected: 0,
+      wrongTaxBehaviorRejected: 0,
       wrongEnvironmentRejected: 0,
       wrongTenantRejected: 0,
       missingIntentRejected: 0,
@@ -153,6 +190,7 @@ class PaymentCreditLoadSimulation {
       packCode: pack.code,
       stripePriceId: pack.stripePriceId,
       stripeCurrency: pack.stripeCurrency,
+      amountPence: pack.amountPence,
       stripeEnvironment: DECLARED_STRIPE_ENV,
       status: "created",
     };
@@ -240,6 +278,18 @@ class PaymentCreditLoadSimulation {
       this.stats.wrongCurrencyRejected += 1;
       return { granted: false, reason: "checkout_currency_mismatch" };
     }
+    if (
+      intent.amountPence !== pack.amountPence ||
+      session.amountTotal !== pack.amountPence ||
+      session.lineItemAmount !== pack.amountPence
+    ) {
+      this.stats.wrongAmountRejected += 1;
+      return { granted: false, reason: "checkout_amount_mismatch" };
+    }
+    if (session.taxBehavior === "exclusive") {
+      this.stats.wrongTaxBehaviorRejected += 1;
+      return { granted: false, reason: "checkout_tax_behavior_mismatch" };
+    }
     if (options.transientTransactionFailure) {
       this.stats.transactionFailures += 1;
       throw new Error("simulated transaction failure before ledger append");
@@ -269,8 +319,11 @@ class PaymentCreditLoadSimulation {
       verifiedCheckout: true,
       livemode: false,
       sessionCurrency: "gbp",
+      amountTotal: pack.amountPence,
       lineItemPriceId: pack.stripePriceId,
       lineItemCurrency: "gbp",
+      lineItemAmount: pack.amountPence,
+      taxBehavior: "inclusive",
     };
   }
 
@@ -304,14 +357,35 @@ class PaymentCreditLoadSimulation {
       }
       if (i % 17 === 0) {
         this.schedule(i % 983, "attack_webhook", {
-          session: { ...session, sessionId: `${sessionId}_wrong_currency`, sessionCurrency: "usd", lineItemCurrency: "usd" },
+          session: {
+            ...session,
+            sessionId: `${sessionId}_wrong_currency`,
+            sessionCurrency: "usd",
+            lineItemCurrency: "usd",
+          },
           eventId: `${eventId}_wrong_currency`,
           reason: "wrong_currency",
         });
         this.createCheckoutIntent(tenantId, pack, `${sessionId}_wrong_currency`);
       }
-      if (i % 19 === 0) {
+      if (i % 41 === 0) {
+        this.schedule(i % 979, "attack_webhook", {
+          session: { ...session, sessionId: `${sessionId}_wrong_amount`, amountTotal: pack.amountPence - 1000 },
+          eventId: `${eventId}_wrong_amount`,
+          reason: "wrong_amount",
+        });
+        this.createCheckoutIntent(tenantId, pack, `${sessionId}_wrong_amount`);
+      }
+      if (i % 43 === 0) {
         this.schedule(i % 977, "attack_webhook", {
+          session: { ...session, sessionId: `${sessionId}_wrong_tax`, taxBehavior: "exclusive" },
+          eventId: `${eventId}_wrong_tax`,
+          reason: "wrong_tax",
+        });
+        this.createCheckoutIntent(tenantId, pack, `${sessionId}_wrong_tax`);
+      }
+      if (i % 19 === 0) {
+        this.schedule(i % 971, "attack_webhook", {
           session: { ...session, sessionId: `${sessionId}_wrong_environment`, livemode: true },
           eventId: `${eventId}_wrong_environment`,
           reason: "wrong_environment",
@@ -525,7 +599,8 @@ class PaymentCreditLoadSimulation {
         duplicateEventExactlyOnce: this.ledger.size === this.workflows && this.stats.replayedEventsIgnored > 0,
         transactionFailureRetryable: this.stats.transactionFailures > 0 && this.stats.retryGrants > 0,
         appendOnlyLedgerAuthority: this.stats.appendOnlyLedgerWrites === this.workflows,
-        zeroCreditTopupUnlock: this.stats.newBeforeTopupRejected === this.workflows && this.stats.newAfterTopupAccepted === this.workflows,
+        zeroCreditTopupUnlock:
+          this.stats.newBeforeTopupRejected === this.workflows && this.stats.newAfterTopupAccepted === this.workflows,
         zeroNegativeWallet: [...this.tenants.values()].every((tenant) => tenant.available >= 0),
       },
     };
@@ -534,10 +609,7 @@ class PaymentCreditLoadSimulation {
 
 const result = new PaymentCreditLoadSimulation(WORKFLOWS, BURST_EVENTS).run();
 fs.mkdirSync(DIST_ROOT, { recursive: true });
-const reportPath = path.join(
-  DIST_ROOT,
-  `payment-credit-load-sim-${WORKFLOWS}-workflows-${BURST_EVENTS}-burst.json`
-);
+const reportPath = path.join(DIST_ROOT, `payment-credit-load-sim-${WORKFLOWS}-workflows-${BURST_EVENTS}-burst.json`);
 fs.writeFileSync(reportPath, `${JSON.stringify(result, null, 2)}\n`, { mode: 0o644 });
 
 console.log(`PAYMENT_CREDIT_LOAD_SIM ${result.status}`);

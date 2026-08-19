@@ -18,7 +18,7 @@
  * yesterday, and a shop discovering at 9am that their manager can no longer enrol the new Mac is a
  * far worse outcome than never having added the role.
  *
- * Mutation targets: SOP1 (role exists with exactly 3 grants), SOP2 (cannot grade/buy/manage),
+ * Mutation targets: SOP1 (role exists with exactly 4 grants), SOP2 (cannot grade/buy/manage),
  * SOP3 (incumbent roles unchanged), SOP4 (routes gated on the split capabilities).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -39,14 +39,18 @@ import { PARTNER_ROLE_CODES } from "../shared/partner-schema";
 let cluster: DisposablePostgres17;
 let admin: Client;
 
-/** The three capabilities SCANNER_OPERATOR is allowed, and nothing else. */
-const EXPECTED_SCANNER_OPERATOR = ["partner.cards.scan", "partner.cards.view", "partner.location.view"];
+/** The four capabilities SCANNER_OPERATOR is allowed, and nothing else. */
+const EXPECTED_SCANNER_OPERATOR = [
+  "partner.cards.scan",
+  "partner.cards.view",
+  "partner.credits.view",
+  "partner.location.view",
+];
 
 /** Everything the role must NOT hold, stated explicitly rather than inferred from a count. */
 const FORBIDDEN_FOR_SCANNER_OPERATOR = [
   "partner.cards.assess", // no grading
   "partner.credits.purchase", // cannot spend the shop's money
-  "partner.credits.view", // cannot even see the wallet
   "partner.users.view",
   "partner.users.manage", // no staff management
   "partner.sessions.revoke",
@@ -110,7 +114,8 @@ describe("AG-2 SCANNER_OPERATOR (real seeded catalogue)", () => {
         f.filename === "0073_lineage_convergence.sql" ||
         f.filename === "0083_partner_credit_packs.sql" ||
         f.filename === "0085_partner_scanner_operator_role.sql" ||
-        f.filename === "0092_partner_station_calibrate_permission.sql"
+        f.filename === "0092_partner_station_calibrate_permission.sql" ||
+        f.filename === "0098_scanner_operator_credit_view.sql"
     );
     await applyMigrations(admin as never, files);
   }, 180_000);
@@ -121,7 +126,7 @@ describe("AG-2 SCANNER_OPERATOR (real seeded catalogue)", () => {
   });
 
   // ---- SOP1 -------------------------------------------------------------------------------
-  it("SOP1: the role is seeded and holds EXACTLY the three operational capabilities", async () => {
+  it("SOP1: the role is seeded and holds EXACTLY the four operational/read capabilities", async () => {
     const role = await admin.query(`SELECT label FROM partner_roles WHERE code='SCANNER_OPERATOR'`);
     expect(role.rowCount).toBe(1);
     expect(role.rows[0].label).toBe("Scanner Operator");
@@ -189,6 +194,7 @@ describe("AG-2 SCANNER_OPERATOR (real seeded catalogue)", () => {
 describe("AG-2 integration surfaces", () => {
   const stationRoutes = readFileSync("server/partner/station-routes.ts", "utf8");
   const migration = readFileSync("migrations/0085_partner_scanner_operator_role.sql", "utf8");
+  const creditViewMigration = readFileSync("migrations/0098_scanner_operator_credit_view.sql", "utf8");
   const seed0034 = readFileSync("migrations/0034_partner_rbac_seed.sql", "utf8");
 
   /*
@@ -251,18 +257,22 @@ describe("AG-2 integration surfaces", () => {
     expect(calibrateMigration).toContain("'PARTNER_OWNER', 'PARTNER_MANAGER', 'MVGS_ASSESSMENT_TECHNICIAN'");
     // And the migration proves its own outcome rather than trusting the INSERT.
     expect(calibrateMigration).toContain("SCANNER_OPERATOR must not hold partner.stations.calibrate");
+    expect(creditViewMigration).toContain("partner.credits.view");
     expect(calibrateMigration).toContain("RAISE EXCEPTION");
   });
 
-  it("0034 is not edited — the new role arrives additively in its own numbered migration", () => {
+  it("0034 is not edited — the new role and later credit-view grant arrive additively", () => {
     expect(seed0034).not.toContain("SCANNER_OPERATOR");
     expect(migration).toContain("ON CONFLICT (code) DO NOTHING");
     expect(migration).toContain("SCANNER_OPERATOR");
+    expect(creditViewMigration).toContain("ON CONFLICT DO NOTHING");
   });
 
   it("the migration asserts its own outcome rather than trusting the INSERTs", () => {
     expect(migration).toContain("RAISE EXCEPTION");
     expect(migration).toContain("must hold exactly 3 permissions");
     expect(migration).toContain("holds a forbidden permission");
+    expect(creditViewMigration).toContain("must hold partner.credits.view exactly once");
+    expect(creditViewMigration).toContain("holds a forbidden non-view permission");
   });
 });

@@ -356,6 +356,9 @@ export interface PartnerCreditPack {
   id: string;
   code: string;
   credits: number;
+  pricePence: number;
+  displayPrice: string;
+  vatIncluded: true;
   stripePriceId: string | null;
   stripeCurrency: string | null;
   purchasable: boolean;
@@ -373,7 +376,14 @@ export const partnerCredits = {
   checkout: (packCode: string) =>
     // `url` is nullable because Stripe's own Checkout Session type is: the server forwards
     // `session.url` verbatim rather than asserting it away.
-    req<{ url: string | null; packCode: string; credits: number }>("POST", "/api/partner/credits/checkout", {
+    req<{
+      url: string | null;
+      packCode: string;
+      credits: number;
+      pricePence: number;
+      displayPrice: string;
+      vatIncluded: true;
+    }>("POST", "/api/partner/credits/checkout", {
       packCode,
     }),
 };

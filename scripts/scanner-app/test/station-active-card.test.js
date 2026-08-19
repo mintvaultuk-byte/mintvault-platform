@@ -650,7 +650,8 @@ test("FIX 2: every reservation-affecting action re-asks the server for the balan
   assert.match(main, /availableCredits: available,/);
   assert.match(main, /walletRefreshGeneration: Number\(stateMod\.get\(\)\.walletRefreshGeneration \|\| 0\) \+ 1/);
   // Including a refusal: "no credits" must be shown beside the real figure.
-  assert.match(main, /await refreshAvailableCredits\(\);\n\s+return \{\s+ok: false,\s+retryable: false/);
+  assert.match(main, /const refreshedAvailable = await refreshAvailableCredits\(\);/);
+  assert.match(main, /error\.code === "INSUFFICIENT_CREDITS" && typeof refreshedAvailable !== "number"/);
   // Cancellation returns a credit, so it must refresh too.
   assert.match(main, /await refreshAvailableCredits\(\);\n\s+return \{ ok: true, cancellation \}/);
   // The renderer prefers the live figure over the sign-in snapshot, and never renders 0 for unknown.
@@ -715,16 +716,19 @@ test("ZERO-CREDIT billing lock opens automatically, survives manual close, and u
   assert.match(renderer, /closeModal\(els\.billingLockModal\)/);
   assert.match(renderer, /startBillingPoll\(\)/);
   assert.match(renderer, /window\.scanner\.refreshAvailableCredits\(\)/);
-  assert.match(renderer, /if \(result\?\.code === "INSUFFICIENT_CREDITS"\) billingModalDismissedAtZero = false;/);
+  assert.match(renderer, /if \(result\?\.code === "INSUFFICIENT_CREDITS"\) \{/);
+  assert.match(renderer, /availableCredits: 0/);
 });
 
-test("TOP-UP modal uses server packs and Stripe Checkout only; it never invents price or grants credits", () => {
+test("TOP-UP modal uses server packs/prices and Stripe Checkout only; it never grants credits", () => {
   for (const label of ["5 CREDITS", "10 CREDITS", "25 CREDITS", "50 CREDITS", "100 CREDITS"]) {
     assert.match(html, new RegExp(label));
   }
   assert.match(renderer, /const REQUIRED_BILLING_PACK_CREDITS = \[5, 10, 25, 50, 100\]/);
   assert.match(renderer, /window\.scanner\.creditPacks\(\)/);
   assert.match(renderer, /packForCredits\(credits\)/);
+  assert.match(renderer, /pack\?\.displayPrice/);
+  assert.match(renderer, /pack\?\.vatIncluded/);
   assert.match(renderer, /button\.dataset\.packCode = pack\?\.code \|\| ""/);
   assert.match(renderer, /window\.scanner\.creditCheckout\(\{ packCode \}\)/);
   assert.match(renderer, /TOP-UP PACKS NOT YET CONFIGURED/);
@@ -741,7 +745,7 @@ test("TOP-UP modal uses server packs and Stripe Checkout only; it never invents 
   assert.match(stationClient, /operatorJson\("GET", "\/api\/partner\/credits\/packs"\)/);
   assert.match(stationClient, /creditCheckout\(packCode\)/);
   assert.match(stationClient, /operatorJson\("POST", "\/api\/partner\/credits\/checkout", \{ packCode \}\)/);
-  assert.doesNotMatch(renderer, /£|GBP|VAT|pricePence|stripePriceId/);
+  assert.doesNotMatch(renderer, /stripePriceId|appendFoundationCredit|fulfilPartnerCreditPurchase/);
   assert.doesNotMatch(renderer, /appendFoundationCredit|fulfilPartnerCreditPurchase|availableCredits\s*[-+]=/);
 });
 
