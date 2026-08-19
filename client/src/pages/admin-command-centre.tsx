@@ -166,7 +166,7 @@ function KpiSection({ dashboard }: { dashboard: CommandCentreDashboardResponse }
                     key={id}
                     href={kpi.deepLink}
                     data-testid={`command-centre-kpi-${id}`}
-                    className="command-centre-surface rounded border border-border p-4 hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="command-centre-surface min-w-0 rounded border border-border p-4 [overflow-wrap:anywhere] hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <h4 className="font-medium">{KPI_LABELS[id] ?? id}</h4>

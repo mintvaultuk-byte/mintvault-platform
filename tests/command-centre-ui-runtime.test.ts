@@ -218,6 +218,8 @@ describe("Command Centre rendered controls", () => {
     const stationKpi = await waitFor("command-centre-kpi-station-lifecycle-state");
     expect(apiRequest).toHaveBeenCalledWith("GET", "/api/admin/command/dashboard?period=today");
     expect(stationKpi.classList.contains("command-centre-surface")).toBe(true);
+    expect(stationKpi.classList.contains("min-w-0")).toBe(true);
+    expect(stationKpi.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
     expect(stationKpi.getAttribute("href")).toBe("/admin/partners/stations");
     expect(q("command-centre-attention-ATT-STATION-PENDING")?.getAttribute("href")).toBe("/admin/partners/stations");
     expect(q("nav-command-centre")?.getAttribute("href")).toBe("/admin/command");
