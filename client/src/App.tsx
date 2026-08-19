@@ -475,6 +475,27 @@ function Router() {
           <Route path="/admin/partners/:partnerId/stations">
             <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/stations$/, "/admin/partner-network/partners/$1")}><AdminPartnerNetworkStationsPage /></PartnerNetworkRoute>
           </Route>
+          <Route path="/admin/partners/:partnerId/onboarding">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/onboarding$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/:partnerId/cards">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/cards$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/:partnerId/staff">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/staff$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/:partnerId/locations">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/locations$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/:partnerId/credits">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/credits$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/:partnerId/activity">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/activity$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
+          <Route path="/admin/partners/:partnerId/security">
+            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/security$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+          </Route>
           <Route path="/admin/partners/:partnerId">
             <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\//, "/admin/partner-network/partners/")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
           </Route>

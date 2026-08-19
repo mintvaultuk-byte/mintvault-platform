@@ -48,10 +48,13 @@ import {
   type FieldErrors,
 } from "./partner-management-helpers";
 import { ReadinessPanel } from "@/components/partner/readiness-panel";
+import { PartnerDrilldown } from "./partner-dashboard";
 
 const BASE = "/api/super-admin/partner-management";
 const TABS = [
   "overview",
+  "cards",
+  "credits",
   "users",
   "locations",
   "profile",
@@ -63,7 +66,8 @@ const TABS = [
   "connector",
 ] as const;
 type TabKey = (typeof TABS)[number];
-const TAB_LABELS: Record<TabKey, string> = {
+const LEGACY_DETAIL_TABS = ["overview", "users", "locations", "profile", "contacts", "branding", "activity", "notes", "audit", "connector"] as const;
+const LEGACY_DETAIL_TAB_LABELS: Record<(typeof LEGACY_DETAIL_TABS)[number], string> = {
   overview: "Overview",
   users: "Users",
   locations: "Locations",
@@ -75,6 +79,36 @@ const TAB_LABELS: Record<TabKey, string> = {
   audit: "Audit",
   connector: "Connector Summary",
 };
+
+/** The route contract for the one canonical Partner workspace. */
+const WORKSPACE_TABS = ["overview", "onboarding", "cards", "staff", "locations", "stations", "credits", "activity", "security"] as const;
+type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
+const WORKSPACE_LABELS: Record<WorkspaceTab, string> = {
+  overview: "Overview",
+  onboarding: "Onboarding",
+  cards: "Cards",
+  staff: "Staff",
+  locations: "Locations",
+  stations: "Stations",
+  credits: "Credits",
+  activity: "Activity",
+  security: "Security",
+};
+const WORKSPACE_DETAIL_TABS: Record<Exclude<WorkspaceTab, "stations">, TabKey> = {
+  overview: "overview",
+  onboarding: "users",
+  cards: "cards",
+  staff: "users",
+  locations: "locations",
+  credits: "credits",
+  activity: "activity",
+  security: "audit",
+};
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isWorkspaceTab(value: string | undefined): value is WorkspaceTab {
+  return !!value && (WORKSPACE_TABS as readonly string[]).includes(value);
+}
 
 const TYPED_CONFIRM = "CONFIRM";
 const USER_ROLES = ["OWNER", "ADMIN", "GRADER", "STAFF"] as const;
@@ -146,12 +180,20 @@ interface OnboardingUser {
 }
 
 export default function PartnerManagementDetailPage() {
-  const [, navigate] = useLocation();
+  const [pathname, navigate] = useLocation();
   const [, canonicalParams] = useRoute("/admin/partners/:partnerId");
+  const [, canonicalWorkspaceParams] = useRoute("/admin/partners/:partnerId/:workspaceTab");
   const [, legacyParams] = useRoute("/admin/partner-network/partners/:partnerId");
-  const partnerId = canonicalParams?.partnerId ?? legacyParams?.partnerId ?? "";
+  const partnerId = canonicalWorkspaceParams?.partnerId ?? canonicalParams?.partnerId ?? legacyParams?.partnerId ?? "";
+  const requestedWorkspaceTab = canonicalWorkspaceParams?.workspaceTab;
+  const workspaceTab: WorkspaceTab = isWorkspaceTab(requestedWorkspaceTab) ? requestedWorkspaceTab : "overview";
+  const [administrationTab, setAdministrationTab] = useState<TabKey | null>(null);
+  const tab: TabKey = administrationTab ?? (workspaceTab === "stations" ? "overview" : WORKSPACE_DETAIL_TABS[workspaceTab]);
+  const isLegacyPath = pathname.startsWith("/admin/partner-network/partners/");
+  // Canonical workspace URLs reject malformed identifiers locally. The older retained route is
+  // deliberately left to its existing server-side not-found behaviour until its retirement date.
+  const validPartnerId = pathname.startsWith("/admin/partner-network/partners/") || UUID_RE.test(partnerId);
   const [authed, setAuthed] = useState<boolean | null>(null);
-  const [tab, setTab] = useState<TabKey>("overview");
   const [banner, setBanner] = useState<string | null>(null);
   // generic reason modal state
   const [modal, setModal] = useState<{
@@ -220,7 +262,7 @@ export default function PartnerManagementDetailPage() {
     if (authed === false) navigate(`/admin/login?next=/admin/partners/${partnerId}`, { replace: true });
   }, [authed, navigate, partnerId]);
 
-  const on = authed === true && !!partnerId;
+  const on = authed === true && validPartnerId;
   const detail = useQuery({
     queryKey: pmKeys.partner(partnerId),
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}`).then((r) => r.json()),
@@ -645,7 +687,7 @@ export default function PartnerManagementDetailPage() {
           <AdminButton
             size="sm"
             variant="ghost"
-            onClick={() => navigate("/admin/partner-network/partners")}
+            onClick={() => navigate("/admin/partners")}
             data-testid="pm-back"
           >
             ← Partners
@@ -666,15 +708,49 @@ export default function PartnerManagementDetailPage() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }} data-testid="pm-tabs">
-          {TABS.map((k) => (
-            <Chip key={k} active={tab === k} onClick={() => setTab(k)} testId={`pm-tab-${k}`}>
-              {TAB_LABELS[k]}
-            </Chip>
-          ))}
-        </div>
+        {isLegacyPath ? (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }} data-testid="pm-tabs">
+            {LEGACY_DETAIL_TABS.map((key) => <Chip key={key} active={tab === key} onClick={() => setAdministrationTab(key)} testId={`pm-tab-${key}`}>{LEGACY_DETAIL_TAB_LABELS[key]}</Chip>)}
+          </div>
+        ) : (
+          <nav aria-label="Partner workspace" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }} data-testid="pm-workspace-tabs">
+            {WORKSPACE_TABS.map((key) => {
+              const href = key === "overview" ? `/admin/partners/${partnerId}` : `/admin/partners/${partnerId}/${key}`;
+              return <Chip key={key} active={workspaceTab === key && !administrationTab} onClick={() => { setAdministrationTab(null); navigate(href); }} testId={`pm-workspace-tab-${key}`}>{WORKSPACE_LABELS[key]}</Chip>;
+            })}
+          </nav>
+        )}
+        {pathname.startsWith("/admin/partner-network/") && (
+          <div role="status" style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>
+            This legacy Partner URL is retained for compatibility. Use the workspace navigation above for the canonical routes.
+          </div>
+        )}
 
-        {tab === "overview" && (
+        {workspaceTab === "onboarding" && (
+          <Panel title="Onboarding" sub="Operational readiness and owner access.">
+            <ReadinessPanel readiness={onboarding.data?.operational} audience="SUPER_ADMIN" />
+          </Panel>
+        )}
+
+        {workspaceTab === "cards" && (
+          <Panel title="Cards" sub="Current Partner pipeline. Grading and review remain in Staff.">
+            <PartnerDrilldown partnerId={partnerId} tab="submissions" />
+          </Panel>
+        )}
+
+        {workspaceTab === "credits" && (
+          <Panel title="Credits" sub="Existing wallet authority and audited adjustment controls.">
+            <PartnerDrilldown partnerId={partnerId} tab="wallet" />
+          </Panel>
+        )}
+
+        {workspaceTab === "security" && (
+          <Panel title="Security" sub="Partner security state and audit records.">
+            <PartnerDrilldown partnerId={partnerId} tab="security" />
+          </Panel>
+        )}
+
+        {workspaceTab === "overview" && !administrationTab && (
           <Panel title="Overview">
             <div data-testid="pm-overview">
               <div>Legal name: {org.legal_name}</div>
@@ -713,14 +789,24 @@ export default function PartnerManagementDetailPage() {
               <div style={{ marginTop: 8, fontSize: 13, opacity: 0.8 }}>
                 Recent activity: {(activity.data?.activity ?? []).length} events
               </div>
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>Partner administration</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {(["profile", "contacts", "branding", "notes", "connector"] as const).map((key) => (
+                    <Chip key={key} active={false} onClick={() => setAdministrationTab(key)} testId={`pm-admin-tab-${key}`}>
+                      {{ profile: "Company Profile", contacts: "Contacts", branding: "Branding", notes: "Internal Notes", connector: "Connector Summary" }[key]}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
             </div>
           </Panel>
         )}
 
-        {tab === "users" && (
+        {(workspaceTab === "onboarding" || workspaceTab === "staff") && (
           <Panel
-            title="Users"
-            sub="Partner membership and invitation management"
+            title={workspaceTab === "onboarding" ? "Onboarding access" : "Staff"}
+            sub={workspaceTab === "onboarding" ? "Owner invitation and login readiness." : "Partner membership and invitation management"}
             actions={
               <AdminButton size="sm" variant="gold" onClick={() => setUserOpen(true)} data-testid="pm-user-add-open">
                 Add user
@@ -792,7 +878,7 @@ export default function PartnerManagementDetailPage() {
           last-active-location guard and no partner_management_audit row — and a test asserts this
           file never names it.
         */}
-        {tab === "locations" && (
+        {workspaceTab === "locations" && (
           <Panel
             title="Locations"
             sub="Shop floors belonging to this partner. A location id is never reissued — stations, Card Jobs, certificate origin snapshots and audit rows all point at it."
@@ -1028,7 +1114,7 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
-        {tab === "activity" && (
+        {workspaceTab === "activity" && (
           <Panel title="Activity">
             <div data-testid="pm-activity">
               {(activity.data?.activity ?? []).length === 0 ? (
@@ -1081,7 +1167,7 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
-        {tab === "audit" && (
+        {workspaceTab === "security" && (
           <Panel title="Audit">
             <div data-testid="pm-audit">
               {(audit.data?.audit ?? []).length === 0 ? (
