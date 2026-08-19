@@ -26,6 +26,7 @@ describe("Partner Network P10 parity and retirement contract", () => {
     expect(inventory).toContain("two releases or 90 days");
     expect(inventory).toContain("/admin/partners/directory");
     expect(app).toContain('path="/admin/partners/directory"');
+    expect(app).toContain('PartnerNetworkLegacyRoute canonical="/admin/partners/directory"');
   });
 
   it("keeps the inherited connector and station mutation guards intact", () => {
@@ -34,5 +35,9 @@ describe("Partner Network P10 parity and retirement contract", () => {
     expect(stationRoutes).toContain("requireAdminStepUp()");
     expect(management).toContain("const showLegacyFleetControls");
     expect(management).toContain("enabled: authed === true && showLegacyFleetControls");
+    expect(management).toContain("const showSettingsControls = showLegacyFleetControls || isCanonicalSettings");
+    expect(management).toContain("const showDirectory = showLegacyFleetControls || !isCanonicalSettings");
+    expect(management).toContain("{showSettingsControls && <Panel title=\"Partner Pilot Flags\"");
+    expect(management).toContain("{showDirectory && <Panel");
   });
 });

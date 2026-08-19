@@ -519,7 +519,7 @@ function Router() {
           <Route path="/admin/partner-network/partners/:partnerId">
             {(params) => <PartnerNetworkLegacyRoute canonical={`/admin/partners/${(params as { partnerId: string }).partnerId}`}><AdminPartnerManagementDetailPage /></PartnerNetworkLegacyRoute>}
           </Route>
-          <Route path="/admin/partner-network/partners"><PartnerNetworkLegacyRoute canonical="/admin/partners"><AdminPartnerManagementPage /></PartnerNetworkLegacyRoute></Route>
+          <Route path="/admin/partner-network/partners"><PartnerNetworkLegacyRoute canonical="/admin/partners/directory"><AdminPartnerManagementPage /></PartnerNetworkLegacyRoute></Route>
           <Route path="/admin/partner-network"><PartnerNetworkLegacyRoute canonical="/admin/partners/infrastructure"><AdminPartnerNetworkPage /></PartnerNetworkLegacyRoute></Route>
           <Route path="/community" component={CommunityPage} />
           <Route path="/reels" component={ReelsPage} />

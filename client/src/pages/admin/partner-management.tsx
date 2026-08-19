@@ -135,6 +135,11 @@ export default function PartnerManagementPage() {
   // Fleet lifecycle controls stay on the retained legacy screen only. Canonical network-wide
   // Stations is observation-only; its Partner-scoped successor owns these privileged controls.
   const showLegacyFleetControls = pathname.startsWith("/admin/partner-network/partners");
+  const isCanonicalSettings = pathname === "/admin/partners/settings";
+  // Legacy keeps its established combined page for flag-off rollback. With consolidation on,
+  // Directory owns organisations/create and Settings owns programme controls/backfill.
+  const showSettingsControls = showLegacyFleetControls || isCanonicalSettings;
+  const showDirectory = showLegacyFleetControls || !isCanonicalSettings;
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [filter, setFilter] = useState<Filter>({ page: 1 });
   const [searchInput, setSearchInput] = useState("");
@@ -224,7 +229,7 @@ export default function PartnerManagementPage() {
   const partners = useQuery<PartnerListResponse>({
     queryKey: pmKeys.partners(filter as Record<string, unknown>),
     queryFn: () => apiRequest("GET", `${BASE}/partners${partnersQueryString(filter)}`).then((r) => r.json()),
-    enabled: authed === true,
+    enabled: authed === true && showDirectory,
   });
 
   const activePartnersForWallets = useQuery<PartnerListResponse>({
@@ -233,13 +238,13 @@ export default function PartnerManagementPage() {
       apiRequest("GET", `${BASE}/partners${partnersQueryString({ status: "ACTIVE", pageSize: 100 })}`).then((r) =>
         r.json()
       ),
-    enabled: authed === true,
+    enabled: authed === true && showSettingsControls,
   });
 
   const pilotFlags = useQuery<PartnerPilotFlagState>({
     queryKey: pmKeys.pilotFlags(),
     queryFn: () => apiRequest("GET", PARTNER_PILOT_FLAG_BASE).then((r) => r.json()),
-    enabled: authed === true,
+    enabled: authed === true && showSettingsControls,
   });
 
   const fleet = useQuery<FleetStationsResponse>({
@@ -416,7 +421,7 @@ export default function PartnerManagementPage() {
           </div>
         )}
 
-        <Panel title="Partner Pilot Flags" sub="Super Admin pilot controls" className="mb-4">
+        {showSettingsControls && <Panel title="Partner Pilot Flags" sub="Super Admin pilot controls" className="mb-4">
           <div data-testid="pm-pilot-flags">
             {pilotFlags.isLoading ? (
               <div data-testid="pm-pilot-flags-loading">Loading Partner pilot flags…</div>
@@ -487,9 +492,9 @@ export default function PartnerManagementPage() {
               </div>
             )}
           </div>
-        </Panel>
+        </Panel>}
 
-        <Panel title="Wallets / Credits" sub="Owner-approved staging controls" className="mb-4">
+        {showSettingsControls && <Panel title="Wallets / Credits" sub="Owner-approved staging controls" className="mb-4">
           <div data-testid="pm-wallet-backfill" style={{ display: "grid", gap: 12 }}>
             <div>
               <strong>Provision Missing Partner Wallets</strong>
@@ -601,7 +606,7 @@ export default function PartnerManagementPage() {
               </div>
             )}
           </div>
-        </Panel>
+        </Panel>}
 
         {showLegacyFleetControls && <Panel title="Station Fleet" sub="Super Admin approval, rejection and safety state" className="mb-4">
           <div data-testid="pm-station-fleet" style={{ display: "grid", gap: 12 }}>
@@ -713,7 +718,7 @@ export default function PartnerManagementPage() {
           </div>
         </Panel>}
 
-        <Panel
+        {showDirectory && <Panel
           title="Partners"
           sub="Internal partner-company management"
           actions={
@@ -798,7 +803,7 @@ export default function PartnerManagementPage() {
                     <td>{p.connector_total}</td>
                     <td>
                       <Link
-                        href={`/admin/partner-network/partners/${p.id}`}
+                        href={showLegacyFleetControls ? `/admin/partner-network/partners/${p.id}` : `/admin/partners/${p.id}`}
                         className={adminButtonClass({ variant: "ghost", size: "sm" })}
                         data-testid={`pm-open-${p.id}`}
                       >
@@ -833,9 +838,9 @@ export default function PartnerManagementPage() {
               Next
             </AdminButton>
           </div>
-        </Panel>
+        </Panel>}
 
-        {createOpen && (
+        {showDirectory && createOpen && (
           <div
             role="dialog"
             aria-modal="true"

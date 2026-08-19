@@ -25,7 +25,7 @@ This inventory records presentation relocation only. It does not grant any new a
 | Legacy URL | Canonical URL when `VITE_PARTNER_NETWORK_CONSOLIDATION=true` | Compatibility behavior |
 | --- | --- | --- |
 | `/admin/partners/dashboard` | `/admin/partners` | Query string and fragment retained; application log emitted |
-| `/admin/partner-network/partners` | `/admin/partners` | Query string and fragment retained; application log emitted |
+| `/admin/partner-network/partners` | `/admin/partners/directory` | Query string and fragment retained; application log emitted |
 | `/admin/partner-network/partners/:partnerId` | `/admin/partners/:partnerId` | Partner UUID, query string and fragment retained; application log emitted |
 | `/admin/partner-network` | `/admin/partners/infrastructure` | Query string and fragment retained; application log emitted |
 
