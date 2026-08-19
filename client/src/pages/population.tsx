@@ -133,7 +133,7 @@ export default function PopulationPage() {
     <>
       <SeoHead
         title="Population Report | MintVault"
-        description="Browse every card graded by MintVault. View grade distributions, scarcity data, and individual certificates."
+        description="Explore privacy-safe MintVault grade distributions for approved active certificates, with small card groups withheld."
         canonical="/population"
       />
 

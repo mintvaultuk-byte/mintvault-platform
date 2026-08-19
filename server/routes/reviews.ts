@@ -20,17 +20,19 @@ const html = (body: string) => `<!doctype html>
 
 export function registerReviewRequestRoutes(app: Express): void {
   app.get("/reviews/r/:token", reviewLinkLimit, async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
     const config = getReviewConfiguration();
     if (config.state !== "READY") return res.status(503).send("Review destination is not configured.");
     if (!(await recordReviewClick(String(req.params.token)))) return res.status(404).send("Review link not found.");
-    res.setHeader("Cache-Control", "private, no-store");
     return res.redirect(302, config.destination.toString());
   });
 
   app.get("/reviews/preferences/:token", reviewLinkLimit, (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
     const token = String(req.params.token);
     if (!/^[A-Za-z0-9_-]{40,64}$/.test(token)) return res.status(404).send("Preference link not found.");
-    res.setHeader("Cache-Control", "private, no-store");
     return res.status(200).send(
       html(`<p>Confirm that MintVault should suppress this review request.</p>
 <form method="post" action="/reviews/preferences/${token}"><button type="submit" style="padding:10px 18px;background:#D4AF37;border:0;border-radius:4px;font-weight:bold">Suppress request</button></form>`)
@@ -38,8 +40,9 @@ export function registerReviewRequestRoutes(app: Express): void {
   });
 
   app.post("/reviews/preferences/:token", reviewLinkLimit, async (req, res) => {
-    const suppressed = await suppressReviewRequest(String(req.params.token));
     res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    const suppressed = await suppressReviewRequest(String(req.params.token));
     if (!suppressed) return res.status(404).send("Preference link not found.");
     return res
       .status(200)

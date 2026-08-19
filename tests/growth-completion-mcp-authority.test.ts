@@ -1,7 +1,15 @@
 import fs from "node:fs";
 import { createHash } from "node:crypto";
+import type { AddressInfo } from "node:net";
+import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
-import { authorizeGrowthMcp, GROWTH_MCP_PATH, GROWTH_MCP_TOOLS, growthMcpAuthState } from "../server/routes/growth-mcp";
+import {
+  authorizeGrowthMcp,
+  GROWTH_MCP_PATH,
+  GROWTH_MCP_TOOLS,
+  growthMcpAuthState,
+  registerGrowthMcpRoutes,
+} from "../server/routes/growth-mcp";
 import { getCapacityStatus } from "../server/growth-intelligence-service";
 import { getSeoMeta } from "../server/seo-config";
 import { renderPublicHtml } from "../server/static";
@@ -38,6 +46,60 @@ describe("GB-04C dedicated MCP Growth-read boundary", () => {
     expect(source).not.toContain("getPartnerApplication(");
   });
 
+  it("enforces bearer auth and serves the stateless JSON-RPC handshake over HTTP", async () => {
+    const app = express();
+    app.use(express.json());
+    registerGrowthMcpRoutes(app);
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}${GROWTH_MCP_PATH}`;
+    const post = (body: object, authorization?: string) =>
+      fetch(base, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(authorization ? { authorization } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      delete process.env.GROWTH_MCP_TOKEN_SHA256;
+      const unavailable = await post({ jsonrpc: "2.0", id: 1, method: "initialize" });
+      expect(unavailable.status).toBe(503);
+
+      const token = "mv_growth_" + "b".repeat(48);
+      process.env.GROWTH_MCP_TOKEN_SHA256 = createHash("sha256").update(token).digest("hex");
+      const unauthorized = await post({ jsonrpc: "2.0", id: 2, method: "initialize" }, "Bearer wrong");
+      expect(unauthorized.status).toBe(401);
+      expect(unauthorized.headers.get("www-authenticate")).toContain("MintVault Growth Read");
+
+      const authorization = `Bearer ${token}`;
+      const initialized = await post({ jsonrpc: "2.0", id: 3, method: "initialize" }, authorization);
+      expect(initialized.status).toBe(200);
+      expect(await initialized.json()).toMatchObject({
+        jsonrpc: "2.0",
+        id: 3,
+        result: { serverInfo: { name: "mintvault-growth-read" }, capabilities: { tools: { listChanged: false } } },
+      });
+
+      const listed = await post({ jsonrpc: "2.0", id: 4, method: "tools/list" }, authorization);
+      const listedBody = (await listed.json()) as { result: { tools: Array<{ name: string; annotations: object }> } };
+      expect(listedBody.result.tools.map((tool) => tool.name)).toEqual(GROWTH_MCP_TOOLS.map(([name]) => name));
+      expect(listedBody.result.tools.every((tool) => Object.hasOwn(tool.annotations, "readOnlyHint"))).toBe(true);
+
+      const notification = await post({ jsonrpc: "2.0", method: "notifications/initialized" }, authorization);
+      expect(notification.status).toBe(204);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        })
+      );
+    }
+  });
+
   it("exports the real capacity contract and keeps scaling disabled without telemetry", () => {
     expect(getCapacityStatus()).toMatchObject({
       status: "UNKNOWN",
@@ -67,6 +129,9 @@ describe("GB-06 public authority MVP", () => {
     expect(route).toContain('state: authorityAvailable ? "PUBLISHED" : "INSUFFICIENT_DATA"');
     expect(route).toContain('Cache-Control", "public, max-age=60, stale-while-revalidate=300');
     expect(route).toContain('app.get("/api/population", populationRateLimit');
+    expect(route).toContain('app.get("/api/population/certs", populationRateLimit');
+    expect(route).toContain("result.rows.length < 5");
+    expect(route.match(/Population filters must be 100 characters or fewer/g)).toHaveLength(2);
     expect(route).toContain("populationCache.size >= 100");
   });
 

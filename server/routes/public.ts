@@ -380,13 +380,7 @@ export function registerPublicRoutes(app: Express): void {
       const lastUpdatedMatch = content.match(/^lastUpdated:\s*"?([^"\n]+)"?\s*$/m);
       const body = content.replace(/^---[\s\S]*?---\s*/m, "");
 
-      res.json({
-        slug,
-        title: titleMatch?.[1] || slug,
-        version: versionMatch?.[1] || "unknown",
-        lastUpdated: lastUpdatedMatch?.[1] || null,
-        content: body,
-      });
+      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", lastUpdated: lastUpdatedMatch?.[1] || null, content: body });
     } catch {
       res.status(404).json({ error: "Document not found" });
     }
@@ -407,7 +401,13 @@ export function registerPublicRoutes(app: Express): void {
       const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
       const lastUpdatedMatch = content.match(/^lastUpdated:\s*"?([^"\n]+)"?\s*$/m);
       const body = content.replace(/^---[\s\S]*?---\s*/m, "");
-      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", lastUpdated: lastUpdatedMatch?.[1] || null, content: body });
+      res.json({
+        slug,
+        title: titleMatch?.[1] || slug,
+        version: versionMatch?.[1] || "unknown",
+        lastUpdated: lastUpdatedMatch?.[1] || null,
+        content: body,
+      });
     } catch {
       res.status(404).json({ error: "Document not found" });
     }
@@ -688,7 +688,7 @@ export function registerPublicRoutes(app: Express): void {
       if ([game, set, card].some((value) => value && value.length > 100)) {
         return res.status(400).json({ error: "Population filters must be 100 characters or fewer." });
       }
-      const cacheKey = JSON.stringify([game?.toLowerCase() ?? "", set?.toLowerCase() ?? "", card?.toLowerCase() ?? ""]);
+      const cacheKey = `aggregate:${JSON.stringify([game?.toLowerCase() ?? "", set?.toLowerCase() ?? "", card?.toLowerCase() ?? ""])}`;
       const cached = populationCache.get(cacheKey);
       res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
       if (cached && cached.expiresAt > Date.now()) return res.json(cached.data);
@@ -774,11 +774,18 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── Population — filtered cert list ─────────────────────────────────────────
-  app.get("/api/population/certs", async (req, res) => {
+  app.get("/api/population/certs", populationRateLimit, async (req, res) => {
     try {
       const card = typeof req.query.card === "string" ? req.query.card.trim() : "";
       const set = typeof req.query.set === "string" ? req.query.set.trim() : "";
       if (!card && !set) return res.status(400).json({ error: "card or set required" });
+      if ([card, set].some((value) => value.length > 100)) {
+        return res.status(400).json({ error: "Population filters must be 100 characters or fewer." });
+      }
+      const cacheKey = `certs:${JSON.stringify([set.toLowerCase(), card.toLowerCase()])}`;
+      const cached = populationCache.get(cacheKey);
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      if (cached && cached.expiresAt > Date.now()) return res.json(cached.data);
 
       // H2: escape LIKE wildcards (\ % _) so user input matches literally, and pass the
       // value as a BOUND PARAMETER — never interpolated into the SQL string. Behaviour is
@@ -795,16 +802,24 @@ export function registerPublicRoutes(app: Express): void {
         LIMIT 500
       `);
 
-      res.json(
-        (result.rows as any[]).map((r) => ({
-          certId: r.certificate_number,
-          cardName: r.card_name,
-          setName: r.set_name,
-          cardGame: r.card_game,
-          grade: r.grade,
-          gradedAt: r.issued_at,
-        }))
-      );
+      // Individual certificates are public records, but this discovery list
+      // follows the same five-record publication floor as its parent group.
+      // Direct certificate verification remains available when a cert ID is
+      // already known; this endpoint does not enumerate a sub-threshold group.
+      const data =
+        result.rows.length < 5
+          ? []
+          : (result.rows as any[]).map((r) => ({
+              certId: r.certificate_number,
+              cardName: r.card_name,
+              setName: r.set_name,
+              cardGame: r.card_game,
+              grade: r.grade,
+              gradedAt: r.issued_at,
+            }));
+      if (populationCache.size >= 100) populationCache.delete(populationCache.keys().next().value!);
+      populationCache.set(cacheKey, { expiresAt: Date.now() + 60_000, data });
+      return res.json(data);
     } catch (err) {
       console.error("[population/certs] error:", err);
       res.status(500).json({ error: "Failed to load certificates." });

@@ -162,6 +162,9 @@ describe("GB-05 review lifecycle", () => {
     expect(lifecycle).not.toMatch(/console\.(?:log|error)\([^\n]*data\.email/);
     expect(lifecycle).toContain("sendReviewRequestEmail");
     expect(lifecycle).toContain("idempotencyKey");
+    const routes = fs.readFileSync("server/routes/reviews.ts", "utf8");
+    expect(routes.match(/Referrer-Policy/g)).toHaveLength(3);
+    expect(routes.match(/private, no-store/g)).toHaveLength(3);
   });
 });
 
