@@ -550,6 +550,7 @@ export default function LogbookPage() {
         ogImage={`https://mintvaultuk.com/api/public/share/${data.certId}/feed`}
         ogImageWidth="1080"
         ogImageHeight="1080"
+        noindex
       />
 
       <div className="min-h-screen bg-white text-[#1A1A1A]">

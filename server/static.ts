@@ -1,7 +1,7 @@
 import express, { type Express, type Request, type Response } from "express";
 import fs from "fs";
 import path from "path";
-import { getSeoMeta } from "./seo-config";
+import { getSeoMeta, isKnownPublicRoute, type SeoMeta } from "./seo-config";
 
 function escapeHtml(str: string): string {
   return str
@@ -11,8 +11,7 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;");
 }
 
-function injectMeta(html: string, pathname: string): string {
-  const meta = getSeoMeta(pathname);
+function injectMeta(html: string, meta: SeoMeta): string {
   const title = escapeHtml(meta.title);
   const desc  = escapeHtml(meta.description);
   const canon = escapeHtml(meta.canonical);
@@ -27,15 +26,32 @@ function injectMeta(html: string, pathname: string): string {
     .replace(/<meta name="twitter:title"[^>]*>/i, `<meta name="twitter:title" content="${title}" />`)
     .replace(/<meta name="twitter:description"[^>]*>/i, `<meta name="twitter:description" content="${desc}" />`);
 
-  // Inject canonical + og:image before </head>
+  // Inject canonical, image and robots before </head>. This is rendered on the
+  // initial response rather than waiting for client-side effects.
   const extras = [
     `  <link rel="canonical" href="${canon}" />`,
     image ? `  <meta property="og:image" content="${image}" />` : "",
     image ? `  <meta name="twitter:image" content="${image}" />` : "",
+    meta.noindex ? `  <meta name="robots" content="noindex, nofollow" />` : "",
   ].filter(Boolean).join("\n");
 
   out = out.replace("</head>", `${extras}\n  </head>`);
   return out;
+}
+
+export function renderPublicHtml(baseHtml: string, pathname: string): { status: number; html: string; noindex: boolean } {
+  if (isKnownPublicRoute(pathname)) {
+    const meta = getSeoMeta(pathname);
+    return { status: 200, html: injectMeta(baseHtml, meta), noindex: !!meta.noindex };
+  }
+
+  const notFound: SeoMeta = {
+    title: "Page Not Found | MintVault UK",
+    description: "The page you requested could not be found.",
+    canonical: "https://mintvaultuk.com",
+    noindex: true,
+  };
+  return { status: 404, html: injectMeta(baseHtml, notFound), noindex: true };
 }
 
 export function serveStatic(app: Express) {
@@ -52,10 +68,12 @@ export function serveStatic(app: Express) {
   const indexPath = path.resolve(distPath, "index.html");
   const baseHtml = fs.readFileSync(indexPath, "utf-8");
 
-  // fall through to index.html if the file doesn't exist — inject SSR meta
+  // Fall through only for recognised client routes. Unknown paths are a real
+  // 404 with noindex rather than an indexable SPA soft-404.
   app.use("/{*path}", (req: Request, res: Response) => {
-    const html = injectMeta(baseHtml, req.path);
+    const rendered = renderPublicHtml(baseHtml, req.path);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(html);
+    if (rendered.noindex) res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.status(rendered.status).send(rendered.html);
   });
 }

@@ -6,11 +6,20 @@
  * before serving, so Google (and other crawlers) get real meta data without JS.
  */
 
+import { guides } from "../client/src/data/guides";
+
 export interface SeoMeta {
   title: string;
   description: string;
   canonical: string;
   ogImage?: string;
+  noindex?: boolean;
+}
+
+export interface SitemapEntry {
+  loc: string;
+  priority: string;
+  changefreq: "weekly" | "monthly" | "yearly";
 }
 
 const BASE = "https://mintvaultuk.com";
@@ -49,6 +58,49 @@ const SEO_MAP: Record<string, SeoMeta> = {
     title: "Card Grading Guides & Articles | MintVault UK",
     description: "Expert guides on Pokémon card grading, trading card collecting, grading costs, and how to prepare cards for grading in the UK.",
     canonical: `${BASE}/guides`,
+  },
+  "/journal": {
+    title: "Card Grading Journal | MintVault UK",
+    description: "Practical guides on card condition, grading economics, submission logistics, and collecting from MintVault UK.",
+    canonical: `${BASE}/journal`,
+    ogImage: DEFAULT_IMAGE,
+  },
+  "/technology": {
+    title: "Grading Technology | MintVault UK",
+    description: "Learn how MintVault combines professional card grading, tamper-evident slabs, NFC verification, and a verified ownership registry.",
+    canonical: `${BASE}/technology`,
+    ogImage: DEFAULT_IMAGE,
+  },
+  "/registry": {
+    title: "Verified Ownership Registry | MintVault UK",
+    description: "Explore MintVault's verified ownership registry for graded trading cards and NFC-enabled certificate verification.",
+    canonical: `${BASE}/registry`,
+    ogImage: DEFAULT_IMAGE,
+  },
+  "/standard": {
+    title: "MintVault Grading Standard | UK Card Grading",
+    description: "Understand MintVault's grading standard and the condition criteria used for professional trading card assessment.",
+    canonical: `${BASE}/standard`,
+  },
+  "/grading-scale": {
+    title: "Card Grading Scale | MintVault UK",
+    description: "Learn the MintVault card grading scale and what each grade means for condition, presentation, and collector confidence.",
+    canonical: `${BASE}/grading-scale`,
+  },
+  "/reports": {
+    title: "MintVault Grading Reports | UK Card Grading",
+    description: "Explore MintVault grading reports and the evidence used to document trading card condition.",
+    canonical: `${BASE}/reports`,
+  },
+  "/tcg": {
+    title: "Trading Card Games We Grade | MintVault UK",
+    description: "Discover the trading card games MintVault accepts for professional grading in the UK.",
+    canonical: `${BASE}/tcg`,
+  },
+  "/verify": {
+    title: "Verify a MintVault Certificate | MintVault UK",
+    description: "Verify a MintVault graded trading card certificate by certificate ID.",
+    canonical: `${BASE}/verify`,
   },
   "/ownership": {
     title: "Ownership Portal | MintVault UK",
@@ -180,7 +232,7 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
 };
 
-/** Default meta for unknown routes (404, cert detail pages, etc.) */
+/** Default metadata is only used for known, non-indexable application routes. */
 const DEFAULT_META: SeoMeta = {
   title: "MintVault UK — Professional Trading Card Grading",
   description: "Professional UK trading card grading. Tamper-evident slabs, NFC tracking, verified ownership registry, and insured return shipping. From £19 per card.",
@@ -188,35 +240,177 @@ const DEFAULT_META: SeoMeta = {
   ogImage: DEFAULT_IMAGE,
 };
 
+const INDEXABLE_STATIC_ROUTES = new Set(Object.keys(SEO_MAP));
+
+// Routes rendered by the SPA but intentionally omitted from the sitemap. A
+// server response must still be usable when opened directly, but these are not
+// search landing pages and must not become an index/crawl surface.
+const KNOWN_NOINDEX_STATIC_ROUTES = new Set([
+  "/submit/success",
+  "/home-v2-integrated",
+  "/how-it-works-v2",
+  "/home-v3",
+  "/home-v4",
+  "/pricing-v2",
+  "/pricing-demo",
+  "/ai-pre-grade",
+  "/pre-grade",
+  "/tools/estimate",
+  "/vault-club",
+  "/stolen-card-protection",
+  "/ownership",
+  "/claim",
+  "/transfer",
+  "/transfer/accept",
+  "/transfer/claim-by-code",
+  "/dashboard",
+  "/population/certs",
+  "/grading-glossary",
+  "/grading/eligible-cards",
+  "/vault-reports/about",
+  "/vault-reports/how-to-read",
+  "/help/faq",
+  "/help/contact",
+  "/login",
+  "/customer-login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+  "/account/settings",
+  "/showrooms",
+  "/community",
+  "/reels",
+  "/mvgs/join",
+  "/grading-standard",
+  "/how-it-works",
+  "/about/our-story",
+  "/about/the-mintvault-slab",
+]);
+
+const KNOWN_NOINDEX_PATTERNS = [
+  /^\/(?:admin|partner|grader|staff)(?:\/|$)/,
+  /^\/auth(?:\/|$)/,
+  /^\/upload\/[^/]+\/[^/]+$/,
+  /^\/nfc\/[^/]+$/,
+  /^\/cert\/[^/]+(?:\/report)?$/,
+  /^\/vault\/[^/]+$/,
+  /^\/showroom\/[^/]+$/,
+  /^\/share\/reel\/[^/]+\/[^/]+$/,
+  /^\/legal\/[^/]+$/,
+];
+
+function cleanPath(pathname: string): string {
+  const path = pathname.split("?")[0].split("#")[0] || "/";
+  return path !== "/" ? path.replace(/\/+$/, "") || "/" : path;
+}
+
+export function isKnownPublicRoute(pathname: string): boolean {
+  const clean = cleanPath(pathname);
+  if (INDEXABLE_STATIC_ROUTES.has(clean) || KNOWN_NOINDEX_STATIC_ROUTES.has(clean)) return true;
+  if (KNOWN_NOINDEX_PATTERNS.some((pattern) => pattern.test(clean))) return true;
+  const journalSlug = clean.match(/^\/journal\/([^/]+)$/)?.[1];
+  return !!journalSlug && guides.some((guide) => guide.slug === journalSlug);
+}
+
+export function isNoindexRoute(pathname: string): boolean {
+  const clean = cleanPath(pathname);
+  return (
+    KNOWN_NOINDEX_STATIC_ROUTES.has(clean) ||
+    KNOWN_NOINDEX_PATTERNS.some((pattern) => pattern.test(clean))
+  );
+}
+
+export function getSitemapEntries(): SitemapEntry[] {
+  const staticEntries: SitemapEntry[] = [
+    { loc: "/", priority: "1.0", changefreq: "weekly" },
+    { loc: "/pricing", priority: "0.9", changefreq: "monthly" },
+    { loc: "/submit", priority: "0.9", changefreq: "monthly" },
+    { loc: "/verify", priority: "0.8", changefreq: "monthly" },
+    { loc: "/why-mintvault", priority: "0.8", changefreq: "monthly" },
+    { loc: "/technology", priority: "0.7", changefreq: "monthly" },
+    { loc: "/registry", priority: "0.7", changefreq: "monthly" },
+    { loc: "/standard", priority: "0.7", changefreq: "monthly" },
+    { loc: "/grading-scale", priority: "0.7", changefreq: "monthly" },
+    { loc: "/reports", priority: "0.6", changefreq: "monthly" },
+    { loc: "/population", priority: "0.6", changefreq: "weekly" },
+    { loc: "/tcg", priority: "0.6", changefreq: "monthly" },
+    { loc: "/labels", priority: "0.5", changefreq: "monthly" },
+    { loc: "/api-docs", priority: "0.5", changefreq: "monthly" },
+    { loc: "/terms-and-conditions", priority: "0.3", changefreq: "yearly" },
+    { loc: "/liability-and-insurance", priority: "0.3", changefreq: "yearly" },
+    { loc: "/journal", priority: "0.8", changefreq: "weekly" },
+    ...[
+      "/pokemon-card-grading-uk",
+      "/trading-card-grading-uk",
+      "/card-grading-service-uk",
+      "/psa-alternative-uk",
+      "/how-to-grade-pokemon-cards",
+      "/tcg-grading-uk",
+      "/yugioh-card-grading-uk",
+      "/one-piece-card-grading-uk",
+      "/sports-card-grading-uk",
+      "/mtg-card-grading-uk",
+      "/best-card-grading-uk",
+      "/card-grading-cost-uk",
+      "/card-grading-near-me",
+    ].map((loc) => ({ loc, priority: loc === "/pokemon-card-grading-uk" ? "0.9" : "0.8", changefreq: "monthly" as const })),
+  ];
+  return [
+    ...staticEntries,
+    ...guides.map((guide) => ({ loc: `/journal/${guide.slug}`, priority: "0.7", changefreq: "monthly" as const })),
+  ];
+}
+
 /**
  * Returns the SeoMeta for a given URL pathname.
  * Handles cert detail pages (/cert/:id) with a generic cert title.
  */
 export function getSeoMeta(pathname: string): SeoMeta {
-  const clean = pathname.split("?")[0].split("#")[0];
+  const clean = cleanPath(pathname);
 
-  if (SEO_MAP[clean]) return SEO_MAP[clean];
+  // A route can retain useful descriptive metadata while still being an
+  // operational/customer flow that must not be indexed. Apply the route
+  // policy here rather than allowing the SEO map lookup to bypass it.
+  if (SEO_MAP[clean]) {
+    return { ...SEO_MAP[clean], noindex: isNoindexRoute(clean) || SEO_MAP[clean].noindex };
+  }
 
-  // Cert detail: /cert/MV42
-  const certMatch = clean.match(/^\/cert\/(.+)$/);
+  const journalSlug = clean.match(/^\/journal\/([^/]+)$/)?.[1];
+  const guide = journalSlug ? guides.find((entry) => entry.slug === journalSlug) : undefined;
+  if (guide) {
+    return {
+      title: guide.metaTitle,
+      description: guide.metaDescription,
+      canonical: `${BASE}/journal/${guide.slug}`,
+      ogImage: DEFAULT_IMAGE,
+    };
+  }
+
+  // Certificate grading report: preserve the real route in the initial HTML
+  // while keeping this individual record view out of search indexes.
+  const certificateReportMatch = clean.match(/^\/cert\/([^/]+)\/report$/);
+  if (certificateReportMatch) {
+    const certId = certificateReportMatch[1].toUpperCase();
+    return {
+      title: `Grading Report ${certId} | MintVault UK`,
+      description: `View the MintVault grading report for certificate ${certId}.`,
+      canonical: `${BASE}/cert/${certId}/report`,
+      noindex: true,
+    };
+  }
+
+  // Certificate detail: /cert/MV42
+  const certMatch = clean.match(/^\/cert\/([^/]+)$/);
   if (certMatch) {
     const certId = certMatch[1].toUpperCase();
     return {
       title: `Certificate ${certId} | MintVault UK`,
       description: `Verify MintVault graded card certificate ${certId}. View grade, card details, and ownership status.`,
-      canonical: `${BASE}/cert/${certId}`,
+      canonical: `${BASE}/vault/${certId}`,
+      noindex: true,
     };
   }
 
-  // Guide detail: /guides/:slug
-  const guideMatch = clean.match(/^\/guides\/(.+)$/);
-  if (guideMatch) {
-    return {
-      title: "Card Grading Guide | MintVault UK",
-      description: "Expert card grading guide from MintVault UK — professional trading card grading service.",
-      canonical: `${BASE}${clean}`,
-    };
-  }
-
-  return { ...DEFAULT_META, canonical: `${BASE}${clean}` };
+  return { ...DEFAULT_META, canonical: `${BASE}${clean}`, noindex: isNoindexRoute(clean) };
 }

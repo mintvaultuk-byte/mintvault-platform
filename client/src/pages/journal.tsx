@@ -5,6 +5,7 @@ import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import { guides } from "@/data/guides";
+import SeoHead from "@/components/seo-head";
 
 function formatDate(iso: string): string {
   try {
@@ -39,6 +40,17 @@ export default function JournalV2() {
 
   return (
     <div className="min-h-screen flex flex-col vault-page">
+      <SeoHead
+        title="Card Grading Journal | MintVault UK"
+        description="Practical guides on card condition, grading economics, submission logistics, and collecting from MintVault UK."
+        canonical="/journal"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "Blog",
+          name: "MintVault Journal",
+          url: "https://mintvaultuk.com/journal",
+        }}
+      />
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ─────────────────────────────────────────── */}

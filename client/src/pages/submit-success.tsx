@@ -8,10 +8,14 @@ export default function SubmitSuccessPage() {
   const params = new URLSearchParams(window.location.search);
   const submissionId = params.get("id") || "";
   const psToken = params.get("pstoken") || "";
+  const successPath =
+    submissionId && psToken
+      ? `/api/submissions/${encodeURIComponent(submissionId)}/success?${new URLSearchParams({ token: psToken })}`
+      : "";
 
   const { data: submission, isLoading } = useQuery<any>({
-    queryKey: ["/api/submissions", submissionId],
-    enabled: !!submissionId,
+    queryKey: [successPath],
+    enabled: !!successPath,
   });
 
   if (isLoading) {

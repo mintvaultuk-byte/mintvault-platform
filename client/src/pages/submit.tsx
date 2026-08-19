@@ -550,19 +550,34 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
   const insurance = getInsuranceTier(state.declaredValue);
   const declaredPerCard = state.quantity > 0 ? Math.ceil(state.declaredValue / state.quantity) : 0;
   const surchargeInfo = getInsuranceSurchargePerCard(declaredPerCard);
-  const [showCardDetails, setShowCardDetails] = useState(state.cardItems.length > 0);
+  const [showCardDetails, setShowCardDetails] = useState(state.quantity > 1 || state.cardItems.length > 0);
+
+  // Resume-safe: a stored wizard can contain a multi-card quantity from an
+  // older version of the optional-details UI. Bring it into the current API
+  // contract before the customer can proceed to payment.
+  useEffect(() => {
+    if (state.quantity <= 1 || state.cardItems.length === state.quantity) return;
+    const cardItems = Array.from({ length: state.quantity }, (_, index) => state.cardItems[index] || emptyCardItem());
+    setShowCardDetails(true);
+    setState({ ...state, cardItems });
+  }, [state, setState]);
 
   const handleQuantityChange = (newQty: number) => {
     const qty = Math.max(1, newQty);
     const newItems = [...state.cardItems];
-    if (showCardDetails) {
+    const detailsRequired = qty > 1;
+    if (showCardDetails || detailsRequired) {
       while (newItems.length < qty) newItems.push(emptyCardItem());
       while (newItems.length > qty) newItems.pop();
     }
+    if (detailsRequired) setShowCardDetails(true);
     setState({ ...state, quantity: qty, cardItems: newItems });
   };
 
   const toggleCardDetails = () => {
+    // The API requires one item record per card for multi-card submissions.
+    // Fields remain optional; only the cardinality is required.
+    if (state.quantity > 1) return;
     if (!showCardDetails) {
       const items: CardItem[] = [];
       for (let i = 0; i < state.quantity; i++) {
@@ -679,7 +694,9 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
         >
           <div className="flex items-center gap-2">
             <Plus size={16} className="text-[#D4AF37]" />
-            <span className="text-[#D4AF37] font-medium text-sm tracking-wide">Add Card Details (Optional)</span>
+            <span className="text-[#D4AF37] font-medium text-sm tracking-wide">
+              {state.quantity > 1 ? "Card Details (one record per card required)" : "Add Card Details (Optional)"}
+            </span>
           </div>
           {showCardDetails ? (
             <ChevronUp size={16} className="text-[#D4AF37]/60" />
@@ -691,7 +708,9 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
         {showCardDetails && (
           <div className="mt-4 space-y-4">
             <p className="text-[#888888] text-xs">
-              Pre-fill card details to speed up processing. All fields are optional.
+              {state.quantity > 1
+                ? "A record is required for each card; all card-detail fields remain optional."
+                : "Pre-fill card details to speed up processing. All fields are optional."}
             </p>
 
             {hasMismatch && (
@@ -1444,7 +1463,18 @@ function Step5Payment({
           paymentIntentId: paymentIntent.id,
         });
         const confirmData = await confirmRes.json();
+        if (
+          !confirmRes.ok ||
+          confirmData?.success !== true ||
+          confirmData?.status !== "paid" ||
+          typeof confirmData?.packingSlipToken !== "string"
+        ) {
+          setError(confirmData?.error || "Payment confirmation is still processing. Please do not pay again.");
+          return;
+        }
         onSuccess(data.submissionId, confirmData.packingSlipToken);
+      } else {
+        setError("Payment was not completed. Please try again when you are ready.");
       }
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
@@ -1855,6 +1885,7 @@ function SubmitWizardInner() {
         return !!state.tier;
       case 2: {
         if (state.quantity <= 0 || state.declaredValue <= 0) return false;
+        if (state.quantity > 1 && state.cardItems.length !== state.quantity) return false;
         if (state.type === "crossover") {
           const company =
             state.crossoverCompany === "Other" ? state.crossoverCompanyOther.trim() : state.crossoverCompany;
