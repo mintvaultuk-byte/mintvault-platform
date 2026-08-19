@@ -19,6 +19,8 @@
 
 Several releases were created on 2026-08-19 while the served commit remained `facfd36f`. Treat production as concurrently managed and reconcile again before any release action.
 
+Final read-only reconciliation at 2026-08-19T22:02Z found `origin/main` still at full SHA `facfd36f4ec8f164d017aba7a4386bab04a4aa6d` and `/api/version` still serving `facfd36f`. Fly had concurrently advanced to complete release v1110 and image `deployment-01M0DYQHT8R6V6QV265H918CED`; both LHR machines were started and healthy. This program did not create that release.
+
 ## Dirty work and active lineage
 
 - The launch checkout is a dirty `fix/canonical-card-detector-20260817` branch with Partner/Scanner changes. It is preserved untouched.

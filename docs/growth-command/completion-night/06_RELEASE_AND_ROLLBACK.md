@@ -2,7 +2,7 @@
 
 ## Current release state
 
-Growth Completion Night is implemented locally through runtime candidate `c2d18aea`; evidence and CI-environment test-isolation closeout follow it through `e877032b`. No migration, push, pull request, configuration write or deployment has occurred. Production remains `facfd36f`, Fly v1109.
+Growth Completion Night is implemented locally through runtime candidate `c2d18aea`; evidence and CI-environment test-isolation closeout follow it through `e877032b`. No migration, push, pull request, configuration write or deployment has occurred. Production still serves `facfd36f`; a concurrent actor advanced Fly from v1109 to v1110 during this task.
 
 ## Intended release order
 

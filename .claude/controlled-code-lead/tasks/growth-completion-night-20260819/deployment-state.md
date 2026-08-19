@@ -3,9 +3,10 @@
 ## Production
 
 - Live commit: `facfd36f` via `https://mintvault.fly.dev/api/version`
-- Fly release: v1109, complete
-- Image: `deployment-01M0DSJ9GTNRS0MJ5KAN0NH2JR`
-- Machines: two started version-1109 LHR machines, health passing
+- Fly release at baseline: v1109, complete
+- Fly release at final reconciliation: v1110, complete, created 2026-08-19T21:27:48Z by a concurrent actor
+- Final image: `deployment-01M0DYQHT8R6V6QV265H918CED`
+- Machines: two started version-1110 LHR machines, health passing
 - Database: production identity confirmed indirectly through the running app; 63 applied migrations, highest `0100`
 - Growth tables: `partner_applications`, `submission_acquisition` present
 - Provider workspace/account values: not inspected; secret values will not be read
@@ -26,4 +27,4 @@
 
 - Dirty launch and `main` worktrees contain unrelated Scanner/Partner work; this candidate remains isolated.
 - Engineering OS is enrolled on the canonical baseline. The graph was rebuilt and checked against the runtime candidate.
-- Production had multiple same-day Fly releases while the served SHA remained `facfd36f`; reconcile SHA, Fly release and migration journal again immediately before any protected release action.
+- Production advanced from Fly v1109 to v1110 during this task while the served SHA remained `facfd36f`; this branch did not cause that release. Reconcile SHA, Fly release and migration journal again immediately before any protected release action.

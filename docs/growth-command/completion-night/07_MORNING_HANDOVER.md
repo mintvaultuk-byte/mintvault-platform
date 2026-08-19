@@ -1,11 +1,11 @@
 # Morning Handover — Live Working Summary
 
-**Last updated:** 2026-08-19 22:35 BST
+**Last updated:** 2026-08-19 23:02 BST
 **State:** Local implementation and hostile-review closure complete; protected release actions remain.
 
 ## What is already live
 
-GB-04B Growth Command is live at production SHA `facfd36f`: authoritative paid/revenue reporting, acquisition attribution, Partner pipeline, campaign links, Live Pulse, deterministic insights and truthful capacity/provider gaps.
+GB-04B Growth Command is live at production SHA `facfd36f`: authoritative paid/revenue reporting, acquisition attribution, Partner pipeline, campaign links, Live Pulse, deterministic insights and truthful capacity/provider gaps. Final reconciliation found concurrent Fly release v1110 on image `deployment-01M0DYQHT8R6V6QV265H918CED`; both machines were healthy and the served SHA did not change.
 
 ## What this program has built so far
 
