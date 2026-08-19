@@ -4,6 +4,7 @@ import SeoHead from "@/components/seo-head";
 import GradientButton from "@/components/ui/gradient-button";
 import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import { apiRequest } from "@/lib/queryClient";
+import { attributionFromSearch } from "@/lib/commercial-attribution";
 
 const businessTypes = [
   ["tcg_card_shop", "TCG / card shop"],
@@ -50,13 +51,13 @@ const initialForm: FormState = {
 };
 
 function pageAttribution() {
-  const params = new URLSearchParams(window.location.search);
+  const params = attributionFromSearch(window.location.search);
   return {
     route: window.location.pathname,
-    utmSource: params.get("utm_source") || undefined,
-    utmMedium: params.get("utm_medium") || undefined,
-    utmCampaign: params.get("utm_campaign") || undefined,
-    utmContent: params.get("utm_content") || undefined,
+    utmSource: params.utm_source,
+    utmMedium: params.utm_medium,
+    utmCampaign: params.utm_campaign,
+    utmContent: params.utm_content,
     referrer: document.referrer || undefined,
   };
 }

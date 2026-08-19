@@ -294,6 +294,10 @@
   border: 1px solid var(--admin-line);
   border-radius: var(--admin-r);
   padding: 22px;
+  /* Panels frequently contain horizontally-scrollable tables. Without this,
+     CSS grid gives the panel its table's min-content width and turns a narrow
+     admin view into page-level horizontal overflow. */
+  min-width: 0;
 }
 .admin-panel__head {
   display: flex;

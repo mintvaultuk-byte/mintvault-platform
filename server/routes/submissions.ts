@@ -8,6 +8,7 @@ import { getUncachableStripeClient } from "../stripeClient";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../email";
 import { computeGradingQuote } from "../services/gradingQuote";
 import { redeemPromoCode, reservePromoCodeUse } from "../services/promoCodeService";
+import { recordSubmissionAttribution } from "../commercial-attribution";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -164,7 +165,8 @@ export async function fulfilPaidSubmission(
   submission: any,
   piMeta: Record<string, string | undefined>,
   piAmount: number,
-  deps: { storage?: typeof storage; exec?: SqlExecutor } = {}
+  deps: { storage?: typeof storage; exec?: SqlExecutor } = {},
+  payment?: { currency: string; paidAt: Date }
 ): Promise<{ fulfilled: boolean }> {
   // Dependency injection is backward-compatible test plumbing: production callers
   // (/api/confirm-payment and the Stripe webhook) pass nothing and get the real
@@ -175,7 +177,16 @@ export async function fulfilPaidSubmission(
   const numId = Number(submission.id);
 
   // ATOMIC GATE — only the first transition to paid wins.
-  const won = await store.markSubmissionAsPaid(numId);
+  const won = await store.markSubmissionAsPaid(
+    numId,
+    payment
+      ? {
+          amountPence: piAmount,
+          currency: payment.currency,
+          paidAt: payment.paidAt,
+        }
+      : undefined
+  );
   if (!won) {
     console.log(`[fulfil] submission ${sid} already paid, skipping (idempotent no-op)`);
     return { fulfilled: false };
@@ -446,6 +457,7 @@ export function registerSubmissionRoutes(app: Express): void {
         applyCredit,
         creditType: requestedCreditType,
         promoCode,
+        attribution,
       } = req.body;
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
@@ -712,6 +724,13 @@ export function registerSubmissionRoutes(app: Express): void {
         marketingFeatureConsentAt: marketingFeatureConsent === true ? new Date() : null,
       });
 
+      // Attribution is optional commercial context, deliberately outside the
+      // payment authority. A persistence failure must never prevent a customer
+      // from creating a submission or paying for grading.
+      await recordSubmissionAttribution(Number(submission.id), attribution).catch(() => {
+        console.warn("[commercial-attribution] submission context unavailable");
+      });
+
       // Audit log for terms acceptance
       if (FEATURE_FLAGS.LEGAL_PAGES_LIVE) {
         try {
@@ -944,7 +963,10 @@ export function registerSubmissionRoutes(app: Express): void {
         // credit, redeem promo, link user, email) run for exactly ONE caller
         // (this handler or the Stripe webhook, whoever wins the atomic paid
         // transition). A duplicate/raced confirm is a safe no-op.
-        await fulfilPaidSubmission(submission, paymentIntent.metadata || {}, paymentIntent.amount || 0);
+        await fulfilPaidSubmission(submission, paymentIntent.metadata || {}, paymentIntent.amount || 0, {}, {
+          currency: paymentIntent.currency,
+          paidAt: new Date(),
+        });
 
         const packingSlipToken = generatePdfToken(submission.submissionId); // H-a hardened token
         return res.json({

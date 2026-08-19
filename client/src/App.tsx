@@ -13,6 +13,7 @@ import VaultVideoBg from "@/components/v2/vault-video-bg";
 import { PartnerSessionProvider } from "@/hooks/use-partner-session";
 import { PartnerRouteGuard } from "@/components/partner/partner-route-guard";
 import { canonicalLegacyPartnerDestination } from "@/lib/partner-network-legacy-redirect";
+import { submitUrlWithAttribution } from "@/lib/commercial-attribution";
 
 // Critical-path pages — eagerly loaded
 import Home from "@/pages/home";
@@ -47,6 +48,7 @@ const TrackPage = lazy(() => import("@/pages/track"));
 const TermsPage = lazy(() => import("@/pages/terms"));
 const LiabilityPage = lazy(() => import("@/pages/liability"));
 const AdminPage = lazy(() => import("@/pages/admin"));
+const AdminGrowthPage = lazy(() => import("@/pages/admin/growth"));
 const GraderLoginPage = lazy(() => import("@/pages/grader-login"));
 const GraderPage = lazy(() => import("@/pages/grader"));
 const AdminGradersPage = lazy(() => import("@/pages/admin-graders"));
@@ -441,6 +443,7 @@ function Router() {
           )}
           {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
           {import.meta.env.DEV && <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />}
+          <Route path="/admin/growth" component={AdminGrowthPage} />
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />
           <Route path="/admin/graders" component={AdminStaffPage} />
@@ -708,6 +711,25 @@ function Router() {
   );
 }
 
+/** Preserve only approved campaign tokens while a visitor enters `/submit`. */
+function SubmitAttributionContinuity() {
+  useEffect(() => {
+    const preserveOnSubmitClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target as Element | null;
+      const anchor = target?.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor || anchor.target || anchor.hasAttribute("download")) return;
+      const destination = new URL(anchor.href, window.location.origin);
+      if (destination.origin !== window.location.origin || destination.pathname !== "/submit") return;
+      const next = submitUrlWithAttribution(destination.href, window.location.search);
+      if (next !== `${destination.pathname}${destination.search}${destination.hash}`) anchor.href = next;
+    };
+    document.addEventListener("click", preserveOnSubmitClick, true);
+    return () => document.removeEventListener("click", preserveOnSubmitClick, true);
+  }, []);
+  return null;
+}
+
 function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
@@ -730,6 +752,7 @@ function App() {
               nothing until the server issues a challenge.
             */}
             <AdminStepUpHost />
+            <SubmitAttributionContinuity />
             <Router />
             <CookieBanner />
           </TooltipProvider>

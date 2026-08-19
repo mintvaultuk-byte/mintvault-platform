@@ -247,6 +247,8 @@ describe("Partner Network rollback safety (DB-F2, dedicated disposable cluster)"
     await admin.query(`CREATE TABLE IF NOT EXISTS submissions (
       id serial primary key, user_id varchar, status varchar(30) not null default 'draft',
       tracking_number text unique, deleted_at timestamptz,
+      payment_intent_id text, payment_status varchar(20) not null default 'unpaid',
+      payment_amount numeric(10,2), payment_currency varchar(3) default 'GBP', payment_timestamp timestamptz,
       grading_status varchar(30), assigned_grader_id varchar, scan_status varchar(30),
       scan_assigned_to varchar, shipped_at timestamptz, delivered_at timestamptz,
       completed_at timestamptz, return_tracking text, return_carrier text, return_service text,

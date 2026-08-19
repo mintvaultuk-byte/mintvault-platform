@@ -115,6 +115,15 @@ describe("every migration is deliberately classified", () => {
     expect(requiresCoreSchema(["0095_growth_partner_applications"])).toBe(true);
   });
 
+  it("keeps commercial attribution application-scoped because it indexes paid core submissions", () => {
+    const SQL = readFileSync(join(process.cwd(), "migrations", "0099_growth_commercial_attribution.sql"), "utf8");
+    expect(SQL).toContain("REFERENCES submissions(id)");
+    expect(SQL).toContain("idx_submissions_paid_growth_window");
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0099_growth_commercial_attribution");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0099_growth_commercial_attribution");
+    expect(requiresCoreSchema(["0099_growth_commercial_attribution"])).toBe(true);
+  });
+
   it("NEGATIVE: neither newly-classified migration leaked into the partner glob", () => {
     // partnerScopeOnly() is the function that actually decides what a partner-only database runs.
     // Assert on IT, not just on the lists, so a future refactor that reads a different source
