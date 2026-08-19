@@ -602,6 +602,21 @@ body {
   min-height: 14px;
   text-align: center;
 }
+.upload-status-panel {
+  background: rgba(76, 154, 255, 0.08);
+  border: 1px solid rgba(76, 154, 255, 0.25);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+}
+.upload-status-line {
+  color: var(--fg);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  margin: 0;
+}
 .capture-rescan-only {
   min-height: 42px;
   width: 100%;

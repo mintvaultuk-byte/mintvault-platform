@@ -96,6 +96,11 @@ const DEFAULT = Object.freeze({
   placementApproval: null,
   activeCapture:    null,
   /*
+   * Background evidence uploads by side for the open Card Job. This is intentionally separate from
+   * activeCapture: a FRONT upload callback must never replace a BACK preview/scan panel.
+   */
+  captureUploads:   {},
+  /*
    * Rolling, local-only physical scan timings by scanner/profile/DPI/window/side. Used for the
    * operator countdown only after this station has measured real captures; no static fake timer is
    * invented for a fresh Mac.
@@ -104,6 +109,12 @@ const DEFAULT = Object.freeze({
   // Briefly displayed after a server acknowledgement so staff receive a clear
   // Front Saved / Back Saved outcome before MintVault arms the next side.
   lastAcceptedCapture: null,
+  /*
+   * Set when a physical side has been accepted from a GREEN Preview, the TIFF is journalled, and
+   * MintVault has granted its server-owned upload task. It is NOT grading evidence and NOT READY;
+   * it exists to arm the same card's next side while upload/finalisation continues.
+   */
+  lastQueuedCapture: null,
   /*
    * The shop's SERVER-REPORTED available Grading Credits, refreshed after every action that can move
    * a reservation. `null` means "not answered yet" and renders as an em dash — NEVER 0, because an

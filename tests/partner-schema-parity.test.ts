@@ -270,6 +270,11 @@ describe("partner schema ↔ migration parity", () => {
       "0091_capture_session_calibration_snapshot.sql",
       "0092_partner_station_calibrate_permission.sql",
       "0093_partner_credit_pack_currency.sql",
+      // 0094 splits one physical scanner target from background upload/finalisation ownership.
+      // It replaces 0075's station partial-unique index so FRONT upload can continue while the
+      // same station captures BACK for the same card. Index-only replacement; owner approval is
+      // still required at apply time because the migration runner flags DROP INDEX.
+      "0094_scanner_capture_physical_release.sql",
     ]);
   });
 

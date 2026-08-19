@@ -62,6 +62,9 @@ const els = {
   cancelCardBtn: document.getElementById("cancelCardBtn"),
   stationCredits: document.getElementById("stationCredits"),
   captureActionHint: document.getElementById("captureActionHint"),
+  uploadStatusPanel: document.getElementById("uploadStatusPanel"),
+  uploadStatusFront: document.getElementById("uploadStatusFront"),
+  uploadStatusBack: document.getElementById("uploadStatusBack"),
   positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
   positioningHint: document.getElementById("positioningHint"),
   positioningPanel: document.getElementById("positioningPanel"),
@@ -360,14 +363,18 @@ function renderTarget(state) {
      */
     els.targetCert.textContent = state.openCardJob.mvNumber || "Card started";
     const accepted = state.lastAcceptedCapture;
-    const nextSideComing = state.armingNextSide || (accepted && !accepted.cardRegistered);
+    const queued = state.lastQueuedCapture;
+    const nextSideComing = state.armingNextSide || (queued && !queued.cardRegistered) || (accepted && !accepted.cardRegistered);
     if (nextSideComing) {
-      // FRONT is saved and BACK is being armed. Naming the saved side is what tells the operator
-      // their scan counted — the previous copy said NOT ARMED over a card that had just succeeded.
-      els.targetSide.textContent = accepted && accepted.side === "front" ? "PREPARING BACK" : "PREPARING NEXT SIDE";
-      els.targetHint.textContent = accepted
-        ? `${toTitle(accepted.side)} is saved. MintVault is arming the next side for this same card — keep it at this station.`
-        : "MintVault is arming the next side for this same card.";
+      // A side can be locally captured/queued before it is server-saved. Name that state precisely:
+      // queued means BACK may proceed, saved means MintVault has already accepted immutable evidence.
+      const side = queued || accepted;
+      els.targetSide.textContent = side && side.side === "front" ? "PREPARING BACK" : "PREPARING NEXT SIDE";
+      els.targetHint.textContent = queued
+        ? `${toTitle(queued.side)} is captured locally and queued to MintVault. Flip for the next side; grading waits until the server validates both sides.`
+        : accepted
+          ? `${toTitle(accepted.side)} is saved by MintVault. MintVault is arming the next side for this same card — keep it at this station.`
+          : "MintVault is arming the next side for this same card.";
       return;
     }
     els.targetSide.textContent = "NOT ARMED";
@@ -451,6 +458,18 @@ function renderWorkflowGuide(state) {
   if (presentationPending) return;
 
   const accepted = state.lastAcceptedCapture;
+  const queued = state.lastQueuedCapture;
+  if (queued?.certId && !state.activeCapture) {
+    const frontQueued = queued.side === "front";
+    els.workflowGuide.dataset.guideState = frontQueued ? "back" : "setup";
+    els.placementVisual.classList.toggle("flip-required", frontQueued);
+    els.workflowGuideStep.textContent = frontQueued ? "FRONT QUEUED" : "SIDE QUEUED";
+    els.workflowGuideTitle.textContent = frontQueued ? "Flip the card for Back" : "Upload queued";
+    els.workflowGuideHint.textContent = frontQueued
+      ? "Front is captured locally and uploading in the background. Back will arm for the same card; READY waits for server validation."
+      : "This side is uploading in the background; evidence is not complete until MintVault validates it.";
+    return;
+  }
   if (accepted?.certId) {
     if (accepted.cardRegistered && !active) {
       els.workflowGuide.dataset.guideState = "complete";
@@ -909,15 +928,25 @@ function renderPositioningPreview(entry, scannerHealth, activeCapture) {
   }
 }
 
-function renderPreview(active) {
-  const previewId = active?.previewId;
+function visibleCapturePreviewId(state) {
+  const active = state?.activeCapture;
+  const activeStage = String(active?.stage || "");
+  if ((activeStage === "uploading" || activeStage === "preview_error") && active?.previewId) {
+    return active.previewId;
+  }
+  if (state?.lastQueuedCapture?.previewId) return state.lastQueuedCapture.previewId;
+  return null;
+}
+
+function renderPreview(entry) {
+  const previewId = entry?.previewId;
   if (!previewId || previewId === renderedPreviewId) return;
   renderedPreviewId = previewId;
   els.capturePreview.removeAttribute("src");
   window.scanner
     .getCapturePreview(previewId)
     .then((result) => {
-      if (lastState?.activeCapture?.previewId !== previewId) return;
+      if (visibleCapturePreviewId(lastState) !== previewId) return;
       if (!result?.ok) {
         actionError = result?.error || "Preview is no longer available";
         renderState(lastState);
@@ -926,7 +955,7 @@ function renderPreview(active) {
       els.capturePreview.src = result.dataUrl;
     })
     .catch(() => {
-      if (lastState?.activeCapture?.previewId === previewId) {
+      if (visibleCapturePreviewId(lastState) === previewId) {
         actionError = "Preview could not be loaded";
         renderState(lastState);
       }
@@ -953,6 +982,31 @@ function uploadProgressText(progress) {
   return `${phase}${percent ? ` ${percent}` : ""}${bytes}`;
 }
 
+function renderBackgroundUploads(state) {
+  const uploads = state?.captureUploads || {};
+  const renderLine = (side, el) => {
+    const entry = uploads[side];
+    if (!entry?.sessionId) {
+      el.hidden = true;
+      el.textContent = "";
+      return false;
+    }
+    const label = side === "back" ? "BACK" : "FRONT";
+    const status = entry.status ? String(entry.status).replace(/_/g, " ").toUpperCase() : uploadProgressText(entry.uploadProgress);
+    const retryAt = Number(entry.retryAfter);
+    const retry = Number.isFinite(retryAt) && retryAt > Date.now()
+      ? ` • retry in ${Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))}s`
+      : "";
+    const error = entry.error ? ` • ${entry.error}` : "";
+    el.hidden = false;
+    el.textContent = `${label} ${entry.certId || "MV—"} — ${status}${retry}${error}`;
+    return true;
+  };
+  const front = renderLine("front", els.uploadStatusFront);
+  const back = renderLine("back", els.uploadStatusBack);
+  els.uploadStatusPanel.hidden = !(front || back);
+}
+
 function renderCaptureActions(state) {
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
@@ -960,7 +1014,8 @@ function renderCaptureActions(state) {
   const scanning = ["scanning", "retrying_scan", "processing_preview"].includes(stage);
   const uploading = stage === "uploading" && Boolean(active?.previewId);
   const previewError = stage === "preview_error" && Boolean(active?.previewId);
-  const previewVisible = uploading || previewError;
+  const queuedPreview = !uploading && !previewError && state.lastQueuedCapture?.previewId ? state.lastQueuedCapture : null;
+  const previewVisible = uploading || previewError || Boolean(queuedPreview);
   const awaitingScan = stage === "awaiting_scan";
   const hasTarget = Boolean(active?.certId && active?.side);
   const scanLabel = hasTarget ? `SCAN ${side}` : "SCAN CARD";
@@ -1058,6 +1113,7 @@ function renderCaptureActions(state) {
    */
   const awaitingNextSide =
     Boolean(state.armingNextSide) ||
+    Boolean(state.lastQueuedCapture && !state.lastQueuedCapture.cardRegistered && openCard) ||
     Boolean(state.lastAcceptedCapture && !state.lastAcceptedCapture.cardRegistered && openCard);
   const needsArming = Boolean(openCard) && !active && !awaitingNextSide;
   els.openCardPanel.hidden = !needsArming;
@@ -1079,7 +1135,7 @@ function renderCaptureActions(state) {
   setActionButton(els.rescanErrorBtn, `RESCAN ${side}`, previewError, actionInFlight);
   setActionButton(els.nextCardBtn, "NEXT CARD", cardRegistered, actionInFlight);
 
-  if (previewVisible) renderPreview(active);
+  if (previewVisible) renderPreview(uploading || previewError ? active : queuedPreview);
   if (!previewVisible && renderedPreviewId) {
     renderedPreviewId = null;
     els.capturePreview.removeAttribute("src");
@@ -1176,6 +1232,7 @@ function renderState(state) {
           : "");
 
   renderCaptureActions(lastState);
+  renderBackgroundUploads(lastState);
   renderBillingLock(lastState);
 
   renderRecent(lastState.recent);

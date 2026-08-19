@@ -133,6 +133,7 @@ class Watcher extends EventEmitter {
     this.lastScannerHealthAt = 0;
     this.scannerHealthPromise = null;
     this.uploadProgressCache = new Map();
+    this.targetUploadWorkers = new Map();
   }
 
   async start() {
@@ -494,6 +495,35 @@ class Watcher extends EventEmitter {
     });
   }
 
+  setCaptureUploadState(entry, uploadProgress, extra = {}) {
+    const side = entry.side === "back" ? "back" : "front";
+    const uploads = stateMod.get().captureUploads || {};
+    stateMod.set({
+      captureUploads: {
+        ...uploads,
+        [side]: {
+          sessionId: entry.sessionId,
+          certId: entry.certId,
+          side,
+          previewId: entry.previewId || null,
+          uploadProgress: uploadProgress || entry.uploadProgress || null,
+          updatedAt: new Date().toISOString(),
+          ...extra,
+        },
+      },
+    });
+    this.emitState();
+  }
+
+  clearCaptureUploadState(entry) {
+    const side = entry.side === "back" ? "back" : "front";
+    const uploads = { ...(stateMod.get().captureUploads || {}) };
+    if (uploads[side]?.sessionId !== entry.sessionId) return;
+    delete uploads[side];
+    stateMod.set({ captureUploads: uploads });
+    this.emitState();
+  }
+
   updateTargetedUploadProgress(entry, progress) {
     const totalBytes = Number(progress?.totalBytes || progress?.byteLength || entry.uploadProgress?.totalBytes || 0);
     const bytesSent = Number(progress?.bytesSent || 0);
@@ -525,7 +555,10 @@ class Watcher extends EventEmitter {
     } catch (error) {
       this.log(`could not persist upload progress for ${entry.sessionId}: ${error.message}`, "warn");
     }
-    this.setTargetState(queueEntry, "uploading", "uploading");
+    this.setCaptureUploadState(queueEntry, uploadProgress);
+    if (stateMod.get().activeCapture?.id === entry.sessionId) {
+      this.setTargetState(queueEntry, "uploading", "uploading");
+    }
   }
 
   async reconcileTargetedCapture(entry) {
@@ -1248,7 +1281,11 @@ class Watcher extends EventEmitter {
   }
 
   previewData(previewId) {
-    const entry = this.activeTargetEntry();
+    const active = this.activeTargetEntry();
+    const entry =
+      active?.previewId === previewId
+        ? active
+        : this.readTargetedQueue().find((candidate) => candidate.previewId === previewId);
     if (!entry || !["upload", "preview_error"].includes(entry.phase) || entry.previewId !== previewId) {
       return { ok: false, error: "Preview is stale or no longer available for this side" };
     }
@@ -1290,10 +1327,15 @@ class Watcher extends EventEmitter {
 
   completeTargetedCapture(entry, capture) {
     const moved = this.moveFile(entry.filePath, this.dateFolder(PROCESSED));
+    const currentActive = stateMod.get().activeCapture;
+    const ownsActive = currentActive?.id === entry.sessionId;
     if (!moved && fs.existsSync(entry.filePath)) {
       // Acceptance is already server-authoritative. Keep the queue entry so
       // local archival can retry without another upload or physical scan.
-      stateMod.set({ state: "error", activeCapture: null, lastError: "Image accepted — retaining local archive for retry" });
+      stateMod.set({
+        ...(ownsActive ? { state: "error", activeCapture: null } : {}),
+        lastError: "Image accepted — retaining local archive for retry",
+      });
       this.emitState();
       return { ok: false, retryPending: true };
     }
@@ -1301,9 +1343,9 @@ class Watcher extends EventEmitter {
     this.removeTargetedPending(entry.sessionId);
     const certId = capture?.certificateNumber || entry.certId;
     const cardRegistered = capture?.cardRegistered === true;
+    const queued = stateMod.get().lastQueuedCapture;
     stateMod.set({
-      state: "success",
-      activeCapture: null,
+      ...(ownsActive ? { state: "success", activeCapture: null } : {}),
       lastUploadedCert: certId,
       lastAcceptedCapture: {
         certId,
@@ -1311,6 +1353,7 @@ class Watcher extends EventEmitter {
         cardRegistered,
         acceptedAt: new Date().toISOString(),
       },
+      ...(queued?.sessionId === entry.sessionId ? { lastQueuedCapture: null } : {}),
       /*
        * THE CARD IS ONLY FINISHED WHEN THE SERVER SAYS BOTH SIDES ARE REGISTERED.
        *
@@ -1323,16 +1366,19 @@ class Watcher extends EventEmitter {
       ...(cardRegistered ? { openCardJob: null } : {}),
       lastError: null,
     });
+    this.clearCaptureUploadState(entry);
     stateMod.pushRecent({ certId, side: entry.side, source: "targeted-lide" });
     this.emitState();
     this.logCaptureStage(entry, "accepted", { certId, elapsedMs: entry.capturedAtMs ? Date.now() - entry.capturedAtMs : null });
     this.log(`targeted ${entry.side} capture accepted for ${certId} (session ${entry.sessionId})`);
-    setTimeout(() => {
-      if (stateMod.get().state === "success") {
-        stateMod.set({ state: "idle" });
-        this.emitState();
-      }
-    }, 1_500);
+    if (ownsActive) {
+      setTimeout(() => {
+        if (stateMod.get().state === "success") {
+          stateMod.set({ state: "idle" });
+          this.emitState();
+        }
+      }, 1_500);
+    }
     return { ok: true, certId };
   }
 
@@ -1346,65 +1392,197 @@ class Watcher extends EventEmitter {
     if (moved) this.writeError(moved, reason);
     if (entry.previewPath && fs.existsSync(entry.previewPath)) this.moveFile(entry.previewPath, this.dateFolder(FAILED));
     this.removeTargetedPending(entry.sessionId);
-    stateMod.set({ state: "error", activeCapture: null, lastError: reason });
+    const ownsActive = stateMod.get().activeCapture?.id === entry.sessionId;
+    this.setCaptureUploadState(entry, entry.uploadProgress || null, {
+      status: "failed",
+      error: reason,
+    });
+    const queued = stateMod.get().lastQueuedCapture;
+    stateMod.set({
+      ...(ownsActive ? { state: "error", activeCapture: null } : {}),
+      ...(queued?.sessionId === entry.sessionId ? { lastQueuedCapture: null } : {}),
+      lastError: reason,
+    });
     this.emitState();
     this.logCaptureStage(entry, "failed", { reason });
     return { ok: false, error: reason };
   }
 
-  async uploadTargetedCapture(entry) {
+  releasePhysicalTargetForBackgroundUpload(entry, preparedTask) {
+    const queuedAt = entry.serverUploadTaskAcceptedAt || new Date().toISOString();
+    const released = {
+      ...entry,
+      phase: "upload",
+      serverUploadTaskAcceptedAt: queuedAt,
+      stagingId: preparedTask?.body?.staging_id || entry.stagingId || null,
+    };
+    this.addTargetedPending(released);
+    this.setCaptureUploadState(released, released.uploadProgress || null, { status: "upload_task_granted" });
+    if (stateMod.get().activeCapture?.id === entry.sessionId) {
+      stateMod.set({
+        state: "idle",
+        activeCapture: null,
+        lastQueuedCapture: {
+          certId: entry.certId,
+          side: entry.side,
+          sessionId: entry.sessionId,
+          previewId: entry.previewId || null,
+          cardRegistered: false,
+          queuedAt,
+          acceptedAt: queuedAt,
+        },
+        lastError: null,
+      });
+      this.emitState();
+      this.logCaptureStage(released, "physical_released_upload_task_granted", {
+        stagingId: released.stagingId,
+      });
+    }
+    return released;
+  }
+
+  async uploadTargetedCapture(entry, options = {}) {
     if (!(await this.waitForStable(entry.filePath))) {
-      this.setTargetState(entry, "uploading", "uploading", "TIFF still processing — retrying completed-write check");
+      this.setCaptureUploadState(entry, entry.uploadProgress || null, { status: "waiting_for_stable_file" });
+      if (stateMod.get().activeCapture?.id === entry.sessionId) {
+        this.setTargetState(entry, "uploading", "uploading", "TIFF still processing — retrying completed-write check");
+      }
       return { ok: false, retryPending: true };
     }
     const initial = await this.reconcileTargetedCapture(entry);
-    if (initial.accepted) return this.completeTargetedCapture(entry, initial.capture);
+    if (initial.accepted) {
+      if (entry.stagingId) {
+        const reconciled = await server.finaliseStagedCaptureEvidence(entry.sessionId, lide400.deviceId(), entry.stagingId, {
+          onProgress: (progress) => this.updateTargetedUploadProgress(entry, progress),
+        });
+        if (reconciled.ok) {
+          return this.completeTargetedCapture(entry, {
+            certificateNumber: reconciled.body?.certId || initial.capture?.certificateNumber || entry.certId,
+            cardRegistered: reconciled.body?.card_registered === true,
+          });
+        }
+        this.setCaptureUploadState(entry, entry.uploadProgress || null, {
+          status: "server_validating",
+          error: reconciled.body?.error || "MintVault is finishing accepted-evidence reconciliation",
+        });
+        this.addTargetedPending({ ...entry, phase: "upload", uploadAttempts: Number(entry.uploadAttempts || 0) + 1 });
+        return { ok: false, retryPending: true };
+      }
+      return this.completeTargetedCapture(entry, initial.capture);
+    }
     if (initial.unavailable) return { ok: false, retryPending: true };
     if (["failed", "expired", "cancelled"].includes(initial.state)) {
       return this.failTargetedCapture(entry, initial.capture?.failureReason || "Capture expired or was rejected — restart this side");
     }
     if (initial.state === "capturing") {
-      this.setTargetState(entry, "uploading", "uploading", "Server is finalising the image — checking again shortly");
+      this.setCaptureUploadState(entry, entry.uploadProgress || null, { status: "server_validating" });
+      if (stateMod.get().activeCapture?.id === entry.sessionId) {
+        this.setTargetState(entry, "uploading", "uploading", "Server is finalising the image — checking again shortly");
+      }
       return { ok: false, retryPending: true };
     }
     if (initial.state !== "claimed") return this.failTargetedCapture(entry, "Capture session is no longer available — restart this side");
 
+    let preparedTask = options.prepared || null;
     for (let attempt = Number(entry.uploadAttempts || 0); attempt <= TARGETED_RETRY_DELAYS_MS.length; attempt++) {
-      this.setTargetState({ ...entry, attempt: attempt + 1 }, "uploading", "uploading", attempt ? `Upload interrupted — retrying ${attempt}/${TARGETED_RETRY_DELAYS_MS.length}` : null);
+      const attemptEntry = { ...entry, attempt: attempt + 1 };
+      this.setCaptureUploadState(attemptEntry, attemptEntry.uploadProgress || null, { status: "uploading" });
+      if (stateMod.get().activeCapture?.id === entry.sessionId) {
+        this.setTargetState(attemptEntry, "uploading", "uploading", attempt ? `Upload interrupted — retrying ${attempt}/${TARGETED_RETRY_DELAYS_MS.length}` : null);
+      }
       let uploaded;
+      let uploadEntry = entry;
       const uploadStartedAt = Date.now();
       this.logCaptureStage(entry, "upload_started", { attempt: attempt + 1 });
       try {
-        uploaded = await server.uploadCaptureEvidence(entry.sessionId, lide400.deviceId(), entry.filePath, entry.provenance, {
-          onProgress: (progress) => this.updateTargetedUploadProgress(entry, progress),
-        });
+        if (!preparedTask) {
+          preparedTask = await server.prepareCaptureEvidenceUpload(entry.sessionId, lide400.deviceId(), entry.filePath, entry.provenance, {
+            onProgress: (progress) => this.updateTargetedUploadProgress(entry, progress),
+          });
+        }
+        if (preparedTask.ok) {
+          uploadEntry = this.releasePhysicalTargetForBackgroundUpload(entry, preparedTask);
+          uploaded = await server.finalisePreparedCaptureEvidenceUpload(uploadEntry.sessionId, lide400.deviceId(), uploadEntry.filePath, preparedTask, {
+            onProgress: (progress) => this.updateTargetedUploadProgress(uploadEntry, progress),
+          });
+        } else {
+          uploaded = preparedTask;
+        }
       } catch (error) {
         uploaded = { ok: false, status: 0, body: { error: error.message || String(error) } };
+      } finally {
+        preparedTask = null;
       }
       if (uploaded.ok) {
-        return this.completeTargetedCapture(entry, {
-          certificateNumber: uploaded.body?.certId || entry.certId,
+        return this.completeTargetedCapture(uploadEntry, {
+          certificateNumber: uploaded.body?.certId || uploadEntry.certId,
           cardRegistered: uploaded.body?.card_registered === true,
         });
       }
-      this.logCaptureStage(entry, "upload_response_lost_or_rejected", { attempt: attempt + 1, status: uploaded.status, elapsedMs: Date.now() - uploadStartedAt });
-      const reconciled = await this.reconcileTargetedCapture(entry);
-      if (reconciled.accepted) return this.completeTargetedCapture(entry, reconciled.capture);
-      if (!this.isTransientCaptureFailure(uploaded)) return this.failTargetedCapture(entry, uploaded.body?.error || `Image rejected — HTTP ${uploaded.status}`);
-      if (["failed", "expired", "cancelled"].includes(reconciled.state)) return this.failTargetedCapture(entry, reconciled.capture?.failureReason || "Capture rejected — restart this side");
+      this.logCaptureStage(uploadEntry, "upload_response_lost_or_rejected", { attempt: attempt + 1, status: uploaded.status, elapsedMs: Date.now() - uploadStartedAt });
+      const reconciled = await this.reconcileTargetedCapture(uploadEntry);
+      if (reconciled.accepted) {
+        const retryEntry = { ...uploadEntry, phase: "upload", uploadAttempts: attempt + 1 };
+        this.addTargetedPending(retryEntry);
+        this.setCaptureUploadState(retryEntry, retryEntry.uploadProgress || null, {
+          status: "server_validating",
+          error: uploaded.body?.error || "MintVault accepted the evidence bytes; retrying final reconciliation",
+        });
+        return { ok: false, retryPending: true };
+      }
+      if (!this.isTransientCaptureFailure(uploaded)) return this.failTargetedCapture(uploadEntry, uploaded.body?.error || `Image rejected — HTTP ${uploaded.status}`);
+      if (["failed", "expired", "cancelled"].includes(reconciled.state)) return this.failTargetedCapture(uploadEntry, reconciled.capture?.failureReason || "Capture rejected — restart this side");
       if (reconciled.state === "capturing" || reconciled.unavailable) {
-        this.addTargetedPending({ ...entry, phase: "upload", uploadAttempts: attempt + 1 });
+        this.addTargetedPending({ ...uploadEntry, phase: "upload", uploadAttempts: attempt + 1 });
         return { ok: false, retryPending: true };
       }
       if (attempt === TARGETED_RETRY_DELAYS_MS.length) {
-        this.addTargetedPending({ ...entry, phase: "upload", uploadAttempts: 0, retryAfter: Date.now() + 60_000 });
-        stateMod.set({ state: "error", activeCapture: null, lastError: "Upload interrupted — keeping this accepted side for safe retry" });
+        const retryEntry = { ...uploadEntry, phase: "upload", uploadAttempts: 0, retryAfter: Date.now() + 60_000 };
+        this.addTargetedPending(retryEntry);
+        this.setCaptureUploadState(retryEntry, retryEntry.uploadProgress || null, {
+          status: "retry_scheduled",
+          retryAfter: retryEntry.retryAfter,
+          error: uploaded.body?.error || "Upload interrupted",
+        });
+        const ownsActive = stateMod.get().activeCapture?.id === entry.sessionId;
+        stateMod.set({
+          ...(ownsActive ? { state: "error", activeCapture: null } : {}),
+          lastError: "Upload interrupted — keeping this accepted side for safe retry",
+        });
         this.emitState();
         return { ok: false, retryPending: true };
       }
       await this.sleep(TARGETED_RETRY_DELAYS_MS[attempt]);
     }
     return { ok: false, retryPending: true };
+  }
+
+  startBackgroundTargetedUpload(entry, options = {}) {
+    if (!entry?.sessionId) return { ok: false, error: "No capture session to upload" };
+    if (this.targetUploadWorkers.has(entry.sessionId)) {
+      return { ok: true, alreadyRunning: true };
+    }
+    const workerEntry = { ...entry, phase: "upload" };
+    this.setCaptureUploadState(workerEntry, workerEntry.uploadProgress || null, { status: "queued" });
+    const worker = (async () => {
+      try {
+        await this.uploadTargetedCapture(workerEntry, options);
+      } catch (error) {
+        const reason = error?.message || String(error);
+        this.log(`background upload failed for ${workerEntry.sessionId}: ${reason}`, "error");
+        const retryEntry = { ...workerEntry, phase: "upload", retryAfter: Date.now() + 60_000 };
+        try { this.addTargetedPending(retryEntry); } catch {}
+        this.setCaptureUploadState(retryEntry, retryEntry.uploadProgress || null, {
+          status: "retry_scheduled",
+          retryAfter: retryEntry.retryAfter,
+          error: reason,
+        });
+      } finally {
+        this.targetUploadWorkers.delete(workerEntry.sessionId);
+      }
+    })();
+    this.targetUploadWorkers.set(entry.sessionId, worker);
+    return { ok: true, backgroundUpload: true };
   }
 
   async restorePreviewCandidate(entry) {
@@ -1482,13 +1660,43 @@ class Watcher extends EventEmitter {
       }
       if (entry.phase === "upload") {
         if (!entry.filePath || !fs.existsSync(entry.filePath)) {
+          const reason = "Accepted local TIFF is missing after restart; this side must be re-armed and rescanned";
+          const released = Boolean(entry.stagingId || entry.serverUploadTaskAcceptedAt);
+          if (released) {
+            const failed = await server.failCapture(entry.sessionId, lide400.deviceId(), reason);
+            const serverTerminal = failed.ok && (
+              failed.body?.terminalized === true ||
+              failed.body?.accepted === true ||
+              failed.body?.state === "failed" ||
+              failed.body?.state === "captured"
+            );
+            if (serverTerminal) {
+              this.failTargetedCapture(entry, reason);
+              return true;
+            }
+            const retryEntry = { ...entry, retryAfter: Date.now() + 60_000 };
+            this.addTargetedPending(retryEntry);
+            this.setCaptureUploadState(retryEntry, entry.uploadProgress || null, {
+              status: "lost_local_master",
+              retryAfter: retryEntry.retryAfter,
+              error: failed.body?.error || reason,
+            });
+            return true;
+          }
           this.removeTargetedPending(entry.sessionId);
           continue;
         }
-        if (Number(entry.retryAfter || 0) > Date.now()) return true;
-        this.targetCaptureInFlight = true;
-        try { await this.uploadTargetedCapture(entry); } finally { this.targetCaptureInFlight = false; }
-        return true;
+        const retryAfter = Number(entry.retryAfter || 0);
+        if (retryAfter > Date.now()) {
+          this.setCaptureUploadState(entry, entry.uploadProgress || null, {
+            status: "retry_scheduled",
+            retryAfter,
+          });
+          setTimeout(() => this.startBackgroundTargetedUpload({ ...entry, retryAfter: null }), Math.min(retryAfter - Date.now(), 60_000));
+          continue;
+        }
+        this.startBackgroundTargetedUpload(entry);
+        continue;
       }
       const kept = await this.keepTargetAlive(entry);
       if (!kept.ok) return true;
@@ -1496,8 +1704,7 @@ class Watcher extends EventEmitter {
         try {
           const restored = await this.restorePreviewCandidate(kept.entry);
           if (restored.phase === "upload") {
-            this.targetCaptureInFlight = true;
-            try { await this.uploadTargetedCapture(restored); } finally { this.targetCaptureInFlight = false; }
+            this.startBackgroundTargetedUpload(restored);
           }
         }
         catch (error) { this.setTargetState(kept.entry, "preview_error", "preview_error", error.message || "Preview unavailable — Rescan this side"); }
@@ -1978,9 +2185,29 @@ class Watcher extends EventEmitter {
       }
       const upload = { ...assessed, phase: "upload", uploadAttempts: 0, retryAfter: null };
       this.addTargetedPending(upload);
-      this.setTargetState(upload, "uploading", "uploading", "Placement-approved Scan accepted this TIFF; uploading authoritative evidence");
-      this.logCaptureStage(upload, "scan_accepted_upload_queued", { elapsedMs: Date.now() - startedAt });
-      return await this.uploadTargetedCapture(upload);
+      this.setTargetState(upload, "uploading", "uploading", "Placement-approved Scan accepted this TIFF; requesting MintVault upload task");
+      this.logCaptureStage(upload, "scan_accepted_requesting_upload_task", { elapsedMs: Date.now() - startedAt });
+      const latest = await this.reconcileTargetedCapture(upload);
+      if (latest.accepted) return this.completeTargetedCapture(upload, latest.capture);
+      if (["failed", "expired", "cancelled"].includes(latest.state)) {
+        return this.expireTargetedCapture(
+          upload,
+          latest.capture?.failureReason || "Capture target expired or changed before MintVault granted an upload task"
+        );
+      }
+      const prepared = await server.prepareCaptureEvidenceUpload(upload.sessionId, lide400.deviceId(), upload.filePath, upload.provenance, {
+        onProgress: (progress) => this.updateTargetedUploadProgress(upload, progress),
+      });
+      if (!prepared.ok) {
+        const reason = prepared.body?.error || `MintVault did not accept the upload task — HTTP ${prepared.status}`;
+        this.setTargetState(upload, "uploading", "uploading", `${reason} — BACK will remain locked until this task is accepted`);
+        this.logCaptureStage(upload, "upload_task_refused", { status: prepared.status, reason });
+        return { ok: false, error: reason, retryPending: this.isTransientCaptureFailure(prepared) };
+      }
+      const released = this.releasePhysicalTargetForBackgroundUpload(upload, prepared);
+      this.logCaptureStage(released, "scan_accepted_background_upload_started", { elapsedMs: Date.now() - startedAt });
+      this.startBackgroundTargetedUpload(released, { prepared });
+      return { ok: true, backgroundUpload: true, certId: released.certId, side: released.side, sessionId: released.sessionId };
     } catch (error) {
       const reason = error?.message || String(error);
       const staged = this.activeTargetEntry();

@@ -20,6 +20,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { readFileSync } from "node:fs";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -112,6 +113,7 @@ async function seedMintVaultTables(): Promise<void> {
     side text not null,
     state varchar(16) not null CHECK (state IN ('armed','claimed','capturing','captured','failed','expired','cancelled')),
     failure_reason text,
+    physical_released boolean not null default false,
     station_id uuid,
     workstation_id text,
     expires_at timestamptz not null default now() + interval '10 minutes'
@@ -372,6 +374,21 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     expect(await settle(cancel(f, finalising.cardJobId))).toEqual({ ok: false, code: "CAPTURE_IN_PROGRESS" });
   });
 
+  it("serializes cancellation against a concurrent scanner finalisation before refunding", () => {
+    const src = readFileSync("server/partner/card-job-cancellation.ts", "utf8");
+    const advisory = src.indexOf("pg_advisory_xact_lock");
+    const lock = src.indexOf("await lockActiveCaptureSessionsForCancellation(client, job.certificateId)");
+    const assert = src.indexOf("await assertNothingCaptured(client, { certificateId: job.certificateId");
+    const release = src.indexOf("await releaseReservationOnce(client");
+    expect(src).toContain("hashLockKey(`scanner-capture-certificate:${certificateId}`)");
+    expect(src).toMatch(/state IN \('armed', 'claimed', 'capturing'\)[\s\S]*FOR UPDATE/);
+    expect(advisory).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(-1);
+    expect(advisory).toBeLessThan(lock);
+    expect(assert).toBeGreaterThan(lock);
+    expect(release).toBeGreaterThan(assert);
+  });
+
   // ---- CANCEL4b -----------------------------------------------------------------------------
   it("makes an outstanding armed target terminal so a cancelled card cannot be photographed", async () => {
     const f = await makeTenant("cancel4b");
@@ -386,9 +403,10 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     const result = await cancel(f, job.cardJobId);
 
     expect(result.cancelledCaptureSessions).toBe(1);
-    const session = await admin.query(`SELECT state, failure_reason FROM scanner_capture_sessions WHERE certificate_id=$1`, [
-      job.certificateId,
-    ]);
+    const session = await admin.query(
+      `SELECT state, failure_reason FROM scanner_capture_sessions WHERE certificate_id=$1`,
+      [job.certificateId]
+    );
     expect(session.rows[0].state).toBe("cancelled");
     expect(session.rows[0].failure_reason).toContain("cancelled");
   });
@@ -425,7 +443,8 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     const db = await import("../server/partner/db");
     const found = await db.withPartnerAdminTenantTransaction(
       { tenantId: f.tenantId, locationId: f.locationId },
-      (client) => lifecycle.findCardJobForCertificate(client, { tenantId: f.tenantId, locationId: null }, job.certificateId)
+      (client) =>
+        lifecycle.findCardJobForCertificate(client, { tenantId: f.tenantId, locationId: null }, job.certificateId)
     );
     expect(found).toBeNull();
   });
@@ -443,7 +462,9 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
-    const releases = [first, second].filter((r) => r.ok && (r.value as { reservationReleased: boolean }).reservationReleased);
+    const releases = [first, second].filter(
+      (r) => r.ok && (r.value as { reservationReleased: boolean }).reservationReleased
+    );
     expect(releases).toHaveLength(1);
     expect(await availableFor(f.tenantId)).toBe(5);
     expect(await reservedFor(f.tenantId)).toBe(0);

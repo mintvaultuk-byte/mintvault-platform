@@ -6321,12 +6321,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
        */
       const bindable = checkNfcBindable(target);
       if (!bindable.ok) {
-        return res
-          .status(bindable.status)
-          .json({
-            error: bindable.error,
-            ...(bindable.refusal === "not_approved" ? { code: "NFC_NOT_APPROVED" } : {}),
-          });
+        return res.status(bindable.status).json({
+          error: bindable.error,
+          ...(bindable.refusal === "not_approved" ? { code: "NFC_NOT_APPROVED" } : {}),
+        });
       }
 
       // Operator attribution. `writtenBy` arrived from the request body and NO client ever sent it,
@@ -10367,7 +10365,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const certificateId = Number.parseInt(String(req.params.id), 10);
       const row = await db.execute(sql`
         SELECT id, certificate_id, card_id, submission_item_id, submission_id, side, workstation_id,
-               scanner_profile_version, state, claimed_by_device_id, recapture, failure_reason,
+               scanner_profile_version, state, claimed_by_device_id, physical_released, recapture, failure_reason,
                created_at, claimed_at, captured_at, expires_at
         FROM scanner_capture_sessions
         WHERE id = ${String(req.params.sessionId)} AND certificate_id = ${certificateId}
@@ -10386,12 +10384,15 @@ Defects (admin-confirmed): ${defectLines}`;
     async (req, res) => {
       try {
         const { failScannerCapture } = await import("./scanner-capture-service");
-        await failScannerCapture(
+        const result = await failScannerCapture(
           String(req.params.sessionId),
           req.scannerStation?.code ?? req.body?.device_id,
           String(req.body?.reason || "Local scanner capture failed")
         );
-        return res.status(204).end();
+        if (!result.terminalized && !result.accepted) {
+          return res.status(409).json({ ok: false, ...result });
+        }
+        return res.json({ ok: true, ...result });
       } catch (error: any) {
         return res.status(400).json({ error: error?.message || "Unable to mark scanner capture failed" });
       }
@@ -10461,10 +10462,30 @@ Defects (admin-confirmed): ${defectLines}`;
           authenticatedStationId: req.scannerStation?.id ?? null,
         });
         if (prepared.alreadyAccepted) {
-          return res.json({ ok: true, already_accepted: true });
+          const { getScannerCaptureStatus } = await import("./scanner-capture-service");
+          const status = await getScannerCaptureStatus(sessionId, req.scannerStation?.code ?? req.body?.device_id);
+          const { reconcileAcceptedScannerEvidence } = await import("./scanner-evidence-finalisation");
+          const reconciled = await reconcileAcceptedScannerEvidence({
+            session: status.session,
+            stagingId,
+            trusted: {
+              stationId: req.scannerStation?.id ?? null,
+              tenantId: req.scannerStation?.tenantId ?? null,
+              locationId: req.scannerStation?.locationId ?? null,
+              actorId: req.scannerOperator?.userId ?? status.session.actorId,
+            },
+          });
+          return res.json({
+            ok: true,
+            already_accepted: true,
+            certId: status.session.certificateNumber,
+            side: status.session.side,
+            raw_uploaded: true,
+            reconciliation_complete: true,
+            card_registered: reconciled.cardRegistered,
+          });
         }
-        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } =
-          await import("./scanner-capture-service");
+        const { beginScannerCapture } = await import("./scanner-capture-service");
         activeSession = await beginScannerCapture(sessionId, req.scannerStation?.code ?? req.body?.device_id);
         const { getR2Buffer } = await import("./r2");
         const stagedTiff = await getR2Buffer(prepared.staging.objectKey);
@@ -10476,7 +10497,7 @@ Defects (admin-confirmed): ${defectLines}`;
         if (actualHash !== prepared.staging.expectedSha256) {
           throw new Error("Staged TIFF hash does not match the accepted candidate");
         }
-        const { finaliseScannerEvidence, recordAcceptedScannerEvidence } =
+        const { finaliseScannerEvidence, reconcileAcceptedScannerEvidence } =
           await import("./scanner-evidence-finalisation");
         const evidence = await finaliseScannerEvidence({
           session: activeSession,
@@ -10491,13 +10512,10 @@ Defects (admin-confirmed): ${defectLines}`;
           },
         });
         evidenceCommitted = true;
-        const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
-        await enqueueScannerProcessing(activeSession.certificateId, activeSession.stationId);
-        await finishScannerCapture(sessionId, true);
-        const cardRegistered = await isScannerCaptureCardRegistered(activeSession.certificateId);
-        await recordAcceptedScannerEvidence({
+        const reconciled = await reconcileAcceptedScannerEvidence({
           session: activeSession,
           evidence,
+          stagingId,
           trusted: {
             stationId: req.scannerStation?.id ?? null,
             tenantId: req.scannerStation?.tenantId ?? null,
@@ -10505,20 +10523,21 @@ Defects (admin-confirmed): ${defectLines}`;
             actorId: req.scannerOperator?.userId ?? activeSession.actorId,
           },
         });
-        const { completeScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
-        await completeScannerEvidenceFinalisation(stagingId);
         return res.status(201).json({
           ok: true,
           certId: activeSession.certificateNumber,
           side: activeSession.side,
           raw_uploaded: true,
-          card_registered: cardRegistered,
+          reconciliation_complete: true,
+          card_registered: reconciled.cardRegistered,
         });
       } catch (error: any) {
         const reason = error?.message || "staged scanner capture rejected";
         if (!evidenceCommitted) {
           const retryable =
-            /(timeout|timed out|temporar|network|socket|econn|eai_again|r2|object storage|unavailable)/i.test(reason);
+            /(timeout|timed out|temporar|network|socket|econn|eai_again|r2|object storage|unavailable|until an immutable front master exists)/i.test(
+              reason
+            );
           try {
             const { failScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
             await failScannerEvidenceFinalisation(stagingId, reason, retryable);
@@ -10578,9 +10597,8 @@ Defects (admin-confirmed): ${defectLines}`;
          * only required to agree with it. Both evidence paths must derive it the same way or the
          * weaker one becomes the way in.
          */
-        const { authoritativeRegionForSession, assertDeclaredRegionMatchesAuthority } = await import(
-          "./lib/lide400-capture-authority"
-        );
+        const { authoritativeRegionForSession, assertDeclaredRegionMatchesAuthority } =
+          await import("./lib/lide400-capture-authority");
         const authoritativeRegion = authoritativeRegionForSession(session);
         assertDeclaredRegionMatchesAuthority(provenance.scanAreaMm, authoritativeRegion);
         // Same commit-time pairing check as the staged path — see scanner-evidence-finalisation.ts.

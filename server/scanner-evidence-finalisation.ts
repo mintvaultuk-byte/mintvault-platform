@@ -17,6 +17,73 @@ export type FinalisedScannerEvidence = {
   frameAssessment: Awaited<ReturnType<typeof import("./lib/lide400-card-frame").assessLide400CardFrame>>;
 };
 
+function parseCaptureMetadata(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function textMetadata(metadata: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+async function loadAcceptedScannerEvidence(session: ScannerCaptureSession): Promise<FinalisedScannerEvidence> {
+  const found = await db.execute(sql`
+    SELECT sha256, byte_length, pixel_width, pixel_height, bit_depth, dpi, format, capture_metadata
+      FROM certificate_image_evidence
+     WHERE certificate_id = ${session.certificateId}
+       AND side = ${session.side}
+       AND is_current = true
+       AND capture_metadata ->> 'captureSessionId' = ${session.id}
+     LIMIT 1`);
+  const row = found.rows[0] as Record<string, unknown> | undefined;
+  if (!row) throw new Error("Accepted scanner evidence is not available for reconciliation");
+  const metadata = parseCaptureMetadata(row.capture_metadata);
+  return {
+    inspection: {
+      sha256: String(row.sha256),
+      byteLength: Number(row.byte_length),
+      width: Number(row.pixel_width),
+      height: Number(row.pixel_height),
+      bitDepth: row.bit_depth == null ? null : Number(row.bit_depth),
+      dpi: row.dpi == null ? null : Number(row.dpi),
+      format: String(row.format),
+    } as FinalisedScannerEvidence["inspection"],
+    provenance: {
+      scannerDeviceId: textMetadata(metadata, "scannerDeviceId", "scanner_device_id") ?? "",
+      scannerModel: textMetadata(metadata, "scannerModel", "scanner_model") ?? "",
+      profileVersion:
+        textMetadata(metadata, "profileVersion", "scanner_profile_version") ?? session.scannerProfileVersion,
+      workstationId: textMetadata(metadata, "workstationId") ?? session.workstationId,
+      scanAreaMm: metadata.declaredScanAreaMm ?? metadata.scanAreaMm ?? null,
+    } as FinalisedScannerEvidence["provenance"],
+    frameAssessment: (metadata.cardFrameAssessment ?? null) as FinalisedScannerEvidence["frameAssessment"],
+  };
+}
+
+async function scannerAcceptanceAuditExists(session: ScannerCaptureSession): Promise<boolean> {
+  const found = await db.execute(sql`
+    SELECT 1
+      FROM audit_log
+     WHERE entity_type = 'certificate'
+       AND entity_id = ${String(session.certificateId)}
+       AND action = 'scanner_capture_accepted'
+       AND details ->> 'capture_session_id' = ${session.id}
+     LIMIT 1`);
+  return found.rows.length > 0;
+}
+
 /**
  * The sole promotion boundary from untrusted bytes (multipart compatibility
  * body or an R2 staging object) into immutable scanner evidence.  It derives
@@ -129,29 +196,31 @@ export async function recordAcceptedScannerEvidence(input: {
   evidence: FinalisedScannerEvidence;
   trusted: TrustedCapturePrincipal;
 }): Promise<void> {
-  await storage.writeAuditLog(
-    "certificate",
-    String(input.session.certificateId),
-    "scanner_capture_accepted",
-    "scanner",
-    {
-      capture_session_id: input.session.id,
-      side: input.session.side,
-      card_id: input.session.cardId,
-      submission_item_id: input.session.submissionItemId,
-      submission_id: input.session.submissionId,
-      workstation_id: input.session.workstationId,
-      station_id: input.trusted.stationId ?? input.session.stationId,
-      tenant_id: input.trusted.tenantId,
-      location_id: input.trusted.locationId,
-      actor_id: input.trusted.actorId ?? input.session.actorId,
-      scanner_device_id: input.evidence.provenance.scannerDeviceId,
-      scanner_model: input.evidence.provenance.scannerModel,
-      scanner_profile_version: input.evidence.provenance.profileVersion,
-      sha256: input.evidence.inspection.sha256,
-      recapture: input.session.recapture,
-    }
-  );
+  if (!(await scannerAcceptanceAuditExists(input.session))) {
+    await storage.writeAuditLog(
+      "certificate",
+      String(input.session.certificateId),
+      "scanner_capture_accepted",
+      "scanner",
+      {
+        capture_session_id: input.session.id,
+        side: input.session.side,
+        card_id: input.session.cardId,
+        submission_item_id: input.session.submissionItemId,
+        submission_id: input.session.submissionId,
+        workstation_id: input.session.workstationId,
+        station_id: input.trusted.stationId ?? input.session.stationId,
+        tenant_id: input.trusted.tenantId,
+        location_id: input.trusted.locationId,
+        actor_id: input.trusted.actorId ?? input.session.actorId,
+        scanner_device_id: input.evidence.provenance.scannerDeviceId,
+        scanner_model: input.evidence.provenance.scannerModel,
+        scanner_profile_version: input.evidence.provenance.profileVersion,
+        sha256: input.evidence.inspection.sha256,
+        recapture: input.session.recapture,
+      }
+    );
+  }
 
   /*
    * ADVANCE THE PARTNER CARD JOB — the bridge from capture to grading.
@@ -166,4 +235,28 @@ export async function recordAcceptedScannerEvidence(input: {
    */
   const { advanceCardJobAfterCaptureSafely } = await import("./partner/card-job-lifecycle");
   await advanceCardJobAfterCaptureSafely(input.session.certificateId);
+}
+
+export async function reconcileAcceptedScannerEvidence(input: {
+  session: ScannerCaptureSession;
+  evidence?: FinalisedScannerEvidence;
+  trusted: TrustedCapturePrincipal;
+  stagingId?: string | null;
+}): Promise<{ cardRegistered: boolean }> {
+  const evidence = input.evidence ?? (await loadAcceptedScannerEvidence(input.session));
+  const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
+  const { finishScannerCapture, isScannerCaptureCardRegistered } = await import("./scanner-capture-service");
+  await enqueueScannerProcessing(input.session.certificateId, input.session.stationId);
+  await finishScannerCapture(input.session.id, true);
+  const cardRegistered = await isScannerCaptureCardRegistered(input.session.certificateId);
+  await recordAcceptedScannerEvidence({
+    session: input.session,
+    evidence,
+    trusted: input.trusted,
+  });
+  if (input.stagingId) {
+    const { completeScannerEvidenceFinalisation } = await import("./scanner-evidence-staging-service");
+    await completeScannerEvidenceFinalisation(input.stagingId);
+  }
+  return { cardRegistered };
 }

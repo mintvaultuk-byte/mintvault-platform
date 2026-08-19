@@ -235,6 +235,10 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // because it genuinely depends on the core schema, not to make a list balance.
   "0091_capture_session_calibration_snapshot",
   "0092_partner_station_calibrate_permission",
+  // APPLICATION scope: replaces scanner_capture_sessions' physical-station partial unique index and
+  // adds the physical_released column. It cannot run on a partner-only database because the scanner
+  // capture table is a core-certificate dependency.
+  "0094_scanner_capture_physical_release",
 ] as const;
 
 /**

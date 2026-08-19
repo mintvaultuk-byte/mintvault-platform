@@ -924,7 +924,11 @@ test("an in-flight arm flag is never resurrected from a dead process", (t) => {
 test("a card between an accepted side and its next armed side reads as PROGRESS, not a fault", () => {
   assert.match(renderer, /const awaitingNextSide =/);
   assert.match(renderer, /Boolean\(state\.armingNextSide\)/);
+  assert.match(renderer, /state\.lastQueuedCapture && !state\.lastQueuedCapture\.cardRegistered && openCard/);
   assert.match(renderer, /state\.lastAcceptedCapture && !state\.lastAcceptedCapture\.cardRegistered && openCard/);
-  // The saved side is NAMED, so the operator can see their scan counted.
-  assert.match(renderer, /is saved\. MintVault is arming the next side for this same card/);
+  // The locally captured/queued side and the server-saved side are NAMED separately, so the operator
+  // can see which boundary their scan has crossed without mistaking upload-task grant for evidence
+  // finalisation.
+  assert.match(renderer, /is captured locally and queued to MintVault/);
+  assert.match(renderer, /is saved by MintVault\. MintVault is arming the next side for this same card/);
 });

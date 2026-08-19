@@ -852,7 +852,9 @@ export function partnerStationRouter(): Router {
           workstationId: station.code,
           stationId: station.id,
           actorId: req.partner!.userId,
-          recapture: req.body?.recapture === true,
+          // Generic Partner arming is not a recapture authority. FIX/repair flows must invalidate
+          // the exact side first, then arm through their own server-owned path.
+          recapture: false,
           scannerProfileVersion: CANON_LIDE_400_PROFILE.version,
         });
         res.status(201).json({ capture });

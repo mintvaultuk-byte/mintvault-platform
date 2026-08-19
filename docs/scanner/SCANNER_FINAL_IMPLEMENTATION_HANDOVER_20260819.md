@@ -219,6 +219,71 @@ environment aggregates, not a claim about a particular Scanner operator.
 - Card Job start/reservation and zero-credit server authority are already strong and locally proven, including a real-PostgreSQL 5,000-way one-credit start storm. This is not a 5,000-station end-to-end capture/load proof.
 - Station identity/tenant/location/capability binding is source- and test-proven. Real staging onboarding, password delivery, Stripe TEST, capacity, packaged app, clean-Mac, and physical capture remain separate acceptance gates.
 
+## SFAP-015 background Front→Back authority pass — 2026-08-19
+
+This pass implements the locked SFAP-015 boundary in source: a side may release the single physical
+Canon target only after the station has a frame-safe TIFF, durable local queue record, content hash,
+and a server-minted direct staging upload task. That released side remains the owner of its upload
+and finalisation retries, but no longer monopolises the glass. BACK can therefore be armed for the
+same Card Job/MV/certificate/station while FRONT uploads/finalises in the background. READY_TO_GRADE
+still depends only on both sides becoming server-validated immutable evidence.
+
+Key implementation points:
+
+- `scanner_capture_sessions.physical_released` separates physical scanner ownership from network
+  upload/finalisation ownership.
+- The station unique index is replaced so only non-released active sessions occupy the physical
+  station slot. This replacement is intentionally protected by migration `0094` and currently
+  requires the owner-approved destructive/index-replacement migration path.
+- Capture authority and capture-session creation count same-station released sides as present for
+  the purpose of arming the remaining side, but do not count them as grading evidence.
+- Same Card Job/MV/certificate/location/station affinity is enforced in both directions and across
+  same-side recapture; generic Partner browser arming no longer accepts caller-supplied `recapture`.
+- Cancellation and arming now share a per-certificate advisory transaction lock, closing the phantom
+  arm-after-empty-session-lock race before credit refund.
+- Staged finalisation has an idempotent reconciliation path for already-accepted evidence. The
+  client no longer deletes a local recovery task from status alone after a post-evidence 500; it
+  replays finalisation until reconciliation completes.
+- Lost-local-TIFF recovery keeps the queue unless the server explicitly proves the session is
+  terminal or accepted. A `capturing` server finalisation returns conflict/non-terminal, so the
+  recovery record remains instead of being silently discarded.
+- The Scanner renderer shows independent FRONT/BACK upload status and keeps queued FRONT preview
+  retrievable while BACK is active; late FRONT completion cannot replace BACK UI state.
+
+Focused and wider local proof after the hostile re-attack repairs:
+
+- `node --test test/server-client-tiff-upload.test.js test/station-active-card.test.js test/renderer-workflow.test.js`
+  in `scripts/scanner-app` — **74 passed, 0 failed**.
+- `npm test` in `scripts/scanner-app` — **166 passed, 0 failed**.
+- `npx vitest run tests/partner-card-job-authority.test.ts tests/partner-station-new-card.test.ts tests/partner-card-job-cancellation.test.ts tests/partner-card-job-output.test.ts tests/partner-card-job-reconciliation.test.ts tests/partner-pilot-concurrency.test.ts tests/partner-card-job-grading-bridge.test.ts tests/scanner-station-capture-boundary.test.ts tests/scanner-front-before-back.test.ts tests/partner-schema-parity.test.ts tests/scanner-evidence-staging-service.integration.test.ts tests/partner-credit-purchase.test.ts tests/partner-at21-grant-boundary.test.ts tests/stripe-environment-isolation.test.ts tests/partner-wallet-reservation-service.test.ts tests/partner-station-identity.test.ts tests/partner-station-fleet-control.test.ts`
+  — **194 passed, 2 skipped**.
+- `npm run check` — **passed**.
+- `npm run build` — **passed** with the existing PostCSS `from` warning.
+- Changed-file ESLint — **0 errors**, 59 legacy warnings in CommonJS/large scanner files.
+- `git diff --check` — **passed**.
+- `npx tsx scripts/db/lint-destructive-sql.ts migrations/0094_scanner_capture_physical_release.sql`
+  — **blocked as expected**: `DROP INDEX` is required to replace the old station uniqueness
+  invariant.
+
+Hostile re-attack results:
+
+- Native/Electron scanner review: **PASS**, source/test only; no physical Canon/Electron GUI proof.
+- Capture/session/evidence authority review: **PASS**, no remaining BLOCKER/HIGH; static/concurrency
+  review only.
+- Auth/payment/Card Job identity review: **PASS**, no remaining BLOCKER/HIGH; noted that a full
+  orchestrated PostgreSQL interleaving test is stronger future proof than the current source/DB
+  service coverage.
+
+Not claimed by this pass:
+
+- No staging deployment was performed because migration `0094` is intentionally blocked by the
+  destructive SQL linter until the protected index replacement is separately authorised.
+- No physical Canon acceptance was run.
+- No clean packaged Scanner application exists yet.
+- No 5,000-station/5,000-overlap scanner load run was executed. The existing real-PostgreSQL
+  5,000-way one-credit NEW storm remains credit/idempotency proof, not scanner-overlap scale proof.
+- Production remains untouched.
+
 ## Evidence recorded this turn
 
 - `git status`, branch, HEAD, `origin/main`, and recent graph were read.

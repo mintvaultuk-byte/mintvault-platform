@@ -1279,6 +1279,7 @@ app.whenReady().then(async () => {
   let lastSuccessState = false;
   let lastPositioningPreviewId = null;
   let lastArmedForAcceptance = null;
+  let lastArmedForQueuedCapture = null;
   watcher.on("state-changed", () => {
     pushStateToRenderer();
     const s = stateMod.get();
@@ -1315,10 +1316,25 @@ app.whenReady().then(async () => {
      * follow it.
      */
     const accepted = s.lastAcceptedCapture;
+    const queued = s.lastQueuedCapture;
+    if (
+      queued &&
+      queued.queuedAt &&
+      queued.queuedAt !== lastArmedForQueuedCapture &&
+      queued.side === "front" &&
+      !queued.cardRegistered &&
+      !s.activeCapture &&
+      s.openCardJob &&
+      s.openCardJob.cardJobId
+    ) {
+      lastArmedForQueuedCapture = queued.queuedAt;
+      void armNextOutstandingSide("upload task accepted");
+    }
     if (
       accepted &&
       accepted.acceptedAt &&
       accepted.acceptedAt !== lastArmedForAcceptance &&
+      accepted.side === "front" &&
       !accepted.cardRegistered &&
       !s.activeCapture &&
       s.openCardJob &&
