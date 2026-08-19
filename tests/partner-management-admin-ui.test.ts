@@ -88,7 +88,7 @@ describe("G5 list page source assertions", () => {
   it("uses the admin shell + admin session gate", () => {
     expect(src).toContain("AdminShell");
     expect(src).toContain("/api/admin/session");
-    expect(src).toContain("/admin/login?next=/admin/partner-network/partners");
+    expect(src).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
   });
   it("carries required data-testids (list, filters, table, create modal)", () => {
     for (const id of [

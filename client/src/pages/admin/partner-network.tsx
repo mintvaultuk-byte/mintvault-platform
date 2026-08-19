@@ -129,7 +129,7 @@ const RECOVER_CREDIT_HOLD_ACTION: ActionSpec = {
 };
 
 export default function PartnerNetworkOpsPage() {
-  const [, navigate] = useLocation();
+  const [pathname, navigate] = useLocation();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [filter, setFilter] = useState<Filter>({ page: 1 });
   const [selected, setSelected] = useState<string | null>(null);
@@ -165,8 +165,12 @@ export default function PartnerNetworkOpsPage() {
     };
   }, []);
   useEffect(() => {
-    if (authed === false) navigate("/admin/login?next=/admin/partner-network", { replace: true });
-  }, [authed, navigate]);
+    if (authed === false)
+      navigate(
+        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
+        { replace: true }
+      );
+  }, [authed, navigate, pathname]);
 
   const health = useQuery({
     queryKey: opsKeys.workerStatus(),

@@ -18,7 +18,17 @@ describe("Partner Network P8 workspace contract", () => {
     }
     expect(workspace).toContain('data-testid="pm-workspace-tabs"');
     expect(stations).toContain('data-testid="pn-workspace-tabs"');
-    for (const label of ["Overview", "Onboarding", "Cards", "Staff", "Locations", "Stations", "Credits", "Activity", "Security"]) {
+    for (const label of [
+      "Overview",
+      "Onboarding",
+      "Cards",
+      "Staff",
+      "Locations",
+      "Stations",
+      "Credits",
+      "Activity",
+      "Security",
+    ]) {
       expect(workspace).toContain(`"${label}"`);
     }
   });
@@ -34,9 +44,11 @@ describe("Partner Network P8 workspace contract", () => {
   it("keeps fleet-wide Stations read-only and sends lifecycle mutations only from a Partner context through canonical step-up", () => {
     expect(stations).toContain("Read-only fleet view");
     expect(stations).toContain("{partnerId && <th>Actions</th>}");
-    expect(stations).toContain("{partnerId && <td>");
+    expect(stations).toMatch(/\{partnerId && \(\s*<td>/);
     expect(stations).toContain("runAdminProtected");
-    expect(stations).toContain('apiRequest("POST", `${BASE}/${encodeURIComponent(action.stationCode)}/${action.route}`');
+    expect(stations).toContain(
+      'apiRequest("POST", `${BASE}/${encodeURIComponent(action.stationCode)}/${action.route}`'
+    );
     expect(stations).not.toContain("/api/partner/");
   });
 

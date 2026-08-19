@@ -66,7 +66,18 @@ const TABS = [
   "connector",
 ] as const;
 type TabKey = (typeof TABS)[number];
-const LEGACY_DETAIL_TABS = ["overview", "users", "locations", "profile", "contacts", "branding", "activity", "notes", "audit", "connector"] as const;
+const LEGACY_DETAIL_TABS = [
+  "overview",
+  "users",
+  "locations",
+  "profile",
+  "contacts",
+  "branding",
+  "activity",
+  "notes",
+  "audit",
+  "connector",
+] as const;
 const LEGACY_DETAIL_TAB_LABELS: Record<(typeof LEGACY_DETAIL_TABS)[number], string> = {
   overview: "Overview",
   users: "Users",
@@ -81,7 +92,17 @@ const LEGACY_DETAIL_TAB_LABELS: Record<(typeof LEGACY_DETAIL_TABS)[number], stri
 };
 
 /** The route contract for the one canonical Partner workspace. */
-const WORKSPACE_TABS = ["overview", "onboarding", "cards", "staff", "locations", "stations", "credits", "activity", "security"] as const;
+const WORKSPACE_TABS = [
+  "overview",
+  "onboarding",
+  "cards",
+  "staff",
+  "locations",
+  "stations",
+  "credits",
+  "activity",
+  "security",
+] as const;
 type WorkspaceTab = (typeof WORKSPACE_TABS)[number];
 const WORKSPACE_LABELS: Record<WorkspaceTab, string> = {
   overview: "Overview",
@@ -195,7 +216,8 @@ export default function PartnerManagementDetailPage() {
   const requestedWorkspaceTab = canonicalWorkspaceParams?.workspaceTab;
   const workspaceTab: WorkspaceTab = isWorkspaceTab(requestedWorkspaceTab) ? requestedWorkspaceTab : "overview";
   const [administrationTab, setAdministrationTab] = useState<TabKey | null>(null);
-  const tab: TabKey = administrationTab ?? (workspaceTab === "stations" ? "overview" : WORKSPACE_DETAIL_TABS[workspaceTab]);
+  const tab: TabKey =
+    administrationTab ?? (workspaceTab === "stations" ? "overview" : WORKSPACE_DETAIL_TABS[workspaceTab]);
   const isLegacyPath = pathname.startsWith("/admin/partner-network/partners/");
   // Canonical workspace URLs reject malformed identifiers locally. The older retained route is
   // deliberately left to its existing server-side not-found behaviour until its retirement date.
@@ -266,8 +288,12 @@ export default function PartnerManagementDetailPage() {
     };
   }, []);
   useEffect(() => {
-    if (authed === false) navigate(`/admin/login?next=/admin/partners/${partnerId}`, { replace: true });
-  }, [authed, navigate, partnerId]);
+    if (authed === false)
+      navigate(
+        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
+        { replace: true }
+      );
+  }, [authed, navigate, pathname]);
 
   const on = authed === true && validPartnerId;
   const detail = useQuery({
@@ -327,7 +353,10 @@ export default function PartnerManagementDetailPage() {
   // existing Staff workstation; this page never opens, approves, returns or rejects a grade.
   const partnerQueue = useQuery<{ queue: PartnerQueueItem[] }>({
     queryKey: ["/api/admin/grading-queue", { partnerId }],
-    queryFn: () => apiRequest("GET", `/api/admin/grading-queue?status=all&partnerId=${encodeURIComponent(partnerId)}`).then((r) => r.json()),
+    queryFn: () =>
+      apiRequest("GET", `/api/admin/grading-queue?status=all&partnerId=${encodeURIComponent(partnerId)}`).then((r) =>
+        r.json()
+      ),
     enabled: on && workspaceTab === "cards",
   });
 
@@ -698,12 +727,7 @@ export default function PartnerManagementDetailPage() {
           </div>
         )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
-          <AdminButton
-            size="sm"
-            variant="ghost"
-            onClick={() => navigate("/admin/partners")}
-            data-testid="pm-back"
-          >
+          <AdminButton size="sm" variant="ghost" onClick={() => navigate("/admin/partners")} data-testid="pm-back">
             ← Partners
           </AdminButton>
           <Badge variant={statusBadgeVariant(org.status)} testId="pm-detail-status">
@@ -724,19 +748,40 @@ export default function PartnerManagementDetailPage() {
 
         {isLegacyPath ? (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }} data-testid="pm-tabs">
-            {LEGACY_DETAIL_TABS.map((key) => <Chip key={key} active={tab === key} onClick={() => setAdministrationTab(key)} testId={`pm-tab-${key}`}>{LEGACY_DETAIL_TAB_LABELS[key]}</Chip>)}
+            {LEGACY_DETAIL_TABS.map((key) => (
+              <Chip key={key} active={tab === key} onClick={() => setAdministrationTab(key)} testId={`pm-tab-${key}`}>
+                {LEGACY_DETAIL_TAB_LABELS[key]}
+              </Chip>
+            ))}
           </div>
         ) : (
-          <nav aria-label="Partner workspace" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }} data-testid="pm-workspace-tabs">
+          <nav
+            aria-label="Partner workspace"
+            style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}
+            data-testid="pm-workspace-tabs"
+          >
             {WORKSPACE_TABS.map((key) => {
               const href = key === "overview" ? `/admin/partners/${partnerId}` : `/admin/partners/${partnerId}/${key}`;
-              return <Chip key={key} active={workspaceTab === key && !administrationTab} onClick={() => { setAdministrationTab(null); navigate(href); }} testId={`pm-workspace-tab-${key}`}>{WORKSPACE_LABELS[key]}</Chip>;
+              return (
+                <Chip
+                  key={key}
+                  active={workspaceTab === key && !administrationTab}
+                  onClick={() => {
+                    setAdministrationTab(null);
+                    navigate(href);
+                  }}
+                  testId={`pm-workspace-tab-${key}`}
+                >
+                  {WORKSPACE_LABELS[key]}
+                </Chip>
+              );
             })}
           </nav>
         )}
         {pathname.startsWith("/admin/partner-network/") && (
           <div role="status" style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>
-            This legacy Partner URL is retained for compatibility. Use the workspace navigation above for the canonical routes.
+            This legacy Partner URL is retained for compatibility. Use the workspace navigation above for the canonical
+            routes.
           </div>
         )}
 
@@ -751,11 +796,22 @@ export default function PartnerManagementDetailPage() {
             <PartnerDrilldown partnerId={partnerId} tab="submissions" />
             <div style={{ marginTop: 16 }} data-testid="pm-partner-qa">
               <div style={{ fontWeight: 600, marginBottom: 6 }}>QA review queue</div>
-              {partnerQueue.isLoading ? <div role="status">Loading Partner QA items…</div> : (partnerQueue.data?.queue ?? []).filter((item) => item.graderStatus === "pending_review").length === 0 ? <div>No Partner cards are awaiting QA review.</div> : (
+              {partnerQueue.isLoading ? (
+                <div role="status">Loading Partner QA items…</div>
+              ) : (partnerQueue.data?.queue ?? []).filter((item) => item.graderStatus === "pending_review").length ===
+                0 ? (
+                <div>No Partner cards are awaiting QA review.</div>
+              ) : (
                 <ul>
-                  {(partnerQueue.data?.queue ?? []).filter((item) => item.graderStatus === "pending_review").map((item) => (
-                    <li key={item.certId}><a href={`/admin/staff?certId=${item.certId}`} className="underline">Review {item.certIdStr} {item.cardName ? `— ${item.cardName}` : ""}</a></li>
-                  ))}
+                  {(partnerQueue.data?.queue ?? [])
+                    .filter((item) => item.graderStatus === "pending_review")
+                    .map((item) => (
+                      <li key={item.certId}>
+                        <a href={`/admin/staff?certId=${item.certId}`} className="underline">
+                          Review {item.certIdStr} {item.cardName ? `— ${item.cardName}` : ""}
+                        </a>
+                      </li>
+                    ))}
                 </ul>
               )}
             </div>
@@ -817,8 +873,21 @@ export default function PartnerManagementDetailPage() {
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Partner administration</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {(["profile", "contacts", "branding", "notes", "connector"] as const).map((key) => (
-                    <Chip key={key} active={false} onClick={() => setAdministrationTab(key)} testId={`pm-admin-tab-${key}`}>
-                      {{ profile: "Company Profile", contacts: "Contacts", branding: "Branding", notes: "Internal Notes", connector: "Connector Summary" }[key]}
+                    <Chip
+                      key={key}
+                      active={false}
+                      onClick={() => setAdministrationTab(key)}
+                      testId={`pm-admin-tab-${key}`}
+                    >
+                      {
+                        {
+                          profile: "Company Profile",
+                          contacts: "Contacts",
+                          branding: "Branding",
+                          notes: "Internal Notes",
+                          connector: "Connector Summary",
+                        }[key]
+                      }
                     </Chip>
                   ))}
                 </div>
@@ -830,7 +899,11 @@ export default function PartnerManagementDetailPage() {
         {(workspaceTab === "onboarding" || workspaceTab === "staff" || (isLegacyPath && tab === "users")) && (
           <Panel
             title={workspaceTab === "onboarding" ? "Onboarding access" : "Staff"}
-            sub={workspaceTab === "onboarding" ? "Owner invitation and login readiness." : "Partner membership and invitation management"}
+            sub={
+              workspaceTab === "onboarding"
+                ? "Owner invitation and login readiness."
+                : "Partner membership and invitation management"
+            }
             actions={
               <AdminButton size="sm" variant="gold" onClick={() => setUserOpen(true)} data-testid="pm-user-add-open">
                 Add user

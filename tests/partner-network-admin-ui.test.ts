@@ -92,7 +92,7 @@ describe("G4 ops page source assertions", () => {
   it("uses the existing admin shell + admin session gate (no new app)", () => {
     expect(src).toContain("AdminShell");
     expect(src).toContain("/api/admin/session");
-    expect(src).toContain("/admin/login?next=/admin/partner-network");
+    expect(src).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
   });
 
   it("carries the required data-testids for overview, records, detail, and reason modal", () => {

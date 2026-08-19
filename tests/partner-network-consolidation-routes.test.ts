@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { canonicalLegacyPartnerDestination } from "../client/src/lib/partner-network-legacy-redirect";
 
 const root = join(process.cwd());
 const app = readFileSync(join(root, "client/src/App.tsx"), "utf8");
@@ -22,11 +23,48 @@ describe("Partner Network P7 route contract", () => {
     expect(app.indexOf('path="/admin/partners/:partnerId/stations"')).toBeLessThan(partner);
   });
 
-  it("has one exposure-only feature flag and preserves legacy redirect state", () => {
+  it("has one exposure-only feature flag and preserves legacy redirect meaning", () => {
     expect(app).toContain("VITE_PARTNER_NETWORK_CONSOLIDATION");
     expect(app).toContain("window.location.search");
     expect(app).toContain("window.location.hash");
     expect(app).toContain("/admin/partner-network/partners/:partnerId");
+    expect(app).toContain("canonicalLegacyPartnerDestination");
+  });
+
+  it("translates emitted dashboard alerts to canonical workspace routes without dropping unrelated state", () => {
+    const partner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    expect(
+      canonicalLegacyPartnerDestination(
+        "/admin/partners",
+        "/admin/partners/dashboard",
+        `?partner=${partner}&tab=wallet&source=alert`,
+        "#credits"
+      )
+    ).toBe(`/admin/partners/${partner}/credits?source=alert#credits`);
+    expect(
+      canonicalLegacyPartnerDestination(
+        "/admin/partners",
+        "/admin/partners/dashboard",
+        `?partner=${partner}&tab=security`,
+        ""
+      )
+    ).toBe(`/admin/partners/${partner}/security`);
+    expect(
+      canonicalLegacyPartnerDestination(
+        "/admin/partners",
+        "/admin/partners/dashboard",
+        `?partner=${partner}&tab=staff`,
+        ""
+      )
+    ).toBe(`/admin/partners/${partner}/staff`);
+    expect(
+      canonicalLegacyPartnerDestination(
+        "/admin/partners",
+        "/admin/partners/dashboard",
+        `?partner=${partner}&tab=corrections`,
+        ""
+      )
+    ).toBeNull();
   });
 
   it("keeps QA in the existing Staff review path and adds no grade mutation", () => {

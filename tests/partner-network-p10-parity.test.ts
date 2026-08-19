@@ -8,6 +8,9 @@ const inventory = read("docs/partner/PARTNER_NETWORK_LEGACY_PARITY_INVENTORY.md"
 const connectorRoutes = read("server/partner/connector-admin-routes.ts");
 const stationRoutes = read("server/partner/station-admin-routes.ts");
 const management = read("client/src/pages/admin/partner-management.tsx");
+const overview = read("client/src/pages/admin/partner-network-overview.tsx");
+const detail = read("client/src/pages/admin/partner-management-detail.tsx");
+const dashboard = read("client/src/pages/admin/partner-dashboard.tsx");
 
 describe("Partner Network P10 parity and retirement contract", () => {
   it("preserves legacy redirect state and records application-only telemetry", () => {
@@ -18,8 +21,22 @@ describe("Partner Network P10 parity and retirement contract", () => {
     expect(app).not.toContain("legacy_route_redirected");
   });
 
+  it("keeps canonical direct destinations intact through the login continuation", () => {
+    for (const page of [overview, management, detail, dashboard]) {
+      expect(page).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
+    }
+  });
+
   it("records every required legacy surface and its authority outcome", () => {
-    for (const surface of ["Partner Master Dashboard", "Partner Management", "Partner detail", "Connector Operations", "WALLET-BACKFILL1", "Google Maps", "Fleet station"]) {
+    for (const surface of [
+      "Partner Master Dashboard",
+      "Partner Management",
+      "Partner detail",
+      "Connector Operations",
+      "WALLET-BACKFILL1",
+      "Google Maps",
+      "Fleet station",
+    ]) {
       expect(inventory).toContain(surface);
     }
     for (const outcome of ["MIGRATED", "REDIRECTED", "RETAINED"]) expect(inventory).toContain(outcome);
@@ -37,7 +54,7 @@ describe("Partner Network P10 parity and retirement contract", () => {
     expect(management).toContain("enabled: authed === true && showLegacyFleetControls");
     expect(management).toContain("const showSettingsControls = showLegacyFleetControls || isCanonicalSettings");
     expect(management).toContain("const showDirectory = showLegacyFleetControls || !isCanonicalSettings");
-    expect(management).toContain("{showSettingsControls && <Panel title=\"Partner Pilot Flags\"");
-    expect(management).toContain("{showDirectory && <Panel");
+    expect(management).toMatch(/\{showSettingsControls && \(\s*<Panel title="Partner Pilot Flags"/);
+    expect(management).toMatch(/\{showDirectory && \(\s*<Panel/);
   });
 });

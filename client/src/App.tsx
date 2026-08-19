@@ -12,6 +12,7 @@ import CookieBanner from "@/components/cookie-banner";
 import VaultVideoBg from "@/components/v2/vault-video-bg";
 import { PartnerSessionProvider } from "@/hooks/use-partner-session";
 import { PartnerRouteGuard } from "@/components/partner/partner-route-guard";
+import { canonicalLegacyPartnerDestination } from "@/lib/partner-network-legacy-redirect";
 
 // Critical-path pages — eagerly loaded
 import Home from "@/pages/home";
@@ -268,15 +269,20 @@ function PartnerNetworkRoute({
 
 function PartnerNetworkLegacyRoute({ canonical, children }: { canonical: string; children: React.ReactNode }) {
   const [pathname] = useLocation();
-  const suffix = `${window.location.search}${window.location.hash}`;
+  const destination = canonicalLegacyPartnerDestination(
+    canonical,
+    pathname,
+    window.location.search,
+    window.location.hash
+  );
   useEffect(() => {
-    if (PARTNER_NETWORK_CONSOLIDATION_ENABLED) {
+    if (PARTNER_NETWORK_CONSOLIDATION_ENABLED && destination) {
       // Route telemetry is an application log only. It is intentionally not an audit event:
       // following an old bookmark does not mutate partner, wallet, station or grading data.
-      console.info("[partner-network] legacy route redirected", { from: pathname, to: canonical });
+      console.info("[partner-network] legacy route redirected", { from: pathname, to: destination });
     }
-  }, [canonical, pathname]);
-  return PARTNER_NETWORK_CONSOLIDATION_ENABLED ? <Redirect to={`${canonical}${suffix}`} /> : <>{children}</>;
+  }, [destination, pathname]);
+  return PARTNER_NETWORK_CONSOLIDATION_ENABLED && destination ? <Redirect to={destination} /> : <>{children}</>;
 }
 
 function PageLoader() {
@@ -433,9 +439,7 @@ function Router() {
             <Route path="/dev/canonical-workstation" component={DevCanonicalWorkstationHarness} />
           )}
           {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
-          {import.meta.env.DEV && (
-            <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />
-          )}
+          {import.meta.env.DEV && <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />}
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />
           <Route path="/admin/graders" component={AdminStaffPage} />
@@ -472,55 +476,133 @@ function Router() {
               a Partner id is a UUID, so literals such as stations/infrastructure/settings must
               never be treated as an identifier or cause a Partner lookup. */}
           <Route path="/admin/partners/stations">
-            <PartnerNetworkRoute legacy="/admin/partners/dashboard"><AdminPartnerNetworkStationsPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute legacy="/admin/partners/dashboard">
+              <AdminPartnerNetworkStationsPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/infrastructure">
-            <PartnerNetworkRoute legacy="/admin/partner-network"><AdminPartnerNetworkPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute legacy="/admin/partner-network">
+              <AdminPartnerNetworkPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/settings">
-            <PartnerNetworkRoute legacy="/admin/partner-network/partners"><AdminPartnerManagementPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute legacy="/admin/partner-network/partners">
+              <AdminPartnerManagementPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/directory">
-            <PartnerNetworkRoute legacy="/admin/partner-network/partners"><AdminPartnerManagementPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute legacy="/admin/partner-network/partners">
+              <AdminPartnerManagementPage />
+            </PartnerNetworkRoute>
           </Route>
-          <Route path="/admin/partners/dashboard"><PartnerNetworkLegacyRoute canonical="/admin/partners"><AdminPartnerDashboardPage /></PartnerNetworkLegacyRoute></Route>
+          <Route path="/admin/partners/dashboard">
+            <PartnerNetworkLegacyRoute canonical="/admin/partners">
+              <AdminPartnerDashboardPage />
+            </PartnerNetworkLegacyRoute>
+          </Route>
           <Route path="/admin/partners/:partnerId/stations">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/stations$/, "/admin/partner-network/partners/$1")}><AdminPartnerNetworkStationsPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/stations$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerNetworkStationsPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/onboarding">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/onboarding$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/onboarding$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/cards">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/cards$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/cards$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/staff">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/staff$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/staff$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/locations">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/locations$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/locations$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/credits">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/credits$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/credits$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/activity">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/activity$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/activity$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/security">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\/([^/]+)\/security$/, "/admin/partner-network/partners/$1")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) =>
+                pathname.replace(/^\/admin\/partners\/([^/]+)\/security$/, "/admin/partner-network/partners/$1")
+              }
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId">
-            <PartnerNetworkRoute legacy={(pathname) => pathname.replace(/^\/admin\/partners\//, "/admin/partner-network/partners/")}><AdminPartnerManagementDetailPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute
+              legacy={(pathname) => pathname.replace(/^\/admin\/partners\//, "/admin/partner-network/partners/")}
+            >
+              <AdminPartnerManagementDetailPage />
+            </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners">
-            <PartnerNetworkRoute legacy="/admin/partners/dashboard"><AdminPartnerNetworkOverviewPage /></PartnerNetworkRoute>
+            <PartnerNetworkRoute legacy="/admin/partners/dashboard">
+              <AdminPartnerNetworkOverviewPage />
+            </PartnerNetworkRoute>
           </Route>
           {/* Backward-compatible legacy surface. Query strings and fragments are preserved by the
               redirect component; route telemetry remains application logging, never audit_log. */}
           <Route path="/admin/partner-network/partners/:partnerId">
-            {(params) => <PartnerNetworkLegacyRoute canonical={`/admin/partners/${(params as { partnerId: string }).partnerId}`}><AdminPartnerManagementDetailPage /></PartnerNetworkLegacyRoute>}
+            {(params) => (
+              <PartnerNetworkLegacyRoute canonical={`/admin/partners/${(params as { partnerId: string }).partnerId}`}>
+                <AdminPartnerManagementDetailPage />
+              </PartnerNetworkLegacyRoute>
+            )}
           </Route>
-          <Route path="/admin/partner-network/partners"><PartnerNetworkLegacyRoute canonical="/admin/partners/directory"><AdminPartnerManagementPage /></PartnerNetworkLegacyRoute></Route>
-          <Route path="/admin/partner-network"><PartnerNetworkLegacyRoute canonical="/admin/partners/infrastructure"><AdminPartnerNetworkPage /></PartnerNetworkLegacyRoute></Route>
+          <Route path="/admin/partner-network/partners">
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/directory">
+              <AdminPartnerManagementPage />
+            </PartnerNetworkLegacyRoute>
+          </Route>
+          <Route path="/admin/partner-network">
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/infrastructure">
+              <AdminPartnerNetworkPage />
+            </PartnerNetworkLegacyRoute>
+          </Route>
           <Route path="/community" component={CommunityPage} />
           <Route path="/reels" component={ReelsPage} />
           <Route path="/share/reel/:date/:certNumber" component={ShareReelPage} />
