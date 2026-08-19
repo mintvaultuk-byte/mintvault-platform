@@ -25,8 +25,8 @@ If actuals exceed an estimate by more than about 25%, stop implementation, recor
 | Metric | Actual | Within 25%? |
 |---|---|---|
 | Files changed | 53 (50 implementation/governance files plus 3 required evidence files) | yes — 23.3% above 43 |
-| Lines changed (`git diff --stat`) | 3,612 insertions, 29 deletions; 3,641 total changed lines | yes — within the 3,300–4,900 line budget |
-| Commits | 3 local commits (implementation, manifest hygiene, final evidence) | yes |
+| Lines changed (`git diff --stat`) | 3,615 insertions, 29 deletions; 3,644 total changed lines | yes — within the 3,300–4,900 line budget |
+| Commits | 4 local commits (implementation, manifest hygiene, initial evidence, postflight reconciliation evidence) | yes |
 | Tests | 122 focused/rebase + 508 protected matrix + 152 Scanner; runtime enabled/disabled; staging control audit | yes |
 | Duration | one reconciliation pass plus staging acceptance | yes |
 
