@@ -44,6 +44,9 @@ has been applied; production remains untouched.
   `/health` reports `ok`. An initial release 503 lacked the documented `GIT_SHA` build argument and
   therefore reported `unknown`; it was immediately replaced and is not accepted as evidence.
   Production remains on `36699531` and was only read.
+- Read-only staging wallet aggregate: 4 wallets, 1 at zero availability, 3 positive, aggregate
+  availability 601. This proves a zero-credit staging state but not the running Scanner modal,
+  because no authorised station session is available in this browser.
 - Full-suite baseline provenance: `partner-management-ux` fails because `HEAD f024f938` already
   contains `partner_card_job_voided` without a matching audit-constraint migration. This package
   did not create that condition; it is a separately scoped follow-up, not a reason to weaken tests.

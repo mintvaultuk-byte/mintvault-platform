@@ -134,6 +134,11 @@ The first staging deploy was immediately superseded because it omitted the exist
 exact commit value and is the sole accepted staging release. The production version endpoint still
 reports `36699531`; production was not deployed or otherwise changed.
 
+Read-only staging wallet aggregation found four wallets: one currently has zero available credits,
+three have positive availability, and the total available balance is 601. This establishes a
+staging zero-credit state without identifying or modifying a partner. It does not prove the running
+Scanner window's user-facing modal because the available browser has no authorised station session.
+
 ## Known blocking conditions at takeover
 
 1. **Physical capture proof:** 18 August data-plane failures were recorded; direct ICA capability exists but persistent lifecycle proof does not. Do not attribute the failure solely to TCPIP/`ippusbd`.
