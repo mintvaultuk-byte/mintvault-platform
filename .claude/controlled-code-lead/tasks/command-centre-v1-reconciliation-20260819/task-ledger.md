@@ -24,7 +24,7 @@
 | 3 — Lead verification | complete | 2026-08-19 | Candidate must exclude all unrelated Scanner, finance, webhook, migration and Partner route/service work. |
 | 4 — Implementation authorisation | complete | 2026-08-19 | `change-manifest.md`, rollback, rollout and budget written before code changes. |
 | 5 — Implementation | complete | 2026-08-19 | Command Centre-only candidate committed as `35660236`; `60b9e268` is the exact deployed artifact after a manifest whitespace repair. |
-| 6 — Regression | complete | 2026-08-19 | Focused, protected-domain, Scanner, check/lint/build, mutation/restore, disposable enabled/disabled runtime harness and live staging acceptance complete. |
+| 6 — Regression | complete | 2026-08-19 | Focused, protected-domain, Scanner, check/lint/build, mutation/restore, disposable enabled/disabled runtime harness, CI preparation/isolated Partner matrix and live staging acceptance complete. Postflight's flattened root test command is recorded as a topology limitation. |
 | 7 — Final report | complete | 2026-08-19 | Exact-SHA evidence, live control audit, hostile finding reconciliation and owner-gated production handoff recorded. |
 
 ## Reviewer assignments (Stage 1)

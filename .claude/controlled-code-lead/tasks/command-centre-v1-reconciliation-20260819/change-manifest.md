@@ -51,7 +51,7 @@
 
 - [x] Targeted Command Centre, Pilot Flag, Partner/RLS/station, finance/credit, Scanner/station, grading immutability, and deep-link/admin-shell tests.
 - [x] `npm run check`
-- [x] `npm test` for all runnable affected suites; broad root suite attempted and externally blocked only by five DB-provisioned non-Command-Centre tests.
+- [x] `npm test` for all runnable affected suites; the prescribed CI preparation and isolated Partner-suite matrix passed after UTF-8 disposable-cluster repair. Generic postflight `npm test` remains non-green because it flattens the documented per-suite Partner topology.
 - [x] `npm run lint`
 - [x] `npm run build`
 - [x] Disposable runtime harness enabled/disabled proof and red/restore mutations for the repaired invariants.

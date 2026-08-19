@@ -5,7 +5,7 @@
 ## Pre-rollout checklist
 
 - [x] Exact candidate has no foreign Scanner, finance, webhook, migration or package paths.
-- [x] All local gates in `change-manifest.md` pass for runnable affected scope; broad root-suite DB-provisioning limitation is explicitly recorded.
+- [x] All local gates in `change-manifest.md` pass for runnable affected scope; CI topology and required isolated Partner matrix are green. The postflight flattened root-suite limitation is explicitly recorded.
 - [x] Staging artifact SHA `60b9e268` and current-main parent `facfd36f` are recorded.
 - [x] Staging-only owner authorisation is recorded; production remains prohibited.
 

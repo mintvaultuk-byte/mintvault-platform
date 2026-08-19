@@ -55,6 +55,7 @@ Controlled red/restore checks were also performed before final validation:
 | Command Centre + Partner focused suite after current-main rebase | 18 files, 122 passed |
 | Cross-domain protected regression matrix (Partner/RLS/station, finance/credit, Scanner boundary, grading/immutability and MVGS) | 18 files, 508 passed; 41 skipped |
 | Scanner application suite | 152 passed, 0 failed |
+| Required Partner matrix re-run after CI-topology repair | 8 suites, 159 assertions passed (certificate origin, five connector migration/query suites, Partner management integration and migration) |
 | Typecheck | `npm run check` passed |
 | Lint | `npm run lint` exited 0; repository warnings only, no lint errors |
 | Production build | `npm run build` passed after rebase |
@@ -63,7 +64,9 @@ Controlled red/restore checks were also performed before final validation:
 | Runtime harness, disabled | persisted flag false; dashboard `404` |
 | Harness cleanup | each disposable database was absent after clean shutdown (`0` matching databases) |
 
-The broad root `npm test -- --reporter=dot` was also attempted. It recorded 5,205 passed and 1,013 skipped, but exited non-zero because five existing environment-provisioned tests require `TEST_DATABASE_URL` or `MINTVAULT_DATABASE_URL` CI databases (`auth-security-migration`, `rarity-structured-migration`, and three VQ tests). No Command Centre test failed. The affected runnable suites above were all green; this external full-suite provisioning limitation is recorded rather than hidden.
+The broad root suite was exercised twice to distinguish candidate failures from test-topology conditions. Without its disposable CI URLs it recorded 5,205 passed and 1,013 skipped, but five database-provisioned tests required `TEST_DATABASE_URL` or `MINTVAULT_DATABASE_URL`. The prescribed `scripts/ci/prepare-engineering-governance-db.mjs` then passed against fresh UTF-8 loopback PostgreSQL 17 services on the required ports. A flattened full `npm test` run under that topology demonstrated why the repository ships `scripts/ci/run-partner-suite.mjs`: migration/RLS suites share process-global environment and cluster-global roles, and must run one suite per process. Its initial 32 failures were all caused by the temporary clusters having been initialized as `SQL_ASCII`; recreating them as UTF-8 and provisioning the documented provider-style definer role cleared the exact suites through the prescribed runner (159 assertions passed).
+
+`engineering postflight --run --accept-protected` then passed typecheck, lint and build and formally recorded the reviewed Partner paths, but its generic `unit_test: npm run test` remained non-zero. The postflight command does not invoke the repository's required isolated Partner matrix and therefore is not a valid replacement for that matrix. This is an existing project test-orchestration limitation, not a Command Centre failure; affected suites, controlled mutations, runtime checks and live staging acceptance are green. It is recorded rather than represented as a green monolithic gate.
 
 ## 6. Staging acceptance
 
@@ -80,7 +83,7 @@ The persisted Pilot Flag was exercised **ON → OFF → ON** in Super Admin Part
 
 ## 7. Residual risk and rollback
 
-No release-blocking in-scope defect remains. The only non-green broad gate is the pre-existing environment-dependent root-suite subset described above; it is outside this candidate and does not reduce the green affected suite or staging acceptance.
+No release-blocking in-scope defect remains. The only non-green broad gate is the project postflight's flattened `npm test`, which conflicts with the repository's documented isolated Partner-suite topology. It is outside this candidate and does not reduce the green affected suite, explicit Partner matrix or staging acceptance.
 
 Rollback is reversible and staging-only: use the established Super Admin Pilot Controls to disable `super_admin_command_centre_enabled`, confirm navigation removal and generic dashboard `404`, and—if code rollback is necessary—use the recorded safe staging deployment path to restore the previous staging artifact. The release adds no migration, domain mutation, data backfill or production state to undo.
 
