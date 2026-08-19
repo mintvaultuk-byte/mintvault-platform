@@ -8,7 +8,7 @@
 ## Baseline
 
 - Production `/api/version`: build `MV-P5-20260225-nohalf`, commit `facfd36f`.
-- Fly release v1109 has two healthy machines.
+- Final reconciliation: Fly release v1110 has two started machines with passing HTTP health checks; it still reports commit `facfd36f`.
 - Production journal reaches repository migration `0100`; Partner location migration `0084` is applied.
 - Two ACTIVE Partner organisations, one ACTIVE Partner location, zero ready branding rows and zero approved Partner-origin certificates were observed through aggregate-only SELECTs.
 - No Google client ID, client secret, separate OAuth encryption key, callback/access/quota proof or Google schema exists.
@@ -84,6 +84,6 @@ The source and production secret inventory do not prove a Google Cloud project w
 
 - Candidate implementation is locally complete and release-ready for an owner-authorised staging sequence.
 - No push, merge, deploy, target migration, secret mutation, flag activation or real Google call occurred.
-- Production remains `facfd36f`, Fly v1109, two healthy machines, and unchanged flags/schema.
+- Production remains `facfd36f`, Fly v1110, two started/healthy machines, and unchanged Partner public/Google activation state.
 - Public Partner Network is code complete; production acceptance requires the protected rollout.
 - Google Partner Presence is code complete; its live pilot remains externally blocked.

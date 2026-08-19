@@ -5,7 +5,7 @@
 - Branch: `codex/public-partner-google-overnight-20260819`
 - Commit: `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`
 - `git status`: clean isolated worktree
-- Production commit: `facfd36f` via `https://mintvault.fly.dev/api/version`; Fly release v1109, two healthy machines
+- Production commit: `facfd36f` via `https://mintvault.fly.dev/api/version`; final reconciliation found Fly release v1110 with two started machines and passing HTTP checks
 - Production schema: journal through `0100_growth_commercial_attribution.sql`; Partner location migration `0084` applied
 - Production flags: `partner_login_enabled`, `partner_onboarding_enabled`, `partner_portal_enabled` globally enabled; no public-directory or Google-presence rows
 - Google prerequisites: no Google client ID, client secret, OAuth encryption key, or proved GBP API approval/quota in production secrets
