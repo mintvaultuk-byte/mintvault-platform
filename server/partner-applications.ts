@@ -3,6 +3,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 export const PARTNER_APPLICATION_STATUSES = ["NEW", "CONTACTED", "QUALIFIED", "NOT_A_FIT", "ONBOARDING"] as const;
+export const PARTNER_APPLICATION_PRIVACY_NOTICE_VERSION = "v1.0-2026-08-19";
 export type PartnerApplicationStatus = (typeof PARTNER_APPLICATION_STATUSES)[number];
 
 export const BUSINESS_TYPES = ["tcg_card_shop", "collectibles_retailer", "hobby_store", "online_retailer", "other"] as const;
@@ -49,8 +50,7 @@ export const partnerApplicationSchema = z
     categories: z.array(z.enum(TCG_CATEGORIES)).max(TCG_CATEGORIES.length, "Too many categories selected").default([]),
     demandBand: z.enum(DEMAND_BANDS).optional(),
     existingGradingSubmissions: z.enum(["yes", "no", "not_currently"]).optional(),
-    privacyAcknowledged: z.literal(true, { errorMap: () => ({ message: "Please confirm that MintVault may review this application" }) }),
-    marketingOptIn: z.boolean().optional().default(false),
+    privacyAcknowledged: z.literal(true, { errorMap: () => ({ message: "Please acknowledge the Privacy Notice" }) }),
     attribution: z
       .object({
         route: z.string().trim().max(120).optional(),
@@ -80,7 +80,6 @@ export type PartnerApplicationInput = {
   demandBand?: (typeof DEMAND_BANDS)[number];
   existingGradingSubmissions?: "yes" | "no" | "not_currently";
   privacyAcknowledged: true;
-  marketingOptIn?: boolean;
   attribution?: {
     route?: string;
     utmSource?: string;
@@ -174,13 +173,13 @@ export async function persistPartnerApplication(
         id, business_name, contact_name, email, city, postcode, business_type,
         web_presence, interest_reason, phone, physical_retail, categories,
         demand_band, existing_grading_submissions, privacy_acknowledged_at,
-        marketing_opt_in, source, attribution, status, dedupe_key
+        privacy_notice_version, source, attribution, status, dedupe_key
       ) VALUES (
         ${leadId}, ${application.businessName}, ${application.contactName}, ${application.email},
         ${application.city}, ${application.postcode.toUpperCase().replace(/\s+/g, " ")}, ${application.businessType},
         ${application.webPresence}, ${application.interestReason}, ${application.phone || null},
         ${application.physicalRetail ?? null}, ${application.categories}, ${application.demandBand ?? null},
-        ${application.existingGradingSubmissions ?? null}, NOW(), ${application.marketingOptIn ?? false},
+        ${application.existingGradingSubmissions ?? null}, NOW(), ${PARTNER_APPLICATION_PRIVACY_NOTICE_VERSION},
         'partners_page', ${JSON.stringify(attribution)}::jsonb, 'NEW', ${dedupeKey}
       )
       ON CONFLICT (dedupe_key) WHERE deleted_at IS NULL DO NOTHING

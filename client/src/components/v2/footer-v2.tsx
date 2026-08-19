@@ -70,8 +70,13 @@ const LEGAL_LINKS = [
 
 export default function FooterV2() {
   const flags = useFeatureFlags();
-  const cols = flags.legalPagesLive
-    ? [...FOOTER_COLS, { title: "Legal", links: LEGAL_LINKS }]
+  const publishedLegalLinks = flags.legalPagesLive
+    ? LEGAL_LINKS
+    : flags.privacyNoticeLive
+      ? LEGAL_LINKS.filter((link) => link.href === "/legal/privacy-policy")
+      : [];
+  const cols = publishedLegalLinks.length > 0
+    ? [...FOOTER_COLS, { title: "Legal", links: publishedLegalLinks }]
     : FOOTER_COLS;
 
   return (
@@ -84,7 +89,7 @@ export default function FooterV2() {
     >
       <div className="mx-auto max-w-7xl px-6 py-16">
         {/* Columns */}
-        <div className={`grid grid-cols-2 gap-8 mb-12 ${flags.legalPagesLive ? "md:grid-cols-6" : "md:grid-cols-5"}`}>
+        <div className={`grid grid-cols-2 gap-8 mb-12 ${publishedLegalLinks.length > 0 ? "md:grid-cols-6" : "md:grid-cols-5"}`}>
           {cols.map((col) => (
             <div key={col.title}>
               <p

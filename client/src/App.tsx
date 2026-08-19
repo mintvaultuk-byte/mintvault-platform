@@ -711,7 +711,7 @@ function Router() {
 function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
-    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false, partnerApplicationsLive: false }}>{children}</FeatureFlagsContext.Provider>
+    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false }}>{children}</FeatureFlagsContext.Provider>
   );
 }
 

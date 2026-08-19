@@ -7,12 +7,13 @@
  */
 
 import { guides } from "../client/src/data/guides";
+import { arePartnerApplicationsLive } from "./config/publication-gates";
 
 // Keep SSR metadata importable in build/test tooling without booting the
 // database-aware feature-flag module. It intentionally mirrors the public
-// legal-publication flag consumed by `server/routes/public.ts`.
-const PARTNER_APPLICATIONS_LIVE =
-  process.env.LEGAL_PAGES_LIVE === "true" && process.env.PARTNER_APPLICATIONS_LIVE === "true";
+// privacy-notice and Partner-publication gates consumed by
+// `server/routes/public.ts`.
+const PARTNER_APPLICATIONS_LIVE = arePartnerApplicationsLive();
 
 export interface SeoMeta {
   title: string;

@@ -2,13 +2,13 @@
 
 ## Authority and boundary
 
-The owner’s GB-03 brief authorises the local implementation and a production deployment only if every gate passes. It does **not** authorise applying a database migration, publishing a solicitor-review privacy draft, changing a legal feature flag, or altering Partner operations. This package therefore creates source and migration artifacts only; live activation requires the separate owner/legal decision recorded as GB03-F2.
+The B2-R owner brief authorises the controlled production migration, publication of the reviewed privacy notice, dedicated release flags and deployment only after every stated gate passes. It does not authorise any Partner operational change. Publication remains fail-closed behind both `PRIVACY_NOTICE_LIVE` and `PARTNER_APPLICATIONS_LIVE`.
 
 ## Files to change
 
 | File set | Change | Why | Class |
 | --- | --- | --- | --- |
-| `migrations/0091_growth_partner_applications.sql`, rollback | Isolated additive lead table, statuses, dedupe invariant and indexes. | GB03-F1 durable structured lead; no Partner tenant/account relation. | E |
+| `migrations/0095_growth_partner_applications.sql`, rollback | Isolated additive lead table, statuses, dedupe invariant and indexes. | GB03-F1 durable structured lead; no Partner tenant/account relation. | E |
 | `shared/schema.ts`, `server/routes/public.ts`, `server/email.ts`, `server/lib/request-logger.ts` | Strict public application contract, persistence-before-notification, safe internal notification and response-log suppression. | GB03-F1/F4. | B/F |
 | `client/src/pages/partners.tsx`, `client/src/App.tsx`, `client/src/components/v2/footer-v2.tsx` | Public, mobile-first acquisition page and footer discovery link. | GB03-F3. | B |
 | `server/seo-config.ts` | SSR metadata and sitemap entry for the genuine `/partners` page. | Discoverability without a directory or doorway pages. | B |
@@ -18,4 +18,4 @@ The owner’s GB-03 brief authorises the local implementation and a production d
 
 - No Partner auth, tenant, onboarding, credit, station, Scanner, Partner admin or public-directory code.
 - No Stripe/payment, MVGS/grading, certificate, R2 or secret/configuration change.
-- No production database mutation, migration application, email send, feature-flag change, push or deployment in this implementation stage.
+- No Partner tenant/account creation, operational onboarding, or public application lookup.

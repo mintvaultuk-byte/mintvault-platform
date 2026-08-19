@@ -20,10 +20,10 @@
 | 1 — Review plan | complete | Three non-overlapping read-only reviews: lead storage, public route/SEO, security/privacy. |
 | 2 — Investigation | complete | Reports reconciled in `issue-register.md`. |
 | 3 — Lead verification | complete | Generic contact persistence, portal route collision, SSR policy and live legal flag rechecked. |
-| 4 — Implementation authorisation | complete for source-only package | Exact bounded change set is in `change-manifest.md`. Production migration and publication remain owner/legal gated. |
-| 5 — Implementation | complete | Public page, isolated source-only lead contract, SSR/sitemap, notification path and handover are implemented. |
-| 6 — Regression | complete | Focused GB-03/B1/migration suite: 53 passed. Partner regression suite: 133 passed, 36 intentionally skipped. `npm run check`, `npm run lint` (0 errors; 2,603 baseline warnings), production build and `git diff --check` pass. Full suite reached 4,881 passing tests; five suites require unavailable test database environment variables. |
-| 7 — Final report | complete — owner action required | Hostile re-review cleared repaired source defects. No production action is permitted until the public privacy notice and migration authority are supplied. |
+| 4 — Implementation authorisation | complete | B2-R explicitly authorises the additive migration, reviewed Privacy Notice, dedicated flags and controlled production release after the stated gates. |
+| 5 — Implementation | complete | Public page, isolated non-Partner lead contract, SSR/sitemap, notification path, reviewed Privacy Notice and consent boundary repair are implemented. |
+| 6 — Regression | complete | Exact focused/Partner suite: 176 passed, 36 existing skips. `npm run check`, `npm run lint` (warnings only), production build and `git diff --check` pass after migration reconciliation to `0095`. |
+| 7 — Final report | in progress | Hostile re-review cleared repaired source defects; production proof remains. |
 
 ## Review assignments
 
@@ -33,3 +33,4 @@
 | `partner_public_audit` | `/partners` route, portal isolation, public SEO and internal discovery | `/partners` is collision-free; no edit. |
 | `security_privacy_audit` | abuse controls, attribution, email and legal surface | reusable controls found; live privacy policy is unpublished and blocks PII-capture publication. |
 | `gb03_hostile_review` | migration, truthful publication state, PII leakage, activation sequencing and duplicate oracle | All actionable source defects repaired and re-reviewed; external legal/migration authority remains. |
+| `gb03r_hostile_privacy` | B2-R privacy notice, unified publication gate, migration and marketing-consent boundary | All reproducible BLOCKER/HIGH defects repaired; final source re-review cleared. |

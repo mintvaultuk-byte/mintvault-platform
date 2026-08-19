@@ -17,6 +17,7 @@ import path from "path";
 import { normalizeCertId } from "../lib/cert-id";
 import { requireAdmin } from "../auth";
 import { partnerApplicationSchema, persistPartnerApplication, sanitizePartnerAttribution } from "../partner-applications";
+import { isLegalDocumentPublic } from "../config/publication-gates";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -28,6 +29,7 @@ export function registerPublicRoutes(app: Express): void {
   app.get("/api/config/public-flags", (_req, res) => {
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
+      privacyNoticeLive: FEATURE_FLAGS.PRIVACY_NOTICE_LIVE,
       partnerApplicationsLive: FEATURE_FLAGS.PARTNER_APPLICATIONS_LIVE,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
       publicNameToggleLive: FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE,
@@ -235,7 +237,7 @@ export function registerPublicRoutes(app: Express): void {
   app.post("/api/partner-applications", partnerApplicationRateLimit, async (req, res) => {
     // A public application endpoint without a published privacy notice would
     // invite direct PII POSTs even while the UI is disabled. Fail closed until
-    // the existing legal-publication control is explicitly enabled.
+    // the dedicated public privacy-notice control is explicitly enabled.
     if (!FEATURE_FLAGS.PARTNER_APPLICATIONS_LIVE) {
       return res.status(503).json({ error: "Partner applications are not available yet." });
     }
@@ -359,11 +361,11 @@ export function registerPublicRoutes(app: Express): void {
 
   // ── Legal page API routes ─────────────────────────────────────────────────
   app.get("/api/legal/:slug", async (req, res) => {
-    if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
-
     const { LEGAL_SLUGS, LEGAL_ALIASES } = await import("../config/legal");
     const slug = String(req.params.slug);
     if (!(LEGAL_SLUGS as readonly string[]).includes(slug)) return res.status(404).json({ error: "Not found" });
+    const isPublished = isLegalDocumentPublic(slug, FEATURE_FLAGS);
+    if (!isPublished) return res.status(404).json({ error: "Not found" });
 
     try {
       const fileSlug = LEGAL_ALIASES[slug] || slug;
@@ -373,12 +375,14 @@ export function registerPublicRoutes(app: Express): void {
       // Extract frontmatter title
       const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
       const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const lastUpdatedMatch = content.match(/^lastUpdated:\s*"?([^"\n]+)"?\s*$/m);
       const body = content.replace(/^---[\s\S]*?---\s*/m, "");
 
       res.json({
         slug,
         title: titleMatch?.[1] || slug,
         version: versionMatch?.[1] || "unknown",
+        lastUpdated: lastUpdatedMatch?.[1] || null,
         content: body,
       });
     } catch {
@@ -399,8 +403,9 @@ export function registerPublicRoutes(app: Express): void {
       const content = fs.readFileSync(filePath, "utf-8");
       const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
       const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const lastUpdatedMatch = content.match(/^lastUpdated:\s*"?([^"\n]+)"?\s*$/m);
       const body = content.replace(/^---[\s\S]*?---\s*/m, "");
-      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", content: body });
+      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", lastUpdated: lastUpdatedMatch?.[1] || null, content: body });
     } catch {
       res.status(404).json({ error: "Document not found" });
     }

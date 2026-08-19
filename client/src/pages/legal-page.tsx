@@ -8,6 +8,7 @@ interface LegalDoc {
   slug: string;
   title: string;
   version: string;
+  lastUpdated: string | null;
   content: string;
 }
 
@@ -26,7 +27,8 @@ export default function LegalPage() {
     enabled: !!slug,
   });
 
-  if (!flags.legalPagesLive) {
+  const isPublished = slug === "privacy-policy" ? flags.privacyNoticeLive : flags.legalPagesLive;
+  if (!isPublished) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center">
         <p className="text-[#888888]">This page is not yet available.</p>
@@ -50,10 +52,10 @@ export default function LegalPage() {
     <>
       <SeoHead title={`${data.title} | MintVault`} description={data.title} canonical={`/legal/${slug}`} />
       <div className="max-w-[720px] mx-auto px-4 py-12">
-        {/* Draft badge */}
+        {/* Published document version */}
         <div className="flex items-center gap-2 mb-8">
           <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-[#D4AF37]/10 text-[#B8960C] border border-[#D4AF37]/30">
-            {data.version} · Draft · Pending review
+            {data.version}{data.lastUpdated ? ` · Updated ${data.lastUpdated}` : ""}
           </span>
         </div>
 

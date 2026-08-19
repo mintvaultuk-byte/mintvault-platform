@@ -2,12 +2,14 @@
  * Weekly-reel data query — graded certificates flagged by an admin for the
  * marketing pool.
  *
- * Selection is driven by certificates.marketing_featured / marketing_pinned /
- * marketing_blacklisted, all admin-controlled. Independent of
- * submissions.marketing_feature_consent (kept as a legal record).
+ * Selection is driven by an explicit submission marketing-feature consent,
+ * followed by the admin's certificate curation flags. Withdrawal therefore
+ * excludes a card from every future reel, even if it was previously pinned or
+ * featured by an administrator.
  *
  * Rules applied (in order):
- *   1. Always exclude marketing_blacklisted certs and soft-deleted certs.
+ *   1. Always require a non-deleted submission with marketing-feature consent,
+ *      then exclude marketing_blacklisted and soft-deleted certificates.
  *   2. Always exclude certs that have not yet been grade-approved.
  *   3. Apply min_grade floor from pipeline_settings.
  *   4. Eligible pool = pinned OR featured. Pinned always sort first.
@@ -63,8 +65,11 @@ export async function fetchWeeklyReelData(limit?: number): Promise<WeeklyReelDat
       si.declared_value          AS declared_value,
       c.marketing_pinned         AS pinned
     FROM certificates c
-    LEFT JOIN submission_items si ON si.id = c.submission_item_id
+    JOIN submission_items si ON si.id = c.submission_item_id
+    JOIN submissions s ON s.id = si.submission_id
     WHERE (c.marketing_featured = true OR c.marketing_pinned = true)
+      AND s.marketing_feature_consent = true
+      AND s.deleted_at IS NULL
       AND c.marketing_blacklisted = false
       AND c.deleted_at IS NULL
       AND c.grade_approved_at IS NOT NULL
@@ -94,7 +99,11 @@ export async function fetchWeeklyReelData(limit?: number): Promise<WeeklyReelDat
     const cnt = await db.execute(sql`
       SELECT COUNT(*)::int AS n
       FROM certificates c
+      JOIN submission_items si ON si.id = c.submission_item_id
+      JOIN submissions s ON s.id = si.submission_id
       WHERE (c.marketing_featured = true OR c.marketing_pinned = true)
+        AND s.marketing_feature_consent = true
+        AND s.deleted_at IS NULL
         AND c.marketing_blacklisted = false
         AND c.deleted_at IS NULL
         AND c.grade_approved_at IS NOT NULL

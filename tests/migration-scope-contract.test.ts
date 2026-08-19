@@ -108,11 +108,11 @@ describe("every migration is deliberately classified", () => {
   });
 
   it("keeps public Partner applications application-scoped, never tenant-scoped", () => {
-    const SQL = readFileSync(join(process.cwd(), "migrations", "0091_growth_partner_applications.sql"), "utf8");
+    const SQL = readFileSync(join(process.cwd(), "migrations", "0095_growth_partner_applications.sql"), "utf8");
     expect(SQL).toContain("CREATE TABLE IF NOT EXISTS partner_applications");
-    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0091_growth_partner_applications");
-    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0091_growth_partner_applications");
-    expect(requiresCoreSchema(["0091_growth_partner_applications"])).toBe(true);
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0095_growth_partner_applications");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0095_growth_partner_applications");
+    expect(requiresCoreSchema(["0095_growth_partner_applications"])).toBe(true);
   });
 
   it("NEGATIVE: neither newly-classified migration leaked into the partner glob", () => {

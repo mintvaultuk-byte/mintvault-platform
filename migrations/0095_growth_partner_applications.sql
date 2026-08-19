@@ -1,4 +1,4 @@
--- 0091 — GB-03 public Partner acquisition leads
+-- 0095 — GB-03 public Partner acquisition leads
 --
 -- Isolated from all `partner_*` operational tables on purpose: an application
 -- is a prospective business lead, never a Partner tenant, user, wallet, station
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS partner_applications (
   demand_band text,
   existing_grading_submissions text,
   privacy_acknowledged_at timestamptz NOT NULL,
-  marketing_opt_in boolean NOT NULL DEFAULT false,
+  privacy_notice_version text NOT NULL,
   source text NOT NULL DEFAULT 'partners_page',
   attribution jsonb NOT NULL DEFAULT '{}'::jsonb,
   status text NOT NULL DEFAULT 'NEW',
@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS partner_applications (
   notification_sent_at timestamptz,
   notification_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
+  retention_review_at timestamptz NOT NULL DEFAULT (now() + interval '24 months'),
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz,
   CONSTRAINT chk_partner_application_status CHECK (status IN ('NEW', 'CONTACTED', 'QUALIFIED', 'NOT_A_FIT', 'ONBOARDING')),

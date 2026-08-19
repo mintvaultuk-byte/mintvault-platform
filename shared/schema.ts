@@ -215,7 +215,7 @@ export const partnerApplications = pgTable("partner_applications", {
   demandBand: text("demand_band"),
   existingGradingSubmissions: text("existing_grading_submissions"),
   privacyAcknowledgedAt: timestamp("privacy_acknowledged_at", { withTimezone: true }).notNull(),
-  marketingOptIn: boolean("marketing_opt_in").notNull().default(false),
+  privacyNoticeVersion: text("privacy_notice_version").notNull(),
   source: text("source").notNull().default("partners_page"),
   attribution: jsonb("attribution").$type<Record<string, unknown>>().notNull().default({}),
   status: text("status").notNull().default("NEW"),
@@ -224,6 +224,7 @@ export const partnerApplications = pgTable("partner_applications", {
   notificationSentAt: timestamp("notification_sent_at", { withTimezone: true }),
   notificationError: text("notification_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  retentionReviewAt: timestamp("retention_review_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });

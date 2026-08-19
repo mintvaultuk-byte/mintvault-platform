@@ -30,7 +30,6 @@ type FormState = {
   demandBand: string;
   existingGradingSubmissions: "" | "yes" | "no" | "not_currently";
   privacyAcknowledged: boolean;
-  marketingOptIn: boolean;
 };
 
 const initialForm: FormState = {
@@ -48,7 +47,6 @@ const initialForm: FormState = {
   demandBand: "",
   existingGradingSubmissions: "",
   privacyAcknowledged: false,
-  marketingOptIn: false,
 };
 
 function pageAttribution() {
@@ -203,7 +201,7 @@ export default function PartnersPage() {
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#B8960C]">Apply now</p>
                   <h2 className="mt-2 text-2xl font-black text-[#1A1A1A]">Tell us about your shop</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-[#5E5E5E]">We only use these details to review your Partner application. Marketing is optional and never implied. Submitting an application does not create a Partner account or confirm approval.</p>
+                  <p className="mt-2 text-sm leading-relaxed text-[#5E5E5E]">We only use these details to review your Partner application. This form does not sign you up for marketing. Submitting an application does not create a Partner account or confirm approval.</p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Business / shop name"><input required value={form.businessName} onChange={(e) => update("businessName", e.target.value)} autoComplete="organization" /></Field>
@@ -223,8 +221,7 @@ export default function PartnersPage() {
                   <fieldset><legend className="mb-2 block text-xs font-bold uppercase tracking-wider text-[#727272]">Categories you sell</legend><div className="flex flex-wrap gap-2">{categories.map((category) => <label key={category} className="cursor-pointer rounded-full border border-[#DED9CE] bg-white px-3 py-1.5 text-xs text-[#444]"><input className="mr-1.5" type="checkbox" checked={form.categories.includes(category)} onChange={() => toggleCategory(category)} />{category}</label>)}</div></fieldset>
                   <div className="grid gap-4 sm:grid-cols-2"><Field label="Approximate grading demand"><select value={form.demandBand} onChange={(e) => update("demandBand", e.target.value)}><option value="">Prefer not to say</option><option value="exploring">Just exploring</option><option value="under_25">Under 25 cards/month</option><option value="25_50">25–50 cards/month</option><option value="51_100">51–100 cards/month</option><option value="101_250">101–250 cards/month</option><option value="250_plus">250+ cards/month</option></select></Field><Field label="Do you currently offer grading submissions?"><select value={form.existingGradingSubmissions} onChange={(e) => update("existingGradingSubmissions", e.target.value)}><option value="">Prefer not to say</option><option value="yes">Yes</option><option value="no">No</option><option value="not_currently">Not currently</option></select></Field></div>
                 </div></details>
-                <label className="flex items-start gap-3 text-sm leading-relaxed text-[#4F4F4F]"><input required className="mt-1" type="checkbox" checked={form.privacyAcknowledged} onChange={(e) => update("privacyAcknowledged", e.target.checked)} /> <span>I confirm MintVault may use these details to review and follow up on this application, as explained in the <a className="font-semibold text-[#946F00] underline" href="/legal/privacy-policy">Privacy Policy</a>.</span></label>
-                <label className="flex items-start gap-3 text-sm leading-relaxed text-[#4F4F4F]"><input className="mt-1" type="checkbox" checked={form.marketingOptIn} onChange={(e) => update("marketingOptIn", e.target.checked)} /> <span>Optional: I’d like to receive Partner programme updates by email. This is separate from reviewing my application.</span></label>
+                <label className="flex items-start gap-3 text-sm leading-relaxed text-[#4F4F4F]"><input required className="mt-1" type="checkbox" checked={form.privacyAcknowledged} onChange={(e) => update("privacyAcknowledged", e.target.checked)} /> <span>I have read the <a className="font-semibold text-[#946F00] underline" href="/legal/privacy-policy">Privacy Notice</a>. MintVault needs the required details to assess and respond to this application; this acknowledgement is not marketing consent.</span></label>
                 {error ? <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" data-testid="partner-application-error">{error}</p> : null}
                 <GradientButton as="button" type="submit" disabled={submitting} height="50px" className="gradient-btn-filled w-full">{submitting ? "Sending application…" : "Apply to become a Founding Partner"}</GradientButton>
               </form>

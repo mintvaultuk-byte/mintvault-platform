@@ -12473,10 +12473,10 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-  // GET /api/admin/weekly-reel/featured-cards — every graded cert with the
-  // admin marketing_featured flag. Replaces the consent-driven
-  // /all-graded-cards view: the weekly reel pool is now admin-curated and
-  // independent of submissions.marketing_feature_consent.
+  // GET /api/admin/weekly-reel/featured-cards — consented graded certs with
+  // admin curation flags. Admin selection never overrides the customer’s
+  // marketing-feature consent; withdrawing consent removes a card from the
+  // future reel pool immediately.
   app.get("/api/admin/weekly-reel/featured-cards", requireAdmin, async (_req, res) => {
     try {
       const rows = (
@@ -12492,7 +12492,11 @@ Defects (admin-confirmed): ${defectLines}`;
           c.marketing_pinned       AS pinned,
           c.marketing_blacklisted  AS blacklisted
         FROM certificates c
+        JOIN submission_items si ON si.id = c.submission_item_id
+        JOIN submissions s ON s.id = si.submission_id
         WHERE c.deleted_at IS NULL
+          AND s.deleted_at IS NULL
+          AND s.marketing_feature_consent = true
           AND c.grade_approved_at IS NOT NULL
         ORDER BY c.marketing_pinned DESC,
                  c.marketing_featured DESC,
@@ -12530,16 +12534,20 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const rows = (
         await db.execute(sql`
-        SELECT id, marketing_featured
-        FROM certificates
-        WHERE certificate_number = ${certNumberRaw}
-          AND deleted_at IS NULL
+        SELECT c.id, c.marketing_featured
+        FROM certificates c
+        JOIN submission_items si ON si.id = c.submission_item_id
+        JOIN submissions s ON s.id = si.submission_id
+        WHERE c.certificate_number = ${certNumberRaw}
+          AND c.deleted_at IS NULL
+          AND s.deleted_at IS NULL
+          AND s.marketing_feature_consent = true
         LIMIT 1
       `)
       ).rows;
       const cur = rows[0] as any;
       if (!cur) {
-        return res.status(404).json({ error: "cert not found" });
+        return res.status(409).json({ error: "Marketing feature consent is required for this card." });
       }
       const certId = Number(cur.id);
       const before = cur.marketing_featured === true;

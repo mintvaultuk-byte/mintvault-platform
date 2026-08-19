@@ -8,7 +8,7 @@ portal. The page invites selected UK TCG and collectibles retailers to apply for
 the first rollout; it does not offer an account, approval, exclusivity, a launch
 date, operational readiness, equipment, pricing, margins or earnings.
 
-Until both the legal-publication flag and the default-off
+Until both the privacy-notice publication flag and the default-off
 `PARTNER_APPLICATIONS_LIVE` release flag are enabled, the page is deliberately
 noindex and omitted from the sitemap, with no application CTA. This prevents a
 legal-pack release from opening PII capture before migration/proof. It does not
@@ -17,7 +17,7 @@ add a public directory, location pages, or consumer-funnel advertising.
 ## Lead boundary and storage
 
 `partner_applications` is a new additive table introduced in
-`migrations/0091_growth_partner_applications.sql`.
+`migrations/0095_growth_partner_applications.sql`.
 
 - It has no foreign key or code dependency on Partner tenants, users, wallets,
   credits, stations or onboarding.
@@ -41,8 +41,8 @@ not drop them before retention/export obligations have been assessed.
 The application captures only form-provided business/contact fields, the fixed
 route `/partners`, allowlisted bounded UTM values, a referrer **origin** (never
 path/query/hash), and the submitted timestamp. It adds no analytics, cookies,
-fingerprinting or raw IP/user-agent storage. Marketing consent is separate and
-optional.
+fingerprinting or raw IP/user-agent storage. Partner applications do not collect
+marketing consent or subscribe an applicant to marketing.
 
 The route is protected by the existing same-origin CSRF middleware and a
 dedicated three-per-hour rate limit. It validates all inputs with a strict Zod
@@ -57,19 +57,17 @@ does not imply acceptance, access or marketing permission.
 
 ## Publication gate
 
-As of the GB-03 baseline, production reports `legalPagesLive:false`; the checked
-in privacy policy remains a solicitor-review draft with unresolved placeholders.
-Therefore the public page fails closed and the endpoint returns `503` until the
-legal-publication flag **and** `PARTNER_APPLICATIONS_LIVE` are enabled. Do not
-enable either flag or publish the draft as part of GB-03.
+The public page fails closed and the endpoint returns `503` until
+`PRIVACY_NOTICE_LIVE=true` **and** `PARTNER_APPLICATIONS_LIVE=true`. The same
+pure gate controls the endpoint, SSR metadata and sitemap. `LEGAL_PAGES_LIVE`
+is intentionally independent and must not be changed for this release.
 
-Before a real public launch, the owner must provide an approved, public privacy
-notice/policy and explicitly approve applying 0091. Once both have happened,
-reconcile current main, run the release gates, deploy only through
-`scripts/safe-deploy.sh`, and submit one unmistakably labelled non-customer test
-lead. Verify durable storage, notification result, retry receipt, absence of
-public lookup and the `/partners` SSR/sitemap result. Only then can the owner
-enable `PARTNER_APPLICATIONS_LIVE`; do not create a Partner account.
+Apply migration `0095`, deploy the reviewed candidate through the established
+release process with both flags initially false, then publish the reviewed
+notice and the dedicated application flag in that order. Submit one
+unmistakably labelled non-customer test lead. Verify durable storage,
+notification result, retry receipt, absence of public lookup and the
+`/partners` SSR/sitemap result. Do not create a Partner account.
 
 ## Verification
 

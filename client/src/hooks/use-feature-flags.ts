@@ -3,10 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 
 export interface FeatureFlags {
   legalPagesLive: boolean;
+  privacyNoticeLive: boolean;
   partnerApplicationsLive: boolean;
 }
 
-const DEFAULT: FeatureFlags = { legalPagesLive: false, partnerApplicationsLive: false };
+const DEFAULT: FeatureFlags = { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false };
 
 export const FeatureFlagsContext = createContext<FeatureFlags>(DEFAULT);
 
