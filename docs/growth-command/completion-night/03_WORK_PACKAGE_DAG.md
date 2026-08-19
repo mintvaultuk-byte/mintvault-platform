@@ -13,7 +13,10 @@ flowchart LR
   E --> G
   F --> G
   G --> H["Integrated verification + hostile review"]
+  G --> S["S · Commercial targets / scoreboard"]
+  S --> H3["H3 · Scoreboard targeted hostile review"]
   H --> I["Remote exact-SHA CI"]
+  H3 --> I
   I --> J["Approved release + live proof"]
 ```
 
@@ -35,7 +38,8 @@ Reviewers are read-only. The controller verifies and de-duplicates evidence befo
 - F must fail open and may not block checkout/payment.
 - D must use only approved/public grades, minimum sample sizes and search-visible canonical output.
 - G cannot release until existing Command Centre branch compatibility and every visible control are reconciled.
+- S cannot invent a target, use a rolling window as a calendar month, count review requests as genuine reviews, or expose target mutation to MCP/AI. Its only mutation is an audited current-month target write through the existing Super Admin boundary.
 
 ## Current checkpoint
 
-A–G and integrated hostile review H are complete locally. I (remote exact-SHA CI) has not started because the reviewed branch is not pushed and no pull request exists. J (migration/release/live proof) therefore remains closed.
+A–G, the Infrastructure/GBP addendum and their hostile reviews are complete locally. S is authorised as the next bounded package; H3 must reconcile its target authority, period pacing, genuine-review unavailable state and MCP non-mutation boundary. I (remote exact-SHA CI) has not started because the reviewed branch is not pushed and no pull request exists. J (migration/release/live proof) therefore remains closed.

@@ -15,7 +15,8 @@ Build the highest-value safe extension of MintVault's live Growth foundation, in
 4. stronger search and machine-readable MintVault authority;
 5. less owner manual work;
 6. truthful capacity and provider intelligence;
-7. bounded read-only ChatGPT Growth visibility.
+7. bounded read-only ChatGPT Growth visibility;
+8. owner-authoritative commercial target pacing without invented targets.
 
 Feature count, vanity metrics, fake data, generic AI content, speculative integrations and architecture for its own sake are not objectives.
 
@@ -30,10 +31,11 @@ Feature count, vanity metrics, fake data, generic AI content, speculative integr
 | E       | Fly telemetry and Search Console provider intelligence | Not connected in GB-04B                                  |
 | F       | Submission-start and checkout-start instrumentation    | Not instrumented in GB-04B                               |
 | G       | Reconcile successful work into existing Growth Command | Depends on B-F                                           |
+| S       | Commercial Growth Targets / Scoreboard addendum        | Depends on authoritative A-G aggregates                  |
 
 ## Completion-night outcome
 
-Packages A–G are complete locally through runtime candidate `c2d18aea`. Independent hostile review found no runtime BLOCKER/HIGH; its release-evidence HIGH findings and public-discovery MEDIUM were repaired. Remote exact-SHA CI, migration, configuration, deployment and live proof have not occurred and remain governed by the release gates.
+Packages A–G and the Infrastructure/GBP addendum are complete locally through candidate `682b78e8`. Package S continues the same mission with an auditable monthly target scoreboard; it may read only existing authoritative aggregates and may accept target changes only from the existing Super Admin boundary. Remote exact-SHA CI, migration, configuration, deployment and live proof have not occurred and remain governed by the release gates.
 
 ## Execution rules
 

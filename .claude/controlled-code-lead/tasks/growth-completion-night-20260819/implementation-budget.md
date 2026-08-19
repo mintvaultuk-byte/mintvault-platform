@@ -10,6 +10,7 @@
 | F — conversion                  |                  5 |       420 |          2 files |         70 min |
 | G — Growth integration          |                  4 |       350 |  1 file + render |         70 min |
 | H — infrastructure/GBP addendum |                  7 |     1,000 | 2 files + render |        120 min |
+| S — commercial scoreboard       |                  9 |     1,400 | 2 files + render |        150 min |
 | Control/evidence updates        |                 12 |       500 |              N/A |         45 min |
 
 Expected runtime ceiling: **30 distinct runtime/test files**, **2,750 net lines**, **one migration identity (`0101`)**, and no dependency change. Control/evidence files are tracked separately. Reconcile the manifest if a runtime estimate grows by roughly 25% or a boundary changes.
