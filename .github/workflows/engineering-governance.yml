@@ -44,7 +44,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: '24'
       - name: Install Node dependencies
         if: ${{ hashFiles('package-lock.json') != '' }}
         run: npm ci
@@ -54,10 +54,10 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y postgresql-client
           fi
-      - name: Prepare disposable CI databases
+      - name: Run project CI preparation
         run: node scripts/ci/prepare-engineering-governance-db.mjs
       - name: Verify managed CI gate integrity
-        run: node -e "const fs=require('node:fs'); const crypto=require('node:crypto'); const actual=crypto.createHash('sha256').update(fs.readFileSync('.engineering/cornelius-engineering-os-ci-gate.mjs')).digest('hex'); if (actual !== '7ad3231be4c5d17bf91c1260d1605665974b31c7e92974203c07bf4a464288a4') { console.error('managed CI gate drift'); process.exit(1); }"
+        run: node -e "const fs=require('node:fs'); const crypto=require('node:crypto'); const actual=crypto.createHash('sha256').update(fs.readFileSync('.engineering/cornelius-engineering-os-ci-gate.mjs')).digest('hex'); if (actual !== 'bd72d407475b3d619fa34a30573aad48d9bc4ab67dd038c5e0d1e2c4a824d9ee') { console.error('managed CI gate drift'); process.exit(1); }"
       - name: Engineering anti-drift gate
         run: node .engineering/cornelius-engineering-os-ci-gate.mjs
 # cornelius-engineering-os:end id=ci-governance

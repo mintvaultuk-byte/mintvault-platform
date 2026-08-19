@@ -4,7 +4,7 @@ project:
   profiles:
     - web-app
 engineering:
-  master_version: 1.0.12
+  master_version: 1.0.13
 agents:
   lead: Codex
   hostile_reviewer: Claude Opus High
@@ -47,3 +47,11 @@ gates:
   required: engineering-check
 deployment:
   agent_deploy_allowed: false
+ci:
+  fetch_history: full
+  node_install: scripts
+  postgres_services:
+    - pgvector16:55432:mintvault_vq_phase10_local
+    - postgres17:55433:postgres
+  prepare:
+    - node:scripts/ci/prepare-engineering-governance-db.mjs

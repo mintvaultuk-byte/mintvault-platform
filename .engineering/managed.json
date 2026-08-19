@@ -1,5 +1,5 @@
 {
-  "master_version": "1.0.12",
+  "master_version": "1.0.13",
   "managed_schema": 1,
-  "ci_gate_sha256": "7ad3231be4c5d17bf91c1260d1605665974b31c7e92974203c07bf4a464288a4"
+  "ci_gate_sha256": "bd72d407475b3d619fa34a30573aad48d9bc4ab67dd038c5e0d1e2c4a824d9ee"
 }
