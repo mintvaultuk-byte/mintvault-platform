@@ -446,8 +446,15 @@ async function availableCreditsOrNull() {
  */
 async function refreshAvailableCredits() {
   const available = await availableCreditsOrNull();
+  const prior = stateMod.get().availableCredits;
+  /*
+   * A failed read is not evidence that capacity changed. Do not replace a confirmed zero with
+   * null and then fall back to a stale sign-in snapshot in the renderer. Return the raw read so a
+   * following authoritative 402 can still force the zero state if this read failed.
+   */
+  const displayed = typeof available === "number" ? available : typeof prior === "number" ? prior : null;
   stateMod.set({
-    availableCredits: available,
+    availableCredits: displayed,
     walletRefreshGeneration: Number(stateMod.get().walletRefreshGeneration || 0) + 1,
   });
   pushStateToRenderer();

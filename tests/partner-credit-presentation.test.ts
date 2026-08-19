@@ -163,6 +163,10 @@ describe("PRES-4 / PRES-5 — zero and low credit states", () => {
     expect(dashboard).toContain("button-buy-credits-low");
   });
 
+  it("uses the locked 1–5 low-credit range at the server presentation boundary", () => {
+    expect(viewService).toContain('available <= 5 ? "low" : "healthy"');
+  });
+
   it("states that zero credits blocks NEW only — FIX and authorised grading continue", () => {
     const flat = dashboard.replace(/\s+/g, " ");
     expect(flat).toContain("New cards cannot be started until you add credits");

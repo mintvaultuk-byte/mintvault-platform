@@ -195,7 +195,7 @@ test("wallet grant from zero closes the modal, shows LOW CREDITS at 5, and enabl
   assert.equal(ui.newCard().disabled, false);
 });
 
-test("zero credits blocks the next card without interrupting an existing reserved capture", async () => {
+test("zero credits keeps the canonical top-up panel visible without interrupting an existing reserved capture", async () => {
   const ui = await mountScanner({
     availableCredits: 0,
     activeCapture: {
@@ -208,7 +208,8 @@ test("zero credits blocks the next card without interrupting an existing reserve
 
   assert.equal(ui.stationCredits(), "0");
   assert.equal(ui.newCard().disabled, true);
-  assert.equal(ui.modal().classList.contains("visible"), false);
+  assert.equal(ui.modal().classList.contains("visible"), true);
+  assert.equal(ui.modal().classList.contains("billing-lock-nonblocking"), true);
   assert.match(ui.document.getElementById("captureActionHint").textContent, /Scan unlocks when the box turns green/);
 });
 
@@ -226,6 +227,9 @@ test("BUY MORE CREDITS double-click creates only one Checkout request while one 
   assert.equal(ui.checkoutCalls(), 1);
   assert.match(ui.document.getElementById("billingLockStatus").textContent, /Starting checkout/);
   ui.resolveCheckout();
+  await delay();
+  // Stripe has returned a URL but payment has not happened: do not create another payable session.
+  ui.click(pack5);
   await delay();
   assert.equal(ui.checkoutCalls(), 1);
 });
@@ -256,8 +260,11 @@ test("manual top-up watches the wallet and closes after an authoritative credit 
 test("Scanner billing UX is permission-gated and wired to the existing pack/Checkout authority", () => {
   assert.match(main, /canPurchaseCredits: Array\.isArray\(sessionBody\.permissions\)/);
   assert.match(main, /sessionBody\.permissions\.includes\("partner\.credits\.purchase"\)/);
-  assert.match(renderer, /function openBillingModal\(mode\)/);
+  assert.match(renderer, /function openBillingModal\(mode, options = \{\}\)/);
   assert.match(renderer, /window\.scanner\.creditPacks\(\)/);
   assert.match(renderer, /window\.scanner\.creditCheckout\(\{ packCode \}\)/);
+  assert.match(renderer, /billingCheckoutAwaitingWallet/);
+  assert.match(renderer, /stationSetup\?\.stage === "active"/);
+  assert.match(main, /const displayed = typeof available === "number" \? available : typeof prior === "number" \? prior : null/);
   assert.doesNotMatch(renderer, /appendFoundationCredit|fulfilPartnerCreditPurchase|availableCredits\s*[-+]=/);
 });

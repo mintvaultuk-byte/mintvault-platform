@@ -515,18 +515,117 @@ describe("P5 Buy More Grading Credits (real PostgreSQL)", () => {
     expect(await availableFor(tenantId)).toBe(0);
   });
 
-  it("a disabled pack grants nothing even for a previously created Checkout Session", async () => {
+  it("a paid server-created Checkout grants once even if its pack is later disabled", async () => {
     const tenantId = await makeTenant("disabled-pack");
     await configureCanonicalPack("PACK_10");
     const checkout = await verifiedSession(tenantId, "PACK_10", "cs_disabled_pack");
     await admin.query(`UPDATE partner_credit_packs SET active=false WHERE code='PACK_10'`);
     try {
       const out = await purchase.fulfilPartnerCreditPurchase(checkout, "evt_disabled_pack_1");
-      expect(out).toMatchObject({ granted: false, reason: "pack_disabled" });
-      expect(await availableFor(tenantId)).toBe(0);
+      expect(out).toMatchObject({ granted: true, credits: 10 });
+      expect(await availableFor(tenantId)).toBe(10);
     } finally {
       await admin.query(`UPDATE partner_credit_packs SET active=true WHERE code='PACK_10'`);
     }
+  });
+
+  it("settles a paid Checkout against its immutable intent after a Stripe Price rotation", async () => {
+    const tenantId = await makeTenant("rotated-price");
+    await configureCanonicalPack("PACK_25");
+    const checkout = await verifiedSession(tenantId, "PACK_25", "cs_rotated_price");
+    await admin.query(
+      `UPDATE partner_credit_packs SET stripe_price_id='price_test_rotated_25', stripe_currency='gbp' WHERE code='PACK_25'`
+    );
+    try {
+      const out = await purchase.fulfilPartnerCreditPurchase(checkout, "evt_rotated_price_1");
+      expect(out).toMatchObject({ granted: true, credits: 25 });
+      expect(await availableFor(tenantId)).toBe(25);
+    } finally {
+      await configureCanonicalPack("PACK_25");
+    }
+  });
+
+  it("concurrent retry/restart requests reserve one durable Checkout operation and one eventual grant", async () => {
+    const tenantId = await makeTenant("durable-operation");
+    await configureCanonicalPack("PACK_5");
+    const input = {
+      tenantId,
+      initiatingUserId: "11111111-1111-1111-1111-111111111111",
+      packCode: "PACK_5",
+      stripePriceId: "price_test_pack_5",
+      stripeCurrency: "gbp",
+      stripeEnvironment: "test" as const,
+      credits: 5,
+      pricePence: 5000,
+      taxBehavior: "inclusive" as const,
+      checkoutExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    };
+    const operations = await Promise.all(
+      Array.from({ length: 10 }, () => purchase.reservePartnerCreditCheckoutOperation(input))
+    );
+    expect(new Set(operations.map((operation) => operation.checkoutOperationKey)).size).toBe(1);
+    expect(operations.every((operation) => operation.stripeSessionId === null)).toBe(true);
+
+    const completed = await purchase.completePartnerCreditCheckoutOperation({
+      checkoutOperationKey: operations[0].checkoutOperationKey,
+      stripeSessionId: "cs_durable_operation",
+      checkoutUrl: "https://checkout.stripe.test/cs_durable_operation",
+      checkoutExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    const retry = await purchase.reservePartnerCreditCheckoutOperation(input);
+    expect(retry.checkoutOperationKey).toBe(completed.checkoutOperationKey);
+    expect(retry.stripeSessionId).toBe("cs_durable_operation");
+    expect(retry.checkoutUrl).toBe("https://checkout.stripe.test/cs_durable_operation");
+
+    const out = await purchase.fulfilPartnerCreditPurchase(
+      session(tenantId, "PACK_5", "cs_durable_operation"),
+      "evt_durable_operation"
+    );
+    expect(out).toMatchObject({ granted: true, credits: 5 });
+    expect(await availableFor(tenantId)).toBe(5);
+    const rows = await admin.query<{ operations: string; ledger: string }>(
+      `SELECT (SELECT count(*) FROM partner_credit_checkout_sessions WHERE tenant_id=$1)::text AS operations,
+              (SELECT count(*) FROM partner_credit_ledger WHERE tenant_id=$1)::text AS ledger`,
+      [tenantId]
+    );
+    expect(rows.rows[0]).toEqual({ operations: "1", ledger: "1" });
+  });
+
+  it("expires an abandoned operation before allowing a deliberate later Checkout", async () => {
+    const tenantId = await makeTenant("expired-operation");
+    await configureCanonicalPack("PACK_5");
+    const base = {
+      tenantId,
+      initiatingUserId: "11111111-1111-1111-1111-111111111111",
+      packCode: "PACK_5",
+      stripePriceId: "price_test_pack_5",
+      stripeCurrency: "gbp",
+      stripeEnvironment: "test" as const,
+      credits: 5,
+      pricePence: 5000,
+      taxBehavior: "inclusive" as const,
+    };
+    const stale = await purchase.reservePartnerCreditCheckoutOperation({
+      ...base,
+      checkoutExpiresAt: new Date(Date.now() - 1_000),
+    });
+    const next = await purchase.reservePartnerCreditCheckoutOperation({
+      ...base,
+      checkoutExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    expect(next.checkoutOperationKey).not.toBe(stale.checkoutOperationKey);
+    const statuses = await admin.query<{ status: string; count: string }>(
+      `SELECT status, count(*)::text AS count
+         FROM partner_credit_checkout_sessions
+        WHERE tenant_id=$1
+        GROUP BY status
+        ORDER BY status`,
+      [tenantId]
+    );
+    expect(statuses.rows).toEqual([
+      { status: "creating", count: "1" },
+      { status: "expired", count: "1" },
+    ]);
   });
 
   it("a verified Session without local Checkout provenance grants nothing", async () => {
@@ -776,7 +875,9 @@ describe("P5 integration surfaces", () => {
     expect(routes).toContain("validateStripePriceForCheckout");
     expect(routes).toContain("unitAmount:");
     expect(routes).toContain("taxBehavior:");
-    expect(routes).toContain("recordPartnerCreditCheckoutIntent");
+    expect(routes).toContain("reservePartnerCreditCheckoutOperation");
+    expect(routes).toContain("completePartnerCreditCheckoutOperation");
+    expect(routes).toContain("idempotencyKey: `partner-credit-checkout:${operation.checkoutOperationKey}`");
     const service = read("server/partner/credit-purchase-service.ts");
     expect(service).toContain("loadPartnerCreditCheckoutIntent");
     expect(service).toContain("withPartnerAdminTransaction");
@@ -786,6 +887,7 @@ describe("P5 integration surfaces", () => {
     expect(service).toContain("STRIPE_TAX_BEHAVIOR_MISMATCH");
     expect(service).toContain("checkout_amount_mismatch");
     expect(service).toContain("checkout_tax_behavior_mismatch");
+    expect(webhook).toContain('event.type === "checkout.session.async_payment_succeeded"');
   });
 
   it("routes refunds and disputes to audited exception handling, never to a wallet debit", () => {
@@ -806,6 +908,8 @@ describe("P5 integration surfaces", () => {
     // The route may never grant — only the webhook may.
     const checkout = routes.slice(routes.indexOf('"/credits/checkout"'));
     expect(checkout).not.toMatch(/appendFoundationCredit|fulfilPartnerCreditPurchase/);
+    expect(checkout).toContain("findActivePartnerCreditCheckoutOperation");
+    expect(checkout).toContain("reservePartnerCreditCheckoutOperation");
   });
 
   it("checkout refuses missing or mismatched Stripe environment before returning a session", () => {
@@ -821,6 +925,7 @@ describe("P5 integration surfaces", () => {
     const checkout = routes.slice(routes.indexOf('"/credits/checkout"'));
     expect(checkout).toContain("partner_tenant_id");
     expect(checkout).toContain("partner_pack_code");
+    expect(checkout).toContain("partner_checkout_operation_key");
     // Quantity is resolved server-side from the pack code at grant time. Putting it in metadata
     // would make a tampered session able to mint capacity.
     expect(checkout).not.toMatch(/metadata:\s*\{[^}]*credits/s);

@@ -322,7 +322,44 @@ interface PartnerCreditCheckoutIntent {
   stripePriceId: string;
   stripeCurrency: string;
   stripeEnvironment: StripeEnvironment;
+  checkoutOperationKey: string | null;
+  checkoutUrl: string | null;
+  checkoutExpiresAt: Date | null;
+  credits: number | null;
+  pricePence: number | null;
+  taxBehavior: string | null;
   status: string;
+}
+
+export interface PartnerCreditCheckoutOperation {
+  checkoutOperationKey: string;
+  stripeSessionId: string | null;
+  checkoutUrl: string | null;
+  checkoutExpiresAt: Date;
+  tenantId: string;
+  packCode: string;
+  initiatingUserId: string;
+  stripePriceId: string;
+  stripeCurrency: string;
+  stripeEnvironment: StripeEnvironment;
+  credits: number;
+  pricePence: number;
+  taxBehavior: "inclusive";
+  status: "creating" | "created";
+}
+
+export interface PartnerCreditCheckoutOperationInput {
+  tenantId: string;
+  packCode: string;
+  initiatingUserId: string;
+  stripePriceId: string;
+  stripeCurrency: string;
+  stripeEnvironment: StripeEnvironment;
+  credits: number;
+  pricePence: number;
+  /** The server only sells VAT-inclusive packs. Kept in the intent snapshot for fulfilment. */
+  taxBehavior: "inclusive";
+  checkoutExpiresAt: Date;
 }
 
 type PartnerCreditCheckoutQueryable = {
@@ -335,6 +372,47 @@ const partnerCreditCheckoutAdminQueryable: PartnerCreditCheckoutQueryable = {
 
 function normalizeCurrency(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function canonicalCheckoutSnapshot(
+  packCode: string
+): { credits: number; pricePence: number; taxBehavior: "inclusive" } | null {
+  const pack = CANONICAL_PARTNER_CREDIT_PACKS[packCode];
+  if (!pack) return null;
+  return { credits: pack.credits, pricePence: pack.pricePence, taxBehavior: "inclusive" };
+}
+
+function presentCheckoutOperation(intent: { packCode: string; credits: number; pricePence: number }): {
+  packCode: string;
+  credits: number;
+  pricePence: number;
+  displayPrice: string;
+  vatIncluded: true;
+} {
+  const pricing = canonicalPackPricing(intent.packCode, intent.credits);
+  if (!pricing || pricing.pricePence !== intent.pricePence) {
+    throw new CreditPurchaseError(
+      "CHECKOUT_INTENT_CONFLICT",
+      "Checkout intent does not match a canonical credit pack."
+    );
+  }
+  return {
+    packCode: intent.packCode,
+    credits: intent.credits,
+    pricePence: intent.pricePence,
+    displayPrice: pricing.displayPrice,
+    vatIncluded: PARTNER_CREDIT_VAT_INCLUDED,
+  };
+}
+
+export function presentPartnerCreditCheckoutOperation(operation: PartnerCreditCheckoutOperation): {
+  packCode: string;
+  credits: number;
+  pricePence: number;
+  displayPrice: string;
+  vatIncluded: true;
+} {
+  return presentCheckoutOperation(operation);
 }
 
 function checkoutIntentMatches(
@@ -355,11 +433,15 @@ function checkoutIntentMatches(
 /** Record the exact server-created Checkout Session that a future webhook is allowed to fulfil. */
 export async function recordPartnerCreditCheckoutIntent(input: PartnerCreditCheckoutIntentInput): Promise<void> {
   const stripeCurrency = normalizeCurrency(input.stripeCurrency);
+  const snapshot = canonicalCheckoutSnapshot(input.packCode);
+  if (!snapshot) {
+    throw new CreditPurchaseError("PACK_NOT_FOUND", "That Grading Credit pack is not available.");
+  }
   const inserted = await partnerAdminQuery<{ id: string }>(
     `INSERT INTO partner_credit_checkout_sessions
        (tenant_id, stripe_session_id, pack_code, initiating_user_id, stripe_price_id, stripe_currency,
-        stripe_environment)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+        stripe_environment, checkout_operation_key, checkout_expires_at, credits, price_pence, tax_behavior)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,gen_random_uuid(),now() + interval '24 hours',$8,$9,$10)
      ON CONFLICT (stripe_session_id) DO NOTHING
      RETURNING id`,
     [
@@ -370,6 +452,9 @@ export async function recordPartnerCreditCheckoutIntent(input: PartnerCreditChec
       input.stripePriceId,
       stripeCurrency,
       input.stripeEnvironment,
+      snapshot.credits,
+      snapshot.pricePence,
+      snapshot.taxBehavior,
     ]
   );
   if (inserted.rowCount && inserted.rowCount > 0) return;
@@ -390,23 +475,30 @@ async function loadPartnerCreditCheckoutIntent(
 ): Promise<PartnerCreditCheckoutIntent | null> {
   const lockClause = lockForGrant ? " FOR UPDATE" : "";
   const { rows } = await client.query<{
-    stripe_session_id: string;
+    stripe_session_id: string | null;
     tenant_id: string;
     pack_code: string;
     initiating_user_id: string;
     stripe_price_id: string;
     stripe_currency: string;
     stripe_environment: StripeEnvironment;
+    checkout_operation_key: string | null;
+    checkout_url: string | null;
+    checkout_expires_at: Date | null;
+    credits: number | null;
+    price_pence: number | null;
+    tax_behavior: string | null;
     status: string;
   }>(
     `SELECT stripe_session_id, tenant_id, pack_code, initiating_user_id, stripe_price_id,
-            stripe_currency, stripe_environment, status
+            stripe_currency, stripe_environment, checkout_operation_key, checkout_url,
+            checkout_expires_at, credits, price_pence, tax_behavior, status
        FROM partner_credit_checkout_sessions
       WHERE stripe_session_id=$1${lockClause}`,
     [stripeSessionId]
   );
   const row = rows[0];
-  if (!row) return null;
+  if (!row || !row.stripe_session_id) return null;
   return {
     stripeSessionId: row.stripe_session_id,
     tenantId: row.tenant_id,
@@ -415,6 +507,12 @@ async function loadPartnerCreditCheckoutIntent(
     stripePriceId: row.stripe_price_id,
     stripeCurrency: normalizeCurrency(row.stripe_currency),
     stripeEnvironment: row.stripe_environment,
+    checkoutOperationKey: row.checkout_operation_key,
+    checkoutUrl: row.checkout_url,
+    checkoutExpiresAt: row.checkout_expires_at,
+    credits: row.credits === null ? null : Number(row.credits),
+    pricePence: row.price_pence === null ? null : Number(row.price_pence),
+    taxBehavior: row.tax_behavior,
     status: row.status,
   };
 }
@@ -428,7 +526,7 @@ async function markPartnerCreditCheckoutGranted(
   const updated = await client.query(
     `UPDATE partner_credit_checkout_sessions
         SET status='granted', granted_event_id=$3, granted_at=COALESCE(granted_at, now()), updated_at=now()
-      WHERE stripe_session_id=$1 AND tenant_id=$2 AND status='created'`,
+      WHERE stripe_session_id=$1 AND tenant_id=$2 AND status IN ('created', 'expired')`,
     [stripeSessionId, tenantId, stripeEventId]
   );
   if (updated.rowCount !== 1) {
@@ -437,6 +535,202 @@ async function markPartnerCreditCheckoutGranted(
       "Checkout Session grant state changed before the ledger commit."
     );
   }
+}
+
+function checkoutOperationFromRow(row: {
+  checkout_operation_key: string;
+  stripe_session_id: string | null;
+  checkout_url: string | null;
+  checkout_expires_at: Date;
+  tenant_id: string;
+  pack_code: string;
+  initiating_user_id: string;
+  stripe_price_id: string;
+  stripe_currency: string;
+  stripe_environment: StripeEnvironment;
+  credits: number;
+  price_pence: number;
+  tax_behavior: string;
+  status: "creating" | "created";
+}): PartnerCreditCheckoutOperation {
+  if (row.tax_behavior !== "inclusive") {
+    throw new CreditPurchaseError("CHECKOUT_INTENT_CONFLICT", "Checkout intent tax behaviour is not supported.");
+  }
+  return {
+    checkoutOperationKey: row.checkout_operation_key,
+    stripeSessionId: row.stripe_session_id,
+    checkoutUrl: row.checkout_url,
+    checkoutExpiresAt: new Date(row.checkout_expires_at),
+    tenantId: row.tenant_id,
+    packCode: row.pack_code,
+    initiatingUserId: row.initiating_user_id,
+    stripePriceId: row.stripe_price_id,
+    stripeCurrency: normalizeCurrency(row.stripe_currency),
+    stripeEnvironment: row.stripe_environment,
+    credits: Number(row.credits),
+    pricePence: Number(row.price_pence),
+    taxBehavior: "inclusive",
+    status: row.status,
+  };
+}
+
+type CheckoutOperationRow = {
+  checkout_operation_key: string;
+  stripe_session_id: string | null;
+  checkout_url: string | null;
+  checkout_expires_at: Date;
+  tenant_id: string;
+  pack_code: string;
+  initiating_user_id: string;
+  stripe_price_id: string;
+  stripe_currency: string;
+  stripe_environment: StripeEnvironment;
+  credits: number;
+  price_pence: number;
+  tax_behavior: string;
+  status: "creating" | "created";
+};
+
+async function expireElapsedCheckoutOperations(input: {
+  tenantId: string;
+  initiatingUserId: string;
+  packCode: string;
+  stripeEnvironment: StripeEnvironment;
+}): Promise<void> {
+  await partnerAdminQuery(
+    `UPDATE partner_credit_checkout_sessions
+        SET status='expired', updated_at=now()
+      WHERE tenant_id=$1
+        AND initiating_user_id=$2
+        AND pack_code=$3
+        AND stripe_environment=$4
+        AND status IN ('creating', 'created')
+        AND checkout_expires_at <= now()`,
+    [input.tenantId, input.initiatingUserId, input.packCode, input.stripeEnvironment]
+  );
+}
+
+async function loadActiveCheckoutOperation(input: {
+  tenantId: string;
+  initiatingUserId: string;
+  packCode: string;
+  stripeEnvironment: StripeEnvironment;
+}): Promise<PartnerCreditCheckoutOperation | null> {
+  const { rows } = await partnerAdminQuery<CheckoutOperationRow>(
+    `SELECT checkout_operation_key, stripe_session_id, checkout_url, checkout_expires_at,
+            tenant_id, pack_code, initiating_user_id, stripe_price_id, stripe_currency,
+            stripe_environment, credits, price_pence, tax_behavior, status
+       FROM partner_credit_checkout_sessions
+      WHERE tenant_id=$1
+        AND initiating_user_id=$2
+        AND pack_code=$3
+        AND stripe_environment=$4
+        AND status IN ('creating', 'created')
+        AND checkout_expires_at > now()
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [input.tenantId, input.initiatingUserId, input.packCode, input.stripeEnvironment]
+  );
+  return rows[0] ? checkoutOperationFromRow(rows[0]) : null;
+}
+
+/** Return a still-live operation before consulting mutable pack configuration. */
+export async function findActivePartnerCreditCheckoutOperation(input: {
+  tenantId: string;
+  initiatingUserId: string;
+  packCode: string;
+  stripeEnvironment: StripeEnvironment;
+}): Promise<PartnerCreditCheckoutOperation | null> {
+  await expireElapsedCheckoutOperations(input);
+  return loadActiveCheckoutOperation(input);
+}
+
+/**
+ * Claim one outstanding Checkout operation before calling Stripe. A second Scanner/browser window
+ * receives this same row and therefore uses the same Stripe idempotency key rather than creating a
+ * second payable Session. The database partial unique index is the concurrency authority.
+ */
+export async function reservePartnerCreditCheckoutOperation(
+  input: PartnerCreditCheckoutOperationInput
+): Promise<PartnerCreditCheckoutOperation> {
+  const existing = await findActivePartnerCreditCheckoutOperation(input);
+  if (existing) return existing;
+
+  const inserted = await partnerAdminQuery<CheckoutOperationRow>(
+    `INSERT INTO partner_credit_checkout_sessions
+       (tenant_id, stripe_session_id, pack_code, initiating_user_id, stripe_price_id, stripe_currency,
+        stripe_environment, checkout_operation_key, checkout_expires_at, credits, price_pence, tax_behavior,
+        status)
+     VALUES ($1,NULL,$2,$3,$4,$5,$6,gen_random_uuid(),$7,$8,$9,$10,'creating')
+     ON CONFLICT DO NOTHING
+     RETURNING checkout_operation_key, stripe_session_id, checkout_url, checkout_expires_at,
+               tenant_id, pack_code, initiating_user_id, stripe_price_id, stripe_currency,
+               stripe_environment, credits, price_pence, tax_behavior, status`,
+    [
+      input.tenantId,
+      input.packCode,
+      input.initiatingUserId,
+      input.stripePriceId,
+      normalizeCurrency(input.stripeCurrency),
+      input.stripeEnvironment,
+      input.checkoutExpiresAt,
+      input.credits,
+      input.pricePence,
+      input.taxBehavior,
+    ]
+  );
+  if (inserted.rows[0]) return checkoutOperationFromRow(inserted.rows[0]);
+
+  const concurrent = await loadActiveCheckoutOperation(input);
+  if (concurrent) return concurrent;
+  throw new CreditPurchaseError("CHECKOUT_INTENT_CONFLICT", "Could not reserve a Checkout operation.");
+}
+
+/** Publish the one Stripe Session returned for a previously claimed operation. */
+export async function completePartnerCreditCheckoutOperation(input: {
+  checkoutOperationKey: string;
+  stripeSessionId: string;
+  checkoutUrl: string;
+  checkoutExpiresAt: Date;
+}): Promise<PartnerCreditCheckoutOperation> {
+  const updated = await partnerAdminQuery<CheckoutOperationRow>(
+    `UPDATE partner_credit_checkout_sessions
+        SET stripe_session_id=COALESCE(stripe_session_id, $2),
+            checkout_url=$3,
+            checkout_expires_at=CASE WHEN stripe_session_id IS NULL THEN $4 ELSE checkout_expires_at END,
+            status='created',
+            updated_at=now()
+      WHERE checkout_operation_key=$1
+        AND (
+          (status='creating' AND stripe_session_id IS NULL)
+          OR (status='created' AND stripe_session_id=$2 AND checkout_url IS NULL)
+        )
+      RETURNING checkout_operation_key, stripe_session_id, checkout_url, checkout_expires_at,
+                tenant_id, pack_code, initiating_user_id, stripe_price_id, stripe_currency,
+                stripe_environment, credits, price_pence, tax_behavior, status`,
+    [input.checkoutOperationKey, input.stripeSessionId, input.checkoutUrl, input.checkoutExpiresAt]
+  );
+  if (updated.rows[0]) return checkoutOperationFromRow(updated.rows[0]);
+
+  const { rows } = await partnerAdminQuery<CheckoutOperationRow>(
+    `SELECT checkout_operation_key, stripe_session_id, checkout_url, checkout_expires_at,
+            tenant_id, pack_code, initiating_user_id, stripe_price_id, stripe_currency,
+            stripe_environment, credits, price_pence, tax_behavior, status
+       FROM partner_credit_checkout_sessions
+      WHERE checkout_operation_key=$1
+      LIMIT 1`,
+    [input.checkoutOperationKey]
+  );
+  const existing = rows[0];
+  if (
+    existing &&
+    existing.status === "created" &&
+    existing.stripe_session_id === input.stripeSessionId &&
+    existing.checkout_url === input.checkoutUrl
+  ) {
+    return checkoutOperationFromRow(existing);
+  }
+  throw new CreditPurchaseError("CHECKOUT_INTENT_CONFLICT", "Checkout Session did not match its reserved operation.");
 }
 
 /** The Checkout Session fields the fulfilment path reads. Kept minimal on purpose. */
@@ -502,23 +796,10 @@ export async function fulfilPartnerCreditPurchase(
     return { granted: false, credits: 0, reason: "checkout_not_verified" };
   }
 
-  // Credits come from the SERVER-side catalogue keyed by pack code, never from session metadata or
-  // the amount paid. Metadata is client-influenced at creation time; trusting a `credits` field
-  // there would let a tampered session mint arbitrary capacity.
-  const { rows } = await partnerAdminQuery<{
-    credits: number;
-    stripe_price_id: string | null;
-    stripe_currency: string | null;
-    active: boolean;
-  }>(`SELECT credits, stripe_price_id, stripe_currency, active FROM partner_credit_packs WHERE code=$1`, [packCode]);
-  const pack = rows[0];
-  const credits = Number(pack?.credits ?? 0);
-  const pricing = canonicalPackPricing(packCode, credits);
-  if (!credits || credits <= 0 || !pricing) {
+  // Preserve the explicit refusal for a non-canonical pack before provenance lookup. A local
+  // operation can never legitimately exist for it, and metadata must not turn it into capacity.
+  if (!canonicalCheckoutSnapshot(packCode)) {
     return { granted: false, credits: 0, reason: "pack_not_found" };
-  }
-  if (pack.active !== true) {
-    return { granted: false, credits: 0, reason: "pack_disabled" };
   }
 
   // Every condition below is permanent for this Checkout Session, so return a handled no-grant
@@ -533,16 +814,30 @@ export async function fulfilPartnerCreditPurchase(
     return { granted: false, credits: 0, reason: "checkout_environment_mismatch" };
   }
 
-  const expectedPriceId = pack?.stripe_price_id;
-  const expectedCurrency = pack?.stripe_currency?.trim().toLowerCase();
-  if (!expectedPriceId || !expectedCurrency) {
-    return { granted: false, credits: 0, reason: "pack_not_purchasable" };
-  }
-
   return withPartnerAdminTransaction(async (client) => {
     const intent = await loadPartnerCreditCheckoutIntent(session.id!, client, true);
     if (!intent) {
       return { granted: false, credits: 0, reason: "checkout_intent_not_found" };
+    }
+    const canonical = canonicalCheckoutSnapshot(intent.packCode);
+    if (!canonical) {
+      return { granted: false, credits: 0, reason: "pack_not_found" };
+    }
+    const credits = intent.credits;
+    const pricePence = intent.pricePence;
+    const taxBehavior = intent.taxBehavior;
+    if (
+      typeof credits !== "number" ||
+      !Number.isInteger(credits) ||
+      credits <= 0 ||
+      typeof pricePence !== "number" ||
+      !Number.isInteger(pricePence) ||
+      pricePence <= 0 ||
+      taxBehavior !== "inclusive" ||
+      canonical.credits !== credits ||
+      canonical.pricePence !== pricePence
+    ) {
+      return { granted: false, credits: 0, reason: "checkout_intent_snapshot_invalid" };
     }
     if (intent.status === "granted") {
       return { granted: false, credits, reason: "already_granted" };
@@ -553,16 +848,10 @@ export async function fulfilPartnerCreditPurchase(
     if (intent.packCode !== packCode) {
       return { granted: false, credits: 0, reason: "checkout_pack_mismatch" };
     }
-    if (intent.stripePriceId !== expectedPriceId) {
-      return { granted: false, credits: 0, reason: "checkout_price_mismatch" };
-    }
-    if (intent.stripeCurrency !== expectedCurrency) {
-      return { granted: false, credits: 0, reason: "checkout_currency_mismatch" };
-    }
     if (intent.stripeEnvironment !== expectedEnvironment) {
       return { granted: false, credits: 0, reason: "checkout_environment_mismatch" };
     }
-    if (session.amountTotal !== pricing.pricePence) {
+    if (session.amountTotal !== pricePence) {
       return { granted: false, credits: 0, reason: "checkout_amount_mismatch" };
     }
 
@@ -573,21 +862,21 @@ export async function fulfilPartnerCreditPurchase(
     const lineItem = lineItems[0];
     const observedCurrency = lineItem.currency?.trim().toLowerCase();
     const checkoutCurrency = session.currency?.trim().toLowerCase();
-    if (lineItem.priceId !== expectedPriceId) {
+    if (lineItem.priceId !== intent.stripePriceId) {
       return { granted: false, credits: 0, reason: "checkout_price_mismatch" };
     }
     if (
       !observedCurrency ||
       !checkoutCurrency ||
-      observedCurrency !== expectedCurrency ||
-      checkoutCurrency !== expectedCurrency
+      observedCurrency !== intent.stripeCurrency ||
+      checkoutCurrency !== intent.stripeCurrency
     ) {
       return { granted: false, credits: 0, reason: "checkout_currency_mismatch" };
     }
-    if (lineItem.unitAmount !== pricing.pricePence) {
+    if (lineItem.unitAmount !== pricePence) {
       return { granted: false, credits: 0, reason: "checkout_amount_mismatch" };
     }
-    if (lineItem.taxBehavior === "exclusive") {
+    if (lineItem.taxBehavior !== taxBehavior) {
       return { granted: false, credits: 0, reason: "checkout_tax_behavior_mismatch" };
     }
 

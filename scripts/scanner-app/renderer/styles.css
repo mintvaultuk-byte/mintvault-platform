@@ -809,6 +809,16 @@ body {
 .modal.visible {
   display: flex;
 }
+.modal.billing-lock-nonblocking {
+  align-items: flex-start;
+  background: transparent;
+  padding-top: 44px;
+  pointer-events: none;
+}
+.modal.billing-lock-nonblocking .modal-card {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+}
 .modal-card {
   background: var(--bg-2);
   border: 1px solid var(--border);

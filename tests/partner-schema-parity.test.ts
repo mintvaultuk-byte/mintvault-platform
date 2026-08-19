@@ -284,6 +284,8 @@ describe("partner schema ↔ migration parity", () => {
       // 0098 grants SCANNER_OPERATOR balance/catalogue read authority for zero-credit lockout UX.
       // Raw-SQL RBAC reference data; no Drizzle model.
       "0098_scanner_operator_credit_view.sql",
+      // 0099 records one durable Checkout operation/snapshot before Stripe is called.
+      "0099_partner_credit_checkout_operation_idempotency.sql",
     ]);
   });
 

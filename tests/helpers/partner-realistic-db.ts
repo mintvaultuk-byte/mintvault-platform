@@ -96,6 +96,8 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // Local Checkout provenance: the verified webhook must match a server-created Stripe Session
   // before it can grant wallet capacity.
   "0097_partner_credit_checkout_sessions",
+  // Durable Checkout-operation idempotency and immutable payment snapshot.
+  "0099_partner_credit_checkout_operation_idempotency",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -332,6 +334,8 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: tenant-owned payment provenance with RLS; depends only on partner organisations
   // and the global credit-pack catalogue.
   "0097_partner_credit_checkout_sessions",
+  // PARTNER scope: additive Checkout-operation provenance; no wallet/ledger mutation.
+  "0099_partner_credit_checkout_operation_idempotency",
   // PARTNER scope: one additive RBAC grant so SCANNER_OPERATOR can read wallet/catalogue state.
   "0098_scanner_operator_credit_view",
 ] as const;
