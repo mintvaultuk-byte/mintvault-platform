@@ -134,11 +134,21 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
   "0041_partner_submission_credit_lifecycle",
 ] as const;
 
-/** 0033 — additive audit-action precision (partner_user_mfa_reset et al). */
+/**
+ * The complete management-audit vocabulary lineage.
+ *
+ * This must stay in migration-number order: 0074 adds the wallet-backfill action,
+ * 0084 adds the location-management actions, and 0096 adds only the protected
+ * Card Job void action. Partner RBAC bootstrap proofs use this exact chain.
+ */
 export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
-  ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
+  "0032_partner_final_owner_invariant",
   "0033_partner_audit_action_precision",
-  // 0096 widens the same management-audit CHECK for the protected Card Job void wrapper.
+  "0074_partner_submission_lifecycle_and_location_snapshot",
+  "0084_partner_location_management",
+  "0086_partner_session_step_up",
+  // 0096 widens the 0084 vocabulary for the protected Card Job void wrapper only.
   "0096_partner_card_job_void_management_audit",
 ] as const;
 
