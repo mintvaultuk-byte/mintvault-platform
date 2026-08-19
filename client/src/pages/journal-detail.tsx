@@ -7,6 +7,7 @@ import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import GradientButton from "@/components/ui/gradient-button";
 import { guides, getGuideBySlug, type Guide } from "@/data/guides";
+import SeoHead from "@/components/seo-head";
 
 function formatDate(iso: string): string {
   try {
@@ -153,6 +154,22 @@ export default function JournalDetailV2() {
 
   return (
     <div className="min-h-screen flex flex-col vault-page">
+      <SeoHead
+        title={guide.metaTitle}
+        description={guide.metaDescription}
+        canonical={`/journal/${guide.slug}`}
+        ogType="article"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "Article",
+          headline: guide.title,
+          description: guide.metaDescription,
+          datePublished: guide.publishedDate,
+          ...(guide.updatedDate ? { dateModified: guide.updatedDate } : {}),
+          author: { "@type": "Organization", name: guide.author },
+          mainEntityOfPage: `https://mintvaultuk.com/journal/${guide.slug}`,
+        }}
+      />
       <style>{PROSE_CSS}</style>
       <HeaderV2 />
 

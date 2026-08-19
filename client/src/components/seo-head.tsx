@@ -63,7 +63,11 @@ export default function SeoHead({
     const resolvedTitle = ogTitle || title;
     const resolvedDesc = ogDescription || description;
     const resolvedImage = ogImage || DEFAULT_OG_IMAGE;
-    const resolvedCanonical = canonical || SITE_URL + window.location.pathname;
+    const resolvedCanonical = canonical
+      ? canonical.startsWith("/")
+        ? `${SITE_URL}${canonical}`
+        : canonical
+      : SITE_URL + window.location.pathname;
 
     setMeta("description", description);
 

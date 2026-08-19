@@ -84,6 +84,7 @@ import { registerVaultQuestProductionRoutes } from "./routes/vault-quest-product
 import { registerVaultQuestCardFactoryRoutes } from "./routes/vault-quest-card-factory";
 import { registerStolenRoutes } from "./routes/stolen";
 import { registerRedirectRoutes } from "./routes/redirects";
+import { getSitemapEntries } from "./seo-config";
 import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
@@ -6430,24 +6431,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  const GUIDE_SLUGS = [
-    "how-to-grade-pokemon-cards-uk",
-    "what-pokemon-cards-are-worth-grading",
-    "psa-vs-uk-card-grading-companies",
-    "is-card-grading-worth-it-uk",
-    "how-card-condition-affects-value",
-    "pokemon-card-grading-costs-explained",
-    "raw-vs-graded-pokemon-cards",
-    "how-to-send-cards-for-grading-safely",
-    "what-makes-a-card-gem-mint",
-    "best-pokemon-cards-worth-grading-this-year",
-    "uk-guide-to-trading-card-grading",
-    "how-to-protect-pokemon-cards-before-grading",
-    "why-graded-cards-sell-for-more",
-    "beginners-guide-pokemon-card-collecting-uk",
-    "understanding-card-centering-corners-edges-surface",
-  ];
-
   // ── PUBLIC CLAIM FLOW ──────────────────────────────────────────────────────
   // Rate limiter: max 5 attempts per IP per 15 minutes to prevent brute-forcing claim codes
 
@@ -6582,40 +6565,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/sitemap.xml", (_req, res) => {
     const baseUrl = APP_BASE_URL;
     const now = new Date().toISOString().split("T")[0];
-
-    const staticPages = [
-      { loc: "/", priority: "1.0", changefreq: "weekly" },
-      { loc: "/submit", priority: "0.9", changefreq: "monthly" },
-      { loc: "/cert", priority: "0.8", changefreq: "weekly" },
-      { loc: "/track", priority: "0.6", changefreq: "monthly" },
-      { loc: "/why-mintvault", priority: "0.7", changefreq: "monthly" },
-      { loc: "/labels", priority: "0.5", changefreq: "monthly" },
-      { loc: "/reports", priority: "0.5", changefreq: "monthly" },
-      { loc: "/population", priority: "0.6", changefreq: "weekly" },
-      { loc: "/tcg", priority: "0.5", changefreq: "monthly" },
-      { loc: "/guides", priority: "0.8", changefreq: "weekly" },
-      { loc: "/terms-and-conditions", priority: "0.3", changefreq: "yearly" },
-      { loc: "/liability-and-insurance", priority: "0.3", changefreq: "yearly" },
-      { loc: "/pokemon-card-grading-uk", priority: "0.9", changefreq: "monthly" },
-      { loc: "/trading-card-grading-uk", priority: "0.8", changefreq: "monthly" },
-      { loc: "/card-grading-service-uk", priority: "0.8", changefreq: "monthly" },
-      { loc: "/psa-alternative-uk", priority: "0.8", changefreq: "monthly" },
-      { loc: "/how-to-grade-pokemon-cards", priority: "0.8", changefreq: "monthly" },
-      { loc: "/tcg-grading-uk", priority: "0.8", changefreq: "monthly" },
-    ];
-
-    staticPages.push({ loc: "/claim", priority: "0.4", changefreq: "monthly" });
-
-    const urls = staticPages.map(
+    const urls = getSitemapEntries().map(
       (p) =>
         `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
     );
-
-    for (const slug of GUIDE_SLUGS) {
-      urls.push(
-        `  <url>\n    <loc>${baseUrl}/guides/${slug}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`
-      );
-    }
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
 

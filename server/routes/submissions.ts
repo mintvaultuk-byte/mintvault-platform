@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { generatePdfToken, verifyPdfToken } from "../lib/pdf-token";
+import { paidSubmissionConfirmation } from "../lib/paid-submission-confirmation";
 import { serviceTierToPricingTier, auditLog } from "@shared/schema";
 import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
@@ -961,6 +962,31 @@ export function registerSubmissionRoutes(app: Express): void {
     } catch (error: any) {
       console.error("Error confirming payment:", error.message);
       res.status(500).json({ error: "Failed to confirm payment" });
+    }
+  });
+
+  // The success page cannot use the normal submission lookup: that endpoint
+  // deliberately requires an email/session to prevent sequential-id discovery.
+  // A confirmation token is minted only after Stripe has reported success, is
+  // bound to this submission id, and already authorizes the more sensitive PDF
+  // documents. Keep this response deliberately small and never cache it.
+  app.get("/api/submissions/:submissionId/success", submissionLookupRateLimit, async (req, res) => {
+    try {
+      const submissionId = String(req.params.submissionId);
+      if (!verifyPdfToken(submissionId, req.query.token)) {
+        return res.status(403).json({ error: "Invalid or expired confirmation token" });
+      }
+
+      const confirmation = paidSubmissionConfirmation(await storage.getSubmissionBySubmissionId(submissionId));
+      if (!confirmation) {
+        return res.status(404).json({ error: "Paid submission confirmation not found" });
+      }
+
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json(confirmation);
+    } catch (error: any) {
+      console.error("Error getting paid submission confirmation:", error.message);
+      res.status(500).json({ error: "Failed to get paid submission confirmation" });
     }
   });
 
