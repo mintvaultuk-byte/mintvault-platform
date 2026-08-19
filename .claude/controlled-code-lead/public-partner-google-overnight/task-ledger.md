@@ -23,7 +23,7 @@
 | 3 — Lead verification | done | 2026-08-19 | Findings reproduced in source; flag/public-ref no-migration public strategy accepted |
 | 4 — Implementation authorisation | done | 2026-08-19 | Manifest and protected boundaries recorded |
 | 5 — Implementation | done | 2026-08-19 | Sole lead writer; exact 57-file candidate re-manifested at Stage 6 |
-| 6 — Regression | done | 2026-08-19 | Typecheck/build/targeted lint/SQL lint; 316 runnable files and 5,168 tests pass; real HTTP/PG/browser/perf/rollback |
+| 6 — Regression | done | 2026-08-20 | Typecheck/build/targeted lint/SQL lint; 319 runnable files and 5,181 tests pass; real HTTP/PG/browser/perf/rollback |
 | 7 — Final report | done | 2026-08-19 | Public code complete; Google live pilot and all deployment/activation remain external/protected |
 
 ## Addendum continuation — public address/privacy safety
@@ -43,6 +43,14 @@
 | Agent B — security/privacy | public DTO, tenant boundary, OAuth/token/log safety | read-only final received 2026-08-19 |
 | Agent C — UX/SEO/accessibility | discovery, SSR/sitemap, mobile, Maps, dead ends | read-only final received 2026-08-19 |
 | Agent D — hostile/release | post-package break/fix and final release verdict | final targeted result: 0 BLOCKER / 0 HIGH |
+
+## Addendum hostile repair gate
+
+- `f592bd2c` independent review found one exact-version approval BLOCKER plus temporary-profile, keyboard-modal, monitoring, stale multi-location and private-log HIGH defects.
+- The approval and Owner-attestation writers now require separate expected profile/location versions and compare them under the locked rows. Stale location, shared-name and cross-location Owner forms return 409 without publication.
+- Private Super Admin status bodies are suppressed from application logs while rollout HTML/XML route status and duration telemetry is emitted without response bodies.
+- Public 503 and genuine 404 states are distinct; both authenticated previews use the established keyboard-modal primitive with explicit focus restoration.
+- The release owner has a tested 15-minute request denominator/5xx/p95 analyser and a precise stepped-up kill-switch action.
 
 ## Links
 

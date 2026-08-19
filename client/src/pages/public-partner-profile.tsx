@@ -24,11 +24,34 @@ export default function PublicPartnerProfilePage({ params }: { params: { publicR
     refetchInterval: 30_000,
   });
   const location = query.data;
+  const errorKind = query.error instanceof Error ? query.error.message : null;
 
   if (query.isLoading) {
     return <div className="min-h-[60vh] bg-[#FAFAF8] px-6 py-16 text-[#171717]" role="status">Loading Partner profile…</div>;
   }
-  if (!location || query.error) {
+  if (errorKind === "request_failed") {
+    return (
+      <div className="min-h-[60vh] bg-[#FAFAF8] px-6 py-16 text-[#171717]">
+        <SeoHead title="Partner profile temporarily unavailable | MintVault UK" description="This Partner profile is temporarily unavailable." noindex />
+        <div className="mx-auto max-w-3xl" role="alert" aria-live="assertive">
+          <h1 className="text-3xl font-semibold">Partner profile temporarily unavailable</h1>
+          <p className="mt-3 text-[#514B42]">The public directory could not be reached. This does not mean the Partner was removed or made private.</p>
+          <button
+            type="button"
+            onClick={() => query.refetch()}
+            disabled={query.isFetching}
+            className="mt-6 min-h-11 rounded-md border border-[#AFA79A] px-5 font-semibold disabled:opacity-60"
+          >
+            {query.isFetching ? "Trying again…" : "Try again"}
+          </button>
+          <Link href="/find-a-partner" className="ml-4 mt-6 inline-flex min-h-11 items-center gap-2 font-semibold text-[#765B00] underline">
+            <ArrowLeft size={16} aria-hidden="true" /> Back to Partner search
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  if (!location || errorKind === "not_found") {
     return (
       <div className="min-h-[60vh] bg-[#FAFAF8] px-6 py-16 text-[#171717]">
         <SeoHead title="Partner not found | MintVault UK" description="This Partner profile is not available." noindex />

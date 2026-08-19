@@ -79,3 +79,14 @@ Exact filenames may be consolidated within these declared surfaces; no new produ
 No operational location field is copied to the public DTO automatically. Editing a consented public field increments its version and immediately invalidates approval/listing until a Super Admin approves that exact version.
 
 Browser-event analytics is excluded: the active cookie notice promises “No analytics or tracking.” The existing request logger remains the only in-scope non-sensitive traffic telemetry; CTA analytics is a recorded owner/legal follow-up, not business `audit_log`.
+
+## Post-package hostile repair manifest
+
+| Surface / expected files | Change | Why | Class |
+|---|---|---|---|
+| Partner/Admin publication routes, services and clients | Carry independent expected profile/location versions; compare under locks; reject stale drafts/approvals | PPN-023/027 exact reviewed-output integrity | B/E |
+| `server/lib/request-logger.ts`, public HTTP/metrics tests and rollout ledger | Suppress private admin bodies; emit body-free bounded public route timing/status; add tested 15-minute threshold analyser | PPN-026/028 privacy and executable rollback evidence | B/G |
+| Public and authenticated profile pages | Distinguish retryable 503; use the established keyboard-modal primitive with explicit focus restoration | PPN-024/025 customer truth and accessibility | A/B |
+| Public publication DB/HTTP/UI tests | Stale location, shared-name, cross-location form, private-log, retry, focus and telemetry regressions | PPN-023–028 | B/E/G |
+
+The repair does not alter either migration, public eligibility, Google authority, grading, Scanner, payments, stations or production state.

@@ -502,11 +502,16 @@ let ADMIN_USER_ID: string;
   it("public-profile publication requires exact Partner consent, rejects non-booleans and cross-tenant references", async () => {
     const ac = await adminCookie();
     const url = `${SA}/${A}/locations/${LA1}/publication`;
-    const body = { reason: "controlled publication test" };
+    const body = {
+      reason: "controlled publication test",
+      expectedProfileVersion: 1,
+      expectedLocationVersion: 1,
+    };
     for (const enabled of ["false", 1, {}]) {
       expect((await apost(url, { ...body, enabled }, ac)).status).toBe(400);
     }
     expect((await apost(`${SA}/${B}/locations/${LA1}/publication`, { ...body, enabled: true }, ac)).status).toBe(404);
+    expect((await apost(url, { enabled: true, reason: body.reason }, ac)).status).toBe(400);
     const notReady = await apost(url, { ...body, enabled: true }, ac);
     expect(notReady.status).toBe(409);
     await admin.query(`

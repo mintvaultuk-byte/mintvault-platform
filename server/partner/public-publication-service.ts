@@ -206,8 +206,16 @@ export async function getAdminPublicProfileStatus(tenantId: string): Promise<Aut
   });
 }
 
+function hasAsciiControl(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 31 || code === 127) return true;
+  }
+  return false;
+}
+
 function requiredText(value: unknown, min: number, max: number, label: string): string {
-  if (typeof value !== "string" || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (typeof value !== "string" || hasAsciiControl(value)) {
     throw new PublicPublicationError("VALIDATION_ERROR", 400, `${label} is not valid.`);
   }
   const clean = value.replace(/\s+/g, " ").trim();
@@ -217,7 +225,7 @@ function requiredText(value: unknown, min: number, max: number, label: string): 
 }
 function optionalText(value: unknown, max: number, label = "Value"): string | null {
   if (value == null || value === "") return null;
-  if (typeof value !== "string" || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (typeof value !== "string" || hasAsciiControl(value)) {
     throw new PublicPublicationError("VALIDATION_ERROR", 400, `${label} is not valid.`);
   }
   const clean = value.replace(/\s+/g, " ").trim();
@@ -240,6 +248,8 @@ function optionalValidated(
 }
 
 export interface PartnerPublicDraftInput {
+  expectedProfileVersion: unknown;
+  expectedLocationVersion: unknown;
   publicDisplayName: unknown;
   privacyState: unknown;
   publicLocationName: unknown;
@@ -257,6 +267,20 @@ export async function savePartnerPublicDraft(
   locationId: string,
   input: PartnerPublicDraftInput
 ): Promise<void> {
+  if (
+    !Number.isInteger(input.expectedProfileVersion) ||
+    Number(input.expectedProfileVersion) < 0 ||
+    !Number.isInteger(input.expectedLocationVersion) ||
+    Number(input.expectedLocationVersion) < 0
+  ) {
+    throw new PublicPublicationError(
+      "VALIDATION_ERROR",
+      400,
+      "The exact profile and location versions are required before saving."
+    );
+  }
+  const expectedProfileVersion = Number(input.expectedProfileVersion);
+  const expectedLocationVersion = Number(input.expectedLocationVersion);
   if (input.attested !== true) {
     throw new PublicPublicationError("ATTESTATION_REQUIRED", 400, "Confirm that every selected value is safe to publish.");
   }
@@ -316,6 +340,21 @@ export async function savePartnerPublicDraft(
       "SELECT public_display_name,version,consented_at FROM partner_public_profiles WHERE tenant_id=$1 FOR UPDATE",
       [principal.tenantId]
     );
+    const existingLocation = await client.query<{ version: number }>(
+      `SELECT version FROM partner_location_publications
+        WHERE tenant_id=$1 AND location_id=$2 FOR UPDATE`,
+      [principal.tenantId, locationId]
+    );
+    if (
+      Number(existing.rows[0]?.version ?? 0) !== expectedProfileVersion ||
+      Number(existingLocation.rows[0]?.version ?? 0) !== expectedLocationVersion
+    ) {
+      throw new PublicPublicationError(
+        "STALE_DRAFT",
+        409,
+        "Public details changed in another location form. Refresh before attesting this exact version."
+      );
+    }
     const profileChanged = existing.rowCount !== 1 || existing.rows[0].public_display_name !== displayName || !existing.rows[0].consented_at;
     if (existing.rowCount === 0) {
       await client.query(
@@ -381,11 +420,13 @@ export async function setAdminPublicPublication(input: {
   tenantId: string;
   locationId: string;
   enabled: boolean;
+  expectedProfileVersion?: number;
+  expectedLocationVersion?: number;
   reason: string;
   adminEmail: string;
 }): Promise<void> {
   if (typeof input.enabled !== "boolean") throw new PublicPublicationError("VALIDATION_ERROR", 400, "Enabled must be true or false.");
-  if (typeof input.reason !== "string" || /[\u0000-\u001f\u007f]/.test(input.reason)) {
+  if (typeof input.reason !== "string" || hasAsciiControl(input.reason)) {
     throw new PublicPublicationError("VALIDATION_ERROR", 400, "A valid publication reason is required.");
   }
   const reason = input.reason.trim();
@@ -413,6 +454,18 @@ export async function setAdminPublicPublication(input: {
     const row = result.rows[0];
     if (!row) throw new PublicPublicationError("NOT_READY", 409, "Partner consent is required before publication.");
     if (input.enabled) {
+      if (
+        !Number.isInteger(input.expectedProfileVersion) ||
+        !Number.isInteger(input.expectedLocationVersion) ||
+        Number(row.profile_version) !== input.expectedProfileVersion ||
+        Number(row.location_version) !== input.expectedLocationVersion
+      ) {
+        throw new PublicPublicationError(
+          "STALE_PREVIEW",
+          409,
+          "The Partner changed this public profile after it was reviewed. Refresh and review the exact current preview."
+        );
+      }
       const readiness = derivePublicLocationPublicationState({
         organisationStatus: row.organisation_status,
         locationStatus: row.location_status,
@@ -439,17 +492,25 @@ export async function setAdminPublicPublication(input: {
       if (!readiness.readyForApproval) {
         throw new PublicPublicationError("NOT_READY", 409, `Public profile is not ready: ${readiness.blockingReasons.join(", ")}`);
       }
-      await client.query(
+      const profileApproval = await client.query(
         `UPDATE partner_public_profiles SET approved_version=version,approved_by=$2,
-                approved_at=now(),listed=true,updated_at=now() WHERE tenant_id=$1`,
-        [input.tenantId, input.adminEmail]
+                approved_at=now(),listed=true,updated_at=now()
+          WHERE tenant_id=$1 AND version=$3`,
+        [input.tenantId, input.adminEmail, input.expectedProfileVersion]
       );
-      await client.query(
+      const locationApproval = await client.query(
         `UPDATE partner_location_publications SET approved_version=version,approved_by=$3,
                 approved_at=now(),listed=true,updated_at=now()
-          WHERE tenant_id=$1 AND location_id=$2`,
-        [input.tenantId, input.locationId, input.adminEmail]
+          WHERE tenant_id=$1 AND location_id=$2 AND version=$4`,
+        [input.tenantId, input.locationId, input.adminEmail, input.expectedLocationVersion]
       );
+      if (profileApproval.rowCount !== 1 || locationApproval.rowCount !== 1) {
+        throw new PublicPublicationError(
+          "STALE_PREVIEW",
+          409,
+          "The Partner changed this public profile after it was reviewed. Refresh and review the exact current preview."
+        );
+      }
     } else {
       await client.query(
         `UPDATE partner_location_publications SET listed=false,updated_at=now()
@@ -472,7 +533,12 @@ export async function setAdminPublicPublication(input: {
         input.locationId,
         input.enabled ? "partner_public_profile_published" : "partner_public_profile_unpublished",
         reason,
-        JSON.stringify({ by: input.adminEmail, enabled: input.enabled }),
+        JSON.stringify({
+          by: input.adminEmail,
+          enabled: input.enabled,
+          expectedProfileVersion: input.enabled ? input.expectedProfileVersion : undefined,
+          expectedLocationVersion: input.enabled ? input.expectedLocationVersion : undefined,
+        }),
       ]
     );
   });

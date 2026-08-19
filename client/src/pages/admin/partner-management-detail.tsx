@@ -8,11 +8,12 @@
  * so). Unavailable statistics are labeled, never shown as a fake 0. No future-phase controls appear.
  * Logic is in ./partner-management-helpers (unit-tested); this is a thin renderer with data-testids.
  */
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
 import {
   canSuspendLocation,
@@ -383,6 +384,14 @@ export default function PartnerManagementDetailPage() {
     enabled: on && tab === "locations",
   });
   const [publicPreview, setPublicPreview] = useState<AuthenticatedPublicProfileRow | null>(null);
+  const publicPreviewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const publicPreviewWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (!publicPreview && publicPreviewWasOpenRef.current) {
+      publicPreviewWasOpenRef.current = false;
+      publicPreviewTriggerRef.current?.focus();
+    }
+  }, [publicPreview]);
   const onboarding = useQuery({
     queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"],
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/onboarding-readiness`).then((r) => r.json()),
@@ -779,18 +788,24 @@ export default function PartnerManagementDetailPage() {
     >
       <div data-testid="pm-detail-root">
         {publicPreview?.preview && (
-          <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="Exact public Partner profile preview">
-            <div className="mx-auto max-w-6xl rounded-lg bg-[#FAFAF8] p-6 text-[#171717] shadow-xl">
-              <div className="mb-6 flex items-center justify-between gap-4 border-b border-[#D8D2C7] pb-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#765B00]">Private Super Admin preview</p>
-                  <h2 className="text-xl font-semibold">Exact customer view — version {publicPreview.version}</h2>
-                </div>
-                <button type="button" className="min-h-11 rounded-md border px-4 font-semibold" onClick={() => setPublicPreview(null)}>Close preview</button>
-              </div>
+          <Dialog
+            open
+            onOpenChange={(open) => {
+              if (!open) setPublicPreview(null);
+            }}
+          >
+            <DialogContent
+              className="max-h-[90vh] max-w-6xl overflow-y-auto bg-[#FAFAF8] p-6 text-[#171717]"
+              data-testid="admin-public-profile-preview-dialog"
+            >
+              <DialogHeader className="mb-2 border-b border-[#D8D2C7] pb-4 pr-8">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#765B00]">Private Super Admin preview</p>
+                <DialogTitle className="text-xl">Exact customer view — version {publicPreview.version}</DialogTitle>
+                <DialogDescription>Escape closes this private preview and returns focus to the action that opened it.</DialogDescription>
+              </DialogHeader>
               <PublicPartnerProfileView location={publicPreview.preview} />
-            </div>
-          </div>
+            </DialogContent>
+          </Dialog>
         )}
         {banner && (
           <div
@@ -1180,7 +1195,17 @@ export default function PartnerManagementDetailPage() {
                               <div>{publicLocation.publication.live ? "Live" : publicLocation.publication.approved ? "Approved — not live" : publicLocation.publication.readyForApproval ? "Ready for approval" : "Not ready"}</div>
                               <div className="text-xs text-muted-foreground">{publicLocation.privacyState.replaceAll("_", " ")}</div>
                               {publicLocation.preview && (
-                                <button type="button" className="mr-2 text-xs underline" onClick={() => setPublicPreview(publicLocation)}>View public profile</button>
+                                <button
+                                  type="button"
+                                  className="mr-2 text-xs underline"
+                                  onClick={(event) => {
+                                    publicPreviewTriggerRef.current = event.currentTarget;
+                                    publicPreviewWasOpenRef.current = true;
+                                    setPublicPreview(publicLocation);
+                                  }}
+                                >
+                                  View public profile
+                                </button>
                               )}
                               {publicLocation.publication.live && (
                                 <a href={publicLocation.publicUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline">
@@ -1232,6 +1257,7 @@ export default function PartnerManagementDetailPage() {
                           <LocationActions
                             location={l}
                             publication={publicByLocation.get(l.id)}
+                            profileVersion={publicProfileStatus.data?.profile?.version}
                             partnerId={partnerId}
                             busy={mutation.isPending}
                             activeLocationCount={
@@ -2501,6 +2527,7 @@ function UserInput({
 function LocationActions({
   location,
   publication,
+  profileVersion,
   partnerId,
   busy,
   activeLocationCount,
@@ -2508,6 +2535,7 @@ function LocationActions({
 }: {
   location: PartnerLocationRow;
   publication?: AuthenticatedPublicProfileRow;
+  profileVersion?: number;
   partnerId: string;
   busy: boolean;
   activeLocationCount: number;
@@ -2524,7 +2552,11 @@ function LocationActions({
 }) {
   const suspendable = canSuspendLocation(location.status, activeLocationCount);
   const published = publication?.publication.locationListed === true;
-  const canPublish = publication?.publication.readyForApproval === true && !!publication.preview;
+  const canPublish =
+    publication?.publication.readyForApproval === true &&
+    !!publication.preview &&
+    Number.isInteger(profileVersion) &&
+    Number.isInteger(publication.version);
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       <AdminButton
@@ -2562,7 +2594,12 @@ function LocationActions({
                 await runAdminProtected(() => apiRequest(
                   "POST",
                   `/api/super-admin/grading-partners/${partnerId}/locations/${location.id}/publication`,
-                  { enabled: !published, reason }
+                  {
+                    enabled: !published,
+                    reason,
+                    expectedProfileVersion: profileVersion,
+                    expectedLocationVersion: publication?.version,
+                  }
                 ))
               ).json(),
           })

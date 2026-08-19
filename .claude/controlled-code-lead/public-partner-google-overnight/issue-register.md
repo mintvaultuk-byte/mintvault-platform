@@ -32,6 +32,12 @@
 | PPN-020 | Directory-enabled header can overflow at tablet breakpoints | UX review | HIGH | A | yes | Keep compact menu through the tablet range and prove 768/820/1024/1280 widths | PROVEN |
 | PPN-021 | Location Cards Graded count can accept mismatched Partner provenance and hides true zero | source review | HIGH | B | yes | Bind both immutable origin IDs in a location-correlated aggregate and retain zero as zero | PROVEN |
 | PPN-022 | Cached Google Maps data can be consumed while the Google feature flag is disabled | source review | HIGH | B/F | yes | Read Google snapshots only behind the Google-specific global switch; retain MintVault address fallback | PROVEN |
+| PPN-023 | A stale Super Admin preview could approve newer unseen Partner values | security + UX hostile review | BLOCKER | B/E | yes | Require reviewed profile and location versions, compare under row locks and use version-qualified approval updates | PROVEN |
+| PPN-024 | Retryable public-profile 503 rendered as a permanent private/unlisted 404 | UX review | HIGH | A/B | yes | Preserve temporary-failure state with announced retry control and separate noindex copy | PROVEN |
+| PPN-025 | Partner and Super Admin previews declared modal semantics without keyboard-modal behaviour | UX/accessibility review | HIGH | A | yes | Use the established Radix Dialog focus scope for initial focus, Tab containment, Escape/background isolation and explicit trigger-focus restoration | PROVEN |
+| PPN-026 | Rollout thresholds named HTML/XML paths absent from application telemetry | UX/release review | HIGH | G | yes | Emit body-free status/duration telemetry for bounded public paths and provide a tested 15-minute denominator/p95 rollback analyser | PROVEN |
+| PPN-027 | A stale multi-location Owner form could revert the shared public display name | UX review | HIGH | A/B/E | yes | Carry profile and location versions on every attestation, reject stale drafts under locks and remount cards when the shared profile version changes | PROVEN |
+| PPN-028 | Super Admin public-profile status body could write home addresses and unpublished drafts to Fly logs | security review | HIGH | B | yes | Suppress the grading-partners response body prefix while retaining method/path/status/duration telemetry | PROVEN |
 
 ## Rejected findings
 

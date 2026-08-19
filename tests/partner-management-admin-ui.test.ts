@@ -228,6 +228,8 @@ describe("G5 detail page source assertions", () => {
     // the exact preview and approves its current version on dedicated routes.
     expect(src).toContain('"/api/super-admin/grading-partners", partnerId, "public-profile"');
     expect(src).toContain("/api/super-admin/grading-partners/${partnerId}/locations/${location.id}/publication");
+    expect(src).toContain("expectedProfileVersion: profileVersion");
+    expect(src).toContain("expectedLocationVersion: publication?.version");
     expect(src).toContain("View public profile");
   });
 

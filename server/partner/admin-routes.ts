@@ -151,10 +151,22 @@ export function superAdminPartnerRouter(): Router {
           res.status(400).json({ error: 'The "enabled" field must be true or false.' });
           return;
         }
+        if (
+          req.body.enabled &&
+          (!Number.isInteger(req.body?.expectedProfileVersion) || req.body.expectedProfileVersion < 1 ||
+            !Number.isInteger(req.body?.expectedLocationVersion) || req.body.expectedLocationVersion < 1)
+        ) {
+          res.status(400).json({
+            error: "The exact reviewed profile and location versions are required for publication.",
+          });
+          return;
+        }
         await setAdminPublicPublication({
           tenantId: String(req.params.partnerId),
           locationId: String(req.params.locationId),
           enabled: req.body.enabled,
+          expectedProfileVersion: req.body.expectedProfileVersion,
+          expectedLocationVersion: req.body.expectedLocationVersion,
           reason: req.body?.reason,
           adminEmail: (req.session as { adminEmail?: string }).adminEmail ?? "unknown-admin",
         });

@@ -846,6 +846,13 @@ export function partnerApiRouter(): Router {
     async (req, res) => {
       noStore(res);
       try {
+        if (
+          !Number.isInteger(req.body?.expectedProfileVersion) || req.body.expectedProfileVersion < 0 ||
+          !Number.isInteger(req.body?.expectedLocationVersion) || req.body.expectedLocationVersion < 0
+        ) {
+          res.status(400).json({ error: "The exact profile and location versions are required before saving." });
+          return;
+        }
         await savePartnerPublicDraft(req.partner!, String(req.params.locationId), req.body ?? {});
         res.json({ ok: true });
       } catch (err) {

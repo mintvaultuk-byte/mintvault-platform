@@ -253,6 +253,8 @@ export const partnerLocations = {
 export const partnerPublicProfile = {
   get: () => req<AuthenticatedPublicProfileStatus>("GET", "/api/partner/public-profile"),
   save: (locationId: string, data: {
+    expectedProfileVersion: number;
+    expectedLocationVersion: number;
     publicDisplayName: string;
     privacyState: PartnerPublicPrivacyState;
     publicLocationName: string;

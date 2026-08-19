@@ -76,6 +76,8 @@ describe("0101 public Partner privacy/publication authority (real PostgreSQL 17)
     expect(await service.listPublicPartnerLocations()).toEqual([]);
 
     await publication.savePartnerPublicDraft(principal, LOC_STORE, {
+      expectedProfileVersion: 0,
+      expectedLocationVersion: 0,
       publicDisplayName: "A Cards",
       privacyState: "PUBLIC_STOREFRONT",
       publicLocationName: "Canterbury Shop",
@@ -88,10 +90,14 @@ describe("0101 public Partner privacy/publication authority (real PostgreSQL 17)
       attested: true,
     });
     expect(await service.listPublicPartnerLocations()).toEqual([]);
+    const storefrontReview = await publication.getPartnerPublicProfileStatus(principal);
+    const storefrontVersion = storefrontReview.locations.find((row) => row.id === LOC_STORE)!.version;
     await publication.setAdminPublicPublication({
       tenantId: ORG_A,
       locationId: LOC_STORE,
       enabled: true,
+      expectedProfileVersion: storefrontReview.profile!.version,
+      expectedLocationVersion: storefrontVersion,
       reason: "Owner consent and exact output reviewed",
       adminEmail: "super@example.test",
     });
@@ -117,7 +123,10 @@ describe("0101 public Partner privacy/publication authority (real PostgreSQL 17)
   });
 
   it("publishes a service area without street address or Maps and never enumerates an unconsented tenant", async () => {
+    const beforeServiceArea = await publication.getPartnerPublicProfileStatus(principal);
     await publication.savePartnerPublicDraft(principal, LOC_SERVICE, {
+      expectedProfileVersion: beforeServiceArea.profile!.version,
+      expectedLocationVersion: 0,
       publicDisplayName: "A Cards",
       privacyState: "SERVICE_AREA_PRIVATE_ADDRESS",
       publicLocationName: "Kent Collection Service",
@@ -129,10 +138,13 @@ describe("0101 public Partner privacy/publication authority (real PostgreSQL 17)
       mapsEnabled: true,
       attested: true,
     });
+    const serviceAreaReview = await publication.getPartnerPublicProfileStatus(principal);
     await publication.setAdminPublicPublication({
       tenantId: ORG_A,
       locationId: LOC_SERVICE,
       enabled: true,
+      expectedProfileVersion: serviceAreaReview.profile!.version,
+      expectedLocationVersion: serviceAreaReview.locations.find((row) => row.id === LOC_SERVICE)!.version,
       reason: "Service-area privacy output reviewed",
       adminEmail: "super@example.test",
     });
@@ -162,6 +174,8 @@ describe("0101 public Partner privacy/publication authority (real PostgreSQL 17)
 
   it("invalidates approval immediately when an Owner edits the exact public output", async () => {
     await publication.savePartnerPublicDraft(principal, LOC_STORE, {
+      expectedProfileVersion: 1,
+      expectedLocationVersion: 1,
       publicDisplayName: "A Cards",
       privacyState: "PUBLIC_STOREFRONT",
       publicLocationName: "Canterbury Shop",
@@ -179,6 +193,70 @@ describe("0101 public Partner privacy/publication authority (real PostgreSQL 17)
     expect(row.publication.live).toBe(false);
     expect(row.preview?.address).toBe("2 New Public Street, Canterbury CT1 2BB");
     expect(row.preview && JSON.stringify(row.preview)).not.toContain("10 Owner Home Road");
+
+    const staleLocationReview = status;
+    await publication.savePartnerPublicDraft(principal, LOC_STORE, {
+      expectedProfileVersion: staleLocationReview.profile!.version,
+      expectedLocationVersion: staleLocationReview.locations.find((location) => location.id === LOC_STORE)!.version,
+      publicDisplayName: "A Cards",
+      privacyState: "PUBLIC_STOREFRONT",
+      publicLocationName: "Canterbury Shop",
+      publicStreetAddress: "3 Newer Public Street, Canterbury CT1 3CC",
+      publicWebsite: "https://cards.example.test",
+      publicPhone: "+44 1227 123456",
+      publicEmail: "public@example.test",
+      mapsEnabled: true,
+      attested: true,
+    });
+    await expect(publication.setAdminPublicPublication({
+      tenantId: ORG_A,
+      locationId: LOC_STORE,
+      enabled: true,
+      expectedProfileVersion: staleLocationReview.profile!.version,
+      expectedLocationVersion: staleLocationReview.locations.find((location) => location.id === LOC_STORE)!.version,
+      reason: "Must reject stale location review",
+      adminEmail: "super@example.test",
+    })).rejects.toMatchObject({ code: "STALE_PREVIEW", status: 409 });
+    expect(await service.getPublicPartnerLocation("storefront-ref-a")).toBeNull();
+
+    const staleProfileReview = await publication.getPartnerPublicProfileStatus(principal);
+    await publication.savePartnerPublicDraft(principal, LOC_SERVICE, {
+      expectedProfileVersion: staleProfileReview.profile!.version,
+      expectedLocationVersion: staleProfileReview.locations.find((location) => location.id === LOC_SERVICE)!.version,
+      publicDisplayName: "A Cards Renamed",
+      privacyState: "SERVICE_AREA_PRIVATE_ADDRESS",
+      publicLocationName: "Kent Collection Service",
+      publicStreetAddress: "99 Private Cottage",
+      publicServiceArea: "Kent and East Sussex",
+      publicWebsite: "",
+      publicPhone: "",
+      publicEmail: "service@example.test",
+      mapsEnabled: false,
+      attested: true,
+    });
+    await expect(publication.savePartnerPublicDraft(principal, LOC_STORE, {
+      expectedProfileVersion: staleProfileReview.profile!.version,
+      expectedLocationVersion: staleProfileReview.locations.find((location) => location.id === LOC_STORE)!.version,
+      publicDisplayName: "A Cards",
+      privacyState: "PUBLIC_STOREFRONT",
+      publicLocationName: "Canterbury Shop",
+      publicStreetAddress: "3 Newer Public Street, Canterbury CT1 3CC",
+      publicWebsite: "https://cards.example.test",
+      publicPhone: "+44 1227 123456",
+      publicEmail: "public@example.test",
+      mapsEnabled: true,
+      attested: true,
+    })).rejects.toMatchObject({ code: "STALE_DRAFT", status: 409 });
+    await expect(publication.setAdminPublicPublication({
+      tenantId: ORG_A,
+      locationId: LOC_STORE,
+      enabled: true,
+      expectedProfileVersion: staleProfileReview.profile!.version,
+      expectedLocationVersion: staleProfileReview.locations.find((location) => location.id === LOC_STORE)!.version,
+      reason: "Must reject stale shared-name review",
+      adminEmail: "super@example.test",
+    })).rejects.toMatchObject({ code: "STALE_PREVIEW", status: 409 });
+    expect(await service.getPublicPartnerLocation("storefront-ref-a")).toBeNull();
   });
 
   it("rolls the public schema back without touching operational Partner data", async () => {

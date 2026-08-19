@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Eye, MapPin, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ExternalLink, Eye, MapPin, RefreshCw, ShieldCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 import { partnerErrorMessage, partnerGooglePresence, partnerPublicProfile } from "@/lib/partner-api";
 import { isStepUpCancelled, usePartnerStepUp } from "@/components/partner/partner-step-up";
@@ -11,41 +12,61 @@ import { queryClient } from "@/lib/queryClient";
 import { PublicPartnerProfileView } from "@/components/public-partner-profile-view";
 import type { AuthenticatedPublicProfileRow, PartnerPublicPrivacyState } from "@shared/public-partner";
 
-function ProfilePreview({ location, onClose }: { location: AuthenticatedPublicProfileRow; onClose(): void }) {
+function ProfilePreview({
+  location,
+  onClose,
+}: {
+  location: AuthenticatedPublicProfileRow;
+  onClose(): void;
+}) {
   if (!location.preview) return null;
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby={`preview-${location.id}`}>
-      <div className="mx-auto max-w-6xl rounded-lg bg-[#FAFAF8] p-5 text-[#171717] shadow-xl sm:p-8">
-        <div className="mb-6 flex items-center justify-between gap-4 border-b border-[#D8D2C7] pb-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#765B00]">Private preview — not a publication action</p>
-            <h2 id={`preview-${location.id}`} className="text-xl font-semibold">Exact customer view</h2>
-          </div>
-          <button type="button" onClick={onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border" aria-label="Close public profile preview">
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </div>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent
+        className="max-h-[90vh] max-w-6xl overflow-y-auto bg-[#FAFAF8] p-5 text-[#171717] sm:p-8"
+        data-testid="partner-public-profile-preview-dialog"
+      >
+        <DialogHeader className="mb-2 border-b border-[#D8D2C7] pb-4 pr-8">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#765B00]">Private preview — not a publication action</p>
+          <DialogTitle className="text-xl">Exact customer view</DialogTitle>
+          <DialogDescription>Only the exact Partner-attested customer fields below can be approved for publication.</DialogDescription>
+        </DialogHeader>
         <PublicPartnerProfileView location={location.preview} />
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function PublicLocationCard({
   location,
   displayName,
+  profileVersion,
   owner,
   googleConnected,
 }: {
   location: AuthenticatedPublicProfileRow;
   displayName: string;
+  profileVersion: number;
   owner: boolean;
   googleConnected: boolean;
 }) {
   const { runProtected } = usePartnerStepUp();
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const previewWasOpenRef = useRef(false);
   const [editing, setEditing] = useState(false);
   const [preview, setPreview] = useState(false);
   const [privacyState, setPrivacyState] = useState<PartnerPublicPrivacyState>(location.privacyState);
+  useEffect(() => {
+    if (!preview && previewWasOpenRef.current) {
+      previewWasOpenRef.current = false;
+      previewTriggerRef.current?.focus();
+    }
+  }, [preview]);
   const [form, setForm] = useState({
     publicDisplayName: displayName,
     publicLocationName: location.publicLocationName ?? location.operationalName,
@@ -58,7 +79,12 @@ function PublicLocationCard({
     attested: false,
   });
   const save = useMutation({
-    mutationFn: () => runProtected(() => partnerPublicProfile.save(location.id, { ...form, privacyState })),
+    mutationFn: () => runProtected(() => partnerPublicProfile.save(location.id, {
+      ...form,
+      privacyState,
+      expectedProfileVersion: profileVersion,
+      expectedLocationVersion: location.version,
+    })),
     onSuccess: async () => {
       setEditing(false);
       await queryClient.invalidateQueries({ queryKey: ["/api/partner/public-profile"] });
@@ -92,7 +118,16 @@ function PublicLocationCard({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={!location.preview} onClick={() => setPreview(true)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!location.preview}
+            onClick={(event) => {
+              previewTriggerRef.current = event.currentTarget;
+              previewWasOpenRef.current = true;
+              setPreview(true);
+            }}
+          >
             <Eye className="mr-2 h-4 w-4" aria-hidden="true" /> View public profile
           </Button>
           {live && (
@@ -144,7 +179,12 @@ function PublicLocationCard({
             <Button type="submit" disabled={!form.attested || save.isPending}>{save.isPending ? "Saving…" : "Save and attest exact public fields"}</Button>
           </form>
         )}
-        {preview && <ProfilePreview location={location} onClose={() => setPreview(false)} />}
+        {preview && (
+          <ProfilePreview
+            location={location}
+            onClose={() => setPreview(false)}
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -190,9 +230,10 @@ export default function PartnerPublicProfilePage() {
       <div className="grid gap-4 lg:grid-cols-2">
         {query.data?.locations.map((location) => (
           <PublicLocationCard
-            key={`${location.id}-${location.version}`}
+            key={`${location.id}-${location.version}-${query.data.profile?.version ?? 0}`}
             location={location}
             displayName={query.data.profile?.publicDisplayName ?? ""}
+            profileVersion={query.data.profile?.version ?? 0}
             owner={query.data.owner}
             googleConnected={google.data?.available === true && google.data.locations.some((item) => item.locationId === location.id && item.state === "CONNECTED")}
           />
