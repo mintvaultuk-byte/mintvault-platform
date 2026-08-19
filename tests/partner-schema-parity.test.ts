@@ -290,6 +290,9 @@ describe("partner schema ↔ migration parity", () => {
       // GB-04 first-party attribution is application-scoped and uses the
       // canonical post-credit migration identity.
       "0100_growth_commercial_attribution.sql",
+      // Optional Partner Google presence foundation. Migration-authoritative raw
+      // SQL, isolated from the whole-portal schema contract and never auto-enabled.
+      "0101_partner_google_presence.sql",
     ]);
   });
 

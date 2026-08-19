@@ -246,6 +246,57 @@ export const partnerLocations = {
   list: () => req<PartnerLocation[]>("GET", "/api/partner/locations"),
 };
 
+export interface PartnerPublicProfileLocation {
+  id: string;
+  publicRef: string;
+  name: string;
+  address: string | null;
+  status: string;
+  ready: boolean;
+  configured: boolean;
+  live: boolean;
+  blockingReasons: string[];
+  publicUrl: string;
+}
+export const partnerPublicProfile = {
+  get: () => req<{ locations: PartnerPublicProfileLocation[] }>("GET", "/api/partner/public-profile"),
+};
+
+export type GooglePresenceState =
+  | "NOT_CONNECTED"
+  | "CONNECTING"
+  | "CONNECTED"
+  | "ACTION_REQUIRED"
+  | "REVOKED"
+  | "ERROR";
+export interface GooglePresenceLocation {
+  locationId: string;
+  locationName: string;
+  connectionId: string | null;
+  state: GooglePresenceState;
+  businessName: string | null;
+  businessAddress: string | null;
+  placeId: string | null;
+  mapsUrl: string | null;
+  lastSyncAt: string | null;
+  candidates: Array<{ handle: string; businessName: string; businessAddress: string | null }>;
+}
+export type GooglePresenceStatus =
+  | { available: false; reason: "feature_disabled" | "not_configured" | "schema_unavailable"; owner: false; locations: [] }
+  | { available: true; owner: boolean; locations: GooglePresenceLocation[] };
+
+export const partnerGooglePresence = {
+  status: () => req<GooglePresenceStatus>("GET", "/api/partner/google-business/status"),
+  connect: (locationId: string) =>
+    req<{ authorizationUrl: string; expiresInMinutes: number }>("POST", "/api/partner/google-business/connect", { locationId }),
+  confirm: (locationId: string, candidateHandle: string) =>
+    req<{ ok: true }>("POST", "/api/partner/google-business/confirm", { locationId, candidateHandle }),
+  refresh: (locationId: string) =>
+    req<{ ok: true }>("POST", `/api/partner/google-business/${encodeURIComponent(locationId)}/refresh`),
+  disconnect: (locationId: string) =>
+    req<{ ok: true }>("POST", `/api/partner/google-business/${encodeURIComponent(locationId)}/disconnect`),
+};
+
 // ---- team ----
 export type PartnerTeamRole = "OWNER" | "ADMIN" | "GRADER" | "STAFF";
 export type PartnerTeamDisplayRole = PartnerTeamRole | "FINANCE_VIEWER" | "TRAINEE" | "UNASSIGNED";

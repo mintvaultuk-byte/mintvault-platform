@@ -154,6 +154,21 @@ interface PartnerLocationRow {
   stationCount: number;
   /** Users pinned to this floor. Org-wide roles are deliberately not counted. */
   assignedUserCount: number;
+  publicProfileConfigured: boolean;
+  publicProfileReady: boolean;
+  publicProfileLive: boolean;
+  publicProfileBlockingReasons: string[];
+  publicProfileUrl: string;
+}
+
+interface AdminGooglePresenceRow {
+  locationId: string;
+  state: "NOT_CONNECTED" | "CONNECTING" | "CONNECTED" | "ACTION_REQUIRED" | "REVOKED" | "ERROR";
+  businessName: string | null;
+  businessAddress: string | null;
+  placeId: string | null;
+  mapsUrl: string | null;
+  lastSyncAt: string | null;
 }
 
 /** Shape of one row from GET /partners/:id/users (see listPartnerUsers in partner-management-service). */
@@ -353,6 +368,11 @@ export default function PartnerManagementDetailPage() {
   const locations = useQuery({
     queryKey: pmKeys.locations(partnerId),
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/locations`).then((r) => r.json()),
+    enabled: on && tab === "locations",
+  });
+  const googlePresence = useQuery<{ available: boolean; locations: AdminGooglePresenceRow[] }>({
+    queryKey: [`${BASE}/partners`, partnerId, "google-presence"],
+    queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/google-presence`).then((r) => r.json()),
     enabled: on && tab === "locations",
   });
   const onboarding = useQuery({
@@ -1092,6 +1112,8 @@ export default function PartnerManagementDetailPage() {
                       <th>Reference</th>
                       <th>Address</th>
                       <th>Status</th>
+                      <th>Public profile</th>
+                      <th>Google Business</th>
                       <th>Stations</th>
                       <th>Assigned users</th>
                       <th>Created</th>
@@ -1122,6 +1144,49 @@ export default function PartnerManagementDetailPage() {
                           <Badge variant={statusBadgeVariant(l.status)} testId={`pm-location-status-${l.id}`}>
                             {l.status}
                           </Badge>
+                        </td>
+                        <td data-testid={`pm-location-public-${l.id}`}>
+                          <div>{l.publicProfileLive ? "Live" : !l.publicProfileReady ? "Not ready" : l.publicProfileConfigured ? "Configured — not live" : "Private"}</div>
+                          {!l.publicProfileReady && (
+                            <div className="text-xs text-muted-foreground">
+                              Complete the active location, address and approved public display name.
+                            </div>
+                          )}
+                          {l.publicProfileLive && (
+                            <a href={l.publicProfileUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline">
+                              Open public page
+                            </a>
+                          )}
+                        </td>
+                        <td data-testid={`pm-location-google-${l.id}`}>
+                          {(() => {
+                            const google = googlePresence.data?.locations.find((row) => row.locationId === l.id);
+                            if (googlePresence.data?.available === false) return "Not configured";
+                            if (!google) return googlePresence.isLoading ? "Loading…" : "Not connected";
+                            return (
+                              <div>
+                                <div>{google.state.replaceAll("_", " ")}</div>
+                                {google.businessName && <div className="text-xs text-muted-foreground">{google.businessName}</div>}
+                                {google.lastSyncAt && (
+                                  <div className="text-xs text-muted-foreground">
+                                    Last sync {new Date(google.lastSyncAt).toLocaleString()}
+                                  </div>
+                                )}
+                                {google.placeId && <div className="text-xs text-muted-foreground">Place ID {google.placeId}</div>}
+                                {google.mapsUrl && (
+                                  <a
+                                    href={google.mapsUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs underline"
+                                    aria-label={`Open ${google.businessName || l.name} Google Business listing in Google Maps`}
+                                  >
+                                    Open in Google Maps
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         {/*
                           stationCount excludes REVOKED and is NOT the same number the suspend
@@ -2425,6 +2490,41 @@ function LocationActions({
   const suspendable = canSuspendLocation(location.status, activeLocationCount);
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || (!location.publicProfileConfigured && !location.publicProfileReady)}
+        title={!location.publicProfileConfigured && !location.publicProfileReady
+          ? "Complete the active location, address and approved public display name before publishing."
+          : undefined}
+        data-testid={`pm-location-public-toggle-${location.id}`}
+        onClick={() =>
+          openModal({
+            kind: location.publicProfileConfigured ? "location-unpublish" : "location-publish",
+            title: `${location.publicProfileConfigured ? "Unpublish" : "Publish"} ${location.name}`,
+            successMessage: location.publicProfileConfigured ? "Public profile disabled." : "Public profile enabled.",
+            highRisk: true,
+            body: (
+              <p style={{ fontSize: 12, opacity: 0.8 }}>
+                {location.publicProfileConfigured
+                  ? "The page will stop resolving and leave the public directory immediately."
+                  : "The shop name, address and approved business contact fields will become public only while the network-wide directory switch and this location are active."}
+              </p>
+            ),
+            run: async (reason) =>
+              (
+                await apiRequest("POST", `/api/super-admin/grading-partners/${partnerId}/flags`, {
+                  flag: "partner_location_public_profile_enabled",
+                  enabled: !location.publicProfileConfigured,
+                  locationId: location.id,
+                  reason,
+                })
+              ).json(),
+          })
+        }
+      >
+        {location.publicProfileConfigured ? "Unpublish" : "Publish"}
+      </AdminButton>
       <AdminButton
         size="sm"
         variant="ghost"

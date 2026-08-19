@@ -33,13 +33,15 @@
  * Known inherited limitation: the express-rate-limit default store is in-process, therefore
  * per-Fly-machine — the same accepted trade-off the G4/G5/dashboard routers document.
  */
-import { Router, type Express, type Request, type Response } from "express";
+import { Router, type Express, type NextFunction, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { storage } from "../storage";
 import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { getPartnerAdminCapability } from "./admin-capability";
 import { PARTNER_FLAGS, resolveGlobalFlag, type PartnerFlag } from "./flags";
+import { requireAdminStepUp } from "../lib/admin-step-up";
+import { PUBLIC_DIRECTORY_FLAG } from "./public-presence-service";
 
 export const PARTNER_GLOBAL_FLAGS_BASE = "/api/super-admin/partner-flags";
 
@@ -153,7 +155,16 @@ export function partnerFlagAdminRouter(): Router {
    * Set ONE global flag. Idempotent: repeating the same call leaves the same single row and the
    * same effective value (it re-audits, which is correct — each operator action is evidence).
    */
-  r.put("/:flag", async (req: Request, res: Response) => {
+  const sensitiveFlagStepUp = requireAdminStepUp();
+  const requireSensitiveFlagStepUp = (req: Request, res: Response, next: NextFunction) => {
+    if (req.params.flag === PUBLIC_DIRECTORY_FLAG || req.params.flag === "google_partner_presence_enabled") {
+      sensitiveFlagStepUp(req, res, next);
+      return;
+    }
+    next();
+  };
+
+  r.put("/:flag", requireSensitiveFlagStepUp, async (req: Request, res: Response) => {
     try {
       const flag = req.params.flag;
       if (!isPartnerFlag(flag)) {

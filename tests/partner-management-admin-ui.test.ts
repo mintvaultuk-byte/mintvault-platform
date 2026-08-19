@@ -224,9 +224,11 @@ describe("G5 detail page source assertions", () => {
     expect(src).toContain("${BASE}/partners/${partnerId}/locations");
     expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}");
     expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}/status");
-    // The legacy /api/super-admin/grading-partners suspend route predates AG-1 and carries none of
-    // its invariants (no last-active-location guard, no partner_management_audit row).
-    expect(src).not.toContain("grading-partners");
+    // Location lifecycle stays on the canonical management router. The sole
+    // accepted use of the older grading-partners prefix is the separately
+    // governed, stepped-up per-location publication flag endpoint.
+    expect(src.match(/grading-partners/g)).toHaveLength(1);
+    expect(src).toContain("/api/super-admin/grading-partners/${partnerId}/flags");
   });
 
   it("offers no location delete, because AG-1 has none", () => {

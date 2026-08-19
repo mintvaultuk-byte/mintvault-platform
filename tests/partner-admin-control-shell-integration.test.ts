@@ -496,6 +496,35 @@ let ADMIN_USER_ID: string;
     ).toBeGreaterThan(0);
   });
 
+  it("public-profile publication rejects non-booleans and cross-tenant location references", async () => {
+    const ac = await adminCookie();
+    const body = {
+      flag: "partner_location_public_profile_enabled",
+      locationId: LA1,
+      reason: "controlled publication test",
+    };
+    for (const enabled of ["false", 1, {}]) {
+      expect((await apost(`${SA}/${A}/flags`, { ...body, enabled }, ac)).status).toBe(400);
+    }
+    expect((await apost(`${SA}/${B}/flags`, { ...body, enabled: true }, ac)).status).toBe(404);
+    const notReady = await apost(`${SA}/${A}/flags`, { ...body, enabled: true }, ac);
+    expect(notReady.status).toBe(409);
+    expect(await notReady.json()).toEqual(expect.objectContaining({
+      blockingReasons: expect.arrayContaining(["ADDRESS_REQUIRED", "APPROVED_DISPLAY_NAME_REQUIRED"]),
+    }));
+    await admin.query("UPDATE partner_locations SET address='1 High Street, Canterbury CT1 1AA' WHERE id=$1", [LA1]);
+    await admin.query(
+      "INSERT INTO partner_profiles (tenant_id,trading_name) VALUES ($1,'A Trading') ON CONFLICT (tenant_id) DO UPDATE SET trading_name=excluded.trading_name",
+      [A]
+    );
+    expect((await apost(`${SA}/${A}/flags`, { ...body, enabled: true }, ac)).status).toBe(200);
+    const stored = await admin.query<{ enabled: boolean }>(
+      "SELECT enabled FROM partner_feature_flags WHERE tenant_id=$1 AND location_id=$2 AND flag=$3",
+      [A, LA1, body.flag]
+    );
+    expect(stored.rows).toEqual([{ enabled: true }]);
+  });
+
   // ── global emergency stop ──
   it("emergency stop: freezes A's portal ops; audited; partner cannot alter it; B/public unaffected", async () => {
     const ac = await adminCookie();

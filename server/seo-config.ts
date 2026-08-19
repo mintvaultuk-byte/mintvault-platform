@@ -21,6 +21,7 @@ export interface SeoMeta {
   canonical: string;
   ogImage?: string;
   noindex?: boolean;
+  schema?: Record<string, unknown> | Record<string, unknown>[];
 }
 
 export interface SitemapEntry {
@@ -49,6 +50,12 @@ const SEO_MAP: Record<string, SeoMeta> = {
     title: "Founding Partner Applications | MintVault UK",
     description: "UK TCG and collectibles retailers can register interest in MintVault’s first Partner rollout. Applications are reviewed before onboarding or operational readiness.",
     canonical: `${BASE}/partners`,
+    ogImage: DEFAULT_IMAGE,
+  },
+  "/find-a-partner": {
+    title: "Find a MintVault Partner | UK Grading Locations",
+    description: "Search approved MintVault Partner shops, view public location details, and open directions in Google Maps.",
+    canonical: `${BASE}/find-a-partner`,
     ogImage: DEFAULT_IMAGE,
   },
   "/cert": {
@@ -239,7 +246,7 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
   "/card-grading-near-me": {
     title: "Card Grading Near Me | UK Card Grading Service | MintVault",
-    description: "Looking for card grading near you in the UK? MintVault is a UK-based professional grading service — no international shipping, fast turnaround, from £19.",
+    description: "Find UK card grading by post and, where available, approved local MintVault Partner shops. Professional grading from £19.",
     canonical: `${BASE}/card-grading-near-me`,
     ogImage: DEFAULT_IMAGE,
   },

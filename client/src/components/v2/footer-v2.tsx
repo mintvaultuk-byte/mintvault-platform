@@ -75,9 +75,14 @@ export default function FooterV2() {
     : flags.privacyNoticeLive
       ? LEGAL_LINKS.filter((link) => link.href === "/legal/privacy-policy")
       : [];
+  const baseCols = FOOTER_COLS.map((column) =>
+    column.title === "Company" && flags.publicPartnerDirectoryLive
+      ? { ...column, links: [{ label: "Find a Partner", href: "/find-a-partner" }, ...column.links] }
+      : column
+  );
   const cols = publishedLegalLinks.length > 0
-    ? [...FOOTER_COLS, { title: "Legal", links: publishedLegalLinks }]
-    : FOOTER_COLS;
+    ? [...baseCols, { title: "Legal", links: publishedLegalLinks }]
+    : baseCols;
 
   return (
     <footer

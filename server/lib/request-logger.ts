@@ -51,6 +51,9 @@ export const BODY_LOG_SUPPRESSED_PREFIXES = [
   // duplicate-check probe added in the partner-management UX work echoes the same categories back.
   // redactSensitive only masks credential-SHAPED KEY NAMES, so none of it would be redacted.
   "/api/super-admin/partner-management",
+  // Public Partner responses intentionally expose only an allowlisted DTO, but
+  // still contain business contact/address data that must not be copied into logs.
+  "/api/public/partners",
   "/api/partner",
 ];
 

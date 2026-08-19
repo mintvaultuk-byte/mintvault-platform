@@ -5,12 +5,18 @@
  * admin connection (partnerAdminQuery); suspensions require a reason and write audit + security
  * events. Mounted additively under /api/super-admin/grading-partners.
  */
-import { Router, type Express, type Request, type Response } from "express";
+import { Router, type Express, type NextFunction, type Request, type Response } from "express";
 import { requireAdminStepUp } from "../lib/admin-step-up";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
-import { partnerAdminQuery } from "./db";
+import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { PARTNER_FLAGS } from "./flags";
+import {
+  PUBLIC_APPROVED_DISPLAY_NAME_SQL,
+  PUBLIC_DIRECTORY_FLAG,
+  PUBLIC_LOCATION_FLAG,
+  derivePublicLocationPublicationState,
+} from "./public-presence-service";
 import { getPartnerAdminCapability } from "./admin-capability";
 import { G5RequestError, g5StatusFor, toG5Error } from "./partner-management-errors";
 import { setPartnerUserStatus, resetPartnerUserMfa, type ActorContext } from "./partner-management-service";
@@ -163,7 +169,7 @@ export function superAdminPartnerRouter(): Router {
     const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
     await partnerAdminQuery("UPDATE partner_organisations SET status='SUSPENDED' WHERE id=$1", [req.params.partnerId]);
     await partnerAdminQuery("UPDATE partner_sessions SET revoked_at=now() WHERE tenant_id=$1 AND revoked_at IS NULL", [
-      req.params.partnerId,
+      String(req.params.partnerId),
     ]);
     await partnerAdminQuery(
       "INSERT INTO partner_security_events (tenant_id, severity, kind) VALUES ($1,'high','partner_suspended')",
@@ -190,7 +196,7 @@ export function superAdminPartnerRouter(): Router {
       [req.params.locationId]
     );
     await adminAudit(
-      req.params.partnerId,
+      String(req.params.partnerId),
       "partner_location_suspended",
       reason,
       email,
@@ -260,24 +266,108 @@ export function superAdminPartnerRouter(): Router {
     res.json({ ok: true, revoked: rr.rowCount ?? 0 });
   });
 
-  r.post("/:partnerId/flags", async (req, res) => {
+  const sensitiveFlagStepUp = requireAdminStepUp();
+  const requireSensitiveFlagStepUp = (req: Request, res: Response, next: NextFunction) => {
+    const flag = req.body?.flag;
+    if (flag === PUBLIC_LOCATION_FLAG || flag === PUBLIC_DIRECTORY_FLAG || flag === "google_partner_presence_enabled") {
+      sensitiveFlagStepUp(req, res, next);
+      return;
+    }
+    next();
+  };
+
+  r.post("/:partnerId/flags", legacyMutationRateLimit, requireSensitiveFlagStepUp, async (req, res) => {
     const { flag, enabled, locationId } = req.body ?? {};
     if (!PARTNER_FLAGS.includes(flag)) {
       res.status(400).json({ error: "unknown flag" });
       return;
     }
+    if (typeof enabled !== "boolean") {
+      res.status(400).json({ error: 'The "enabled" field must be true or false.' });
+      return;
+    }
+    if (flag === PUBLIC_DIRECTORY_FLAG) {
+      res.status(400).json({ error: "This flag is global-only. Use the global Partner flag control." });
+      return;
+    }
+    if (locationId != null) {
+      const location = await partnerAdminQuery(
+        "SELECT 1 FROM partner_locations WHERE id=$1 AND tenant_id=$2 AND partner_id=$2 LIMIT 1",
+        [locationId, req.params.partnerId]
+      );
+      if (location.rows.length !== 1) {
+        // Do not disclose whether the supplied location belongs to another tenant.
+        res.status(404).json({ error: "location not found" });
+        return;
+      }
+    }
+    if (flag === PUBLIC_LOCATION_FLAG && !locationId) {
+      res.status(400).json({ error: "A Partner location is required for public-profile publication." });
+      return;
+    }
+    const reason = String(req.body?.reason ?? "").trim();
+    if (flag === PUBLIC_LOCATION_FLAG && (!reason || reason.length > 500)) {
+      res.status(400).json({ error: "A publication reason of 1-500 characters is required." });
+      return;
+    }
+    if (flag === PUBLIC_LOCATION_FLAG && enabled === true) {
+      const readiness = await partnerAdminQuery<{
+        organisation_status: string;
+        location_status: string;
+        location_name: string;
+        address: string | null;
+        approved_display_name: string | null;
+      }>(
+        `SELECT o.status AS organisation_status, l.status AS location_status,
+                l.name AS location_name, l.address,
+                ${PUBLIC_APPROVED_DISPLAY_NAME_SQL} AS approved_display_name
+           FROM partner_locations l
+           JOIN partner_organisations o ON o.id=l.tenant_id AND o.id=l.partner_id
+           LEFT JOIN partner_profiles p ON p.tenant_id=l.tenant_id
+           LEFT JOIN partner_branding b ON b.tenant_id=l.tenant_id
+          WHERE l.id=$1 AND l.tenant_id=$2 AND l.partner_id=$2
+          LIMIT 1`,
+        [locationId, req.params.partnerId]
+      );
+      const row = readiness.rows[0];
+      const publication = row && derivePublicLocationPublicationState({
+        organisationStatus: row.organisation_status,
+        locationStatus: row.location_status,
+        locationName: row.location_name,
+        address: row.address,
+        approvedDisplayName: row.approved_display_name,
+        configured: true,
+        directoryEnabled: true,
+      });
+      if (!publication?.ready) {
+        res.status(409).json({
+          error: "This location is not ready for public display.",
+          blockingReasons: publication?.blockingReasons ?? ["LOCATION_NOT_ACTIVE"],
+        });
+        return;
+      }
+    }
     const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
     // H2: deterministic set — remove any existing row for this exact (tenant, location, flag) then
     // insert one, so resolution can never return a stale prior value and disabling always takes.
-    await partnerAdminQuery(
-      "DELETE FROM partner_feature_flags WHERE flag=$1 AND tenant_id IS NOT DISTINCT FROM $2 AND location_id IS NOT DISTINCT FROM $3",
-      [flag, req.params.partnerId, locationId ?? null]
+    await withPartnerAdminTransaction(async (client) => {
+      await client.query(
+        "DELETE FROM partner_feature_flags WHERE flag=$1 AND tenant_id IS NOT DISTINCT FROM $2 AND location_id IS NOT DISTINCT FROM $3",
+        [flag, req.params.partnerId, locationId ?? null]
+      );
+      await client.query(
+        "INSERT INTO partner_feature_flags (tenant_id, location_id, flag, enabled) VALUES ($1,$2,$3,$4)",
+        [req.params.partnerId, locationId ?? null, flag, enabled]
+      );
+    });
+    await adminAudit(
+      String(req.params.partnerId),
+      "partner_flag_set",
+      reason || `${flag}=${enabled}`,
+      email,
+      flag === PUBLIC_LOCATION_FLAG ? "partner_location_publication" : "partner_flag",
+      locationId ?? flag
     );
-    await partnerAdminQuery(
-      "INSERT INTO partner_feature_flags (tenant_id, location_id, flag, enabled) VALUES ($1,$2,$3,$4)",
-      [req.params.partnerId, locationId ?? null, flag, !!enabled]
-    );
-    await adminAudit(req.params.partnerId, "partner_flag_set", `${flag}=${!!enabled}`, email);
     res.json({ ok: true });
   });
 

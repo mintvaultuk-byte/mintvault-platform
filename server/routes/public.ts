@@ -18,6 +18,7 @@ import { normalizeCertId } from "../lib/cert-id";
 import { requireAdmin } from "../auth";
 import { partnerApplicationSchema, persistPartnerApplication, sanitizePartnerAttribution } from "../partner-applications";
 import { isLegalDocumentPublic } from "../config/publication-gates";
+import { isPublicPartnerDirectoryEnabled } from "../partner/public-presence-service";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -26,11 +27,13 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── Public flags endpoint ──────────────────────────────────────────────────
-  app.get("/api/config/public-flags", (_req, res) => {
+  app.get("/api/config/public-flags", async (_req, res) => {
+    const publicPartnerDirectoryLive = await isPublicPartnerDirectoryEnabled();
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
       privacyNoticeLive: FEATURE_FLAGS.PRIVACY_NOTICE_LIVE,
       partnerApplicationsLive: FEATURE_FLAGS.PARTNER_APPLICATIONS_LIVE,
+      publicPartnerDirectoryLive,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
       publicNameToggleLive: FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE,
     });

@@ -72,6 +72,7 @@ import { registerPartnerPublicRoutes } from "./partner/public-routes";
 import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
+import { registerPublicPartnerPresenceRoutes } from "./partner/public-presence-routes";
 import { registerCommercialGrowthRoutes } from "./routes/admin/commercial-growth";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
@@ -86,6 +87,7 @@ import { registerVaultQuestCardFactoryRoutes } from "./routes/vault-quest-card-f
 import { registerStolenRoutes } from "./routes/stolen";
 import { registerRedirectRoutes } from "./routes/redirects";
 import { getSitemapEntries } from "./seo-config";
+import { getPublicPartnerSitemapPaths } from "./partner/public-presence-service";
 import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
@@ -2858,6 +2860,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Domain route modules ───────────────────────────────────────────────────
   registerPublicRoutes(app);
+  registerPublicPartnerPresenceRoutes(app); // Unauthenticated explicit public-safe Partner projection
   registerAuthRoutes(app);
   registerReviewPreviewRoutes(app);
   registerCorrectionModeRoutes(app);
@@ -6573,10 +6576,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/sitemap.xml", (_req, res) => {
+  app.get("/sitemap.xml", async (_req, res) => {
     const baseUrl = APP_BASE_URL;
     const now = new Date().toISOString().split("T")[0];
-    const urls = getSitemapEntries().map(
+    const publicPartnerEntries = (await getPublicPartnerSitemapPaths()).map((loc) => ({
+      loc,
+      changefreq: "weekly" as const,
+      priority: loc === "/find-a-partner" ? "0.8" : "0.6",
+    }));
+    const urls = [...getSitemapEntries(), ...publicPartnerEntries].map(
       (p) =>
         `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
     );
