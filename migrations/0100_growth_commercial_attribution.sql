@@ -1,4 +1,4 @@
--- 0099 — GB-04 first-party commercial attribution and paid-event reporting index
+-- 0100 — GB-04 first-party commercial attribution and paid-event reporting index
 --
 -- Additive only. Values are controlled campaign tokens; the table deliberately
 -- contains no cookie, browser identifier, IP address, referrer or customer PII.

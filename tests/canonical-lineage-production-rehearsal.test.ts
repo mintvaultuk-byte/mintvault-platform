@@ -68,7 +68,7 @@ const PRODUCTION_SOURCE_HISTORY = [
 ] as const;
 
 const ALREADY_APPLIED_GB03 = "0095_growth_partner_applications";
-const GROWTH_MIGRATION = "0099_growth_commercial_attribution.sql";
+const GROWTH_MIGRATION = "0100_growth_commercial_attribution.sql";
 
 /** The expected ordered plan after canonical Partner/Scanner integration. */
 const CANONICAL_PENDING = [
@@ -236,14 +236,21 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.alreadyApplied).toHaveLength(63);
   });
 
-  it("applies only 0099 from the exact 62-entry production journal shape", async () => {
+  it("applies only 0100 from the exact 62-entry production journal shape", async () => {
     const acquisition = await admin.query<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='submission_acquisition'
       ORDER BY ordinal_position
     `);
     expect(acquisition.rows.map((row) => row.column_name)).toEqual([
-      "submission_id", "acquisition_category", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "captured_at",
+      "submission_id",
+      "acquisition_category",
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_content",
+      "utm_term",
+      "captured_at",
     ]);
     const growthIndex = await admin.query<{ indexname: string }>(`
       SELECT indexname FROM pg_indexes WHERE schemaname='public' AND indexname='idx_submissions_paid_growth_window'
