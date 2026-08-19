@@ -311,6 +311,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // RENUMBERED 0078 -> 0089: main landed a different 0078. Self-contained table, so the later
   // position changes nothing. PARTNER scope — touches no core table.
   "0089_partner_shared_rate_limit_buckets",
+  // Forward-only management-audit vocabulary repair for the super-admin Card Job void wrapper.
+  // It only rewrites the existing partner_management_audit CHECK as a strict superset.
+  "0094_partner_management_audit_card_job_void",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -399,6 +402,10 @@ export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
   // 0043 re-keys the active-hold unique index per RESERVATION (so an N-card recovery can exist at
   // all) and adds the tenant-isolation policy 0041 omitted on partner_submission_credit_holds.
   "0043_partner_credit_hold_per_card",
+  // The super-admin Card Job void wrapper records this precise management-audit action. Include
+  // the forward-only vocabulary repair in every real-Postgres Card Job harness so the exercised
+  // workflow runs against the same constraint contract as production will after migration.
+  "0094_partner_management_audit_card_job_void",
 ] as const;
 /**
  * 0044 widens partner_submissions.status past the three states 0007 allowed (draft /

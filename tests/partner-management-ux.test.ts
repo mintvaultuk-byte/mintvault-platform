@@ -686,6 +686,16 @@ describe("audit-action contract (database CHECK constraint)", () => {
     expect(declared.filter((a) => !permitted.includes(a))).toEqual([]);
   });
 
+  it("the Card Job void workflow emits exactly the canonical action admitted by the migration", () => {
+    const service = readSrc(SERVER_SERVICE);
+    const start = service.indexOf("export async function voidPartnerCardJob(");
+    expect(start).toBeGreaterThan(-1);
+    const body = service.slice(start, service.indexOf("async function lookupCardJobLocation", start));
+    expect(body).toMatch(/withAudit\(actor, org\.id, "partner_card_job_voided", reason, \{ cardJobId \}/);
+    expect(declaredActions()).toContain("partner_card_job_voided");
+    expect(latestPermittedActions()).toContain("partner_card_job_voided");
+  });
+
   it("the four owner-approved 0033 actions are BOTH declared in code and permitted by the migration", () => {
     const permitted = latestPermittedActions();
     const declared = declaredActions();

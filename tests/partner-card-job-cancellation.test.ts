@@ -32,6 +32,7 @@ let admin: Client;
 let wallet: typeof import("../server/partner/partner-wallet-service");
 let authority: typeof import("../server/partner/card-job-authority");
 let cancellation: typeof import("../server/partner/card-job-cancellation");
+let management: typeof import("../server/partner/partner-management-service");
 let savedEnv: Record<string, string | undefined> = {};
 
 const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail: "ops@mintvault.test" };
@@ -243,6 +244,7 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     wallet = await import("../server/partner/partner-wallet-service");
     authority = await import("../server/partner/card-job-authority");
     cancellation = await import("../server/partner/card-job-cancellation");
+    management = await import("../server/partner/partner-management-service");
     await admin.query(
       `INSERT INTO partner_feature_flags (flag,tenant_id,location_id,enabled)
        VALUES ('partner_emergency_stop',NULL,NULL,false)`
@@ -292,6 +294,36 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     ]);
     expect(reservation.rows[0].status).toBe("released");
     expect(reservation.rows[0].released_at).not.toBeNull();
+  });
+
+  // ---- VOID-AUDIT ---------------------------------------------------------------------------
+  it("the super-admin void wrapper persists its exact management-audit action", async () => {
+    const f = await makeTenant("void-audit");
+    await addCredits(f.tenantId, 1, "void-audit");
+    const job = await start(f, "op-void-audit");
+
+    const result = await management.voidPartnerCardJob(
+      {
+        actorUserId: f.userId,
+        actorEmail: "super-admin@mintvault.test",
+        requestId: "void-audit-request",
+        idempotencyKey: "void-audit-key",
+      },
+      f.tenantId,
+      job.cardJobId,
+      "Capture geometry cannot be recovered."
+    );
+
+    expect(result.alreadyCompleted).toBe(false);
+    expect(result.result).toMatchObject({ cardJobId: job.cardJobId, status: "CANCELLED" });
+    const audit = await admin.query<{ action_type: string; result: string }>(
+      `SELECT action_type, result FROM partner_management_audit
+        WHERE request_id='void-audit-request' ORDER BY created_at`
+    );
+    expect(audit.rows).toEqual([
+      { action_type: "partner_card_job_voided", result: "attempted" },
+      { action_type: "partner_card_job_voided", result: "succeeded" },
+    ]);
   });
 
   // ---- CANCEL2 ------------------------------------------------------------------------------
@@ -386,9 +418,10 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     const result = await cancel(f, job.cardJobId);
 
     expect(result.cancelledCaptureSessions).toBe(1);
-    const session = await admin.query(`SELECT state, failure_reason FROM scanner_capture_sessions WHERE certificate_id=$1`, [
-      job.certificateId,
-    ]);
+    const session = await admin.query(
+      `SELECT state, failure_reason FROM scanner_capture_sessions WHERE certificate_id=$1`,
+      [job.certificateId]
+    );
     expect(session.rows[0].state).toBe("cancelled");
     expect(session.rows[0].failure_reason).toContain("cancelled");
   });
@@ -425,7 +458,8 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
     const db = await import("../server/partner/db");
     const found = await db.withPartnerAdminTenantTransaction(
       { tenantId: f.tenantId, locationId: f.locationId },
-      (client) => lifecycle.findCardJobForCertificate(client, { tenantId: f.tenantId, locationId: null }, job.certificateId)
+      (client) =>
+        lifecycle.findCardJobForCertificate(client, { tenantId: f.tenantId, locationId: null }, job.certificateId)
     );
     expect(found).toBeNull();
   });
@@ -443,7 +477,9 @@ describe("P6c Card Job cancellation (real PostgreSQL)", () => {
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
-    const releases = [first, second].filter((r) => r.ok && (r.value as { reservationReleased: boolean }).reservationReleased);
+    const releases = [first, second].filter(
+      (r) => r.ok && (r.value as { reservationReleased: boolean }).reservationReleased
+    );
     expect(releases).toHaveLength(1);
     expect(await availableFor(f.tenantId)).toBe(5);
     expect(await reservedFor(f.tenantId)).toBe(0);
