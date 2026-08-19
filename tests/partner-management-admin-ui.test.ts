@@ -294,8 +294,9 @@ describe("G5 nav + routes source assertions", () => {
     expect(detailIdx).toBeLessThan(listIdx); // :partnerId before the bare list
     expect(listIdx).toBeLessThan(opsIdx); // both before the existing G4 ops route (kept)
   });
-  it("adds one additive Partners NavLink and keeps Partner Connectors", () => {
-    expect(shell).toContain('label: "Partner Connectors"');
-    expect(shell).toContain('href: "/admin/partner-network/partners", label: "Partners"');
+  it("replaces the legacy Partner entries with the canonical Partner Network link", () => {
+    expect(shell).toContain('href: "/admin/partners", label: "Partner Network"');
+    expect(shell).not.toContain('href: "/admin/partner-network", label: "Partner Connectors"');
+    expect(shell).not.toContain('href: "/admin/partner-network/partners", label: "Partners"');
   });
 });

@@ -216,8 +216,10 @@ describe("page is shell-unified and correctly registered", () => {
     );
   });
 
-  it("registers the dashboard route", () => {
-    expect(APP).toContain('<Route path="/admin/partners/dashboard" component={AdminPartnerDashboardPage} />');
+  it("retains the dashboard URL as a flag-gated redirect to the canonical overview", () => {
+    expect(APP).toContain(
+      '<Route path="/admin/partners/dashboard"><PartnerNetworkLegacyRoute canonical="/admin/partners"><AdminPartnerDashboardPage /></PartnerNetworkLegacyRoute></Route>'
+    );
   });
 
   it("keeps /admin/partners/dashboard above any future /admin/partners/:param route", () => {
@@ -237,13 +239,13 @@ describe("page is shell-unified and correctly registered", () => {
     if (notFoundAt > -1) expect(dashboardAt).toBeLessThan(notFoundAt);
   });
 
-  it("is registered in the admin navigation", () => {
-    expect(SHELL).toContain('href: "/admin/partners/dashboard"');
+  it("is reached through the canonical Partner Network admin navigation", () => {
+    expect(SHELL).toContain('href: "/admin/partners", label: "Partner Network"');
   });
 
-  it("preserves the two pre-existing partner nav entries", () => {
-    expect(SHELL).toContain('href: "/admin/partner-network"');
-    expect(SHELL).toContain('href: "/admin/partner-network/partners"');
+  it("does not expose retired legacy Partner entries in the canonical admin navigation", () => {
+    expect(SHELL).not.toContain('href: "/admin/partner-network", label: "Partner Connectors"');
+    expect(SHELL).not.toContain('href: "/admin/partner-network/partners", label: "Partners"');
   });
 });
 
