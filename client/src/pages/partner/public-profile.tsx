@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, MapPin, RefreshCw, ShieldCheck } from "lucide-react";
+import { ExternalLink, Eye, MapPin, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,147 @@ import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/par
 import { partnerErrorMessage, partnerGooglePresence, partnerPublicProfile } from "@/lib/partner-api";
 import { isStepUpCancelled, usePartnerStepUp } from "@/components/partner/partner-step-up";
 import { queryClient } from "@/lib/queryClient";
+import { PublicPartnerProfileView } from "@/components/public-partner-profile-view";
+import type { AuthenticatedPublicProfileRow, PartnerPublicPrivacyState } from "@shared/public-partner";
+
+function ProfilePreview({ location, onClose }: { location: AuthenticatedPublicProfileRow; onClose(): void }) {
+  if (!location.preview) return null;
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby={`preview-${location.id}`}>
+      <div className="mx-auto max-w-6xl rounded-lg bg-[#FAFAF8] p-5 text-[#171717] shadow-xl sm:p-8">
+        <div className="mb-6 flex items-center justify-between gap-4 border-b border-[#D8D2C7] pb-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#765B00]">Private preview — not a publication action</p>
+            <h2 id={`preview-${location.id}`} className="text-xl font-semibold">Exact customer view</h2>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border" aria-label="Close public profile preview">
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
+        <PublicPartnerProfileView location={location.preview} />
+      </div>
+    </div>
+  );
+}
+
+function PublicLocationCard({
+  location,
+  displayName,
+  owner,
+  googleConnected,
+}: {
+  location: AuthenticatedPublicProfileRow;
+  displayName: string;
+  owner: boolean;
+  googleConnected: boolean;
+}) {
+  const { runProtected } = usePartnerStepUp();
+  const [editing, setEditing] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [privacyState, setPrivacyState] = useState<PartnerPublicPrivacyState>(location.privacyState);
+  const [form, setForm] = useState({
+    publicDisplayName: displayName,
+    publicLocationName: location.publicLocationName ?? location.operationalName,
+    publicStreetAddress: location.publicStreetAddress ?? "",
+    publicServiceArea: location.publicServiceArea ?? "",
+    publicWebsite: location.publicWebsite ?? "",
+    publicPhone: location.publicPhone ?? "",
+    publicEmail: location.publicEmail ?? "",
+    mapsEnabled: location.mapsEnabled,
+    attested: false,
+  });
+  const save = useMutation({
+    mutationFn: () => runProtected(() => partnerPublicProfile.save(location.id, { ...form, privacyState })),
+    onSuccess: async () => {
+      setEditing(false);
+      await queryClient.invalidateQueries({ queryKey: ["/api/partner/public-profile"] });
+    },
+  });
+  const live = location.publication.live;
+  return (
+    <Card className="rounded-md">
+      <CardContent className="space-y-4 pt-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex gap-3">
+            <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <div>
+              <h2 className="font-semibold">{location.operationalName}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Operational address (private): {location.operationalAddress || "Not supplied"}</p>
+            </div>
+          </div>
+          <Badge variant={live ? "default" : "secondary"}>{live ? "Live" : location.publication.approved ? "Approved — not live" : "Private"}</Badge>
+        </div>
+
+        <div className="rounded-md border p-3 text-sm">
+          <div className="flex items-center gap-2 font-medium"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />Public Profile</div>
+          <ul className="mt-2 space-y-1 text-muted-foreground">
+            <li>{displayName ? "✓" : "—"} Business name</li>
+            <li>{location.preview?.address || location.preview?.serviceArea ? "✓" : "—"} Public location</li>
+            <li>{location.publicPhone ? "✓" : "—"} Phone</li>
+            <li>{location.publicWebsite ? "✓" : "—"} Website</li>
+            <li>— Opening hours</li>
+            <li>{googleConnected ? "✓ Connected" : "— Not connected"} Google Business Profile</li>
+          </ul>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" disabled={!location.preview} onClick={() => setPreview(true)}>
+            <Eye className="mr-2 h-4 w-4" aria-hidden="true" /> View public profile
+          </Button>
+          {live && (
+            <a href={location.publicUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium">
+              Open live page <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+          )}
+          {owner && <Button type="button" onClick={() => setEditing((value) => !value)}>{editing ? "Cancel editing" : "Edit public details"}</Button>}
+        </div>
+        {!location.preview && <p className="text-sm text-muted-foreground">Complete a public business name, location name and safe storefront address or service area to enable preview.</p>}
+        {location.consentedAt && <p className="text-xs text-muted-foreground">Partner-attested version {location.version}. Any edit immediately removes it from the directory until Super Admin approves the new exact version.</p>}
+
+        {editing && owner && (
+          <form className="space-y-4 rounded-md border p-4" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}>
+            <label className="block text-sm font-medium">Public business name
+              <input className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" maxLength={160} value={form.publicDisplayName} onChange={(e) => setForm({ ...form, publicDisplayName: e.target.value })} required />
+            </label>
+            <label className="block text-sm font-medium">Address/privacy classification
+              <select className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" value={privacyState} onChange={(e) => setPrivacyState(e.target.value as PartnerPublicPrivacyState)}>
+                <option value="INCOMPLETE_UNVERIFIED">Incomplete / unverified</option>
+                <option value="PUBLIC_STOREFRONT">Public storefront</option>
+                <option value="SERVICE_AREA_PRIVATE_ADDRESS">Service area / private address</option>
+                <option value="NOT_PUBLIC">Not public</option>
+              </select>
+            </label>
+            <label className="block text-sm font-medium">Public location name
+              <input className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" maxLength={120} value={form.publicLocationName} onChange={(e) => setForm({ ...form, publicLocationName: e.target.value })} />
+            </label>
+            {privacyState === "PUBLIC_STOREFRONT" && (
+              <label className="block text-sm font-medium">Public storefront address
+                <textarea className="mt-1 min-h-20 w-full rounded-md border bg-background px-3 py-2" maxLength={500} value={form.publicStreetAddress} onChange={(e) => setForm({ ...form, publicStreetAddress: e.target.value })} />
+              </label>
+            )}
+            {privacyState === "SERVICE_AREA_PRIVATE_ADDRESS" && (
+              <label className="block text-sm font-medium">Public service area (no street address shown)
+                <input className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" maxLength={160} value={form.publicServiceArea} onChange={(e) => setForm({ ...form, publicServiceArea: e.target.value })} />
+              </label>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm font-medium">Public website<input className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" value={form.publicWebsite} onChange={(e) => setForm({ ...form, publicWebsite: e.target.value })} placeholder="https://…" /></label>
+              <label className="text-sm font-medium">Public phone<input className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" value={form.publicPhone} onChange={(e) => setForm({ ...form, publicPhone: e.target.value })} /></label>
+              <label className="text-sm font-medium sm:col-span-2">Public email<input className="mt-1 min-h-11 w-full rounded-md border bg-background px-3" type="email" value={form.publicEmail} onChange={(e) => setForm({ ...form, publicEmail: e.target.value })} /></label>
+            </div>
+            {privacyState === "PUBLIC_STOREFRONT" && (
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={form.mapsEnabled} onChange={(e) => setForm({ ...form, mapsEnabled: e.target.checked })} />I consent to this exact public street address being used for Maps and directions.</label>
+            )}
+            <label className="flex items-start gap-2 rounded-md bg-muted p-3 text-sm"><input type="checkbox" className="mt-1" checked={form.attested} onChange={(e) => setForm({ ...form, attested: e.target.checked })} />I am a Partner Owner and attest that every populated field above is intended for public display. I understand the operational address is separate.</label>
+            {save.error && !isStepUpCancelled(save.error) && <p className="text-sm text-destructive" role="alert">{partnerErrorMessage(save.error)}</p>}
+            <Button type="submit" disabled={!form.attested || save.isPending}>{save.isPending ? "Saving…" : "Save and attest exact public fields"}</Button>
+          </form>
+        )}
+        {preview && <ProfilePreview location={location} onClose={() => setPreview(false)} />}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function PartnerPublicProfilePage() {
   const { runProtected } = usePartnerStepUp();
@@ -40,55 +182,20 @@ export default function PartnerPublicProfilePage() {
 
       {query.isLoading && <PartnerLoadingState label="Loading public profile state…" />}
       {query.error && <PartnerErrorState message={partnerErrorMessage(query.error)} onRetry={() => query.refetch()} />}
+      {query.data?.available === false && (
+        <Card className="rounded-md"><CardContent className="pt-5 text-sm text-muted-foreground">Public-profile editing is not available until the publication migration is applied. No operational location data is public.</CardContent></Card>
+      )}
       {query.data?.locations.length === 0 && <p className="text-sm text-muted-foreground">No locations available.</p>}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {query.data?.locations.map((location) => (
-          <Card key={location.id} className="rounded-md">
-            <CardContent className="space-y-4 pt-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex gap-3">
-                  <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-                  <div>
-                    <h2 className="font-semibold">{location.name}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">{location.address || "Address required"}</p>
-                  </div>
-                </div>
-                <Badge variant={location.live ? "default" : "secondary"}>
-                  {location.live ? "Live" : location.configured ? "Not live" : "Private"}
-                </Badge>
-              </div>
-
-              <div className="rounded-md border p-3 text-sm">
-                <div className="flex items-center gap-2 font-medium">
-                  <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-                  Publication readiness
-                </div>
-                <ul className="mt-2 space-y-1 text-muted-foreground">
-                  <li>{location.status === "ACTIVE" ? "✓" : "—"} Location is active</li>
-                  <li>{location.address ? "✓" : "—"} Public shop address</li>
-                  <li>{location.blockingReasons.includes("APPROVED_DISPLAY_NAME_REQUIRED") ? "—" : "✓"} Approved public display name</li>
-                  <li>{location.configured ? "✓" : "—"} Approved for public display</li>
-                  <li>{location.live ? "✓" : "—"} Network-wide directory is live</li>
-                </ul>
-              </div>
-
-              {location.live ? (
-                <a
-                  href={location.publicUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-11 items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium"
-                >
-                  Open public page <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                </a>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Ask MintVault Partner Support to review and publish this location once the missing items are complete.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <PublicLocationCard
+            key={`${location.id}-${location.version}`}
+            location={location}
+            displayName={query.data.profile?.publicDisplayName ?? ""}
+            owner={query.data.owner}
+            googleConnected={google.data?.available === true && google.data.locations.some((item) => item.locationId === location.id && item.state === "CONNECTED")}
+          />
         ))}
       </div>
 

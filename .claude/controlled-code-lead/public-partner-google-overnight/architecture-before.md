@@ -21,3 +21,7 @@ flowchart LR
 - Public SSR recognition and sitemap are static; unknown paths are real 404/noindex.
 - Google credentials, schema, OAuth code and provider access proof are absent.
 - Optional Google must not enter whole-portal env/schema gates.
+
+## Addendum defect at `a3cda596`
+
+The first candidate used one exact location flag but projected `partner_locations.address` and organisation contact fields directly. That operational record has no storefront/service-area/private classification, field consent, version or exact preview, so an active home address could satisfy readiness and become public.

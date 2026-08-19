@@ -26,6 +26,15 @@
 | 6 — Regression | done | 2026-08-19 | Typecheck/build/targeted lint/SQL lint; 316 runnable files and 5,168 tests pass; real HTTP/PG/browser/perf/rollback |
 | 7 — Final report | done | 2026-08-19 | Public code complete; Google live pilot and all deployment/activation remain external/protected |
 
+## Addendum continuation — public address/privacy safety
+
+- Reopened 2026-08-19 at `a3cda596` without restarting the campaign.
+- Live reconciliation: `origin/main=facfd36f`, production `/api/version=facfd36f`, Fly release v1110.
+- Read-only production inventory proves there is no public-publication/privacy table: operational `partner_locations.address` and generic flags are the only relevant authorities.
+- Stage 1/2: three existing read-only specialists reassigned to non-overlapping source, security/privacy and UX/SEO scopes; hostile reviewer remains reserved for the post-repair gate.
+- Authorised next action: local candidate repair, migration authoring and disposable verification only.
+- Not authorised: push, merge, deploy, staging/production migration application, secrets, activation or live Google calls.
+
 ## Reviewer assignments (Stage 1)
 
 | Reviewer | Scope | Report |

@@ -6,6 +6,10 @@
  */
 import { apiRequest } from "./queryClient";
 import type { PartnerOperationalReadiness } from "@shared/partner-readiness";
+import type {
+  AuthenticatedPublicProfileStatus,
+  PartnerPublicPrivacyState,
+} from "@shared/public-partner";
 
 export class PartnerApiError extends Error {
   code: string;
@@ -246,20 +250,20 @@ export const partnerLocations = {
   list: () => req<PartnerLocation[]>("GET", "/api/partner/locations"),
 };
 
-export interface PartnerPublicProfileLocation {
-  id: string;
-  publicRef: string;
-  name: string;
-  address: string | null;
-  status: string;
-  ready: boolean;
-  configured: boolean;
-  live: boolean;
-  blockingReasons: string[];
-  publicUrl: string;
-}
 export const partnerPublicProfile = {
-  get: () => req<{ locations: PartnerPublicProfileLocation[] }>("GET", "/api/partner/public-profile"),
+  get: () => req<AuthenticatedPublicProfileStatus>("GET", "/api/partner/public-profile"),
+  save: (locationId: string, data: {
+    publicDisplayName: string;
+    privacyState: PartnerPublicPrivacyState;
+    publicLocationName: string;
+    publicStreetAddress: string;
+    publicServiceArea: string;
+    publicWebsite: string;
+    publicPhone: string;
+    publicEmail: string;
+    mapsEnabled: boolean;
+    attested: boolean;
+  }) => req<{ ok: true }>("POST", `/api/partner/public-profile/locations/${encodeURIComponent(locationId)}`, data),
 };
 
 export type GooglePresenceState =

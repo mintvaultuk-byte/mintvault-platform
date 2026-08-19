@@ -93,7 +93,8 @@ const CANONICAL_PENDING = [
   "0096_partner_card_job_void_management_audit.sql",
   "0097_partner_credit_checkout_sessions.sql",
   "0098_scanner_operator_credit_view.sql",
-  "0101_partner_google_presence.sql",
+  "0101_partner_public_presence.sql",
+  "0102_partner_google_presence.sql",
 ] as const;
 
 const sha256 = (sql: string): string => createHash("sha256").update(sql).digest("hex");
@@ -212,10 +213,11 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     applied = result.applied;
 
     // GB-04 release rehearsal starts from the current production journal shape:
-    // 63 immutable applied entries (including prepared 0101) and exactly one
+    // 64 immutable applied entries (including prepared public 0101 and optional
+    // Google 0102) and exactly one
     // growth migration left in this ordered rehearsal.
     const growthBefore = await planMigrations(migrator as never, files);
-    expect(growthBefore.alreadyApplied).toHaveLength(63);
+    expect(growthBefore.alreadyApplied).toHaveLength(64);
     expect(growthBefore.pending).toEqual([GROWTH_MIGRATION]);
     expect(growthBefore.inconsistent).toEqual([]);
     expect(growthBefore.checksumMismatches).toEqual([]);
@@ -235,10 +237,10 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(64);
+    expect(after.alreadyApplied).toHaveLength(65);
   });
 
-  it("applies only 0100 after the exact 63-entry prepared Partner journal shape", async () => {
+  it("applies only 0100 after the exact 64-entry prepared Partner journal shape", async () => {
     const acquisition = await admin.query<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='submission_acquisition'

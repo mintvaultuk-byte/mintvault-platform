@@ -10,7 +10,7 @@
 
 ## Rollback steps
 
-1. Disable `public_partner_directory_enabled` and `google_partner_presence_enabled` globally; exact scoped rows then cannot expose either feature.
+1. Disable `public_partner_directory_enabled` and `google_partner_presence_enabled` globally; consented/listed rows then cannot expose either feature.
 2. Revert the reviewed code commit and redeploy the last known-good commit through the safe deploy path.
 3. Do not delete Google schema or history during emergency rollback. Revoke provider credentials and make encrypted credentials unusable if compromise is suspected.
 4. The additive migration rollback script is for pre-production/disposable verification only unless separately reviewed against live data.
@@ -29,5 +29,6 @@
 
 ## Local proof
 
-- `tests/google-partner-presence-migration.test.ts` applied 0101 to disposable PostgreSQL 17, exercised its constraints/RLS/service flow, ran the explicit rollback, and proved all five Google tables plus the three additive composite constraints were removed.
-- Public containment is independently available through the global directory kill switch and exact location opt-in; cache tests prove remount revalidation removes revoked list/profile data.
+- `tests/public-partner-presence-db.test.ts` applies public 0101 to disposable PostgreSQL 17, proves versioned consent/approval/privacy and rollback without operational-data loss.
+- `tests/google-partner-presence-migration.test.ts` applies optional Google 0102, exercises its constraints/RLS/service flow and proves its five Google tables plus Google-only session constraint roll back.
+- Public containment is independently available through the global directory kill switch and exact listing state; cache tests prove remount revalidation removes revoked list/profile data.

@@ -9,14 +9,18 @@ import {
 } from "../server/partner/public-presence-service";
 
 const rows = Array.from({ length: 100 }, (_, index) => ({
+  tenant_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  location_id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
   public_ref: `shop-ref-${String(index).padStart(3, "0")}`,
   display_name: `Shop ${index}`,
   location_name: `Town ${index}`,
+  privacy_state: "PUBLIC_STOREFRONT",
   address: `${index} High Street, Town AB1 2CD`,
+  service_area: null,
   website: null,
   phone: null,
   email: null,
-  partner_since: null,
+  maps_enabled: true,
   cards_graded: "0",
 }));
 
@@ -25,7 +29,7 @@ beforeEach(() => {
   partnerAdminQuery.mockImplementation(async (sql: string) => {
     if (sql.includes("to_regclass('public.partner_google_profile_cache')")) return { rows: [{ ready: true }] };
     if (sql.includes("FROM partner_google_profile_cache")) return { rows: [] };
-    if (sql.includes("lower(public_ref) = lower($3)")) return { rows: [rows[0]] };
+    if (sql.includes("lower(public_ref)=lower($2)")) return { rows: [rows[0]] };
     return { rows };
   });
 });

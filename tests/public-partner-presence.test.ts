@@ -25,13 +25,16 @@ const location: PublicPartnerLocation = {
   publicRef: "11111111-1111-4111-8111-111111111111",
   displayName: "Cards & <Collectibles>",
   locationName: "Canterbury",
+  privacyState: "PUBLIC_STOREFRONT",
   address: "1 High Street, Canterbury, CT1 1AA",
+  serviceArea: null,
   designation: "MintVault Partner",
   websiteUrl: "https://example.test/",
   phone: "+44 1234 567890",
   email: "shop@example.test",
   mapsUrl: "https://www.google.com/maps/search/?api=1&query=1%20High%20Street",
   cardsGraded: 12,
+  cardsGradedMeaning: "Approved cards graded by MintVault through this Partner location",
   partnerSince: "2026-08-01",
 };
 
@@ -40,31 +43,66 @@ describe("public Partner value safety", () => {
     const complete = {
       organisationStatus: "ACTIVE",
       locationStatus: "ACTIVE",
-      locationName: "Canterbury Shop",
-      address: "1 High Street, Canterbury CT1 1AA",
-      approvedDisplayName: "A Trading",
-      configured: true,
+      publicDisplayName: "A Trading",
+      profileVersion: 1,
+      profileConsentedAt: "2026-08-19T00:00:00Z",
+      profileApprovedVersion: 1,
+      profileListed: true,
+      privacyState: "PUBLIC_STOREFRONT",
+      publicLocationName: "Canterbury Shop",
+      publicStreetAddress: "1 High Street, Canterbury CT1 1AA",
+      publicServiceArea: null,
+      publicWebsite: null,
+      publicPhone: null,
+      publicEmail: null,
+      mapsEnabled: true,
+      consentedFields: ["public_location_name", "public_street_address", "maps_enabled"],
+      locationVersion: 2,
+      locationConsentedAt: "2026-08-19T00:00:00Z",
+      locationApprovedVersion: 2,
+      locationListed: true,
       directoryEnabled: true,
     };
     expect(derivePublicLocationPublicationState(complete)).toEqual({
-      ready: true,
-      configured: true,
+      readyForApproval: true,
+      approved: true,
+      partnerListed: true,
+      locationListed: true,
       live: true,
       blockingReasons: [],
     });
-    expect(derivePublicLocationPublicationState({ ...complete, approvedDisplayName: null })).toEqual(
+    expect(derivePublicLocationPublicationState({ ...complete, publicDisplayName: null })).toEqual(
       expect.objectContaining({
-        ready: false,
+        readyForApproval: false,
         live: false,
-        blockingReasons: ["APPROVED_DISPLAY_NAME_REQUIRED"],
+        blockingReasons: expect.arrayContaining(["PUBLIC_DISPLAY_NAME_REQUIRED"]),
       })
     );
     expect(derivePublicLocationPublicationState({ ...complete, organisationStatus: "SUSPENDED" }).live).toBe(false);
     expect(derivePublicLocationPublicationState({ ...complete, locationStatus: "SUSPENDED" }).live).toBe(false);
-    expect(derivePublicLocationPublicationState({ ...complete, configured: false }).blockingReasons)
-      .toContain("NOT_APPROVED_FOR_PUBLICATION");
+    expect(derivePublicLocationPublicationState({ ...complete, locationApprovedVersion: null }).blockingReasons)
+      .toContain("LOCATION_APPROVAL_REQUIRED");
     expect(derivePublicLocationPublicationState({ ...complete, directoryEnabled: false }).blockingReasons)
       .toContain("DIRECTORY_DISABLED");
+    const serviceArea = derivePublicLocationPublicationState({
+      ...complete,
+      privacyState: "SERVICE_AREA_PRIVATE_ADDRESS",
+      publicStreetAddress: null,
+      publicServiceArea: "Kent",
+      publicEmail: "shop@example.test",
+      mapsEnabled: false,
+      consentedFields: ["public_location_name", "public_service_area", "public_email"],
+    });
+    expect(serviceArea.live).toBe(true);
+    expect(derivePublicLocationPublicationState({
+      ...complete,
+      mapsEnabled: false,
+      publicWebsite: null,
+      publicPhone: null,
+      publicEmail: null,
+      consentedFields: ["public_location_name", "public_street_address"],
+    }).blockingReasons).toContain("PUBLIC_CONTACT_ACTION_REQUIRED");
+    expect(derivePublicLocationPublicationState({ ...complete, privacyState: "NOT_PUBLIC" }).live).toBe(false);
   });
 
   it("permits only absolute credential-free HTTP(S) website values", () => {
@@ -146,6 +184,24 @@ describe("public Partner direct-response SEO boundary", () => {
     expect(result.html).toContain('data-mintvault-ssr-schema');
     expect(result.html).not.toContain("<Collectibles>");
     expect(result.html).not.toContain('name="robots"');
+  });
+
+  it("uses areaServed and never fabricates a street address for private service-area profiles", async () => {
+    const serviceAreaLocation: PublicPartnerLocation = {
+      ...location,
+      privacyState: "SERVICE_AREA_PRIVATE_ADDRESS",
+      address: null,
+      serviceArea: "Kent and East Sussex",
+      mapsUrl: null,
+    };
+    const result = await renderPublicHtmlWithPartnerPresence(
+      BASE_HTML,
+      `/partners/location/${location.publicRef}`,
+      { directoryEnabled: async () => true, profile: async () => serviceAreaLocation }
+    );
+    expect(result.html).toContain('"areaServed":"Kent and East Sussex"');
+    expect(result.html).not.toContain('"streetAddress"');
+    expect(result.html).not.toContain('"hasMap"');
   });
 
   it("renders the directory as indexable only when its global resolver is enabled", async () => {

@@ -1,4 +1,4 @@
--- 0101 — Partner Google Business Profile presence (OPTIONAL, PARTNER scope).
+-- 0102 — Partner Google Business Profile presence (OPTIONAL, PARTNER scope).
 --
 -- Additive foundation only. Google is not a Partner authority and these tables
 -- are deliberately absent from the whole-portal schema contract. Applying this
@@ -7,7 +7,7 @@
 
 DO $$ BEGIN
   IF to_regclass('public.partner_locations') IS NULL THEN
-    RAISE EXCEPTION '0101 requires partner_locations';
+    RAISE EXCEPTION '0102 requires partner_locations';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
@@ -172,6 +172,6 @@ DO $$ BEGIN
   IF to_regclass('public.partner_google_connections') IS NULL
      OR to_regclass('public.partner_google_credentials') IS NULL
      OR to_regclass('public.partner_google_profile_cache') IS NULL THEN
-    RAISE EXCEPTION '0101 Google presence schema is incomplete';
+    RAISE EXCEPTION '0102 Google presence schema is incomplete';
   END IF;
 END$$;

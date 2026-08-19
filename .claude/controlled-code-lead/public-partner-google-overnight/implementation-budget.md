@@ -25,3 +25,14 @@ The reviewed manifest is revised to **55–60 files / 4,400–4,800 additions**.
 - independent real PostgreSQL, HTTP callback, cache-revocation, query-budget and controlled-performance tests.
 
 No new product authority or frozen grading/QA/payment/station/credit surface entered the delta. The exact staged inventory falls inside the revised manifest.
+
+## Addendum budget (before resumed product edits)
+
+| Metric | Estimate |
+|---|---|
+| Additional files changed | 18–28 including tests, renamed migration/rollback and governance |
+| Additional lines changed | 1,800–3,000 |
+| Additional commits | 2–3 local, unpushed |
+| Additional focused tests | 8–14 files/sections plus prior campaign/full gates |
+
+Budget drivers are the two-stage consent/approval boundary, exact DTO preview reuse, conditional SEO/CTA rendering and a separately deployable pre-Google migration. Grading, QA, payments, Scanner, stations, credits and customer submission authority remain excluded.

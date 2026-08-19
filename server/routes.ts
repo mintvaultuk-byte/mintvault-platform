@@ -87,7 +87,10 @@ import { registerVaultQuestCardFactoryRoutes } from "./routes/vault-quest-card-f
 import { registerStolenRoutes } from "./routes/stolen";
 import { registerRedirectRoutes } from "./routes/redirects";
 import { getSitemapEntries } from "./seo-config";
-import { getPublicPartnerSitemapPaths } from "./partner/public-presence-service";
+import {
+  getPublicPartnerSitemapPaths,
+  PublicPartnerPresenceUnavailableError,
+} from "./partner/public-presence-service";
 import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
@@ -6577,22 +6580,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get("/sitemap.xml", async (_req, res) => {
-    const baseUrl = APP_BASE_URL;
-    const now = new Date().toISOString().split("T")[0];
-    const publicPartnerEntries = (await getPublicPartnerSitemapPaths()).map((loc) => ({
-      loc,
-      changefreq: "weekly" as const,
-      priority: loc === "/find-a-partner" ? "0.8" : "0.6",
-    }));
-    const urls = [...getSitemapEntries(), ...publicPartnerEntries].map(
-      (p) =>
-        `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
-    );
+    try {
+      const baseUrl = APP_BASE_URL;
+      const now = new Date().toISOString().split("T")[0];
+      const publicPartnerEntries = (await getPublicPartnerSitemapPaths()).map((loc) => ({
+        loc,
+        changefreq: "weekly" as const,
+        priority: loc === "/find-a-partner" ? "0.8" : "0.6",
+      }));
+      const urls = [...getSitemapEntries(), ...publicPartnerEntries].map(
+        (p) =>
+          `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
+      );
 
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
 
-    res.header("Content-Type", "application/xml");
-    res.send(xml);
+      res.header("Content-Type", "application/xml");
+      res.send(xml);
+    } catch (err) {
+      if (!(err instanceof PublicPartnerPresenceUnavailableError)) throw err;
+      res.setHeader("Retry-After", "60");
+      res.status(503).type("text/plain").send("Sitemap temporarily unavailable.");
+    }
   });
 
   app.get("/robots.txt", (_req, res) => {

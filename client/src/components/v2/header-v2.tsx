@@ -304,7 +304,7 @@ export default function HeaderV2() {
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden xl:flex items-center gap-6">
             {navItems.map((item) =>
               item.dropdown ? (
                 <DropdownNavItem key={item.label} item={item} location={location} />
@@ -329,7 +329,7 @@ export default function HeaderV2() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="hidden md:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
+                  className="hidden xl:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
                   style={{ color: "var(--v2-ink-soft)" }}
                   aria-label={link.label}
                 >
@@ -342,7 +342,7 @@ export default function HeaderV2() {
             {isAuthed ? (
               <Link
                 href="/dashboard"
-                className="hidden md:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
+                className="hidden xl:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
                 style={{ color: "var(--v2-ink-soft)" }}
               >
                 <LayoutDashboard size={14} />
@@ -351,14 +351,14 @@ export default function HeaderV2() {
             ) : (
               <Link
                 href="/customer-login"
-                className="hidden md:inline-flex font-body text-sm font-medium no-underline transition-colors"
+                className="hidden xl:inline-flex font-body text-sm font-medium no-underline transition-colors"
                 style={{ color: "var(--v2-ink-soft)" }}
               >
                 Sign in
               </Link>
             )}
 
-            <Link href="/pricing" className="hidden md:inline-flex no-underline">
+            <Link href="/pricing" className="hidden xl:inline-flex no-underline">
               <GradientButton height="36px" className="gradient-btn-filled">
                 Pricing <ArrowRight size={14} />
               </GradientButton>
@@ -368,7 +368,7 @@ export default function HeaderV2() {
             <button
               ref={mobileTriggerRef}
               type="button"
-              className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg"
+              className="xl:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg"
               style={{ color: "var(--v2-ink)" }}
               onClick={() => setMobileOpen(true)}
               aria-label="Open menu"
@@ -387,7 +387,7 @@ export default function HeaderV2() {
           role="dialog"
           aria-modal="true"
           aria-label="Main navigation"
-          className="fixed inset-0 z-[100] md:hidden flex flex-col"
+          className="fixed inset-0 z-[100] xl:hidden flex flex-col"
           style={{ backgroundColor: "var(--v2-paper)" }}
         >
           <div

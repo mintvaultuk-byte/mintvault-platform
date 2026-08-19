@@ -224,11 +224,11 @@ describe("G5 detail page source assertions", () => {
     expect(src).toContain("${BASE}/partners/${partnerId}/locations");
     expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}");
     expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}/status");
-    // Location lifecycle stays on the canonical management router. The sole
-    // accepted use of the older grading-partners prefix is the separately
-    // governed, stepped-up per-location publication flag endpoint.
-    expect(src.match(/grading-partners/g)).toHaveLength(1);
-    expect(src).toContain("/api/super-admin/grading-partners/${partnerId}/flags");
+    // Publication is a separate consent/approval authority. Super Admin reads
+    // the exact preview and approves its current version on dedicated routes.
+    expect(src).toContain('"/api/super-admin/grading-partners", partnerId, "public-profile"');
+    expect(src).toContain("/api/super-admin/grading-partners/${partnerId}/locations/${location.id}/publication");
+    expect(src).toContain("View public profile");
   });
 
   it("offers no location delete, because AG-1 has none", () => {

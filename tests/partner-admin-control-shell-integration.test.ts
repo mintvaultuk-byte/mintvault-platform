@@ -102,7 +102,10 @@ let ADMIN_USER_ID: string;
     // The legacy MFA-reset route now DELEGATES to the canonical partner-management service, which
     // records into partner_management_audit (migration 0015) using an action type added by 0033.
     // The previous default set stopped at 0009, so those tables/values did not exist here.
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, [
+      ...PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION,
+      "0101_partner_public_presence",
+    ]);
     await admin.query("DROP ROLE IF EXISTS partner_app_test_shell").catch(() => {});
     await admin.query("CREATE ROLE partner_app_test_shell LOGIN PASSWORD 'synthetic'");
     await admin.query("GRANT partner_runtime TO partner_app_test_shell");
@@ -496,33 +499,32 @@ let ADMIN_USER_ID: string;
     ).toBeGreaterThan(0);
   });
 
-  it("public-profile publication rejects non-booleans and cross-tenant location references", async () => {
+  it("public-profile publication requires exact Partner consent, rejects non-booleans and cross-tenant references", async () => {
     const ac = await adminCookie();
-    const body = {
-      flag: "partner_location_public_profile_enabled",
-      locationId: LA1,
-      reason: "controlled publication test",
-    };
+    const url = `${SA}/${A}/locations/${LA1}/publication`;
+    const body = { reason: "controlled publication test" };
     for (const enabled of ["false", 1, {}]) {
-      expect((await apost(`${SA}/${A}/flags`, { ...body, enabled }, ac)).status).toBe(400);
+      expect((await apost(url, { ...body, enabled }, ac)).status).toBe(400);
     }
-    expect((await apost(`${SA}/${B}/flags`, { ...body, enabled: true }, ac)).status).toBe(404);
-    const notReady = await apost(`${SA}/${A}/flags`, { ...body, enabled: true }, ac);
+    expect((await apost(`${SA}/${B}/locations/${LA1}/publication`, { ...body, enabled: true }, ac)).status).toBe(404);
+    const notReady = await apost(url, { ...body, enabled: true }, ac);
     expect(notReady.status).toBe(409);
-    expect(await notReady.json()).toEqual(expect.objectContaining({
-      blockingReasons: expect.arrayContaining(["ADDRESS_REQUIRED", "APPROVED_DISPLAY_NAME_REQUIRED"]),
-    }));
-    await admin.query("UPDATE partner_locations SET address='1 High Street, Canterbury CT1 1AA' WHERE id=$1", [LA1]);
-    await admin.query(
-      "INSERT INTO partner_profiles (tenant_id,trading_name) VALUES ($1,'A Trading') ON CONFLICT (tenant_id) DO UPDATE SET trading_name=excluded.trading_name",
-      [A]
+    await admin.query(`
+      INSERT INTO partner_public_profiles
+        (tenant_id,public_display_name,version,consented_by,consented_at,listed)
+      VALUES ($1,'A Public Trading',1,$3,now(),false);
+      INSERT INTO partner_location_publications
+        (tenant_id,location_id,privacy_state,public_location_name,public_street_address,maps_enabled,
+         consented_fields,version,consented_by,consented_at,listed)
+      VALUES ($1,$2,'PUBLIC_STOREFRONT','A Public Shop','1 Public Street, Canterbury',true,
+              ARRAY['public_location_name','public_street_address','maps_enabled'],1,$3,now(),false)
+    `, [A, LA1, UA_OWNER]);
+    expect((await apost(url, { ...body, enabled: true }, ac)).status).toBe(200);
+    const stored = await admin.query<{ listed: boolean; approved_version: number }>(
+      "SELECT listed,approved_version FROM partner_location_publications WHERE tenant_id=$1 AND location_id=$2",
+      [A, LA1]
     );
-    expect((await apost(`${SA}/${A}/flags`, { ...body, enabled: true }, ac)).status).toBe(200);
-    const stored = await admin.query<{ enabled: boolean }>(
-      "SELECT enabled FROM partner_feature_flags WHERE tenant_id=$1 AND location_id=$2 AND flag=$3",
-      [A, LA1, body.flag]
-    );
-    expect(stored.rows).toEqual([{ enabled: true }]);
+    expect(stored.rows).toEqual([{ listed: true, approved_version: 1 }]);
   });
 
   // ── global emergency stop ──

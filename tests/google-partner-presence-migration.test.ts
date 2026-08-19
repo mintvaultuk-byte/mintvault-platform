@@ -7,7 +7,7 @@ import { applyMigrationsRealistic, PARTNER_MIGRATIONS } from "./helpers/partner-
 import { decryptGoogleSecret, oauthVerifierAad } from "../server/partner/google-presence-crypto";
 import type { PartnerPrincipal } from "../server/partner/session";
 
-describe("0101 Partner Google presence (real PostgreSQL 17)", () => {
+describe("0102 Partner Google presence (real PostgreSQL 17)", () => {
   let cluster: DisposablePostgres17;
   let admin: Client;
   let runtime: Client;
@@ -26,7 +26,7 @@ describe("0101 Partner Google presence (real PostgreSQL 17)", () => {
     cluster = await startPostgres17("partner-google-presence");
     admin = new Client({ connectionString: cluster.url });
     await admin.connect();
-    await applyMigrationsRealistic(admin, cluster.url, [...PARTNER_MIGRATIONS, "0101_partner_google_presence"]);
+    await applyMigrationsRealistic(admin, cluster.url, [...PARTNER_MIGRATIONS, "0101_partner_public_presence", "0102_partner_google_presence"]);
     await admin.query(`
       INSERT INTO partner_organisations (id,legal_name,status) VALUES
         ('${ORG_A}','A','ACTIVE'),('${ORG_B}','B','ACTIVE');
@@ -263,8 +263,8 @@ describe("0101 Partner Google presence (real PostgreSQL 17)", () => {
     expect(visible.rows.some((row) => row.tenant_id === ORG_B)).toBe(false);
   });
 
-  it("rolls 0101 back cleanly in the disposable database", async () => {
-    const rollback = readFileSync(join(process.cwd(), "migrations/rollback-0101-partner-google-presence.sql"), "utf8");
+  it("rolls 0102 back cleanly in the disposable database", async () => {
+    const rollback = readFileSync(join(process.cwd(), "migrations/rollback-0102-partner-google-presence.sql"), "utf8");
     await admin.query(rollback);
     const relations = await admin.query<{ relation: string | null }>(`
       SELECT to_regclass('public.' || name)::text AS relation
@@ -276,7 +276,7 @@ describe("0101 Partner Google presence (real PostgreSQL 17)", () => {
     expect(relations.rows.every((row) => row.relation === null)).toBe(true);
     const constraints = await admin.query<{ conname: string }>(`
       SELECT conname FROM pg_constraint
-       WHERE conname IN ('uq_partner_locations_tenant_id_id','uq_partner_users_tenant_id_id','uq_partner_sessions_tenant_user_id_id')
+       WHERE conname IN ('uq_partner_sessions_tenant_user_id')
     `);
     expect(constraints.rows).toEqual([]);
   });

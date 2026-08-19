@@ -18,14 +18,7 @@ import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from ".
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
-import {
-  PUBLIC_APPROVED_DISPLAY_NAME_SQL,
-  PUBLIC_DIRECTORY_FLAG,
-  PUBLIC_LOCATION_FLAG,
-  PUBLIC_PARTNER_PROFILE_PREFIX,
-  derivePublicLocationPublicationState,
-  type PublicLocationPublicationBlocker,
-} from "./public-presence-service";
+import { PUBLIC_PARTNER_PROFILE_PREFIX } from "./public-presence-service";
 
 export interface ActorContext {
   actorUserId: string;
@@ -2487,7 +2480,7 @@ export interface PartnerLocationRow {
   publicProfileConfigured: boolean;
   publicProfileReady: boolean;
   publicProfileLive: boolean;
-  publicProfileBlockingReasons: PublicLocationPublicationBlocker[];
+  publicProfileBlockingReasons: string[];
   publicProfileUrl: string;
 }
 
@@ -2525,9 +2518,6 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
     created_at: string;
     station_count: string;
     assigned_user_count: string;
-    public_profile_configured: boolean;
-    public_directory_enabled: boolean;
-    approved_display_name: string | null;
   }>(
     `SELECT l.id, l.public_ref, l.name, l.address, l.status, l.created_at,
             COALESCE((SELECT count(*) FROM partner_stations s
@@ -2535,34 +2525,13 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
                          AND s.status <> 'REVOKED'), 0)::text AS station_count,
             COALESCE((SELECT count(*) FROM partner_user_locations pul
                        WHERE pul.location_id = l.id AND pul.tenant_id = l.tenant_id), 0)::text
-              AS assigned_user_count,
-            COALESCE((SELECT f.enabled FROM partner_feature_flags f
-                       WHERE f.flag = $2 AND f.tenant_id = l.tenant_id AND f.location_id = l.id
-                       ORDER BY f.updated_at DESC, f.id DESC LIMIT 1), false)
-              AS public_profile_configured,
-            COALESCE((SELECT f.enabled FROM partner_feature_flags f
-                       WHERE f.flag = $3 AND f.tenant_id IS NULL AND f.location_id IS NULL
-                       ORDER BY f.updated_at DESC, f.id DESC LIMIT 1), false)
-              AS public_directory_enabled,
-            ${PUBLIC_APPROVED_DISPLAY_NAME_SQL} AS approved_display_name
+              AS assigned_user_count
        FROM partner_locations l
-       LEFT JOIN partner_profiles p ON p.tenant_id = l.tenant_id
-       LEFT JOIN partner_branding b ON b.tenant_id = l.tenant_id
       WHERE l.tenant_id = $1
       ORDER BY (l.status = 'ACTIVE') DESC, l.name`,
-    [org.id, PUBLIC_LOCATION_FLAG, PUBLIC_DIRECTORY_FLAG]
+    [org.id]
   );
-  return rows.map((r) => {
-    const publication = derivePublicLocationPublicationState({
-      organisationStatus: org.status,
-      locationStatus: r.status,
-      locationName: r.name,
-      address: r.address,
-      approvedDisplayName: r.approved_display_name,
-      configured: r.public_profile_configured,
-      directoryEnabled: r.public_directory_enabled,
-    });
-    return {
+  return rows.map((r) => ({
       id: r.id,
       publicRef: r.public_ref,
       name: r.name,
@@ -2571,13 +2540,15 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
       createdAt: new Date(r.created_at).toISOString(),
       stationCount: Number(r.station_count),
       assignedUserCount: Number(r.assigned_user_count),
-      publicProfileConfigured: publication.configured,
-      publicProfileReady: publication.ready,
-      publicProfileLive: publication.live,
-      publicProfileBlockingReasons: publication.blockingReasons,
+      // Publication state is intentionally loaded from the optional 0101
+      // public-only schema through the dedicated status endpoint. Keeping the
+      // base operational list independent allows schema-first deployment.
+      publicProfileConfigured: false,
+      publicProfileReady: false,
+      publicProfileLive: false,
+      publicProfileBlockingReasons: ["PUBLICATION_STATUS_SEPARATE"],
       publicProfileUrl: `${PUBLIC_PARTNER_PROFILE_PREFIX}${encodeURIComponent(r.public_ref)}`,
-    };
-  });
+    }));
 }
 
 /**

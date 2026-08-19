@@ -58,13 +58,16 @@ const publicLocation = {
   publicRef: "11111111-1111-4111-8111-111111111111",
   displayName: "A Cards",
   locationName: "Canterbury Shop",
+  privacyState: "PUBLIC_STOREFRONT",
   address: "1 High Street, Canterbury CT1 1AA",
+  serviceArea: null,
   designation: "MintVault Partner",
   websiteUrl: null,
   phone: null,
   email: null,
   mapsUrl: "https://www.google.com/maps/search/?api=1&query=Canterbury",
   cardsGraded: null,
+  cardsGradedMeaning: "Approved cards graded by MintVault through this Partner location",
   partnerSince: null,
 };
 

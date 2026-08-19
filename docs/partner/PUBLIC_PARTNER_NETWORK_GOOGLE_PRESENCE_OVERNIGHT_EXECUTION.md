@@ -24,10 +24,10 @@
 ## Decisions
 
 1. Public URL: `/partners/location/:publicRef`. `partner_locations.public_ref` is globally unique, stable and explicitly external; internal IDs are never returned.
-2. Publication: `public_partner_directory_enabled` is the independent global kill switch. `partner_location_public_profile_enabled` requires an exact location-scoped true row; normal global fallback cannot publish all locations. Organisation and location must both be ACTIVE with a meaningful name/address and approved branding display name or trading name. One shared server decision feeds public, Partner and Super Admin status.
+2. Publication: `public_partner_directory_enabled` is only the independent global kill switch. Migration 0101 stores Partner-Owner-attested public-only values and one privacy class per location; Super Admin can list only the exact current consented versions. Organisation and location must also be ACTIVE. Operational names, addresses and contacts are never fallback public inputs.
 3. Public data: new bounded SQL and explicit DTO only; no admin objects or row spreading.
-4. Search: normalized free text over approved display/location/address only. No distance, coordinates, parsed geography, fake map pins or N+1.
-5. Stats: approved, active, nondeleted certificates from immutable Partner/location origin only. Zero/unavailable is omitted or rendered honestly.
+4. Search: normalized free text over approved public display/location/address/service-area values only. No distance, coordinates, parsed geography, fake map pins or N+1.
+5. Stats: approved, active, nondeleted certificates bound to both immutable Partner and Location origin. A true zero remains zero; unavailable is omitted.
 6. Feedback/reviews/hours/services: omitted because no canonical authority exists.
 7. Google: isolated optional integration. Missing flag/config/schema/provider disables only its routes/panel; it cannot gate Partner login or operations.
 8. Google migration: authored/tested as an explicit additive package, never silently applied.
@@ -36,8 +36,10 @@
 
 | Candidate | Classification | Rule |
 |---|---|---|
-| Location `public_ref`, public display/location name, formatted address | PUBLIC WHEN ENABLED | Exact publication opt-in plus ACTIVE/readiness checks |
-| Valid business website/phone/support email/logo | PUBLIC WHEN ENABLED | Explicit public projection rule and strict validation; absent/invalid omitted |
+| Location `public_ref`, consented public display/location name | PUBLIC WHEN ENABLED | Partner Owner attests exact version; Super Admin approves/list exact version; ACTIVE checks |
+| Public storefront street address | PUBLIC WHEN ENABLED | Explicit `PUBLIC_STOREFRONT` classification and per-field consent; never copied from operational address |
+| Service area | PUBLIC WHEN ENABLED | `SERVICE_AREA_PRIVATE_ADDRESS`; street address and Maps are structurally absent |
+| Valid public website/phone/email | PUBLIC WHEN ENABLED | Per-field consent plus strict server validation; absent/invalid omitted |
 | Partner designation and approved certificate count | PUBLIC WHEN ENABLED | Derived from canonical status/origin facts |
 | Org/location internal IDs, tenant IDs, legal/company/VAT data | PRIVATE / SUPER ADMIN ONLY | Never in public DTO |
 | Staff, personal contacts, notes, audit/security, MFA/auth/session | PRIVATE | Never exposed |
@@ -52,7 +54,7 @@
 | A — evidence/data contract | COMPLETE | Three specialist reports; lead verification; manifest frozen |
 | B — public Partner profile | COMPLETE | Public DTO/API, direct SSR/404/meta/schema, profile, Maps, stats and operator visibility |
 | C — Find a Partner | COMPLETE | Searchable directory, global discovery, truth-aligned near-me page, dynamic sitemap, cache revocation |
-| D — Google foundation | CODE COMPLETE | OAuth/PKCE/state/encryption/binding/cache/Partner/Admin and 0101; external live pilot blocked |
+| D — Google foundation | CODE COMPLETE | OAuth/PKCE/state/encryption/binding/cache/Partner/Admin and 0102; external live pilot blocked |
 | E — hostile break/fix | COMPLETE | Security, privacy, UX/SEO and final hostile reviews at 0 BLOCKER / 0 HIGH |
 | F — pilot/production | BLOCKED | Requires deployment/migration approval and Google prerequisites |
 
@@ -67,10 +69,10 @@ The source and production secret inventory do not prove a Google Cloud project w
 - `npm run check`: pass.
 - Changed-file ESLint `--quiet`: pass. Whole-repository lint exits 0 with 2,716 documented warnings and no errors.
 - `npm run build`: pass (client, server and migration runners).
-- SQL destructive heuristic: 0101 pass, no obvious destructive statement.
-- Runnable full suite: **316 files passed, 54 environment-gated skipped; 5,168 tests passed, 998 skipped; 0 failed**. Five separately known suites need external database environment variables and were excluded from this runnable count rather than weakened.
+- SQL destructive heuristic: additive public 0101 and optional Google 0102 pass, no obvious destructive statement.
+- Runnable full suite: **317 files passed, 54 environment-gated skipped; 5,172 tests passed, 998 skipped; 0 failed**. Five separately known suites need external database environment variables and were excluded from this runnable count rather than weakened.
 - Super Admin control-shell HTTP suite against a disposable restricted-role PostgreSQL topology: **12/12 pass**, including step-up, boolean, cross-tenant and not-ready publication rejection.
-- Focused public/Google/canonical tests: real PostgreSQL public projection, OAuth lifecycle, RLS/constraints, callback guards, cache revocation, query budget and 0101 rollback all pass.
+- Focused public/Google/canonical tests: real PostgreSQL consent/approval/projection, OAuth lifecycle, RLS/constraints, callback guards, cache revocation, query budget and disposable 0101/0102 rollbacks all pass.
 - Controlled public load: 100 eligible locations, 36 directory/search/profile requests in batches of 12; **0 errors, p50 5.80 ms, p95 11.53 ms** on disposable local PostgreSQL. Directory/search/profile stay at three bounded SQL calls per request regardless of 100 rows.
 - Browser: 390×844 and 1440×900, no horizontal overflow, semantic single H1/main/search label, result-to-profile navigation, authoritative conditional CTAs and keyboard Enter search pass.
 
@@ -87,3 +89,22 @@ The source and production secret inventory do not prove a Google Cloud project w
 - Production remains `facfd36f`, Fly v1110, two started/healthy machines, and unchanged Partner public/Google activation state.
 - Public Partner Network is code complete; production acceptance requires the protected rollout.
 - Google Partner Presence is code complete; its live pilot remains externally blocked.
+
+## Addendum completion — privacy and exact preview
+
+- Four server-owned classifications exist: `PUBLIC_STOREFRONT`, `SERVICE_AREA_PRIVATE_ADDRESS`, `NOT_PUBLIC`, and `INCOMPLETE_UNVERIFIED`.
+- A Partner Owner with a fresh step-up attests the exact public business/location/contact fields. Consent is recorded per populated field and version. Editing any public location output clears its approval and listing immediately; changing the shared public business name also unlists every location.
+- Super Admin cannot edit Partner public values. A fresh step-up can only approve/list or unlist the exact current version after reviewing the exact customer DTO.
+- Partner and Super Admin previews use the same `PublicPartnerProfileView` component and the same allowlisted DTO mapper as the public API. Authenticated status and previews are `private, no-store`.
+- Service-area profiles show no street address, Directions or Maps. Public storefront Maps requires explicit consent. Google remains optional and is read only when its separate global switch is enabled.
+- Browser click analytics were not added because the active cookie notice promises “No analytics or tracking”. Existing non-sensitive request path/status/duration telemetry remains available; CTA events require an owner/legal policy change.
+
+## Production monitoring checklist (required after protected rollout)
+
+1. Start with one Partner-attested, Super-Admin-approved location and the global directory switch off. Capture the exact 0101 migration journal row, consent/approval versions and public preview; do not copy operational values.
+2. Turn on the global directory switch and, within 30 seconds, verify: directory API/HTML 200, exact profile API/HTML 200, canonical URL, sitemap inclusion, conditional structured data and safe website/phone/Maps links. Verify a malformed ref and an unpublished, suspended and cross-tenant ref each return indistinguishable 404 responses and do not appear in search/sitemap.
+3. Verify the directory empty state with a no-match search and at 390, 768, 820, 1024, 1280 and 1440 CSS pixels. At 768–1024 the compact menu must remain available with no horizontal overflow. Keyboard focus, visible labels and one H1 must remain intact.
+4. Inspect JSON, initial HTML and application logs for operational address, legal name, staff/customer data, tenant/internal IDs, tokens and provider payloads. Any private-field appearance is an immediate kill-switch event.
+5. Monitor existing request telemetry for `/api/public/partners`, `/find-a-partner`, `/partners/location/*` and `/sitemap.xml` at 15 minutes, 1 hour and 24 hours. Roll back if public-route 5xx exceeds 1% over 15 minutes or p95 latency exceeds 500 ms over 15 minutes; distinguish genuine 404s from retryable 503s.
+6. Exercise the kill switch: disable `public_partner_directory_enabled` and prove the directory/profile/sitemap entry disappears within 30 seconds. Re-enable only after the release owner confirms the prior checks.
+7. Keep Google off unless its separate credential/API pilot passes. Public storefront directions must continue through the consented encoded-address fallback; service-area/private locations must still show no Maps link.

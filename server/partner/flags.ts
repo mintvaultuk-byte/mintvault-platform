@@ -38,10 +38,6 @@ export const PARTNER_FLAGS = [
    * directory to evaluate exact location opt-ins; it never publishes a row by
    * itself. */
   "public_partner_directory_enabled",
-  /** Location publication consent. Public reads require the latest exact
-   * tenant+location row to be TRUE — normal flag fallback is deliberately not
-   * used, so a global or tenant row can never publish every shop floor. */
-  "partner_location_public_profile_enabled",
   /** Optional Google Business Profile integration. This flag is evaluated
    * only inside Google routes and must never join the whole-portal gate. */
   "google_partner_presence_enabled",

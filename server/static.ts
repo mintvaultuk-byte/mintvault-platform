@@ -4,8 +4,9 @@ import path from "path";
 import { getSeoMeta, isKnownPublicRoute, type SeoMeta } from "./seo-config";
 import {
   getPublicPartnerLocation,
-  isPublicPartnerDirectoryEnabled,
+  getPublicPartnerDirectoryState,
   isValidPublicPartnerRef,
+  PublicPartnerPresenceUnavailableError,
   type PublicPartnerLocation,
 } from "./partner/public-presence-service";
 
@@ -73,7 +74,7 @@ export interface PublicPartnerSeoResolver {
 }
 
 const defaultPublicPartnerSeoResolver: PublicPartnerSeoResolver = {
-  directoryEnabled: isPublicPartnerDirectoryEnabled,
+  directoryEnabled: async () => (await getPublicPartnerDirectoryState()) === "ENABLED",
   profile: getPublicPartnerLocation,
 };
 
@@ -119,16 +120,21 @@ export async function renderPublicHtmlWithPartnerPresence(
       "@type": "LocalBusiness",
       name: location.displayName,
       url: canonical,
-      address: { "@type": "PostalAddress", streetAddress: location.address, addressCountry: "GB" },
-      hasMap: location.mapsUrl,
       parentOrganization: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
     };
+    if (location.address) {
+      schema.address = { "@type": "PostalAddress", streetAddress: location.address, addressCountry: "GB" };
+    }
+    if (location.serviceArea) schema.areaServed = location.serviceArea;
+    if (location.mapsUrl) schema.hasMap = location.mapsUrl;
     if (location.phone) schema.telephone = location.phone;
     if (location.email) schema.email = location.email;
     if (location.websiteUrl) schema.sameAs = [location.websiteUrl];
     const meta: SeoMeta = {
       title: `${location.displayName} — ${location.locationName} | MintVault Partner`,
-      description: `${location.displayName} is an approved MintVault Partner location at ${location.address}. Get directions and public shop contact details.`,
+      description: location.address
+        ? `${location.displayName} is an approved MintVault Partner location at ${location.address}. View public shop details.`
+        : `${location.displayName} is an approved MintVault Partner serving ${location.serviceArea}. View public contact details.`,
       canonical,
       schema,
     };
@@ -165,9 +171,23 @@ export function serveStatic(app: Express) {
   // Fall through only for recognised client routes. Unknown paths are a real
   // 404 with noindex rather than an indexable SPA soft-404.
   app.use("/{*path}", async (req: Request, res: Response) => {
-    const rendered = await renderPublicHtmlWithPartnerPresence(baseHtml, publicRequestPath(req.originalUrl));
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    if (rendered.noindex) res.setHeader("X-Robots-Tag", "noindex, nofollow");
-    res.status(rendered.status).send(rendered.html);
+    try {
+      const rendered = await renderPublicHtmlWithPartnerPresence(baseHtml, publicRequestPath(req.originalUrl));
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      if (rendered.noindex) res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.status(rendered.status).send(rendered.html);
+    } catch (err) {
+      if (!(err instanceof PublicPartnerPresenceUnavailableError)) throw err;
+      const unavailable: SeoMeta = {
+        title: "Partner discovery temporarily unavailable | MintVault UK",
+        description: "Partner discovery is temporarily unavailable. Please try again shortly.",
+        canonical: "https://mintvaultuk.com/find-a-partner",
+        noindex: true,
+      };
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.setHeader("Retry-After", "60");
+      res.status(503).send(injectMeta(baseHtml, unavailable));
+    }
   });
 }

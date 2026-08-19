@@ -4,20 +4,7 @@ import { ArrowRight, ExternalLink, MapPin, Search, Store } from "lucide-react";
 import { Link } from "wouter";
 import SeoHead from "@/components/seo-head";
 import { useFeatureFlags } from "@/hooks/use-feature-flags";
-
-export interface PublicPartnerLocation {
-  publicRef: string;
-  displayName: string;
-  locationName: string;
-  address: string;
-  designation: "MintVault Partner";
-  websiteUrl: string | null;
-  phone: string | null;
-  email: string | null;
-  mapsUrl: string;
-  cardsGraded: number | null;
-  partnerSince: string | null;
-}
+import type { PublicPartnerLocation } from "@shared/public-partner";
 
 async function loadPartners(search: string): Promise<PublicPartnerLocation[]> {
   const query = search ? `?search=${encodeURIComponent(search)}` : "";
@@ -88,7 +75,7 @@ export default function FindAPartnerPage() {
           <h1 className="mt-3 font-display text-4xl font-semibold sm:text-5xl">Find a MintVault Partner</h1>
           <p className="mt-4 text-base leading-7 text-[#514B42]">
             Search shops that MintVault has explicitly approved for public display. Each result uses the Partner’s
-            current MintVault location record and opens directions without inventing distance or map pins.
+            separately consented public details and never exposes an operational address by default.
           </p>
         </div>
 
@@ -167,16 +154,19 @@ export default function FindAPartnerPage() {
                       <p className="mt-1 text-sm font-medium text-[#514B42]">{location.locationName}</p>
                     </div>
                   </div>
-                  <address className="mt-4 flex gap-2 text-sm not-italic leading-6 text-[#514B42]">
-                    <MapPin className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> {location.address}
-                  </address>
+                  <div className="mt-4 flex gap-2 text-sm leading-6 text-[#514B42]">
+                    <MapPin className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    {location.address ? <address className="not-italic">{location.address}</address> : <span>Serves {location.serviceArea}</span>}
+                  </div>
                   <div className="mt-auto flex flex-wrap gap-3 pt-6">
                     <Link href={`/partners/location/${location.publicRef}`} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-[#171717] px-4 py-2 text-sm font-semibold text-white">
                       View Partner <ArrowRight size={16} aria-hidden="true" />
                     </Link>
-                    <a href={location.mapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#AFA79A] px-4 py-2 text-sm font-semibold">
-                      Google Maps <ExternalLink size={15} aria-hidden="true" />
-                    </a>
+                    {location.mapsUrl && (
+                      <a href={location.mapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-[#AFA79A] px-4 py-2 text-sm font-semibold">
+                        Google Maps <ExternalLink size={15} aria-hidden="true" />
+                      </a>
+                    )}
                   </div>
                 </article>
               ))}

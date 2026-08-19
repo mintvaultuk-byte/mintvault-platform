@@ -83,9 +83,10 @@ import {
   refreshGoogleBusinessConnection,
 } from "./google-presence-service";
 import {
-  PUBLIC_APPROVED_DISPLAY_NAME_SQL,
-  derivePublicLocationPublicationState,
-} from "./public-presence-service";
+  getPartnerPublicProfileStatus,
+  PublicPublicationError,
+  savePartnerPublicDraft,
+} from "./public-publication-service";
 
 function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
   const g5 = toG5Error(err);
@@ -117,6 +118,15 @@ function sendGooglePresenceError(res: import("express").Response, err: unknown):
   res.status(503).json({
     error: { code: "google_business_unavailable", message: "Google Business is temporarily unavailable." },
   });
+}
+
+function sendPublicPublicationError(res: import("express").Response, err: unknown): void {
+  if (err instanceof PublicPublicationError) {
+    res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  console.error("[partner-publication] request failed:", (err as Error)?.message ?? "unknown");
+  res.status(503).json({ error: { code: "PUBLIC_PROFILE_UNAVAILABLE", message: "Public profiles are temporarily unavailable." } });
 }
 
 /** OAuth returns as a top-level navigation, so the standard JSON mutation
@@ -814,63 +824,35 @@ export function partnerApiRouter(): Router {
     res.json(rows);
   });
 
-  // Public-profile readiness for the authenticated Partner. This is a view of
-  // canonical location/flag data only: publication remains a Super Admin
-  // operation, and no public response object is reused here.
+  // Public-profile state is backed by the separate public-only consent schema.
+  // Operational addresses remain visible only on this authenticated surface;
+  // preview is built by the exact public DTO mapper.
   r.get("/public-profile", requirePartnerCapability("partner.location.view"), async (req, res) => {
-    const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-      const accessPredicate = req.partner!.orgWide
-        ? "TRUE"
-        : "EXISTS (SELECT 1 FROM partner_user_locations pul WHERE pul.location_id=l.id AND pul.user_id=$1)";
-      const params = req.partner!.orgWide ? [] : [req.partner!.userId];
-      const result = await c.query(
-        `SELECT l.id, l.public_ref, l.name, l.address, l.status, o.status AS organisation_status,
-                ${PUBLIC_APPROVED_DISPLAY_NAME_SQL} AS approved_display_name,
-                COALESCE((SELECT f.enabled FROM partner_feature_flags f
-                           WHERE f.flag='partner_location_public_profile_enabled'
-                             AND f.tenant_id=l.tenant_id AND f.location_id=l.id
-                           ORDER BY f.updated_at DESC, f.id DESC LIMIT 1), false) AS configured,
-                COALESCE((SELECT f.enabled FROM partner_feature_flags f
-                           WHERE f.flag='public_partner_directory_enabled'
-                             AND f.tenant_id IS NULL AND f.location_id IS NULL
-                           ORDER BY f.updated_at DESC, f.id DESC LIMIT 1), false) AS directory_enabled
-           FROM partner_locations l
-           JOIN partner_organisations o ON o.id=l.tenant_id AND o.id=l.partner_id
-           LEFT JOIN partner_profiles p ON p.tenant_id=l.tenant_id
-           LEFT JOIN partner_branding b ON b.tenant_id=l.tenant_id
-          WHERE l.tenant_id = current_setting('app.tenant_id')::uuid
-            AND ${accessPredicate}
-          ORDER BY (l.status='ACTIVE') DESC, l.name`,
-        params
-      );
-      return result.rows;
-    });
-    res.json({
-      locations: rows.map((row: any) => {
-        const publication = derivePublicLocationPublicationState({
-          organisationStatus: row.organisation_status,
-          locationStatus: row.status,
-          locationName: row.name,
-          address: row.address,
-          approvedDisplayName: row.approved_display_name,
-          configured: row.configured,
-          directoryEnabled: row.directory_enabled,
-        });
-        return {
-          id: row.id,
-          publicRef: row.public_ref,
-          name: row.name,
-          address: row.address,
-          status: row.status,
-          ready: publication.ready,
-          configured: publication.configured,
-          live: publication.live,
-          blockingReasons: publication.blockingReasons,
-          publicUrl: `/partners/location/${encodeURIComponent(row.public_ref)}`,
-        };
-      }),
-    });
+    noStore(res);
+    try {
+      res.json(await getPartnerPublicProfileStatus(req.partner!));
+    } catch (err) {
+      sendPublicPublicationError(res, err);
+    }
   });
+
+  r.post(
+    "/public-profile/locations/:locationId",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    requireRecentAuth(),
+    async (req, res) => {
+      noStore(res);
+      try {
+        await savePartnerPublicDraft(req.partner!, String(req.params.locationId), req.body ?? {});
+        res.json({ ok: true });
+      } catch (err) {
+        sendPublicPublicationError(res, err);
+      }
+    }
+  );
 
   // Google Business is an optional, isolated Partner feature. Its positive gate
   // is evaluated inside these routes only; missing Google config/schema never

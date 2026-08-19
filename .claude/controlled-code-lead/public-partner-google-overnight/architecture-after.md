@@ -7,7 +7,7 @@
 flowchart LR
   Customer --> PublicAPI["Explicit public-safe Partner API"]
   Customer --> SSR["DB-aware SSR metadata + sitemap"]
-  PublicAPI --> PubGate["Global kill switch + exact location opt-in + ACTIVE checks"]
+  PublicAPI --> PubGate["Owner consent + exact-version Admin approval + global switch + ACTIVE checks"]
   SSR --> PubGate
   PubGate --> Core["Canonical Partner + immutable certificate origin"]
   Partner --> GPanel["Google panel"]
@@ -30,4 +30,20 @@ flowchart LR
 
 - The public surface uses an explicit allowlisted SQL/DTO and one shared publication decision; legal names and private management objects never become fallback public data.
 - Google config/schema/provider failure is route-local. The portal-wide readiness/schema gates remain unchanged.
-- 0101 is additive, forced-RLS, migration-inventory classified, applied and rolled back only in disposable PostgreSQL.
+- Public 0101 and optional Google 0102 are additive, forced-RLS where tenant-scoped, migration-inventory classified, and applied/rolled back only in disposable PostgreSQL.
+
+## Addendum target architecture
+
+```mermaid
+flowchart LR
+  Ops["Operational location/address"] -. never projected .-> Public
+  Owner["Partner Owner + fresh step-up"] --> Consent["Versioned public-only values + privacy class"]
+  Admin["Super Admin + fresh step-up"] --> Approval["Approve exact consent version"]
+  Consent --> Approval
+  Approval --> Gate["Global switch + ACTIVE org/location + Partner listed + Location listed"]
+  Gate --> Public["One allowlisted DTO used by preview/API/SSR/sitemap"]
+  Public --> Logs["Existing path/status/duration request telemetry"]
+  Google["Optional Google 0102"] -. optional exact Maps URI only when Maps consented .-> Public
+```
+
+The public privacy substrate is migration 0101; optional Google becomes 0102. A public launch can therefore proceed with approved MintVault public values and encoded Maps-address links while Google stays disabled.

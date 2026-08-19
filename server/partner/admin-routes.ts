@@ -11,12 +11,12 @@ import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { PARTNER_FLAGS } from "./flags";
+import { PUBLIC_DIRECTORY_FLAG } from "./public-presence-service";
 import {
-  PUBLIC_APPROVED_DISPLAY_NAME_SQL,
-  PUBLIC_DIRECTORY_FLAG,
-  PUBLIC_LOCATION_FLAG,
-  derivePublicLocationPublicationState,
-} from "./public-presence-service";
+  getAdminPublicProfileStatus,
+  PublicPublicationError,
+  setAdminPublicPublication,
+} from "./public-publication-service";
 import { getPartnerAdminCapability } from "./admin-capability";
 import { G5RequestError, g5StatusFor, toG5Error } from "./partner-management-errors";
 import { setPartnerUserStatus, resetPartnerUserMfa, type ActorContext } from "./partner-management-service";
@@ -126,6 +126,49 @@ export function superAdminPartnerRouter(): Router {
     );
     res.json(rows);
   });
+
+  r.get("/:partnerId/public-profile", async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    try {
+      res.json(await getAdminPublicProfileStatus(String(req.params.partnerId)));
+    } catch (err) {
+      if (err instanceof PublicPublicationError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
+      console.error("[partner-publication] admin status failed:", (err as Error)?.message ?? "unknown");
+      res.status(503).json({ error: "Public profile status is temporarily unavailable." });
+    }
+  });
+
+  r.post(
+    "/:partnerId/locations/:locationId/publication",
+    legacyMutationRateLimit,
+    requireAdminStepUp(),
+    async (req, res) => {
+      try {
+        if (typeof req.body?.enabled !== "boolean") {
+          res.status(400).json({ error: 'The "enabled" field must be true or false.' });
+          return;
+        }
+        await setAdminPublicPublication({
+          tenantId: String(req.params.partnerId),
+          locationId: String(req.params.locationId),
+          enabled: req.body.enabled,
+          reason: req.body?.reason,
+          adminEmail: (req.session as { adminEmail?: string }).adminEmail ?? "unknown-admin",
+        });
+        res.json({ ok: true });
+      } catch (err) {
+        if (err instanceof PublicPublicationError) {
+          res.status(err.status).json({ error: err.message, code: err.code });
+          return;
+        }
+        console.error("[partner-publication] admin mutation failed:", (err as Error)?.message ?? "unknown");
+        res.status(503).json({ error: "Public profile publication is temporarily unavailable." });
+      }
+    }
+  );
 
   r.get("/:partnerId/users", async (req, res) => {
     const { rows } = await partnerAdminQuery(
@@ -269,7 +312,7 @@ export function superAdminPartnerRouter(): Router {
   const sensitiveFlagStepUp = requireAdminStepUp();
   const requireSensitiveFlagStepUp = (req: Request, res: Response, next: NextFunction) => {
     const flag = req.body?.flag;
-    if (flag === PUBLIC_LOCATION_FLAG || flag === PUBLIC_DIRECTORY_FLAG || flag === "google_partner_presence_enabled") {
+    if (flag === PUBLIC_DIRECTORY_FLAG || flag === "google_partner_presence_enabled") {
       sensitiveFlagStepUp(req, res, next);
       return;
     }
@@ -301,52 +344,7 @@ export function superAdminPartnerRouter(): Router {
         return;
       }
     }
-    if (flag === PUBLIC_LOCATION_FLAG && !locationId) {
-      res.status(400).json({ error: "A Partner location is required for public-profile publication." });
-      return;
-    }
     const reason = String(req.body?.reason ?? "").trim();
-    if (flag === PUBLIC_LOCATION_FLAG && (!reason || reason.length > 500)) {
-      res.status(400).json({ error: "A publication reason of 1-500 characters is required." });
-      return;
-    }
-    if (flag === PUBLIC_LOCATION_FLAG && enabled === true) {
-      const readiness = await partnerAdminQuery<{
-        organisation_status: string;
-        location_status: string;
-        location_name: string;
-        address: string | null;
-        approved_display_name: string | null;
-      }>(
-        `SELECT o.status AS organisation_status, l.status AS location_status,
-                l.name AS location_name, l.address,
-                ${PUBLIC_APPROVED_DISPLAY_NAME_SQL} AS approved_display_name
-           FROM partner_locations l
-           JOIN partner_organisations o ON o.id=l.tenant_id AND o.id=l.partner_id
-           LEFT JOIN partner_profiles p ON p.tenant_id=l.tenant_id
-           LEFT JOIN partner_branding b ON b.tenant_id=l.tenant_id
-          WHERE l.id=$1 AND l.tenant_id=$2 AND l.partner_id=$2
-          LIMIT 1`,
-        [locationId, req.params.partnerId]
-      );
-      const row = readiness.rows[0];
-      const publication = row && derivePublicLocationPublicationState({
-        organisationStatus: row.organisation_status,
-        locationStatus: row.location_status,
-        locationName: row.location_name,
-        address: row.address,
-        approvedDisplayName: row.approved_display_name,
-        configured: true,
-        directoryEnabled: true,
-      });
-      if (!publication?.ready) {
-        res.status(409).json({
-          error: "This location is not ready for public display.",
-          blockingReasons: publication?.blockingReasons ?? ["LOCATION_NOT_ACTIVE"],
-        });
-        return;
-      }
-    }
     const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
     // H2: deterministic set — remove any existing row for this exact (tenant, location, flag) then
     // insert one, so resolution can never return a stale prior value and disabling always takes.
@@ -365,7 +363,7 @@ export function superAdminPartnerRouter(): Router {
       "partner_flag_set",
       reason || `${flag}=${enabled}`,
       email,
-      flag === PUBLIC_LOCATION_FLAG ? "partner_location_publication" : "partner_flag",
+      "partner_flag",
       locationId ?? flag
     );
     res.json({ ok: true });
