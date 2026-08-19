@@ -64,6 +64,7 @@ describe("Partner RBAC bootstrap coverage is wired up", () => {
 let admin: Client;
 let svc: typeof import("../server/partner/partner-management-service");
 let perms: typeof import("../server/partner/permissions");
+let pre0096Vocabulary: string[];
 
 const ACTOR = {
   actorUserId: "aaaa1111-2222-3333-4444-555566667777",
@@ -71,6 +72,9 @@ const ACTOR = {
   requestId: "rbac-rt",
 } as const;
 const actor = (extra: Record<string, unknown> = {}) => ({ ...ACTOR, ...extra }) as never;
+
+const auditActionsFromConstraint = (definition: string): string[] =>
+  (definition.match(/'([a-z_]+)'/g) ?? []).map((value) => value.replace(/'/g, ""));
 
 describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (PostgreSQL 17)", () => {
   beforeAll(async () => {
@@ -97,7 +101,32 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION);
+    const pre0096 = PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION.filter(
+      (migration) => migration !== "0096_partner_card_job_void_management_audit"
+    );
+    await applyMigrationsRealistic(admin, ADMIN_DB!, pre0096);
+
+    const pre0096Constraint = await admin.query<{ d: string }>(
+      "SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname='chk_partner_management_audit_action'"
+    );
+    pre0096Vocabulary = auditActionsFromConstraint(pre0096Constraint.rows[0].d);
+    expect(pre0096Vocabulary).toHaveLength(27);
+    expect(pre0096Vocabulary).toContain("partner_location_created");
+    expect(pre0096Vocabulary).not.toContain("partner_card_job_voided");
+
+    const seed = await admin.query<{ id: string }>(
+      "INSERT INTO partner_organisations (legal_name) VALUES ('Pre-0096 audit fixture Ltd') RETURNING id"
+    );
+    await admin.query(
+      `INSERT INTO partner_management_audit (tenant_id, action_type, actor_user_id, actor_email, request_id, result)
+       VALUES ($1,'partner_location_created',$2,$3,'pre-0096','succeeded')`,
+      [seed.rows[0].id, ACTOR.actorUserId, ACTOR.actorEmail]
+    );
+
+    await applyMigrationsRealistic(admin, ADMIN_DB!, ["0096_partner_card_job_void_management_audit"]);
+    await expect(
+      admin.query("SELECT 1 FROM partner_management_audit WHERE request_id='pre-0096'")
+    ).resolves.toMatchObject({ rowCount: 1 });
 
     // DELIBERATELY NOT calling seedPartnerRbac() here — that is the habit that hid the bug.
     svc = await import("../server/partner/partner-management-service");
@@ -728,13 +757,13 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
     });
   });
 
-  // ---- MIGRATION 0033 ------------------------------------------------------------------------
-  describe("migration 0033 — audit-action precision", () => {
-    it("preserves all 18 pre-existing values and adds exactly the four approved ones", async () => {
+  // ---- MIGRATIONS 0033 + 0096 ---------------------------------------------------------------
+  describe("migrations 0033 + 0096 — audit-action vocabulary", () => {
+    it("preserves all 18 pre-existing values and exposes the complete post-0096 vocabulary", async () => {
       const { rows } = await admin.query<{ d: string }>(
         "SELECT pg_get_constraintdef(oid) d FROM pg_constraint WHERE conname='chk_partner_management_audit_action'"
       );
-      const permitted = (rows[0].d.match(/'([a-z_]+)'/g) ?? []).map((s) => s.replace(/'/g, ""));
+      const permitted = auditActionsFromConstraint(rows[0].d);
       const original = [
         "partner_created",
         "profile_updated",
@@ -756,23 +785,47 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
         "partner_user_membership_removed",
       ];
       for (const a of original) expect(permitted).toContain(a);
-      const added = permitted.filter((p) => !original.includes(p)).sort();
-      expect(added).toEqual([
+      expect(pre0096Vocabulary.filter((p) => !original.includes(p)).sort()).toEqual([
         "partner_duplicate_override",
         "partner_invitation_amended",
         "partner_legal_name_changed",
+        "partner_location_created",
+        "partner_location_status_changed",
+        "partner_location_updated",
         "partner_user_mfa_reset",
+        "partner_user_locations_changed",
+        "partner_wallet_backfilled",
       ]);
-      expect(permitted).toHaveLength(22);
+      expect(permitted.filter((p) => !pre0096Vocabulary.includes(p))).toEqual(["partner_card_job_voided"]);
+      const added = permitted.filter((p) => !original.includes(p)).sort();
+      expect(added).toEqual([
+        "partner_card_job_voided",
+        "partner_duplicate_override",
+        "partner_invitation_amended",
+        "partner_legal_name_changed",
+        "partner_location_created",
+        "partner_location_status_changed",
+        "partner_location_updated",
+        "partner_user_mfa_reset",
+        "partner_user_locations_changed",
+        "partner_wallet_backfilled",
+      ]);
+      expect(permitted).toHaveLength(28);
     });
 
-    it("accepts each new action and still REJECTS an unknown one", async () => {
+    it("accepts each canonical post-0096 action and still REJECTS an unknown one", async () => {
       const id = await newPartner("Constraint Ltd");
       for (const a of [
         "partner_user_mfa_reset",
         "partner_invitation_amended",
         "partner_legal_name_changed",
         "partner_duplicate_override",
+        "partner_wallet_backfilled",
+        "partner_location_created",
+        "partner_location_updated",
+        "partner_location_status_changed",
+        "partner_user_locations_changed",
+        "partner_card_job_voided",
       ]) {
         await expect(
           admin.query(

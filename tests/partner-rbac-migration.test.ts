@@ -120,6 +120,8 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
    *   0083 — adds partner.credits.purchase (P5 Grading Credit packs)
    *   0085 — adds the SCANNER_OPERATOR role plus partner.stations.enrol / partner.cards.fix (AG-2)
    *   0092 — adds partner.stations.calibrate
+   *   0098 — grants SCANNER_OPERATOR the read-only credit view required by the
+   *           zero-credit lockout UX
    *
    * ORDER IS LOAD-BEARING. 0083's permission seed is guarded by
    * `IF to_regclass('public.partner_permissions') IS NOT NULL`, so applying it BEFORE 0034 would
@@ -134,7 +136,8 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
         f.filename === "0073_lineage_convergence.sql" ||
         f.filename === "0083_partner_credit_packs.sql" ||
         f.filename === "0085_partner_scanner_operator_role.sql" ||
-        f.filename === "0092_partner_station_calibrate_permission.sql"
+        f.filename === "0092_partner_station_calibrate_permission.sql" ||
+        f.filename === "0098_scanner_operator_credit_view.sql"
     );
     expect(
       files.map((f) => f.filename),
@@ -145,6 +148,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
       "0083_partner_credit_packs.sql",
       "0085_partner_scanner_operator_role.sql",
       "0092_partner_station_calibrate_permission.sql",
+      "0098_scanner_operator_credit_view.sql",
     ]);
     return applyMigrations(admin as never, files);
   };
@@ -208,6 +212,46 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
         `grants for ${code}`
       ).toEqual([...ROLE_PERMISSIONS[code]].sort());
     }
+  });
+
+  it("5c. 0098 grants SCANNER_OPERATOR only the canonical read-only credit view", async () => {
+    const pre0098 = listMigrationFiles(join(process.cwd(), "migrations")).filter((f) =>
+      [
+        "0034_partner_rbac_seed.sql",
+        "0073_lineage_convergence.sql",
+        "0083_partner_credit_packs.sql",
+        "0085_partner_scanner_operator_role.sql",
+        "0092_partner_station_calibrate_permission.sql",
+      ].includes(f.filename)
+    );
+    await applyMigrations(admin as never, pre0098);
+
+    const grantsBefore = await admin.query<{ code: string }>(
+      `SELECT p.code FROM partner_role_permissions rp
+         JOIN partner_roles r ON r.id = rp.role_id
+         JOIN partner_permissions p ON p.id = rp.permission_id
+        WHERE r.code='SCANNER_OPERATOR' ORDER BY p.code`
+    );
+    expect(grantsBefore.rows.map((r) => r.code)).toEqual([
+      "partner.cards.scan",
+      "partner.cards.view",
+      "partner.location.view",
+    ]);
+
+    const migration0098 = listMigrationFiles(join(process.cwd(), "migrations")).filter(
+      (f) => f.filename === "0098_scanner_operator_credit_view.sql"
+    );
+    await applyMigrations(admin as never, migration0098);
+
+    const grantsAfter = await admin.query<{ code: string }>(
+      `SELECT p.code FROM partner_role_permissions rp
+         JOIN partner_roles r ON r.id = rp.role_id
+         JOIN partner_permissions p ON p.id = rp.permission_id
+        WHERE r.code='SCANNER_OPERATOR' ORDER BY p.code`
+    );
+    expect(grantsAfter.rows.map((r) => r.code)).toEqual([...ROLE_PERMISSIONS.SCANNER_OPERATOR].sort());
+    expect(grantsAfter.rows.map((r) => r.code)).not.toContain("partner.credits.purchase");
+    expect(grantsAfter.rows.map((r) => r.code)).not.toContain("partner.cards.assess");
   });
 
   // ---- 6-7: pre-existing and partial catalogues ----------------------------------------
@@ -287,6 +331,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
       "0083_partner_credit_packs.sql",
       "0085_partner_scanner_operator_role.sql",
       "0092_partner_station_calibrate_permission.sql",
+      "0098_scanner_operator_credit_view.sql",
     ]);
     const afterFirst = await counts();
 
