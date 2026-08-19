@@ -38,6 +38,10 @@ export type RequestLogSink = (message: string, source?: string) => void;
  * Method, path, status and duration are still logged — only the body is suppressed.
  */
 export const BODY_LOG_SUPPRESSED_PREFIXES = [
+  // Public Partner applications carry business contact data. The endpoint only
+  // returns an opaque receipt today, but suppress it defensively so a later
+  // response-shape change cannot put applicant PII into Fly logs.
+  "/api/partner-applications",
   "/api/super-admin/partner-dashboard",
   // Same reasoning as the dashboard above: these responses carry partner contact details — email,
   // telephone, postal address, company/VAT numbers — for one or many partners at a time. The

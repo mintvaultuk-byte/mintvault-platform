@@ -197,6 +197,39 @@ export const CONTACT_TOPICS = [
 ] as const;
 export type ContactTopic = (typeof CONTACT_TOPICS)[number];
 
+// Public acquisition records. Deliberately not linked to `partner_organisations`:
+// application review happens before any Partner tenant or operational access exists.
+export const partnerApplications = pgTable("partner_applications", {
+  id: uuid("id").primaryKey(),
+  businessName: text("business_name").notNull(),
+  contactName: text("contact_name").notNull(),
+  email: text("email").notNull(),
+  city: text("city").notNull(),
+  postcode: text("postcode").notNull(),
+  businessType: text("business_type").notNull(),
+  webPresence: text("web_presence").notNull(),
+  interestReason: text("interest_reason").notNull(),
+  phone: text("phone"),
+  physicalRetail: boolean("physical_retail"),
+  categories: text("categories").array().notNull().default([]),
+  demandBand: text("demand_band"),
+  existingGradingSubmissions: text("existing_grading_submissions"),
+  privacyAcknowledgedAt: timestamp("privacy_acknowledged_at", { withTimezone: true }).notNull(),
+  marketingOptIn: boolean("marketing_opt_in").notNull().default(false),
+  source: text("source").notNull().default("partners_page"),
+  attribution: jsonb("attribution").$type<Record<string, unknown>>().notNull().default({}),
+  status: text("status").notNull().default("NEW"),
+  dedupeKey: text("dedupe_key").notNull(),
+  notificationAttemptedAt: timestamp("notification_attempted_at", { withTimezone: true }),
+  notificationSentAt: timestamp("notification_sent_at", { withTimezone: true }),
+  notificationError: text("notification_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+export type PartnerApplication = typeof partnerApplications.$inferSelect;
+
 export const submissions = pgTable("submissions", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull(),

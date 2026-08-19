@@ -169,6 +169,63 @@ ${safeMessage}
   });
 }
 
+/**
+ * Notify MintVault's configured business inbox about a newly persisted public
+ * Partner application. This intentionally has no applicant acknowledgement:
+ * the application receipt is shown on-page and no marketing/approval promise
+ * is inferred from submitting the form.
+ */
+export async function sendPartnerApplicationNotification(data: {
+  leadId: string;
+  businessName: string;
+  contactName: string;
+  email: string;
+  city: string;
+  postcode: string;
+  businessType: string;
+  webPresence: string;
+  interestReason: string;
+  physicalRetail?: boolean;
+  categories: string[];
+  demandBand?: string;
+  existingGradingSubmissions?: string;
+}): Promise<{ id: string } | null> {
+  const resend = getResend();
+  if (!resend) return null;
+
+  const inbox = process.env.CONTACT_INBOX_EMAIL || "hello@mintvaultuk.com";
+  const safe = (value: string) => escapeHtmlForEmail(value);
+  const optionalRows = [
+    data.physicalRetail === undefined ? "" : `<tr><td style="padding:8px 0;color:#999;">Physical retail</td><td style="padding:8px 0;color:#fff;">${data.physicalRetail ? "Yes" : "No"}</td></tr>`,
+    data.categories.length ? `<tr><td style="padding:8px 0;color:#999;">Categories</td><td style="padding:8px 0;color:#fff;">${safe(data.categories.join(", "))}</td></tr>` : "",
+    data.demandBand ? `<tr><td style="padding:8px 0;color:#999;">Demand band</td><td style="padding:8px 0;color:#fff;">${safe(data.demandBand)}</td></tr>` : "",
+    data.existingGradingSubmissions ? `<tr><td style="padding:8px 0;color:#999;">Existing grading service</td><td style="padding:8px 0;color:#fff;">${safe(data.existingGradingSubmissions)}</td></tr>` : "",
+  ].join("");
+
+  const body = `
+<p style="color:#ccc;font-size:13px;margin:0 0 16px 0;">A public Founding Partner application has been received. Review does not create a Partner account or operational access.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:145px;">Application ID</td><td style="padding:8px 0;color:#D4AF37;font-family:Menlo,monospace;font-weight:bold;">${safe(data.leadId)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Business</td><td style="padding:8px 0;color:#fff;">${safe(data.businessName)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Contact</td><td style="padding:8px 0;color:#fff;">${safe(data.contactName)} &lt;${safe(data.email)}&gt;</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Location</td><td style="padding:8px 0;color:#fff;">${safe(data.city)}, ${safe(data.postcode)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Business type</td><td style="padding:8px 0;color:#fff;">${safe(data.businessType)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Website / social</td><td style="padding:8px 0;color:#fff;">${safe(data.webPresence)}</td></tr>
+${optionalRows}
+</table>
+<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">WHY THEY ARE INTERESTED</h3>
+<div style="padding:16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-size:13px;line-height:1.6;">${safe(data.interestReason)}</div>`;
+
+  return sendViaResend(resend, {
+    from: getFromEmail(),
+    replyTo: data.email,
+    to: inbox,
+    // Fixed subject avoids putting untrusted names into email headers.
+    subject: `MintVault Partner Application ${data.leadId}`,
+    html: baseHtml("Founding Partner application", body),
+  });
+}
+
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   grading: "Card Grading",
   reholder: "Reholder",

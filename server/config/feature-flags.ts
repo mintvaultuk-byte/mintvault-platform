@@ -21,6 +21,12 @@ import { sql } from "drizzle-orm";
 export const FEATURE_FLAGS = {
   LEGAL_PAGES_LIVE: process.env.LEGAL_PAGES_LIVE === "true",
 
+  // GB-03 is a separate release gate from legal-page publication. Both this
+  // and LEGAL_PAGES_LIVE must be enabled only after 0091 is applied and the
+  // Partner application funnel has had its controlled live proof.
+  PARTNER_APPLICATIONS_LIVE:
+    process.env.LEGAL_PAGES_LIVE === "true" && process.env.PARTNER_APPLICATIONS_LIVE === "true",
+
   // v435 — gates the entire public-facing transfer flow (seller-initiated +
   // buyer-initiated). Admin endpoints (/api/admin/transfers/*) are NOT
   // gated — admins can always inspect/resolve. Default false until

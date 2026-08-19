@@ -8,6 +8,12 @@
 
 import { guides } from "../client/src/data/guides";
 
+// Keep SSR metadata importable in build/test tooling without booting the
+// database-aware feature-flag module. It intentionally mirrors the public
+// legal-publication flag consumed by `server/routes/public.ts`.
+const PARTNER_APPLICATIONS_LIVE =
+  process.env.LEGAL_PAGES_LIVE === "true" && process.env.PARTNER_APPLICATIONS_LIVE === "true";
+
 export interface SeoMeta {
   title: string;
   description: string;
@@ -36,6 +42,12 @@ const SEO_MAP: Record<string, SeoMeta> = {
     title: "Pricing | MintVault UK — Card Grading Costs",
     description: "Transparent card grading pricing for UK collectors. Three tiers from £19 to £45 per card. Fully insured return shipping included. No hidden fees.",
     canonical: `${BASE}/pricing`,
+    ogImage: DEFAULT_IMAGE,
+  },
+  "/partners": {
+    title: "Founding Partner Applications | MintVault UK",
+    description: "UK TCG and collectibles retailers can register interest in MintVault’s first Partner rollout. Applications are reviewed before onboarding or operational readiness.",
+    canonical: `${BASE}/partners`,
     ogImage: DEFAULT_IMAGE,
   },
   "/cert": {
@@ -325,6 +337,7 @@ export function getSitemapEntries(): SitemapEntry[] {
   const staticEntries: SitemapEntry[] = [
     { loc: "/", priority: "1.0", changefreq: "weekly" },
     { loc: "/pricing", priority: "0.9", changefreq: "monthly" },
+    ...(PARTNER_APPLICATIONS_LIVE ? [{ loc: "/partners", priority: "0.6", changefreq: "monthly" as const }] : []),
     { loc: "/submit", priority: "0.9", changefreq: "monthly" },
     { loc: "/verify", priority: "0.8", changefreq: "monthly" },
     { loc: "/why-mintvault", priority: "0.8", changefreq: "monthly" },
@@ -368,6 +381,19 @@ export function getSitemapEntries(): SitemapEntry[] {
  */
 export function getSeoMeta(pathname: string): SeoMeta {
   const clean = cleanPath(pathname);
+
+  // A page that cannot accept applications must not be advertised to search
+  // engines as an open funnel. This switches automatically only with the
+  // separately approved legal-publication feature flag.
+  if (clean === "/partners" && !PARTNER_APPLICATIONS_LIVE) {
+    return {
+      title: "MintVault Partner Programme | MintVault UK",
+      description: "MintVault is preparing the first Partner rollout for selected UK TCG and collectibles retailers. Applications will open after the public privacy notice is available.",
+      canonical: `${BASE}/partners`,
+      ogImage: DEFAULT_IMAGE,
+      noindex: true,
+    };
+  }
 
   // A route can retain useful descriptive metadata while still being an
   // operational/customer flow that must not be indexed. Apply the route

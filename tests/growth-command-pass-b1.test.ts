@@ -161,7 +161,7 @@ describe("GB-02 rendered search policy", () => {
     expect(locs).toContain("/card-grading-near-me");
     expect(locs).not.toContain("/guides");
     expect(locs.some((loc) => loc.startsWith("/guides/"))).toBe(false);
-    expect(locs.some((loc) => /^(?:\/admin|\/partner|\/cert\/|\/vault\/|\/population\/certs)/.test(loc))).toBe(false);
+    expect(locs.some((loc) => /^(?:\/admin(?:\/|$)|\/partner(?:\/|$)|\/cert\/|\/vault\/|\/population\/certs)/.test(loc))).toBe(false);
     expect(new Set(locs).size).toBe(locs.length);
   });
 });

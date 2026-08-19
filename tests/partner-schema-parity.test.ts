@@ -270,6 +270,9 @@ describe("partner schema ↔ migration parity", () => {
       "0091_capture_session_calibration_snapshot.sql",
       "0092_partner_station_calibrate_permission.sql",
       "0094_partner_management_audit_card_job_void.sql",
+      // GB-03 adds public business-lead retention only. It intentionally has
+      // no partner tenant/account foreign key or operational Partner state.
+      "0095_growth_partner_applications.sql",
     ]);
   });
 

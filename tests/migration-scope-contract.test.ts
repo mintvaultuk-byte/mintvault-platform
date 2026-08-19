@@ -107,6 +107,14 @@ describe("every migration is deliberately classified", () => {
     expect(requiresCoreSchema(["0090_lineage_convergence_scanner"])).toBe(true);
   });
 
+  it("keeps public Partner applications application-scoped, never tenant-scoped", () => {
+    const SQL = readFileSync(join(process.cwd(), "migrations", "0091_growth_partner_applications.sql"), "utf8");
+    expect(SQL).toContain("CREATE TABLE IF NOT EXISTS partner_applications");
+    expect(APPLICATION_SCOPE_MIGRATIONS).toContain("0091_growth_partner_applications");
+    expect(PARTNER_SCHEMA_MIGRATIONS).not.toContain("0091_growth_partner_applications");
+    expect(requiresCoreSchema(["0091_growth_partner_applications"])).toBe(true);
+  });
+
   it("NEGATIVE: neither newly-classified migration leaked into the partner glob", () => {
     // partnerScopeOnly() is the function that actually decides what a partner-only database runs.
     // Assert on IT, not just on the lists, so a future refactor that reads a different source

@@ -43,6 +43,7 @@ const FOOTER_COLS = [
       { label: "About", href: "/about/our-story" },
       { label: "Vault Club", href: "/vault-club" },
       { label: "Journal", href: "/journal" },
+      { label: "Partner applications", href: "/partners" },
       { label: "Contact", href: "/help/contact" },
     ],
   },

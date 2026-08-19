@@ -37,6 +37,7 @@ const DevAdminShellGeometryHarness = import.meta.env.DEV
   : (null as unknown as ReturnType<typeof lazy>);
 const CertDetailPage = lazy(() => import("@/pages/cert-detail"));
 const WhyMintVaultPage = lazy(() => import("@/pages/why-mintvault"));
+const PartnersPage = lazy(() => import("@/pages/partners"));
 const LabelsPage = lazy(() => import("@/pages/labels"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
 const TcgPage = lazy(() => import("@/pages/tcg"));
@@ -633,6 +634,7 @@ function Router() {
                   <Redirect to="/verify" />
                 </Route>
                 <Route path="/why-mintvault" component={WhyMintVaultPage} />
+                <Route path="/partners" component={PartnersPage} />
                 <Route path="/labels" component={LabelsPage} />
                 <Route path="/reports" component={ReportsPage} />
                 <Route path="/tcg" component={TcgPage} />
@@ -709,7 +711,7 @@ function Router() {
 function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
-    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false }}>{children}</FeatureFlagsContext.Provider>
+    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false, partnerApplicationsLive: false }}>{children}</FeatureFlagsContext.Provider>
   );
 }
 

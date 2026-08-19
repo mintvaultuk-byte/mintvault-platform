@@ -232,6 +232,10 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // because it genuinely depends on the core schema, not to make a list balance.
   "0091_capture_session_calibration_snapshot",
   "0092_partner_station_calibrate_permission",
+  // GB-03 public acquisition records are deliberately application-scoped even
+  // though they have no `partner_*` foreign key: a partner-only harness must
+  // never claim it exercised public lead retention, consent or notification.
+  "0095_growth_partner_applications",
 ] as const;
 
 /**

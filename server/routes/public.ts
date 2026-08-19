@@ -16,6 +16,7 @@ import fs from "fs";
 import path from "path";
 import { normalizeCertId } from "../lib/cert-id";
 import { requireAdmin } from "../auth";
+import { partnerApplicationSchema, persistPartnerApplication, sanitizePartnerAttribution } from "../partner-applications";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -27,6 +28,7 @@ export function registerPublicRoutes(app: Express): void {
   app.get("/api/config/public-flags", (_req, res) => {
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
+      partnerApplicationsLive: FEATURE_FLAGS.PARTNER_APPLICATIONS_LIVE,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
       publicNameToggleLive: FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE,
     });
@@ -216,6 +218,101 @@ export function registerPublicRoutes(app: Express): void {
     } catch (err: any) {
       console.error("[contact] route error:", err?.message || err);
       return res.status(500).json({ error: "Couldn't process your message. Please try again." });
+    }
+  });
+
+  // ── Founding Partner application (public acquisition only) ────────────────
+  // This endpoint must never create a Partner tenant, login, invite, wallet or
+  // station. It records a prospective business lead before any email attempt.
+  const partnerApplicationRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many Partner applications from this device. Please try again later." },
+  });
+
+  app.post("/api/partner-applications", partnerApplicationRateLimit, async (req, res) => {
+    // A public application endpoint without a published privacy notice would
+    // invite direct PII POSTs even while the UI is disabled. Fail closed until
+    // the existing legal-publication control is explicitly enabled.
+    if (!FEATURE_FLAGS.PARTNER_APPLICATIONS_LIVE) {
+      return res.status(503).json({ error: "Partner applications are not available yet." });
+    }
+
+    const parsed = partnerApplicationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      return res.status(400).json({
+        error: firstIssue?.message || "Invalid application",
+        field: firstIssue?.path?.[0] ?? null,
+      });
+    }
+
+    const application = parsed.data as import("../partner-applications").PartnerApplicationInput;
+    const attribution = sanitizePartnerAttribution(application.attribution);
+
+    try {
+      const result = await persistPartnerApplication(
+        {
+          transaction: (operation) => db.transaction((tx) => operation((query) => tx.execute(query))),
+        },
+        application,
+        attribution
+      );
+
+      // A retry returns the same opaque receipt and deliberately avoids a
+      // second inbox notification. There is no public read endpoint.
+      if (result.created) {
+        try {
+          const { sendPartnerApplicationNotification } = await import("../email");
+          const notification = await sendPartnerApplicationNotification({
+            leadId: result.leadId,
+            businessName: application.businessName,
+            contactName: application.contactName,
+            email: application.email,
+            city: application.city,
+            postcode: application.postcode,
+            businessType: application.businessType,
+            webPresence: application.webPresence,
+            interestReason: application.interestReason,
+            physicalRetail: application.physicalRetail,
+            categories: application.categories,
+            demandBand: application.demandBand,
+            existingGradingSubmissions: application.existingGradingSubmissions,
+          });
+          if (!notification) {
+            await db.execute(sql`
+              UPDATE partner_applications
+              SET notification_attempted_at = NOW(), notification_error = 'Internal notification is not configured'
+              WHERE id = ${result.leadId}
+            `);
+          } else {
+            await db.execute(sql`
+              UPDATE partner_applications
+              SET notification_attempted_at = NOW(), notification_sent_at = NOW(), notification_error = NULL
+              WHERE id = ${result.leadId}
+            `);
+          }
+        } catch {
+          // Provider errors can echo a recipient or submitted address. Preserve
+          // an auditable outcome without copying that PII to Fly logs or DB.
+          const message = "Internal notification failed";
+          console.error(`[partner-application] notification failed for ${result.leadId}`);
+          await db.execute(sql`
+            UPDATE partner_applications
+            SET notification_attempted_at = NOW(), notification_error = ${message}
+            WHERE id = ${result.leadId}
+          `);
+        }
+      }
+
+      // Keep the exact same public response for new and duplicate submissions:
+      // otherwise a known business/email pair becomes an application oracle.
+      return res.status(201).json({ ok: true, leadId: result.leadId });
+    } catch (err: any) {
+      console.error("[partner-application] route error:", err?.message || err);
+      return res.status(500).json({ error: "We couldn't process your application. Please try again." });
     }
   });
 
