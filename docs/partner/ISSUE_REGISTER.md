@@ -10,6 +10,22 @@ Last updated: 2026-08-13 (P0 complete, P1 archaeology 3/5 agents reported).
 
 ---
 
+## 2026-08-19 Partner Network production location form repair
+
+### PNL-LOCATION-001 — Production audit action constraint rejects canonical location creation. BLOCKER
+
+**Status:** IN-PROGRESS · **Root cause:** the production audit CHECK omitted
+`partner_location_created`, causing the canonical audited creation path to return PostgreSQL 23514.
+
+**Production migration proof:** scoped runner applied only `0084_partner_location_management.sql`
+atomically (journal 41 → 42). A rollback-only transaction then proved its widened CHECK accepts the
+new location action while retaining current audit actions. No 0091/0092/0093 migration was applied.
+
+**Deploy scope:** structured UK address UI, controlled canonical reason values, client validation,
+and existing encoded Google Maps navigation are being reconciled directly onto the live release
+lineage. No new authority, schema or Maps dependency is introduced.
+
+---
 ## A. ARCHITECTURE-LEVEL FINDINGS (change the shape of the work)
 
 ### A-1 — There is no "Card Job" record. BLOCKER (scope-defining)

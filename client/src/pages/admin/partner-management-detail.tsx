@@ -8,7 +8,7 @@
  * so). Unavailable statistics are labeled, never shown as a fake 0. No future-phase controls appear.
  * Logic is in ./partner-management-helpers (unit-tested); this is a thin renderer with data-testids.
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
@@ -43,9 +43,16 @@ import {
   submitLabel,
   serverErrorMessage,
   deliveryBanner,
+  EMPTY_PARTNER_LOCATION_ADDRESS,
+  PARTNER_LOCATION_CREATE_REASONS,
+  composePartnerLocationAddress,
+  locationCreationAuditReason,
+  validatePartnerLocationCreate,
   type ProfileValues,
   type SubmitState,
   type FieldErrors,
+  type PartnerLocationAddressInput,
+  type PartnerLocationCreateReason,
 } from "./partner-management-helpers";
 import { ReadinessPanel } from "@/components/partner/readiness-panel";
 import { PartnerDrilldown } from "./partner-dashboard";
@@ -249,6 +256,9 @@ export default function PartnerManagementDetailPage() {
   const [typed, setTyped] = useState("");
   const [modalValue, setModalValue] = useState("");
   const [modalValue2, setModalValue2] = useState("");
+  const [locationAddress, setLocationAddress] = useState<PartnerLocationAddressInput>(EMPTY_PARTNER_LOCATION_ADDRESS);
+  const [locationReason, setLocationReason] = useState<PartnerLocationCreateReason>("new_partner_location");
+  const [locationOtherExplanation, setLocationOtherExplanation] = useState("");
   // note modal
   const [noteBody, setNoteBody] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
@@ -373,7 +383,13 @@ export default function PartnerManagementDetailPage() {
 
   const mutation = useMutation({
     mutationFn: async (run: (reason: string, value: string, value2: string) => Promise<unknown>) =>
-      run(reason, modalValue, modalValue2),
+      run(
+        modal?.kind === "location-create"
+          ? (locationCreationAuditReason(locationReason, locationOtherExplanation) ?? "")
+          : reason,
+        modalValue,
+        modal?.kind === "location-create" ? (composePartnerLocationAddress(locationAddress) ?? "") : modalValue2
+      ),
     onSuccess: (data: any) => {
       setBanner(
         modal?.successMessage ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage) : "Action completed."
@@ -386,8 +402,16 @@ export default function PartnerManagementDetailPage() {
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
     },
-    onError: (err: unknown) =>
-      setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Action failed."),
+    onError: (err: unknown) => {
+      const body = (err as { body?: { error?: { code?: string; message?: string } } })?.body?.error;
+      setBanner(
+        modal?.kind === "location-create" &&
+          body?.code === "VALIDATION_ERROR" &&
+          body.message === "A field value is not permitted."
+          ? "Location creation cannot be recorded because the Partner audit schema is incomplete. Apply migration 0084_partner_location_management.sql."
+          : (body?.message ?? "Action failed.")
+      );
+    },
   });
 
   const noteMutation = useMutation({
@@ -618,6 +642,9 @@ export default function PartnerManagementDetailPage() {
     setTyped("");
     setModalValue("");
     setModalValue2("");
+    setLocationAddress(EMPTY_PARTNER_LOCATION_ADDRESS);
+    setLocationReason("new_partner_location");
+    setLocationOtherExplanation("");
   }
 
   /**
@@ -632,6 +659,11 @@ export default function PartnerManagementDetailPage() {
   function openModalSeeded(m: NonNullable<typeof modal>) {
     setModalValue(m.input?.initial ?? "");
     setModalValue2(m.input2?.initial ?? "");
+    if (m.kind === "location-create") {
+      setLocationAddress(EMPTY_PARTNER_LOCATION_ADDRESS);
+      setLocationReason("new_partner_location");
+      setLocationOtherExplanation("");
+    }
     setModal(m);
   }
   useEffect(() => {
@@ -996,7 +1028,6 @@ export default function PartnerManagementDetailPage() {
                     title: "Add a location",
                     successMessage: "Location created.",
                     input: { label: "Location name", initial: "", testId: "pm-location-name", required: true },
-                    input2: { label: "Address (optional)", initial: "", testId: "pm-location-address" },
                     run: async (r, name, address) =>
                       (
                         await apiRequest("POST", `${BASE}/partners/${partnerId}/locations`, {
@@ -1397,7 +1428,9 @@ export default function PartnerManagementDetailPage() {
                   />
                   {modal.input.required && modalValue.trim() === "" && (
                     <div role="alert" style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}>
-                      {modal.input.label} is required.
+                      {modal.kind === "location-create"
+                        ? "Enter a location name."
+                        : `${modal.input.label} is required.`}
                     </div>
                   )}
                 </div>
@@ -1430,24 +1463,37 @@ export default function PartnerManagementDetailPage() {
                   )}
                 </div>
               )}
-              <label htmlFor="pm-reason" style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
-                Reason
-              </label>
-              <textarea
-                id="pm-reason"
-                data-testid="pm-reason-input"
-                autoFocus
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={3}
-                style={{
-                  width: "100%",
-                  background: "var(--admin-bg, #0d0d0d)",
-                  color: "#fff",
-                  borderRadius: 8,
-                  padding: 8,
-                }}
-              />
+              {modal.kind === "location-create" ? (
+                <LocationCreateFields
+                  address={locationAddress}
+                  setAddress={setLocationAddress}
+                  reason={locationReason}
+                  setReason={setLocationReason}
+                  otherExplanation={locationOtherExplanation}
+                  setOtherExplanation={setLocationOtherExplanation}
+                />
+              ) : (
+                <>
+                  <label htmlFor="pm-reason" style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
+                    Reason
+                  </label>
+                  <textarea
+                    id="pm-reason"
+                    data-testid="pm-reason-input"
+                    autoFocus
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      background: "var(--admin-bg, #0d0d0d)",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                </>
+              )}
               {modal.body && (
                 <div style={{ marginTop: 8, color: "var(--admin-dim, #9c9c9c)" }} data-testid="pm-modal-body">
                   {modal.body}
@@ -1484,7 +1530,16 @@ export default function PartnerManagementDetailPage() {
                   size="sm"
                   variant="gold"
                   disabled={
-                    !reasonValid(reason) ||
+                    (modal.kind === "location-create"
+                      ? Object.keys(
+                          validatePartnerLocationCreate({
+                            name: modalValue,
+                            address: locationAddress,
+                            reason: locationReason,
+                            otherExplanation: locationOtherExplanation,
+                          })
+                        ).length > 0
+                      : !reasonValid(reason)) ||
                     (modal.highRisk && typed.trim() !== TYPED_CONFIRM) ||
                     (!!modal.input?.required && modalValue.trim() === "") ||
                     mutation.isPending
@@ -2037,6 +2092,104 @@ function Field({ label, v }: { label: string; v?: string | null }) {
     <div style={{ display: "flex", gap: 8, padding: "2px 0" }}>
       <span style={{ opacity: 0.6, minWidth: 200 }}>{label}</span>
       <span>{v ?? "—"}</span>
+    </div>
+  );
+}
+
+function LocationCreateFields({
+  address,
+  setAddress,
+  reason,
+  setReason,
+  otherExplanation,
+  setOtherExplanation,
+}: {
+  address: PartnerLocationAddressInput;
+  setAddress: Dispatch<SetStateAction<PartnerLocationAddressInput>>;
+  reason: PartnerLocationCreateReason;
+  setReason: Dispatch<SetStateAction<PartnerLocationCreateReason>>;
+  otherExplanation: string;
+  setOtherExplanation: Dispatch<SetStateAction<string>>;
+}) {
+  const errors = validatePartnerLocationCreate({ name: "location", address, reason, otherExplanation });
+  const inputStyle = {
+    width: "100%",
+    background: "var(--admin-bg, #0d0d0d)",
+    color: "#fff",
+    borderRadius: 8,
+    padding: 8,
+  };
+  const fields: Array<{ key: keyof PartnerLocationAddressInput; label: string; optional?: boolean }> = [
+    { key: "line1", label: "Address line 1" },
+    { key: "line2", label: "Address line 2", optional: true },
+    { key: "townCity", label: "Town / City" },
+    { key: "county", label: "County", optional: true },
+    { key: "postcode", label: "Postcode" },
+    { key: "country", label: "Country" },
+  ];
+  return (
+    <div style={{ display: "grid", gap: 10, marginTop: 10 }} data-testid="pm-location-create-fields">
+      <div style={{ fontSize: 12, opacity: 0.8 }}>Address (optional)</div>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+        {fields.map((field) => (
+          <label key={field.key} style={{ display: "grid", gap: 4, fontSize: 12 }}>
+            {field.label}
+            {field.optional ? " (optional)" : ""}
+            <input
+              data-testid={`pm-location-address-${field.key}`}
+              value={address[field.key]}
+              onChange={(event) => setAddress((current) => ({ ...current, [field.key]: event.target.value }))}
+              aria-invalid={!!errors[field.key]}
+              style={inputStyle}
+            />
+            {errors[field.key] && (
+              <span role="alert" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+                {errors[field.key]}
+              </span>
+            )}
+          </label>
+        ))}
+      </div>
+      {errors.address && (
+        <span role="alert" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+          {errors.address}
+        </span>
+      )}
+      <label htmlFor="pm-location-reason" style={{ display: "grid", gap: 4, fontSize: 12 }}>
+        Reason
+        <select
+          id="pm-location-reason"
+          data-testid="pm-location-reason"
+          value={reason}
+          onChange={(event) => setReason(event.target.value as PartnerLocationCreateReason)}
+          style={inputStyle}
+        >
+          {PARTNER_LOCATION_CREATE_REASONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {reason === "other" && (
+        <label htmlFor="pm-location-other-explanation" style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          Please explain
+          <textarea
+            id="pm-location-other-explanation"
+            data-testid="pm-location-other-explanation"
+            value={otherExplanation}
+            onChange={(event) => setOtherExplanation(event.target.value)}
+            rows={3}
+            aria-invalid={!!errors.otherExplanation}
+            style={inputStyle}
+          />
+          {errors.otherExplanation && (
+            <span role="alert" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+              {errors.otherExplanation}
+            </span>
+          )}
+        </label>
+      )}
     </div>
   );
 }
