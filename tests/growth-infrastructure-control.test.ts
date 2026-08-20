@@ -214,11 +214,17 @@ describe("Growth infrastructure control and GBP truth", () => {
   it("exposes no infrastructure control or MCP mutation surface", () => {
     const mcp = fs.readFileSync("server/routes/growth-mcp.ts", "utf8");
     const infrastructure = fs.readFileSync("server/growth-infrastructure-intelligence.ts", "utf8");
+    const fly = fs.readFileSync("server/fly-telemetry-service.ts", "utf8");
     const page = fs.readFileSync("client/src/pages/admin/growth.tsx", "utf8");
     expect(mcp).toContain("get_infrastructure_status");
     expect(mcp).toContain("readOnlyHint: true");
     expect(mcp).not.toMatch(/scale_machine|resize_machine|set_budget|enable_autoscal/i);
     expect(infrastructure).not.toMatch(/fetch\(|flyctl|neonctl|machines\/|compute\/.*(?:post|patch|delete)/i);
+    expect(fly).toContain('method: "GET"');
+    expect(fly).toContain('const FLY_APP = "mintvault"');
+    expect(fly).toContain('const FLY_ORGANISATION = "personal"');
+    expect(fly).not.toMatch(/method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i);
+    expect(fly).not.toMatch(/flyctl|fly\s+scale|machines\/(?:start|stop|restart)|secrets\s+(?:set|unset)/i);
     expect(page).not.toMatch(/>\s*(?:Scale|Resize|Enable auto|Set budget)\s*</i);
   });
 });

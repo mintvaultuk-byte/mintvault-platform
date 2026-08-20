@@ -116,8 +116,8 @@ describe("GB-04C dedicated MCP Growth-read boundary", () => {
     }
   });
 
-  it("exports the real capacity contract and keeps scaling disabled without telemetry", () => {
-    expect(getCapacityStatus()).toMatchObject({
+  it("exports the real capacity contract and keeps scaling disabled without telemetry", async () => {
+    expect(await getCapacityStatus()).toMatchObject({
       status: "UNKNOWN",
       recommendation: "TELEMETRY_INCOMPLETE",
       automaticScalingEnabled: false,

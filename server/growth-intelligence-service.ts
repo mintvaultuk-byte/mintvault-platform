@@ -4,9 +4,9 @@
  * This module deliberately does not create a telemetry firehose, use local
  * request logs as fleet metrics, or expose provider configuration.  The
  * current runtime has authoritative commercial/Partner data and a bounded
- * database readiness check. Fly, Neon-pressure and Search Console adapters
- * are deliberately represented as NOT_CONNECTED until a separately managed
- * server-side integration exists.
+ * database readiness check. Fly can use a dedicated server-side read adapter;
+ * every other provider remains NOT_CONNECTED until its own approved authority
+ * exists.
  */
 import { sql, type SQL } from "drizzle-orm";
 import { getSitemapEntries, isKnownPublicRoute } from "./seo-config";
@@ -33,6 +33,7 @@ import {
   type ApplicationHealthSnapshot,
 } from "./growth-runtime-telemetry";
 import { getSearchConsoleSnapshot } from "./growth-search-console";
+import { FLY_CAPACITY_THRESHOLDS, getFlyTelemetrySnapshot, type FlyTelemetrySnapshot } from "./fly-telemetry-service";
 
 export type IntelligenceState = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "INSUFFICIENT_DATA" | "STALE" | "ERROR";
 export type HealthStatus = "GREEN" | "AMBER" | "RED" | "UNKNOWN";
@@ -243,22 +244,39 @@ export function deriveCapacityStatus(
       "Requires fleet-wide CPU, memory, p95, 5xx and machine-health telemetry with server-configured sustained-window thresholds. Request rate is contextual only.",
     automaticScalingEnabled: false as const,
   };
-  if (
-    !telemetry ||
-    !thresholds ||
-    telemetry.cpuPercent == null ||
-    telemetry.memoryPercent == null ||
-    telemetry.p95Ms == null ||
-    telemetry.fiveXRate == null ||
-    telemetry.healthyMachines == null ||
-    telemetry.expectedMachines == null
-  ) {
+  if (!telemetry || !thresholds || telemetry.healthyMachines == null || telemetry.expectedMachines == null) {
     return {
       ...common,
       status: "UNKNOWN",
       label: "INSUFFICIENT_TELEMETRY",
       recommendation: "TELEMETRY_INCOMPLETE",
       evidence: ["Fleet-wide Fly telemetry is not connected. Request rate alone never sets capacity state."],
+    };
+  }
+
+  const machinesDegraded = telemetry.healthyMachines < telemetry.expectedMachines;
+  if (machinesDegraded) {
+    return {
+      ...common,
+      status: "RED",
+      label: "CAPACITY_OR_SERVICE_PRESSURE",
+      recommendation: "RESTORE_EXPECTED_FLEET",
+      evidence: ["Healthy Fly machines are below the expected fleet count."],
+    };
+  }
+
+  if (
+    telemetry.cpuPercent == null ||
+    telemetry.memoryPercent == null ||
+    telemetry.p95Ms == null ||
+    telemetry.fiveXRate == null
+  ) {
+    return {
+      ...common,
+      status: "UNKNOWN",
+      label: "INSUFFICIENT_TELEMETRY",
+      recommendation: "TELEMETRY_INCOMPLETE",
+      evidence: ["Fleet-wide Fly performance telemetry is incomplete. Request rate alone never sets capacity state."],
     };
   }
 
@@ -270,7 +288,6 @@ export function deriveCapacityStatus(
     telemetry.requestCount != null &&
     telemetry.requestCount >= thresholds.minimumErrorRateRequests &&
     telemetry.fiveXRate >= thresholds.fiveXCriticalRate;
-  const machinesDegraded = telemetry.healthyMachines < telemetry.expectedMachines;
   const cpuCritical = telemetry.cpuPercent >= thresholds.cpuCriticalPercent;
   const memoryCritical = telemetry.memoryPercent >= thresholds.memoryCriticalPercent;
   const latencyCritical = telemetry.p95Ms >= thresholds.p95CriticalMs;
@@ -296,18 +313,13 @@ export function deriveCapacityStatus(
       evidence: ["Authoritative database pressure telemetry is red."],
     };
   }
-  if (machinesDegraded || (cpuCritical && latencyCritical) || (memoryCritical && latencyCritical)) {
+  if ((cpuCritical && latencyCritical) || (memoryCritical && latencyCritical)) {
     return {
       ...common,
       status: "RED",
       label: "CAPACITY_OR_SERVICE_PRESSURE",
-      recommendation: machinesDegraded
-        ? "RESTORE_EXPECTED_FLEET"
-        : memoryCritical
-          ? "CONSIDER_MORE_MEMORY"
-          : "CONSIDER_ADDITIONAL_FLY_CAPACITY",
+      recommendation: memoryCritical ? "CONSIDER_MORE_MEMORY" : "CONSIDER_ADDITIONAL_FLY_CAPACITY",
       evidence: [
-        ...(machinesDegraded ? ["Healthy Fly machines are below the expected fleet count."] : []),
         ...(cpuCritical ? ["CPU is above the configured critical threshold."] : []),
         ...(memoryCritical ? ["Memory is above the configured critical threshold."] : []),
         ...(latencyCritical ? ["p95 latency is above the configured critical threshold."] : []),
@@ -349,9 +361,20 @@ export function deriveCapacityStatus(
   };
 }
 
+function capacityFromFly(fly: FlyTelemetrySnapshot, databasePressure?: IntelligenceMetric): CapacityStatus {
+  if (fly.state !== "REAL" || !fly.fleet) return deriveCapacityStatus(null, null);
+  return deriveCapacityStatus(
+    {
+      ...fly.fleet,
+      databasePressure: databasePressure?.state === "REAL" ? databasePressure.status : undefined,
+    },
+    FLY_CAPACITY_THRESHOLDS
+  );
+}
+
 /** Aggregate-only boundary for MCP/internal consumers; never enables scaling. */
-export function getCapacityStatus(): CapacityStatus {
-  return deriveCapacityStatus(null, null);
+export async function getCapacityStatus(): Promise<CapacityStatus> {
+  return capacityFromFly(await getFlyTelemetrySnapshot());
 }
 
 export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse> {
@@ -447,27 +470,29 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
 }
 
 export async function getInfrastructureStatus(executor?: QueryExecutor): Promise<InfrastructureIntelligence> {
-  const siteHealth = await getSiteHealth(executor);
+  const [siteHealth, fly] = await Promise.all([getSiteHealth(executor), getFlyTelemetrySnapshot()]);
+  const capacity = capacityFromFly(fly, siteHealth.databasePressure);
   return buildInfrastructureIntelligence(
     {
       database: siteHealth.database,
       databasePressure: siteHealth.databasePressure,
       databaseLatency: siteHealth.databaseLatency,
-      capacity: getCapacityStatus(),
+      capacity,
+      fly,
     },
     siteHealth.lastUpdated
   );
 }
 
 export async function getCampaignReadinessStatus(executor?: QueryExecutor): Promise<CampaignReadiness> {
-  const siteHealth = await getSiteHealth(executor);
+  const [siteHealth, fly] = await Promise.all([getSiteHealth(executor), getFlyTelemetrySnapshot()]);
   return deriveCampaignReadiness({
     site: siteHealth.site,
     payments: siteHealth.payments,
     database: siteHealth.database,
     fiveXErrorRate: siteHealth.fiveXErrorRate,
     flyMachines: siteHealth.flyMachines,
-    capacity: getCapacityStatus(),
+    capacity: capacityFromFly(fly, siteHealth.databasePressure),
   });
 }
 
@@ -514,6 +539,7 @@ function applicationHealthMetric(
 }
 
 export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealth> {
+  const flyPromise = getFlyTelemetrySnapshot();
   const databaseModule = executor ? null : await import("./db");
   const runner = executor ?? databaseModule!.db;
   const now = new Date().toISOString();
@@ -592,7 +618,6 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
       lastUpdated: now,
     };
   }
-  const fleetReason = "Fly fleet telemetry is not connected in the application runtime.";
   const requests = getRuntimeRequestSnapshot();
   const runtimeSource =
     "Current application process rolling telemetry; fleet-wide authority requires the separate Fly read connection";
@@ -662,17 +687,19 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
   if (fiveXErrorRate.state === "REAL" && requests.requestsLastHour < 20) {
     fiveXErrorRate.reason = "Fewer than 20 request completions; the value is real but no health colour is assigned.";
   }
+  const fly = await flyPromise;
+  const useFlyRequestMetrics = fly.state !== "NOT_CONNECTED";
   return {
     site,
-    cpu: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
-    memory: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
-    requestRate,
-    p95Latency,
-    fiveXErrorRate,
+    cpu: fly.metrics.cpu,
+    memory: fly.metrics.memory,
+    requestRate: useFlyRequestMetrics ? fly.metrics.requestRate : requestRate,
+    p95Latency: useFlyRequestMetrics ? fly.metrics.p95Latency : p95Latency,
+    fiveXErrorRate: useFlyRequestMetrics ? fly.metrics.fiveXErrorRate : fiveXErrorRate,
     database,
     databasePressure,
     databaseLatency,
-    flyMachines: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
+    flyMachines: fly.metrics.machineHealth,
     payments: applicationHealthMetric(
       getApplicationHealthSnapshot("payments"),
       "Current-process payment endpoint outcomes",
@@ -1100,14 +1127,15 @@ export async function getGrowthIntelligence(
   if (!options.force && cached && cached.expiresAt > now) return cached.value;
   try {
     const summary = await getGrowthSummary(period);
-    const [livePulse, siteHealth, conversion, scoreboard, seo] = await Promise.all([
+    const [livePulse, siteHealth, conversion, scoreboard, seo, fly] = await Promise.all([
       getLivePulse(),
       getSiteHealth(),
       getConversionSummary(period, summary),
       getCommercialScoreboard(),
       getConnectedSeoSummary(period),
+      getFlyTelemetrySnapshot(),
     ]);
-    const capacity = deriveCapacityStatus(null, null);
+    const capacity = capacityFromFly(fly, siteHealth.databasePressure);
     const generatedAt = new Date().toISOString();
     const infrastructure = buildInfrastructureIntelligence(
       {
@@ -1115,6 +1143,7 @@ export async function getGrowthIntelligence(
         databasePressure: siteHealth.databasePressure,
         databaseLatency: siteHealth.databaseLatency,
         capacity,
+        fly,
       },
       generatedAt
     );
