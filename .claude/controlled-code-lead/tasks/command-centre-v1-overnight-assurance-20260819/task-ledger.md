@@ -24,20 +24,21 @@
 | 0 — Baseline | complete | 2026-08-19 | Clean exact baseline, current main, governance integrity and task lock recorded. |
 | 1 — Review plan | complete | 2026-08-19 | Three isolated reviewers cover A–G/J/K initially; follow-on passes cover I/L/M/N/O. Lead owns live UI, toggle, staging load/log/soak and final reconciliation. |
 | 2 — Investigation | complete | 2026-08-19 | All independent A–O reports received; reviewers remained read-only and HEAD unchanged. |
-| 3 — Lead verification | complete | 2026-08-20 | Twenty-five findings reconciled through iterative hostile/live retest. Parser-only auth approval received, then stopped because the mandated trust-proxy authority precondition failed. |
+| 3 — Lead verification | complete | 2026-08-20 | Twenty-five findings reconciled through iterative hostile/live retest. The parser-only proposal stopped when its trust-proxy precondition failed; the owner then authorised the separately bounded Fly-aware IP-authority repair. |
 | 4 — Implementation authorisation | complete | 2026-08-19 | Bounded non-auth manifest/budget/architecture/rollout/rollback written. Local repair and staging-if-changed are explicitly authorised by the owner. |
-| 5 — Implementation | complete | 2026-08-19 | Every non-auth HIGH/release-MED root cause repaired within the locked read-only V1 surface; no migrations, dependencies, grading, Scanner feature, payment/ledger writes or protected auth changes. |
-| 6 — Regression | complete with two open release gates | 2026-08-20 | All non-auth repairs passed focused/Partner/runtime/real-PostgreSQL/browser/load/soak/rollback and independent retest. Protected `CC-OA-001` and exact-candidate Pilot transition proof `CC-OA-025` remain open. |
-| 7 — Final report | complete — decision NO | 2026-08-20 | Authoritative overnight assurance records 0 BLOCKER, 1 HIGH, 1 release-MED, zero-dead-UI PASS, main reconciliation PASS and rollback READY. |
+| 5 — Implementation | complete | 2026-08-20 | Every HIGH/release-MED root cause repaired within the locked read-only V1 surface, including only the owner-approved Admin IP-authority hardening; no migrations, dependencies, login/PIN/MFA/session/role changes, grading, Scanner feature or payment/ledger writes. |
+| 6 — Regression | complete — all gates green | 2026-08-20 | Fly-aware Admin authority passed 194/194 plus 136/136 independent hostile cases; Command Centre 109/109; Partner 70/70 and 1,313; protected grading 765/765; Scanner 152/152; check/lint/build/mobile passed. |
+| 7 — Final report | complete — decision YES | 2026-08-20 | Native exact-candidate Pilot ON→OFF→ON passed and ended ON; 0 BLOCKER, 0 HIGH, 0 release-MED; zero-dead-UI/main/rollback PASS; production untouched. |
 
 ## Reviewer assignments (Stage 1)
 
 | Reviewer | Workstreams | Boundary | Report state |
 |---|---|---|---|
-| Auth/security reviewer | A auth/session/flag; C grading/certificate authority; L/O retest | Read-only source/tests; no staging or production state | complete — only owner-blocked `CC-OA-001` remains |
+| Auth/security reviewer | A auth/session/flag; C grading/certificate authority; L/O retest | Read-only source/tests; no staging or production state | complete — protected auth semantics, cache, build, harness, rollback and grading clean |
 | Partner/domain reviewer | B Partner/RLS/privacy; D/E/I/M/H | Read-only source/tests; protected code inspection only | complete — no open source finding; mobile repair independently cleared and live responsive/keyboard proof passed |
 | Data/resilience reviewer | F/G/J/K/D | Read-only source/tests; safe local commands only | complete — no open BLOCKER/HIGH/release-MED |
-| Lead | H live controls; feature flag runtime; I/M live deep-link/accessibility; L harness; N drift; O release/rollback; final issue register | Sole editor and sole staging-state operator | complete — final decision NO; production untouched |
+| Client-IP bypass reviewer | Bounded `CC-OA-001` hostile review | Read-only source/tests; no staging or production state | complete — legacy bypass reproduced; candidate held-out matrix 136/136; no open finding |
+| Lead | H live controls; feature flag runtime; I/M live deep-link/accessibility; L harness; N drift; O release/rollback; final issue register | Sole editor and sole staging-state operator | complete — final decision YES; production untouched |
 
 ## Links
 

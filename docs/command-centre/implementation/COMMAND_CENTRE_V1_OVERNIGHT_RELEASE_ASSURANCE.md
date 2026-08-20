@@ -1,105 +1,102 @@
 # MintVault Command Centre V1 — overnight release assurance
 
-**Decision date:** 2026-08-20 (Europe/London)  
-**Branch:** `codex/command-centre-v1-reconciliation-20260819`  
-**Current-main authority:** `origin/main` = `facfd36f4ec8f164d017aba7a4386bab04a4aa6d`  
-**Final candidate identity:** the commit containing this evidence file; the exact SHA is verified from Git and `/api/version` in the owner handoff because a commit cannot self-contain its own hash.  
-**Decision:** **NO — not ready for owner production authorisation.** Production was not accessed or changed.
+**Decision date:** 2026-08-20 (Europe/London)
+
+**Branch:** `codex/command-centre-v1-reconciliation-20260819`
+
+**Current-main authority:** `origin/main` = `e057a67d116162e65f0898c02f52d9a249c25069`
+
+**Final candidate identity:** the commit containing this evidence file; the exact SHA is verified from Git and staging `/api/version` in the owner handoff because a commit cannot self-contain its own hash.
+
+**Decision:** **YES — ready for owner production authorisation.** Production was not accessed or changed.
 
 ## Release-gate result
 
 | Gate | Result |
 |---|---|
 | BLOCKERS open | 0 |
-| HIGH open | 1 — `CC-OA-001` protected Admin client-IP authority |
-| Release-blocking MEDIUM open | 1 — `CC-OA-025` exact-candidate Pilot OFF/ON live proof |
+| HIGH open | 0 |
+| Release-blocking MEDIUM open | 0 |
 | Zero-dead-UI | PASS |
-| Current-main reconciliation | PASS — 0 behind, merge-base exactly `facfd36f` |
-| Rollback | READY and executed on staging |
-| Ready for owner production authorisation | **NO** |
+| Current-main reconciliation | PASS — 0 behind; candidate descends from `e057a67d` |
+| Rollback | READY; earlier rollback executed on staging and immediate prior image captured |
+| Ready for owner production authorisation | **YES** |
 
-## Why the decision remains NO
+## Final two-gate closure
 
-### CC-OA-001 — protected Admin client-IP authority (HIGH, owner-blocked)
+### CC-OA-001 — protected Admin client-IP authority (HIGH, closed)
 
-The owner authorised only replacing the raw leftmost `X-Forwarded-For` parser with Express `req.ip`, and required a stop if the application's trust-proxy authority was unsafe. The required precondition failed:
+The proposed `req.ip` replacement was correctly rejected. `server/index.ts` uses `trust proxy=1`, and the observed Fly chain makes Express select Fly's app-facing hop rather than the originating client. The final authority is independent of `req.ip` and caller-controlled forwarding metadata:
 
-- `server/index.ts` configures `app.set("trust proxy", 1)`.
-- Under Fly's public proxy topology, the app-facing rightmost forwarded hop is Fly infrastructure. Hop-count `1` therefore does not establish the external client as the only trusted address.
-- The current leftmost parser remains forgeable by prepended values. Although `req.ip` ignores that leftmost value in the reproduced chain, hop-count `1` selects Fly's app IP rather than the external client, so legitimate proxied resolution fails and the parser-only substitution is not correct.
+- Fly runtime is detected only from Fly's injected machine/app environment.
+- The direct socket peer must be a single RFC1918 IPv4 Fly proxy hop; loopback, public, link-local, CGNAT and malformed peers fail closed in Fly runtime.
+- `Fly-Client-IP` must be one canonical IPv4/IPv6 value and `Fly-Forwarded-Port` one valid port. Duplicate or malformed values fail closed.
+- `X-Forwarded-For`, `Forwarded`, `X-Real-IP` and Express `req.ip` never participate in protected Admin identity.
+- Local/non-Fly tests use only the direct socket peer and ignore forwarded headers.
 
-Per the owner's safety condition, the protected auth parser, login, passphrase, PIN, MFA, session, cookie, role and permission paths were left byte-unmodified. Closing this finding requires separate authority for a topology-correct client-IP design and its full auth regression matrix.
+The two-machine Fly probe observed Fly overwriting `Fly-Client-IP`, `Fly-Forwarded-Port` and `Fly-Region` while preserving a caller-prepended XFF value; both app socket peers were RFC1918 IPv4. Direct localhost retained forged Fly headers, proving why peer validation is mandatory. Public IPv4 and IPv6 probes both resolved through the documented Fly header. Authoritative references: [Fly request headers](https://fly.io/docs/networking/request-headers/), [Fly app services](https://fly.io/docs/networking/app-services/), and [Fly Machines runtime environment](https://fly.io/docs/machines/runtime-environment/).
 
-### CC-OA-025 — exact-candidate Pilot OFF/ON proof (release MEDIUM, evidence gate)
+The independent bypass reviewer reproduced the legacy control as `[200,200,200]` under rotated forged XFF and the candidate as `[200,200,429]`. Its held-out matrix passed 136/136, including raw duplicate headers, 100 forged rotations, IPv4/IPv6/mapped canonicalisation and Fly/local peer boundaries. The expanded protected Admin wiring passed 194/194. Normal login, PIN, sessions, roles and Partner/customer/staff/grader boundaries were unchanged.
 
-The exact repaired candidate was exercised live while the persisted flag remained ON. The authorised Super Admin UI was used to attempt OFF, but its native confirmation dialog could not be controlled by the available browser automation; the flag remained authoritatively ON. No direct database write, route bypass or credential extraction was used. Local real-QueryClient tests prove success→401/403/404/Pilot-OFF cache eviction, and the earlier `60b9e268` artifact completed ON→OFF→ON, but neither substitutes for the required exact-candidate live transition. This gate remains honestly open.
+Staging intentionally has no `ADMIN_IP_ALLOWLIST` configured, so membership admission is not claimed from that environment. Staging proves the exact Fly header/topology contract and both-machine artifact health; allowlist semantics are proven by real Express and independent hostile tests.
 
-## Repaired and independently retested
+### CC-OA-025 — exact-candidate Pilot OFF/ON proof (release MEDIUM, closed)
 
-All other reproduced BLOCKER/HIGH/release-MED findings are closed:
+The native Super Admin Pilot Controls UI at `/admin/partners/settings` completed ON → OFF → ON, including the real JavaScript confirmation dialog. No database write, environment toggle, route bypass or credential extraction was used.
 
-- privileged dashboard cache is session-scoped and evicted on logout, 401/403/404, Pilot OFF and unmount;
-- London finance windows convert BST/GMT boundaries to the UTC-naive storage representation;
-- connector `Date` values are validated and normalised before attention ordering;
-- Partner counts fail closed above the 100-row authority bound;
-- core and Partner reads use absolute destructive deadlines, bounded waves and no post-timeout pool work;
-- Partner onboarding is set-based, keeps global flags inside the same read budget, preserves unreadable wallet/schema truth as UNKNOWN and supports pre-0091 staging schema;
-- canonical `Metric<number>` credit envelopes are unwrapped correctly;
-- 401/403/404 UI states, locked hierarchy, filters, breadcrumb, timing, accessibility, reduced motion and canonical Partner deep links are implemented;
-- client/server build compatibility is baked consistently and rollout pins `--partner-network-consolidation true`;
-- runtime harness signal and unexpected-child cleanup paths leave no disposable database;
-- the 320px KPI token overflow is contained and guarded by a real Chrome/CSS regression.
+- OFF persisted across refresh, removed Command Centre navigation and made `/admin/command` render the source-hiding feature-state denial.
+- ON persisted across refresh, restored navigation and returned the authorised live dashboard with current KPIs and attention data.
+- The final flag state is ON.
+- Both Fly machines run the same embedded candidate and share the uncached persisted flag authority.
 
-Three isolated hostile reviewers independently retested auth/grading, Partner/domain and data/resilience scopes. Apart from `CC-OA-001`, they reported no remaining source BLOCKER/HIGH/release-MED finding. The mobile repair received a separate independent retest.
+The evidence-only final commit is redeployed and the same native transition is repeated before the owner handoff.
+
+## Other repaired findings
+
+All earlier confirmed BLOCKER/HIGH/release-MED findings remain closed: privileged cache eviction; London finance boundaries; `Date` connector normalisation; Partner 100-row truth; core/Partner absolute destructive deadlines; set-based Partner readiness; unreadable flag/wallet/schema truth; canonical credit metrics; auth-state UI; locked hierarchy/filter/breadcrumb/timing/accessibility/reduced-motion/deep-link behavior; build compatibility; harness cleanup; and 320px overflow containment.
 
 ## Exact local proof
 
 | Proof | Result |
 |---|---|
-| Current Command Centre glob | 18 files, 109/109 passed |
-| Prior expanded Command Centre pass before the proof-only mobile commit | 19 files, 129/129 passed |
-| Canonical isolated Partner matrix | 70/70 suites, 1,313 assertions |
-| Runtime harness lifecycle | 10/10, zero disposable-database residue |
-| Scanner protected subset | 5 files, 34/34 |
-| Protected aggregate | 239 passed, 11 skipped |
-| Protected grading retest | 69 passed, 2 skipped; protected diff clean |
-| PostgreSQL 17 finance matrix | BST, GMT, month boundary, future/null/deleted/currency cases passed |
-| Mobile layout control/candidate | pre-fix 885px document at 320px; candidate 320px with 256px card, `min-width:0`, `overflow-wrap:anywhere` |
+| Admin client-IP/auth surface | 9 files, 194/194 passed |
+| Independent client-IP hostile matrix | 136/136 passed |
+| Command Centre glob | 18 files, 109/109 passed |
+| Canonical isolated Partner matrix | 70/70 suites, 1,313 assertions, zero skips |
+| Protected grading/current-code aggregate | 40 files, 765/765 passed |
+| Scanner application | 152/152 passed |
+| Mobile layout control/candidate | pre-fix 885px document at 320px; candidate 320px document with 256px KPI card |
 | Typecheck | PASS |
 | ESLint (`--quiet`) | PASS |
 | Production build with canonical Partner flag | PASS |
 | `git diff --check` | PASS |
 
-The repository's generic flattened root test remains an invalid substitute for its shipped isolated Partner runner because process-global environment and cluster-global roles collide across suites. The canonical isolated matrix is the authoritative Partner result; this orchestration limitation was not misrepresented as green.
+The first isolated Partner run encountered one disposable-cluster connection termination in `partner-runtime-integration`; that suite passed 47/47 on a clean immediate replay, and the required whole-matrix rerun then passed all 70 suites and all 1,313 assertions. No failed run was represented as green.
 
 ## Exact staging proof
 
-The repaired runtime artifact `3d65b960` was deployed to staging before the proof-only mobile-test commit:
+The final two-gate runtime artifact `8c1aac56` was deployed to staging as Fly v544:
 
-- image `registry.fly.io/mintvault-v2:deployment-01M0E2K5QPTYAYN0N8GJGAJQSX`;
-- digest `sha256:925e8f94d670ecb0adafaf0af19aea2d9ed2ebd686c687efb63882f94962b2cd`;
-- two LHR machines, both started with 1/1 health checks;
-- live views Overview, Attention, Work Tree and Skills rendered;
-- 320, 768 and 1280px viewports had no document overflow;
-- bottom-sheet/dialog geometry, Tab/Shift+Tab focus wrap, Escape close and focus restoration passed;
-- search capped at 80 characters and department/KPI/registry filters composed correctly;
-- Partner onboarding rendered authoritative VALUE `6` on the pre-0091 schema; unavailable/unknown source truth stayed explicit;
-- 1/5/10/20 protected-read tiers completed 1/1, 5/5, 10/10 and 20/20 with no failure;
-- 15m44s protected soak completed 90/90, min 322ms, max 981ms, average 454ms, crossing London midnight without a timeout/error/5xx signature.
+- image `registry.fly.io/mintvault-v2:deployment-01M0ET8GH7D6MWY4845F0SWW9W`;
+- digest `sha256:a79cf53ffe264c9f145a9e8152fa0d9619cebc8771dcbef112cf4cc8bdf43fe3`;
+- two LHR machines, both started with 1/1 health checks and `/api/version=8c1aac56`;
+- native Super Admin Pilot ON → OFF → ON passed and staging was left ON;
+- live `/admin/command` returned authorised operational data after re-enable;
+- Partner settings, protected grading, Scanner and payment/credit matrices remained green.
 
-After this evidence commit, staging is redeployed once more and accepted only if both machines are healthy and `/api/version` equals the exact final Git SHA. That identity is reported in the final owner handoff.
+After this evidence commit, staging is redeployed once more and accepted only if both machines are healthy, `/api/version` equals the exact final Git SHA, and the native Pilot transition passes again. That exact identity is reported in the final owner handoff.
 
 ## Rollback proof
 
-Rollback was executed on staging, not inferred:
+The earlier staging image rollback was executed, not inferred: v532 (`60b9e268`) was restored, verified 2/2 healthy, and the repaired image was restored and verified again. The immediate pre-two-gate recovery image is Fly v543:
 
-1. deployed prior image `registry.fly.io/mintvault-v2:deployment-01M0DTK3VQNA3FESW58R851JGT`;
-2. verified both machines healthy and `/api/version` commit `60b9e268`;
-3. restored repaired image `registry.fly.io/mintvault-v2:deployment-01M0E2K5QPTYAYN0N8GJGAJQSX`;
-4. verified both machines healthy and `/api/version` commit `3d65b960`.
+- image `registry.fly.io/mintvault-v2:deployment-01M0ERFXFDRYJ2EP44HWAKRHQ9`;
+- digest `sha256:d018716271b2ccb1681d44bbdc41c0e99e44c233dfd2b76c6367591a194a9b03`;
+- embedded source `a4491693`;
+- two healthy LHR machines at capture.
 
-The prior image digest is `sha256:e2524959029d7ceac1cc96c2f104b6bdd001383f5fc8a8f2c50898be2254ed0d`. V1 adds no migration or write/backfill rollback requirement.
+V1 adds no migration, business-data mutation or write/backfill rollback requirement. The Pilot OFF control is immediate containment.
 
 ## Production boundary
 
-Production remains forbidden. No production query, deployment, flag, configuration or data mutation occurred. The two open gates above must be closed and the affected proofs rerun before an owner production-authorisation answer can become YES.
+Production remains forbidden. No production query, deployment, flag, configuration or data mutation occurred. Release execution now waits for explicit owner production authorisation.

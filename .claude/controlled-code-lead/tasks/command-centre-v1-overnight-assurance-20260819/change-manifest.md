@@ -24,6 +24,7 @@ Repair only reproduced V1 release defects. No new capability, workflow execution
 7. Ensure canonical Partner destinations exist in the release build, add reduced-motion/contrast compliance, and label aggregate zeros truthfully.
 8. Make the disposable runtime harness signal/failure cleanup awaited and idempotent.
 9. Replace the unusable rollback instruction with an exact captured-image procedure.
+10. Replace raw/Express forwarded-header Admin identity with the validated Fly socket-peer + overwritten-header authority, and wire every protected Admin/Super Admin limiter to the same key.
 
 ## Explicit exclusion
 
