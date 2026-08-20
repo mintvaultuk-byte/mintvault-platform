@@ -80,7 +80,23 @@ async function seedMintVaultTables(): Promise<void> {
     print_state varchar(24) not null default 'awaiting_approval',
     updated_at timestamptz not null default now()
   )`);
-  for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
+  await admin.query(`CREATE TABLE certificate_image_evidence (
+    id serial primary key,
+    certificate_id integer not null references certificates(id) on delete restrict,
+    side varchar(5) not null check (side in ('front','back')),
+    evidence_class varchar(32) not null check (evidence_class in ('NEW_IMMUTABLE_MASTER','LEGACY_DERIVED_ONLY')),
+    evidence_version varchar(32) not null default 'v1',
+    object_key text not null unique, sha256 varchar(64) not null, byte_length bigint not null,
+    pixel_width integer not null, pixel_height integer not null,
+    bit_depth integer, dpi integer, format varchar(16) not null,
+    capture_metadata jsonb not null default '{}'::jsonb,
+    working_object_key text, working_sha256 varchar(64),
+    working_width integer, working_height integer, working_format varchar(16), working_settings jsonb,
+    is_current boolean not null default true,
+    superseded_at timestamptz, superseded_by_id integer,
+    created_at timestamptz not null default now()
+  )`);
+  for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates", "certificate_image_evidence"]) {
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
   }
 }
@@ -146,12 +162,46 @@ async function makeGradableJob(
       [f.tenantId, submissionId, `Card ${tag}`]
     )
   ).rows[0].id;
+  const certificateId = (
+    await admin.query<{ id: number }>(
+      `INSERT INTO certificates (certificate_number) VALUES ($1) RETURNING id`,
+      [`MV-lease-${tag}-${cardId}`]
+    )
+  ).rows[0].id;
   const { rows } = await admin.query<{ id: string }>(
     `INSERT INTO partner_card_jobs
-       (tenant_id, submission_id, card_id, ordinal, card_reference, location_id, created_by, status)
-     VALUES ($1,$2,$3,1,$4,$5,$6,$7) RETURNING id`,
-    [f.tenantId, submissionId, cardId, `partner-submission-card:${cardId}:1`, locationId, f.graderOne, status]
+       (tenant_id, submission_id, card_id, ordinal, card_reference, location_id, created_by, status, certificate_id, mv_number)
+     VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [
+      f.tenantId,
+      submissionId,
+      cardId,
+      `partner-submission-card:${cardId}:1`,
+      locationId,
+      f.graderOne,
+      status,
+      certificateId,
+      `MV-lease-${tag}-${cardId}`,
+    ]
   );
+  for (const side of ["front", "back"] as const) {
+    await admin.query(
+      `INSERT INTO certificate_image_evidence
+         (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height, dpi,
+          format, working_object_key, working_width, working_height, working_format, working_settings,
+          capture_metadata, is_current)
+       VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,4724,6136,1200,'tiff',$5,4724,6136,'jpeg',
+               '{"resize":null}'::jsonb,$6::jsonb,true)`,
+      [
+        certificateId,
+        side,
+        `evidence/${certificateId}/${side}.tif`,
+        "a".repeat(64),
+        `evidence/${certificateId}/${side}.working.jpg`,
+        JSON.stringify({ scannerProfileVersion: "mintvault-canon-lide-400-v3" }),
+      ]
+    );
+  }
   return rows[0].id;
 }
 
@@ -638,15 +688,10 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
   ): Promise<{ cardJobId: string; certificateId: number }> {
     const cardJobId = await makeGradableJob(f, locationId, tag);
     const certificateId = (
-      await admin.query<{ id: number }>(`INSERT INTO certificates (certificate_number) VALUES ($1) RETURNING id`, [
-        `MV-lease-${tag}`,
+      await admin.query<{ certificate_id: number }>(`SELECT certificate_id FROM partner_card_jobs WHERE id = $1`, [
+        cardJobId,
       ])
-    ).rows[0].id;
-    await admin.query(`UPDATE partner_card_jobs SET certificate_id=$1, mv_number=$2 WHERE id=$3`, [
-      certificateId,
-      `MV-lease-${tag}`,
-      cardJobId,
-    ]);
+    ).rows[0].certificate_id;
     return { cardJobId, certificateId };
   }
 

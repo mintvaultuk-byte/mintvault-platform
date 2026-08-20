@@ -431,6 +431,10 @@ export default function ImageViewer({
   // to escape the image container's stacking context + overflow:hidden) can
   // position itself with `position: fixed` against the marker's screen coords.
   const [editingDefectAnchor, setEditingDefectAnchor] = useState<DOMRect | null>(null);
+  // Only an actual admin route may offer an image-upload recovery. Partner grading has no
+  // equivalent endpoint: it must show the server-owned Canon capture/regeneration instruction,
+  // never a control that will fail authorization after the operator has selected a file.
+  const mayUploadRecoveryEvidence = apiBase === "/api/admin" || apiBase.startsWith("/api/admin/");
   // Close popover on ESC. Plus a no-op cleanup when popover is closed —
   // the listener bind/unbind is cheap.
   useEffect(() => {
@@ -1950,7 +1954,7 @@ export default function ImageViewer({
                 </div>
               ))}
           </div>
-        ) : certId && mutationsEnabled ? (
+        ) : certId && mutationsEnabled && mayUploadRecoveryEvidence ? (
           <InlineDropZone
             side={side}
             certId={certId}
@@ -2452,9 +2456,11 @@ function InlineDropZone({
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(f: File) {
+    setUploadError(null);
     setUploading(true);
     try {
       const fd = new FormData();
@@ -2470,6 +2476,8 @@ function InlineDropZone({
       }
       onUploaded();
     } catch {
+      setUploadError(`Could not upload ${side}. Please try again or use the stated recovery action.`);
+    } finally {
       setUploading(false);
     }
   }
@@ -2514,6 +2522,11 @@ function InlineDropZone({
           <Upload size={24} className="text-[var(--admin-ink-dim)]" />
           <p className="text-[var(--admin-ink-dim)] text-xs font-bold">Drop new {side} image here</p>
           <p className="text-[var(--admin-ink-dim)] text-[10px]">or click to browse</p>
+          {uploadError ? (
+            <p className="max-w-sm px-5 text-center text-xs text-red-400" role="alert">
+              {uploadError}
+            </p>
+          ) : null}
         </>
       )}
     </div>

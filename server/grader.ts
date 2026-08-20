@@ -651,7 +651,7 @@ export type WorkingEvidenceStatus = {
   working: { width: number | null; height: number | null; format: string | null } | null;
 };
 
-type WorkingEvidenceRow = {
+export type WorkingEvidenceRow = {
   /** Present for ledger batches; admission itself is deliberately certificate-agnostic. */
   certificate_id?: number;
   side: string;

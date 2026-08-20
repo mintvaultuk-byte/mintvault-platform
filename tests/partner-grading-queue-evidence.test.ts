@@ -87,6 +87,13 @@ describe("Partner grading queue evidence projection", () => {
     expect(evidence.workflow).toBe("AWAITING_CAPTURE_ACCEPTANCE");
   });
 
+  it("requires the same admitted workflow before the server may offer a grading lease", () => {
+    const routes = readFileSync("server/partner/grading-routes.ts", "utf8");
+    const queue = routes.slice(routes.indexOf("const lifecycleOpenable"), routes.indexOf("if (!byGroup.has"));
+    expect(queue).toContain('evidence.workflow === "READY_TO_GRADE" || evidence.workflow === "IN_GRADING"');
+    expect(queue).toContain("const openable =");
+  });
+
   it("keeps working URLs and side labels bound to their exact card and side", () => {
     const first = projectPartnerQueueEvidence({
       workingEvidence: { front: admitted(), back: admitted() },

@@ -20,9 +20,9 @@
 | 2 — Investigation | done | 2026-08-20 | Source, live artifact, route/capability and staging read-only evidence ledger inspected. |
 | 3 — Lead verification | done | 2026-08-20 | PQW-F1–3 reproduced; no schema/migration or data mutation is required. |
 | 4 — Implementation authorisation | done | 2026-08-20 | The owner request authorises local non-maths changes in `change-manifest.md`; deploy remains excluded. |
-| 5 — Implementation | done | 2026-08-20 | Reconciled the owner-authorised evidence admission contract; queue, dashboard, navigation and non-CRM intake changes are complete. |
-| 6 — Regression | done | 2026-08-20 | Focused queues/evidence/navigation and protected MVGS suites passed; full suite (346 files / 5,463 tests), TypeScript, changed-file ESLint (0 errors) and production build passed. |
-| 7 — Final report | done | 2026-08-20 | Candidate committed after local gates. Staging visual acceptance remains deliberately pending a separately authorised guarded deploy. |
+| 5 — Implementation | done | 2026-08-20 | PQW-F4–6 repaired without a migration, data mutation, Scanner, payment, auth or MVGS change. |
+| 6 — Regression | done | 2026-08-20 | Focused evidence/workstation/lease checks, protected grading regression, production build, changed-file lint, and the 70-suite/1,313-assertion governed Partner matrix all passed. Final hostile re-review is clear. |
+| 7 — Final report | pending | | The owner deploy approval names `030ecb34`; the repaired candidate will require a fresh exact-SHA approval before guarded staging release. |
 
 ## Reviewer assignments (Stage 1)
 

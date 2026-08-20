@@ -242,6 +242,25 @@ describe("mounted controlled card inspection", () => {
     );
   });
 
+  it("keeps the Partner unavailable state visible and never mounts the admin-only upload recovery", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_display: "https://display.test/front-display.jpg" },
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+          certId: 279,
+          mutationsEnabled: true,
+          apiBase: "/api/partner/grading",
+        })
+      )
+    );
+    expect(host.querySelector('[data-testid="working-evidence-unavailable"]')).toBeTruthy();
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+    expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
+  });
+
   it("honours a server rejection even if a stale working URL remains in client state", async () => {
     await act(async () =>
       root.render(

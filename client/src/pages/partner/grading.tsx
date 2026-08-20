@@ -464,9 +464,6 @@ export default function PartnerGradingPage() {
             // OPENABILITY COMES FROM THE SERVER. Re-deriving it here is what made every Scanner Card
             // Job un-openable: its certificate is `unassigned` until a grader takes the lease.
             const canEditSubmitted = card.gradingStatus === "pending_review" && card.gradedByMe;
-            // Workflow readiness is server-derived from both canonical evidence sides. The raw
-            // lifecycle remains a separate hint, never a readiness substitute.
-            const lifecycleLabel = (card.lineage === "card_job" ? card.cardJobStatus : card.gradingStatus) ?? "unknown";
             const unavailableAction =
               card.evidence.workflow === "INCOMPLETE_EVIDENCE"
                 ? "Capture at approved Scanner"
@@ -501,7 +498,6 @@ export default function PartnerGradingPage() {
                       <Badge data-testid={`partner-queue-workflow-${card.certId}`}>
                         {card.evidence.workflow.replace(/_/g, " ").toLowerCase()}
                       </Badge>
-                      <span className="text-[10px] text-muted-foreground">{lifecycleLabel.replace(/_/g, " ")}</span>
                     </div>
                     {card.openable ? (
                       <Button onClick={() => setActive({ item, card })}>{canEditSubmitted ? "Edit" : "Open"}</Button>

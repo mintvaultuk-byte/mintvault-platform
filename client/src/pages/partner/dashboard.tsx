@@ -41,6 +41,9 @@ export default function PartnerDashboardPage() {
     queryFn: () => partnerCredits.view(),
     enabled: canViewCredits,
   });
+  const hasCardsToContinueGrading =
+    (operations.data?.counts.readyToGrade !== undefined && operations.data.counts.readyToGrade > 0) ||
+    (operations.data?.counts.inReview !== undefined && operations.data.counts.inReview > 0);
 
   return (
     <div className="space-y-8" data-testid="partner-shop-floor-dashboard">
@@ -89,34 +92,41 @@ export default function PartnerDashboardPage() {
           />
         ) : null}
         {operations.data ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="grid-operations">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="grid-operations">
             <OperationTile
               label="Needs scan"
               value={operations.data.counts.needsScan}
-              href="/partner/grading"
+              href={canAssessCards ? "/partner/grading" : undefined}
               description="Cards waiting for their first accepted side."
               testId="needs-scan"
             />
             <OperationTile
               label="FIX required"
               value={operations.data.counts.fixRequired}
-              href="/partner/grading"
+              href={canAssessCards ? "/partner/grading" : undefined}
               description="Replacement evidence only; no additional credit is charged."
               testId="fix-required"
             />
             <OperationTile
               label="Ready to grade"
               value={operations.data.counts.readyToGrade}
-              href="/partner/grading"
+              href={canAssessCards ? "/partner/grading" : undefined}
               description="Both evidence sides are accepted and ready for inspection."
               testId="ready-to-grade"
             />
             <OperationTile
               label="In review"
               value={operations.data.counts.inReview}
-              href="/partner/grading"
+              href={canAssessCards ? "/partner/grading" : undefined}
               description="Cards currently being graded or awaiting review."
               testId="in-review"
+            />
+            <OperationTile
+              label="Completed / return"
+              value={operations.data.counts.completed}
+              href={canCreateSubmissions ? "/partner/certificates" : undefined}
+              description="Cards finished for return, with certificate status available."
+              testId="completed"
             />
           </div>
         ) : null}
@@ -168,10 +178,12 @@ export default function PartnerDashboardPage() {
               <p className="text-xs text-muted-foreground">
                 Queue state and full-resolution evidence are verified by the server.
               </p>
-              {canAssessCards ? (
+              {canAssessCards && hasCardsToContinueGrading ? (
                 <Link href="/partner/grading" className="inline-flex text-sm text-primary">
-                  Open Grading <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
+                  Continue Grading <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
                 </Link>
+              ) : canAssessCards ? (
+                <p className="text-xs text-muted-foreground">No cards are currently ready for grading.</p>
               ) : (
                 <p className="text-xs text-muted-foreground">Your role does not include grading.</p>
               )}
@@ -284,25 +296,27 @@ function OperationTile({
 }: {
   label: string;
   value: number | null | undefined;
-  href: string;
+  href?: string;
   description: string;
   testId: string;
 }) {
-  return (
-    <Link href={href} className="block">
-      <Card className="h-full transition-colors hover:border-primary/60" data-testid={`card-operations-${testId}`}>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-2xl font-semibold" data-testid={`text-ops-${testId}`}>
-            {count(value)}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        </CardContent>
-      </Card>
-    </Link>
+  const card = (
+    <Card
+      className={`h-full ${href ? "transition-colors hover:border-primary/60" : ""}`}
+      data-testid={`card-operations-${testId}`}
+    >
+      <CardHeader className="pb-2">
+        <CardTitle className="text-xs font-medium text-muted-foreground">{label}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-2xl font-semibold" data-testid={`text-ops-${testId}`}>
+          {count(value)}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
   );
+  return href ? <Link href={href} className="block">{card}</Link> : card;
 }
 
 function CreditTile({ label, value, testId }: { label: string; value: number | null | undefined; testId: string }) {

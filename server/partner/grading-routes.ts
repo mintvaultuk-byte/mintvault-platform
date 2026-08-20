@@ -1134,11 +1134,15 @@ export function partnerGradingRouter(): Router {
          *             the acquire will either succeed or tell them who holds it.
          * connector — exactly the rule the client used to apply, unchanged, now computed here.
          */
-        const openable =
+        const lifecycleOpenable =
           row.lineage === "card_job"
             ? row.card_job_status === "READY_TO_GRADE" || (row.card_job_status === "GRADING" && !heldByAnother)
             : (row.grader_status === "assigned" && assignedToMe) ||
               (row.grader_status === "pending_review" && gradedByMe);
+        // A lifecycle state is not enough: the same canonical evidence admission that supplies
+        // the workstation must allow both sides before any queue row can offer an editing lease.
+        const openable =
+          lifecycleOpenable && (evidence.workflow === "READY_TO_GRADE" || evidence.workflow === "IN_GRADING");
 
         if (!byGroup.has(row.group_key)) {
           byGroup.set(row.group_key, {

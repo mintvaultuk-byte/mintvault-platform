@@ -8,6 +8,9 @@
 - PQW-F1 — server-derived per-side evidence state must remain visible in the Partner queue — classification B/C.
 - PQW-F2 — recover the prior canonical working-evidence-only admission contract — classification B/C.
 - PQW-F3 — remove dead pages from launch navigation and retain live settings routes as secondary navigation — classification A/C.
+- PQW-F4 — an evidence-invalid card can still acquire a grading lease because the lease trusts only the raw Card Job state — classification B/C.
+- PQW-F5 — the Partner unavailable-evidence state exposes an admin-only upload control whose failure is hidden — classification B/C.
+- PQW-F6 — the shop-floor dashboard omits completed/return and can link roles without assessment authority into access-denied grading — classification A/C.
 
 ## Files to change
 
@@ -23,7 +26,10 @@
 | `client/src/components/partner/partner-shell.tsx` | Replace the large primary list with role-gated primary and secondary navigation. | PQW-F3 | A |
 | `client/src/pages/partner/dashboard.tsx` | Focus the operational dashboard on credit and card lifecycle actions. | PQW-F3 | A |
 | `client/src/pages/partner/submission-wizard.tsx` | Make existing customer selection optional only if the server already accepts a null customer. | PQW-F3 | A |
-| `tests/partner-grading-queue-evidence.test.ts`, `tests/partner-shop-workflow-source.test.ts`, `tests/partner-submission-wizard-ui.test.ts`, evidence tests | Add behavioural, cross-card, cross-side and navigation regressions. | PQW-F1–3 | A/B |
+| `server/partner/grading-lease-service.ts` | Re-check both canonical working-evidence admissions under lock before every acquire, renewal, takeover and grading write. | PQW-F4 | B |
+| `client/src/components/grading/image-viewer.tsx` | Restrict upload recovery to real admin surfaces and make any admin upload failure visible. | PQW-F5 | B |
+| `client/src/pages/partner/dashboard.tsx` | Add completed/return and capability-safe operational actions. | PQW-F6 | A |
+| `tests/partner-grading-queue-evidence.test.ts`, `tests/partner-card-job-grading-bridge.test.ts`, `tests/partner-grading-lease.test.ts`, dashboard and evidence tests | Add behavioural, cross-card, cross-side, lifecycle and navigation regressions. | PQW-F1–6 | A/B |
 | task governance records | Record scope, proof and rollback. | governance | A |
 
 ## Files explicitly NOT touched
@@ -45,12 +51,13 @@
 2. Reconcile the previously owner-authorised working-evidence contract with current main.
 3. Add shared, server-derived queue status and side-bound thumbnail fields, then render them.
 4. Simplify navigation and dashboard only after route/capability/dead-page audit.
-5. Run regression, mutation and visual gates without a deploy.
+5. Hostile re-review the exact candidate. Repair only reproduced in-scope high findings, then rerun targeted and full regression gates.
+6. Deploy staging only through the guarded path after the owner authorises the resulting exact repaired SHA.
 
 ## Regression gates required
 
 - [x] `npm run check`
-- [x] `npm test` — isolated disposable loopback database only: 346 files passed, 5,463 tests passed, 29 explicitly skipped.
+- [x] Governed disposable Partner matrix: 70 suites, 1,313 assertions, zero skips/failures.
 - [x] Changed-file lint — 0 errors. The repository reports pre-existing warning-only debt in broad legacy files; no warning is promoted to an error.
 - [x] `npm run build`
 - [x] Focused queue/evidence/navigation tests plus MVGS protected regressions

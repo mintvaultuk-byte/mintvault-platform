@@ -111,6 +111,8 @@ async function seedMintVaultTables(): Promise<void> {
     object_key text not null unique, sha256 varchar(64) not null, byte_length bigint not null,
     pixel_width integer not null, pixel_height integer not null,
     bit_depth integer, dpi integer, format varchar(16) not null,
+    working_object_key text, working_sha256 varchar(64),
+    working_width integer, working_height integer, working_format varchar(16), working_settings jsonb,
     capture_metadata jsonb not null default '{}'::jsonb,
     is_current boolean not null default true,
     superseded_at timestamptz, superseded_by_id integer,
@@ -252,15 +254,18 @@ async function captureSide(f: Fixture, certificateId: number, side: "front" | "b
   );
   await admin.query(
     `INSERT INTO certificate_image_evidence
-       (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height,
-        format, capture_metadata, is_current)
-     VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,1000,1400,'tiff',$5::jsonb,true)`,
+       (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height, dpi,
+        format, working_object_key, working_width, working_height, working_format, working_settings,
+        capture_metadata, is_current)
+     VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,4724,6136,1200,'tiff',$5,4724,6136,'jpeg',
+             '{"resize":null}'::jsonb,$6::jsonb,true)`,
     [
       certificateId,
       side,
       `evidence/${certificateId}/${side}/${evidenceSeq}.tif`,
       "a".repeat(64),
-      JSON.stringify({ captureSessionId: sessionId }),
+      `evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`,
+      JSON.stringify({ captureSessionId: sessionId, scannerProfileVersion: "mintvault-canon-lide-400-v3" }),
     ]
   );
 }

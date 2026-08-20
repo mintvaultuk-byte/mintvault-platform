@@ -392,6 +392,7 @@ describe("P8 integration surfaces", () => {
       ["FIX required", '"fix-required"'],
       ["Ready to grade", '"ready-to-grade"'],
       ["In review", '"in-review"'],
+      ["Completed / return", '"completed"'],
     ]) {
       expect(dashboard, `${label} tile missing`).toContain(label);
       expect(dashboard, `${id} tile id missing`).toContain(id);
@@ -402,6 +403,12 @@ describe("P8 integration surfaces", () => {
     for (const id of ["action-start-submission", "action-scan-new-card", "action-open-grading"]) {
       expect(dashboard, `${id} missing`).toContain(id);
     }
+  });
+
+  it("does not manufacture grading links for roles without the server assessment capability", () => {
+    expect(dashboard).toContain('href={canAssessCards ? "/partner/grading" : undefined}');
+    expect(dashboard).toContain("Continue Grading");
+    expect(dashboard).toContain('href={canCreateSubmissions ? "/partner/certificates" : undefined}');
   });
 
   it("states plainly that a FIX does not charge another credit", () => {

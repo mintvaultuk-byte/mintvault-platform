@@ -31,6 +31,7 @@ import { withPartnerAdminTenantTransaction } from "./db";
 import { writePartnerAudit } from "./audit";
 import { beginCardJobGrading, releaseCardJobGrading } from "./card-job-grading-bridge";
 import type { PartnerPrincipal } from "./session";
+import { assessWorkingEvidence, type WorkingEvidenceRow } from "../grader";
 
 export class GradingLeaseError extends Error {
   constructor(
@@ -109,10 +110,10 @@ async function loadGradableJob(
   client: PoolClient,
   principal: PartnerPrincipal,
   cardJobId: string
-): Promise<{ id: string; status: string; location_id: string | null }> {
+): Promise<{ id: string; status: string; location_id: string | null; certificate_id: number | null }> {
   const scopedLocationId = principal.orgWide ? null : principal.locationId;
-  const { rows } = await client.query<{ id: string; status: string; location_id: string | null }>(
-    `SELECT id, status, location_id
+  const { rows } = await client.query<{ id: string; status: string; location_id: string | null; certificate_id: number | null }>(
+    `SELECT id, status, location_id, certificate_id
        FROM partner_card_jobs
       WHERE id = $1 AND tenant_id = $2 AND cancelled_at IS NULL
         AND ($3::uuid IS NULL OR location_id = $3::uuid)`,
@@ -124,6 +125,43 @@ async function loadGradableJob(
     throw new GradingLeaseError("NOT_GRADABLE", `A card in ${row.status} is not open for grading.`);
   }
   return row;
+}
+
+/**
+ * The lifecycle transition is not evidence admission. A Card Job can be marked READY_TO_GRADE
+ * while a derivative is later found missing, resized or otherwise invalid. Before a lease can
+ * make that card editable, re-run the single canonical admission evaluator against both current
+ * immutable sides inside the same transaction that changes the lifecycle. This is deliberately
+ * the evaluator used by the queue and workstation, not a second lease-local approximation.
+ */
+async function requireAdmittedWorkingEvidence(client: PoolClient, certificateId: number | null): Promise<void> {
+  if (certificateId === null || !Number.isSafeInteger(certificateId) || certificateId <= 0) {
+    throw new GradingLeaseError("NOT_GRADABLE", "This card has no certificate evidence record to open for grading.");
+  }
+  const { rows } = await client.query<WorkingEvidenceRow>(
+    `SELECT side, working_object_key, pixel_width, pixel_height, dpi,
+            working_width, working_height, working_format, working_settings,
+            COALESCE(capture_metadata->>'scannerProfileVersion', capture_metadata->>'profileVersion')
+              AS scanner_profile_version
+       FROM certificate_image_evidence
+      WHERE certificate_id = $1
+        AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+        AND is_current = true
+      FOR SHARE`,
+    [certificateId]
+  );
+  const admitted = new Set(
+    rows
+      .filter((row) => row.side === "front" || row.side === "back")
+      .filter((row) => assessWorkingEvidence(row).state === "admitted")
+      .map((row) => row.side)
+  );
+  if (!admitted.has("front") || !admitted.has("back")) {
+    throw new GradingLeaseError(
+      "NOT_GRADABLE",
+      "Both FRONT and BACK need admitted full-resolution working evidence before this card can be opened for grading."
+    );
+  }
 }
 
 /** Every grading action requires the assess permission. SCANNER_OPERATOR never holds it. */
@@ -172,8 +210,6 @@ export async function acquireLease(
   return withPartnerAdminTenantTransaction(
     { tenantId: principal.tenantId, locationId: principal.locationId ?? null },
     async (client) => {
-      const job = await loadGradableJob(client, principal, cardJobId);
-
       /*
        * Serialise concurrent acquires on THIS card before doing anything else.
        *
@@ -183,6 +219,14 @@ export async function acquireLease(
        * losing side's answer intelligible.
        */
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`grading-lease:${cardJobId}`]);
+
+      // Re-read after taking the per-card lock. The lifecycle and evidence admission used to
+      // authorise this lease therefore belong to the same serialised decision.
+      const job = await loadGradableJob(client, principal, cardJobId);
+
+      // Fail closed before creating or renewing a lease. A raw READY_TO_GRADE lifecycle state
+      // alone is never enough to authorize inspection or grading.
+      await requireAdmittedWorkingEvidence(client, job.certificate_id);
 
       await releaseExpired(client, principal.tenantId, cardJobId);
 
@@ -287,6 +331,12 @@ export async function heartbeatLease(principal: PartnerPrincipal, cardJobId: str
   return withPartnerAdminTenantTransaction(
     { tenantId: principal.tenantId, locationId: principal.locationId ?? null },
     async (client) => {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`grading-lease:${cardJobId}`]);
+      const job = await loadGradableJob(client, principal, cardJobId);
+      // An editing session may not be extended merely because it was valid when it was opened.
+      // Working evidence can be invalidated by a later integrity check or recapture, so every
+      // renewal reuses the same single admission authority as a first acquire.
+      await requireAdmittedWorkingEvidence(client, job.certificate_id);
       const renewed = await client.query<{
         card_job_id: string;
         holder_user_id: string;
@@ -368,8 +418,11 @@ export async function takeoverLease(
   return withPartnerAdminTenantTransaction(
     { tenantId: principal.tenantId, locationId: principal.locationId ?? null },
     async (client) => {
-      await loadGradableJob(client, principal, cardJobId);
       await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`grading-lease:${cardJobId}`]);
+      const job = await loadGradableJob(client, principal, cardJobId);
+      // Takeover is a new editing session, never a way around evidence admission. Do this before
+      // releasing the existing holder so a refusal leaves their historical lease untouched.
+      await requireAdmittedWorkingEvidence(client, job.certificate_id);
 
       const previous = await client.query<{ holder_user_id: string; revision: number }>(
         `UPDATE partner_grading_leases
@@ -480,6 +533,11 @@ export async function assertMayWrite(
   if (lease.expired) {
     throw new GradingLeaseError("LEASE_EXPIRED", "Your editing session ended. Reopen the card before saving.");
   }
+  // A lease asserts who may edit, but it never turns stale or invalid evidence back into a
+  // grading source. Re-check the canonical admission inside the caller's write transaction so an
+  // integrity failure after acquisition cannot be saved through an old browser tab.
+  const job = await loadGradableJob(client, principal, cardJobId);
+  await requireAdmittedWorkingEvidence(client, job.certificate_id);
   if (!Number.isInteger(expectedRevision) || expectedRevision !== lease.revision) {
     throw new GradingLeaseError(
       "STALE_REVISION",
