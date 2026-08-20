@@ -25,6 +25,7 @@ Stage 0 (new task) and Stage 7 (final report). Programs group multi-phase work.
 | command-centre-v1-overnight-assurance-20260819 | Command Centre V1 overnight release assurance | Stage 2 investigation in progress | `codex/command-centre-v1-reconciliation-20260819` | `c485a7f` | `c485a7f` | none accepted at baseline | independent read-only reviews plus Lead runtime/staging verification | `tasks/command-centre-v1-overnight-assurance-20260819/` |
 | growth-command-gb04d | Growth Command full live activation | Stage 2 read-only investigation | `codex/growth-command-gb04d` | `ee7fbe43` | `ee7fbe43` | none accepted at baseline | three read-only lanes, then Lead verification and manifest | `tasks/growth-command-gb04d/` |
 | growth-command-gb04e | Growth Command provider activation | Stage 6 candidate verification | `codex/growth-command-gb04e` | `da9c4406` | pending freeze | none actionable in scope | exact-SHA hostile and remote gates, then provider-scoped activation | `tasks/growth-command-gb04e/` |
+| growth-command-gb04f | Growth Command latency diagnosis and premium gauges | Stage 6 local regression / exact-SHA release gates pending | `codex/growth-command-gb04f` | `d67e3472` | local candidate pending commit | none accepted; exact remote hostile/CI/security gates pending | freeze candidate, push and verify exact SHA | `tasks/growth-command-gb04f/` |
 
 ## Conventions
 

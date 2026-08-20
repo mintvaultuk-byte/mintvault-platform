@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { recordGrowthDependency } from "./growth-runtime-telemetry";
 import type {
   CapacityThresholds,
   FleetTelemetry,
@@ -276,6 +277,7 @@ function staleSnapshot(value: FlyTelemetrySnapshot, now: string): FlyTelemetrySn
       cpu: staleMetric(machine.cpu, now),
       memory: staleMetric(machine.memory, now),
       requestRate: staleMetric(machine.requestRate, now),
+      requestCount: staleMetric(machine.requestCount, now),
       p95Latency: staleMetric(machine.p95Latency, now),
       fiveXErrorRate: staleMetric(machine.fiveXErrorRate, now),
       deployedVersion: staleMetric(machine.deployedVersion, now),
@@ -352,6 +354,15 @@ async function readSnapshot(
         now,
         "Fly Managed Prometheus five-minute request rate",
         "requests/minute",
+        null,
+        null
+      ),
+      requestCount: machineMetric(
+        requestCount,
+        machineRef,
+        now,
+        "Fly Managed Prometheus five-minute completed responses",
+        "requests / 5 minutes",
         null,
         null
       ),
@@ -517,11 +528,14 @@ export async function getFlyTelemetrySnapshot(
   if (!options.force && inFlight?.authority === key) return inFlight.promise;
 
   const operation = (async () => {
+    const startedAt = Date.now();
     try {
       const value = await readSnapshot(token, options.fetcher ?? fetch, env, now);
+      recordGrowthDependency("FLY_TELEMETRY", Date.now() - startedAt);
       cache = { value, authority: key, expiresAt: nowMs + CACHE_MS, staleUntil: nowMs + STALE_MS };
       return value;
     } catch {
+      recordGrowthDependency("FLY_TELEMETRY", Date.now() - startedAt, true);
       if (cache?.authority === key && cache.staleUntil > nowMs) return staleSnapshot(cache.value, now);
       return emptySnapshot(
         "ERROR",

@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   classifyGrowthService,
+  classifyGrowthRequest,
   clearGrowthRuntimeTelemetry,
+  getPerformanceDiagnostics,
   getApplicationHealthSnapshot,
   getRuntimeRequestSnapshot,
   recordApplicationOutcome,
+  recordGrowthDependency,
   recordGrowthRequest,
 } from "../server/growth-runtime-telemetry";
-import { deriveDatabasePoolPressure } from "../server/growth-intelligence-service";
+import { deriveDatabasePoolPressure, derivePerformanceInsight } from "../server/growth-intelligence-service";
 
 afterEach(clearGrowthRuntimeTelemetry);
 
@@ -38,6 +41,65 @@ describe("GB-04D bounded application telemetry", () => {
       fiveXRatePercent: 5,
     });
     expect(JSON.stringify(snapshot)).not.toMatch(/visitor|people|session|identity/i);
+  });
+
+  it("retains fixed route templates and separates low-sample internal traffic from customer traffic", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    expect(classifyGrowthRequest("/api/super-admin/growth/intelligence?email=private@example.com")).toEqual({
+      routeGroup: "SUPER_ADMIN_GROWTH",
+      trafficClass: "GROWTH_COMMAND",
+    });
+    expect(classifyGrowthRequest("/api/partner/customers/abc-123?token=secret")).toEqual({
+      routeGroup: "PARTNER_API",
+      trafficClass: "PARTNER",
+    });
+    expect(classifyGrowthRequest("/api/admin/certificates/123/measure-centering")).toEqual({
+      routeGroup: "AI_MODEL_API",
+      trafficClass: "AI_MODEL",
+    });
+    for (let index = 0; index < 4; index += 1) {
+      recordGrowthRequest("/api/super-admin/growth/intelligence?email=private@example.com", 200, 2_200, now - index);
+    }
+    for (let index = 0; index < 5; index += 1) {
+      recordGrowthRequest("/submit", 200, 180, now - index);
+    }
+    const diagnostics = getPerformanceDiagnostics(now);
+    const growth = diagnostics.trafficClasses.find((entry) => entry.trafficClass === "GROWTH_COMMAND")!;
+    const publicTraffic = diagnostics.trafficClasses.find((entry) => entry.trafficClass === "PUBLIC_CUSTOMER")!;
+    expect(growth).toMatchObject({ requestCount: 4, p95LatencyMs: 2200, confidence: "LOW_SAMPLE", status: "UNKNOWN" });
+    expect(publicTraffic).toMatchObject({
+      requestCount: 5,
+      p95LatencyMs: 180,
+      confidence: "SUFFICIENT",
+      status: "GREEN",
+    });
+    expect(JSON.stringify(diagnostics)).not.toMatch(/private|example|token|secret|abc-123/i);
+  });
+
+  it("reports p99 only at a defensible sample size and bounds dependency summaries", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    for (let index = 0; index < 20; index += 1)
+      recordGrowthRequest("/api/create-payment-intent", 200, index + 10, now - index);
+    recordGrowthDependency("DATABASE", 12, false, now - 1_000);
+    recordGrowthDependency("DATABASE", 31, true, now);
+    const diagnostics = getPerformanceDiagnostics(now);
+    const checkout = diagnostics.trafficClasses.find((entry) => entry.trafficClass === "SUBMISSION_CHECKOUT")!;
+    const database = diagnostics.dependencies.find((entry) => entry.dependency === "DATABASE")!;
+    expect(checkout).toMatchObject({ p99LatencyMs: 29, requestCount: 20 });
+    expect(database).toMatchObject({ sampleCount: 2, p95LatencyMs: 31, failures: 1, complete: true });
+  });
+
+  it("does not let a red internal class poison customer latency or capacity advice", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    for (let index = 0; index < 5; index += 1) {
+      recordGrowthRequest("/submit", 200, 180, now - index);
+      recordGrowthRequest("/api/super-admin/growth/intelligence", 200, 2_200, now - index);
+    }
+    expect(derivePerformanceInsight(getPerformanceDiagnostics(now))).toMatchObject({
+      status: "AMBER",
+      title: "Red p95 is internal only",
+      recommendation: expect.stringContaining("do not scale public capacity"),
+    });
   });
 
   it("excludes expected auth/customer 4xx outcomes from platform failure health", () => {

@@ -167,6 +167,11 @@ describe("Growth infrastructure control and GBP truth", () => {
   it("renders radial gauges from server status without inventing a capacity percentage", () => {
     const page = fs.readFileSync("client/src/pages/admin/growth.tsx", "utf8");
     expect(page).toContain("conic-gradient");
+    expect(page).toContain("function RadialRing");
+    expect(page).toContain("function DigitalMetric");
+    expect(page).toContain("function StatusTile");
+    expect(page).toContain("function Sparkline");
+    expect(page).not.toContain("rotate(${needle})");
     expect(page).toContain("aria-label={`${label}: ${metric.status}; ${text(metric)}`}");
     expect(page).not.toMatch(/capacity remaining/i);
   });
