@@ -2432,6 +2432,7 @@ export class DatabaseStorage implements IStorage {
       FROM certificates
       WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric' AND grade_approved_at IS NOT NULL${gameCond}${setCond}${cardCond}
       GROUP BY card_game, set_name, card_name
+      HAVING COUNT(*) >= 5
       ORDER BY total DESC
       LIMIT 200
     `

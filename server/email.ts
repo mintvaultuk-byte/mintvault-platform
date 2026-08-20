@@ -52,9 +52,10 @@ async function sendViaResend(
     html: string;
     bcc?: string | string[];
     attachments?: Array<{ filename: string; content: Buffer | string }>;
-  }
+  },
+  options: { idempotencyKey?: string } = {}
 ): Promise<{ id: string }> {
-  const result = await resend.emails.send(payload);
+  const result = await resend.emails.send(payload, options);
   if (result.error) {
     throw new Error(`Resend API error: ${result.error.message || JSON.stringify(result.error)}`);
   }
@@ -298,16 +299,16 @@ ${
 </p>`;
 
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Submission Confirmed (${data.submissionId})`,
       html: baseHtml("Submission Confirmed", body),
     });
-    console.log(`[email] Submission confirmation sent to ${data.email}`);
+    console.log(`[email] submission_confirmation_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send confirmation to ${data.email}:`, err.message);
+    console.error(`[email] submission_confirmation_failed submissionId=${data.submissionId}`);
     throw err;
   }
 }
@@ -384,16 +385,16 @@ ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">Yo
 </div>`;
 
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Submission Confirmed (${data.submissionId})`,
       html: baseHtml("Submission Confirmed", body),
     });
-    console.log(`[email] Submission confirmation v2 sent to ${data.email}`);
+    console.log(`[email] submission_confirmation_v2_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send v2 confirmation to ${data.email}:`, err.message);
+    console.error(`[email] submission_confirmation_v2_failed submissionId=${data.submissionId}`);
     throw err;
   }
 }
@@ -430,16 +431,16 @@ ${photosHtml}
 </p>`;
 
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Cards Received (${data.submissionId})`,
       html: baseHtml("Cards Received", body),
     });
-    console.log(`[email] Cards received email sent to ${data.email}`);
+    console.log(`[email] cards_received_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send cards received to ${data.email}:`, err.message);
+    console.error(`[email] cards_received_failed submissionId=${data.submissionId}`);
     throw err;
   }
 }
@@ -478,16 +479,16 @@ ${turnaroundLine}
 </p>`;
 
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Grading Started (${data.submissionId})`,
       html: baseHtml("Grading Started", body),
     });
-    console.log(`[email] Grading started email sent to ${data.email}`);
+    console.log(`[email] grading_started_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send grading started to ${data.email}:`, err.message);
+    console.error(`[email] grading_started_failed submissionId=${data.submissionId}`);
     throw err;
   }
 }
@@ -514,16 +515,16 @@ export async function sendGradingComplete(data: {
 </p>`;
 
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Grading Complete (${data.submissionId})`,
       html: baseHtml("Grading Complete", body),
     });
-    console.log(`[email] Grading complete email sent to ${data.email}`);
+    console.log(`[email] grading_complete_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send grading complete to ${data.email}:`, err.message);
+    console.error(`[email] grading_complete_failed submissionId=${data.submissionId}`);
     throw err;
   }
 }
@@ -581,16 +582,16 @@ ${trackingBtn}
 </p>`;
 
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Your Cards Have Been Shipped (${data.submissionId})`,
       html: baseHtml("Your Cards Have Been Shipped", body),
     });
-    console.log(`[email] Shipped email sent to ${data.email}`);
+    console.log(`[email] shipped_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send shipped email to ${data.email}:`, err.message);
+    console.error(`[email] shipped_failed submissionId=${data.submissionId}`);
     throw err;
   }
 }
@@ -617,18 +618,57 @@ export async function sendSubmissionDelivered(data: {
 <a href="${vaultLink}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW VAULT REPORT</a>
 </p>`;
   try {
-    await sendViaResend(resend, {
+    const sent = await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `Your MintVault slab has arrived — ${data.submissionId}`,
       html: baseHtml("Slab Delivered", body),
     });
-    console.log(`[email] Delivered email sent to ${data.email}`);
+    console.log(`[email] delivered_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
   } catch (err: any) {
-    console.error(`[email] Failed to send delivered email to ${data.email}:`, err.message);
+    console.error(`[email] delivered_failed submissionId=${data.submissionId}`);
     throw err;
   }
+}
+
+/** Neutral, non-incentivised request sent only by the durable GB-05 worker. */
+export async function sendReviewRequestEmail(data: {
+  email: string;
+  firstName: string;
+  submissionId: string;
+  reviewUrl: string;
+  preferencesUrl: string;
+  idempotencyKey: string;
+}): Promise<{ id: string } | null> {
+  const resend = getResend();
+  if (!resend) return null;
+  const safeName = escapeHtmlForEmail(data.firstName);
+  const safeSubmission = escapeHtmlForEmail(data.submissionId);
+  const safeReviewUrl = escapeHtmlForEmail(data.reviewUrl);
+  const safePreferencesUrl = escapeHtmlForEmail(data.preferencesUrl);
+  const body = `
+<p>Hi ${safeName},</p>
+<p>Your MintVault return has been delivered. If you would like to share an honest review of your experience, you can use the link below.</p>
+<p>Positive, neutral and critical feedback are all welcome. There is no incentive, and your response does not affect your order or support.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${safeSubmission}</td></tr>
+</table>
+<p style="margin-top:24px;">
+<a href="${safeReviewUrl}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">SHARE AN HONEST REVIEW</a>
+</p>
+<p style="color:#777;font-size:11px;margin-top:24px;">Prefer not to receive this request for this submission? <a href="${safePreferencesUrl}" style="color:#D4AF37;">Update this review preference</a>.</p>`;
+  return sendViaResend(
+    resend,
+    {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: `Share your honest MintVault experience — ${safeSubmission}`,
+      html: baseHtml("How was your MintVault experience?", body),
+    },
+    { idempotencyKey: data.idempotencyKey }
+  );
 }
 
 // ── Premium ownership email wrapper ────────────────────────────────────────

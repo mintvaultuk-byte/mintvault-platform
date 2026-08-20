@@ -52,6 +52,12 @@ const summary: GrowthSummary = {
   historical: { state: "NOT_INSTRUMENTED", reason: "No link" },
 };
 
+const unavailableConversionExecutor = {
+  execute: async () => {
+    throw new Error("growth conversion event authority unavailable");
+  },
+};
+
 describe("GB-04B Growth intelligence authority", () => {
   it("never converts request rate alone into a capacity alert", () => {
     const result = deriveCapacityStatus({ requestRatePerMinute: 9999 }, thresholds);
@@ -120,13 +126,15 @@ describe("GB-04B Growth intelligence authority", () => {
 
   it("returns recent persisted activity but labels missing fleet request telemetry honestly", async () => {
     const replies = [
-      { rows: [{ submission_starts: "4", paid_submissions: "2", paid_cards: "5" }] },
+      { rows: [{ submission_starts: "4", paid_submissions: "2", paid_cards: "5", revenue_pence: "3800" }] },
       { rows: [{ partner_applications: "1" }] },
     ];
     let index = 0;
     const pulse = await getLivePulse({ execute: async () => replies[index++] });
     expect(pulse.submissionStarts).toMatchObject({ state: "REAL", value: 4 });
     expect(pulse.paidCards).toMatchObject({ state: "REAL", value: 5 });
+    expect(pulse.revenuePence).toMatchObject({ state: "REAL", value: 3800, unit: "GBP pence" });
+    expect(pulse.revenueVelocity.revenuePencePerHour.state).toBe("INSUFFICIENT_DATA");
     expect(pulse.checkoutStarts.state).toBe("NOT_INSTRUMENTED");
     expect(pulse.requestsPerMinute).toMatchObject({ state: "NOT_CONNECTED", status: "UNKNOWN" });
     expect(JSON.stringify(pulse)).not.toMatch(/"(?:email|phone|address|ipAddress)"/i);
@@ -171,7 +179,7 @@ describe("GB-04B Growth intelligence authority", () => {
   });
 
   it("does not calculate a checkout conversion percentage without an authoritative checkout event", async () => {
-    const conversion = await getConversionSummary("30d", summary);
+    const conversion = await getConversionSummary("30d", summary, unavailableConversionExecutor);
     expect(conversion.stages.find((stage) => stage.key === "CHECKOUT_STARTS")?.metric.state).toBe("NOT_INSTRUMENTED");
     expect(conversion.dropOff.state).toBe("NOT_INSTRUMENTED");
     expect(conversion.comparison.state).toBe("NOT_INSTRUMENTED");
@@ -180,7 +188,7 @@ describe("GB-04B Growth intelligence authority", () => {
   it("generates traceable deterministic insights without a provider or AI claim", async () => {
     const health = await getSiteHealth({ execute: async () => ({ rows: [{ ok: 1, certificates: "certificates" }] }) });
     const seo = getSeoSummary();
-    const conversion = await getConversionSummary("30d", summary);
+    const conversion = await getConversionSummary("30d", summary, unavailableConversionExecutor);
     const capacity = deriveCapacityStatus(null, null);
     const insights = getGrowthInsights({ period: "30d", summary, siteHealth: health, capacity, seo, conversion });
     expect(insights.map((insight) => insight.trace.ruleId)).toEqual(

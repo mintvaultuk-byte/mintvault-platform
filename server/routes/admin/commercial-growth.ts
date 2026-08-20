@@ -14,6 +14,13 @@ import {
   updatePartnerLeadStatus,
 } from "../../commercial-growth-service";
 import { getGrowthIntelligence } from "../../growth-intelligence-service";
+import { clearGrowthIntelligenceCache } from "../../growth-intelligence-service";
+import {
+  getCommercialScoreboard,
+  MAX_GROWTH_TARGET_VALUE,
+  setCurrentMonthCommercialTargets,
+} from "../../growth-scoreboard-service";
+import { getReviewSummary } from "../../review-request-service";
 import { PARTNER_APPLICATION_STATUSES } from "../../partner-applications";
 import { storage } from "../../storage";
 
@@ -41,6 +48,17 @@ const mutationLimit = rateLimit({
 
 const leadIdSchema = z.string().uuid();
 const leadStatusSchema = z.object({ status: z.enum(PARTNER_APPLICATION_STATUSES) }).strict();
+const targetValueSchema = z.number().int().positive().max(MAX_GROWTH_TARGET_VALUE).nullable().optional();
+const commercialTargetSchema = z
+  .object({
+    PAID_CARDS: targetValueSchema,
+    REVENUE_GBP: targetValueSchema,
+    PARTNER_APPLICATIONS: targetValueSchema,
+    QUALIFIED_PARTNERS: targetValueSchema,
+    GENUINE_REVIEWS: targetValueSchema,
+  })
+  .strict()
+  .refine((value) => Object.values(value).some((target) => target !== undefined), "At least one target is required");
 
 async function audit(req: Request, entityId: string, action: string, details: Record<string, unknown>): Promise<void> {
   try {
@@ -100,6 +118,40 @@ export function registerCommercialGrowthRoutes(app: Express): void {
     } catch {
       console.error("[commercial-growth] intelligence query failed");
       return res.status(500).json({ error: "Growth Command intelligence is unavailable" });
+    }
+  });
+
+  router.get("/reviews", async (req: Request, res: Response) => {
+    const period = req.query.period ?? "30d";
+    if (!isGrowthPeriod(period)) return res.status(400).json({ error: "period must be today, 7d, 30d, 90d, or all" });
+    try {
+      const reviews = await getReviewSummary(period);
+      await audit(req, period, "growth_reviews_viewed", {
+        period,
+        configuration: reviews.configuration.state,
+      });
+      return res.set("Cache-Control", "private, no-store").json(reviews);
+    } catch {
+      console.error("[commercial-growth] review aggregate query failed");
+      return res.status(500).json({ error: "Review reporting is unavailable" });
+    }
+  });
+
+  router.put("/scoreboard/targets", mutationLimit, async (req: Request, res: Response) => {
+    const parsedBody = commercialTargetSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: "Targets must be positive whole units, or null to clear" });
+    }
+    const actor = req.session.adminEmail;
+    if (!actor) return res.status(403).json({ error: "Forbidden: Super Admin identity required" });
+    try {
+      const update = await setCurrentMonthCommercialTargets(parsedBody.data, actor);
+      clearGrowthIntelligenceCache();
+      const scoreboard = await getCommercialScoreboard();
+      return res.set("Cache-Control", "private, no-store").json({ update, scoreboard });
+    } catch {
+      console.error("[commercial-growth] target update failed");
+      return res.status(503).json({ error: "Commercial targets could not be saved" });
     }
   });
 

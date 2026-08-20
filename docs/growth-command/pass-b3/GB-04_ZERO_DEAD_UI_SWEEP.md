@@ -8,7 +8,7 @@
 | Lead Review | Loads selected application detail | `GET /api/super-admin/growth/leads/:id` | Super Admin-gated detail endpoint |
 | Open website/profile | Opens only validated applicant `http(s)` URL | Applicant-provided business URL | `safeExternalUrl` regression test |
 | Contacted / Qualified / Not a fit / Onboarding | Updates only existing Growth lead state | `POST /api/super-admin/growth/leads/:id/status` | strict enum + transactional audit |
-| Partner Management handoff | Opens canonical operational workflow with opaque lead context | `/admin/partners/settings?growthLead=<uuid>` | rendered only after `ONBOARDING`; never provisions |
+| Partner Management settings | Opens the canonical operational settings workspace without claiming selected-lead transfer | `/admin/partners/settings` | rendered only after `ONBOARDING`; explicitly states that lead context is not transferred and never provisions |
 | Campaign generator selects | Restricts input to server-owned choices | `GET /api/super-admin/growth/link-options` | controlled registry |
 | Generate tracked link | Generates MintVault-owned deterministic URL | `POST /api/super-admin/growth/links` | strict Zod target/token validation |
 | Copy Link | Writes generated URL to clipboard or reports failure | Browser Clipboard API/fallback | `copyTrackedLink`; failure message is visible |

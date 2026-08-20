@@ -73,6 +73,8 @@ import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerCommercialGrowthRoutes } from "./routes/admin/commercial-growth";
+import { registerReviewRequestRoutes } from "./routes/reviews";
+import { registerGrowthMcpRoutes } from "./routes/growth-mcp";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCatalogueRoutes } from "./routes/admin/catalogue";
@@ -2881,6 +2883,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerStationAdminRoutes(app); // server-paginated station fleet control
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
   registerCommercialGrowthRoutes(app); // GB-04 aggregate/lead Super Admin Growth Command
+  registerReviewRequestRoutes(app); // GB-05 signed review redirect + explicit suppression confirmation
+  registerGrowthMcpRoutes(app); // GB-04C dedicated aggregate-only external MCP transport
   registerPartnerFlagAdminRoutes(app); // GLOBAL partner feature flags (requireSuperAdmin-gated, audited)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);

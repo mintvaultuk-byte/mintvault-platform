@@ -14,6 +14,7 @@ const TABS = [
   ["partners", "Partners"],
   ["seo", "SEO & Traffic"],
   ["conversion", "Conversion"],
+  ["reviews", "Reviews"],
   ["health", "Site Health"],
   ["campaigns", "Campaigns"],
 ] as const;
@@ -22,7 +23,7 @@ type Period = (typeof PERIODS)[number];
 type Tab = (typeof TABS)[number][0];
 type LeadState = (typeof LEAD_STATES)[number];
 type Health = "GREEN" | "AMBER" | "RED" | "UNKNOWN";
-type State = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "STALE" | "ERROR";
+type State = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "INSUFFICIENT_DATA" | "STALE" | "ERROR";
 type Metric = {
   state: State;
   status: Health;
@@ -31,6 +32,28 @@ type Metric = {
   source: string;
   reason?: string;
   lastUpdated: string | null;
+};
+type InfrastructureMachine = {
+  machineRef: string;
+  status: Health;
+  region: string;
+  cpu: Metric;
+  memory: Metric;
+  requestRate: Metric;
+  p95Latency: Metric;
+  fiveXErrorRate: Metric;
+  deployedVersion: Metric;
+  deployedSha: Metric;
+};
+type RevenueVelocity = {
+  window: "60m";
+  minimumPaidSample: 3;
+  paidSubmissionsPerHour: Metric;
+  paidCardsPerHour: Metric;
+  revenuePencePerHour: Metric;
+  comparison: Metric;
+  definition: string;
+  lastUpdated: string;
 };
 type Count = { state: "MEASURED"; value: number };
 type PartnerOperationalMetric = Count | { state: "NOT_INSTRUMENTED"; reason: string };
@@ -89,6 +112,48 @@ type LinkOptions = {
   campaigns: string[];
   contents: string[];
 };
+type CommercialMetricKey =
+  "PAID_CARDS" | "REVENUE_GBP" | "PARTNER_APPLICATIONS" | "QUALIFIED_PARTNERS" | "GENUINE_REVIEWS";
+type CommercialScoreboard = {
+  period: {
+    kind: "MONTHLY";
+    timezone: "Europe/London";
+    start: string;
+    end: string;
+    progressPercent: number;
+  };
+  targetAuthority:
+    | { state: "READY"; mutationAuthority: "SUPER_ADMIN_ONLY"; mcpMutationEnabled: false }
+    | {
+        state: "NOT_INSTRUMENTED";
+        mutationAuthority: "SUPER_ADMIN_ONLY";
+        mcpMutationEnabled: false;
+        reason: string;
+      };
+  metrics: Array<{
+    key: CommercialMetricKey;
+    label: string;
+    unit: "COUNT" | "GBP_PENCE";
+    actual: { state: "REAL"; value: number } | { state: "NOT_INSTRUMENTED"; reason: string };
+    target:
+      | { state: "SET"; value: number; authority: "SUPER_ADMIN"; lastSetAt: string }
+      | { state: "NOT_SET"; authority: "SUPER_ADMIN"; lastSetAt: string | null };
+    status: "GREEN" | "AMBER" | "RED" | "GREY";
+    statusLabel: "ON_TRACK" | "ATTENTION" | "MATERIALLY_BEHIND" | "NO_TARGET_SET" | "INSUFFICIENT_DATA";
+    actualProgressPercent: number | null;
+    expectedProgressPercent: number;
+    paceRatio: number | null;
+    explanation: string;
+  }>;
+  insights: Array<{
+    id: string;
+    kind: "ON_TRACK" | "ACTION";
+    metric: CommercialMetricKey;
+    message: string;
+  }>;
+  definition: string;
+  lastUpdated: string;
+};
 type Intelligence = {
   period: Period;
   summary: Summary;
@@ -98,9 +163,11 @@ type Intelligence = {
     checkoutStarts: Metric;
     paidSubmissions: Metric;
     paidCards: Metric;
+    revenuePence: Metric;
     partnerApplications: Metric;
     requestsPerMinute: Metric;
     requestsLastHour: Metric;
+    revenueVelocity: RevenueVelocity;
     lastUpdated: string;
   };
   siteHealth: Record<
@@ -126,6 +193,86 @@ type Intelligence = {
     thresholdModel: string;
     automaticScalingEnabled: false;
   };
+  infrastructure: {
+    overallStatus: Health;
+    control: {
+      currentMode: "MANUAL";
+      currentAuthority: "MONITOR_DETECT_RECOMMEND";
+      mutationEnabled: false;
+      automaticScalingEnabled: false;
+      futureMode: "GUARDED_AUTO_REQUIRES_SEPARATE_APPROVAL";
+      futureModeAvailable: false;
+      safetyBoundary: string;
+    };
+    fly: {
+      connection: Metric;
+      overallStatus: Health;
+      machines: InfrastructureMachine[];
+      expectedMachineFields: string[];
+    };
+    neon: {
+      availability: Metric;
+      connectionPressure: Metric;
+      latency: Metric;
+      compute: Metric;
+      storage: Metric;
+      pointInTimeRecovery: Metric;
+      mutationEnabled: false;
+    };
+    costs: {
+      period: "MONTH_TO_DATE";
+      providers: Array<{
+        provider: "Fly" | "Neon" | "R2" | "Resend";
+        state: State;
+        status: Health;
+        period: "MONTH_TO_DATE";
+        sourceCurrency: string | null;
+        amountMajor?: number;
+        reason?: string;
+        lastUpdated: string | null;
+      }>;
+      trend: Metric;
+      normalisedTotalGBP: Metric;
+      costPerPaidCardGBP: Metric;
+      costPerPaidOrderGBP: Metric;
+      currencyPolicy: string;
+    };
+    budget: {
+      state: "NOT_CONFIGURED";
+      status: "UNKNOWN";
+      monthlyBudgetPence: null;
+      automaticShutdownEnabled: false;
+      automaticSpendEnabled: false;
+      reason: string;
+    };
+    lastUpdated: string;
+  };
+  campaignReadiness: {
+    status: Health;
+    label: "READY" | "CAUTION" | "NOT_READY" | "INSUFFICIENT_TELEMETRY";
+    recommendation: string;
+    evidence: string[];
+    advisoryOnly: true;
+    definition: string;
+  };
+  incident:
+    | {
+        status: "ACTIVE";
+        severity: "RED";
+        priorityKey: string;
+        title: string;
+        detail: string;
+        recommendation: string;
+      }
+    | {
+        status: "CLEAR";
+        severity: null;
+        priorityKey: null;
+        title: string;
+        detail: string;
+        recommendation: string;
+      };
+  revenueVelocity: RevenueVelocity;
   seo: {
     searchConsole: Metric;
     impressions: Metric;
@@ -143,6 +290,7 @@ type Intelligence = {
     comparison: Metric;
     definition: string;
   };
+  scoreboard: CommercialScoreboard;
   insights: Array<{
     id: string;
     priority: "CRITICAL" | "ACTION" | "OPPORTUNITY" | "INFO";
@@ -155,9 +303,49 @@ type Intelligence = {
   generatedAt: string;
 };
 type AdminSession = { authenticated: boolean; isSuperAdmin?: boolean };
+type GrowthReviewSummary = {
+  period: Period;
+  configuration: { state: "READY" | "NOT_CONFIGURED" | "INVALID"; reason?: string };
+  eligible: number;
+  scheduled: number;
+  sent: number;
+  deliveryFailed: number;
+  deliveryUncertain: number;
+  suppressed: number;
+  cancelled: number;
+  clicked: number;
+  publicReviews: { state: "NOT_CONNECTED"; reason: string };
+  definition: string;
+  lastUpdated: string;
+};
 
-const money = (pence: number) =>
+export const formatGrowthMoneyGBP = (pence: number) =>
   new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(pence / 100);
+export function parseGbpTargetToPence(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return undefined;
+  const [wholeText, fractionText = ""] = trimmed.split(".");
+  const whole = Number(wholeText);
+  const fraction = Number(fractionText.padEnd(2, "0"));
+  const pence = whole * 100 + fraction;
+  return Number.isSafeInteger(pence) && pence > 0 && pence <= 1_000_000_000_000 ? pence : undefined;
+}
+export function parseCountTarget(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const count = Number(trimmed);
+  return Number.isSafeInteger(count) && count > 0 && count <= 1_000_000_000_000 ? count : undefined;
+}
+export function formatProviderMoney(amountMajor: number, sourceCurrency: string): string | null {
+  if (!Number.isFinite(amountMajor) || !/^[A-Z]{3}$/.test(sourceCurrency)) return null;
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency: sourceCurrency }).format(amountMajor);
+  } catch {
+    return null;
+  }
+}
 const number = (value: number) => new Intl.NumberFormat("en-GB").format(value);
 const date = (value: string | null) =>
   value && !Number.isNaN(new Date(value).getTime())
@@ -267,6 +455,229 @@ function MetricCard({ label, metric }: { label: string; metric: Metric }) {
     </div>
   );
 }
+function MoneyMetricCard({ label, metric }: { label: string; metric: Metric }) {
+  return (
+    <div className="rounded border border-[var(--admin-line,#333)] p-3">
+      <p className="text-xs uppercase text-[var(--admin-muted,#8a8a8a)]">{label}</p>
+      <p className="mt-1 font-semibold">
+        {metric.state === "REAL" && typeof metric.value === "number"
+          ? formatGrowthMoneyGBP(metric.value)
+          : metric.state.replaceAll("_", " ")}
+      </p>
+      <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">{metric.reason ?? metric.source}</p>
+    </div>
+  );
+}
+function IncidentBanner({ incident }: { incident: Intelligence["incident"] }) {
+  if (incident.status !== "ACTIVE") return null;
+  return (
+    <section
+      role="alert"
+      data-testid="growth-incident-mode"
+      className="rounded border-2 border-red-400 bg-red-950/70 p-4 shadow-[0_0_24px_rgba(248,113,113,.18)]"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="red">INCIDENT MODE · RED</Badge>
+        <h2 className="text-lg font-semibold text-red-50">{incident.title}</h2>
+      </div>
+      <p className="mt-2 text-sm text-red-100">{incident.detail}</p>
+      <p className="mt-2 text-xs font-medium uppercase text-red-200">{incident.recommendation}</p>
+    </section>
+  );
+}
+
+const commercialTargetInput = (metric: CommercialScoreboard["metrics"][number]): string => {
+  if (metric.target.state !== "SET") return "";
+  if (metric.unit === "COUNT") return String(metric.target.value);
+  const whole = Math.floor(metric.target.value / 100);
+  return `${whole}.${String(metric.target.value % 100).padStart(2, "0")}`;
+};
+
+function CommercialScoreboardPanel({
+  scoreboard,
+  selectedPeriod,
+}: {
+  scoreboard: CommercialScoreboard;
+  selectedPeriod: Period;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Record<CommercialMetricKey, string>>({
+    PAID_CARDS: "",
+    REVENUE_GBP: "",
+    PARTNER_APPLICATIONS: "",
+    QUALIFIED_PARTNERS: "",
+    GENUINE_REVIEWS: "",
+  });
+  const updateTargets = useMutation<
+    { update: { changed: boolean; changedMetrics: CommercialMetricKey[] }; scoreboard: CommercialScoreboard },
+    Error,
+    Record<CommercialMetricKey, number | null>
+  >({
+    mutationFn: async (targets) => (await apiRequest("PUT", `${BASE}/scoreboard/targets`, targets)).json(),
+    onSuccess: ({ scoreboard: next }) => {
+      queryClient.setQueryData<Intelligence>([BASE, "intelligence", selectedPeriod], (current) =>
+        current ? { ...current, scoreboard: next } : current
+      );
+      void queryClient.invalidateQueries({ queryKey: [BASE, "intelligence"] });
+      setEditing(false);
+      setError(null);
+    },
+  });
+  const beginEdit = () => {
+    setDraft(
+      Object.fromEntries(scoreboard.metrics.map((metric) => [metric.key, commercialTargetInput(metric)])) as Record<
+        CommercialMetricKey,
+        string
+      >
+    );
+    setError(null);
+    setEditing(true);
+  };
+  const submit = () => {
+    const payload = {} as Record<CommercialMetricKey, number | null>;
+    for (const metric of scoreboard.metrics) {
+      const value =
+        metric.unit === "GBP_PENCE" ? parseGbpTargetToPence(draft[metric.key]) : parseCountTarget(draft[metric.key]);
+      if (value === undefined) {
+        setError(
+          `${metric.label} must be a positive whole count${metric.unit === "GBP_PENCE" ? " or GBP amount with at most two decimal places" : ""}.`
+        );
+        return;
+      }
+      payload[metric.key] = value;
+    }
+    setError(null);
+    updateTargets.mutate(payload);
+  };
+  const month = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: scoreboard.period.timezone,
+  }).format(new Date(scoreboard.period.start));
+  return (
+    <Panel
+      title="Commercial Growth Targets"
+      sub={`${month} · ${scoreboard.period.progressPercent.toFixed(1)}% of calendar month elapsed · owner-authoritative targets`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--admin-line,#333)] p-4">
+        <div>
+          <p className="text-xs font-medium uppercase text-[var(--admin-gold-hi,#ecd585)]">Monthly scoreboard</p>
+          <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
+            Target pace compares actual progress with elapsed month progress. MCP is read-only and cannot change
+            targets.
+          </p>
+        </div>
+        {scoreboard.targetAuthority.state === "READY" ? (
+          <AdminButton
+            size="sm"
+            onClick={editing ? () => setEditing(false) : beginEdit}
+            disabled={updateTargets.isPending}
+          >
+            {editing ? "Cancel" : "Edit targets"}
+          </AdminButton>
+        ) : (
+          <Badge variant="wait">TARGET STORE NOT INSTRUMENTED</Badge>
+        )}
+      </div>
+      {scoreboard.targetAuthority.state === "NOT_INSTRUMENTED" && (
+        <p
+          role="status"
+          className="mx-4 mt-4 rounded border border-amber-400/35 bg-amber-400/10 p-3 text-sm text-amber-100"
+        >
+          {scoreboard.targetAuthority.reason}
+        </p>
+      )}
+      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5" data-testid="commercial-scoreboard">
+        {scoreboard.metrics.map((metric) => (
+          <article
+            key={metric.key}
+            className={`min-w-0 rounded border p-3 ${tone(metric.status === "GREY" ? "UNKNOWN" : metric.status)}`}
+            data-testid={`commercial-score-${metric.key.toLowerCase().replaceAll("_", "-")}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-medium uppercase">{metric.label}</p>
+              <span className="text-right text-[10px] font-semibold">{metric.statusLabel.replaceAll("_", " ")}</span>
+            </div>
+            <p className="mt-3 text-xl font-semibold">
+              {metric.actual.state === "REAL"
+                ? metric.unit === "GBP_PENCE"
+                  ? formatGrowthMoneyGBP(metric.actual.value)
+                  : number(metric.actual.value)
+                : "NOT INSTRUMENTED"}
+            </p>
+            <p className="mt-1 text-xs opacity-80">
+              Actual · target{" "}
+              {metric.target.state === "SET"
+                ? metric.unit === "GBP_PENCE"
+                  ? formatGrowthMoneyGBP(metric.target.value)
+                  : number(metric.target.value)
+                : "not set"}
+            </p>
+            {editing ? (
+              <label className="mt-3 block text-xs font-medium">
+                {metric.unit === "GBP_PENCE" ? "Target (£)" : "Target"}
+                <input
+                  inputMode={metric.unit === "GBP_PENCE" ? "decimal" : "numeric"}
+                  value={draft[metric.key]}
+                  onChange={(event) => setDraft((current) => ({ ...current, [metric.key]: event.target.value }))}
+                  placeholder="Blank clears"
+                  className="mt-1 w-full rounded border border-current/30 bg-black/25 px-2 py-1.5 text-sm text-white"
+                  aria-label={`${metric.label} monthly target`}
+                />
+              </label>
+            ) : (
+              <>
+                <div className="mt-3 h-1.5 overflow-hidden rounded bg-black/30" aria-hidden="true">
+                  <div
+                    className="h-full bg-current"
+                    style={{ width: `${Math.min(metric.actualProgressPercent ?? 0, 100)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs opacity-80">
+                  {metric.actualProgressPercent == null
+                    ? metric.explanation
+                    : `${metric.actualProgressPercent.toFixed(1)}% actual · ${metric.expectedProgressPercent.toFixed(1)}% expected`}
+                </p>
+              </>
+            )}
+          </article>
+        ))}
+      </div>
+      {editing && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--admin-line,#333)] p-4">
+          <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+            Blank clears a target by adding a revision; prior revisions remain auditable. No target is inferred.
+          </p>
+          <AdminButton size="sm" onClick={submit} disabled={updateTargets.isPending}>
+            {updateTargets.isPending ? "Saving…" : "Save monthly targets"}
+          </AdminButton>
+        </div>
+      )}
+      {(error || updateTargets.isError) && (
+        <p role="alert" className="mx-4 mb-4 rounded border border-red-400/45 bg-red-400/10 p-3 text-sm text-red-100">
+          {error ?? updateTargets.error?.message ?? "Commercial targets could not be saved."}
+        </p>
+      )}
+      {scoreboard.insights.length > 0 && !editing && (
+        <div className="border-t border-[var(--admin-line,#333)] p-4">
+          <p className="text-xs font-medium uppercase text-[var(--admin-muted,#8a8a8a)]">Scoreboard insights</p>
+          <ul className="mt-2 grid gap-2 md:grid-cols-2">
+            {scoreboard.insights.map((insight) => (
+              <li key={insight.id} className="rounded border border-[var(--admin-line,#333)] p-2 text-sm">
+                <strong>{insight.kind === "ACTION" ? "Action" : "On track"}:</strong> {insight.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="border-t border-[var(--admin-line,#333)] px-4 py-3 text-xs text-[var(--admin-muted,#8a8a8a)]">
+        {scoreboard.definition} Qualified Partners means applications currently in QUALIFIED or ONBOARDING that were
+        received this month.
+      </p>
+    </Panel>
+  );
+}
 function Value({ label, value }: { label: string; value: Count | undefined }) {
   return (
     <div>
@@ -296,7 +707,7 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={`rounded-full border px-3 py-1.5 text-xs font-medium ${active ? "border-[var(--admin-gold,#d4af37)] bg-[rgba(212,175,55,.12)] text-[var(--admin-gold-hi,#ecd585)]" : "border-[var(--admin-line,#333)] text-[var(--admin-muted,#8a8a8a)]"}`}
+      className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium ${active ? "border-[var(--admin-gold,#d4af37)] bg-[rgba(212,175,55,.12)] text-[var(--admin-gold-hi,#ecd585)]" : "border-[var(--admin-line,#333)] text-[var(--admin-muted,#8a8a8a)]"}`}
     >
       {label}
     </button>
@@ -343,11 +754,6 @@ export default function GrowthCommandPage() {
     enabled: allowed,
     refetchInterval: tab === "overview" || tab === "health" ? 30_000 : 120_000,
   });
-  const refreshCommand = () => {
-    manualRefresh.current = true;
-    setRefreshing(true);
-    void command.refetch().finally(() => setRefreshing(false));
-  };
   const leads = useQuery<{ leads: Lead[] }>({
     queryKey: [BASE, "leads"],
     queryFn: async () => {
@@ -375,6 +781,22 @@ export default function GrowthCommandPage() {
     },
     enabled: allowed && tab === "campaigns",
   });
+  const reviews = useQuery<GrowthReviewSummary>({
+    queryKey: [BASE, "reviews", period],
+    queryFn: async () => {
+      const response = await fetch(`${BASE}/reviews?period=${period}`, { credentials: "include" });
+      if (!response.ok) throw new Error();
+      return response.json() as Promise<GrowthReviewSummary>;
+    },
+    enabled: allowed && tab === "reviews",
+  });
+  const refreshCommand = () => {
+    manualRefresh.current = true;
+    setRefreshing(true);
+    const requests: Array<Promise<unknown>> = [command.refetch()];
+    if (tab === "reviews") requests.push(reviews.refetch());
+    void Promise.all(requests).finally(() => setRefreshing(false));
+  };
   const statusChange = useMutation<{ changed: boolean; status: LeadState }, Error, { id: string; status: LeadState }>({
     mutationFn: async (input) =>
       (await apiRequest("POST", `${BASE}/leads/${input.id}/status`, { status: input.status })).json(),
@@ -416,7 +838,7 @@ export default function GrowthCommandPage() {
         <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-sm text-[var(--admin-muted,#8a8a8a)]">
-              Revenue, paid cards, Partner leads, site evidence and controlled campaigns.
+              Revenue, paid cards, Partner leads, genuine review lifecycle, site evidence and controlled campaigns.
             </p>
             <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
               No request count is called a visitor. Provider absence is never shown as healthy.
@@ -441,14 +863,19 @@ export default function GrowthCommandPage() {
             <AdminButton
               size="sm"
               onClick={refreshCommand}
-              disabled={command.isFetching || refreshing}
+              disabled={command.isFetching || reviews.isFetching || refreshing}
               data-testid="growth-refresh"
             >
-              <RefreshCw size={14} /> {command.isFetching || refreshing ? "Refreshing" : "Refresh"}
+              <RefreshCw size={14} />{" "}
+              {command.isFetching || reviews.isFetching || refreshing ? "Refreshing" : "Refresh"}
             </AdminButton>
           </div>
         </header>
-        <nav aria-label="Growth Command sections" className="flex gap-2 overflow-x-auto pb-1" data-testid="growth-tabs">
+        <nav
+          aria-label="Growth Command sections"
+          className="flex flex-wrap gap-2 pb-1 sm:flex-nowrap sm:overflow-x-auto"
+          data-testid="growth-tabs"
+        >
           {TABS.map(([key, label]) => (
             <TabButton key={key} active={tab === key} label={label} onClick={() => selectTab(key)} />
           ))}
@@ -463,8 +890,10 @@ export default function GrowthCommandPage() {
               Last updated: {date(data.generatedAt)} ·{" "}
               {data.freshness === "STALE" ? "STALE — last known valid snapshot" : "CURRENT"}
             </p>
+            <IncidentBanner incident={data.incident} />
             {tab === "overview" && (
               <section className="space-y-4">
+                <CommercialScoreboardPanel scoreboard={data.scoreboard} selectedPeriod={period} />
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                   <StatCard
                     label="Paid cards"
@@ -473,9 +902,9 @@ export default function GrowthCommandPage() {
                     testId="growth-paid-cards"
                   />
                   <StatCard
-                    label="Grading revenue"
-                    value={money(summary.paid.revenuePence.value)}
-                    foot="Actual Stripe amount"
+                    label="Grading revenue (GBP)"
+                    value={formatGrowthMoneyGBP(summary.paid.revenuePence.value)}
+                    foot="Verified GBP Stripe amount"
                     testId="growth-revenue"
                   />
                   <StatCard
@@ -502,11 +931,12 @@ export default function GrowthCommandPage() {
                     title="Live Pulse"
                     sub="Recent persisted business activity; fleet request telemetry needs a secure provider adapter."
                   >
-                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
                       <MetricCard label="Submission records" metric={data.livePulse.submissionStarts} />
                       <MetricCard label="Checkout starts" metric={data.livePulse.checkoutStarts} />
                       <MetricCard label="Paid submissions" metric={data.livePulse.paidSubmissions} />
                       <MetricCard label="Paid cards" metric={data.livePulse.paidCards} />
+                      <MoneyMetricCard label="Revenue · last 60m (GBP)" metric={data.livePulse.revenuePence} />
                       <MetricCard label="Partner applications" metric={data.livePulse.partnerApplications} />
                       <MetricCard label="Requests / min" metric={data.livePulse.requestsPerMinute} />
                     </div>
@@ -529,6 +959,49 @@ export default function GrowthCommandPage() {
                       />
                       <p className="text-sm">
                         Recommendation: <strong>{data.capacity.recommendation.replaceAll("_", " ")}</strong>
+                      </p>
+                    </div>
+                  </Panel>
+                </div>
+                <div className="grid gap-4 xl:grid-cols-3">
+                  <Panel title="Campaign readiness" sub="Deterministic and advisory only; it never changes a campaign.">
+                    <div className="space-y-3 p-4">
+                      <Gauge
+                        label="Readiness"
+                        metric={{
+                          state: data.campaignReadiness.status === "UNKNOWN" ? "INSUFFICIENT_DATA" : "REAL",
+                          status: data.campaignReadiness.status,
+                          value: data.campaignReadiness.label.replaceAll("_", " "),
+                          source: data.campaignReadiness.definition,
+                          reason: data.campaignReadiness.evidence.join(" "),
+                          lastUpdated: data.generatedAt,
+                        }}
+                      />
+                      <p className="text-sm">{data.campaignReadiness.recommendation}</p>
+                    </div>
+                  </Panel>
+                  <Panel
+                    title="Revenue velocity"
+                    sub="Exact rolling hour, not a forecast or tiny-sample extrapolation."
+                  >
+                    <div className="grid gap-3 p-4 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+                      <MetricCard
+                        label="Paid submissions / hour"
+                        metric={data.revenueVelocity.paidSubmissionsPerHour}
+                      />
+                      <MetricCard label="Paid cards / hour" metric={data.revenueVelocity.paidCardsPerHour} />
+                      <MoneyMetricCard label="Revenue / hour (GBP)" metric={data.revenueVelocity.revenuePencePerHour} />
+                    </div>
+                  </Panel>
+                  <Panel title="Infrastructure control" sub="Current authority is monitor, detect and recommend.">
+                    <div className="space-y-3 p-4">
+                      <div className={`rounded border p-3 ${tone(data.infrastructure.overallStatus)}`}>
+                        <p className="text-xs font-medium uppercase">Mode</p>
+                        <p className="mt-2 text-xl font-semibold">{data.infrastructure.control.currentMode}</p>
+                        <p className="mt-2 text-xs opacity-80">No provider mutation · no automatic spend</p>
+                      </div>
+                      <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+                        Guarded auto is a future design requiring separate approval; it is unavailable now.
                       </p>
                     </div>
                   </Panel>
@@ -587,6 +1060,73 @@ export default function GrowthCommandPage() {
                 <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">{data.conversion.definition}</p>
               </Panel>
             )}
+            {tab === "reviews" && (
+              <section className="space-y-4" data-testid="growth-reviews">
+                {reviews.isError ? (
+                  <Retry message="Review reporting could not be loaded." retry={() => void reviews.refetch()} />
+                ) : !reviews.data ? (
+                  <Empty>Loading aggregate review lifecycle…</Empty>
+                ) : (
+                  <>
+                    <Panel
+                      title="Reviews & Reputation"
+                      sub="Neutral requests after genuine delivered completion. Grade, sentiment and marketing consent are never eligibility inputs."
+                    >
+                      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                        <StatCard label="Eligible" value={number(reviews.data.eligible)} foot="Delivered completion" />
+                        <StatCard label="Scheduled" value={number(reviews.data.scheduled)} foot="Durable outbox" />
+                        <StatCard label="Sent" value={number(reviews.data.sent)} foot="Provider accepted" />
+                        <StatCard label="Clicked" value={number(reviews.data.clicked)} foot="Request link only" />
+                        <StatCard
+                          label="Failed"
+                          value={number(reviews.data.deliveryFailed)}
+                          foot="Bounded retry lifecycle"
+                        />
+                        <StatCard
+                          label="Uncertain"
+                          value={number(reviews.data.deliveryUncertain)}
+                          foot="No invented delivery state"
+                        />
+                        <StatCard
+                          label="Suppressed"
+                          value={number(reviews.data.suppressed)}
+                          foot="Customer/admin preference"
+                        />
+                        <StatCard
+                          label="Cancelled"
+                          value={number(reviews.data.cancelled)}
+                          foot="Eligibility withdrawn"
+                        />
+                      </div>
+                    </Panel>
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <Panel title="Request delivery" sub="Activation is server-owned and fail-closed.">
+                        <div className="p-4">
+                          <Badge variant={reviews.data.configuration.state === "READY" ? "prog" : "wait"}>
+                            {reviews.data.configuration.state.replaceAll("_", " ")}
+                          </Badge>
+                          <p className="mt-3 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">
+                            {reviews.data.configuration.reason ??
+                              "Approved HTTPS destination, verified MintVault sender and token authority are configured."}
+                          </p>
+                        </div>
+                      </Panel>
+                      <Panel title="Public reputation authority" sub="No rating or public-review count is inferred.">
+                        <div className="p-4">
+                          <Badge variant="neu">{reviews.data.publicReviews.state.replaceAll("_", " ")}</Badge>
+                          <p className="mt-3 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">
+                            {reviews.data.publicReviews.reason}
+                          </p>
+                        </div>
+                      </Panel>
+                    </div>
+                    <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      {reviews.data.definition} · Updated {date(reviews.data.lastUpdated)}
+                    </p>
+                  </>
+                )}
+              </section>
+            )}
             {tab === "health" && (
               <section className="space-y-4">
                 <Panel
@@ -628,8 +1168,110 @@ export default function GrowthCommandPage() {
                     <p className="mt-3 text-sm">
                       Recommended next action: <strong>{data.capacity.recommendation.replaceAll("_", " ")}</strong>
                     </p>
+                    <p className="mt-2 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      Automatic scaling: DISABLED · Infrastructure mutation: UNAVAILABLE
+                    </p>
                   </div>
                 </Panel>
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <Panel
+                    title="Fly machine intelligence"
+                    sub="Machine detail appears only from an approved least-privilege server authority."
+                  >
+                    <div className="p-4">
+                      <Gauge label="Fly connection" metric={data.infrastructure.fly.connection} />
+                      {data.infrastructure.fly.machines.length === 0 ? (
+                        <p className="mt-3 text-sm text-[var(--admin-muted,#8a8a8a)]">
+                          No machine rows are shown because Fly telemetry is not connected. No machine count, health,
+                          version or SHA is inferred.
+                        </p>
+                      ) : (
+                        <div className="mt-3 grid gap-3">
+                          {data.infrastructure.fly.machines.map((machine) => (
+                            <article key={machine.machineRef} className={`rounded border p-3 ${tone(machine.status)}`}>
+                              <div className="flex flex-wrap justify-between gap-2">
+                                <strong>{machine.machineRef}</strong>
+                                <span>
+                                  {machine.region} · {machine.status}
+                                </span>
+                              </div>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                <MetricCard label="CPU" metric={machine.cpu} />
+                                <MetricCard label="RAM" metric={machine.memory} />
+                                <MetricCard label="Request rate" metric={machine.requestRate} />
+                                <MetricCard label="P95 latency" metric={machine.p95Latency} />
+                                <MetricCard label="5XX error rate" metric={machine.fiveXErrorRate} />
+                                <MetricCard label="Deployed version" metric={machine.deployedVersion} />
+                                <MetricCard label="Deployed SHA" metric={machine.deployedSha} />
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Panel>
+                  <Panel
+                    title="Neon database intelligence"
+                    sub="Availability is distinct from provider pressure and cost."
+                  >
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                      <Gauge label="Availability" metric={data.infrastructure.neon.availability} />
+                      <MetricCard label="Connection pressure" metric={data.infrastructure.neon.connectionPressure} />
+                      <MetricCard label="Latency" metric={data.infrastructure.neon.latency} />
+                      <MetricCard label="Compute" metric={data.infrastructure.neon.compute} />
+                      <MetricCard label="Storage" metric={data.infrastructure.neon.storage} />
+                      <MetricCard
+                        label="Point-in-time recovery"
+                        metric={data.infrastructure.neon.pointInTimeRecovery}
+                      />
+                    </div>
+                    <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      Neon mutation: UNAVAILABLE · Monitor and recommend only
+                    </p>
+                  </Panel>
+                </div>
+                <div className="grid gap-4 xl:grid-cols-[1.4fr_.6fr]">
+                  <Panel title="Infrastructure cost" sub="Month-to-date provider authority; estimates are forbidden.">
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                      {data.infrastructure.costs.providers.map((cost) => (
+                        <div key={cost.provider} className={`rounded border p-3 ${tone(cost.status)}`}>
+                          <p className="text-xs font-medium uppercase">{cost.provider} · MTD</p>
+                          <p className="mt-2 text-lg font-semibold">
+                            {cost.state === "REAL" && typeof cost.amountMajor === "number" && cost.sourceCurrency
+                              ? (formatProviderMoney(cost.amountMajor, cost.sourceCurrency) ?? "INVALID CURRENCY")
+                              : cost.state.replaceAll("_", " ")}
+                          </p>
+                          <p className="mt-2 text-xs opacity-80">{cost.reason ?? "Authoritative provider billing"}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid gap-3 border-t border-[var(--admin-line,#333)] p-4 sm:grid-cols-3">
+                      <MetricCard label="GBP-normalised total" metric={data.infrastructure.costs.normalisedTotalGBP} />
+                      <MetricCard label="Cost / paid card" metric={data.infrastructure.costs.costPerPaidCardGBP} />
+                      <MetricCard label="Cost / paid order" metric={data.infrastructure.costs.costPerPaidOrderGBP} />
+                    </div>
+                    <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                      {data.infrastructure.costs.currencyPolicy}
+                    </p>
+                  </Panel>
+                  <Panel title="Monthly budget guardrail" sub="Owner-defined future boundary; no automatic shutdown.">
+                    <div className="p-4">
+                      <Gauge
+                        label="Budget"
+                        metric={{
+                          state: "NOT_INSTRUMENTED",
+                          status: data.infrastructure.budget.status,
+                          source: "Owner-approved infrastructure budget",
+                          reason: data.infrastructure.budget.reason,
+                          lastUpdated: null,
+                        }}
+                      />
+                      <p className="mt-3 text-xs text-[var(--admin-muted,#8a8a8a)]">
+                        Automatic shutdown: DISABLED · Automatic spend: DISABLED
+                      </p>
+                    </div>
+                  </Panel>
+                </div>
               </section>
             )}
             {tab === "partners" && (
@@ -800,15 +1442,17 @@ export default function GrowthCommandPage() {
                         )}
                         {selected.status === "ONBOARDING" && (
                           <div className="rounded border border-amber-400/35 bg-amber-400/5 p-3">
-                            <p className="font-medium">Ready for manual Partner Management handoff</p>
+                            <p className="font-medium">Ready for manual Partner Management review</p>
                             <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                              No tenant, user, location, station, credit or approval has been created.
+                              {
+                                "No selected-lead context is transferred. No tenant, user, location, station, credit or approval has been created."
+                              }
                             </p>
                             <Link
                               className={`${adminButtonClass({ size: "sm", variant: "gold", className: "mt-2 inline-flex" })}`}
-                              href={`/admin/partners/settings?growthLead=${encodeURIComponent(selected.id)}`}
+                              href="/admin/partners/settings"
                             >
-                              Open Partner Management <ArrowUpRight size={14} />
+                              Open Partner Management settings <ArrowUpRight size={14} />
                             </Link>
                           </div>
                         )}
@@ -1002,7 +1646,7 @@ function PerformancePanel({ title, rows }: { title: string; rows: Performance[] 
                   <td className="p-3">{row.category.replaceAll("_", " ")}</td>
                   <td className="p-3">{number(row.paidSubmissions)}</td>
                   <td className="p-3">{number(row.paidCards)}</td>
-                  <td className="p-3">{money(row.revenuePence)}</td>
+                  <td className="p-3">{formatGrowthMoneyGBP(row.revenuePence)}</td>
                   <td className="p-3">{number(row.partnerApplications)}</td>
                 </tr>
               ))}
@@ -1036,7 +1680,7 @@ function CampaignPanel({ title, rows }: { title: string; rows: Campaign[] }) {
                   <td className="p-3">{row.campaign}</td>
                   <td className="p-3">{row.category.replaceAll("_", " ")}</td>
                   <td className="p-3">{number(row.paidSubmissions)}</td>
-                  <td className="p-3">{money(row.revenuePence)}</td>
+                  <td className="p-3">{formatGrowthMoneyGBP(row.revenuePence)}</td>
                   <td className="p-3">{number(row.partnerApplications)}</td>
                 </tr>
               ))}

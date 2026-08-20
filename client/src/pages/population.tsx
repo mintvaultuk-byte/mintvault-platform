@@ -21,8 +21,15 @@ interface PopRow {
 }
 
 interface PopulationResponse {
+  authority: {
+    state: "PUBLISHED" | "INSUFFICIENT_DATA";
+    minimumGlobalSample: number;
+    minimumGroupSample: number;
+    source: string;
+    asOf: string;
+  };
   counters: {
-    total_graded: number;
+    total_graded: number | null;
     unique_cards: number;
     unique_sets: number;
     claimed_count: number;
@@ -90,6 +97,13 @@ export default function PopulationPage() {
       // Backwards compat: old API returned a plain array
       if (Array.isArray(json)) {
         return {
+          authority: {
+            state: "INSUFFICIENT_DATA",
+            minimumGlobalSample: 20,
+            minimumGroupSample: 5,
+            source: "Legacy population response",
+            asOf: new Date(0).toISOString(),
+          },
           counters: { total_graded: 0, unique_cards: 0, unique_sets: 0, claimed_count: 0, avg_grade: 0 },
           recent: [],
           population: json,
@@ -119,7 +133,7 @@ export default function PopulationPage() {
     <>
       <SeoHead
         title="Population Report | MintVault"
-        description="Browse every card graded by MintVault. View grade distributions, scarcity data, and individual certificates."
+        description="Explore privacy-safe MintVault grade distributions for approved active certificates, with small card groups withheld."
         canonical="/population"
       />
 
@@ -129,7 +143,7 @@ export default function PopulationPage() {
           <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-3">Public Registry</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] tracking-tight mb-4">Population Report</h1>
           <p className="text-base text-[#555555] max-w-2xl mx-auto">
-            Browse every card graded by MintVault. Tap any certificate to see its full ownership logbook.
+            Explore approved MintVault grading aggregates. Small groups are withheld so the report stays useful and privacy-safe.
           </p>
 
           {/* Stats hidden until meaningful volume — restore when CARDS_GRADED >= 1000 */}
@@ -252,10 +266,11 @@ export default function PopulationPage() {
             </div>
             <ul className="space-y-2">
               {[
-                "Total graded count for each card across all grade levels",
+                "Only active certificates with approved numeric grades are counted",
                 "Grade distribution shows scarcity at each tier — useful for pricing",
                 "P10 = Pristine 10P: all four sub-scores are 10 (quad-10)",
-                "Updated in real time as new cards are graded and certified",
+                "At least 20 approved certificates are required globally and five per displayed card group",
+                "The report refreshes from MintVault's registry and shows when the current snapshot was produced",
                 "Click 'View certs' to see individual certificates for that card",
               ].map((item, i) => (
                 <li key={i} className="flex items-start gap-2">
@@ -264,6 +279,11 @@ export default function PopulationPage() {
                 </li>
               ))}
             </ul>
+            {data?.authority && (
+              <p className="mt-4 border-t border-[#E8E4DC] pt-3 text-xs text-[#888888]">
+                Source: {data.authority.source}. Snapshot: {new Date(data.authority.asOf).toLocaleString("en-GB")}.
+              </p>
+            )}
           </div>
 
           {/* Results */}
@@ -280,7 +300,9 @@ export default function PopulationPage() {
 
           {!isLoading && !isError && population.length === 0 && (
             <p className="text-center text-[#888888] text-sm py-10">
-              No graded cards match your filters yet. Try a broader search or check back as more cards are graded.
+              {data?.authority.state === "INSUFFICIENT_DATA"
+                ? "INSUFFICIENT DATA — aggregate population figures publish once the minimum approved sample is reached."
+                : "No card group meeting the five-certificate publication threshold matches these filters."}
             </p>
           )}
 

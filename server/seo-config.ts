@@ -21,6 +21,7 @@ export interface SeoMeta {
   canonical: string;
   ogImage?: string;
   noindex?: boolean;
+  structuredData?: Array<Record<string, unknown>>;
 }
 
 export interface SitemapEntry {
@@ -139,6 +140,23 @@ const SEO_MAP: Record<string, SeoMeta> = {
     title: "Population Report | MintVault UK",
     description: "Explore MintVault's population data — see how many cards of each set and grade have been submitted and certified.",
     canonical: `${BASE}/population`,
+    structuredData: [
+      {
+        "@type": "Dataset",
+        name: "MintVault Population Report",
+        description:
+          "Privacy-safe aggregate grade distributions for active MintVault certificates with approved numeric grades.",
+        url: `${BASE}/population`,
+        creator: { "@type": "Organization", name: "MintVault UK", url: BASE },
+        isAccessibleForFree: true,
+        measurementTechnique: "Counts of active certificates after grade approval, with small groups suppressed.",
+        distribution: {
+          "@type": "DataDownload",
+          encodingFormat: "application/json",
+          contentUrl: `${BASE}/api/population`,
+        },
+      },
+    ],
   },
   "/api-docs": {
     title: "Public Verification API | MintVault UK",

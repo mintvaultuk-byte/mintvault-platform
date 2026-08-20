@@ -1,0 +1,10 @@
+{
+  "program": "growth-completion-night-20260819",
+  "governanceVersion": "1.2",
+  "capturedAt": "2026-08-19T20:27:58Z",
+  "hashMethod": "sha256 of concatenated sha256 lines for AGENTS.md, CLAUDE.md, both controllers, controlled-code-lead SKILL.md, governance version/changelog and protected-systems.md",
+  "hash": "a87b4b87340c986446937dce6ec4d37cd5471ff182d08569e1075b9746139ce4",
+  "engineeringOsCli": "1.0.13",
+  "engineeringOsEnrolledOnCurrentMain": true,
+  "graphify": "0.9.39"
+}
