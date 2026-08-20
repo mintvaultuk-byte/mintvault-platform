@@ -244,22 +244,39 @@ export function deriveCapacityStatus(
       "Requires fleet-wide CPU, memory, p95, 5xx and machine-health telemetry with server-configured sustained-window thresholds. Request rate is contextual only.",
     automaticScalingEnabled: false as const,
   };
-  if (
-    !telemetry ||
-    !thresholds ||
-    telemetry.cpuPercent == null ||
-    telemetry.memoryPercent == null ||
-    telemetry.p95Ms == null ||
-    telemetry.fiveXRate == null ||
-    telemetry.healthyMachines == null ||
-    telemetry.expectedMachines == null
-  ) {
+  if (!telemetry || !thresholds || telemetry.healthyMachines == null || telemetry.expectedMachines == null) {
     return {
       ...common,
       status: "UNKNOWN",
       label: "INSUFFICIENT_TELEMETRY",
       recommendation: "TELEMETRY_INCOMPLETE",
       evidence: ["Fleet-wide Fly telemetry is not connected. Request rate alone never sets capacity state."],
+    };
+  }
+
+  const machinesDegraded = telemetry.healthyMachines < telemetry.expectedMachines;
+  if (machinesDegraded) {
+    return {
+      ...common,
+      status: "RED",
+      label: "CAPACITY_OR_SERVICE_PRESSURE",
+      recommendation: "RESTORE_EXPECTED_FLEET",
+      evidence: ["Healthy Fly machines are below the expected fleet count."],
+    };
+  }
+
+  if (
+    telemetry.cpuPercent == null ||
+    telemetry.memoryPercent == null ||
+    telemetry.p95Ms == null ||
+    telemetry.fiveXRate == null
+  ) {
+    return {
+      ...common,
+      status: "UNKNOWN",
+      label: "INSUFFICIENT_TELEMETRY",
+      recommendation: "TELEMETRY_INCOMPLETE",
+      evidence: ["Fleet-wide Fly performance telemetry is incomplete. Request rate alone never sets capacity state."],
     };
   }
 
@@ -271,7 +288,6 @@ export function deriveCapacityStatus(
     telemetry.requestCount != null &&
     telemetry.requestCount >= thresholds.minimumErrorRateRequests &&
     telemetry.fiveXRate >= thresholds.fiveXCriticalRate;
-  const machinesDegraded = telemetry.healthyMachines < telemetry.expectedMachines;
   const cpuCritical = telemetry.cpuPercent >= thresholds.cpuCriticalPercent;
   const memoryCritical = telemetry.memoryPercent >= thresholds.memoryCriticalPercent;
   const latencyCritical = telemetry.p95Ms >= thresholds.p95CriticalMs;
@@ -297,18 +313,13 @@ export function deriveCapacityStatus(
       evidence: ["Authoritative database pressure telemetry is red."],
     };
   }
-  if (machinesDegraded || (cpuCritical && latencyCritical) || (memoryCritical && latencyCritical)) {
+  if ((cpuCritical && latencyCritical) || (memoryCritical && latencyCritical)) {
     return {
       ...common,
       status: "RED",
       label: "CAPACITY_OR_SERVICE_PRESSURE",
-      recommendation: machinesDegraded
-        ? "RESTORE_EXPECTED_FLEET"
-        : memoryCritical
-          ? "CONSIDER_MORE_MEMORY"
-          : "CONSIDER_ADDITIONAL_FLY_CAPACITY",
+      recommendation: memoryCritical ? "CONSIDER_MORE_MEMORY" : "CONSIDER_ADDITIONAL_FLY_CAPACITY",
       evidence: [
-        ...(machinesDegraded ? ["Healthy Fly machines are below the expected fleet count."] : []),
         ...(cpuCritical ? ["CPU is above the configured critical threshold."] : []),
         ...(memoryCritical ? ["Memory is above the configured critical threshold."] : []),
         ...(latencyCritical ? ["p95 latency is above the configured critical threshold."] : []),

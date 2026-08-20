@@ -46,3 +46,11 @@
 - Full CI-equivalent: 395 files / 6,381 passed / 2 intentional skips / 0 failed on clean disposable PostgreSQL services at 55432/55433.
 - Typecheck, lint and production build: passed. Changed files: Prettier-clean. Repository-wide format gate: pre-existing unrelated baseline failure.
 - Runtime/provider mutations: none. No token created; no production secret changed; no deployment performed.
+
+## Independent hostile-review repair
+
+- Reviewed candidate `d6fe0e628172a423ef36a8e9a443e9613f3ee788`: 0 BLOCKER, 0 HIGH, 1 MEDIUM.
+- Root cause: capacity completeness was evaluated before the protected two-machine floor, so a wholly absent machine yielded UNKNOWN capacity even though authoritative machine health was RED `1/2`.
+- Correction: evaluate and enforce the approved fleet floor before requiring complete per-machine performance series; do not weaken any threshold or telemetry requirement.
+- Exact focused regression covers an absent machine plus incomplete p95 and requires RED / `RESTORE_EXPECTED_FLEET`.
+- New candidate SHA and independent re-review remain pending.

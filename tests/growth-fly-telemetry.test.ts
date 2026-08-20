@@ -19,6 +19,7 @@ const MACHINE_B = "83d479c745d0d8";
 type RequestRecord = { url: URL; init?: RequestInit };
 type FixtureOptions = {
   machineBState?: string;
+  omitMachineB?: boolean;
   omitP95ForMachineB?: boolean;
   fiveX?: Array<[string, number]>;
 };
@@ -42,32 +43,36 @@ function fixtures(options: FixtureOptions = {}) {
     const url = new URL(String(input));
     requests.push({ url, init });
     if (url.hostname === "api.machines.dev") {
-      return Response.json([
-        {
-          id: MACHINE_A,
-          state: "started",
-          region: "lhr",
-          image_ref: {
-            registry: "registry.fly.io",
-            repository: "mintvault",
-            tag: "deployment-01M0FVMKY1KSZMWDN6WHDD3185",
-            digest: "sha256:must-never-be-exposed",
+      return Response.json(
+        [
+          {
+            id: MACHINE_A,
+            state: "started",
+            region: "lhr",
+            image_ref: {
+              registry: "registry.fly.io",
+              repository: "mintvault",
+              tag: "deployment-01M0FVMKY1KSZMWDN6WHDD3185",
+              digest: "sha256:must-never-be-exposed",
+            },
+            checks: [{ status: "passing", output: "must never be exposed" }],
           },
-          checks: [{ status: "passing", output: "must never be exposed" }],
-        },
-        {
-          id: MACHINE_B,
-          state: options.machineBState ?? "started",
-          region: "lhr",
-          image_ref: {
-            registry: "registry.fly.io",
-            repository: "mintvault",
-            tag: "deployment-01M0FVMKY1KSZMWDN6WHDD3185",
-            digest: "sha256:must-never-be-exposed",
-          },
-          checks: [{ status: "passing", output: "must never be exposed" }],
-        },
-      ]);
+          options.omitMachineB
+            ? null
+            : {
+                id: MACHINE_B,
+                state: options.machineBState ?? "started",
+                region: "lhr",
+                image_ref: {
+                  registry: "registry.fly.io",
+                  repository: "mintvault",
+                  tag: "deployment-01M0FVMKY1KSZMWDN6WHDD3185",
+                  digest: "sha256:must-never-be-exposed",
+                },
+                checks: [{ status: "passing", output: "must never be exposed" }],
+              },
+        ].filter((machine) => machine !== null)
+      );
     }
     const query = url.searchParams.get("query") ?? "";
     if (query.includes("fly_instance_cpu"))
@@ -202,6 +207,24 @@ describe("Fly read-only Growth telemetry", () => {
     const snapshot = await getFlyTelemetrySnapshot({ fetcher, env: env(), force: true });
     expect(snapshot.metrics.machineHealth).toMatchObject({ state: "REAL", status: "RED", value: "1/2 healthy" });
     expect(deriveCapacityStatus(snapshot.fleet, FLY_CAPACITY_THRESHOLDS)).toMatchObject({
+      status: "RED",
+      recommendation: "RESTORE_EXPECTED_FLEET",
+    });
+
+    resetFlyTelemetryCacheForTests();
+    const missingMachine = fixtures({ omitMachineB: true });
+    const missingSnapshot = await getFlyTelemetrySnapshot({
+      fetcher: missingMachine.fetcher,
+      env: env(),
+      force: true,
+    });
+    expect(missingSnapshot.metrics.machineHealth).toMatchObject({
+      state: "REAL",
+      status: "RED",
+      value: "1/2 healthy",
+    });
+    expect(missingSnapshot.fleet?.p95Ms).toBeUndefined();
+    expect(deriveCapacityStatus(missingSnapshot.fleet, FLY_CAPACITY_THRESHOLDS)).toMatchObject({
       status: "RED",
       recommendation: "RESTORE_EXPECTED_FLEET",
     });
