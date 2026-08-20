@@ -40,6 +40,7 @@ import {
   buildCertImagesPayload,
   GradeDraftRejected,
   stripGraderPii,
+  type WorkingEvidenceStatus,
 } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { auditInOwnTxn } from "./audit";
@@ -69,6 +70,11 @@ import {
   type PartnerCertLineage,
 } from "./card-job-grading-bridge";
 import { CardJobTransitionError } from "./card-job-lifecycle";
+import {
+  buildPartnerWorkingEvidencePayloads,
+  hasAdmittedPartnerWorkingEvidence,
+  loadPartnerWorkingEvidenceRows,
+} from "./working-evidence-admission";
 
 /**
  * Lease failures mapped to statuses a workstation can act on.
@@ -731,12 +737,14 @@ async function partnerImageFallback(auth: PartnerCertAuth): Promise<Record<strin
 }
 
 async function imagesForPartnerCert(auth: PartnerCertAuth) {
-  const payload = (await buildCertImagesPayload(auth.certId)) ?? { urls: {}, quality: {} };
+  const payload = (await buildCertImagesPayload(auth.certId)) ?? { urls: {}, quality: {}, workingEvidence: undefined };
+  const partnerWorking = await buildPartnerWorkingEvidencePayloads([auth.certId], auth.tenantId);
+  const admittedWorking = partnerWorking.get(auth.certId);
   const fallback = await partnerImageFallback(auth);
   // Intake photos can help an operator prepare a target, but may never replace
   // accepted scanner derivatives. Those are bound to a certificate/session/
   // station in the immutable evidence ledger.
-  const urls = { ...payload.urls } as Record<string, string | null>;
+  const urls = { ...payload.urls, ...(admittedWorking?.urls ?? {}) } as Record<string, string | null>;
   for (const side of ["front", "back"] as const) {
     const hasCapturedImage = Boolean(urls[`${side}_display`] || urls[`${side}_original`] || urls[`${side}_working`]);
     if (!hasCapturedImage && fallback[`${side}_original`]) {
@@ -747,7 +755,75 @@ async function imagesForPartnerCert(auth: PartnerCertAuth) {
   return {
     urls,
     quality: payload.quality ?? {},
+    // The Partner adapter must preserve the same server admission verdict consumed by the canonical
+    // workstation. Dropping it makes valid Canon evidence look unavailable, while recreating it in
+    // the browser would create a second evidence authority.
+    workingEvidence: admittedWorking?.workingEvidence ?? payload.workingEvidence,
   };
+}
+
+type PartnerQueueEvidenceSide = {
+  state: WorkingEvidenceStatus["state"];
+  label: string;
+  thumbnailUrl: string | null;
+  reason: string | null;
+  recovery: string | null;
+};
+
+export type PartnerQueueEvidence = {
+  front: PartnerQueueEvidenceSide;
+  back: PartnerQueueEvidenceSide;
+  workflow: "READY_TO_GRADE" | "IN_GRADING" | "INCOMPLETE_EVIDENCE" | "EVIDENCE_ERROR" | "AWAITING_CAPTURE_ACCEPTANCE";
+};
+
+/**
+ * The queue and the workstation share the exact ledger admission verdict. `thumbnailUrl` is a
+ * deliberately small presentation use of the same admitted working evidence; it is never a
+ * substitute grading source and is null unless that side is admitted.
+ */
+export function projectPartnerQueueEvidence(input: {
+  workingEvidence: Record<"front" | "back", WorkingEvidenceStatus>;
+  urls: Record<string, string | null>;
+  cardJobStatus: string | null;
+  gradingStatus: string;
+}): PartnerQueueEvidence {
+  const side = (
+    name: "FRONT" | "BACK",
+    status: WorkingEvidenceStatus,
+    url: string | null
+  ): PartnerQueueEvidenceSide => {
+    const label =
+      status.state === "admitted"
+        ? `${name} ✓`
+        : status.state === "missing"
+          ? `${name} MISSING`
+          : status.state === "invalid"
+            ? `${name} INVALID`
+            : `${name} UNAVAILABLE`;
+    return {
+      state: status.state,
+      label,
+      // A stale URL is never enough. The explicit canonical admission verdict is
+      // the only authority that can permit even a queue thumbnail.
+      thumbnailUrl: status.state === "admitted" && status.available ? url : null,
+      reason: status.reason,
+      recovery: status.recovery,
+    };
+  };
+
+  const front = side("FRONT", input.workingEvidence.front, input.urls.front_working ?? null);
+  const back = side("BACK", input.workingEvidence.back, input.urls.back_working ?? null);
+  const statuses = [front.state, back.state];
+  const workflow = statuses.includes("missing")
+    ? "INCOMPLETE_EVIDENCE"
+    : statuses.some((state) => state !== "admitted")
+      ? "EVIDENCE_ERROR"
+      : input.cardJobStatus === "GRADING" || input.gradingStatus === "pending_review"
+        ? "IN_GRADING"
+        : input.cardJobStatus !== null && input.cardJobStatus !== "READY_TO_GRADE"
+          ? "AWAITING_CAPTURE_ACCEPTANCE"
+          : "READY_TO_GRADE";
+  return { front, back, workflow };
 }
 
 async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
@@ -778,6 +854,26 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
   );
   const captured = new Set(rows.map((row) => row.side));
   return captured.has("front") && captured.has("back");
+}
+
+/**
+ * The physical Scanner/session proof and the full-resolution working-raster
+ * contract are one gate for Partner grading. This also protects connector
+ * lineage, which intentionally has no Card Job lease to provide that check.
+ */
+async function hasAdmittedPartnerGradingEvidence(auth: PartnerCertAuth): Promise<boolean> {
+  const rows = await withPartnerAdminTransaction((client) =>
+    loadPartnerWorkingEvidenceRows(client, [auth.certId], auth.tenantId)
+  );
+  return hasAdmittedPartnerWorkingEvidence(rows, auth.certId);
+}
+
+function fullResolutionEvidenceUnavailable(res: Response): Response {
+  return res.status(409).json({
+    code: "FULL_RESOLUTION_EVIDENCE_UNAVAILABLE",
+    error:
+      "FULL-RESOLUTION EVIDENCE UNAVAILABLE. Restore both verified Canon 1200-DPI working sides from their approved station captures before grading.",
+  });
 }
 
 export function partnerGradingRouter(): Router {
@@ -902,36 +998,6 @@ export function partnerGradingRouter(): Router {
       if (!principal.orgWide && !principal.locationId) return res.json({ items: [] });
       const scopedLocationId = principal.orgWide ? null : principal.locationId;
 
-      /*
-       * READY TO GRADE IS A PHYSICAL-CAPTURE STATE, not merely a lifecycle/assignment state.
-       *
-       * Each side must be the CURRENT immutable TIFF master accepted by a terminal capture session on
-       * an ACTIVE station in this exact Partner location. Asserted in SQL on BOTH lineages rather than
-       * trusted from a browser transition or from the Card Job's status alone, so a guessed
-       * certificate id can never make an uncaptured card appear in the operational queue — and so the
-       * queue stays honest even if a lifecycle transition were ever driven incorrectly.
-       */
-      const capturedSide = (side: "front" | "back", tenantExpr: string, locationExpr: string) => `
-              AND EXISTS (
-                SELECT 1
-                  FROM certificate_image_evidence evidence
-                  JOIN scanner_capture_sessions session
-                    ON session.id = evidence.capture_metadata ->> 'captureSessionId'
-                   AND session.certificate_id = evidence.certificate_id
-                   AND session.side = evidence.side
-                   AND session.state = 'captured'
-                  JOIN partner_stations station
-                    ON station.id = session.station_id
-                   AND station.status = 'ACTIVE'
-                   AND station.tenant_id = ${tenantExpr}
-                   AND station.location_id = ${locationExpr}
-                 WHERE evidence.certificate_id = cert.id
-                   AND evidence.side = '${side}'
-                   AND evidence.is_current = true
-                   AND evidence.evidence_class = 'NEW_IMMUTABLE_MASTER'
-                   AND evidence.format = 'tiff'
-              )`;
-
       type QueueRow = {
         lineage: PartnerCertLineage;
         card_job_id: string | null;
@@ -993,14 +1059,12 @@ export function partnerGradingRouter(): Router {
               AND lease.expires_at > now()
             WHERE job.tenant_id = $1
               AND job.cancelled_at IS NULL
-              AND job.status IN ('READY_TO_GRADE', 'GRADING')
+              AND job.status IN ('NEEDS_SCAN', 'CAPTURING', 'FIX_REQUIRED', 'READY_TO_GRADE', 'GRADING')
               AND ($2::uuid IS NULL OR job.location_id = $2::uuid)
               AND cert.deleted_at IS NULL
               AND cert.origin_type = 'PARTNER'
               AND cert.origin_partner_id = job.tenant_id
               AND cert.origin_location_id = job.location_id
-              ${capturedSide("front", "job.tenant_id", "job.location_id")}
-              ${capturedSide("back", "job.tenant_id", "job.location_id")}
             ORDER BY job.updated_at DESC, job.id DESC`,
           [principal.tenantId, scopedLocationId]
         );
@@ -1057,8 +1121,6 @@ export function partnerGradingRouter(): Router {
               AND cert.origin_type = 'PARTNER'
               AND cert.origin_partner_id = pci.partner_organisation_id
               AND cert.origin_location_id = pci.partner_location_id
-              ${capturedSide("front", "pci.partner_organisation_id", "pci.partner_location_id")}
-              ${capturedSide("back", "pci.partner_organisation_id", "pci.partner_location_id")}
               ${locationWhere}
             ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC`,
           params
@@ -1072,6 +1134,10 @@ export function partnerGradingRouter(): Router {
        */
       const seen = new Set(cardJobRows.map((row) => Number(row.cert_id)));
       const rows = [...cardJobRows, ...connectorRows.filter((row) => !seen.has(Number(row.cert_id)))];
+      const evidenceByCertificate = await buildPartnerWorkingEvidencePayloads(
+        rows.map((row) => Number(row.cert_id)),
+        principal.tenantId
+      );
 
       const byGroup = new Map<string, Record<string, unknown>>();
       for (const row of rows) {
@@ -1079,6 +1145,14 @@ export function partnerGradingRouter(): Router {
         const heldByAnother = row.lease_holder !== null && row.lease_holder !== principal.userId;
         const gradedByMe = String(row.graded_by ?? "") === principal.userId;
         const assignedToMe = String(row.assigned_grader_id ?? "") === principal.userId;
+        const evidencePayload = evidenceByCertificate.get(Number(row.cert_id));
+        if (!evidencePayload) throw new Error("Queue evidence projection is missing its certificate binding.");
+        const evidence = projectPartnerQueueEvidence({
+          workingEvidence: evidencePayload.workingEvidence,
+          urls: evidencePayload.urls,
+          cardJobStatus: row.card_job_status,
+          gradingStatus: row.grader_status,
+        });
 
         /*
          * SERVER-DERIVED OPENABILITY.
@@ -1089,11 +1163,15 @@ export function partnerGradingRouter(): Router {
          *             the acquire will either succeed or tell them who holds it.
          * connector — exactly the rule the client used to apply, unchanged, now computed here.
          */
-        const openable =
+        const lifecycleOpenable =
           row.lineage === "card_job"
             ? row.card_job_status === "READY_TO_GRADE" || (row.card_job_status === "GRADING" && !heldByAnother)
             : (row.grader_status === "assigned" && assignedToMe) ||
               (row.grader_status === "pending_review" && gradedByMe);
+        // A lifecycle state is not enough: the same canonical evidence admission that supplies
+        // the workstation must allow both sides before any queue row can offer an editing lease.
+        const openable =
+          lifecycleOpenable && (evidence.workflow === "READY_TO_GRADE" || evidence.workflow === "IN_GRADING");
 
         if (!byGroup.has(row.group_key)) {
           byGroup.set(row.group_key, {
@@ -1126,6 +1204,7 @@ export function partnerGradingRouter(): Router {
           assignedToMe: row.lineage === "card_job" ? heldByMe : assignedToMe,
           gradedByMe,
           openable,
+          evidence,
           // A display name the shop already shows its own staff — never an email or a user id.
           heldBy: heldByAnother ? (row.lease_holder_display ?? "Another grader") : null,
         });
@@ -1263,6 +1342,7 @@ export function partnerGradingRouter(): Router {
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
         const editable = draftEditability(auth.auth, req.partner!);
         if (!editable.ok) return res.status(editable.status).json({ error: editable.error });
+        if (!(await hasAdmittedPartnerGradingEvidence(auth.auth))) return fullResolutionEvidenceUnavailable(res);
         let leaseRevision: number | null;
         try {
           leaseRevision = await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
@@ -1347,6 +1427,8 @@ export function partnerGradingRouter(): Router {
         } else if (auth.auth.gradingStatus !== "assigned") {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not submittable` });
         }
+
+        if (!(await hasAdmittedPartnerGradingEvidence(auth.auth))) return fullResolutionEvidenceUnavailable(res);
 
         if (!(await requireBothImages(auth.auth))) {
           return res
@@ -1528,6 +1610,7 @@ export function partnerGradingRouter(): Router {
         if (auth.auth.gradedBy && auth.auth.gradedBy !== req.partner!.userId) {
           return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
         }
+        if (!(await hasAdmittedPartnerGradingEvidence(auth.auth))) return fullResolutionEvidenceUnavailable(res);
         if (!(await requireBothImages(auth.auth))) {
           return res
             .status(409)

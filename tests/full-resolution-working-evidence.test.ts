@@ -17,6 +17,7 @@ beforeAll(async () => {
 const canonicalRow = (overrides: Record<string, unknown> = {}) => ({
   side: "front",
   working_object_key: "evidence/working/1/front/example.v1.jpg",
+  format: "tiff",
   pixel_width: 4724,
   pixel_height: 6136,
   dpi: 1200,
@@ -55,6 +56,19 @@ describe("full-resolution Canon working evidence admission", () => {
   it("fails closed for a non-1200-DPI master or missing working key", () => {
     expect(assessWorkingEvidence(canonicalRow({ dpi: 900 })).available).toBe(false);
     expect(assessWorkingEvidence(canonicalRow({ working_object_key: null })).available).toBe(false);
+  });
+
+  it("fails closed when a Partner row lacks the authoritative captured-session and active-station proof", () => {
+    const status = assessWorkingEvidence(canonicalRow({ capture_provenance_valid: false }));
+    expect(status.available).toBe(false);
+    expect(status.reason).toContain("active authorised station");
+    expect(status.recovery).toContain("approved station");
+  });
+
+  it("fails closed when a metadata-shaped row is not backed by an immutable TIFF master", () => {
+    const status = assessWorkingEvidence(canonicalRow({ format: "jpeg" }));
+    expect(status.available).toBe(false);
+    expect(status.reason).toContain("immutable TIFF");
   });
 
   it("derives an actual Canon-sized working JPEG without resizing the immutable TIFF", async () => {

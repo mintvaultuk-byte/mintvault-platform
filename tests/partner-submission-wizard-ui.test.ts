@@ -3,7 +3,7 @@
  * is an isolated, unmounted-in-production surface with no RTL/jsdom harness, so we assert on the
  * committed source the way tests/grading-workstation-ux-redesign.test.ts does for grading UI).
  * Proves:
- *   - all 5 steps (Customer, Service, Cards, Review, Submit) exist with a visible progress indicator;
+ *   - all 5 steps (Reference, Service, Cards, Review, Submit) exist with a visible progress indicator;
  *   - a stable idempotency key guards submit against double-click / retry duplication;
  *   - submit is disabled while a request is in flight (no way to fire twice);
  *   - version-checked edits surface a conflict state rather than silently overwriting;
@@ -29,7 +29,7 @@ const WORKFLOW_PLACEHOLDER = read("client/src/pages/partner/workflow-placeholder
 
 describe("wizard has all 5 steps with a visible progress indicator", () => {
   it("declares all 5 step labels in order", () => {
-    expect(WIZARD).toContain('const STEPS = ["Customer", "Service", "Cards", "Review", "Submit"]');
+    expect(WIZARD).toContain('const STEPS = ["Reference", "Service", "Cards", "Review", "Submit"]');
   });
   it("renders a step indicator for each step with aria-current on the active one", () => {
     expect(WIZARD).toContain('data-testid="wizard-progress"');
@@ -37,7 +37,7 @@ describe("wizard has all 5 steps with a visible progress indicator", () => {
     expect(WIZARD).toContain('aria-current={i === currentStep ? "step" : undefined}');
   });
   it("renders one step panel per step, each with its own data-testid", () => {
-    for (const key of ["customer", "service", "cards", "review", "submit"]) {
+    for (const key of ["reference", "service", "cards", "review", "submit"]) {
       expect(WIZARD).toContain(`data-testid="wizard-step-${key}"`);
     }
   });
@@ -62,9 +62,9 @@ describe("double-submit / duplication safety", () => {
     expect(WIZARD).toContain('data-testid="button-confirm-submit"');
   });
   it("Review and Submit steps share one computed 'missing' list, not two independent checks", () => {
-    expect(WIZARD).toContain('if (!customerDisplay) missing.push("Customer");');
     expect(WIZARD).toContain('if (!serviceTierCode) missing.push("Service");');
     expect(WIZARD).toContain('if (cards.length === 0) missing.push("At least one card");');
+    expect(WIZARD).not.toContain('missing.push("Customer")');
     // ReviewStep/SubmitStep receive it as a prop rather than recomputing their own copy.
     expect(WIZARD).toMatch(/<ReviewStep[\s\S]*?missing=\{missing\}/);
     expect(WIZARD).toMatch(/<SubmitStep[\s\S]*?missing=\{missing\}/);
@@ -87,9 +87,10 @@ describe("optimistic-concurrency conflict is surfaced, never silently overwritte
     expect(WIZARD).toContain('setSaveStatus("conflict")');
     expect(WIZARD).not.toContain("catch (err: any)");
   });
-  it("a rejected new-customer save shows the server's reason instead of swallowing it", () => {
-    expect(WIZARD).toContain("setCustomerError(partnerErrorMessage(err))");
-    expect(WIZARD).toContain('data-testid="text-new-customer-error"');
+  it("does not create, search, or require a customer CRM record in the submission path", () => {
+    expect(WIZARD).not.toContain("partnerCustomers");
+    expect(WIZARD).not.toContain("CustomerStep");
+    expect(WIZARD).toContain("A customer record is not required to start, scan, or process this submission.");
   });
   it("every PATCH-style edit call includes the current submission.version", () => {
     expect(WIZARD).toContain("partnerSubmissions.edit(submission.id, { version: submission.version, ...patch })");
@@ -271,8 +272,8 @@ describe("Locations and Billing use their real partner APIs", () => {
   });
 });
 
-describe("partner workstation IA keeps live workflow primary and relegates secondary routes", () => {
-  it("shell exposes exactly five shop-floor routes in primary navigation and supplies only in More", () => {
+describe("partner workstation IA keeps live workflow primary and relegates dead routes", () => {
+  it("shell exposes only live shop-floor routes in primary navigation", () => {
     for (const href of [
       "/partner/dashboard",
       "/partner/submissions/new",
@@ -282,16 +283,16 @@ describe("partner workstation IA keeps live workflow primary and relegates secon
     ]) {
       expect(SHELL).toContain(href);
     }
-    const primary = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
+    const primary = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const SECONDARY_NAV_ITEMS"));
     expect((primary.match(/href:/g) ?? [])).toHaveLength(5);
-    for (const href of ["/partner/customers", "/partner/public-profile"]) {
-      expect(SHELL).not.toContain(`href: "${href}"`);
+    for (const href of ["/partner/customers", "/partner/supplies", "/partner/orders", "/partner/public-profile"]) {
+      expect(primary).not.toContain(`href: "${href}"`);
     }
-    const more = SHELL.slice(SHELL.indexOf("const MORE_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
-    expect(more).toContain('href: "/partner/supplies"');
-    expect(more).toContain('href: "/partner/orders"');
+    const secondary = SHELL.slice(SHELL.indexOf("const SECONDARY_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
+    expect(secondary).toContain('href: "/partner/supplies"');
+    expect(secondary).toContain('href: "/partner/orders"');
   });
-  it("App mounts every shell destination instead of falling through to dashboard", () => {
+  it("legacy direct routes remain mounted instead of becoming broken links", () => {
     for (const route of [
       'path="/partner/certificates"',
       'path="/partner/supplies"',
@@ -300,24 +301,13 @@ describe("partner workstation IA keeps live workflow primary and relegates secon
     ]) {
       expect(APP).toContain(route);
     }
-    /*
-     * The invariant is that each shell link lands on a MOUNTED route rather than falling through the
-     * /partner/* catch-all to the dashboard — asserted by the route loop above, which is what
-     * actually protects the operator.
-     *
-     * `certificates` has since graduated from a placeholder to a real page (PartnerCertificatesPage,
-     * App.tsx). Continuing to assert its placeholder pinned the OLD state and failed on forward
-     * progress, so it is asserted here as a real destination instead. The other three are still
-     * placeholders and are still pinned as such, so that any one of them graduating is a deliberate
-     * edit rather than a silent drift.
-     */
     expect(APP).toContain("<PartnerCertificatesPage />");
     expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
     expect(APP).toContain("<PartnerSuppliesPage />");
     expect(APP).toContain("<PartnerSuppliesOrdersPage />");
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
   });
-  it("placeholder copy is explicit about missing server contracts, not fake live data", () => {
+  it("relegated placeholder copy remains explicit about missing server contracts, not fake live data", () => {
     expect(WORKFLOW_PLACEHOLDER).toContain("partner-to-certificate contract");
     expect(WORKFLOW_PLACEHOLDER).toContain("Supply catalogue");
     expect(WORKFLOW_PLACEHOLDER).toContain("public partner network contract");

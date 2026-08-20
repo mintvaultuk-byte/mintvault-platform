@@ -20,13 +20,13 @@ const CUSTOMER_SERVICE = read("server/partner/customer-service.ts");
 const APP = read("client/src/App.tsx");
 const ROUTE_GUARD = read("client/src/components/partner/partner-route-guard.tsx");
 
-describe("partner customers remain manageable on their direct route", () => {
-  it("exposes customer create/edit/search without restoring Customers to shop-floor navigation", () => {
+describe("partner customer CRM remains available only as a secondary direct surface", () => {
+  it("keeps customer create/edit/search APIs intact without presenting CRM in primary workflow", () => {
     expect(API).toContain("partnerCustomers");
     expect(API).toContain('PATCH", `/api/partner/customers/${id}`');
-    expect(APP).toContain('path="/partner/customers"');
-    const primaryBlock = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
-    expect(primaryBlock).not.toContain('href: "/partner/customers"');
+    expect(SHELL).not.toContain('href: "/partner/customers"');
+    expect(WIZARD).not.toContain("partnerCustomers");
+    expect(WIZARD).toContain("A customer record is not required to start, scan, or process this submission.");
     expect(CUSTOMERS).toContain("partnerCustomers.list");
     expect(CUSTOMERS).toContain("partnerCustomers.create");
     expect(CUSTOMERS).toContain("partnerCustomers.edit");
@@ -42,26 +42,6 @@ describe("partner customers remain manageable on their direct route", () => {
     expect(CUSTOMER_SERVICE).toContain("lower(reference)=lower($4)");
     expect(CUSTOMER_ROUTES).toContain('err.code === "duplicate"');
     expect(CUSTOMER_ROUTES).toContain("return 409");
-  });
-});
-
-describe("partner launch navigation is locked to the shop-floor workflow", () => {
-  it("renders exactly five primary shop-floor destinations and segregates supplies in More", () => {
-    const primaryBlock = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
-    expect(primaryBlock).toContain('href: "/partner/dashboard", label: "Dashboard"');
-    expect(primaryBlock).toContain('href: "/partner/submissions/new", label: "New Submission"');
-    expect(primaryBlock).toContain('href: "/partner/grading", label: "Grading"');
-    expect(primaryBlock).toContain('href: "/partner/certificates",\n    label: "Completed"');
-    expect(primaryBlock).toContain('href: "/partner/billing", label: "Credits & Billing"');
-    expect((primaryBlock.match(/href:/g) ?? [])).toHaveLength(5);
-    const moreBlock = SHELL.slice(SHELL.indexOf("const MORE_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
-    expect(moreBlock).toContain('href: "/partner/supplies", label: "Supplies"');
-    expect(moreBlock).toContain('href: "/partner/orders", label: "My Orders"');
-    expect((moreBlock.match(/href:/g) ?? [])).toHaveLength(2);
-    expect(SHELL).toContain("MORE_NAV_ITEMS");
-    for (const legacyLabel of ["Customers", "Supplies", "Orders", "Public Profile", "Submissions", "Users", "Locations"]) {
-      expect(primaryBlock).not.toContain(`label: "${legacyLabel}"`);
-    }
   });
 });
 

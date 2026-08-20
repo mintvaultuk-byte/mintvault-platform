@@ -8,13 +8,13 @@
 ## Staging
 
 - Fly control plane: `mintvault-v2` release `v546`, image `mintvault-v2:deployment-01M0G2MK681WB68TZRNYGPXY2C`, two healthy LHR machines, observed 2026-08-20.
-- The currently prepared Partner staging candidate is not deployed because the guarded release requires a live `/api/version` proof and local DNS resolves `mintvault-v2.fly.dev` as `SERVFAIL`.
+- The live staging endpoint now reports `aab526ea`. Guarded preflight refused the Supplies-only candidate because that live commit is divergent, so a normal merge is required and is in progress; no bypass flag was used.
 - This task is staging-only. A staging migration and a single staging test order are owner-authorised only as part of the final explicit rollout; neither has occurred.
 
 ## This task branch
 
 - Branch: `codex/partner-supplies-staging-20260820`
-- Exact candidate: `3e5d9bd1d60a609c35561d3558163dc86bbb64a3`, reconciled as one Supplies-only commit on current `origin/main` (`2d776db9`).
+- Candidate parents: Supplies `97bb6518a64958b891a707b15f5ce820819dc262` on current `origin/main` (`2d776db9`) and current staging `aab526eaf15b49424a258eb6b4fa5497d7a5c34d`; final merge SHA is recorded after its local commit.
 - Pushed: no.
 - Deployed anywhere: no.
 

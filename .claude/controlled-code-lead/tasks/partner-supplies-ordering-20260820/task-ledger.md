@@ -3,7 +3,7 @@
 ## Stage 0 — Baseline (recorded 2026-08-20 Europe/London)
 
 - Governed repository: `/private/tmp/mintvault-partner-supplies-staging.20260820`; the shared checkout is dirty and excluded.
-- Candidate branch / commit: `codex/partner-supplies-staging-20260820` at `3e5d9bd1d60a609c35561d3558163dc86bbb64a3`, a fresh worktree from `origin/main` (`2d776db9`), with only the Supplies commit reconciled; isolated worktree is clean.
+- Candidate branch: `codex/partner-supplies-staging-20260820`, initially a fresh worktree from `origin/main` (`2d776db9`) carrying only Supplies. During final guarded-release preflight, staging's live `aab526ea` was proven a divergent ancestor requirement, so the final candidate is a normal merge of that live full-resolution-evidence release with the Supplies branch; only its Partner-nav conflict is manually reconciled to retain the five primary items and add Supplies/My Orders under More.
 - Existing release state: staging remains Fly release `v546`; its guarded replacement is not deployed because this Mac cannot resolve the staging hostname. Production is Fly release `v1114` and prohibited.
 - Protected systems in play: Partner tenant/location scope, shared schema/migrations, Super Admin RBAC, existing Resend provider integration, staging deploy and a staging test-order data mutation. MVGS, Scanner, Stripe, Partner authentication and production are excluded.
 - Explicit scope: durable Partner supplies orders for plastic graded slabs, print paper/label stock and NFC tags; address snapshotting; idempotent Resend notification/retry; Partner and Super Admin views and status workflow; hard tests and staging-only release/E2E.
@@ -19,7 +19,7 @@
 | 3 — Lead verification | done | 2026-08-20 | Findings SP-01 through SP-07 are evidence-backed and accepted below. |
 | 4 — Implementation authorisation | done | 2026-08-20 | Owner authorised staging-only implementation and one eventual staging test order. |
 | 5 — Implementation | done | 2026-08-20 | Durable order/outbox, scoped Partner/Super Admin surfaces, cache policy, retry/reconciliation safety and all requested three products are implemented. |
-| 6 — Regression | in progress | 2026-08-20 | Fresh-candidate graph and scoped real-Postgres/source/UI/RBAC/cache suite are green (142 passed); first full-suite replay exposed and then closed SP-12, with a focused lineage/schema/RBAC/Supplies rerun green (64 passed). Final exact-SHA full suite, typecheck, SQL/lint/build and guarded deploy/browser/E2E remain pending. |
+| 6 — Regression | in progress | 2026-08-20 | Pre-merge exact-SHA Supplies suite passed; the normal live-ancestry check rejected a divergent live release, closing SP-13 by a non-bypass merge. The combined Supplies/full-resolution 15-file suite now passes 231 tests and TypeScript is green. Final merge-SHA full suite, SQL/lint/build, migration dry-run and guarded deploy/browser/E2E remain pending. |
 | 7 — Final report | pending | | |
 
 ## Reviewer assignments (Stage 1)

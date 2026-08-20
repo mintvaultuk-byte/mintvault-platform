@@ -133,6 +133,14 @@ interface Props {
   /** False outside the active Grade stage. Inspection remains interactive,
    * but defect, line, crop, upload and image-delete mutations are unavailable. */
   mutationsEnabled?: boolean;
+  /**
+   * Destructive/source-image operations are a narrower capability than grading
+   * observations. Partner graders may mark defects and measure centering on an
+   * admitted working image, but they must never be offered admin-only delete or
+   * recrop controls. Defaults to `mutationsEnabled` for the established admin
+   * callers so this is an explicit capability split, not a second workflow.
+   */
+  sourceImageMutationsEnabled?: boolean;
   /** When true, defect markers render but clicks are inert (tooltip explains
    *  why). Used by the post-approval read-only state in the parent's edit-mode
    *  gate so admins can still SEE the defects but can't edit until they click
@@ -410,6 +418,7 @@ export default function ImageViewer({
   inspectionState,
   onInspectionStateChange,
   mutationsEnabled = true,
+  sourceImageMutationsEnabled,
   readOnly,
   side: controlledSide,
   omitSideTabs,
@@ -422,6 +431,7 @@ export default function ImageViewer({
   onCreaseLinesChange,
   apiBase = "/api/admin",
 }: Props) {
+  const mayMutateSourceImage = sourceImageMutationsEnabled ?? mutationsEnabled;
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
   // values from the live `defects` array (avoids stale closures during edit).
@@ -431,6 +441,10 @@ export default function ImageViewer({
   // to escape the image container's stacking context + overflow:hidden) can
   // position itself with `position: fixed` against the marker's screen coords.
   const [editingDefectAnchor, setEditingDefectAnchor] = useState<DOMRect | null>(null);
+  // Only an actual admin route may offer an image-upload recovery. Partner grading has no
+  // equivalent endpoint: it must show the server-owned Canon capture/regeneration instruction,
+  // never a control that will fail authorization after the operator has selected a file.
+  const mayUploadRecoveryEvidence = apiBase === "/api/admin" || apiBase.startsWith("/api/admin/");
   // Close popover on ESC. Plus a no-op cleanup when popover is closed —
   // the listener bind/unbind is cheap.
   useEffect(() => {
@@ -602,6 +616,10 @@ export default function ImageViewer({
     onSideChange?.(inspectionState?.side ?? "front");
   }, []);
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
+  // A signed URL is only a capability to attempt a read. If the browser cannot
+  // decode/load it, keep the failure visible and fail closed for this exact URL;
+  // never reveal a compact derivative underneath it.
+  const [failedWorkingUrl, setFailedWorkingUrl] = useState<string | null>(null);
   useEffect(() => {
     if (mutationsEnabled) return;
     setManualCropSide(null);
@@ -983,15 +1001,19 @@ export default function ImageViewer({
 
   const workingEvidenceAsset = getWorkingEvidenceAsset(urls, side);
   const workingEvidenceStatus = workingEvidence?.[side as "front" | "back"];
+  const workingEvidenceLoadFailed = failedWorkingUrl === workingEvidenceAsset?.url;
   // A URL alone is not an admission decision. Requiring the companion server
   // proof prevents stale query data, an older endpoint, or a UI race from
   // presenting an otherwise plausible derivative as verified working evidence.
-  const workingEvidenceAvailable = Boolean(workingEvidenceAsset) && workingEvidenceStatus?.available === true;
+  const workingEvidenceAvailable =
+    Boolean(workingEvidenceAsset) && workingEvidenceStatus?.available === true && !workingEvidenceLoadFailed;
   const currentUrl = workingEvidenceAvailable ? (workingEvidenceAsset?.url ?? null) : null;
-  const unavailableReason =
-    workingEvidenceStatus?.reason ?? `${side.toUpperCase()} cannot be graded from a display derivative.`;
-  const unavailableRecovery =
-    workingEvidenceStatus?.recovery ?? "Restore the canonical working evidence for this side.";
+  const unavailableReason = workingEvidenceLoadFailed
+    ? "The canonical full-resolution working image could not be loaded."
+    : (workingEvidenceStatus?.reason ?? `${side.toUpperCase()} cannot be graded from a display derivative.`);
+  const unavailableRecovery = workingEvidenceLoadFailed
+    ? "Restore the working evidence from the immutable 1200-DPI master, then reload this card."
+    : (workingEvidenceStatus?.recovery ?? "Restore the canonical working evidence for this side.");
   const frontWorkingEvidenceAvailable =
     Boolean(getWorkingEvidenceAsset(urls, "front")) && workingEvidence?.front?.available === true;
   const backWorkingEvidenceAvailable =
@@ -1310,7 +1332,7 @@ export default function ImageViewer({
                     {s}
                     {count > 0 ? ` (${count})` : ""}
                   </button>
-                  {hasImage && certId && !fullscreen && mutationsEnabled && (
+                  {hasImage && certId && !fullscreen && mayMutateSourceImage && (
                     <button
                       type="button"
                       title={`Delete ${s} image`}
@@ -1524,6 +1546,7 @@ export default function ImageViewer({
                 if (!markMode) return;
                 setImgNaturalDims({ w, h });
               }}
+              onError={() => setFailedWorkingUrl(currentUrl)}
               draggable={false}
             />
 
@@ -1950,7 +1973,7 @@ export default function ImageViewer({
                 </div>
               ))}
           </div>
-        ) : certId && mutationsEnabled ? (
+        ) : certId && mutationsEnabled && mayUploadRecoveryEvidence ? (
           <InlineDropZone
             side={side}
             certId={certId}
@@ -2377,7 +2400,7 @@ export default function ImageViewer({
           Mark Defects
         </button>
         {certId &&
-          mutationsEnabled &&
+          mayMutateSourceImage &&
           !readOnly &&
           (side === "front" || side === "back") &&
           urls[`${side}_original` as keyof ImageUrls] && (
@@ -2410,7 +2433,7 @@ export default function ImageViewer({
       </div>
 
       {/* Manual Crop modal (lazy-loaded — won't crash if module fails) */}
-      {mutationsEnabled && manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
+      {mayMutateSourceImage && manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
         <Suspense
           fallback={
             <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[var(--admin-gold)] text-sm">
@@ -2452,9 +2475,11 @@ function InlineDropZone({
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(f: File) {
+    setUploadError(null);
     setUploading(true);
     try {
       const fd = new FormData();
@@ -2470,6 +2495,8 @@ function InlineDropZone({
       }
       onUploaded();
     } catch {
+      setUploadError(`Could not upload ${side}. Please try again or use the stated recovery action.`);
+    } finally {
       setUploading(false);
     }
   }
@@ -2514,6 +2541,11 @@ function InlineDropZone({
           <Upload size={24} className="text-[var(--admin-ink-dim)]" />
           <p className="text-[var(--admin-ink-dim)] text-xs font-bold">Drop new {side} image here</p>
           <p className="text-[var(--admin-ink-dim)] text-[10px]">or click to browse</p>
+          {uploadError ? (
+            <p className="max-w-sm px-5 text-center text-xs text-red-400" role="alert">
+              {uploadError}
+            </p>
+          ) : null}
         </>
       )}
     </div>

@@ -29,6 +29,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -52,6 +55,7 @@ let printEligibility: typeof import("../server/partner/print-eligibility");
 let labels: typeof import("../server/labels");
 let drizzle: typeof import("../server/db");
 let savedEnv: Record<string, string | undefined> = {};
+let localEvidenceRoot = "";
 
 const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail: "ops@mintvault.test" };
 const QA = { actor: "qa@mintvault.test", role: "admin" as const };
@@ -113,6 +117,8 @@ async function seedMintVaultTables(): Promise<void> {
     sha256 varchar(64) not null, byte_length bigint not null,
     pixel_width integer not null, pixel_height integer not null,
     bit_depth integer, dpi integer, format varchar(16) not null,
+    working_object_key text, working_sha256 varchar(64),
+    working_width integer, working_height integer, working_format varchar(16), working_settings jsonb,
     capture_metadata jsonb not null default '{}'::jsonb,
     is_current boolean not null default true,
     superseded_at timestamptz, superseded_by_id integer,
@@ -156,6 +162,12 @@ async function seedMintVaultTables(): Promise<void> {
   ]) {
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
   }
+}
+
+async function writeWorkingEvidence(key: string): Promise<void> {
+  const destination = join(localEvidenceRoot, ...key.split("/"));
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, "fixture working evidence");
 }
 
 async function makeTenant(label: string): Promise<Fixture> {
@@ -228,6 +240,7 @@ function principal(f: Fixture): PartnerPrincipal {
 async function captureSide(f: Fixture, certificateId: number, side: "front" | "back"): Promise<void> {
   evidenceSeq += 1;
   const sessionId = `sess-${certificateId}-${side}-${evidenceSeq}`;
+  const workingKey = `evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`;
   await admin.query(
     `INSERT INTO scanner_capture_sessions
        (id, certificate_id, side, workstation_id, station_id, scanner_profile_version, actor_id, state,
@@ -237,17 +250,21 @@ async function captureSide(f: Fixture, certificateId: number, side: "front" | "b
   );
   await admin.query(
     `INSERT INTO certificate_image_evidence
-       (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height,
-        format, capture_metadata, is_current)
-     VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,1000,1400,'tiff',$5::jsonb,true)`,
+       (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height, dpi,
+        format, working_object_key, working_width, working_height, working_format, working_settings,
+        capture_metadata, is_current)
+     VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,4724,6136,1200,'tiff',$5,4724,6136,'jpeg',
+             '{"resize":null}'::jsonb,$6::jsonb,true)`,
     [
       certificateId,
       side,
       `evidence/${certificateId}/${side}/${evidenceSeq}.tif`,
       "a".repeat(64),
-      JSON.stringify({ captureSessionId: sessionId }),
+      workingKey,
+      JSON.stringify({ captureSessionId: sessionId, scannerProfileVersion: "mintvault-canon-lide-400-v3" }),
     ]
   );
+  await writeWorkingEvidence(workingKey);
 }
 
 interface OutputCard {
@@ -362,7 +379,10 @@ describe("P11 Card Job output: certificate, label, print, NFC (real PostgreSQL)"
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
       PARTNER_CONNECTOR_DATABASE_URL: process.env.PARTNER_CONNECTOR_DATABASE_URL,
+      MINTVAULT_LOCAL_EVIDENCE_DIR: process.env.MINTVAULT_LOCAL_EVIDENCE_DIR,
     };
+    localEvidenceRoot = await mkdtemp(join(tmpdir(), "mintvault-output-evidence-"));
+    process.env.MINTVAULT_LOCAL_EVIDENCE_DIR = localEvidenceRoot;
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
@@ -409,6 +429,7 @@ describe("P11 Card Job output: certificate, label, print, NFC (real PostgreSQL)"
     await drizzle?.pool.end().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
+    await rm(localEvidenceRoot, { recursive: true, force: true }).catch(() => {});
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;

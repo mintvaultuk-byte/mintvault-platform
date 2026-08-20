@@ -18,6 +18,7 @@
 - Add Partner Supplies/My Orders pages, typed API helpers, lazy routes, and a responsive secondary More surface only. Replace the two existing placeholder route uses; leave all unrelated placeholder routes untouched.
 - Add Super Admin Supplies Orders page/link inside existing Partner Network navigation.
 - Add focused real-Postgres, route/RBAC, Resend/outbox, source/UI and migration-scope tests; extend the realistic Partner migration allowlist intentionally.
+- Preserve the current staging full-resolution evidence release (`aab526ea`) by normal merge, as the guarded live-ancestry check requires. Reconcile only the shared Partner shell: retain its exact five primary items and add Supplies/My Orders to its existing responsive More section.
 
 ## Explicit non-changes
 

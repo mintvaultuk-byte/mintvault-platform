@@ -74,10 +74,10 @@ describe("Partner supplies route and UI composition", () => {
     expect(APP).toContain("PartnerSuppliesOrdersPage");
     expect(APP).not.toContain('PartnerWorkflowPlaceholderPage kind="supplies"');
     expect(APP).not.toContain('PartnerWorkflowPlaceholderPage kind="orders"');
-    const primary = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
+    const primary = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const SECONDARY_NAV_ITEMS"));
     expect((primary.match(/href:/g) ?? [])).toHaveLength(5);
-    expect(SHELL).toContain("visibleMoreItems");
-    const more = SHELL.slice(SHELL.indexOf("const MORE_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
+    expect(SHELL).toContain("visibleSecondaryItems");
+    const more = SHELL.slice(SHELL.indexOf("const SECONDARY_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
     expect(more).toContain('href: "/partner/supplies"');
     expect(more).toContain('href: "/partner/orders"');
     expect(SUPPLIES).toContain('href="/partner/orders"');

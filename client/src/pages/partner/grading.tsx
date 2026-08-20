@@ -18,6 +18,18 @@ import { usePartnerGradingLease } from "@/hooks/use-partner-grading-lease";
  * grading authority in browser state; the server decides and this renders what it is told.
  */
 type PartnerLineage = "card_job" | "connector";
+type QueueEvidenceSide = {
+  state: "admitted" | "missing" | "invalid" | "unavailable";
+  label: string;
+  thumbnailUrl: string | null;
+  reason: string | null;
+  recovery: string | null;
+};
+type QueueEvidence = {
+  front: QueueEvidenceSide;
+  back: QueueEvidenceSide;
+  workflow: "READY_TO_GRADE" | "IN_GRADING" | "INCOMPLETE_EVIDENCE" | "EVIDENCE_ERROR" | "AWAITING_CAPTURE_ACCEPTANCE";
+};
 
 type GradingCard = {
   lineage: PartnerLineage;
@@ -43,6 +55,8 @@ type GradingCard = {
   openable: boolean;
   /** Display name of another grader currently holding it, or null. Never an email or a user id. */
   heldBy: string | null;
+  /** Complete server-derived evidence projection. The browser never infers it from an image URL. */
+  evidence: QueueEvidence;
 };
 type QueueItem = {
   groupKey: string;
@@ -65,6 +79,49 @@ type CaptureSession = {
   expiresAt: string;
   workstationId: string;
 };
+
+function QueueEvidenceTile({
+  certId,
+  side,
+  evidence,
+}: {
+  certId: number;
+  side: "front" | "back";
+  evidence: QueueEvidenceSide;
+}) {
+  const accessibleSide = side.toUpperCase();
+  return (
+    <div
+      className="flex min-w-[7.5rem] items-center gap-2 rounded border border-border bg-muted/20 p-2"
+      data-testid={`partner-queue-${side}-evidence-${certId}`}
+      data-evidence-state={evidence.state}
+    >
+      {evidence.thumbnailUrl ? (
+        <img
+          src={evidence.thumbnailUrl}
+          alt={`${accessibleSide} evidence thumbnail`}
+          className="h-12 w-9 rounded object-contain bg-black"
+          loading="lazy"
+          data-testid={`partner-queue-${side}-thumbnail-${certId}`}
+        />
+      ) : (
+        <div
+          className="flex h-12 w-9 items-center justify-center rounded border border-dashed border-muted-foreground/50 px-1 text-center text-[9px] font-semibold leading-tight text-muted-foreground"
+          aria-label={evidence.label}
+          data-testid={`partner-queue-${side}-placeholder-${certId}`}
+        >
+          {evidence.label}
+        </div>
+      )}
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold leading-tight">{evidence.label}</p>
+        {evidence.state !== "admitted" && evidence.reason ? (
+          <p className="mt-0.5 line-clamp-2 text-[10px] leading-tight text-muted-foreground">{evidence.reason}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Partner capture is an adapter over the same target-bound signed-station
@@ -407,11 +464,19 @@ export default function PartnerGradingPage() {
             // OPENABILITY COMES FROM THE SERVER. Re-deriving it here is what made every Scanner Card
             // Job un-openable: its certificate is `unassigned` until a grader takes the lease.
             const canEditSubmitted = card.gradingStatus === "pending_review" && card.gradedByMe;
-            // A Card Job shows its OWN lifecycle state; a connector card shows the certificate's.
-            const statusLabel = (card.lineage === "card_job" ? card.cardJobStatus : card.gradingStatus) ?? "unknown";
+            const unavailableAction =
+              card.evidence.workflow === "INCOMPLETE_EVIDENCE"
+                ? "Capture at approved Scanner"
+                : card.evidence.workflow === "EVIDENCE_ERROR"
+                  ? "Resolve evidence"
+                  : card.evidence.workflow === "AWAITING_CAPTURE_ACCEPTANCE"
+                    ? "Awaiting capture acceptance"
+                    : card.heldBy
+                      ? "Held by another grader"
+                      : "Not available";
             return (
               <Card key={card.certId} data-testid={`partner-grade-card-${card.certId}`} data-lineage={card.lineage}>
-                <CardContent className="p-4 flex items-center justify-between gap-4">
+                <CardContent className="p-4 flex flex-wrap items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-xs font-mono text-muted-foreground">
                       {item.submissionRef ?? card.mvNumber ?? card.certIdStr}
@@ -424,11 +489,26 @@ export default function PartnerGradingPage() {
                       <p className="text-xs text-amber-500">{card.heldBy} is working on this card</p>
                     ) : null}
                   </div>
+                  <div className="flex flex-wrap items-center gap-2" aria-label="Evidence status">
+                    <QueueEvidenceTile certId={card.certId} side="front" evidence={card.evidence.front} />
+                    <QueueEvidenceTile certId={card.certId} side="back" evidence={card.evidence.back} />
+                  </div>
                   <div className="flex items-center gap-2">
-                    <Badge>{statusLabel.replace(/_/g, " ").toLowerCase()}</Badge>
-                    <Button disabled={!card.openable} onClick={() => setActive({ item, card })}>
-                      {canEditSubmitted ? "Edit" : "Open"}
-                    </Button>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge data-testid={`partner-queue-workflow-${card.certId}`}>
+                        {card.evidence.workflow.replace(/_/g, " ").toLowerCase()}
+                      </Badge>
+                    </div>
+                    {card.openable ? (
+                      <Button onClick={() => setActive({ item, card })}>{canEditSubmitted ? "Edit" : "Open"}</Button>
+                    ) : (
+                      <span
+                        className="max-w-32 text-right text-[10px] text-muted-foreground"
+                        data-testid={`partner-queue-unavailable-action-${card.certId}`}
+                      >
+                        {unavailableAction}
+                      </span>
+                    )}
                   </div>
                 </CardContent>
               </Card>
