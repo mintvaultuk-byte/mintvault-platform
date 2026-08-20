@@ -38,7 +38,6 @@ import {
   applyCertGradeDraft,
   buildCertGradingPayload,
   buildCertImagesPayload,
-  buildWorkingEvidencePayloads,
   GradeDraftRejected,
   stripGraderPii,
   type WorkingEvidenceStatus,
@@ -71,6 +70,11 @@ import {
   type PartnerCertLineage,
 } from "./card-job-grading-bridge";
 import { CardJobTransitionError } from "./card-job-lifecycle";
+import {
+  buildPartnerWorkingEvidencePayloads,
+  hasAdmittedPartnerWorkingEvidence,
+  loadPartnerWorkingEvidenceRows,
+} from "./working-evidence-admission";
 
 /**
  * Lease failures mapped to statuses a workstation can act on.
@@ -734,11 +738,13 @@ async function partnerImageFallback(auth: PartnerCertAuth): Promise<Record<strin
 
 async function imagesForPartnerCert(auth: PartnerCertAuth) {
   const payload = (await buildCertImagesPayload(auth.certId)) ?? { urls: {}, quality: {}, workingEvidence: undefined };
+  const partnerWorking = await buildPartnerWorkingEvidencePayloads([auth.certId], auth.tenantId);
+  const admittedWorking = partnerWorking.get(auth.certId);
   const fallback = await partnerImageFallback(auth);
   // Intake photos can help an operator prepare a target, but may never replace
   // accepted scanner derivatives. Those are bound to a certificate/session/
   // station in the immutable evidence ledger.
-  const urls = { ...payload.urls } as Record<string, string | null>;
+  const urls = { ...payload.urls, ...(admittedWorking?.urls ?? {}) } as Record<string, string | null>;
   for (const side of ["front", "back"] as const) {
     const hasCapturedImage = Boolean(urls[`${side}_display`] || urls[`${side}_original`] || urls[`${side}_working`]);
     if (!hasCapturedImage && fallback[`${side}_original`]) {
@@ -752,7 +758,7 @@ async function imagesForPartnerCert(auth: PartnerCertAuth) {
     // The Partner adapter must preserve the same server admission verdict consumed by the canonical
     // workstation. Dropping it makes valid Canon evidence look unavailable, while recreating it in
     // the browser would create a second evidence authority.
-    workingEvidence: payload.workingEvidence,
+    workingEvidence: admittedWorking?.workingEvidence ?? payload.workingEvidence,
   };
 }
 
@@ -848,6 +854,26 @@ async function requireBothImages(auth: PartnerCertAuth): Promise<boolean> {
   );
   const captured = new Set(rows.map((row) => row.side));
   return captured.has("front") && captured.has("back");
+}
+
+/**
+ * The physical Scanner/session proof and the full-resolution working-raster
+ * contract are one gate for Partner grading. This also protects connector
+ * lineage, which intentionally has no Card Job lease to provide that check.
+ */
+async function hasAdmittedPartnerGradingEvidence(auth: PartnerCertAuth): Promise<boolean> {
+  const rows = await withPartnerAdminTransaction((client) =>
+    loadPartnerWorkingEvidenceRows(client, [auth.certId], auth.tenantId)
+  );
+  return hasAdmittedPartnerWorkingEvidence(rows, auth.certId);
+}
+
+function fullResolutionEvidenceUnavailable(res: Response): Response {
+  return res.status(409).json({
+    code: "FULL_RESOLUTION_EVIDENCE_UNAVAILABLE",
+    error:
+      "FULL-RESOLUTION EVIDENCE UNAVAILABLE. Restore both verified Canon 1200-DPI working sides from their approved station captures before grading.",
+  });
 }
 
 export function partnerGradingRouter(): Router {
@@ -1108,7 +1134,10 @@ export function partnerGradingRouter(): Router {
        */
       const seen = new Set(cardJobRows.map((row) => Number(row.cert_id)));
       const rows = [...cardJobRows, ...connectorRows.filter((row) => !seen.has(Number(row.cert_id)))];
-      const evidenceByCertificate = await buildWorkingEvidencePayloads(rows.map((row) => Number(row.cert_id)));
+      const evidenceByCertificate = await buildPartnerWorkingEvidencePayloads(
+        rows.map((row) => Number(row.cert_id)),
+        principal.tenantId
+      );
 
       const byGroup = new Map<string, Record<string, unknown>>();
       for (const row of rows) {
@@ -1313,6 +1342,7 @@ export function partnerGradingRouter(): Router {
         if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
         const editable = draftEditability(auth.auth, req.partner!);
         if (!editable.ok) return res.status(editable.status).json({ error: editable.error });
+        if (!(await hasAdmittedPartnerGradingEvidence(auth.auth))) return fullResolutionEvidenceUnavailable(res);
         let leaseRevision: number | null;
         try {
           leaseRevision = await requireLeaseForCertificateWrite(req.partner!, certId, req.body);
@@ -1397,6 +1427,8 @@ export function partnerGradingRouter(): Router {
         } else if (auth.auth.gradingStatus !== "assigned") {
           return res.status(409).json({ error: `Card is '${auth.auth.gradingStatus}', not submittable` });
         }
+
+        if (!(await hasAdmittedPartnerGradingEvidence(auth.auth))) return fullResolutionEvidenceUnavailable(res);
 
         if (!(await requireBothImages(auth.auth))) {
           return res
@@ -1578,6 +1610,7 @@ export function partnerGradingRouter(): Router {
         if (auth.auth.gradedBy && auth.auth.gradedBy !== req.partner!.userId) {
           return res.status(403).json({ error: "Only the partner user who submitted this card can edit it" });
         }
+        if (!(await hasAdmittedPartnerGradingEvidence(auth.auth))) return fullResolutionEvidenceUnavailable(res);
         if (!(await requireBothImages(auth.auth))) {
           return res
             .status(409)

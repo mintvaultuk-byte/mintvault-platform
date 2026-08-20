@@ -27,6 +27,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -46,6 +49,7 @@ let grading: typeof import("../server/partner/grading-routes");
 let printEligibility: typeof import("../server/partner/print-eligibility");
 let drizzle: typeof import("../server/db");
 let savedEnv: Record<string, string | undefined> = {};
+let localEvidenceRoot = "";
 
 const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail: "ops@mintvault.test" };
 
@@ -363,6 +367,12 @@ async function scannerNew(
 
 let evidenceSeq = 0;
 
+async function writeWorkingEvidence(key: string): Promise<void> {
+  const destination = join(localEvidenceRoot, ...key.split("/"));
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, "fixture working evidence");
+}
+
 /**
  * Accept ONE side on a station — the evidence shape the queue and the lifecycle both require.
  *
@@ -405,6 +415,7 @@ async function captureSide(
       }),
     ]
   );
+  await writeWorkingEvidence(`evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`);
 }
 
 /** A Scanner card captured on both sides and advanced to READY_TO_GRADE through the real bridge. */
@@ -524,7 +535,10 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
       PARTNER_CONNECTOR_DATABASE_URL: process.env.PARTNER_CONNECTOR_DATABASE_URL,
+      MINTVAULT_LOCAL_EVIDENCE_DIR: process.env.MINTVAULT_LOCAL_EVIDENCE_DIR,
     };
+    localEvidenceRoot = await mkdtemp(join(tmpdir(), "mintvault-bridge-evidence-"));
+    process.env.MINTVAULT_LOCAL_EVIDENCE_DIR = localEvidenceRoot;
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
@@ -559,6 +573,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     await drizzle?.pool.end().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
+    await rm(localEvidenceRoot, { recursive: true, force: true }).catch(() => {});
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;

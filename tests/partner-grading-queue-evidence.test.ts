@@ -33,7 +33,8 @@ describe("Partner grading queue evidence projection", () => {
       routes.indexOf("async function imagesForPartnerCert"),
       routes.indexOf("type PartnerQueueEvidenceSide")
     );
-    expect(adapter).toContain("workingEvidence: payload.workingEvidence");
+    expect(adapter).toContain("buildPartnerWorkingEvidencePayloads");
+    expect(adapter).toContain("workingEvidence: admittedWorking?.workingEvidence ?? payload.workingEvidence");
     expect(adapter).not.toContain("front_display: payload.workingEvidence");
   });
 
@@ -92,6 +93,28 @@ describe("Partner grading queue evidence projection", () => {
     const queue = routes.slice(routes.indexOf("const lifecycleOpenable"), routes.indexOf("if (!byGroup.has"));
     expect(queue).toContain('evidence.workflow === "READY_TO_GRADE" || evidence.workflow === "IN_GRADING"');
     expect(queue).toContain("const openable =");
+  });
+
+  it("uses one station-proven full-resolution gate for queue, lease and every direct Partner write", () => {
+    const routes = readFileSync("server/partner/grading-routes.ts", "utf8");
+    const admission = readFileSync("server/partner/working-evidence-admission.ts", "utf8");
+    expect(admission).toContain("scanner_capture_sessions session");
+    expect(admission).toContain("evidence.format = 'tiff'");
+    expect(admission).toContain("session.state = 'captured'");
+    expect(admission).toContain("station.status = 'ACTIVE'");
+    expect(admission).toContain("station.location_id = certificate.origin_location_id");
+    expect(routes).toContain("buildPartnerWorkingEvidencePayloads");
+    for (const path of [
+      '"/grading/certificates/:id/grade"',
+      '"/grading/certificates/:id/submit"',
+      '"/grading/certificates/:id/edit-submission"',
+    ]) {
+      const start = routes.indexOf(path);
+      expect(start).toBeGreaterThan(-1);
+      const handler = routes.slice(start, routes.indexOf("\n  );", start));
+      expect(handler).toContain("hasAdmittedPartnerGradingEvidence");
+      expect(handler).toContain("fullResolutionEvidenceUnavailable");
+    }
   });
 
   it("keeps working URLs and side labels bound to their exact card and side", () => {

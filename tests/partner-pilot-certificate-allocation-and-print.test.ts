@@ -102,7 +102,7 @@ describe("Partner Pilot physical evidence and output gate", () => {
     // Incomplete cards must be visible to the shop floor, not filtered out. The authoritative
     // evidence projection labels each side, and tests exercise the no-false-ready branch directly.
     expect(queue).toContain("'NEEDS_SCAN', 'CAPTURING', 'FIX_REQUIRED', 'READY_TO_GRADE', 'GRADING'");
-    expect(queue).toContain("buildWorkingEvidencePayloads");
+    expect(queue).toContain("buildPartnerWorkingEvidencePayloads");
     expect(queue).toContain("projectPartnerQueueEvidence");
     expect(grading).toContain('input.cardJobStatus !== null && input.cardJobStatus !== "READY_TO_GRADE"');
     expect(grading).toContain('"AWAITING_CAPTURE_ACCEPTANCE"');

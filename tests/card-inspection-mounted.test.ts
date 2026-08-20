@@ -261,6 +261,55 @@ describe("mounted controlled card inspection", () => {
     expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
   });
 
+  it("keeps Partner inspection tools but removes dead source-image mutation controls", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: {
+            front_working: IMAGE,
+            back_working: IMAGE,
+            front_original: "https://legacy.test/front-original.jpg",
+            back_original: "https://legacy.test/back-original.jpg",
+          },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
+          defects: [],
+          onDefectAdded: () => {},
+          onOpenCardTool: () => {},
+          certId: 279,
+          mutationsEnabled: true,
+          sourceImageMutationsEnabled: false,
+          apiBase: "/api/partner/grading",
+          highlightId: null,
+        })
+      )
+    );
+    expect(host.querySelector('[data-testid="btn-card-tool-front"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="btn-card-tool-back"]')).toBeTruthy();
+    expect([...host.querySelectorAll("button")].some((button) => button.textContent?.includes("Manual Crop"))).toBe(
+      false
+    );
+    expect(host.querySelector('[title^="Delete"]')).toBeNull();
+  });
+
+  it("keeps the Partner Card Tool on admitted working evidence without exposing Auto-Detect", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ManualCardTool, {
+          certId: 279,
+          side: "front",
+          workingImageUrl: IMAGE,
+          allowSourceImageMutations: false,
+          onDone: () => {},
+          onCancel: () => {},
+        })
+      )
+    );
+    expect(host.querySelector("img")?.getAttribute("src")).toBe(IMAGE);
+    expect([...host.querySelectorAll("button")].some((button) => button.textContent?.includes("Auto-Detect"))).toBe(
+      false
+    );
+  });
+
   it("honours a server rejection even if a stale working URL remains in client state", async () => {
     await act(async () =>
       root.render(
@@ -285,6 +334,25 @@ describe("mounted controlled card inspection", () => {
     expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
     expect(host.textContent).toContain("dimensions do not match");
     expect(host.textContent).toContain("immutable 1200-DPI master");
+  });
+
+  it("fails visibly when a supposedly admitted working URL cannot load", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: "https://evidence.test/missing-working.jpg" },
+          workingEvidence: { front: ADMITTED_WORKING_EVIDENCE.front },
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    const image = host.querySelector("img")!;
+    await act(async () => image.dispatchEvent(new Event("error", { bubbles: true })));
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.querySelector('[data-testid="working-evidence-unavailable"]')).toBeTruthy();
+    expect(host.textContent).toContain("could not be loaded");
   });
 
   it("keeps the Card Details and Review preview fail-closed too", async () => {

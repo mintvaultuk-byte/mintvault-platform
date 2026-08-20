@@ -25,6 +25,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -53,6 +56,7 @@ let reconciliation: typeof import("../server/partner/card-job-reconciliation");
 let printEligibility: typeof import("../server/partner/print-eligibility");
 let drizzle: typeof import("../server/db");
 let savedEnv: Record<string, string | undefined> = {};
+let localEvidenceRoot = "";
 
 const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail: "ops@mintvault.test" };
 const RUN_SALT = Math.random().toString(36).slice(2, 8);
@@ -130,6 +134,12 @@ async function seedMintVaultTables(): Promise<void> {
   ]) {
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
   }
+}
+
+async function writeWorkingEvidence(key: string): Promise<void> {
+  const destination = join(localEvidenceRoot, ...key.split("/"));
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, "fixture working evidence");
 }
 
 async function makeTenant(label: string): Promise<Fixture> {
@@ -245,6 +255,7 @@ function startNew(f: Fixture, clientOpId: string, opts: { locationId?: string; s
 async function captureSide(f: Fixture, certificateId: number, side: "front" | "back", stationId?: string) {
   evidenceSeq += 1;
   const sessionId = `sess-${certificateId}-${side}-${evidenceSeq}`;
+  const workingKey = `evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`;
   await admin.query(
     `INSERT INTO scanner_capture_sessions
        (id, certificate_id, side, workstation_id, station_id, scanner_profile_version, actor_id, state,
@@ -264,10 +275,11 @@ async function captureSide(f: Fixture, certificateId: number, side: "front" | "b
       side,
       `evidence/${certificateId}/${side}/${evidenceSeq}.tif`,
       "a".repeat(64),
-      `evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`,
+      workingKey,
       JSON.stringify({ captureSessionId: sessionId, scannerProfileVersion: "mintvault-canon-lide-400-v3" }),
     ]
   );
+  await writeWorkingEvidence(workingKey);
 }
 
 async function readyCard(f: Fixture, opts: { locationId?: string; stationId?: string } = {}) {
@@ -377,7 +389,10 @@ describe("P13 Partner pilot concurrency (real PostgreSQL, genuinely parallel)", 
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
       PARTNER_CONNECTOR_DATABASE_URL: process.env.PARTNER_CONNECTOR_DATABASE_URL,
+      MINTVAULT_LOCAL_EVIDENCE_DIR: process.env.MINTVAULT_LOCAL_EVIDENCE_DIR,
     };
+    localEvidenceRoot = await mkdtemp(join(tmpdir(), "mintvault-pilot-evidence-"));
+    process.env.MINTVAULT_LOCAL_EVIDENCE_DIR = localEvidenceRoot;
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
@@ -402,6 +417,7 @@ describe("P13 Partner pilot concurrency (real PostgreSQL, genuinely parallel)", 
     await drizzle?.pool.end().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
+    await rm(localEvidenceRoot, { recursive: true, force: true }).catch(() => {});
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
