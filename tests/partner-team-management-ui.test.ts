@@ -17,7 +17,7 @@ describe("Partner Portal team management UI source assertions", () => {
   });
 
   it("keeps Users on its permission-gated direct route without restoring it to launch navigation", () => {
-    const primary = shell.slice(shell.indexOf("const PRIMARY_NAV_ITEMS"), shell.indexOf("const MORE_NAV_ITEMS"));
+    const primary = shell.slice(shell.indexOf("const PRIMARY_NAV_ITEMS"), shell.indexOf("const SECONDARY_NAV_ITEMS"));
     expect(primary).not.toContain('href: "/partner/users"');
     expect(app).toContain('path="/partner/users"');
   });
