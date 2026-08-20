@@ -16,8 +16,10 @@ The estimate is based on the 67-file reviewed candidate delta and four proven te
 
 | Metric | Actual | Within 25%? |
 |---|---|---|
-| Files changed | pending | pending |
-| Lines changed | pending | pending |
-| Commits | pending | pending |
-| Tests | pending | pending |
-| Duration | pending | pending |
+| Files changed | 81 product, migration, test and governance files | yes (estimate 73; upper bound 91) |
+| Lines changed | 6,820 insertions / 128 deletions, including final local evidence | yes (within ±13,000 estimate) |
+| Commits | 2 local, unpushed checkpoints | yes |
+| Tests | 8 focused proof groups, full Partner matrix, full build/type/lint/graph gates, and targeted hostile review | yes |
+| Duration | one controlled local release pass | yes |
+
+The actuals exclude all external production work: no migration was applied, no flag was enabled, no Partner was reset or created, and no Google provider operation was attempted.

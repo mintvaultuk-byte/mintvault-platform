@@ -9,6 +9,7 @@
 | PPNR-005 | HIGH | G | Partner audit/provenance/financial history prevents a safe physical delete. | Require recovery evidence and an aggregate manifest; use canonical terminal revocation only for targets later proven disposable. | Read-only database/security review; no reset started. | Owner/external gate |
 | PPNR-006 | EXTERNAL FOLLOW-UP | F | Google OAuth/API credentials and live pilot prerequisites are absent. | Keep optional `0103` schema, flag and provider integration inactive. | Source/flag boundaries reviewed. | Deferred safely |
 | PPNR-007 | EXTERNAL INPUT | G | A legitimate new Partner requires owner-controlled business/contact/location/access data. | Collect exact inputs and obtain action-time approval only after code release is ready. | Not applicable before owner input. | Waiting |
+| PPNR-008 | HIGH | A | The critical Super Admin control-shell test used two parameterised `INSERT`s in one PostgreSQL prepared statement, which PostgreSQL rejects before it can prove exact public-profile approval. | Split the fixture into two atomic parameterised inserts. | Isolated suite 12/12; full fail-closed Partner matrix 70 suites / 1,315 assertions. | Locally verified |
 
 ## Latest evidence
 
@@ -16,5 +17,6 @@
 - `npx vitest run tests/canonical-lineage-production-rehearsal.test.ts tests/public-partner-presence-db.test.ts tests/google-partner-presence-migration.test.ts tests/partner-schema-parity.test.ts`: 25/25 passed.
 - Public API/SSR/cache/privacy/Google/control suites: 40 passed, 40 environment-gated skipped.
 - `npm run check`, `npm run lint` (0 errors), `npm run build`, and `npm run graph:check`: passed.
+- `node scripts/ci/run-partner-suite.mjs --all`: 70/70 critical suites green, 1,315 assertions observed.
 - Full `npm test`: 5,214 passed / 1,015 skipped; five suites lacked their pinned local environment. Those five were then exercised with the disposable loopback variables: 62/62 passed. The shared CI-fixture preparation script itself stopped on pre-existing local VQ schema drift and was not reset.
 - `git diff --check`: clean at the time of each focused proof.

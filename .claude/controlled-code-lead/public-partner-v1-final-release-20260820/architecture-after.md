@@ -1,6 +1,6 @@
 # Architecture — AFTER — Public Partner Network v1 final production release
 
-**State:** PROPOSED (Stage 4)
+**State:** AS-BUILT LOCALLY; NOT DEPLOYED
 **Date:** 2026-08-20
 
 ```mermaid
@@ -22,4 +22,4 @@ flowchart LR
 | One shared structured-data serializer renders Growth and Partner SEO metadata. | Retain both public authorities. | B |
 | Settings gains a stepped-up reasoned public exposure/kill switch. | Safe activation and containment. | B/G |
 
-No public flag is turned on, schema applied, Partner reset, payment mutated, or Google provider action taken by this code-reconciliation stage.
+No public flag is turned on, schema applied, Partner reset, payment mutated, or Google provider action taken by this code-reconciliation stage. Production still requires the owner to approve the revised `0101` + `0102` scope, expressly excluding `0103`.

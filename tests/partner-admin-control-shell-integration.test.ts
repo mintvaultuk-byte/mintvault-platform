@@ -517,7 +517,9 @@ let ADMIN_USER_ID: string;
     await admin.query(`
       INSERT INTO partner_public_profiles
         (tenant_id,public_display_name,version,consented_by,consented_at,listed)
-      VALUES ($1,'A Public Trading',1,$3,now(),false);
+      VALUES ($1,'A Public Trading',1,$2,now(),false)
+    `, [A, UA_OWNER]);
+    await admin.query(`
       INSERT INTO partner_location_publications
         (tenant_id,location_id,privacy_state,public_location_name,public_street_address,maps_enabled,
          consented_fields,version,consented_by,consented_at,listed)

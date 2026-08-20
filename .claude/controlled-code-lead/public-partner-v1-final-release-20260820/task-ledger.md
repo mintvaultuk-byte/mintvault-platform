@@ -19,8 +19,8 @@
 | 3 — Lead verification | done | 2026-08-20 | Accepted PPNR-001 through PPNR-007; blockers are addressed only by the bounded manifest. |
 | 4 — Implementation authorisation | done | 2026-08-20 | The bounded reconciliation manifest authorises local code/test work only. |
 | 5 — Implementation | done | 2026-08-20 | Candidate merged locally; four conflicts reconciled; public migration renamed to 0102, Google to optional 0103; public-directory control added. |
-| 6 — Regression | in progress | 2026-08-20 | Focused UI, real PostgreSQL lineage/public migration, public HTTP/SSR/SEO/cache and Google isolation suites are green; TypeScript/lint/build are green. Full suite code execution is green apart from a shared local-fixture preparation failure, whose five affected suites were run safely with their pinned loopback variables. |
-| 7 — Final report | pending | | |
+| 6 — Regression | done | 2026-08-20 | Focused UI, real PostgreSQL lineage/public migration, public HTTP/SSR/SEO/cache and Google isolation suites are green; TypeScript/lint/build are green. The full fail-closed Partner matrix is green: 70 suites / 1,315 assertions. |
+| 7 — Final report | done (local) | 2026-08-20 | Local reconciliation is checkpointed with protected production operations expressly pending the owner decision described below. |
 
 ## Accepted investigation findings
 
@@ -45,4 +45,4 @@
 
 ## Next authorised action
 
-Finalize local governance evidence and create an unpushed reconciliation commit. No push, deployment, migration, flag activation, Partner reset, or Partner creation is authorised to execute.
+The next action needs an explicit owner decision on the revised migration scope: approve current-main `0101_growth_reviews_and_conversion.sql` followed by public `0102_partner_public_presence.sql`, while explicitly excluding optional Google `0103_partner_google_presence.sql`. No push, deployment, migration, flag activation, Partner reset, or Partner creation is authorised to execute before that decision and the target-time recovery/manifest gates.
