@@ -59,9 +59,34 @@ function localRole(): string {
   return role;
 }
 
-function databaseUrl(role: string, database: string): string {
+/**
+ * Reuse the repository's disposable loopback PostgreSQL coordinate when CI
+ * supplies one. GitHub exposes that service on 55432, while a developer's
+ * local peer-authenticated cluster normally listens on 5432. The previous
+ * hard-coded port made the real lifecycle tests fail before READY in CI even
+ * though the configured disposable database was healthy.
+ */
+export function resolveRuntimeMaintenanceUrl(
+  environment: NodeJS.ProcessEnv = process.env
+): string {
+  const configured =
+    environment.MINTVAULT_COMMAND_CENTRE_RUNTIME_MAINTENANCE_URL ??
+    environment.MINTVAULT_DATABASE_URL;
+  if (configured) {
+    const url = new URL(configured);
+    if ((url.protocol !== "postgres:" && url.protocol !== "postgresql:") || !LOOPBACK_HOSTS.has(url.hostname.toLowerCase())) {
+      throw new Error("Command Centre runtime harness maintenance database must be loopback PostgreSQL.");
+    }
+    url.pathname = "/postgres";
+    return url.toString();
+  }
   const url = new URL("postgresql://127.0.0.1:5432/postgres");
-  url.username = role;
+  url.username = localRole();
+  return url.toString();
+}
+
+function databaseUrl(maintenanceUrl: string, database: string): string {
+  const url = new URL(maintenanceUrl);
   url.pathname = `/${database}`;
   return url.toString();
 }
@@ -299,14 +324,13 @@ async function main(): Promise<number> {
   }
   const runtimeAdminPassword = requireRuntimeCredential(RUNTIME_ADMIN_PASSWORD_ENV);
   const runtimeAdminPin = requireRuntimeCredential(RUNTIME_ADMIN_PIN_ENV);
-  const role = localRole();
   // This is an audit-only process argument, not a product feature switch. It
   // lets the rendered audit prove the existing server-side kill switch with the
   // same local-only database safeguards as the enabled runtime.
   const commandCentreEnabled = !process.argv.includes("--feature-off");
   const database = runtimeDatabaseName(`${COMMAND_CENTRE_RUNTIME_DB_PREFIX}${process.pid}_${randomUUID().slice(0, 8)}`);
-  const maintenanceUrl = databaseUrl(role, "postgres");
-  const runtimeUrl = databaseUrl(role, database);
+  const maintenanceUrl = resolveRuntimeMaintenanceUrl();
+  const runtimeUrl = databaseUrl(maintenanceUrl, database);
   assertDisposableRuntimeDatabaseUrl(runtimeUrl);
   let app: ChildProcess | undefined;
   let databaseCreated = false;

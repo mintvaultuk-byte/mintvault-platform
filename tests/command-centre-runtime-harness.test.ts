@@ -7,6 +7,7 @@ import {
   COMMAND_CENTRE_RUNTIME_DB_PREFIX,
   assertDisposableRuntimeDatabaseUrl,
   requireRuntimeCredential,
+  resolveRuntimeMaintenanceUrl,
 } from "../scripts/command-centre-runtime-harness";
 
 describe("Command Centre rendered-runtime harness safety", () => {
@@ -28,6 +29,17 @@ describe("Command Centre rendered-runtime harness safety", () => {
   it("keeps the loopback session transport exception test-only", () => {
     const server = readFileSync("server/index.ts", "utf8");
     expect(server).toContain('ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false }');
+  });
+
+  it("derives the disposable maintenance database from the configured CI loopback port", () => {
+    const maintenance = new URL(
+      resolveRuntimeMaintenanceUrl({
+        MINTVAULT_DATABASE_URL: "postgres://postgres:synthetic@127.0.0.1:55432/mintvault_vq_phase10_local",
+      })
+    );
+    expect(maintenance.hostname).toBe("127.0.0.1");
+    expect(maintenance.port).toBe("55432");
+    expect(maintenance.pathname).toBe("/postgres");
   });
 
   it("uses the existing server kill switch for the optional flag-off audit", () => {
@@ -86,9 +98,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
       expect(exited, "harness did not finish awaited cleanup").toBe(true);
       expect(child.exitCode).toBe(0);
 
-      const role = process.env.USER;
-      expect(role).toMatch(/^[a-z_][a-z0-9_]*$/i);
-      const admin = new Client({ connectionString: `postgresql://${role}@127.0.0.1:5432/postgres` });
+      const admin = new Client({ connectionString: resolveRuntimeMaintenanceUrl() });
       await admin.connect();
       try {
         const residue = await admin.query<{ datname: string }>(
@@ -138,9 +148,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
     expect(child.exitCode, output).toBe(1);
     expect(output).toContain("child exited unexpectedly");
 
-    const role = process.env.USER;
-    expect(role).toMatch(/^[a-z_][a-z0-9_]*$/i);
-    const admin = new Client({ connectionString: `postgresql://${role}@127.0.0.1:5432/postgres` });
+    const admin = new Client({ connectionString: resolveRuntimeMaintenanceUrl() });
     await admin.connect();
     try {
       const residue = await admin.query<{ datname: string }>(
