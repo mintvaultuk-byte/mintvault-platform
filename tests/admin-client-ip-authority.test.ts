@@ -177,6 +177,7 @@ describe("CC-OA-001 — real Express allowlist and limiter regressions", () => {
       "server/partner/flag-admin-routes.ts",
       "server/partner/partner-management-routes.ts",
       "server/routes/admin/commercial-growth.ts",
+      "server/routes/growth-mcp.ts",
     ];
     for (const file of files) {
       const source = readFileSync(join(process.cwd(), file), "utf8");

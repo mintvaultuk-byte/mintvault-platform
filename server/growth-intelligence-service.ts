@@ -11,7 +11,11 @@
 import { sql, type SQL } from "drizzle-orm";
 import { getSitemapEntries, isKnownPublicRoute } from "./seo-config";
 import { getGrowthSummary, type GrowthPeriod, type GrowthSummary } from "./commercial-growth-service";
-import { getConversionEventSummary, type GrowthConversionExecutor } from "./growth-conversion-service";
+import {
+  getConversionEventSummary,
+  getPreviousConversionEventSummary,
+  type GrowthConversionExecutor,
+} from "./growth-conversion-service";
 import { getCommercialScoreboard, type CommercialScoreboard } from "./growth-scoreboard-service";
 import {
   buildInfrastructureIntelligence,
@@ -23,6 +27,12 @@ import {
   type InfrastructureIntelligence,
   type RevenueVelocity,
 } from "./growth-infrastructure-intelligence";
+import {
+  getApplicationHealthSnapshot,
+  getRuntimeRequestSnapshot,
+  type ApplicationHealthSnapshot,
+} from "./growth-runtime-telemetry";
+import { getSearchConsoleSnapshot } from "./growth-search-console";
 
 export type IntelligenceState = "REAL" | "NOT_CONNECTED" | "NOT_INSTRUMENTED" | "INSUFFICIENT_DATA" | "STALE" | "ERROR";
 export type HealthStatus = "GREEN" | "AMBER" | "RED" | "UNKNOWN";
@@ -70,6 +80,7 @@ export type CapacityStatus = {
     | "INVESTIGATE_DATABASE_PRESSURE"
     | "CONSIDER_ADDITIONAL_FLY_CAPACITY"
     | "CONSIDER_MORE_MEMORY"
+    | "RESTORE_EXPECTED_FLEET"
     | "ERROR_RATE_ELEVATED_SCALING_MAY_NOT_HELP"
     | "TELEMETRY_INCOMPLETE";
   evidence: string[];
@@ -99,6 +110,8 @@ export type SiteHealth = {
   p95Latency: IntelligenceMetric;
   fiveXErrorRate: IntelligenceMetric;
   database: IntelligenceMetric;
+  databasePressure: IntelligenceMetric;
+  databaseLatency: IntelligenceMetric;
   flyMachines: IntelligenceMetric;
   payments: IntelligenceMetric;
   email: IntelligenceMetric;
@@ -113,6 +126,7 @@ export type SeoSummary = {
   clicks: IntelligenceMetric;
   ctr: IntelligenceMetric;
   averagePosition: IntelligenceMetric;
+  trend: IntelligenceMetric;
   topQueries: IntelligenceMetric;
   topPages: IntelligenceMetric;
   technical: {
@@ -132,6 +146,10 @@ export type ConversionStage = {
 export type ConversionSummary = {
   period: GrowthPeriod;
   stages: ConversionStage[];
+  submissionToCheckout: IntelligenceMetric;
+  checkoutToPaid: IntelligenceMetric;
+  submissionToPaid: IntelligenceMetric;
+  cardsPerPaidOrder: IntelligenceMetric;
   dropOff: IntelligenceMetric;
   comparison: IntelligenceMetric;
   definition: string;
@@ -283,7 +301,11 @@ export function deriveCapacityStatus(
       ...common,
       status: "RED",
       label: "CAPACITY_OR_SERVICE_PRESSURE",
-      recommendation: memoryCritical ? "CONSIDER_MORE_MEMORY" : "CONSIDER_ADDITIONAL_FLY_CAPACITY",
+      recommendation: machinesDegraded
+        ? "RESTORE_EXPECTED_FLEET"
+        : memoryCritical
+          ? "CONSIDER_MORE_MEMORY"
+          : "CONSIDER_ADDITIONAL_FLY_CAPACITY",
       evidence: [
         ...(machinesDegraded ? ["Healthy Fly machines are below the expected fleet count."] : []),
         ...(cpuCritical ? ["CPU is above the configured critical threshold."] : []),
@@ -378,6 +400,9 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
   const paidCards = numberValue(row.paid_cards);
   const revenuePence = numberValue(row.revenue_pence);
   const revenueVelocity = deriveRevenueVelocity({ paidSubmissions, paidCards, revenuePence }, now);
+  const requests = getRuntimeRequestSnapshot();
+  const requestSource =
+    "Current application process rolling telemetry; it is not a fleet total, visitor count or active-session count";
   return {
     window: "60m",
     submissionStarts: real(
@@ -396,16 +421,26 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
       "MintVault partner_applications.created_at",
       now
     ),
-    requestsPerMinute: unavailable(
-      "NOT_CONNECTED",
-      "Fly fleet telemetry",
-      "Fleet-wide request telemetry is not connected; per-machine logs are not presented as site-wide requests."
-    ),
-    requestsLastHour: unavailable(
-      "NOT_CONNECTED",
-      "Fly fleet telemetry",
-      "Fleet-wide request telemetry is not connected; per-machine logs are not presented as site-wide requests."
-    ),
+    requestsPerMinute:
+      requests.lastUpdated && requests.complete
+        ? real(requests.requestsPerMinute, "requests/minute", requestSource, requests.lastUpdated)
+        : unavailable(
+            "INSUFFICIENT_DATA",
+            requestSource,
+            requests.complete
+              ? "No API request completion has been observed by this process in the rolling hour."
+              : "The bounded process telemetry ring reached its safety cap, so a complete request rate is unavailable."
+          ),
+    requestsLastHour:
+      requests.lastUpdated && requests.complete
+        ? real(requests.requestsLastHour, "requests", requestSource, requests.lastUpdated)
+        : unavailable(
+            "INSUFFICIENT_DATA",
+            requestSource,
+            requests.complete
+              ? "No API request completion has been observed by this process in the rolling hour."
+              : "The bounded process telemetry ring reached its safety cap, so a complete hourly count is unavailable."
+          ),
     revenueVelocity,
     lastUpdated: now,
   };
@@ -414,7 +449,12 @@ export async function getLivePulse(executor?: QueryExecutor): Promise<LivePulse>
 export async function getInfrastructureStatus(executor?: QueryExecutor): Promise<InfrastructureIntelligence> {
   const siteHealth = await getSiteHealth(executor);
   return buildInfrastructureIntelligence(
-    { database: siteHealth.database, capacity: getCapacityStatus() },
+    {
+      database: siteHealth.database,
+      databasePressure: siteHealth.databasePressure,
+      databaseLatency: siteHealth.databaseLatency,
+      capacity: getCapacityStatus(),
+    },
     siteHealth.lastUpdated
   );
 }
@@ -435,13 +475,60 @@ export async function getRevenueVelocity(executor?: QueryExecutor): Promise<Reve
   return (await getLivePulse(executor)).revenueVelocity;
 }
 
+export function deriveDatabasePoolPressure(
+  values: { total: number; idle: number; waiting: number; max: number },
+  now: string
+): IntelligenceMetric {
+  const max = Math.max(1, values.max);
+  const active = Math.max(0, values.total - values.idle);
+  const utilization = (active / max) * 100;
+  const status: HealthStatus = values.waiting > 0 || utilization >= 90 ? "RED" : utilization >= 70 ? "AMBER" : "GREEN";
+  return {
+    state: "REAL",
+    status,
+    value: `${active}/${max} active · ${Math.max(0, values.waiting)} waiting`,
+    source: "Current application PostgreSQL pool counters",
+    reason:
+      "GREEN <70% active with no waiters; AMBER ≥70%; RED ≥90% or any waiter. This is application-pool pressure, not Neon compute utilisation.",
+    lastUpdated: now,
+  };
+}
+
+function applicationHealthMetric(
+  snapshot: ApplicationHealthSnapshot,
+  source: string,
+  limitation: string
+): IntelligenceMetric {
+  if (snapshot.status === "UNKNOWN") {
+    return unavailable("INSUFFICIENT_DATA", source, `${snapshot.reason} ${limitation}`, snapshot.lastUpdated);
+  }
+  return {
+    state: "REAL",
+    status: snapshot.status,
+    value: `${snapshot.successful}/${snapshot.classifiedAttempts} successful`,
+    unit: "classified outcomes / 60m",
+    source,
+    reason: `${snapshot.reason} ${limitation}`,
+    lastUpdated: snapshot.lastUpdated,
+  };
+}
+
 export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealth> {
-  const runner = executor ?? (await import("./db")).db;
+  const databaseModule = executor ? null : await import("./db");
+  const runner = executor ?? databaseModule!.db;
   const now = new Date().toISOString();
   let database: IntelligenceMetric;
+  let databasePressure = unavailable(
+    "NOT_INSTRUMENTED",
+    "Current application PostgreSQL pool counters",
+    "Pool counters are unavailable through the injected query executor."
+  );
+  let databaseLatency: IntelligenceMetric;
   let site: IntelligenceMetric;
+  const databaseStartedAt = Date.now();
   try {
     const result = await runner.execute(sql`SELECT 1 AS ok, to_regclass('public.certificates') AS certificates`);
+    const latencyMs = Date.now() - databaseStartedAt;
     const row = (result.rows[0] ?? {}) as Record<string, unknown>;
     const ready = Number(row.ok) === 1 && row.certificates != null;
     database = ready
@@ -462,6 +549,26 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
           reason: "The current service could not complete its readiness check.",
           lastUpdated: now,
         };
+    const latencyStatus: HealthStatus = latencyMs >= 1_000 ? "RED" : latencyMs >= 250 ? "AMBER" : "GREEN";
+    databaseLatency = real(
+      latencyMs,
+      "ms readiness round-trip",
+      "Current application database readiness query",
+      now,
+      latencyStatus
+    );
+    databaseLatency.reason = "GREEN <250ms; AMBER ≥250ms; RED ≥1000ms for the bounded readiness round-trip.";
+    if (databaseModule) {
+      databasePressure = deriveDatabasePoolPressure(
+        {
+          total: databaseModule.pool.totalCount,
+          idle: databaseModule.pool.idleCount,
+          waiting: databaseModule.pool.waitingCount,
+          max: databaseModule.pool.options.max ?? 8,
+        },
+        now
+      );
+    }
   } catch {
     database = {
       state: "ERROR",
@@ -477,36 +584,114 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
       reason: "The current service could not complete its readiness check.",
       lastUpdated: now,
     };
+    databaseLatency = {
+      state: "ERROR",
+      status: "RED",
+      source: "Current application database readiness query",
+      reason: "Database readiness latency could not be measured because the query failed.",
+      lastUpdated: now,
+    };
   }
   const fleetReason = "Fly fleet telemetry is not connected in the application runtime.";
+  const requests = getRuntimeRequestSnapshot();
+  const runtimeSource =
+    "Current application process rolling telemetry; fleet-wide authority requires the separate Fly read connection";
+  const requestRate =
+    requests.lastUpdated && requests.complete
+      ? real(requests.requestsPerMinute, "requests/minute", runtimeSource, requests.lastUpdated, "UNKNOWN")
+      : unavailable(
+          "INSUFFICIENT_DATA",
+          runtimeSource,
+          requests.complete
+            ? "No API request completion has been observed by this process in the rolling hour."
+            : "The bounded process telemetry ring reached its safety cap, so a complete rate is unavailable."
+        );
+  if (requestRate.state === "REAL") {
+    requestRate.reason = "Throughput is context, not a green/amber/red health or capacity decision.";
+  }
+  const p95Latency =
+    requests.lastUpdated && requests.complete && requests.p95LatencyMs != null
+      ? real(
+          requests.p95LatencyMs,
+          "ms",
+          runtimeSource,
+          requests.lastUpdated,
+          requests.requestsLastHour < 5
+            ? "UNKNOWN"
+            : requests.p95LatencyMs >= 1_500
+              ? "RED"
+              : requests.p95LatencyMs >= 500
+                ? "AMBER"
+                : "GREEN"
+        )
+      : unavailable(
+          "INSUFFICIENT_DATA",
+          runtimeSource,
+          requests.complete
+            ? "No request-latency sample exists in this process."
+            : "The bounded process telemetry ring reached its safety cap, so a complete p95 is unavailable."
+        );
+  if (p95Latency.state === "REAL") {
+    p95Latency.reason =
+      requests.requestsLastHour < 5
+        ? "Fewer than 5 request completions; the value is real but no health colour is assigned."
+        : "Current-process p95 thresholds: GREEN <500ms; AMBER ≥500ms; RED ≥1500ms.";
+  }
+  const fiveXErrorRate =
+    requests.lastUpdated && requests.complete
+      ? real(
+          requests.fiveXRatePercent ?? 0,
+          "% of process requests / 60m",
+          runtimeSource,
+          requests.lastUpdated,
+          requests.requestsLastHour < 20
+            ? "UNKNOWN"
+            : (requests.fiveXRatePercent ?? 0) >= 5
+              ? "RED"
+              : (requests.fiveXRatePercent ?? 0) >= 1
+                ? "AMBER"
+                : "GREEN"
+        )
+      : unavailable(
+          "INSUFFICIENT_DATA",
+          runtimeSource,
+          requests.complete
+            ? "No request-status sample exists in this process."
+            : "The bounded process telemetry ring reached its safety cap, so a complete 5xx rate is unavailable."
+        );
+  if (fiveXErrorRate.state === "REAL" && requests.requestsLastHour < 20) {
+    fiveXErrorRate.reason = "Fewer than 20 request completions; the value is real but no health colour is assigned.";
+  }
   return {
     site,
     cpu: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
     memory: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
-    requestRate: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
-    p95Latency: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
-    fiveXErrorRate: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
+    requestRate,
+    p95Latency,
+    fiveXErrorRate,
     database,
+    databasePressure,
+    databaseLatency,
     flyMachines: unavailable("NOT_CONNECTED", "Fly fleet telemetry", fleetReason),
-    payments: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault payment authority",
-      "Payment infrastructure failure classification is not instrumented; customer declines are not treated as an incident."
+    payments: applicationHealthMetric(
+      getApplicationHealthSnapshot("payments"),
+      "Current-process payment endpoint outcomes",
+      "Customer/client 4xx outcomes are excluded. Stripe account health and durable webhook failure taxonomy require separate authority."
     ),
-    email: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault email authority",
-      "Email provider health aggregation is not instrumented."
+    email: applicationHealthMetric(
+      getApplicationHealthSnapshot("email"),
+      "Current-process Resend API acceptance outcomes",
+      "Accepted means the Resend send API returned a message id; it is not a final-delivery claim without signed webhooks."
     ),
-    partnerApi: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault Partner authority",
-      "Partner API error aggregation is not instrumented."
+    partnerApi: applicationHealthMetric(
+      getApplicationHealthSnapshot("partnerApi"),
+      "Current-process Partner API HTTP outcomes",
+      "Expected authentication/authorization and other 4xx responses are excluded from platform failures."
     ),
-    scannerApi: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault scanner authority",
-      "Scanner API error aggregation is not instrumented."
+    scannerApi: applicationHealthMetric(
+      getApplicationHealthSnapshot("scannerApi"),
+      "Current-process Scanner API HTTP outcomes",
+      "Expected authentication/authorization and other 4xx responses are excluded from platform failures."
     ),
     lastUpdated: now,
   };
@@ -528,6 +713,7 @@ export function getSeoSummary(): SeoSummary {
     clicks: disconnected("Search clicks"),
     ctr: disconnected("CTR"),
     averagePosition: disconnected("Average position"),
+    trend: disconnected("Click trend"),
     topQueries: disconnected("Top queries"),
     topPages: disconnected("Top landing pages"),
     technical: {
@@ -548,6 +734,62 @@ export function getSeoSummary(): SeoSummary {
   };
 }
 
+export async function getConnectedSeoSummary(period: GrowthPeriod): Promise<SeoSummary> {
+  const technical = getSeoSummary();
+  const snapshot = await getSearchConsoleSnapshot(period);
+  if (snapshot.state === "NOT_CONNECTED") return technical;
+
+  const source = snapshot.sourceWindow
+    ? `Google Search Console final data · ${snapshot.sourceWindow.startDate} to ${snapshot.sourceWindow.endDate}`
+    : "Google Search Console read authority";
+  const status: HealthStatus =
+    snapshot.state === "ERROR"
+      ? "RED"
+      : snapshot.state === "STALE"
+        ? "AMBER"
+        : snapshot.state === "REAL"
+          ? "GREEN"
+          : "UNKNOWN";
+  const state: IntelligenceState = snapshot.state;
+  const metric = (value: number | string | undefined, unit?: string): IntelligenceMetric =>
+    value === undefined
+      ? unavailable(
+          snapshot.state === "ERROR" ? "ERROR" : "INSUFFICIENT_DATA",
+          source,
+          snapshot.reason ?? "Search Console returned insufficient final data.",
+          snapshot.lastUpdated
+        )
+      : {
+          state,
+          status,
+          value,
+          unit,
+          source,
+          reason: snapshot.reason,
+          lastUpdated: snapshot.lastUpdated,
+        };
+
+  return {
+    ...technical,
+    searchConsole: {
+      state,
+      status,
+      value: snapshot.property ? "Connected" : undefined,
+      source,
+      reason: snapshot.reason,
+      lastUpdated: snapshot.lastUpdated,
+    },
+    impressions: metric(snapshot.impressions, "impressions"),
+    clicks: metric(snapshot.clicks, "clicks"),
+    ctr: metric(snapshot.ctrPercent, "%"),
+    averagePosition: metric(snapshot.averagePosition, "average position"),
+    trend: metric(snapshot.clickTrendPercent, "% clicks vs previous like-for-like period"),
+    topQueries: metric(snapshot.topQueries?.length ? snapshot.topQueries.join(" · ") : undefined, "top 5"),
+    topPages: metric(snapshot.topPages?.length ? snapshot.topPages.join(" · ") : undefined, "top 5"),
+    lastUpdated: snapshot.lastUpdated ?? technical.lastUpdated,
+  };
+}
+
 export async function getConversionSummary(
   period: GrowthPeriod,
   summary?: GrowthSummary,
@@ -556,8 +798,12 @@ export async function getConversionSummary(
   const growth = summary ?? (await getGrowthSummary(period));
   const now = new Date().toISOString();
   let events: Awaited<ReturnType<typeof getConversionEventSummary>> | null = null;
+  let previous: Awaited<ReturnType<typeof getPreviousConversionEventSummary>> | null = null;
   try {
-    events = await getConversionEventSummary(period, executor);
+    [events, previous] = await Promise.all([
+      getConversionEventSummary(period, executor),
+      getPreviousConversionEventSummary(period, executor),
+    ]);
   } catch {
     // An unavailable additive event table must never take down paid reporting.
   }
@@ -568,6 +814,59 @@ export async function getConversionSummary(
         "MintVault growth_conversion_events",
         "The submission-start event migration is not available in this environment."
       );
+  const conversionRate = (
+    numerator: number | undefined,
+    denominator: number | undefined,
+    label: string
+  ): IntelligenceMetric => {
+    if (!events || numerator == null || denominator == null) {
+      return unavailable("NOT_INSTRUMENTED", "MintVault conversion authority", `${label} is not instrumented.`);
+    }
+    if (denominator === 0) {
+      return unavailable(
+        "INSUFFICIENT_DATA",
+        "MintVault canonical funnel cohort",
+        `${label} is not calculated because the denominator is zero.`,
+        now
+      );
+    }
+    return real(
+      Number(((numerator / denominator) * 100).toFixed(1)),
+      "%",
+      "Server-observed funnel cohort joined to verified Stripe-paid authority",
+      now
+    );
+  };
+  const submissionToCheckout = conversionRate(
+    events?.checkoutStarts,
+    events?.submissionStarts,
+    "Submission-to-checkout conversion"
+  );
+  const checkoutToPaid = conversionRate(
+    events?.checkoutCohortPaid,
+    events?.checkoutStarts,
+    "Checkout-to-paid conversion"
+  );
+  const submissionToPaid = conversionRate(
+    events?.checkoutCohortPaid,
+    events?.submissionStarts,
+    "Submission-to-paid conversion"
+  );
+  const cardsPerPaidOrder = !events
+    ? unavailable("NOT_INSTRUMENTED", "MintVault conversion authority", "Paid cohort cards/order is unavailable.")
+    : events.checkoutCohortPaid === 0
+      ? unavailable(
+          "INSUFFICIENT_DATA",
+          "MintVault canonical funnel cohort",
+          "No verified paid checkout exists in this cohort.",
+          now
+        )
+      : real(
+          Number((events.checkoutCohortPaidCards / events.checkoutCohortPaid).toFixed(2)),
+          "cards / paid order",
+          "Verified paid checkout cohort",
+          now
+        );
   const checkoutStarts = events
     ? real(
         events.checkoutStarts,
@@ -598,8 +897,47 @@ export async function getConversionSummary(
           "% checkout-to-paid drop-off",
           "Server-created checkout cohort joined to verified Stripe-paid submission authority",
           now,
-          events.checkoutCohortPaid < events.checkoutStarts ? "AMBER" : "GREEN"
+          ((events.checkoutStarts - events.checkoutCohortPaid) / events.checkoutStarts) * 100 >= 75
+            ? "RED"
+            : ((events.checkoutStarts - events.checkoutCohortPaid) / events.checkoutStarts) * 100 >= 40
+              ? "AMBER"
+              : "GREEN"
         );
+  const comparison = !events
+    ? unavailable(
+        "NOT_INSTRUMENTED",
+        "MintVault conversion authority",
+        "Previous-period conversion comparison requires the canonical funnel event authority."
+      )
+    : period === "all"
+      ? unavailable(
+          "INSUFFICIENT_DATA",
+          "MintVault canonical funnel cohort",
+          "All instrumented time has no finite previous like-for-like period.",
+          now
+        )
+      : !previous || events.checkoutStarts === 0 || previous.checkoutStarts === 0
+        ? unavailable(
+            "INSUFFICIENT_DATA",
+            "MintVault canonical funnel cohort",
+            "Both current and previous periods need at least one checkout start for comparison.",
+            now
+          )
+        : real(
+            Number(
+              (
+                (events.checkoutCohortPaid / events.checkoutStarts -
+                  previous.checkoutCohortPaid / previous.checkoutStarts) *
+                100
+              ).toFixed(1)
+            ),
+            "percentage points checkout-to-paid vs previous period",
+            "Like-for-like London calendar checkout cohorts",
+            now,
+            events.checkoutCohortPaid / events.checkoutStarts >= previous.checkoutCohortPaid / previous.checkoutStarts
+              ? "GREEN"
+              : "AMBER"
+          );
   return {
     period,
     stages: [
@@ -624,12 +962,12 @@ export async function getConversionSummary(
         metric: real(growth.paid.paidCards.value, "cards", "Verified Stripe payment_timestamp", now),
       },
     ],
+    submissionToCheckout,
+    checkoutToPaid,
+    submissionToPaid,
+    cardsPerPaidOrder,
     dropOff,
-    comparison: unavailable(
-      "NOT_INSTRUMENTED",
-      "MintVault conversion authority",
-      "Previous-period conversion comparison needs the same canonical funnel events."
-    ),
+    comparison,
     definition:
       "Submission start is a persisted server submission. Checkout start is recorded only after Stripe creates a PaymentIntent. Checkout drop-off follows that period's checkout cohort to current verified paid state. Paid headline stages remain verified Stripe payments in the selected calendar window.",
     lastUpdated: now,
@@ -762,16 +1100,24 @@ export async function getGrowthIntelligence(
   if (!options.force && cached && cached.expiresAt > now) return cached.value;
   try {
     const summary = await getGrowthSummary(period);
-    const [livePulse, siteHealth, conversion, scoreboard] = await Promise.all([
+    const [livePulse, siteHealth, conversion, scoreboard, seo] = await Promise.all([
       getLivePulse(),
       getSiteHealth(),
       getConversionSummary(period, summary),
       getCommercialScoreboard(),
+      getConnectedSeoSummary(period),
     ]);
-    const seo = getSeoSummary();
     const capacity = deriveCapacityStatus(null, null);
     const generatedAt = new Date().toISOString();
-    const infrastructure = buildInfrastructureIntelligence({ database: siteHealth.database, capacity }, generatedAt);
+    const infrastructure = buildInfrastructureIntelligence(
+      {
+        database: siteHealth.database,
+        databasePressure: siteHealth.databasePressure,
+        databaseLatency: siteHealth.databaseLatency,
+        capacity,
+      },
+      generatedAt
+    );
     const campaignReadiness = deriveCampaignReadiness({
       site: siteHealth.site,
       payments: siteHealth.payments,

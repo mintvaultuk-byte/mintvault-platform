@@ -2,7 +2,11 @@ import fs from "node:fs";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it } from "vitest";
 import { getConversionSummary } from "../server/growth-intelligence-service";
-import { getConversionEventSummary, recordGrowthConversionEvent } from "../server/growth-conversion-service";
+import {
+  getConversionEventSummary,
+  getPreviousConversionEventSummary,
+  recordGrowthConversionEvent,
+} from "../server/growth-conversion-service";
 import {
   getReviewConfiguration,
   getReviewSummary,
@@ -198,7 +202,28 @@ describe("Growth conversion events", () => {
     expect(conversion.stages[0].metric).toMatchObject({ state: "REAL", value: 6 });
     expect(conversion.stages[1].metric).toMatchObject({ state: "REAL", value: 4 });
     expect(conversion.dropOff).toMatchObject({ state: "REAL", value: 50 });
+    expect(conversion.submissionToCheckout).toMatchObject({ state: "REAL", value: 66.7 });
+    expect(conversion.checkoutToPaid).toMatchObject({ state: "REAL", value: 50 });
+    expect(conversion.submissionToPaid).toMatchObject({ state: "REAL", value: 33.3 });
+    expect(conversion.cardsPerPaidOrder).toMatchObject({ state: "REAL", value: 2.5 });
+    expect(conversion.comparison).toMatchObject({ state: "REAL", value: 0 });
     expect(conversion.stages[2].metric.source).toContain("Stripe");
+  });
+
+  it("queries an immediately preceding like-for-like London cohort and refuses an all-time comparison", async () => {
+    let query!: { sql: string; params: unknown[] };
+    const previous = await getPreviousConversionEventSummary("7d", {
+      execute: async (input) => {
+        query = dialect.sqlToQuery(input);
+        return {
+          rows: [{ submission_starts: 4, checkout_starts: 3, checkout_cohort_paid: 2, checkout_cohort_paid_cards: 4 }],
+        };
+      },
+    });
+    expect(previous).toMatchObject({ submissionStarts: 4, checkoutStarts: 3, checkoutCohortPaid: 2 });
+    expect(query.sql).toContain("Europe/London");
+    expect(query.sql).toContain("e.occurred_at <");
+    expect(await getPreviousConversionEventSummary("all", { execute: async () => ({ rows: [] }) })).toBeNull();
   });
 
   it("keeps both event writes explicitly fail-open around checkout", () => {
