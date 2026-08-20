@@ -36,7 +36,7 @@ describe("partner login and invitation UI source assertions", () => {
     // A bare `onboardingState.replaceAll` would throw in render and white-screen the page, so
     // the guard is pinned here to stop it being "simplified" back.
     expect(src).toContain('onboardingState ?? "UNKNOWN"');
-    expect(src).toContain(".replaceAll(\"_\", \" \")");
+    expect(src).toContain('.replaceAll("_", " ")');
     expect(src).toContain("Password configured");
     expect(src).toContain("MFA configured");
     expect(src).toContain("Send password setup");
@@ -51,10 +51,12 @@ describe("partner login and invitation UI source assertions", () => {
     expect(app.indexOf('path="/partner/invite"')).toBeLessThan(app.indexOf('path="/partner/dashboard"'));
   });
 
-  it("partner dashboard gives a truthful station-setup handoff", () => {
+  it("partner dashboard gives an operational Scanner handoff without inventing station readiness", () => {
     const src = read("client/src/pages/partner/dashboard.tsx");
-    expect(src).toContain("card-dashboard-scanner-station");
-    expect(src).toContain("wait for Super Admin approval");
-    expect(src).toContain("does not guess at device approval");
+    expect(src).toContain("action-scan-new-card");
+    const flat = src.replace(/\s+/g, " ");
+    expect(flat).toContain("Use the approved MintVault Scanner station.");
+    expect(flat).toContain("The station confirms capture authority and credit reservation.");
+    expect(src).not.toContain("card-dashboard-scanner-station");
   });
 });

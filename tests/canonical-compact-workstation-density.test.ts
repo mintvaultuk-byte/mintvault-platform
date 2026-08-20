@@ -66,6 +66,7 @@ describe("compact rail geometry", () => {
     expect(VIEWER).not.toContain("setVariant(");
     expect(VIEWER).toContain('type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted"');
     expect(VIEWER).not.toContain("function getUrl(");
+    expect(VIEWER).not.toContain("function getUrl(urls: ImageUrls, side: Side, variant: Variant)");
     expect(VIEWER).toContain("front_greyscale?: string | null");
     expect(VIEWER).toContain("front_highcontrast?: string | null");
     // The density pass originally pinned `getUrl()`, which selected processed

@@ -37,6 +37,13 @@ afterEach(() => {
   host.remove();
   vi.restoreAllMocks();
 });
+
+async function flushQuery(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe("mounted controlled card inspection", () => {
   it("keeps real drag pan, zoom and side state while the workstation stage changes", async () => {
     function Host() {
@@ -283,9 +290,7 @@ describe("mounted controlled card inspection", () => {
         )
       )
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await flushQuery();
     expect(host.querySelector('[data-testid="card-preview-image"]')).toBeNull();
     expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
     expect(host.textContent).toContain("FRONT cannot be inspected from a display derivative");
