@@ -57,15 +57,23 @@ describe("compact rail geometry", () => {
     expect(CERTIFICATE).toContain('data-preview-presentation={url ? "bare-image"');
   });
 
-  it("removes all normal image-filter controls without removing the image-processing contract", () => {
+  it("removes normal image-filter controls and admits only verified working evidence", () => {
     expect(VIEWER).not.toContain('label: "Original"');
     expect(VIEWER).not.toContain('label: "Greyscale"');
     expect(VIEWER).not.toContain('label: "Hi-Contrast"');
     expect(VIEWER).not.toContain('label: "Edge"');
     expect(VIEWER).not.toContain('label: "Inverted"');
     expect(VIEWER).not.toContain("setVariant(");
-    expect(VIEWER).toContain('type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted"');
-    expect(VIEWER).toContain("function getUrl(urls: ImageUrls, side: Side, variant: Variant)");
+    // The later full-resolution evidence release deliberately removed getUrl(): that helper could
+    // fall back from canonical working evidence to a display/legacy derivative. Preserve the
+    // stronger current invariant instead of pinning the superseded fallback path.
+    expect(VIEWER).not.toContain("function getUrl(");
+    expect(VIEWER).toContain("function getWorkingEvidenceAsset(urls: ImageUrls, side: Side)");
+    expect(VIEWER).toContain('const url = record[`${side}_working`]');
+    expect(VIEWER).toContain(
+      "const currentUrl = workingEvidenceAvailable ? (workingEvidenceAsset?.url ?? null) : null"
+    );
+    expect(VIEWER).toContain('data-working-evidence="full-resolution"');
     expect(VIEWER).toContain("front_greyscale?: string | null");
     expect(VIEWER).toContain("front_highcontrast?: string | null");
     // The INLINE grid keeps the 525px cap (it has no definite height to resolve
