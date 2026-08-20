@@ -1,15 +1,23 @@
 # Rollout — Growth Completion Night
 
-No push, pull request, migration, secret/configuration write or deployment has occurred. The runtime candidate is `c2d18aea`; the release candidate is the final clean descendant at branch HEAD, including evidence, CI-environment test isolation and the Infrastructure/GBP addendum.
+## Completed production rollout
 
-1. Owner authorizes publication of the exact clean branch and creation of a pull request; do not rebase or mix unrelated work.
-2. Wait for terminal remote CI on the exact published SHA and reconcile every required check. A local green run is not a substitute.
-3. Reconcile `origin/main`, production `/api/version`, Fly release/machines and production migration journal again. Stop on unexpected divergence.
-4. Obtain separate authorization to apply additive migration `0101`; inventory target schema, apply once through the governed migration path, then verify journal and expected tables/indexes.
-5. Through separately authorized configuration writes, set only approved review destination/allowlist/token and Resend verification values; set a dedicated MCP bearer hash only if the owner chooses to connect it. Absence remains a safe `NOT_CONFIGURED` state.
-6. Deploy the exact remote-CI-green SHA through the repository safe-deploy path under the controller's conditional deployment authority, serialized against other releases.
-7. Verify exact served SHA/bundle, health, real Growth/review/MCP/public contracts, scheduler disabled-safe behavior, Fly machines and database identity. Do not claim external providers or review delivery live until real connection tests pass.
+1. Re-fetched canonical `origin/main`, production `/api/version`, Fly machines/image and the production migration journal. Main had not moved beyond the candidate baseline; no migration `0101` collision existed.
+2. Published exact candidate `d7dddadd504eddd6a976bc5c29a0949cbc5220f5` without force or rewrite and opened PR #320.
+3. Waited for terminal pull-request checks. Lint/type/test/build, PostgreSQL/migration coverage, dependency review, gitleaks, CodeQL, Engineering OS/governance and amd64 image boot passed.
+4. Merged normally to canonical `main` at `f4285b71a5fd0cad578e845d9aaed43768309541`; terminal `main` CI and Engineering OS passed on that exact authority.
+5. Revalidated production-shaped migration lineage (4/4), applied `0101_growth_reviews_and_conversion.sql` once through `scripts/db/migrate.ts --apply`, and verified 64 applied / 0 pending / 0 inconsistent / 0 checksum mismatch plus expected schema objects and zero seeded rows.
+6. Deployed only through `scripts/safe-deploy.sh prod --yes`. The guarded path verified live ancestry, moving-target safety, rollback image and the exact served SHA.
+7. Verified Fly v1111, two passing LHR machines, public/core routes, protected Partner/Scanner boundaries, authenticated Growth Command, 1440×900 and 390×844 layouts, optional absent-safe interfaces and bounded post-release logs.
 
-The addendum activates as read-only application code: `MANUAL` monitor/detect/recommend, `NOT_CONNECTED` Fly/Neon/provider costs when authority is absent, and no infrastructure mutation or spend. Any future guarded-auto implementation is a separate project requiring its own approved provider identity, hard thresholds/limits/budget, confirmation, audit, rollback and hostile release review.
+## Current operating state
 
-Any gate failure invokes `rollback.md`; no autonomous external write, outreach or fabricated data is permitted.
+- Application: `f4285b71` live.
+- Commercial targets: none seeded; owner entry only through `/admin/growth`.
+- Review engine: live and neutral; destination/sender not configured.
+- Growth MCP: production interface ready; external auth/client not connected.
+- Search Console and Fly/Neon/billing reads: not connected and truthfully unknown.
+- Infrastructure: `MANUAL` monitor/detect/recommend only; no provider mutation, autoscaling or spend path.
+- Outreach: no message sent by engineering; Medway/Cataclysm remains an owner commercial action.
+
+GB-07, GB-08 and Market Intelligence are outside this rollout and were not started.
