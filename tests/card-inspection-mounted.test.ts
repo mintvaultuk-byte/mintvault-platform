@@ -323,7 +323,7 @@ describe("mounted controlled card inspection", () => {
       )
     );
     await act(async () => {
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(host.querySelector('[data-testid="card-preview-image"]')).toBeNull();
     expect(host.textContent).toContain("FULL-RESOLUTION EVIDENCE UNAVAILABLE");
