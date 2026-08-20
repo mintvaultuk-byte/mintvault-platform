@@ -63,6 +63,7 @@ import {
   isAbsoluteSessionExpired,
   stampAuthSession,
 } from "../lib/auth-security";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 export function registerAuthRoutes(app: Express): void {
   const adminCredentialRateLimit = rateLimit({
@@ -72,14 +73,7 @@ export function registerAuthRoutes(app: Express): void {
     legacyHeaders: false,
     validate: false,
     message: { error: "Too many login attempts, please try again later" },
-    keyGenerator: (req) => {
-      const forwarded = req.headers["x-forwarded-for"];
-      if (forwarded) {
-        const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-        return first.trim();
-      }
-      return req.ip || req.socket.remoteAddress || "unknown";
-    },
+    keyGenerator: adminClientIpRateLimitKey,
   });
 
   // ── Admin login ────────────────────────────────────────────────────────────

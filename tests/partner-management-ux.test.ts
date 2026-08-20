@@ -923,7 +923,7 @@ describe("hostile-review repairs (regression pins)", () => {
 
   it("the mutation limiter keys on req.ip, not a hand-parsed X-Forwarded-For", () => {
     const routes = readSrc(SERVER_ROUTES);
-    expect(routes).toContain('keyGenerator: (req) => req.ip ?? req.socket?.remoteAddress ?? "unknown"');
+    expect(routes).toContain("keyGenerator: adminClientIpRateLimitKey");
     expect(routes).not.toContain('req.headers["x-forwarded-for"]');
   });
 

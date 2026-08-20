@@ -23,6 +23,7 @@ import {
 import { getReviewSummary } from "../../review-request-service";
 import { PARTNER_APPLICATION_STATUSES } from "../../partner-applications";
 import { storage } from "../../storage";
+import { adminClientIpRateLimitKey } from "../../lib/admin-client-ip";
 
 export const COMMERCIAL_GROWTH_BASE = "/api/super-admin/growth";
 
@@ -32,7 +33,7 @@ const readLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: false,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
   message: { error: "Too many Growth Command requests. Please slow down." },
 });
 
@@ -42,7 +43,7 @@ const mutationLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: false,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
   message: { error: "Too many Growth Command changes. Please wait before trying again." },
 });
 

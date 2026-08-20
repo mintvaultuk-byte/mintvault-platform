@@ -25,6 +25,7 @@ import {
 } from "./connector-admin-errors";
 import * as svc from "./connector-admin-service";
 import type { ActorContext } from "./connector-admin-service";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 /**
  * Mutation rate-limiter. Mirrors the existing adminRateLimit pattern (server/index.ts). NOTE: the
@@ -39,11 +40,7 @@ const g4MutationRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: { code: "OPERATION_CONFLICT", message: "Too many operations, please slow down." } },
-  keyGenerator: (req) => {
-    const fwd = req.headers["x-forwarded-for"];
-    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
+  keyGenerator: adminClientIpRateLimitKey,
 });
 
 /** Derive the acting admin identity from the authenticated session — never from the request body. */

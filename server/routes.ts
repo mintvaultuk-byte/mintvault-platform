@@ -283,6 +283,7 @@ import { FEATURE_FLAGS } from "./config/feature-flags";
  * to lose the original error to a second one.
  */
 import { CaptureGeometryError } from "./lib/lide400-capture-authority";
+import { adminClientIpRateLimitKey } from "./lib/admin-client-ip";
 
 // `/api/health` remains a generic public readiness probe only. Detailed
 // database/infrastructure intelligence belongs exclusively behind the Super
@@ -3389,6 +3390,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     standardHeaders: true,
     legacyHeaders: false,
     validate: false,
+    keyGenerator: adminClientIpRateLimitKey,
   });
   const socialStudioCertificateBodySchema = z.object({
     certNumber: z.string().trim().min(1).max(80),

@@ -24,7 +24,7 @@ import { validatePartnerRbacAtBoot } from "./partner/permissions";
 import pg from "pg";
 import path from "path";
 import { partnerAccountingTopologyReadiness } from "./partner/db";
-import { isIP } from "node:net";
+import { adminClientIpRateLimitKey } from "./lib/admin-client-ip";
 
 const app = express();
 const httpServer = createServer(app);
@@ -82,39 +82,6 @@ app.use((req, res, next) => {
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
-});
-
-/**
- * TEMPORARY CC-OA-001 staging contract probe. It exposes no address or request payload: only
- * booleans that show whether Fly's HTTP handler replaced caller-supplied sentinel headers, the
- * resulting address family, and the public Machine id already exposed by `fly status`.
- *
- * This route MUST be removed before the final candidate is built.
- */
-app.get("/__mv-fly-client-ip-contract-probe-ccoa001", (req, res) => {
-  const scalar = (name: string): string => {
-    const value = req.headers[name];
-    return (Array.isArray(value) ? value[0] : value || "").trim();
-  };
-  const flyClientIp = scalar("fly-client-ip");
-  const xff = scalar("x-forwarded-for");
-  const socketIp = req.socket.remoteAddress || "";
-  const socketPrivateV4 = /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(socketIp);
-
-  res.status(200).json({
-    machineId: process.env.FLY_MACHINE_ID || "not-fly",
-    flyClientIpFamily: isIP(flyClientIp),
-    flyClientIpWasCallerSentinel: flyClientIp === "203.0.113.77",
-    flyForwardedPortWasCallerSentinel: scalar("fly-forwarded-port") === "9",
-    flyRegionWasCallerSentinel: scalar("fly-region") === "zzz",
-    xffContainsCallerSentinel: xff.split(",").some((part) => part.trim() === "198.51.100.77"),
-    xffRightmostIsKnownAppIp: ["66.241.125.187", "2a09:8280:1::106:3eba:0"].includes(
-      xff.split(",").at(-1)?.trim() || ""
-    ),
-    socketFamily: isIP(socketIp),
-    socketIsLoopback: socketIp === "127.0.0.1" || socketIp === "::1",
-    socketIsPrivateV4: socketPrivateV4,
-  });
 });
 
 // Readiness probe (Phase 5): unlike /health (pure liveness), /ready also verifies
@@ -206,11 +173,10 @@ app.use("/api/admin", adminIpAllowlist);
  * passed the allowlist from the same address, so no caller that could previously reach a
  * super-admin route loses access.
  *
- * CONFIGURATION COMPATIBILITY: `adminIpAllowlist` returns `next()` immediately when
- * ADMIN_IP_ALLOWLIST is unset or empty, so on any deployment not using the allowlist this is
- * a no-op. It reuses the same variable and the same middleware — no new configuration, no new
- * failure mode. It also adds defence against a stolen session cookie being replayed from an
- * address the operator never uses.
+ * CONFIGURATION COMPATIBILITY: when ADMIN_IP_ALLOWLIST is unset or empty there is no address-list
+ * restriction, but the request must still carry a valid Admin network identity. Fly edge requests
+ * always do; malformed/direct requests fail closed. The same middleware also defends against a
+ * stolen session cookie being replayed from an address the operator never uses.
  */
 app.use("/api/super-admin", adminIpAllowlist);
 
@@ -306,14 +272,7 @@ const adminRateLimit = rateLimit({
   validate: false,
   message: { error: "Too many requests, please try again later" },
   skip: (req: any) => req.session?.isAdmin === true,
-  keyGenerator: (req) => {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-      return first.trim();
-    }
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
+  keyGenerator: adminClientIpRateLimitKey,
 });
 app.use("/api/admin", adminRateLimit);
 

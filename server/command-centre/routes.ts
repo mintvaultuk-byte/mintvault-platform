@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import rateLimit from "express-rate-limit";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 import { z } from "zod";
 import { requireSuperAdmin } from "../auth";
 import { requireCommandCentreEnabled } from "./auth";
@@ -17,6 +18,7 @@ const commandCentreReadRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: false,
+  keyGenerator: adminClientIpRateLimitKey,
   message: { error: "Too many Command Centre requests" },
 });
 
@@ -35,9 +37,7 @@ export function registerCommandCentreRoutes(app: Express): void {
 
       let serialized: string;
       try {
-        const dashboard = await composeCommandCentreDashboard(
-          parsed.data.period ?? "today",
-        );
+        const dashboard = await composeCommandCentreDashboard(parsed.data.period ?? "today");
         serialized = JSON.stringify(dashboard);
       } catch {
         response.status(503).json({ error: "Command Centre response unavailable" });
@@ -49,6 +49,6 @@ export function registerCommandCentreRoutes(app: Express): void {
       }
 
       response.type("application/json").send(serialized);
-    },
+    }
   );
 }

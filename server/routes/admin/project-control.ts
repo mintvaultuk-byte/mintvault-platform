@@ -36,6 +36,7 @@
  */
 import type { Express, NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
+import { adminClientIpRateLimitKey } from "../../lib/admin-client-ip";
 import { z, ZodError } from "zod";
 import { requireSuperAdmin } from "../../auth";
 import {
@@ -101,6 +102,7 @@ const projectControlWriteLimit = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: adminClientIpRateLimitKey,
   message: { error: "Too many Project Control changes. Please wait a few minutes and try again." },
 });
 
@@ -113,6 +115,7 @@ const projectControlReadLimit = rateLimit({
   max: 240,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: adminClientIpRateLimitKey,
   message: { error: "Too many Project Control requests. Please wait a moment." },
 });
 
@@ -129,6 +132,7 @@ const projectControlExpensiveLimit = rateLimit({
   max: 12,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: adminClientIpRateLimitKey,
   message: {
     error: "Refresh is rate limited. The repository scan is expensive, and the cached view is still current.",
   },
