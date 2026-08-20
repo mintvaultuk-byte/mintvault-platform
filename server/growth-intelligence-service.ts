@@ -29,8 +29,11 @@ import {
 } from "./growth-infrastructure-intelligence";
 import {
   getApplicationHealthSnapshot,
+  getPerformanceDiagnostics,
   getRuntimeRequestSnapshot,
+  recordGrowthDependency,
   type ApplicationHealthSnapshot,
+  type PerformanceDiagnostics,
 } from "./growth-runtime-telemetry";
 import { getSearchConsoleSnapshot } from "./growth-search-console";
 import { FLY_CAPACITY_THRESHOLDS, getFlyTelemetrySnapshot, type FlyTelemetrySnapshot } from "./fly-telemetry-service";
@@ -121,6 +124,13 @@ export type SiteHealth = {
   lastUpdated: string;
 };
 
+export type PerformanceInsight = {
+  status: "GREEN" | "AMBER" | "RED" | "UNKNOWN";
+  title: string;
+  detail: string;
+  recommendation: string;
+};
+
 export type SeoSummary = {
   searchConsole: IntelligenceMetric;
   impressions: IntelligenceMetric;
@@ -172,6 +182,8 @@ export type GrowthIntelligence = {
   partnerPipeline: GrowthSummary["partnerApplications"];
   livePulse: LivePulse;
   siteHealth: SiteHealth;
+  performanceDiagnostics: PerformanceDiagnostics;
+  performanceInsight: PerformanceInsight;
   capacity: CapacityStatus;
   infrastructure: InfrastructureIntelligence;
   campaignReadiness: CampaignReadiness;
@@ -241,7 +253,7 @@ export function deriveCapacityStatus(
 ): CapacityStatus {
   const common = {
     thresholdModel:
-      "Requires fleet-wide CPU, memory, p95, 5xx and machine-health telemetry with server-configured sustained-window thresholds. Request rate is contextual only.",
+      "Requires fleet-wide CPU, memory, provider p95, 5xx and machine-health telemetry with server-configured sustained-window thresholds. Route diagnostics attribute customer latency separately; request rate is contextual only.",
     automaticScalingEnabled: false as const,
   };
   if (!telemetry || !thresholds || telemetry.healthyMachines == null || telemetry.expectedMachines == null) {
@@ -332,7 +344,9 @@ export function deriveCapacityStatus(
       status: "AMBER",
       label: "REDUCED_HEADROOM",
       recommendation: "INVESTIGATE_APPLICATION_LATENCY",
-      evidence: ["p95 latency is elevated without correlated CPU or memory pressure."],
+      evidence: [
+        "p95 latency is elevated without correlated CPU or memory pressure; investigate application or dependency latency before any scale request.",
+      ],
     };
   }
   if (errorsElevated || telemetry.databasePressure === "AMBER" || cpuWarning || memoryWarning || latencyWarning) {
@@ -538,6 +552,58 @@ function applicationHealthMetric(
   };
 }
 
+export function derivePerformanceInsight(diagnostics: PerformanceDiagnostics): PerformanceInsight {
+  const byClass = new Map(diagnostics.trafficClasses.map((entry) => [entry.trafficClass, entry]));
+  const publicTraffic = byClass.get("PUBLIC_CUSTOMER");
+  const revenueTraffic = byClass.get("SUBMISSION_CHECKOUT");
+  const internalTraffic = [
+    byClass.get("GROWTH_COMMAND"),
+    byClass.get("SUPER_ADMIN"),
+    byClass.get("HEALTH_INTERNAL"),
+  ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const customerRed = [publicTraffic, revenueTraffic].some((entry) => entry?.status === "RED");
+  const internalRed = internalTraffic.some((entry) => entry.status === "RED");
+  const customerSamples = (publicTraffic?.requestCount ?? 0) + (revenueTraffic?.requestCount ?? 0);
+  const internalSamples = internalTraffic.reduce((sum, entry) => sum + entry.requestCount, 0);
+  const customerHasSufficientClass = [publicTraffic, revenueTraffic].some(
+    (entry) => entry?.confidence === "SUFFICIENT"
+  );
+  if (customerRed) {
+    return {
+      status: "RED",
+      title: "Customer latency degraded",
+      detail:
+        "A sufficiently sampled public or revenue-path route class has a red p95. This is route evidence, not a capacity claim.",
+      recommendation:
+        "Investigate the listed route and measured dependency evidence before considering any capacity change.",
+    };
+  }
+  if (internalRed && customerHasSufficientClass) {
+    return {
+      status: "AMBER",
+      title: "Red p95 is internal only",
+      detail: `Internal/admin telemetry has a sufficiently sampled red p95 across ${internalSamples} request${internalSamples === 1 ? "" : "s"}; measured customer/revenue traffic is not red.`,
+      recommendation: "Investigate the internal route group; do not scale public capacity from this signal.",
+    };
+  }
+  if (!customerHasSufficientClass) {
+    return {
+      status: "UNKNOWN",
+      title: "Latency sample is insufficient",
+      detail: `Fewer than ${diagnostics.minimumLatencySample} completed requests are available in each public/revenue route class on this machine; ${customerSamples} customer/revenue and ${internalSamples} internal/admin samples are retained as context only.`,
+      recommendation:
+        "Keep collecting bounded route evidence; do not infer a root cause or capacity need from sparse provider p95 alone.",
+    };
+  }
+  return {
+    status: "GREEN",
+    title: "No sampled customer latency degradation",
+    detail:
+      "Sufficiently sampled customer/revenue traffic is not red on this process. Fleet provider p95 remains a separate maximum-per-machine signal.",
+    recommendation: "Continue route and dependency monitoring; capacity remains a manual owner decision.",
+  };
+}
+
 export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealth> {
   const flyPromise = getFlyTelemetrySnapshot();
   const databaseModule = executor ? null : await import("./db");
@@ -555,6 +621,7 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
   try {
     const result = await runner.execute(sql`SELECT 1 AS ok, to_regclass('public.certificates') AS certificates`);
     const latencyMs = Date.now() - databaseStartedAt;
+    recordGrowthDependency("DATABASE", latencyMs);
     const row = (result.rows[0] ?? {}) as Record<string, unknown>;
     const ready = Number(row.ok) === 1 && row.certificates != null;
     database = ready
@@ -596,6 +663,7 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
       );
     }
   } catch {
+    recordGrowthDependency("DATABASE", Date.now() - databaseStartedAt, true);
     database = {
       state: "ERROR",
       status: "RED",
@@ -619,6 +687,7 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
     };
   }
   const requests = getRuntimeRequestSnapshot();
+  const performance = getPerformanceDiagnostics();
   const runtimeSource =
     "Current application process rolling telemetry; fleet-wide authority requires the separate Fly read connection";
   const requestRate =
@@ -634,33 +703,28 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
   if (requestRate.state === "REAL") {
     requestRate.reason = "Throughput is context, not a green/amber/red health or capacity decision.";
   }
-  const p95Latency =
-    requests.lastUpdated && requests.complete && requests.p95LatencyMs != null
-      ? real(
-          requests.p95LatencyMs,
-          "ms",
-          runtimeSource,
-          requests.lastUpdated,
-          requests.requestsLastHour < 5
-            ? "UNKNOWN"
-            : requests.p95LatencyMs >= 1_500
-              ? "RED"
-              : requests.p95LatencyMs >= 500
-                ? "AMBER"
-                : "GREEN"
-        )
-      : unavailable(
-          "INSUFFICIENT_DATA",
-          runtimeSource,
-          requests.complete
-            ? "No request-latency sample exists in this process."
-            : "The bounded process telemetry ring reached its safety cap, so a complete p95 is unavailable."
-        );
+  const customerLatencyClasses = performance.trafficClasses.filter(
+    (entry) => entry.trafficClass === "PUBLIC_CUSTOMER" || entry.trafficClass === "SUBMISSION_CHECKOUT"
+  );
+  const sufficientCustomerLatency = customerLatencyClasses
+    .filter((entry) => entry.confidence === "SUFFICIENT" && entry.p95LatencyMs != null)
+    .sort((left, right) => (right.p95LatencyMs ?? 0) - (left.p95LatencyMs ?? 0));
+  const p95Latency = sufficientCustomerLatency[0]
+    ? real(
+        sufficientCustomerLatency[0].p95LatencyMs!,
+        "ms",
+        "Bounded current-process public and revenue route telemetry",
+        performance.lastUpdated ?? now,
+        sufficientCustomerLatency[0].status
+      )
+    : unavailable(
+        "INSUFFICIENT_DATA",
+        "Bounded current-process public and revenue route telemetry",
+        `Fewer than ${performance.minimumLatencySample} completed requests exist in each public/revenue route class; provider maximum-per-machine p95 is shown separately and does not set customer health.`
+      );
   if (p95Latency.state === "REAL") {
-    p95Latency.reason =
-      requests.requestsLastHour < 5
-        ? "Fewer than 5 request completions; the value is real but no health colour is assigned."
-        : "Current-process p95 thresholds: GREEN <500ms; AMBER ≥500ms; RED ≥1500ms.";
+    const source = sufficientCustomerLatency[0]!;
+    p95Latency.reason = `Worst sufficiently sampled customer/revenue route class: ${source.label}, ${source.requestCount} requests. GREEN <500ms; AMBER ≥500ms; RED ≥1500ms.`;
   }
   const fiveXErrorRate =
     requests.lastUpdated && requests.complete
@@ -694,7 +758,7 @@ export async function getSiteHealth(executor?: QueryExecutor): Promise<SiteHealt
     cpu: fly.metrics.cpu,
     memory: fly.metrics.memory,
     requestRate: useFlyRequestMetrics ? fly.metrics.requestRate : requestRate,
-    p95Latency: useFlyRequestMetrics ? fly.metrics.p95Latency : p95Latency,
+    p95Latency,
     fiveXErrorRate: useFlyRequestMetrics ? fly.metrics.fiveXErrorRate : fiveXErrorRate,
     database,
     databasePressure,
@@ -1135,6 +1199,8 @@ export async function getGrowthIntelligence(
       getConnectedSeoSummary(period),
       getFlyTelemetrySnapshot(),
     ]);
+    const performanceDiagnostics = getPerformanceDiagnostics();
+    const performanceInsight = derivePerformanceInsight(performanceDiagnostics);
     const capacity = capacityFromFly(fly, siteHealth.databasePressure);
     const generatedAt = new Date().toISOString();
     const infrastructure = buildInfrastructureIntelligence(
@@ -1170,6 +1236,8 @@ export async function getGrowthIntelligence(
       partnerPipeline: getPartnerPipeline(summary),
       livePulse,
       siteHealth,
+      performanceDiagnostics,
+      performanceInsight,
       capacity,
       infrastructure,
       campaignReadiness,

@@ -18,6 +18,7 @@ export type FlyMachineSnapshot = {
   cpu: IntelligenceMetric;
   memory: IntelligenceMetric;
   requestRate: IntelligenceMetric;
+  requestCount: IntelligenceMetric;
   p95Latency: IntelligenceMetric;
   fiveXErrorRate: IntelligenceMetric;
   deployedVersion: IntelligenceMetric;
@@ -332,6 +333,7 @@ export function buildInfrastructureIntelligence(
         "cpu",
         "memory",
         "requestRate",
+        "requestCount",
         "p95Latency",
         "fiveXErrorRate",
         "deployedVersion",

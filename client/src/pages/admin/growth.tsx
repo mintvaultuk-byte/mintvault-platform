@@ -40,10 +40,46 @@ type InfrastructureMachine = {
   cpu: Metric;
   memory: Metric;
   requestRate: Metric;
+  requestCount: Metric;
   p95Latency: Metric;
   fiveXErrorRate: Metric;
   deployedVersion: Metric;
   deployedSha: Metric;
+};
+type PerformanceAggregate = {
+  key: string;
+  label: string;
+  trafficClass: string;
+  requestCount: number;
+  p50LatencyMs: number | null;
+  p95LatencyMs: number | null;
+  p99LatencyMs: number | null;
+  averageLatencyMs: number | null;
+  maxLatencyMs: number | null;
+  fiveXCount: number;
+  errorRatePercent: number | null;
+  trendP95LatencyMs: Array<number | null>;
+  confidence: "INSUFFICIENT_DATA" | "LOW_SAMPLE" | "SUFFICIENT";
+  status: Health;
+};
+type PerformanceDiagnostics = {
+  scope: "CURRENT_APPLICATION_PROCESS";
+  machineRef: string;
+  window: "60m";
+  minimumLatencySample: number;
+  minimumP99Sample: number;
+  trafficClasses: PerformanceAggregate[];
+  topSlowRoutes: PerformanceAggregate[];
+  dependencies: Array<{
+    dependency: string;
+    sampleCount: number;
+    p95LatencyMs: number | null;
+    averageLatencyMs: number | null;
+    failures: number;
+    complete: boolean;
+  }>;
+  lastUpdated: string | null;
+  complete: boolean;
 };
 type RevenueVelocity = {
   window: "60m";
@@ -113,7 +149,11 @@ type LinkOptions = {
   contents: string[];
 };
 type CommercialMetricKey =
-  "PAID_CARDS" | "REVENUE_GBP" | "PARTNER_APPLICATIONS" | "QUALIFIED_PARTNERS" | "GENUINE_REVIEWS";
+  | "PAID_CARDS"
+  | "REVENUE_GBP"
+  | "PARTNER_APPLICATIONS"
+  | "QUALIFIED_PARTNERS"
+  | "GENUINE_REVIEWS";
 type CommercialScoreboard = {
   period: {
     kind: "MONTHLY";
@@ -187,6 +227,8 @@ type Intelligence = {
     | "scannerApi",
     Metric
   > & { lastUpdated: string };
+  performanceDiagnostics: PerformanceDiagnostics;
+  performanceInsight: { status: Health; title: string; detail: string; recommendation: string };
   capacity: {
     status: Health;
     label: string;
@@ -358,6 +400,23 @@ const date = (value: string | null) =>
   value && !Number.isNaN(new Date(value).getTime())
     ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
     : "Not available";
+function performanceMetric(item: PerformanceAggregate, lastUpdated: string | null): Metric {
+  const p95 = item.p95LatencyMs;
+  const confidence =
+    item.confidence === "SUFFICIENT"
+      ? `P50 ${item.p50LatencyMs ?? "—"}ms · average ${item.averageLatencyMs ?? "—"}ms · ${item.fiveXCount} 5xx`
+      : item.confidence === "LOW_SAMPLE"
+        ? `LOW SAMPLE: ${item.requestCount}/${5} requests; p95 is shown without a health colour.`
+        : "INSUFFICIENT DATA: no completed request sample in this rolling window.";
+  return {
+    state: item.requestCount ? "REAL" : "INSUFFICIENT_DATA",
+    status: item.status,
+    value: p95 == null ? "INSUFFICIENT DATA" : `${p95} ms`,
+    source: "Bounded machine-local route telemetry",
+    reason: confidence,
+    lastUpdated,
+  };
+}
 const text = (metric: Metric) =>
   (metric.state === "REAL" || metric.state === "STALE") && metric.value !== undefined
     ? `${metric.value}${metric.unit ? ` ${metric.unit}` : ""}${metric.state === "STALE" ? " · STALE" : ""}`
@@ -438,48 +497,123 @@ function Retry({ message, retry }: { message: string; retry: () => void }) {
     </div>
   );
 }
-function Gauge({ label, metric }: { label: string; metric: Metric }) {
-  const needle =
-    metric.status === "GREEN"
-      ? "-55deg"
-      : metric.status === "AMBER"
-        ? "0deg"
-        : metric.status === "RED"
-          ? "55deg"
-          : "-90deg";
+function statusAccent(status: Health) {
+  return status === "GREEN" ? "#34d399" : status === "AMBER" ? "#fbbf24" : status === "RED" ? "#f87171" : "#8a8a8a";
+}
+function Sparkline({ values, status }: { values: Array<number | null>; status: Health }) {
+  const known = values.filter((value): value is number => typeof value === "number");
+  if (known.length < 2)
+    return <p className="mt-3 text-[10px] uppercase tracking-[0.14em] opacity-55">Trend collecting</p>;
+  const max = Math.max(...known);
+  const min = Math.min(...known);
+  const points = values
+    .map((value, index) => {
+      if (value == null) return null;
+      const x = (index / Math.max(1, values.length - 1)) * 100;
+      const y = max === min ? 50 : 88 - ((value - min) / (max - min)) * 72;
+      return `${x},${y}`;
+    })
+    .filter((value): value is string => value !== null)
+    .join(" ");
+  return (
+    <svg className="mt-3 h-8 w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Rolling p95 trend">
+      <path
+        d="M0 88 H100"
+        stroke="currentColor"
+        strokeOpacity="0.18"
+        strokeWidth="3"
+        vectorEffect="non-scaling-stroke"
+      />
+      <polyline
+        fill="none"
+        points={points}
+        stroke={statusAccent(status)}
+        strokeWidth="4"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+function RadialRing({ label, metric }: { label: string; metric: Metric }) {
+  const numeric = typeof metric.value === "number" ? Math.min(100, Math.max(0, metric.value)) : null;
+  const accent = statusAccent(metric.status);
+  const progress = numeric == null ? 0 : numeric * 3.6;
   return (
     <div
-      className={`rounded border p-3 text-center ${tone(metric.status)}`}
+      className={`rounded-xl border p-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,.05)] ${tone(metric.status)}`}
       data-testid={`growth-gauge-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`}
     >
       <div className="flex justify-between gap-2">
-        <p className="text-xs font-medium uppercase">{label}</p>
-        <span className="text-[10px] font-semibold">{metric.status}</span>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">{label}</p>
+        <span className="text-[10px] font-semibold tracking-[0.12em]">{metric.status}</span>
       </div>
       <div
-        className="relative mx-auto mt-3 h-16 w-32 overflow-hidden"
+        className="relative mx-auto mt-4 grid h-24 w-24 place-items-center rounded-full"
         role="img"
         aria-label={`${label}: ${metric.status}; ${text(metric)}`}
+        style={{ background: `conic-gradient(${accent} ${progress}deg, rgba(255,255,255,.08) ${progress}deg 360deg)` }}
       >
-        <div
-          className="absolute inset-x-0 top-0 h-32 rounded-full"
-          style={{
-            background:
-              "conic-gradient(from 225deg, var(--admin-green,#34d399) 0deg 60deg, var(--admin-amber,#fbbf24) 60deg 120deg, var(--admin-red,#f87171) 120deg 180deg, rgba(255,255,255,.08) 180deg 360deg)",
-          }}
-        />
-        <div className="absolute inset-x-2 top-2 h-28 rounded-full bg-[var(--admin-panel,#151515)]" />
-        <div
-          className="absolute bottom-0 left-1/2 h-12 w-0.5 origin-bottom bg-current transition-transform"
-          style={{ transform: `translateX(-50%) rotate(${needle})` }}
-        />
-        <div className="absolute bottom-[-3px] left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-current" />
+        <div className="grid h-[5.1rem] w-[5.1rem] place-items-center rounded-full bg-[var(--admin-panel,#151515)] px-2">
+          <span className="text-sm font-semibold leading-tight">{text(metric)}</span>
+        </div>
       </div>
-      <p className="mt-2 text-xl font-semibold leading-tight">{text(metric)}</p>
       <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
       <p className="mt-2 text-[10px] uppercase opacity-60">Updated {date(metric.lastUpdated)}</p>
     </div>
   );
+}
+function DigitalMetric({
+  label,
+  metric,
+  sampleCount,
+  trend,
+}: {
+  label: string;
+  metric: Metric;
+  sampleCount?: number;
+  trend?: Array<number | null>;
+}) {
+  return (
+    <div className={`rounded-xl border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.05)] ${tone(metric.status)}`}>
+      <div className="flex justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">{label}</p>
+        <span className="text-[10px] font-semibold">{metric.status}</span>
+      </div>
+      <p className="mt-3 text-3xl font-semibold tracking-tight">{text(metric)}</p>
+      {typeof sampleCount === "number" && (
+        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] opacity-70">{sampleCount} requests</p>
+      )}
+      {trend && <Sparkline values={trend} status={metric.status} />}
+      <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
+      <p className="mt-2 text-[10px] uppercase opacity-60">Updated {date(metric.lastUpdated)}</p>
+    </div>
+  );
+}
+function StatusTile({ label, metric }: { label: string; metric: Metric }) {
+  return (
+    <div className={`rounded-xl border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.05)] ${tone(metric.status)}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">{label}</p>
+        <span
+          className="h-2 w-2 rounded-full"
+          style={{ backgroundColor: statusAccent(metric.status) }}
+          aria-hidden="true"
+        />
+      </div>
+      <p className="mt-3 text-lg font-semibold">{text(metric)}</p>
+      <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
+      <p className="mt-2 text-[10px] uppercase opacity-60">
+        {metric.status} · {date(metric.lastUpdated)}
+      </p>
+    </div>
+  );
+}
+function Gauge({ label, metric }: { label: string; metric: Metric }) {
+  if (label === "CPU" || label === "RAM" || label === "Capacity headroom")
+    return <RadialRing label={label} metric={metric} />;
+  if (label.includes("P95") || label.includes("Request") || label.includes("5XX"))
+    return <DigitalMetric label={label} metric={metric} />;
+  return <StatusTile label={label} metric={metric} />;
 }
 function MetricCard({ label, metric }: { label: string; metric: Metric }) {
   return (
@@ -1200,6 +1334,86 @@ export default function GrowthCommandPage() {
                     ))}
                   </div>
                 </Panel>
+                <Panel
+                  title="Performance diagnostics"
+                  sub={`Bounded 60-minute telemetry from machine ${data.performanceDiagnostics.machineRef}. Route labels are fixed safe templates; low samples are never coloured as a latency incident.`}
+                >
+                  <div
+                    className={`m-4 rounded-xl border p-4 ${tone(data.performanceInsight.status)}`}
+                    data-testid="growth-performance-insight"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="font-semibold">{data.performanceInsight.title}</h3>
+                      <Badge
+                        variant={
+                          data.performanceInsight.status === "GREEN"
+                            ? "prog"
+                            : data.performanceInsight.status === "RED"
+                              ? "red"
+                              : "wait"
+                        }
+                      >
+                        {data.performanceInsight.status}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm">{data.performanceInsight.detail}</p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.1em] opacity-75">
+                      {data.performanceInsight.recommendation}
+                    </p>
+                  </div>
+                  <div className="grid gap-3 px-4 pb-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {data.performanceDiagnostics.trafficClasses.map((entry) => (
+                      <DigitalMetric
+                        key={entry.key}
+                        label={entry.label}
+                        metric={performanceMetric(entry, data.performanceDiagnostics.lastUpdated)}
+                        sampleCount={entry.requestCount}
+                        trend={entry.trendP95LatencyMs}
+                      />
+                    ))}
+                  </div>
+                  <div className="grid gap-4 border-t border-[var(--admin-line,#333)] p-4 xl:grid-cols-2">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">Top slow route groups</p>
+                      {data.performanceDiagnostics.topSlowRoutes.length ? (
+                        <div className="mt-3 space-y-2">
+                          {data.performanceDiagnostics.topSlowRoutes.map((entry) => (
+                            <div
+                              key={entry.key}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--admin-line,#333)] px-3 py-2 text-sm"
+                            >
+                              <span className="font-medium">{entry.label}</span>
+                              <span>
+                                {entry.p95LatencyMs ?? "—"} ms p95 · {entry.requestCount} req · {entry.fiveXCount} 5xx ·{" "}
+                                {entry.confidence.replaceAll("_", " ")}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Empty>No safe route group has completed in this window.</Empty>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">Measured dependencies</p>
+                      <div className="mt-3 space-y-2">
+                        {data.performanceDiagnostics.dependencies.map((entry) => (
+                          <div
+                            key={entry.dependency}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--admin-line,#333)] px-3 py-2 text-sm"
+                          >
+                            <span className="font-medium">{entry.dependency.replaceAll("_", " ")}</span>
+                            <span>
+                              {entry.sampleCount
+                                ? `${entry.p95LatencyMs ?? "—"} ms p95 · ${entry.sampleCount} samples · ${entry.failures} failures`
+                                : "NOT INSTRUMENTED"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </Panel>
                 <Panel title="Capacity decision" sub="Scaling remains an owner decision.">
                   <div className="p-4">
                     <Gauge
@@ -1247,6 +1461,7 @@ export default function GrowthCommandPage() {
                                 <MetricCard label="CPU" metric={machine.cpu} />
                                 <MetricCard label="RAM" metric={machine.memory} />
                                 <MetricCard label="Request rate" metric={machine.requestRate} />
+                                <MetricCard label="Request count" metric={machine.requestCount} />
                                 <MetricCard label="P95 latency" metric={machine.p95Latency} />
                                 <MetricCard label="5XX error rate" metric={machine.fiveXErrorRate} />
                                 <MetricCard label="Deployed version" metric={machine.deployedVersion} />
