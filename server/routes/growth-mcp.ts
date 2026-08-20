@@ -12,15 +12,16 @@ import {
   getCapacityStatus,
   getCampaignReadinessStatus,
   getConversionSummary,
+  getConnectedSeoSummary,
   getGrowthIntelligence,
   getInfrastructureStatus,
   getLivePulse,
   getRevenueVelocity,
-  getSeoSummary,
   getSiteHealth,
 } from "../growth-intelligence-service";
 import { getReviewSummary } from "../review-request-service";
 import { getCommercialScoreboard } from "../growth-scoreboard-service";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 export const GROWTH_MCP_PATH = "/mcp/growth";
 export const GROWTH_MCP_PROTOCOL_VERSION = "2025-03-26";
@@ -31,7 +32,7 @@ const readLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   validate: false,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
   message: { jsonrpc: "2.0", id: null, error: { code: -32029, message: "Growth read rate limit exceeded" } },
 });
 
@@ -197,7 +198,7 @@ export async function executeGrowthMcpTool(name: string, args: unknown): Promise
     case "get_seo_summary":
       requireEmptyArgs(args);
       await auditMcpTool(name);
-      return getSeoSummary();
+      return getConnectedSeoSummary("30d");
     case "get_conversion_summary": {
       const period = parsePeriod(args);
       await auditMcpTool(name, period);

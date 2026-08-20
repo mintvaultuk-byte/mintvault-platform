@@ -13,6 +13,21 @@ function periodFilter(period: GrowthPeriod): SQL {
   return sql`e.occurred_at >= ((date_trunc('day', now() AT TIME ZONE 'Europe/London') - (${days} * interval '1 day')) AT TIME ZONE 'Europe/London')`;
 }
 
+function previousPeriodFilter(period: Exclude<GrowthPeriod, "all">): SQL {
+  const windowDays = period === "today" ? 1 : period === "7d" ? 7 : period === "30d" ? 30 : 90;
+  const currentStartOffset = windowDays - 1;
+  return sql`
+    e.occurred_at >= (
+      (date_trunc('day', now() AT TIME ZONE 'Europe/London') - (${currentStartOffset} * interval '1 day'))
+      AT TIME ZONE 'Europe/London'
+    ) - (${windowDays} * interval '1 day')
+    AND e.occurred_at < (
+      (date_trunc('day', now() AT TIME ZONE 'Europe/London') - (${currentStartOffset} * interval '1 day'))
+      AT TIME ZONE 'Europe/London'
+    )
+  `;
+}
+
 /**
  * Records one server-observed funnel event. The unique submission/kind key
  * makes retries and double-clicks idempotent. Callers deliberately catch any
@@ -45,6 +60,54 @@ export async function getConversionEventSummary(
 ): Promise<ConversionEventSummary> {
   const runner = executor ?? (await import("./db")).db;
   const window = periodFilter(period);
+  const result = await runner.execute(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE e.event_kind = 'SUBMISSION_START')::int AS submission_starts,
+      COUNT(*) FILTER (WHERE e.event_kind = 'CHECKOUT_START')::int AS checkout_starts,
+      COUNT(*) FILTER (
+        WHERE e.event_kind = 'CHECKOUT_START'
+          AND s.payment_status = 'paid'
+          AND s.deleted_at IS NULL
+          AND s.payment_intent_id IS NOT NULL
+          AND s.payment_timestamp IS NOT NULL
+          AND s.payment_currency = 'GBP'
+      )::int AS checkout_cohort_paid,
+      COALESCE(SUM(s.card_count) FILTER (
+        WHERE e.event_kind = 'CHECKOUT_START'
+          AND s.payment_status = 'paid'
+          AND s.deleted_at IS NULL
+          AND s.payment_intent_id IS NOT NULL
+          AND s.payment_timestamp IS NOT NULL
+          AND s.payment_currency = 'GBP'
+      ), 0)::int AS checkout_cohort_paid_cards
+    FROM growth_conversion_events e
+    JOIN submissions s ON s.id = e.submission_id
+    WHERE ${window}
+  `);
+  const row = (result.rows[0] ?? {}) as Record<string, unknown>;
+  const value = (key: string) => {
+    const parsed = Number(row[key] ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return {
+    submissionStarts: value("submission_starts"),
+    checkoutStarts: value("checkout_starts"),
+    checkoutCohortPaid: value("checkout_cohort_paid"),
+    checkoutCohortPaidCards: value("checkout_cohort_paid_cards"),
+  };
+}
+
+/**
+ * The immediately preceding like-for-like London calendar window. "all" has
+ * no finite predecessor and therefore returns null rather than inventing one.
+ */
+export async function getPreviousConversionEventSummary(
+  period: GrowthPeriod,
+  executor?: GrowthConversionExecutor
+): Promise<ConversionEventSummary | null> {
+  if (period === "all") return null;
+  const runner = executor ?? (await import("./db")).db;
+  const window = previousPeriodFilter(period);
   const result = await runner.execute(sql`
     SELECT
       COUNT(*) FILTER (WHERE e.event_kind = 'SUBMISSION_START')::int AS submission_starts,

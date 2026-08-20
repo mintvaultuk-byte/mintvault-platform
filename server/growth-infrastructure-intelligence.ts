@@ -297,7 +297,12 @@ export function deriveIncidentMode(input: IncidentInput): IncidentMode {
 }
 
 export function buildInfrastructureIntelligence(
-  input: { database: IntelligenceMetric; capacity: CapacityStatus },
+  input: {
+    database: IntelligenceMetric;
+    databasePressure?: IntelligenceMetric;
+    databaseLatency?: IntelligenceMetric;
+    capacity: CapacityStatus;
+  },
   now: string
 ): InfrastructureIntelligence {
   const flyReason = "A least-privilege server-side Fly telemetry authority is not connected.";
@@ -334,8 +339,9 @@ export function buildInfrastructureIntelligence(
     },
     neon: {
       availability: input.database,
-      connectionPressure: notConnected("Neon telemetry", neonReason),
-      latency: notConnected("Neon telemetry", neonReason),
+      connectionPressure:
+        input.databasePressure ?? notConnected("Current application PostgreSQL pool counters", neonReason),
+      latency: input.databaseLatency ?? notConnected("Current application database readiness query", neonReason),
       compute: notConnected("Neon telemetry", neonReason),
       storage: notConnected("Neon telemetry", neonReason),
       pointInTimeRecovery: notConnected("Neon telemetry", neonReason),

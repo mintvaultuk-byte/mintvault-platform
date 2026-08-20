@@ -21,6 +21,13 @@ afterEach(() => {
 });
 
 describe("GB-04C dedicated MCP Growth-read boundary", () => {
+  it("uses the trusted Fly client identity for its request budget", () => {
+    const source = fs.readFileSync("server/routes/growth-mcp.ts", "utf8");
+    expect(source).toContain('import { adminClientIpRateLimitKey } from "../lib/admin-client-ip"');
+    expect(source).toContain("keyGenerator: adminClientIpRateLimitKey");
+    expect(source).not.toMatch(/keyGenerator:\s*\(req\)\s*=>\s*req\.ip/);
+  });
+
   it("fails closed when unconfigured and accepts only the dedicated bearer preimage", () => {
     delete process.env.GROWTH_MCP_TOKEN_SHA256;
     expect(growthMcpAuthState()).toBe("NOT_CONFIGURED");

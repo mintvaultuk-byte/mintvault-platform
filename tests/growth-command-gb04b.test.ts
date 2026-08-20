@@ -124,7 +124,7 @@ describe("GB-04B Growth intelligence authority", () => {
     ).toMatchObject({ status: "RED", recommendation: "ERROR_RATE_ELEVATED_SCALING_MAY_NOT_HELP" });
   });
 
-  it("returns recent persisted activity but labels missing fleet request telemetry honestly", async () => {
+  it("returns recent persisted activity and labels an empty process request window honestly", async () => {
     const replies = [
       { rows: [{ submission_starts: "4", paid_submissions: "2", paid_cards: "5", revenue_pence: "3800" }] },
       { rows: [{ partner_applications: "1" }] },
@@ -136,7 +136,7 @@ describe("GB-04B Growth intelligence authority", () => {
     expect(pulse.revenuePence).toMatchObject({ state: "REAL", value: 3800, unit: "GBP pence" });
     expect(pulse.revenueVelocity.revenuePencePerHour.state).toBe("INSUFFICIENT_DATA");
     expect(pulse.checkoutStarts.state).toBe("NOT_INSTRUMENTED");
-    expect(pulse.requestsPerMinute).toMatchObject({ state: "NOT_CONNECTED", status: "UNKNOWN" });
+    expect(pulse.requestsPerMinute).toMatchObject({ state: "INSUFFICIENT_DATA", status: "UNKNOWN" });
     expect(JSON.stringify(pulse)).not.toMatch(/"(?:email|phone|address|ipAddress)"/i);
   });
 
@@ -167,7 +167,7 @@ describe("GB-04B Growth intelligence authority", () => {
     expect(health.site).toMatchObject({ state: "REAL", status: "GREEN" });
     expect(health.database).toMatchObject({ state: "REAL", status: "GREEN" });
     expect(health.cpu).toMatchObject({ state: "NOT_CONNECTED", status: "UNKNOWN" });
-    expect(health.payments.state).toBe("NOT_INSTRUMENTED");
+    expect(health.payments.state).toBe("INSUFFICIENT_DATA");
   });
 
   it("shows Search Console as not connected and technical SEO only as MintVault-owned configuration", () => {

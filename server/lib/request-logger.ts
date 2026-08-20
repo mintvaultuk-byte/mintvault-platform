@@ -15,6 +15,7 @@
  */
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { redactSensitive } from "./auth-security";
+import { recordGrowthRequest } from "../growth-runtime-telemetry";
 
 /** The shape of `log` in server/index.ts. `source` is optional and defaults inside the sink. */
 export type RequestLogSink = (message: string, source?: string) => void;
@@ -77,6 +78,11 @@ export function createRequestLogger(sink: RequestLogSink): RequestHandler {
 
     res.on("finish", () => {
       const duration = Date.now() - start;
+      try {
+        recordGrowthRequest(reqPath, res.statusCode, duration);
+      } catch {
+        // Observability is strictly fail-open and must never affect a response.
+      }
       if (reqPath.startsWith("/api")) {
         let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
         if (capturedJsonResponse && !isBodyLogSuppressed(reqPath)) {

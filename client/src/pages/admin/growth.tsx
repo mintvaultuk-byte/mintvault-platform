@@ -1,6 +1,6 @@
 /** GB-04B Super Admin Growth Command. All unavailable authority stays visible as unavailable. */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { AdminButton, AdminShell, Badge, Panel, StatCard, adminButtonClass } from "@/components/admin";
@@ -178,6 +178,8 @@ type Intelligence = {
     | "p95Latency"
     | "fiveXErrorRate"
     | "database"
+    | "databasePressure"
+    | "databaseLatency"
     | "flyMachines"
     | "payments"
     | "email"
@@ -279,6 +281,7 @@ type Intelligence = {
     clicks: Metric;
     ctr: Metric;
     averagePosition: Metric;
+    trend: Metric;
     topQueries: Metric;
     topPages: Metric;
     technical: { sitemap: Metric; robots: Metric; indexabilityPolicy: Metric };
@@ -286,6 +289,10 @@ type Intelligence = {
   };
   conversion: {
     stages: Array<{ key: string; label: string; metric: Metric }>;
+    submissionToCheckout: Metric;
+    checkoutToPaid: Metric;
+    submissionToPaid: Metric;
+    cardsPerPaidOrder: Metric;
     dropOff: Metric;
     comparison: Metric;
     definition: string;
@@ -352,8 +359,8 @@ const date = (value: string | null) =>
     ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
     : "Not available";
 const text = (metric: Metric) =>
-  metric.state === "REAL"
-    ? `${metric.value ?? "Measured"}${metric.unit ? ` ${metric.unit}` : ""}`
+  (metric.state === "REAL" || metric.state === "STALE") && metric.value !== undefined
+    ? `${metric.value}${metric.unit ? ` ${metric.unit}` : ""}${metric.state === "STALE" ? " · STALE" : ""}`
     : metric.state.replaceAll("_", " ");
 const tone = (status: Health) =>
   status === "GREEN"
@@ -373,8 +380,8 @@ const leadTone = (status: LeadState): "act" | "neu" | "prog" | "wait" | "red" =>
         : status === "ONBOARDING"
           ? "act"
           : "red";
-const initialTab = (): Tab => {
-  const raw = new URLSearchParams(window.location.search).get("tab");
+export const growthTabFromSearch = (search: string): Tab => {
+  const raw = new URLSearchParams(search).get("tab");
   return TABS.some(([key]) => key === raw) ? (raw as Tab) : "overview";
 };
 
@@ -432,17 +439,45 @@ function Retry({ message, retry }: { message: string; retry: () => void }) {
   );
 }
 function Gauge({ label, metric }: { label: string; metric: Metric }) {
+  const needle =
+    metric.status === "GREEN"
+      ? "-55deg"
+      : metric.status === "AMBER"
+        ? "0deg"
+        : metric.status === "RED"
+          ? "55deg"
+          : "-90deg";
   return (
     <div
-      className={`rounded border p-3 ${tone(metric.status)}`}
+      className={`rounded border p-3 text-center ${tone(metric.status)}`}
       data-testid={`growth-gauge-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`}
     >
       <div className="flex justify-between gap-2">
         <p className="text-xs font-medium uppercase">{label}</p>
         <span className="text-[10px] font-semibold">{metric.status}</span>
       </div>
-      <p className="mt-2 text-xl font-semibold">{text(metric)}</p>
+      <div
+        className="relative mx-auto mt-3 h-16 w-32 overflow-hidden"
+        role="img"
+        aria-label={`${label}: ${metric.status}; ${text(metric)}`}
+      >
+        <div
+          className="absolute inset-x-0 top-0 h-32 rounded-full"
+          style={{
+            background:
+              "conic-gradient(from 225deg, var(--admin-green,#34d399) 0deg 60deg, var(--admin-amber,#fbbf24) 60deg 120deg, var(--admin-red,#f87171) 120deg 180deg, rgba(255,255,255,.08) 180deg 360deg)",
+          }}
+        />
+        <div className="absolute inset-x-2 top-2 h-28 rounded-full bg-[var(--admin-panel,#151515)]" />
+        <div
+          className="absolute bottom-0 left-1/2 h-12 w-0.5 origin-bottom bg-current transition-transform"
+          style={{ transform: `translateX(-50%) rotate(${needle})` }}
+        />
+        <div className="absolute bottom-[-3px] left-1/2 h-2.5 w-2.5 -translate-x-1/2 rounded-full bg-current" />
+      </div>
+      <p className="mt-2 text-xl font-semibold leading-tight">{text(metric)}</p>
       <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
+      <p className="mt-2 text-[10px] uppercase opacity-60">Updated {date(metric.lastUpdated)}</p>
     </div>
   );
 }
@@ -716,8 +751,9 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
 
 export default function GrowthCommandPage() {
   const [, navigate] = useLocation();
+  const searchLocation = useSearch();
   const [period, setPeriod] = useState<Period>("30d");
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const tab = growthTabFromSearch(searchLocation);
   const manualRefresh = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [leadId, setLeadId] = useState<string | null>(null);
@@ -807,14 +843,19 @@ export default function GrowthCommandPage() {
   const link = useMutation<{ url: string }, Error, void>({
     mutationFn: async () =>
       (await apiRequest("POST", `${BASE}/links`, { ...form, content: form.content || undefined })).json(),
+    onSuccess: () => setCopyState("idle"),
   });
   const data = command.data;
   const summary = data?.summary;
   const selected = detail.data?.lead;
   const external = safeExternalUrl(selected?.webPresence);
   const selectTab = (next: Tab) => {
-    setTab(next);
     navigate(`/admin/growth?tab=${next}`);
+  };
+  const updateLinkForm = (field: keyof typeof form, value: string) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setCopyState("idle");
+    link.reset();
   };
   if (session.isLoading || !session.data) return <div className="min-h-screen bg-[#10110f]" />;
   if (!allowed) return null;
@@ -1030,6 +1071,7 @@ export default function GrowthCommandPage() {
                     <MetricCard label="Clicks" metric={data.seo.clicks} />
                     <MetricCard label="CTR" metric={data.seo.ctr} />
                     <MetricCard label="Average position" metric={data.seo.averagePosition} />
+                    <MetricCard label="Click trend" metric={data.seo.trend} />
                     <MetricCard label="Top queries" metric={data.seo.topQueries} />
                     <MetricCard label="Top landing pages" metric={data.seo.topPages} />
                   </div>
@@ -1054,6 +1096,10 @@ export default function GrowthCommandPage() {
                   ))}
                 </div>
                 <div className="grid gap-3 border-t border-[var(--admin-line,#333)] p-4 md:grid-cols-2">
+                  <MetricCard label="Submission → checkout" metric={data.conversion.submissionToCheckout} />
+                  <MetricCard label="Checkout → paid" metric={data.conversion.checkoutToPaid} />
+                  <MetricCard label="Submission → paid" metric={data.conversion.submissionToPaid} />
+                  <MetricCard label="Cards / paid order" metric={data.conversion.cardsPerPaidOrder} />
                   <MetricCard label="Drop-off" metric={data.conversion.dropOff} />
                   <MetricCard label="Previous-period comparison" metric={data.conversion.comparison} />
                 </div>
@@ -1142,6 +1188,8 @@ export default function GrowthCommandPage() {
                       ["P95 latency", data.siteHealth.p95Latency],
                       ["5XX error rate", data.siteHealth.fiveXErrorRate],
                       ["Database", data.siteHealth.database],
+                      ["Database pressure", data.siteHealth.databasePressure],
+                      ["Database latency", data.siteHealth.databaseLatency],
                       ["Fly machines", data.siteHealth.flyMachines],
                       ["Payments", data.siteHealth.payments],
                       ["Email", data.siteHealth.email],
@@ -1483,25 +1531,25 @@ export default function GrowthCommandPage() {
                           label="Audience"
                           value={form.target}
                           options={options.data.targets}
-                          onChange={(value) => setForm((current) => ({ ...current, target: value }))}
+                          onChange={(value) => updateLinkForm("target", value)}
                         />
                         <Select
                           label="Source"
                           value={form.source}
                           options={options.data.sources.map((value) => ({ value, label: value }))}
-                          onChange={(value) => setForm((current) => ({ ...current, source: value }))}
+                          onChange={(value) => updateLinkForm("source", value)}
                         />
                         <Select
                           label="Medium"
                           value={form.medium}
                           options={options.data.mediums.map((value) => ({ value, label: value }))}
-                          onChange={(value) => setForm((current) => ({ ...current, medium: value }))}
+                          onChange={(value) => updateLinkForm("medium", value)}
                         />
                         <Select
                           label="Campaign"
                           value={form.campaign}
                           options={options.data.campaigns.map((value) => ({ value, label: value }))}
-                          onChange={(value) => setForm((current) => ({ ...current, campaign: value }))}
+                          onChange={(value) => updateLinkForm("campaign", value)}
                         />
                         <Select
                           label="Content (optional)"
@@ -1510,7 +1558,7 @@ export default function GrowthCommandPage() {
                             { value: "", label: "No content variant" },
                             ...options.data.contents.map((value) => ({ value, label: value })),
                           ]}
-                          onChange={(value) => setForm((current) => ({ ...current, content: value }))}
+                          onChange={(value) => updateLinkForm("content", value)}
                         />
                       </div>
                       <div className="flex flex-wrap items-center gap-3">

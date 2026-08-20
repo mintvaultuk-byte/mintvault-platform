@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { APP_BASE_URL } from "./app-url";
 import { COMPANY, formatPostalAddress } from "@shared/company";
 import { trackUrl, serviceLabel, carrierLabel, carrierIdFromLegacyName } from "@shared/carriers";
+import { recordApplicationOutcome } from "./growth-runtime-telemetry";
 
 // Pre-formatted postal address as HTML <br />-joined block. Sourced from
 // the canonical record on shared/company.ts so any address change updates
@@ -55,14 +56,20 @@ async function sendViaResend(
   },
   options: { idempotencyKey?: string } = {}
 ): Promise<{ id: string }> {
-  const result = await resend.emails.send(payload, options);
-  if (result.error) {
-    throw new Error(`Resend API error: ${result.error.message || JSON.stringify(result.error)}`);
+  try {
+    const result = await resend.emails.send(payload, options);
+    if (result.error) {
+      throw new Error(`Resend API error: ${result.error.message || JSON.stringify(result.error)}`);
+    }
+    if (!result.data?.id) {
+      throw new Error("Resend returned no message id");
+    }
+    recordApplicationOutcome("email", "SUCCESS");
+    return { id: result.data.id };
+  } catch (error) {
+    recordApplicationOutcome("email", "PLATFORM_FAILURE");
+    throw error;
   }
-  if (!result.data?.id) {
-    throw new Error("Resend returned no message id");
-  }
-  return { id: result.data.id };
 }
 
 function baseHtml(title: string, body: string): string {
@@ -197,10 +204,18 @@ export async function sendPartnerApplicationNotification(data: {
   const inbox = process.env.CONTACT_INBOX_EMAIL || "hello@mintvaultuk.com";
   const safe = (value: string) => escapeHtmlForEmail(value);
   const optionalRows = [
-    data.physicalRetail === undefined ? "" : `<tr><td style="padding:8px 0;color:#999;">Physical retail</td><td style="padding:8px 0;color:#fff;">${data.physicalRetail ? "Yes" : "No"}</td></tr>`,
-    data.categories.length ? `<tr><td style="padding:8px 0;color:#999;">Categories</td><td style="padding:8px 0;color:#fff;">${safe(data.categories.join(", "))}</td></tr>` : "",
-    data.demandBand ? `<tr><td style="padding:8px 0;color:#999;">Demand band</td><td style="padding:8px 0;color:#fff;">${safe(data.demandBand)}</td></tr>` : "",
-    data.existingGradingSubmissions ? `<tr><td style="padding:8px 0;color:#999;">Existing grading service</td><td style="padding:8px 0;color:#fff;">${safe(data.existingGradingSubmissions)}</td></tr>` : "",
+    data.physicalRetail === undefined
+      ? ""
+      : `<tr><td style="padding:8px 0;color:#999;">Physical retail</td><td style="padding:8px 0;color:#fff;">${data.physicalRetail ? "Yes" : "No"}</td></tr>`,
+    data.categories.length
+      ? `<tr><td style="padding:8px 0;color:#999;">Categories</td><td style="padding:8px 0;color:#fff;">${safe(data.categories.join(", "))}</td></tr>`
+      : "",
+    data.demandBand
+      ? `<tr><td style="padding:8px 0;color:#999;">Demand band</td><td style="padding:8px 0;color:#fff;">${safe(data.demandBand)}</td></tr>`
+      : "",
+    data.existingGradingSubmissions
+      ? `<tr><td style="padding:8px 0;color:#999;">Existing grading service</td><td style="padding:8px 0;color:#fff;">${safe(data.existingGradingSubmissions)}</td></tr>`
+      : "",
   ].join("");
 
   const body = `
@@ -392,7 +407,9 @@ ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">Yo
       subject: `MintVault — Submission Confirmed (${data.submissionId})`,
       html: baseHtml("Submission Confirmed", body),
     });
-    console.log(`[email] submission_confirmation_v2_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
+    console.log(
+      `[email] submission_confirmation_v2_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`
+    );
   } catch (err: any) {
     console.error(`[email] submission_confirmation_v2_failed submissionId=${data.submissionId}`);
     throw err;

@@ -138,6 +138,48 @@ describe("Growth infrastructure control and GBP truth", () => {
     ).toMatchObject({ status: "ACTIVE", priorityKey: "CAPACITY" });
   });
 
+  it("restores fleet redundancy before recommending a machine resize", () => {
+    const degraded = deriveCapacityStatus(
+      {
+        cpuPercent: 20,
+        memoryPercent: 95,
+        p95Ms: 100,
+        fiveXRate: 0,
+        requestCount: 100,
+        healthyMachines: 1,
+        expectedMachines: 2,
+      },
+      {
+        cpuWarningPercent: 70,
+        cpuCriticalPercent: 90,
+        memoryWarningPercent: 70,
+        memoryCriticalPercent: 90,
+        p95WarningMs: 500,
+        p95CriticalMs: 1500,
+        fiveXWarningRate: 1,
+        fiveXCriticalRate: 5,
+        minimumErrorRateRequests: 20,
+      }
+    );
+    expect(degraded).toMatchObject({ status: "RED", recommendation: "RESTORE_EXPECTED_FLEET" });
+  });
+
+  it("renders radial gauges from server status without inventing a capacity percentage", () => {
+    const page = fs.readFileSync("client/src/pages/admin/growth.tsx", "utf8");
+    expect(page).toContain("conic-gradient");
+    expect(page).toContain("aria-label={`${label}: ${metric.status}; ${text(metric)}`}");
+    expect(page).not.toMatch(/capacity remaining/i);
+  });
+
+  it("keeps the URL authoritative for tabs and clears stale generated-link feedback", () => {
+    const page = fs.readFileSync("client/src/pages/admin/growth.tsx", "utf8");
+    expect(page).toContain("const searchLocation = useSearch()");
+    expect(page).toContain("const tab = growthTabFromSearch(searchLocation)");
+    expect(page).not.toContain("const [tab, setTab]");
+    expect(page).toContain('setCopyState("idle")');
+    expect(page).toContain("link.reset()");
+  });
+
   it("keeps Fly, Neon, provider cost and budget intelligence truthful and recommendation-only", () => {
     const capacity = deriveCapacityStatus(null, null);
     const infrastructure = buildInfrastructureIntelligence(

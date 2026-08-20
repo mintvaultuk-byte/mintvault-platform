@@ -64,18 +64,29 @@ describe("compact rail geometry", () => {
     expect(VIEWER).not.toContain('label: "Edge"');
     expect(VIEWER).not.toContain('label: "Inverted"');
     expect(VIEWER).not.toContain("setVariant(");
-    // The later full-resolution evidence release deliberately removed getUrl(): that helper could
-    // fall back from canonical working evidence to a display/legacy derivative. Preserve the
-    // stronger current invariant instead of pinning the superseded fallback path.
+    expect(VIEWER).toContain('type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted"');
     expect(VIEWER).not.toContain("function getUrl(");
+    expect(VIEWER).toContain("front_greyscale?: string | null");
+    expect(VIEWER).toContain("front_highcontrast?: string | null");
+    // The density pass originally pinned `getUrl()`, which selected processed
+    // display/original variants for the normal workstation. Full-resolution
+    // evidence hardening later replaced that helper with a stronger contract:
+    // only server-admitted working evidence may become the inspection image.
+    // Keep the processed fields for the server-side image contract, but never
+    // restore their former normal-inspection fallback merely to satisfy this test.
     expect(VIEWER).toContain("function getWorkingEvidenceAsset(urls: ImageUrls, side: Side)");
-    expect(VIEWER).toContain('const url = record[`${side}_working`]');
+    const workingEvidenceSelector = VIEWER.slice(
+      VIEWER.indexOf("function getWorkingEvidenceAsset"),
+      VIEWER.indexOf("function hasAny")
+    );
+    expect(workingEvidenceSelector).toContain("record[`${side}_working`]");
+    expect(workingEvidenceSelector).not.toContain("record[`${side}_original`]");
+    expect(workingEvidenceSelector).not.toContain("record[`${side}_display`]");
     expect(VIEWER).toContain(
       "const currentUrl = workingEvidenceAvailable ? (workingEvidenceAsset?.url ?? null) : null"
     );
     expect(VIEWER).toContain('data-working-evidence="full-resolution"');
-    expect(VIEWER).toContain("front_greyscale?: string | null");
-    expect(VIEWER).toContain("front_highcontrast?: string | null");
+    expect(VIEWER).toContain('data-inspection-source={workingEvidenceAsset?.source ?? "working-evidence-unavailable"}');
     // The INLINE grid keeps the 525px cap (it has no definite height to resolve
     // against). The RAIL path must instead be bounded by its real parent, or the
     // card is capped well below the space the rail actually offers — measured at
