@@ -13,8 +13,8 @@
 
 ## This task branch
 
-- Branch: `codex/partner-queue-workflow-staging-20260820`
-- Commit at baseline: `41245d5f31fa98d567130b50ecef0d7f063ed052`
+- Branch: `codex/partner-supplies-staging-20260820`
+- Exact candidate: `3e5d9bd1d60a609c35561d3558163dc86bbb64a3`, reconciled as one Supplies-only commit on current `origin/main` (`2d776db9`).
 - Pushed: no.
 - Deployed anywhere: no.
 

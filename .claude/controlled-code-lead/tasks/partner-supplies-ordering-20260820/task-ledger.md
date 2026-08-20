@@ -2,8 +2,8 @@
 
 ## Stage 0 — Baseline (recorded 2026-08-20 Europe/London)
 
-- Governed repository: `/tmp/mintvault-partner-queue-staging.20260820`; the shared checkout is dirty and excluded.
-- Branch / commit: `codex/partner-queue-workflow-staging-20260820` at `41245d5f31fa98d567130b50ecef0d7f063ed052`; isolated worktree is clean.
+- Governed repository: `/private/tmp/mintvault-partner-supplies-staging.20260820`; the shared checkout is dirty and excluded.
+- Candidate branch / commit: `codex/partner-supplies-staging-20260820` at `3e5d9bd1d60a609c35561d3558163dc86bbb64a3`, a fresh worktree from `origin/main` (`2d776db9`), with only the Supplies commit reconciled; isolated worktree is clean.
 - Existing release state: staging remains Fly release `v546`; its guarded replacement is not deployed because this Mac cannot resolve the staging hostname. Production is Fly release `v1114` and prohibited.
 - Protected systems in play: Partner tenant/location scope, shared schema/migrations, Super Admin RBAC, existing Resend provider integration, staging deploy and a staging test-order data mutation. MVGS, Scanner, Stripe, Partner authentication and production are excluded.
 - Explicit scope: durable Partner supplies orders for plastic graded slabs, print paper/label stock and NFC tags; address snapshotting; idempotent Resend notification/retry; Partner and Super Admin views and status workflow; hard tests and staging-only release/E2E.
@@ -19,7 +19,7 @@
 | 3 — Lead verification | done | 2026-08-20 | Findings SP-01 through SP-07 are evidence-backed and accepted below. |
 | 4 — Implementation authorisation | done | 2026-08-20 | Owner authorised staging-only implementation and one eventual staging test order. |
 | 5 — Implementation | done | 2026-08-20 | Durable order/outbox, scoped Partner/Super Admin surfaces, cache policy, retry/reconciliation safety and all requested three products are implemented. |
-| 6 — Regression | in progress | 2026-08-20 | Focused real-Postgres, source/UI/RBAC/cache, typecheck, SQL lint, changed-file lint, graph and production-build gates are measured; guarded deploy/browser/E2E remain pending. |
+| 6 — Regression | in progress | 2026-08-20 | Fresh-candidate graph and scoped real-Postgres/source/UI/RBAC/cache suite are green (142 passed; explicitly environment-gated legacy skips); full suite, typecheck, SQL/lint/build and guarded deploy/browser/E2E remain pending. |
 | 7 — Final report | pending | | |
 
 ## Reviewer assignments (Stage 1)

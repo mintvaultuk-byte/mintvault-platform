@@ -20,11 +20,13 @@ const CUSTOMER_SERVICE = read("server/partner/customer-service.ts");
 const APP = read("client/src/App.tsx");
 const ROUTE_GUARD = read("client/src/components/partner/partner-route-guard.tsx");
 
-describe("partner customers are manageable from a real page", () => {
-  it("exposes customer create/edit/search through partner APIs and nav", () => {
+describe("partner customers remain manageable on their direct route", () => {
+  it("exposes customer create/edit/search without restoring Customers to shop-floor navigation", () => {
     expect(API).toContain("partnerCustomers");
     expect(API).toContain('PATCH", `/api/partner/customers/${id}`');
-    expect(SHELL).toContain('href: "/partner/customers"');
+    expect(APP).toContain('path="/partner/customers"');
+    const primaryBlock = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
+    expect(primaryBlock).not.toContain('href: "/partner/customers"');
     expect(CUSTOMERS).toContain("partnerCustomers.list");
     expect(CUSTOMERS).toContain("partnerCustomers.create");
     expect(CUSTOMERS).toContain("partnerCustomers.edit");
