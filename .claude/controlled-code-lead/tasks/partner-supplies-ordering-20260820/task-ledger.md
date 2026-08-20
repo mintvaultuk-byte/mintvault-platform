@@ -19,7 +19,7 @@
 | 3 — Lead verification | done | 2026-08-20 | Findings SP-01 through SP-07 are evidence-backed and accepted below. |
 | 4 — Implementation authorisation | done | 2026-08-20 | Owner authorised staging-only implementation and one eventual staging test order. |
 | 5 — Implementation | done | 2026-08-20 | Durable order/outbox, scoped Partner/Super Admin surfaces, cache policy, retry/reconciliation safety and all requested three products are implemented. |
-| 6 — Regression | in progress | 2026-08-20 | Fresh-candidate graph and scoped real-Postgres/source/UI/RBAC/cache suite are green (142 passed; explicitly environment-gated legacy skips); full suite, typecheck, SQL/lint/build and guarded deploy/browser/E2E remain pending. |
+| 6 — Regression | in progress | 2026-08-20 | Fresh-candidate graph and scoped real-Postgres/source/UI/RBAC/cache suite are green (142 passed); first full-suite replay exposed and then closed SP-12, with a focused lineage/schema/RBAC/Supplies rerun green (64 passed). Final exact-SHA full suite, typecheck, SQL/lint/build and guarded deploy/browser/E2E remain pending. |
 | 7 — Final report | pending | | |
 
 ## Reviewer assignments (Stage 1)

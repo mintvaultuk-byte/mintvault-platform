@@ -44,16 +44,22 @@ SELECT r.id, p.id
  WHERE r.code IN ('PARTNER_OWNER', 'PARTNER_MANAGER')
 ON CONFLICT DO NOTHING;
 
--- Existing parents pre-date the composite-tenant-FK idiom. Add identities without changing rows.
+-- Existing parents pre-date the composite-tenant-FK idiom. 0017 normally supplies the named
+-- unique location index, but this migration also creates it when applying against a minimal
+-- converged Partner estate. Foreign keys require a unique constraint, so attach the existing or
+-- just-created indexes rather than creating duplicates.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_locations_identity ON partner_locations(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_users_identity ON partner_users(id, tenant_id);
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_partner_locations_identity') THEN
     ALTER TABLE partner_locations
-      ADD CONSTRAINT uq_partner_locations_identity UNIQUE (id, tenant_id);
+      ADD CONSTRAINT uq_partner_locations_identity UNIQUE USING INDEX uq_partner_locations_identity;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_partner_users_identity') THEN
     ALTER TABLE partner_users
-      ADD CONSTRAINT uq_partner_users_identity UNIQUE (id, tenant_id);
+      ADD CONSTRAINT uq_partner_users_identity UNIQUE USING INDEX uq_partner_users_identity;
   END IF;
 END$$;
 

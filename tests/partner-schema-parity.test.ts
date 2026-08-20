@@ -3,9 +3,9 @@
  * authoritative migrations. The Drizzle model covers the 14 foundation tables of migration 0001,
  * which is the surface it is used for; the auth/MFA tables and columns added in 0002–0005 are
  * accessed by the runtime through raw SQL / SECURITY DEFINER functions (never typed Drizzle access),
- * so they are MIGRATION-authoritative and intentionally not modelled in Drizzle. This test asserts
- * the 0001 Drizzle↔migration parity exactly AND pins the full Phase-1 migration inventory (0001–0006)
- * so a new/removed migration is noticed. Pure: reads files, no DB.
+ * so they are MIGRATION-authoritative and intentionally not modelled in Drizzle. The four Supplies
+ * tables are the one approved later typed surface and remain bound to their own 0102 migration;
+ * foundation parity remains pinned to 0001. Pure: reads files, no DB.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -14,13 +14,20 @@ import { getTableName, getTableColumns, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import * as partnerSchema from "../shared/partner-schema";
 
-const migration = readFileSync(join(process.cwd(), "migrations", "0001_partner_foundation.sql"), "utf8");
+const foundationMigration = readFileSync(join(process.cwd(), "migrations", "0001_partner_foundation.sql"), "utf8");
+const suppliesMigration = readFileSync(join(process.cwd(), "migrations", "0102_partner_supplies_orders.sql"), "utf8");
+const SUPPLIES_TABLES = [
+  "partner_supplies_orders",
+  "partner_supplies_order_items",
+  "partner_supplies_order_events",
+  "partner_supplies_order_notifications",
+] as const;
 
-function migrationTableNames(): string[] {
+function migrationTableNames(sql: string): string[] {
   const re = /CREATE TABLE IF NOT EXISTS\s+(\w+)/gi;
   const names = new Set<string>();
   let m: RegExpExecArray | null;
-  while ((m = re.exec(migration)) !== null) names.add(m[1]);
+  while ((m = re.exec(sql)) !== null) names.add(m[1]);
   return [...names].sort();
 }
 
@@ -32,16 +39,18 @@ function drizzleTableNames(): string[] {
 }
 
 describe("partner schema ↔ migration parity", () => {
-  it("every Drizzle partner table exists in the migration", () => {
-    const inMigration = new Set(migrationTableNames());
+  it("every typed Drizzle partner table exists in its authoritative migration", () => {
+    const inMigration = new Set([...migrationTableNames(foundationMigration), ...migrationTableNames(suppliesMigration)]);
     for (const t of drizzleTableNames()) {
-      expect(inMigration.has(t), `Drizzle table ${t} missing from migration 0001`).toBe(true);
+      expect(inMigration.has(t), `Drizzle table ${t} missing from its migration authority`).toBe(true);
     }
   });
 
-  it("the Drizzle schema and migration 0001 define the same 14 foundation tables", () => {
-    expect(drizzleTableNames()).toEqual(migrationTableNames());
-    expect(drizzleTableNames().length).toBe(14);
+  it("keeps the 14 foundation tables in 0001 and the four Supplies tables in 0102", () => {
+    const foundationTables = drizzleTableNames().filter((name) => !SUPPLIES_TABLES.includes(name as (typeof SUPPLIES_TABLES)[number]));
+    expect(foundationTables).toEqual(migrationTableNames(foundationMigration));
+    expect(foundationTables).toHaveLength(14);
+    expect([...SUPPLIES_TABLES].sort()).toEqual(migrationTableNames(suppliesMigration));
   });
 
   it("pins the full numbered migration inventory, so a new migration is noticed", () => {
@@ -293,6 +302,7 @@ describe("partner schema ↔ migration parity", () => {
       // Review delivery and conversion instrumentation are application-scoped
       // because both are anchored to canonical grading submissions.
       "0101_growth_reviews_and_conversion.sql",
+      "0102_partner_supplies_orders.sql",
     ]);
   });
 
@@ -323,25 +333,29 @@ describe("partner schema ↔ migration parity", () => {
     for (const t of drizzleTableNames()) expect(t.startsWith("partner_")).toBe(true);
   });
 
-  it("every Drizzle column name exists in the migration's CREATE TABLE for that table (F5 — column drift guard)", () => {
+  it("every Drizzle column name exists in its authoritative migration's CREATE TABLE (F5 — column drift guard)", () => {
     // Parse the migration's CREATE TABLE column names per table.
     const tableCols = new Map<string, Set<string>>();
     const blockRe = /CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\n\);/gi;
-    let b: RegExpExecArray | null;
-    while ((b = blockRe.exec(migration)) !== null) {
-      const [, table, body] = b;
-      const cols = new Set<string>();
-      for (const line of body.split("\n")) {
-        const m = line.match(/^\s*([a-z_]+)\s+/i);
-        // skip constraint/PK/UNIQUE lines
-        if (m && !/^(primary|unique|constraint|foreign|check)$/i.test(m[1])) cols.add(m[1]);
+    for (const sql of [foundationMigration, suppliesMigration]) {
+      let b: RegExpExecArray | null;
+      while ((b = blockRe.exec(sql)) !== null) {
+        const [, table, body] = b;
+        const cols = new Set<string>();
+        for (const line of body.split("\n")) {
+          const m = line.match(/^\s*([a-z_]+)\s+/i);
+          // skip constraint/PK/UNIQUE lines
+          if (m && !/^(primary|unique|constraint|foreign|check)$/i.test(m[1])) cols.add(m[1]);
+        }
+        tableCols.set(table, cols);
       }
-      tableCols.set(table, cols);
     }
     // ALTER TABLE ... ADD COLUMN (org tenant_id)
     const alterRe = /ALTER TABLE\s+(\w+)\s+ADD COLUMN IF NOT EXISTS\s+(\w+)/gi;
-    let a: RegExpExecArray | null;
-    while ((a = alterRe.exec(migration)) !== null) tableCols.get(a[1])?.add(a[2]);
+    for (const sql of [foundationMigration, suppliesMigration]) {
+      let a: RegExpExecArray | null;
+      while ((a = alterRe.exec(sql)) !== null) tableCols.get(a[1])?.add(a[2]);
+    }
 
     for (const table of Object.values(partnerSchema).filter((v): v is PgTable => is(v, PgTable))) {
       const name = getTableName(table);
@@ -354,14 +368,14 @@ describe("partner schema ↔ migration parity", () => {
   });
 
   it("migration enables RLS + FORCE and uses the fail-closed partner_current_tenant() helper", () => {
-    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
-    expect(migration).toMatch(/FORCE ROW LEVEL SECURITY/i);
-    expect(migration).toMatch(/CREATE POLICY/i);
+    expect(foundationMigration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+    expect(foundationMigration).toMatch(/FORCE ROW LEVEL SECURITY/i);
+    expect(foundationMigration).toMatch(/CREATE POLICY/i);
     // the helper coerces unset/empty/malformed context -> NULL -> 0 rows (fail closed).
-    expect(migration).toMatch(/CREATE OR REPLACE FUNCTION partner_current_tenant\(\) RETURNS uuid/i);
-    expect(migration).toMatch(/nullif\(current_setting\('app\.tenant_id', true\), ''\)::uuid/);
-    expect(migration).toMatch(/WHEN invalid_text_representation THEN\s*\n?\s*RETURN NULL/i);
-    expect(migration).toMatch(/tenant_id = partner_current_tenant\(\)/);
+    expect(foundationMigration).toMatch(/CREATE OR REPLACE FUNCTION partner_current_tenant\(\) RETURNS uuid/i);
+    expect(foundationMigration).toMatch(/nullif\(current_setting\('app\.tenant_id', true\), ''\)::uuid/);
+    expect(foundationMigration).toMatch(/WHEN invalid_text_representation THEN\s*\n?\s*RETURN NULL/i);
+    expect(foundationMigration).toMatch(/tenant_id = partner_current_tenant\(\)/);
   });
 
   it("the RLS loop covers all 11 tenant-scoped tables (not the 3 global reference tables)", () => {
@@ -379,10 +393,10 @@ describe("partner schema ↔ migration parity", () => {
       "partner_emergency_controls",
     ];
     // the RLS ARRAY literal is repeated (enable loop + grant loop); assert each tenant table is in it.
-    for (const t of tenantScoped) expect(migration).toContain(`'${t}'`);
+    for (const t of tenantScoped) expect(foundationMigration).toContain(`'${t}'`);
     // global reference tables must NOT be RLS-looped (they are granted SELECT only).
     for (const g of ["partner_roles", "partner_permissions", "partner_role_permissions"]) {
-      expect(migration).toMatch(new RegExp(`GRANT SELECT ON[^;]*${g}`));
+      expect(foundationMigration).toMatch(new RegExp(`GRANT SELECT ON[^;]*${g}`));
     }
   });
 });

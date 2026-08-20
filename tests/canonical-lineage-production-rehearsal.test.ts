@@ -94,6 +94,7 @@ const CANONICAL_PENDING = [
   "0096_partner_card_job_void_management_audit.sql",
   "0097_partner_credit_checkout_sessions.sql",
   "0098_scanner_operator_credit_view.sql",
+  "0102_partner_supplies_orders.sql",
 ] as const;
 
 const sha256 = (sql: string): string => createHash("sha256").update(sql).digest("hex");
@@ -214,20 +215,20 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     const result = await applyMigrations(migrator as never, preGrowthFiles, { allowDestructive: true });
     applied = result.applied;
 
-    // GB-04 release rehearsal starts from the current production journal shape:
-    // 62 immutable applied entries and exactly one new canonical migration.
+    // GB-04 release rehearsal starts from the current production journal shape plus the
+    // already-applied Supplies migration, and exactly one new canonical migration.
     const attributionFiles = files.filter((file) => file.filename !== COMPLETION_MIGRATION);
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
-    expect(growthBefore.alreadyApplied).toHaveLength(62);
+    expect(growthBefore.alreadyApplied).toHaveLength(63);
     expect(growthBefore.pending).toEqual([ATTRIBUTION_MIGRATION]);
     expect(growthBefore.inconsistent).toEqual([]);
     expect(growthBefore.checksumMismatches).toEqual([]);
     growthApplied = (await applyMigrations(migrator as never, attributionFiles)).applied;
 
-    // Completion Night starts from the exact observed 63-entry production
+    // Completion Night starts from the exact observed 64-entry rehearsal
     // journal and has one additive, non-destructive migration to apply.
     const completionBefore = await planMigrations(migrator as never, files);
-    expect(completionBefore.alreadyApplied).toHaveLength(63);
+    expect(completionBefore.alreadyApplied).toHaveLength(64);
     expect(completionBefore.pending).toEqual([COMPLETION_MIGRATION]);
     expect(completionBefore.inconsistent).toEqual([]);
     expect(completionBefore.checksumMismatches).toEqual([]);
@@ -249,7 +250,7 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(64);
+    expect(after.alreadyApplied).toHaveLength(65);
   });
 
   it("applies 0100 and then only 0101 from the exact 63-entry production journal shape", async () => {
