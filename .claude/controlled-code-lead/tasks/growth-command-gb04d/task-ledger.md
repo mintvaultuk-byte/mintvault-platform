@@ -20,16 +20,16 @@
 
 ## Stage progress
 
-| Stage                            | Status      | Date       | Notes                                                                                                                                                                                            |
-| -------------------------------- | ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0 — Baseline                     | COMPLETE    | 2026-08-20 | Deployed SHA/main/worktrees/Fly fleet/secret names/governance reconciled.                                                                                                                        |
-| 1 — Review plan                  | COMPLETE    | 2026-08-20 | Three non-overlapping read-only lanes assigned; Lead owns production/schema/runtime verification.                                                                                                |
-| 2 — Investigation                | COMPLETE    | 2026-08-20 | Three independent read-only reports reconciled; browser/provider/config authority also inspected.                                                                                                |
-| 3 — Lead verification            | COMPLETE    | 2026-08-20 | Accepted findings reproduced in source/tests/runtime; external authority gaps separately proven.                                                                                                 |
-| 4 — Implementation authorisation | COMPLETE    | 2026-08-20 | Exact manifest, protected exclusions and budget frozen.                                                                                                                                          |
-| 5 — Implementation               | COMPLETE    | 2026-08-20 | Lead-owned product/tests/handover; no protected mutation.                                                                                                                                        |
-| 6 — Regression                   | IN PROGRESS | 2026-08-20 | Focused/type/lint/build/graph/diff/format green; broad no-env suite red only for absent local disposable DB URLs and a baseline-reproduced canonical-density assertion; hostile/release pending. |
-| 7 — Final report                 | PENDING     |            | Required 23-section owner format.                                                                                                                                                                |
+| Stage                            | Status      | Date       | Notes                                                                                                                                                                                               |
+| -------------------------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Baseline                     | COMPLETE    | 2026-08-20 | Deployed SHA/main/worktrees/Fly fleet/secret names/governance reconciled.                                                                                                                           |
+| 1 — Review plan                  | COMPLETE    | 2026-08-20 | Three non-overlapping read-only lanes assigned; Lead owns production/schema/runtime verification.                                                                                                   |
+| 2 — Investigation                | COMPLETE    | 2026-08-20 | Three independent read-only reports reconciled; browser/provider/config authority also inspected.                                                                                                   |
+| 3 — Lead verification            | COMPLETE    | 2026-08-20 | Accepted findings reproduced in source/tests/runtime; external authority gaps separately proven.                                                                                                    |
+| 4 — Implementation authorisation | COMPLETE    | 2026-08-20 | Exact manifest, protected exclusions and budget frozen.                                                                                                                                             |
+| 5 — Implementation               | COMPLETE    | 2026-08-20 | Lead-owned product/tests/handover; no protected mutation.                                                                                                                                           |
+| 6 — Regression                   | IN PROGRESS | 2026-08-20 | Focused/type/lint/build green; full disposable matrix overall red only for baseline-reproduced assertion; graph current; hostile proof-doc HIGH corrected; resulting-SHA re-review/release pending. |
+| 7 — Final report                 | PENDING     |            | Required 23-section owner format.                                                                                                                                                                   |
 
 ## Reviewer assignments (Stage 1)
 

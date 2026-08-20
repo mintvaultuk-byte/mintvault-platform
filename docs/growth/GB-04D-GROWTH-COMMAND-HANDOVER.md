@@ -4,7 +4,7 @@
 
 GB-04D extends the existing Super Admin Growth Command with truthful application-process telemetry, database latency and pool-pressure signals, complete canonical funnel ratios, a dormant read-only Search Console adapter, radial status gauges, and UI/MCP hardening. It deliberately does not alter authentication semantics, Stripe/webhook processing, grading, Partner tenancy, Scanner authority, infrastructure capacity, provider spend, secrets, or database schema.
 
-The release base is production commit `ee7fbe43e995b623b488bb9875ca37d261c2dfc4`, Fly release v1112. The local candidate is the current committed branch tip. Production activation remains gated by Git-push authority, independent hostile-review completion, terminal exact-SHA CI, staging proof, and final lineage reconciliation.
+The release base is production commit `ee7fbe43e995b623b488bb9875ca37d261c2dfc4`, Fly release v1112. The implementation was committed and given an exact-SHA hostile review; this handover then received the review's evidence corrections. `git rev-parse HEAD` is the authority for the resulting candidate SHA. Production activation remains gated by Git-push authority, terminal exact-SHA CI, staging proof, a hostile re-review of the resulting SHA, and final lineage reconciliation.
 
 ## As-built data path
 
@@ -136,18 +136,19 @@ Runtime rings retain only timestamp, rounded duration, numeric response status, 
 ## Verification record
 
 - Focused Growth suites: 7 files, 60 tests passed after implementation reconciliation.
-- Broad no-env local regression: 334 files passed, 54 skipped, 6 failed files; 5,313 tests passed and 1,013 skipped. Failed files were `tests/auth-security-migration.test.ts` and `tests/rarity-structured-migration.test.ts` requiring `TEST_DATABASE_URL`, `tests/vq-backend.test.ts`, `tests/vq-fetch-art-stored-pointer.test.ts` and `tests/vq-higgsfield-observability.test.ts` requiring `MINTVAULT_DATABASE_URL`, plus one unrelated `tests/canonical-compact-workstation-density.test.ts` source-contract assertion reproduced identically on the untouched production baseline.
+- Full disposable local matrix command completed with an overall red exit: 393 files and 6,369 tests passed, 2 tests skipped, and one unrelated `canonical-compact-workstation-density` source-contract test failed. That same assertion was separately run and failed identically on the untouched production baseline. This is recorded as a baseline exception, not described as a green full-suite gate.
 - Type check: passed.
 - Lint: passed with zero errors; existing warning estate retained.
 - Production build: passed.
 - `git diff --check`: passed.
 - Formatting for every changed product/test file: passed.
-- Graph check: passed.
-- Hostile/remote CI/staging/live rows must be filled only after their gates actually run.
+- Engineering graph: current at the committed implementation SHA (`engineering graph check .`).
+- Engineering postflight: governance-only pass with protected live-lineage ancestry explicitly reconciled; the `--run` unit gate remains red only for the baseline-reproduced test above.
+- First exact-SHA hostile review: zero product BLOCKER/HIGH; one release-evidence HIGH accepted and corrected by this documentation change. Resulting-SHA hostile re-review, remote CI, staging and live rows remain pending.
 
 ## Release and rollback
 
-There is no migration. The existing production journal was previously read as 64 applied/0 pending; it must be freshly rechecked before deployment. The candidate is committed locally; it must be independently reviewed, published only with Git-push authority, pass terminal remote CI for that exact SHA, and then pass staging desktop/mobile/auth/fallback checks before the already-recorded one-time production deployment approval becomes usable.
+There is no migration. A fresh production-image dry-run on 2026-08-20 reported 64 applied, zero pending, zero inconsistent and zero checksum mismatch. The resulting documentation-corrected candidate must pass exact-SHA hostile re-review, be published only with Git-push authority, pass terminal remote CI for that exact SHA, and then pass staging desktop/mobile/auth/fallback checks before the already-recorded one-time production deployment approval becomes usable.
 
 Rollback is an exact application artifact rollback to the pre-release image/source captured immediately before deployment. Expected rollback proof: two production machines started and healthy, `/api/version` restored, public revenue path and authenticated Growth/Partner/Scanner bounded smokes at their expected outcomes, and no schema/data rollback.
 
