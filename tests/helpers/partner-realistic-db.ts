@@ -176,6 +176,12 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   // no-op for the suite that wants it and a repair for the four that never did.
 ] as const;
 
+/** Partner supplies ordering needs management snapshots (0015) and the real RBAC seed (0034). */
+export const PARTNER_MIGRATIONS_WITH_SUPPLIES = [
+  ...PARTNER_MIGRATIONS_WITH_RBAC_SEED,
+  "0102_partner_supplies_orders",
+] as const;
+
 /**
  * ── MIGRATION SCOPE CONTRACT ───────────────────────────────────────────────
  *
@@ -357,6 +363,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0097_partner_credit_checkout_sessions",
   // PARTNER scope: one additive RBAC grant so SCANNER_OPERATOR can read wallet/catalogue state.
   "0098_scanner_operator_credit_view",
+  // PARTNER scope: durable operational supplies orders/outbox, RLS and additive RBAC only. It
+  // touches no core certificate/payment table, so every Partner-only realistic harness may model it.
+  "0102_partner_supplies_orders",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

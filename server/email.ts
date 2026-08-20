@@ -242,6 +242,75 @@ ${optionalRows}
   });
 }
 
+/**
+ * Operational notification for a Partner supplies request that has ALREADY committed durably.
+ *
+ * This intentionally reuses the one Resend transport/escaping authority in this module. It has no
+ * customer acknowledgement, payment link, credential, token or staff Gmail fallback: delivery goes
+ * only to the configured operational inbox used by the existing Partner/contact notifications.
+ * Retries must pass the same `idempotencyKey` for the canonical order, so a crash after Resend
+ * accepts the message cannot duplicate operational mail on recovery.
+ */
+export async function sendPartnerSuppliesOrderNotification(data: {
+  orderReference: string;
+  partnerName: string;
+  shopName: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone?: string | null;
+  deliveryAddress: string;
+  deliveryPostcode: string;
+  deliveryCountry: string;
+  submittedAt: string;
+  items: Array<{ label: string; quantity: number }>;
+  notes?: string | null;
+  idempotencyKey: string;
+}): Promise<{ id: string } | null> {
+  const resend = getResend();
+  if (!resend) return null;
+
+  const inbox = process.env.CONTACT_INBOX_EMAIL || "hello@mintvaultuk.com";
+  const safe = (value: string) => escapeHtmlForEmail(value);
+  const itemRows = data.items
+    .map(
+      (item) =>
+        `<tr><td style="padding:8px 0;color:#fff;">${safe(item.label)}</td><td style="padding:8px 0;color:#fff;text-align:right;font-family:Menlo,monospace;">${item.quantity}</td></tr>`
+    )
+    .join("");
+  const contactPhone = data.contactPhone ? `<br />${safe(data.contactPhone)}` : "";
+  const notes = data.notes
+    ? `<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">NOTES</h3><div style="padding:12px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-size:13px;line-height:1.6;">${safe(data.notes)}</div>`
+    : "";
+  const body = `
+<p style="color:#ccc;font-size:13px;margin:0 0 16px 0;">A Partner supplies order has been received and is ready for operational processing. This is not a payment or stock-dispatch instruction.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:145px;">Order ID</td><td style="padding:8px 0;color:#D4AF37;font-family:Menlo,monospace;font-weight:bold;">${safe(data.orderReference)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Submitted</td><td style="padding:8px 0;color:#fff;">${safe(data.submittedAt)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Partner</td><td style="padding:8px 0;color:#fff;">${safe(data.partnerName)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Shop</td><td style="padding:8px 0;color:#fff;">${safe(data.shopName)}</td></tr>
+<tr><td style="padding:8px 0;color:#999;vertical-align:top;">Contact</td><td style="padding:8px 0;color:#fff;">${safe(data.contactName)}<br />${safe(data.contactEmail)}${contactPhone}</td></tr>
+<tr><td style="padding:8px 0;color:#999;vertical-align:top;">Delivery address</td><td style="padding:8px 0;color:#fff;">${safe(data.deliveryAddress)}<br />${safe(data.deliveryPostcode)}<br />${safe(data.deliveryCountry)}</td></tr>
+</table>
+<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">ITEMS</h3>
+<table style="width:100%;border-collapse:collapse;border-top:1px solid #333;border-bottom:1px solid #333;">
+<tr><th style="padding:8px 0;color:#999;text-align:left;font-size:11px;letter-spacing:1px;">PRODUCT</th><th style="padding:8px 0;color:#999;text-align:right;font-size:11px;letter-spacing:1px;">QUANTITY</th></tr>
+${itemRows}
+</table>
+${notes}`;
+
+  return sendViaResend(
+    resend,
+    {
+      from: getFromEmail(),
+      to: inbox,
+      // A trusted canonical reference only: untrusted partner/contact names never enter headers.
+      subject: `MintVault Partner Supplies ${data.orderReference}`,
+      html: baseHtml("Partner supplies order", body),
+    },
+    { idempotencyKey: data.idempotencyKey }
+  );
+}
+
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   grading: "Card Grading",
   reholder: "Reholder",

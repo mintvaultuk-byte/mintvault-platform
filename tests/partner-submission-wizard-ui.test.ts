@@ -271,17 +271,25 @@ describe("Locations and Billing use their real partner APIs", () => {
   });
 });
 
-describe("partner workstation IA has mounted destinations for shell links", () => {
-  it("shell exposes the requested partner workstation destinations", () => {
+describe("partner workstation IA keeps live workflow primary and relegates secondary routes", () => {
+  it("shell exposes exactly five shop-floor routes in primary navigation and supplies only in More", () => {
     for (const href of [
+      "/partner/dashboard",
       "/partner/submissions/new",
+      "/partner/grading",
       "/partner/certificates",
-      "/partner/supplies",
-      "/partner/orders",
-      "/partner/public-profile",
+      "/partner/billing",
     ]) {
       expect(SHELL).toContain(href);
     }
+    const primary = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
+    expect((primary.match(/href:/g) ?? [])).toHaveLength(5);
+    for (const href of ["/partner/customers", "/partner/public-profile"]) {
+      expect(SHELL).not.toContain(`href: "${href}"`);
+    }
+    const more = SHELL.slice(SHELL.indexOf("const MORE_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
+    expect(more).toContain('href: "/partner/supplies"');
+    expect(more).toContain('href: "/partner/orders"');
   });
   it("App mounts every shell destination instead of falling through to dashboard", () => {
     for (const route of [
@@ -305,8 +313,8 @@ describe("partner workstation IA has mounted destinations for shell links", () =
      */
     expect(APP).toContain("<PartnerCertificatesPage />");
     expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
-    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="supplies" />');
-    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="orders" />');
+    expect(APP).toContain("<PartnerSuppliesPage />");
+    expect(APP).toContain("<PartnerSuppliesOrdersPage />");
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
   });
   it("placeholder copy is explicit about missing server contracts, not fake live data", () => {

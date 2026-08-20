@@ -32,6 +32,11 @@ export const PARTNER_PERMISSIONS = [
    * it (plan OD-5 default: off), GRADER never.
    */
   "partner.credits.purchase",
+  // Supplies are a separately-audited operational authority. Do not borrow the historical
+  // partner.orders.* grading-submission capabilities: stock fulfilment is neither a card order
+  // nor a payment authority.
+  "partner.supplies.view",
+  "partner.supplies.submit",
   "partner.orders.view",
   "partner.orders.create",
   "partner.orders.edit",
@@ -82,6 +87,8 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.documents.view",
     "partner.training.view",
     "partner.credits.view",
+    "partner.supplies.view",
+    "partner.supplies.submit",
     "partner.orders.view",
     "partner.orders.create",
     "partner.orders.edit",
@@ -114,6 +121,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
   PARTNER_RECEPTION: [
     "partner.dashboard.view",
     "partner.location.view",
+    "partner.supplies.view",
     "partner.orders.view",
     "partner.orders.create",
     "partner.orders.edit",

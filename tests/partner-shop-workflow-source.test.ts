@@ -43,6 +43,26 @@ describe("partner customers are manageable from a real page", () => {
   });
 });
 
+describe("partner launch navigation is locked to the shop-floor workflow", () => {
+  it("renders exactly five primary shop-floor destinations and segregates supplies in More", () => {
+    const primaryBlock = SHELL.slice(SHELL.indexOf("const PRIMARY_NAV_ITEMS"), SHELL.indexOf("const MORE_NAV_ITEMS"));
+    expect(primaryBlock).toContain('href: "/partner/dashboard", label: "Dashboard"');
+    expect(primaryBlock).toContain('href: "/partner/submissions/new", label: "New Submission"');
+    expect(primaryBlock).toContain('href: "/partner/grading", label: "Grading"');
+    expect(primaryBlock).toContain('href: "/partner/certificates",\n    label: "Completed"');
+    expect(primaryBlock).toContain('href: "/partner/billing", label: "Credits & Billing"');
+    expect((primaryBlock.match(/href:/g) ?? [])).toHaveLength(5);
+    const moreBlock = SHELL.slice(SHELL.indexOf("const MORE_NAV_ITEMS"), SHELL.indexOf("function isActiveNavItem"));
+    expect(moreBlock).toContain('href: "/partner/supplies", label: "Supplies"');
+    expect(moreBlock).toContain('href: "/partner/orders", label: "My Orders"');
+    expect((moreBlock.match(/href:/g) ?? [])).toHaveLength(2);
+    expect(SHELL).toContain("MORE_NAV_ITEMS");
+    for (const legacyLabel of ["Customers", "Supplies", "Orders", "Public Profile", "Submissions", "Users", "Locations"]) {
+      expect(primaryBlock).not.toContain(`label: "${legacyLabel}"`);
+    }
+  });
+});
+
 describe("partner catalogue surface is read-only and mounted under partner auth", () => {
   it("mounts the partner catalogue router and reuses the HQ snapshot provider", () => {
     expect(MOUNT).toContain("partnerCatalogueRouter()");

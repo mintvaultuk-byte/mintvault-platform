@@ -42,6 +42,7 @@ const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
  *   0073 — partner.cards.preview, granted with `WHERE r.code IN (...)`
  *   0083 — partner.credits.purchase, granted with `WHERE r.code = '...'` (single role)
  *   0098 — partner.credits.view for SCANNER_OPERATOR, granted without widening purchase/admin scope
+ *   0102 — Partner supplies view/submit authority, deliberately distinct from grading submissions
  *
  * The two grant SHAPES differ, so the parser below handles both rather than assuming one.
  */
@@ -51,6 +52,7 @@ const ADDITIVE_MIGRATIONS = [
   "0085_partner_scanner_operator_role.sql",
   "0092_partner_station_calibrate_permission.sql",
   "0098_scanner_operator_credit_view.sql",
+  "0102_partner_supplies_orders.sql",
 ] as const;
 const additiveSqlByFile = ADDITIVE_MIGRATIONS.map(
   (file) => [file, readFileSync(join(process.cwd(), "migrations", file), "utf8")] as const

@@ -147,6 +147,7 @@ const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-
 const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
 const AdminPartnerNetworkStationsPage = lazy(() => import("@/pages/admin/partner-network-stations"));
 const AdminPartnerNetworkOverviewPage = lazy(() => import("@/pages/admin/partner-network-overview"));
+const AdminPartnerSuppliesOrdersPage = lazy(() => import("@/pages/admin/partner-supplies-orders"));
 
 // Exposure-only kill switch for the consolidated Super Admin IA. It does not alter APIs,
 // permissions or mutations: with the flag off, canonical URLs simply lead back to their legacy
@@ -172,6 +173,8 @@ const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
 const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
+const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
+const PartnerSuppliesOrdersPage = lazy(() => import("@/pages/partner/supplies-orders"));
 const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
 
 function GoldBurstEffect() {
@@ -384,13 +387,13 @@ function PartnerPortalRoutes() {
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/supplies">
-            <PartnerRouteGuard>
-              <PartnerWorkflowPlaceholderPage kind="supplies" />
+            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+              <PartnerSuppliesPage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/orders">
-            <PartnerRouteGuard requiredPermission="partner.orders.view">
-              <PartnerWorkflowPlaceholderPage kind="orders" />
+            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+              <PartnerSuppliesOrdersPage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/public-profile">
@@ -482,6 +485,7 @@ function Router() {
           {/* Partner Network static routes MUST remain above /admin/partners/:partnerId:
               a Partner id is a UUID, so literals such as stations/infrastructure/settings must
               never be treated as an identifier or cause a Partner lookup. */}
+          <Route path="/admin/partners/supplies" component={AdminPartnerSuppliesOrdersPage} />
           <Route path="/admin/partners/stations">
             <PartnerNetworkRoute legacy="/admin/partners/dashboard">
               <AdminPartnerNetworkStationsPage />

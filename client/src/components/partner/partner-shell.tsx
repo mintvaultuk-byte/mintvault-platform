@@ -16,21 +16,13 @@ import {
   Menu,
   X,
   LayoutDashboard,
-  FileText,
-  Users,
-  MapPin,
   CreditCard,
   ClipboardCheck,
-  Contact,
-  HelpCircle,
-  ShieldCheck,
   LogOut,
   PlusCircle,
   Bell,
   PackageCheck,
-  ShoppingCart,
-  Printer,
-  Store,
+  Package,
 } from "lucide-react";
 import { useState } from "react";
 import "@/styles/partner-portal.css";
@@ -43,27 +35,41 @@ interface NavItem {
   permission?: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
+/**
+ * The primary rail contains only actions a shop-floor operator can complete.
+ * Historic CRM, configuration and placeholder routes stay permission-protected
+ * on their direct URLs, but are deliberately not presented in normal launch navigation.
+ */
+const PRIMARY_NAV_ITEMS: NavItem[] = [
   { href: "/partner/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
   { href: "/partner/submissions/new", label: "New Submission", icon: PlusCircle, permission: "partner.orders.view" },
-  { href: "/partner/customers", label: "Customers", icon: Contact, permission: "partner.orders.view" },
   { href: "/partner/grading", label: "Grading", icon: ClipboardCheck, permission: "partner.cards.assess" },
   {
     href: "/partner/certificates",
-    label: "Certificates / Completed",
+    label: "Completed",
     icon: PackageCheck,
     permission: "partner.orders.view",
   },
-  { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
-  { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
   { href: "/partner/billing", label: "Credits & Billing", icon: CreditCard, permission: "partner.credits.view" },
-  { href: "/partner/supplies", label: "Supplies", icon: ShoppingCart },
-  { href: "/partner/orders", label: "Orders", icon: Printer, permission: "partner.orders.view" },
-  { href: "/partner/public-profile", label: "Public Profile", icon: Store, permission: "partner.location.view" },
-  { href: "/partner/help", label: "Help", icon: HelpCircle },
-  { href: "/partner/security", label: "Security & Account", icon: ShieldCheck },
 ];
+
+/**
+ * Supplies is deliberately a secondary operational surface. It must be reachable without turning
+ * a five-item shop-floor rail into the old sprawling portal navigation, so desktop and mobile render
+ * this tiny More section separately from PRIMARY_NAV_ITEMS.
+ */
+const MORE_NAV_ITEMS: NavItem[] = [
+  { href: "/partner/supplies", label: "Supplies", icon: Package, permission: "partner.supplies.view" },
+  { href: "/partner/orders", label: "My Orders", icon: PackageCheck, permission: "partner.supplies.view" },
+];
+
+function isActiveNavItem(location: string, item: NavItem): boolean {
+  if (location === item.href) return true;
+  // The historic submission index is deliberately secondary; its primary new-submission route
+  // must not light both links at once.
+  if (item.href === "/partner/submissions") return false;
+  return location.startsWith(`${item.href}/`);
+}
 
 export function PartnerShell({ children }: { children: ReactNode }) {
   const { session, hasPermission } = usePartnerSession();
@@ -80,7 +86,8 @@ export function PartnerShell({ children }: { children: ReactNode }) {
     }
   }
 
-  const visibleItems = NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
+  const visiblePrimaryItems = PRIMARY_NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
+  const visibleMoreItems = MORE_NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
 
   return (
     <div className="partner-portal min-h-screen bg-background text-foreground flex flex-col">
@@ -112,7 +119,7 @@ export function PartnerShell({ children }: { children: ReactNode }) {
                 <Bell className="h-4 w-4" aria-hidden="true" />
               </Button>
             )}
-            {session?.mfaPassed && (
+            {session?.mfaPassed && hasPermission("partner.orders.view") && (
               <Link href="/partner/submissions/new">
                 <Button size="sm" data-testid="button-new-submission-header">
                   <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />
@@ -160,7 +167,7 @@ export function PartnerShell({ children }: { children: ReactNode }) {
               </div>
             )}
             <ul className="flex flex-col p-2">
-              {visibleItems.map((item) => (
+              {visiblePrimaryItems.map((item) => (
                 <li key={item.href}>
                   <Link
                     href={item.href}
@@ -173,6 +180,26 @@ export function PartnerShell({ children }: { children: ReactNode }) {
                   </Link>
                 </li>
               ))}
+              {visibleMoreItems.length > 0 && (
+                <li className="mt-2 border-t pt-2">
+                  <p className="px-3 py-2 text-xs font-semibold uppercase text-muted-foreground">More</p>
+                  <ul>
+                    {visibleMoreItems.map((item) => (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          onClick={() => setMobileOpen(false)}
+                          data-testid={`link-mobile-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                          className="partner-portal__nav-link flex items-center gap-3 px-3 py-3"
+                        >
+                          <item.icon className="h-5 w-5" aria-hidden="true" />
+                          {item.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              )}
               {session?.mfaPassed && (
                 <li>
                   <button
@@ -204,8 +231,8 @@ export function PartnerShell({ children }: { children: ReactNode }) {
             </div>
             <div className="p-4">
               <ul className="space-y-1">
-                {visibleItems.map((item) => {
-                  const active = location.startsWith(item.href);
+                {visiblePrimaryItems.map((item) => {
+                  const active = isActiveNavItem(location, item);
                   return (
                     <li key={item.href}>
                       <Link
@@ -221,6 +248,29 @@ export function PartnerShell({ children }: { children: ReactNode }) {
                   );
                 })}
               </ul>
+              {visibleMoreItems.length > 0 && (
+                <div className="mt-5 border-t pt-4" aria-label="Partner secondary navigation">
+                  <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">More</p>
+                  <ul className="space-y-1">
+                    {visibleMoreItems.map((item) => {
+                      const active = isActiveNavItem(location, item);
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            data-testid={`link-more-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                            aria-current={active ? "page" : undefined}
+                            className="partner-portal__nav-link flex items-center gap-3 px-3 py-2 text-sm"
+                          >
+                            <item.icon className="h-4 w-4" aria-hidden="true" />
+                            {item.label}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
           </nav>
         )}
