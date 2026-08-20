@@ -24,6 +24,7 @@ import { validatePartnerRbacAtBoot } from "./partner/permissions";
 import pg from "pg";
 import path from "path";
 import { partnerAccountingTopologyReadiness } from "./partner/db";
+import { isIP } from "node:net";
 
 const app = express();
 const httpServer = createServer(app);
@@ -81,6 +82,34 @@ app.use((req, res, next) => {
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
+});
+
+/**
+ * TEMPORARY CC-OA-001 staging contract probe. It exposes no address or request payload: only
+ * booleans that show whether Fly's HTTP handler replaced caller-supplied sentinel headers, the
+ * resulting address family, and the public Machine id already exposed by `fly status`.
+ *
+ * This route MUST be removed before the final candidate is built.
+ */
+app.get("/__mv-fly-client-ip-contract-probe-ccoa001", (req, res) => {
+  const scalar = (name: string): string => {
+    const value = req.headers[name];
+    return (Array.isArray(value) ? value[0] : value || "").trim();
+  };
+  const flyClientIp = scalar("fly-client-ip");
+  const xff = scalar("x-forwarded-for");
+
+  res.status(200).json({
+    machineId: process.env.FLY_MACHINE_ID || "not-fly",
+    flyClientIpFamily: isIP(flyClientIp),
+    flyClientIpWasCallerSentinel: flyClientIp === "203.0.113.77",
+    flyForwardedPortWasCallerSentinel: scalar("fly-forwarded-port") === "9",
+    flyRegionWasCallerSentinel: scalar("fly-region") === "zzz",
+    xffContainsCallerSentinel: xff.split(",").some((part) => part.trim() === "198.51.100.77"),
+    xffRightmostIsKnownAppIp: ["66.241.125.187", "2a09:8280:1::106:3eba:0"].includes(
+      xff.split(",").at(-1)?.trim() || ""
+    ),
+  });
 });
 
 // Readiness probe (Phase 5): unlike /health (pure liveness), /ready also verifies

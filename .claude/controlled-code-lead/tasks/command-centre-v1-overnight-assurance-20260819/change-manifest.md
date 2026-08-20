@@ -27,7 +27,9 @@ Repair only reproduced V1 release defects. No new capability, workflow execution
 
 ## Explicit exclusion
 
-The Admin allowlist/rate-limit parser is **not authorised for edit** at this stage. The parser-only approval required a correct Express `req.ip` authority; local configuration plus Fly's documented topology disproved that precondition. Any trust-proxy or Fly-header authority change requires a separate owner decision because it affects every `req.ip` consumer.
+The earlier parser-only `req.ip` approval expired when its trust-proxy precondition failed. The owner has now separately authorised a Fly-aware **Admin client-network identity only** repair for `CC-OA-001`. The authorised surface is limited to the Admin allowlist, Admin credential/front-door rate-limit keys, a shared validated client-IP resolver, their adversarial tests, and temporary non-secret staging topology instrumentation that must be removed before the final candidate.
+
+The repair may not change password/passphrase, PIN, MFA/TOTP, sessions, cookies, roles, permissions, Super Admin identity, Partner authentication, customer/staff authentication, grading, payments, migrations, secrets, or production configuration.
 
 ## Protected invariants
 
