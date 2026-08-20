@@ -71,11 +71,16 @@ describe("G5 UI pure helpers", () => {
     expect(pmKeys.walletBackfill()[0]).toBe("/api/super-admin/partner-management/wallet-backfills/WALLET-BACKFILL1");
   });
 
-  it("pilot flag helpers expose only onboarding/login as mutable and portal as read-only", () => {
+  it("pilot flag helpers expose onboarding/login plus the public release switch, while portal remains read-only", () => {
     expect(PARTNER_PILOT_READONLY_FLAG).toBe("partner_portal_enabled");
-    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual(["partner_onboarding_enabled", "partner_login_enabled"]);
+    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual([
+      "partner_onboarding_enabled",
+      "partner_login_enabled",
+      "public_partner_directory_enabled",
+    ]);
     expect(isPartnerPilotMutableFlag("partner_onboarding_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_login_enabled")).toBe(true);
+    expect(isPartnerPilotMutableFlag("public_partner_directory_enabled")).toBe(true);
     expect(isPartnerPilotMutableFlag("partner_portal_enabled")).toBe(false);
     expect(isPartnerPilotMutableFlag("partner_connector_enabled")).toBe(false);
     expect(isPartnerPilotMutableFlag("partner_grading_enabled")).toBe(false);
@@ -127,6 +132,9 @@ describe("G5 list page source assertions", () => {
   it("hardcodes the pilot controls to the canonical flag API and no connector/grading/payment flags", () => {
     expect(src).toContain("PARTNER_PILOT_FLAG_BASE");
     expect(src).toContain("window.confirm");
+    expect(src).toContain("window.prompt");
+    expect(src).toContain("public_partner_directory_enabled");
+    expect(src).toContain("runAdminProtected");
     expect(src).toContain("Pilot setup:");
     expect(src).not.toContain("partner_connector_enabled");
     expect(src).not.toContain("partner_grading_enabled");
@@ -224,9 +232,13 @@ describe("G5 detail page source assertions", () => {
     expect(src).toContain("${BASE}/partners/${partnerId}/locations");
     expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}");
     expect(src).toContain("${BASE}/partners/${partnerId}/locations/${location.id}/status");
-    // The legacy /api/super-admin/grading-partners suspend route predates AG-1 and carries none of
-    // its invariants (no last-active-location guard, no partner_management_audit row).
-    expect(src).not.toContain("grading-partners");
+    // Publication is a separate consent/approval authority. Super Admin reads
+    // the exact preview and approves its current version on dedicated routes.
+    expect(src).toContain('"/api/super-admin/grading-partners", partnerId, "public-profile"');
+    expect(src).toContain("/api/super-admin/grading-partners/${partnerId}/locations/${location.id}/publication");
+    expect(src).toContain("expectedProfileVersion: profileVersion");
+    expect(src).toContain("expectedLocationVersion: publication?.version");
+    expect(src).toContain("View public profile");
   });
 
   it("offers no location delete, because AG-1 has none", () => {

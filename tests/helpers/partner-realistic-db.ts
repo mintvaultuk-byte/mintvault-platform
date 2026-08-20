@@ -357,6 +357,8 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0097_partner_credit_checkout_sessions",
   // PARTNER scope: one additive RBAC grant so SCANNER_OPERATOR can read wallet/catalogue state.
   "0098_scanner_operator_credit_view",
+  "0102_partner_public_presence",
+  "0103_partner_google_presence",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

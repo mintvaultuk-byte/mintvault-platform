@@ -6,6 +6,10 @@
  */
 import { apiRequest } from "./queryClient";
 import type { PartnerOperationalReadiness } from "@shared/partner-readiness";
+import type {
+  AuthenticatedPublicProfileStatus,
+  PartnerPublicPrivacyState,
+} from "@shared/public-partner";
 
 export class PartnerApiError extends Error {
   code: string;
@@ -244,6 +248,59 @@ export interface PartnerLocation {
 }
 export const partnerLocations = {
   list: () => req<PartnerLocation[]>("GET", "/api/partner/locations"),
+};
+
+export const partnerPublicProfile = {
+  get: () => req<AuthenticatedPublicProfileStatus>("GET", "/api/partner/public-profile"),
+  save: (locationId: string, data: {
+    expectedProfileVersion: number;
+    expectedLocationVersion: number;
+    publicDisplayName: string;
+    privacyState: PartnerPublicPrivacyState;
+    publicLocationName: string;
+    publicStreetAddress: string;
+    publicServiceArea: string;
+    publicWebsite: string;
+    publicPhone: string;
+    publicEmail: string;
+    mapsEnabled: boolean;
+    attested: boolean;
+  }) => req<{ ok: true }>("POST", `/api/partner/public-profile/locations/${encodeURIComponent(locationId)}`, data),
+};
+
+export type GooglePresenceState =
+  | "NOT_CONNECTED"
+  | "CONNECTING"
+  | "CONNECTED"
+  | "ACTION_REQUIRED"
+  | "REVOKED"
+  | "ERROR";
+export interface GooglePresenceLocation {
+  locationId: string;
+  locationName: string;
+  connectionId: string | null;
+  state: GooglePresenceState;
+  businessName: string | null;
+  businessAddress: string | null;
+  placeId: string | null;
+  mapsUrl: string | null;
+  lastSyncAt: string | null;
+  candidates: Array<{ handle: string; businessName: string; businessAddress: string | null }>;
+}
+export type GooglePresenceStatus =
+  | { available: false; reason: "feature_disabled" | "not_configured" | "schema_unavailable"; owner: false; locations: [] }
+  | { available: true; owner: boolean; locations: GooglePresenceLocation[] };
+
+export const partnerGooglePresence = {
+  status: () => req<GooglePresenceStatus>("GET", "/api/partner/google-business/status"),
+  connect: (locationId: string) =>
+    req<{ authorizationUrl: string; expiresInMinutes: number }>("POST", "/api/partner/google-business/connect", { locationId }),
+  confirm: (locationId: string, candidateHandle: string) =>
+    req<{ ok: true }>("POST", "/api/partner/google-business/confirm", { locationId, candidateHandle }),
+  refresh: (locationId: string) =>
+    req<{ ok: true }>("POST", `/api/partner/google-business/${encodeURIComponent(locationId)}/refresh`),
+  disconnect: (locationId: string) =>
+    req<{ ok: true }>("POST", `/api/partner/google-business/${encodeURIComponent(locationId)}/disconnect`),
 };
 
 // ---- team ----

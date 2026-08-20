@@ -324,30 +324,49 @@ export default function PartnerManagementPage() {
   });
 
   const flagMutation = useMutation({
-    mutationFn: async ({ flag, enabled }: { flag: PartnerPilotMutableFlag; enabled: boolean }) =>
-      (
-        await apiRequest("PUT", `${PARTNER_PILOT_FLAG_BASE}/${flag}`, {
-          enabled,
-          reason: `Pilot setup: ${PARTNER_PILOT_FLAG_LABELS[flag]} ${enabled ? "enabled" : "disabled"}`,
-        })
-      ).json(),
+    mutationFn: async ({ flag, enabled, reason }: { flag: PartnerPilotMutableFlag; enabled: boolean; reason: string }) =>
+      // The public directory flag is a server-enforced sensitive operation. The wrapper only
+      // prompts after the server requests fresh proof, then retries this exact reasoned action once.
+      runAdminProtected(async () =>
+        (
+          await apiRequest("PUT", `${PARTNER_PILOT_FLAG_BASE}/${flag}`, {
+            enabled,
+            reason,
+          })
+        ).json()
+      ),
     onSuccess: (_data, vars) => {
       setBanner(`${PARTNER_PILOT_FLAG_LABELS[vars.flag]} ${vars.enabled ? "enabled" : "disabled"}.`);
       queryClient.invalidateQueries({ queryKey: pmKeys.pilotFlags() });
       pilotFlags.refetch();
     },
-    onError: (err: unknown, vars) =>
+    onError: (err: unknown, vars) => {
+      if (isAdminStepUpCancelled(err)) return;
       setBanner(
         (err as { body?: { error?: { message?: string } } })?.body?.error?.message ??
           `${PARTNER_PILOT_FLAG_LABELS[vars.flag]} update failed.`
-      ),
+      );
+    },
   });
 
   const changePilotFlag = (flag: string, enabled: boolean) => {
     if (!isPartnerPilotMutableFlag(flag)) return;
     const label = PARTNER_PILOT_FLAG_LABELS[flag];
+    let reason = `Pilot setup: ${label} ${enabled ? "enabled" : "disabled"}`;
+    if (flag === "public_partner_directory_enabled") {
+      const entered = window.prompt(
+        `${enabled ? "Enable" : "Disable"} ${label}. Record the release or incident reason for the audit trail:`,
+        ""
+      );
+      if (entered === null) return;
+      reason = entered.trim();
+      if (!reasonValid(reason)) {
+        setBanner("A non-blank reason of 2,000 characters or fewer is required. No directory state changed.");
+        return;
+      }
+    }
     if (!window.confirm(`${enabled ? "Enable" : "Disable"} ${label}?`)) return;
-    flagMutation.mutate({ flag, enabled });
+    flagMutation.mutate({ flag, enabled, reason });
   };
 
   const walletTargets = activePartnersForWallets.data?.partners ?? [];
@@ -466,7 +485,13 @@ export default function PartnerManagementPage() {
                       >
                         <div>
                           <div style={{ fontWeight: 600 }}>{PARTNER_PILOT_FLAG_LABELS[flag]}</div>
-                          <div style={{ fontSize: 12, opacity: 0.7 }}>{mutable ? flag : "Read-only master switch"}</div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            {flag === "public_partner_directory_enabled"
+                              ? "Customer-facing release control — fresh step-up and a recorded reason required"
+                              : mutable
+                                ? flag
+                                : "Read-only master switch"}
+                          </div>
                         </div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <Badge

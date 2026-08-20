@@ -52,6 +52,12 @@ const SEO_MAP: Record<string, SeoMeta> = {
     canonical: `${BASE}/partners`,
     ogImage: DEFAULT_IMAGE,
   },
+  "/find-a-partner": {
+    title: "Find a MintVault Partner | UK Grading Locations",
+    description: "Search approved MintVault Partner shops, view public location details, and open directions in Google Maps.",
+    canonical: `${BASE}/find-a-partner`,
+    ogImage: DEFAULT_IMAGE,
+  },
   "/cert": {
     title: "Certificate Lookup | MintVault UK",
     description: "Verify any MintVault graded card certificate. Search by certificate ID to check grade, card details, and ownership status.",
@@ -257,7 +263,7 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
   "/card-grading-near-me": {
     title: "Card Grading Near Me | UK Card Grading Service | MintVault",
-    description: "Looking for card grading near you in the UK? MintVault is a UK-based professional grading service — no international shipping, fast turnaround, from £19.",
+    description: "Find UK card grading by post and, where available, approved local MintVault Partner shops. Professional grading from £19.",
     canonical: `${BASE}/card-grading-near-me`,
     ogImage: DEFAULT_IMAGE,
   },

@@ -334,6 +334,7 @@ async function login(
       s.adminEmail = ADMIN_EMAIL;
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
+      if (rq.body?.stepUp === true) s.adminStepUpAt = new Date().toISOString();
       rq.session.save(() => rs.json({ ok: true }));
     });
     app.post("/__test/non-super-admin-login", (rq, rs) => {
@@ -761,6 +762,31 @@ async function login(
         "SELECT enabled FROM partner_feature_flags WHERE flag='partner_portal_enabled' AND tenant_id IS NULL"
       );
       expect(rows[0].enabled).toBe(true);
+    });
+
+    it("requires a fresh Super Admin step-up before global public-directory activation", async () => {
+      await admin.query(
+        "DELETE FROM partner_feature_flags WHERE flag='public_partner_directory_enabled' AND tenant_id IS NULL"
+      );
+      const refused = await req("PUT", `${FLAGS_BASE}/public_partner_directory_enabled`, {
+        cookie: adminCookie,
+        body: { enabled: true, reason: "attempt without fresh proof" },
+      });
+      expect(refused.status).toBe(403);
+      expect(refused.body.code).toBe("admin_step_up_required");
+
+      const login = await fetch(`${base}/__test/admin-login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stepUp: true }),
+      });
+      const steppedUpCookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+      const enabled = await req("PUT", `${FLAGS_BASE}/public_partner_directory_enabled`, {
+        cookie: steppedUpCookie,
+        body: { enabled: true, reason: "approved public directory activation" },
+      });
+      expect(enabled.status).toBe(200);
+      expect(enabled.body).toMatchObject({ flag: "public_partner_directory_enabled", enabled: true });
     });
 
     it("writes a GLOBAL row (tenant_id IS NULL AND location_id IS NULL) and flips resolveGlobalFlag in the same test", async () => {

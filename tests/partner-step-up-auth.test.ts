@@ -225,6 +225,7 @@ describe("AG-3 integration surfaces", () => {
     '"/users/:id/role"',
     '"/users/:id/status"',
     '"/users/:id/revoke-sessions"',
+    '"/public-profile/locations/:locationId"',
   ];
 
   it("every high-risk partner action demands a recent proof", () => {
@@ -261,6 +262,12 @@ describe("AG-3 integration surfaces", () => {
     expect(segment.indexOf('requirePartnerCapability("partner.credits.purchase")')).toBeLessThan(
       segment.indexOf("requireRecentAuth()")
     );
+    const publication = postGuards(routes, '"/public-profile/locations/:locationId"');
+    expect(publication.indexOf('requirePartnerCapability("partner.location.view")')).toBeLessThan(
+      publication.indexOf("requireRecentAuth()")
+    );
+    expect(publication).toContain("requireNotViewOnly");
+    expect(publication).toContain("requireNotSensitiveFrozen");
   });
 
   it("the proof demands password AND the current second factor when one is enrolled", () => {
