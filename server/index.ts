@@ -98,6 +98,8 @@ app.get("/__mv-fly-client-ip-contract-probe-ccoa001", (req, res) => {
   };
   const flyClientIp = scalar("fly-client-ip");
   const xff = scalar("x-forwarded-for");
+  const socketIp = req.socket.remoteAddress || "";
+  const socketPrivateV4 = /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(socketIp);
 
   res.status(200).json({
     machineId: process.env.FLY_MACHINE_ID || "not-fly",
@@ -109,6 +111,9 @@ app.get("/__mv-fly-client-ip-contract-probe-ccoa001", (req, res) => {
     xffRightmostIsKnownAppIp: ["66.241.125.187", "2a09:8280:1::106:3eba:0"].includes(
       xff.split(",").at(-1)?.trim() || ""
     ),
+    socketFamily: isIP(socketIp),
+    socketIsLoopback: socketIp === "127.0.0.1" || socketIp === "::1",
+    socketIsPrivateV4: socketPrivateV4,
   });
 });
 
