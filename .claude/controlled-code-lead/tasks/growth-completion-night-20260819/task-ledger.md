@@ -26,7 +26,7 @@
 | 4 — Implementation authorisation | COMPLETE          | 2026-08-19 | Runtime manifest, architecture-after and budget frozen                                                                                                                                                                                                                                                                    |
 | 5 — Implementation               | COMPLETE          | 2026-08-20 | Packages A–G in `079d5336`; hostile privacy closure in `c2d18aea`; Infrastructure/GBP and Commercial Scoreboard addenda implemented locally                                                                                                                                                                               |
 | 6 — Regression                   | COMPLETE IN SCOPE | 2026-08-20 | TypeScript, build, lint, split full/focused/migration/high-risk suites and rendered UI green; three hostile reviews reconciled. Scoreboard Growth suite: 86 assertions plus real PostgreSQL lineage/revision proof. Raw monolithic postflight test remains red only in out-of-scope Partner/Scanner local-topology suites |
-| 7 — Final report                 | IN PROGRESS       | 2026-08-20 | Durable evidence reconciled; remote CI/release/live proof blocked on protected publication and connection actions                                                                                                                                                                                                         |
+| 7 — Final report                 | COMPLETE          | 2026-08-20 | PR #320 merged normally; exact-SHA CI and Engineering OS green; `0101` applied through the canonical runner; `f4285b71` live on Fly v1111; public/authenticated/responsive proof green; no actionable BLOCKER/HIGH remains                                                                                                |
 
 ## Reviewer assignments
 
@@ -39,10 +39,14 @@
 | `/root/hostile_release_review` | Infrastructure/GBP addendum and future scaling boundary        | COMPLETE | no actionable in-scope BLOCKER/HIGH                           |
 | `/root/hostile_release_review` | Commercial Growth Targets / Scoreboard addendum                | COMPLETE | no actionable in-scope BLOCKER/HIGH                           |
 
-## Next authorised action
+## Final activation
 
-Finish the local final-SHA gates and hand over the exact clean branch for owner-authorized push/PR and terminal remote CI.
+- Candidate `d7dddadd504eddd6a976bc5c29a0949cbc5220f5` was published without force or rewrite and merged by PR #320.
+- Canonical/deployed application authority is `f4285b71a5fd0cad578e845d9aaed43768309541`; exact-SHA CI and Engineering OS completed successfully.
+- Migration `0101` is journaled with canonical checksum `e91a62b6352c69945a9824a41a07a0c78e36d4914509464a88290e3737ecbe9a`; inventory is 64 applied, 0 pending/inconsistent/mismatched.
+- Fly v1111 serves `f4285b71` on two passing LHR machines. Rollback image: `registry.fly.io/mintvault:deployment-01M0DYQHT8R6V6QV265H918CED`.
+- No target, fake review, fake conversion event, charge, customer data, provider credential or provider mutation was created.
 
-## Protected actions not yet authorised
+## Remaining protected owner actions
 
-Git push/PR, migration application, secret/config writes, dependency changes, provider writes, auth/payment/grading edits and staging/production writes remain protected. Deployment is conditionally authorized only after every prerequisite gate and separate migration/configuration authority are proven; those prerequisites are not yet met.
+Commercial target entry, Partner outreach, review destination/sender configuration, Growth MCP client/auth connection, Search Console and provider telemetry remain separate owner actions. GB-07, GB-08 and Market Intelligence were not started.
