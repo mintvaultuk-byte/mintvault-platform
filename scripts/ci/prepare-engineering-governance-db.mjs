@@ -25,6 +25,7 @@ Object.assign(env, {
   TEST_DATABASE_URL: sharedTestUrl,
   MINTVAULT_DATABASE_URL: sharedTestUrl,
   PROJECT_CONTROL_TEST_ADMIN_URL: projectControlAdminUrl,
+  MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_URL: projectControlAdminUrl,
   CORRECTION_TEST_DATABASE_URL: correctionTestUrl,
 });
 

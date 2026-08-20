@@ -2,27 +2,63 @@ import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { Client } from "pg";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   COMMAND_CENTRE_RUNTIME_DB_PREFIX,
+  RUNTIME_ADMIN_DATABASE_URL_ENV,
+  assertDisposableRuntimeAdminDatabaseUrl,
   assertDisposableRuntimeDatabaseUrl,
   requireRuntimeCredential,
 } from "../scripts/command-centre-runtime-harness";
+import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+let runtimeAdminDatabaseUrl = "";
+let localPostgres: DisposablePostgres17 | undefined;
+
+beforeAll(async () => {
+  const configured = process.env[RUNTIME_ADMIN_DATABASE_URL_ENV];
+  if (configured) {
+    runtimeAdminDatabaseUrl = assertDisposableRuntimeAdminDatabaseUrl(configured).toString();
+    return;
+  }
+  localPostgres = await startPostgres17("command-centre-runtime-harness");
+  runtimeAdminDatabaseUrl = assertDisposableRuntimeAdminDatabaseUrl(localPostgres.url).toString();
+});
+
+afterAll(async () => {
+  await localPostgres?.stop();
+});
 
 describe("Command Centre rendered-runtime harness safety", () => {
   it("accepts only a loopback URL with the dedicated disposable database prefix", () => {
     const url = assertDisposableRuntimeDatabaseUrl(
-      `postgresql://tester@127.0.0.1:5432/${COMMAND_CENTRE_RUNTIME_DB_PREFIX}safe`
+      `postgresql://tester@127.0.0.1:61234/${COMMAND_CENTRE_RUNTIME_DB_PREFIX}safe`
     );
     expect(url.hostname).toBe("127.0.0.1");
+    expect(url.port).toBe("61234");
   });
 
   it.each([
     "postgresql://tester@ep-remote.neon.tech:5432/mintvault_command_centre_runtime_safe",
     "postgresql://tester@127.0.0.1:5432/mintvault_test",
+    "postgresql://tester@127.0.0.1/mintvault_command_centre_runtime_safe",
     "https://127.0.0.1/mintvault_command_centre_runtime_safe",
   ])("fails closed for unsafe runtime database %s", (unsafeUrl) => {
     expect(() => assertDisposableRuntimeDatabaseUrl(unsafeUrl)).toThrow();
+  });
+
+  it("accepts an explicitly configured disposable maintenance authority on any loopback port", () => {
+    const url = assertDisposableRuntimeAdminDatabaseUrl("postgresql://tester@127.0.0.1:61235/postgres");
+    expect(url.port).toBe("61235");
+    expect(url.pathname).toBe("/postgres");
+  });
+
+  it.each([
+    "postgresql://tester@ep-remote.neon.tech:55433/postgres",
+    "postgresql://tester@127.0.0.1:55433/mintvault_vq_phase10_local",
+    "postgresql://tester@127.0.0.1/postgres",
+  ])("fails closed for unsafe maintenance authority %s", (unsafeUrl) => {
+    expect(() => assertDisposableRuntimeAdminDatabaseUrl(unsafeUrl)).toThrow();
   });
 
   it("keeps the loopback session transport exception test-only", () => {
@@ -38,6 +74,8 @@ describe("Command Centre rendered-runtime harness safety", () => {
     expect(harness).toContain(
       "await verifyCommandCentreRuntime(port, commandCentreEnabled, runtimeAdminPassword, runtimeAdminPin)"
     );
+    expect(harness).toContain("requireRuntimeAdminDatabaseUrl()");
+    expect(harness).not.toContain("127.0.0.1:5432");
     expect(harness).not.toContain('SUPER_ADMIN_COMMAND_CENTRE_ENABLED: commandCentreEnabled ? "true" : "false"');
   });
 
@@ -61,6 +99,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
             MINTVAULT_COMMAND_CENTRE_RUNTIME_AUDIT: "1",
             MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD: "synthetic-runtime-password-1",
             MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN: "synthetic-runtime-pin-1",
+            [RUNTIME_ADMIN_DATABASE_URL_ENV]: runtimeAdminDatabaseUrl,
           },
           stdio: ["ignore", "pipe", "pipe"],
         }
@@ -86,9 +125,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
       expect(exited, "harness did not finish awaited cleanup").toBe(true);
       expect(child.exitCode).toBe(0);
 
-      const role = process.env.USER;
-      expect(role).toMatch(/^[a-z_][a-z0-9_]*$/i);
-      const admin = new Client({ connectionString: `postgresql://${role}@127.0.0.1:5432/postgres` });
+      const admin = new Client({ connectionString: runtimeAdminDatabaseUrl });
       await admin.connect();
       try {
         const residue = await admin.query<{ datname: string }>(
@@ -111,6 +148,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
         MINTVAULT_COMMAND_CENTRE_RUNTIME_AUDIT: "1",
         MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD: "synthetic-runtime-password-1",
         MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN: "synthetic-runtime-pin-1",
+        [RUNTIME_ADMIN_DATABASE_URL_ENV]: runtimeAdminDatabaseUrl,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -138,9 +176,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
     expect(child.exitCode, output).toBe(1);
     expect(output).toContain("child exited unexpectedly");
 
-    const role = process.env.USER;
-    expect(role).toMatch(/^[a-z_][a-z0-9_]*$/i);
-    const admin = new Client({ connectionString: `postgresql://${role}@127.0.0.1:5432/postgres` });
+    const admin = new Client({ connectionString: runtimeAdminDatabaseUrl });
     await admin.connect();
     try {
       const residue = await admin.query<{ datname: string }>(

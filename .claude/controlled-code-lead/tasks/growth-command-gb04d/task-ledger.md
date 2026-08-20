@@ -28,8 +28,27 @@
 | 3 — Lead verification            | COMPLETE    | 2026-08-20 | Accepted findings reproduced in source/tests/runtime; external authority gaps separately proven.                                                                                                    |
 | 4 — Implementation authorisation | COMPLETE    | 2026-08-20 | Exact manifest, protected exclusions and budget frozen.                                                                                                                                             |
 | 5 — Implementation               | COMPLETE    | 2026-08-20 | Lead-owned product/tests/handover; no protected mutation.                                                                                                                                           |
-| 6 — Regression                   | IN PROGRESS | 2026-08-20 | Focused/type/lint/build green; full disposable matrix overall red only for baseline-reproduced assertion; graph current; hostile proof-doc HIGH corrected; resulting-SHA re-review/release pending. |
+| 6 — Regression                   | IN PROGRESS | 2026-08-20 | CI-repair focused/type/lint/build/governance/graph and full disposable-URL suite green locally; resulting-SHA hostile and remote exact-SHA checks pending.                                                     |
 | 7 — Final report                 | PENDING     |            | Required 23-section owner format.                                                                                                                                                                   |
+
+## PR #322 CI-repair continuation — 2026-08-20
+
+- Old candidate: `699d084f7ab112ed4b0fd2f9df359082bdaf861b`.
+- Remote CI/security completed at that exact SHA: security green; CI and
+  governance red only for GB04D-CI-001/002.
+- Owner authorised a narrow repair of those two baseline contracts, one new
+  branch push and exact-SHA verification. Merge/deploy and every production or
+  provider mutation remain prohibited.
+- Lead verification established that GB04D-CI-001 is a stale source assertion
+  superseded by the stronger full-resolution working-evidence admission rule.
+- The authorised five-file functional repair changes no product-runtime source.
+  Focused proof is green at 58/58 on the workflow's existing PostgreSQL 17
+  service at port 55433 and 15/15 against an unconfigured ephemeral local
+  PostgreSQL 17 instance. `npm run check`, lint, build, repository governance,
+  graph-current proof and the full suite are green; the full suite reports 394
+  files, 5,598 passed and 779 environment-gated skips (6,377 tests total).
+- Current authorised action: freeze the repair commit, run exact-SHA hostile
+  review, push the existing PR branch and observe every required remote check.
 
 ## Reviewer assignments (Stage 1)
 

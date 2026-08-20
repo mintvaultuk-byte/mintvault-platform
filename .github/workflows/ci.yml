@@ -60,6 +60,10 @@ jobs:
       # `ADMIN_URL.replace(/\/postgres$/, '/<db>')`, so any other path would silently leave them
       # connected to the admin database.
       PROJECT_CONTROL_TEST_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:55433/postgres
+      # Command Centre rendered-runtime harness. It creates a unique prefixed database and removes
+      # it after each lifecycle proof. This dedicated variable makes the already-provided pg17
+      # service authoritative; the harness must never assume the host's default PostgreSQL port.
+      MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:55433/postgres
 
       # ---- Partner User Management (PR: codex/partner-user-management) ----
       # Five DB-backed suites gate on their own admin URL and are `describe.skip` without it. Before

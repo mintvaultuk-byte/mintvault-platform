@@ -18,6 +18,7 @@ export const COMMAND_CENTRE_RUNTIME_DB_PREFIX = "mintvault_command_centre_runtim
 export const RUNTIME_ADMIN_EMAIL = "mintvaultuk@gmail.com";
 export const RUNTIME_ADMIN_PASSWORD_ENV = "MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD";
 export const RUNTIME_ADMIN_PIN_ENV = "MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN";
+export const RUNTIME_ADMIN_DATABASE_URL_ENV = "MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_URL";
 export const COMMAND_CENTRE_PILOT_FLAG = "super_admin_command_centre_enabled";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -35,8 +36,7 @@ function quoteIdentifier(value: string): string {
   return `"${value}"`;
 }
 
-/** Fail closed before either bootstrapping or starting the application. */
-export function assertDisposableRuntimeDatabaseUrl(raw: string): URL {
+function assertLoopbackPostgresUrl(raw: string): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -49,21 +49,44 @@ export function assertDisposableRuntimeDatabaseUrl(raw: string): URL {
   if (!LOOPBACK_HOSTS.has(url.hostname.toLowerCase())) {
     throw new Error("Command Centre runtime harness refuses non-loopback databases.");
   }
+  if (!url.port) {
+    throw new Error("Command Centre runtime harness requires an explicitly configured PostgreSQL port.");
+  }
+  return url;
+}
+
+/** Fail closed before either bootstrapping or starting the application. */
+export function assertDisposableRuntimeDatabaseUrl(raw: string): URL {
+  const url = assertLoopbackPostgresUrl(raw);
   runtimeDatabaseName(decodeURIComponent(url.pathname).replace(/^\//, ""));
   return url;
 }
 
-function localRole(): string {
-  const role = process.env.USER ?? "";
-  if (!/^[a-z_][a-z0-9_]*$/i.test(role)) throw new Error("Runtime harness requires a safe local PostgreSQL role.");
-  return role;
+/** The harness may create/drop only its own prefixed database, through a
+ * separately configured loopback maintenance authority. Requiring `/postgres`
+ * prevents a product or suite database from becoming the administrative base. */
+export function assertDisposableRuntimeAdminDatabaseUrl(raw: string): URL {
+  const url = assertLoopbackPostgresUrl(raw);
+  if (decodeURIComponent(url.pathname).replace(/^\//, "") !== "postgres") {
+    throw new Error("Command Centre runtime harness admin URL must target the disposable postgres database.");
+  }
+  return url;
 }
 
-function databaseUrl(role: string, database: string): string {
-  const url = new URL("postgresql://127.0.0.1:5432/postgres");
-  url.username = role;
+function requireRuntimeAdminDatabaseUrl(): URL {
+  const raw = process.env[RUNTIME_ADMIN_DATABASE_URL_ENV];
+  if (!raw) {
+    throw new Error(
+      `${RUNTIME_ADMIN_DATABASE_URL_ENV} is required; configure a disposable loopback PostgreSQL authority.`
+    );
+  }
+  return assertDisposableRuntimeAdminDatabaseUrl(raw);
+}
+
+function databaseUrl(authority: URL, database: string): string {
+  const url = new URL(authority.toString());
   url.pathname = `/${database}`;
-  return url.toString();
+  return assertDisposableRuntimeDatabaseUrl(url.toString()).toString();
 }
 
 /** Synthetic credentials are deliberately supplied only to the disposable
@@ -299,14 +322,14 @@ async function main(): Promise<number> {
   }
   const runtimeAdminPassword = requireRuntimeCredential(RUNTIME_ADMIN_PASSWORD_ENV);
   const runtimeAdminPin = requireRuntimeCredential(RUNTIME_ADMIN_PIN_ENV);
-  const role = localRole();
+  const runtimeAdminDatabaseUrl = requireRuntimeAdminDatabaseUrl();
   // This is an audit-only process argument, not a product feature switch. It
   // lets the rendered audit prove the existing server-side kill switch with the
   // same local-only database safeguards as the enabled runtime.
   const commandCentreEnabled = !process.argv.includes("--feature-off");
   const database = runtimeDatabaseName(`${COMMAND_CENTRE_RUNTIME_DB_PREFIX}${process.pid}_${randomUUID().slice(0, 8)}`);
-  const maintenanceUrl = databaseUrl(role, "postgres");
-  const runtimeUrl = databaseUrl(role, database);
+  const maintenanceUrl = runtimeAdminDatabaseUrl.toString();
+  const runtimeUrl = databaseUrl(runtimeAdminDatabaseUrl, database);
   assertDisposableRuntimeDatabaseUrl(runtimeUrl);
   let app: ChildProcess | undefined;
   let databaseCreated = false;

@@ -42,3 +42,21 @@ Focused Vitest suites, full `npm test`, `npm run check`, `npm run lint`,
 `npm run build`, `git diff --check`, Graphify check/update, Engineering OS validate,
 rendered desktop/mobile interaction proof, independent hostile review, then exact-SHA
 remote CI/staging/live proof if the remaining owner gates are supplied.
+
+## PR #322 CI-repair addendum — owner authorised 2026-08-20
+
+This addendum supersedes only the two red CI gates at candidate
+`699d084f7ab112ed4b0fd2f9df359082bdaf861b`. It does not reopen or widen the
+GB-04D runtime implementation.
+
+| File                                                  | Finding      | Class | Authorised correction                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------- | ------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/canonical-compact-workstation-density.test.ts` | GB04D-CI-001 | A     | Replace the stale `getUrl()` fallback assertion with the stronger current canonical invariant: normal grading resolves only server-admitted `*_working` evidence and contains no `*_original`/`*_display` fallback. Do not change workstation runtime code or lower any density requirement.      |
+| `scripts/command-centre-runtime-harness.ts`           | GB04D-CI-002 | D     | Resolve the disposable PostgreSQL maintenance authority from a dedicated required environment variable, require an explicit loopback port and `/postgres`, and derive the uniquely prefixed runtime database URL from that authority. Remove the implicit `127.0.0.1:5432`/local-role assumption. |
+| `tests/command-centre-runtime-harness.test.ts`        | GB04D-CI-002 | D     | Exercise arbitrary configured ports, fail-closed authority validation, real harness lifecycle/cleanup and residue checks through the configured authority. Use CI authority when supplied; otherwise start a disposable local PostgreSQL 17 instance on an ephemeral port.                        |
+| `.github/workflows/ci.yml`                            | GB04D-CI-002 | D     | Give the harness its dedicated synthetic loopback admin URL on the existing PostgreSQL 17 service at port 55433.                                                                                                                                                                                  |
+| `scripts/ci/prepare-engineering-governance-db.mjs`    | GB04D-CI-002 | D     | Export the same dedicated harness authority for the Engineering OS workflow from the existing validated PostgreSQL 17 maintenance URL.                                                                                                                                                            |
+
+Durable task records may be updated with evidence and exact SHA state. No other
+test, workflow, product runtime, migration, secret, provider, infrastructure,
+Partner, Scanner, payment or grading-maths surface is authorised.
