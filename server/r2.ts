@@ -449,6 +449,47 @@ export async function headR2(key: string): Promise<{ lastModified: Date; content
   }
 }
 
+export type R2ObjectReadCheck =
+  { ok: true } | { ok: false; reason: "missing" | "access_denied" | "storage_unavailable"; message: string };
+
+/** Distinguish read failures before issuing a browser URL for an admin review image. */
+export async function checkR2ObjectReadable(key: string): Promise<R2ObjectReadCheck> {
+  const localRoot = localEvidenceDirectory();
+  if (localRoot) {
+    try {
+      await fs.stat(localEvidencePath(localRoot, key));
+      return { ok: true };
+    } catch (error: any) {
+      if (error?.code === "ENOENT") {
+        return { ok: false, reason: "missing", message: "Storage object missing." };
+      }
+      return { ok: false, reason: "storage_unavailable", message: "Storage object could not be checked." };
+    }
+  }
+  let client: S3Client;
+  let bucket: string;
+  try {
+    client = getClient();
+    bucket = getBucket();
+  } catch {
+    return { ok: false, reason: "storage_unavailable", message: "Object storage is not configured." };
+  }
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { ok: true };
+  } catch (error: any) {
+    const status = error?.$metadata?.httpStatusCode;
+    const name = String(error?.name || "");
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") {
+      return { ok: false, reason: "missing", message: "Storage object missing." };
+    }
+    if (status === 403 || name === "AccessDenied") {
+      return { ok: false, reason: "access_denied", message: "Object storage access denied." };
+    }
+    return { ok: false, reason: "storage_unavailable", message: "Object storage could not be checked." };
+  }
+}
+
 export function r2KeyForImage(certId: string, side: "front" | "back", ext: string): string {
   return `images/${certId}/${side}.${ext}`;
 }

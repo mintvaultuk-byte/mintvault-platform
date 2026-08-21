@@ -310,6 +310,71 @@ describe("mounted controlled card inspection", () => {
     );
   });
 
+  it("renders admin-review authoritative FRONT/BACK images without weakening grader working-evidence fallback", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: {
+            front_display: "https://display.test/front-display.jpg",
+            back_display: "https://display.test/back-display.jpg",
+            front_review: "https://review.test/mv686-front.jpg",
+            back_review: "https://review.test/mv686-back.jpg",
+          },
+          workingEvidence: {
+            front: {
+              available: false,
+              reason: "Full-resolution working evidence has not been generated for this side.",
+              recovery: "Regenerate the working evidence from the immutable 1200-DPI master.",
+              master: null,
+              working: null,
+            },
+            back: {
+              available: false,
+              reason: "Full-resolution working evidence has not been generated for this side.",
+              recovery: "Regenerate the working evidence from the immutable 1200-DPI master.",
+              master: null,
+              working: null,
+            },
+          },
+          reviewEvidence: {
+            front: { available: true, reason: null, recovery: null, source: "certificate-bound-image" },
+            back: { available: true, reason: null, recovery: null, source: "certificate-bound-image" },
+          },
+          defects: [
+            {
+              id: 1,
+              image_side: "front",
+              x_percent: 20,
+              y_percent: 30,
+              type: "Scratch",
+              severity: "minor",
+              description: "front scratch",
+              location: "front",
+            },
+          ],
+          onDefectAdded: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    const buttonByText = (text) =>
+      [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === text);
+    const viewport = host.querySelector('[data-testid="grading-image-viewport"]');
+    expect(viewport.dataset.inspectionSource).toBe("review-evidence");
+    expect(host.querySelector("img").getAttribute("src")).toBe("https://review.test/mv686-front.jpg");
+    expect(host.querySelector("img").getAttribute("data-review-evidence")).toBe("certificate-bound-image");
+    expect(host.querySelector('[data-testid="working-evidence-status"]')?.textContent).toContain(
+      "Authoritative review image · front"
+    );
+
+    await act(async () => buttonByText("back").click());
+    expect(viewport.dataset.inspectionSource).toBe("review-evidence");
+    expect(host.querySelector("img").getAttribute("src")).toBe("https://review.test/mv686-back.jpg");
+    expect(host.querySelector('[data-testid="working-evidence-status"]')?.textContent).toContain(
+      "Authoritative review image · back"
+    );
+  });
+
   it("honours a server rejection even if a stale working URL remains in client state", async () => {
     await act(async () =>
       root.render(

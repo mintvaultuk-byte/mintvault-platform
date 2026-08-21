@@ -108,6 +108,7 @@ import {
   isGraderLocked,
   checkGradePublishGates,
   buildWorkingEvidencePayload,
+  buildSuperAdminCertImagesPayload,
 } from "./grader";
 
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
@@ -7924,59 +7925,9 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/certificates/:id/images", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
-      const cert = await storage.getCertificate(id);
-      if (!cert) return res.status(404).json({ error: "Certificate not found" });
-
-      const c = cert as any;
-      const imageKeys: Record<string, string | null> = {
-        // Grading-specific images (from capture wizard / upload-images endpoint)
-        front_original: c.gradingFrontOriginal || c.frontImagePath || null,
-        front_cropped: c.gradingFrontCropped || null,
-        front_greyscale: c.gradingFrontGreyscale || null,
-        front_highcontrast: c.gradingFrontHighcontrast || null,
-        front_edgeenhanced: c.gradingFrontEdgeenhanced || null,
-        front_inverted: c.gradingFrontInverted || null,
-        back_original: c.gradingBackOriginal || c.backImagePath || null,
-        back_cropped: c.gradingBackCropped || null,
-        back_greyscale: c.gradingBackGreyscale || null,
-        back_highcontrast: c.gradingBackHighcontrast || null,
-        back_edgeenhanced: c.gradingBackEdgeenhanced || null,
-        back_inverted: c.gradingBackInverted || null,
-        angled_original: c.gradingAngledOriginal || null,
-        angled_cropped: c.gradingAngledCropped || null,
-        closeup_original: c.gradingCloseupOriginal || null,
-        closeup_cropped: c.gradingCloseupCropped || null,
-        // Viewer derivatives (1600px q80). Fallback chain keeps certs that
-        // predate the derivative pipeline working: full-res cropped → legacy
-        // display path.
-        front_display: c.gradingFrontDisplay || c.gradingFrontCropped || c.frontImagePath || null,
-        back_display: c.gradingBackDisplay || c.gradingBackCropped || c.backImagePath || null,
-      };
-
-      const urls: Record<string, string | null> = {};
-      await Promise.all(
-        Object.entries(imageKeys).map(async ([k, key]) => {
-          if (!key) {
-            urls[k] = null;
-            return;
-          }
-          try {
-            urls[k] = await getR2SignedUrl(key, 3600);
-          } catch {
-            urls[k] = null;
-          }
-        })
-      );
-
-      // One shared admission gate serves both admin and restricted-grader UI.
-      // It signs a working key only when the ledger proves it preserves the
-      // Canon master's dimensions with no resize; otherwise the viewer shows a
-      // side-specific unavailable/recovery state rather than a display fallback.
-      const working = await buildWorkingEvidencePayload(id);
-      Object.assign(urls, working.urls);
-
-      const quality = c.imageQualityChecks || {};
-      res.json({ urls, quality, workingEvidence: working.workingEvidence });
+      const images = await buildSuperAdminCertImagesPayload(id);
+      if (!images) return res.status(404).json({ error: "Certificate not found" });
+      res.json(images);
     } catch (error: any) {
       res.status(500).json({ error: "Failed to get images" });
     }

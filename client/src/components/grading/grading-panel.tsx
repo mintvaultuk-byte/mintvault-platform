@@ -427,6 +427,15 @@ export default function GradingPanel({
         working: { width: number | null; height: number | null; format: string | null } | null;
       }
     >;
+    reviewEvidence?: Record<
+      "front" | "back",
+      {
+        available: boolean;
+        reason: string | null;
+        recovery: string | null;
+        source: "certificate-bound-image";
+      }
+    >;
   }>({
     queryKey: [`${apiBase}/certificates/${certId}/images`],
     queryFn: async () => {
@@ -3173,6 +3182,7 @@ export default function GradingPanel({
                   apiBase={apiBase}
                   urls={urls}
                   workingEvidence={imageData?.workingEvidence}
+                  reviewEvidence={imageData?.reviewEvidence}
                   defects={defects}
                   onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
                   onDefectsChange={(next) => active && setDefects(next)}

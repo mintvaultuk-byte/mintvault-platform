@@ -37,6 +37,7 @@ type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inv
 interface ImageUrls {
   front_original?: string | null;
   front_working?: string | null;
+  front_review?: string | null;
   front_working_cropped?: string | null;
   front_cropped?: string | null;
   /** 1600px q80 viewer derivatives — preferred main-viewer source. The
@@ -50,6 +51,7 @@ interface ImageUrls {
   front_inverted?: string | null;
   back_original?: string | null;
   back_working?: string | null;
+  back_review?: string | null;
   back_working_cropped?: string | null;
   back_cropped?: string | null;
   back_greyscale?: string | null;
@@ -70,6 +72,13 @@ interface WorkingEvidenceStatus {
   working: { width: number | null; height: number | null; format: string | null } | null;
 }
 
+interface ReviewEvidenceStatus {
+  available: boolean;
+  reason: string | null;
+  recovery: string | null;
+  source: "certificate-bound-image";
+}
+
 interface FrameRect {
   left_pct: number;
   right_pct: number;
@@ -88,6 +97,8 @@ interface Props {
   urls: ImageUrls;
   /** Server-verified 1200-DPI/master-dimension admission state. Never inferred from a URL. */
   workingEvidence?: Partial<Record<"front" | "back", WorkingEvidenceStatus>>;
+  /** Admin-review-only authoritative certificate image. Never supplied to normal grader surfaces. */
+  reviewEvidence?: Partial<Record<"front" | "back", ReviewEvidenceStatus>>;
   defects: Defect[];
   onDefectAdded: (defect: Defect) => void;
   /** Opens the 8-dot Card Tool for a side. When provided, "Card Tool (Front)"
@@ -231,11 +242,11 @@ export function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCo
 
 const SIDES: Side[] = ["front", "back"];
 
-type WorkingEvidenceSource = "working-evidence";
+type InspectionImageSource = "working-evidence" | "review-evidence";
 
 interface WorkingEvidenceAsset {
   url: string;
-  source: WorkingEvidenceSource;
+  source: InspectionImageSource;
 }
 
 /**
@@ -253,6 +264,13 @@ function getWorkingEvidenceAsset(urls: ImageUrls, side: Side): WorkingEvidenceAs
   const record = urls as Record<string, string | null | undefined>;
   const url = record[`${side}_working`];
   return url ? { source: "working-evidence", url } : null;
+}
+
+function getReviewEvidenceAsset(urls: ImageUrls, side: Side): WorkingEvidenceAsset | null {
+  if (side !== "front" && side !== "back") return null;
+  const record = urls as Record<string, string | null | undefined>;
+  const url = record[`${side}_review`];
+  return url ? { source: "review-evidence", url } : null;
 }
 
 function hasAny(urls: ImageUrls, side: Side): boolean {
@@ -402,6 +420,7 @@ const PIN_CURSOR = `url("data:image/svg+xml,${PIN_CURSOR_SVG}") 12 12, crosshair
 export default function ImageViewer({
   urls,
   workingEvidence,
+  reviewEvidence,
   defects,
   onDefectAdded,
   onDefectsChange,
@@ -1007,13 +1026,26 @@ export default function ImageViewer({
   // presenting an otherwise plausible derivative as verified working evidence.
   const workingEvidenceAvailable =
     Boolean(workingEvidenceAsset) && workingEvidenceStatus?.available === true && !workingEvidenceLoadFailed;
-  const currentUrl = workingEvidenceAvailable ? (workingEvidenceAsset?.url ?? null) : null;
-  const unavailableReason = workingEvidenceLoadFailed
-    ? "The canonical full-resolution working image could not be loaded."
-    : (workingEvidenceStatus?.reason ?? `${side.toUpperCase()} cannot be graded from a display derivative.`);
-  const unavailableRecovery = workingEvidenceLoadFailed
-    ? "Restore the working evidence from the immutable 1200-DPI master, then reload this card."
-    : (workingEvidenceStatus?.recovery ?? "Restore the canonical working evidence for this side.");
+  const reviewEvidenceAsset = getReviewEvidenceAsset(urls, side);
+  const reviewEvidenceStatus = reviewEvidence?.[side as "front" | "back"];
+  const reviewEvidenceAvailable =
+    !workingEvidenceAvailable && Boolean(reviewEvidenceAsset) && reviewEvidenceStatus?.available === true;
+  const inspectionAsset = workingEvidenceAvailable
+    ? workingEvidenceAsset
+    : reviewEvidenceAvailable
+      ? reviewEvidenceAsset
+      : null;
+  const currentUrl = inspectionAsset?.url ?? null;
+  const unavailableReason = reviewEvidenceStatus?.reason
+    ? reviewEvidenceStatus.reason
+    : workingEvidenceLoadFailed
+      ? "The canonical full-resolution working image could not be loaded."
+      : (workingEvidenceStatus?.reason ?? `${side.toUpperCase()} cannot be graded from a display derivative.`);
+  const unavailableRecovery = reviewEvidenceStatus?.recovery
+    ? reviewEvidenceStatus.recovery
+    : workingEvidenceLoadFailed
+      ? "Restore the working evidence from the immutable 1200-DPI master, then reload this card."
+      : (workingEvidenceStatus?.recovery ?? "Restore the canonical working evidence for this side.");
   const frontWorkingEvidenceAvailable =
     Boolean(getWorkingEvidenceAsset(urls, "front")) && workingEvidence?.front?.available === true;
   const backWorkingEvidenceAvailable =
@@ -1462,7 +1494,7 @@ export default function ImageViewer({
         data-testid="grading-image-viewport"
         data-coordinate-mode={markMode ? "measurement" : "inspection"}
         data-inspection-side={side}
-        data-inspection-source={workingEvidenceAsset?.source ?? "working-evidence-unavailable"}
+        data-inspection-source={inspectionAsset?.source ?? "working-evidence-unavailable"}
         data-inspection-zoom={zoom}
         data-inspection-focus-x={pan.x / 100}
         data-inspection-focus-y={pan.y / 100}
@@ -1505,7 +1537,11 @@ export default function ImageViewer({
             <img
               ref={imgElRef}
               src={currentUrl}
-              alt={`${side} full-resolution working evidence`}
+              alt={
+                inspectionAsset?.source === "review-evidence"
+                  ? `${side} authoritative bound scan image`
+                  : `${side} full-resolution working evidence`
+              }
               className={markMode ? "block" : "w-full h-full object-contain"}
               style={
                 markMode
@@ -1526,7 +1562,10 @@ export default function ImageViewer({
                       }
                   : undefined
               }
-              data-working-evidence="full-resolution"
+              data-working-evidence={inspectionAsset?.source === "working-evidence" ? "full-resolution" : undefined}
+              data-review-evidence={
+                inspectionAsset?.source === "review-evidence" ? "certificate-bound-image" : undefined
+              }
               data-testid={railFitEnabled ? "grading-card-image" : undefined}
               onLoad={(e) => {
                 const w = e.currentTarget.naturalWidth;
@@ -2355,13 +2394,15 @@ export default function ImageViewer({
       >
         <p
           className={`text-[9px] font-bold uppercase tracking-widest ${
-            workingEvidenceAvailable ? "text-emerald-300" : "text-amber-300"
+            currentUrl ? "text-emerald-300" : "text-amber-300"
           }`}
           data-testid="working-evidence-status"
         >
           {workingEvidenceAvailable
             ? `Full-resolution working evidence · ${side}`
-            : `Working evidence unavailable · ${side}`}
+            : reviewEvidenceAvailable
+              ? `Authoritative review image · ${side}`
+              : `Working evidence unavailable · ${side}`}
         </p>
         {/* Side-specific centering/defect tools remain directly available in the
             workstation. A side without canonical working evidence is visibly

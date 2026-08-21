@@ -140,6 +140,12 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     expect(VIEWER).toMatch(/function getWorkingEvidenceAsset/);
     const inspectionHelper = VIEWER.slice(
       VIEWER.indexOf("function getWorkingEvidenceAsset"),
+      VIEWER.indexOf("function getReviewEvidenceAsset")
+    );
+    // Super Admin review images are a SEPARATE, side-specific selector. Expanding it for
+    // both sides keeps the no-cross-side proof from covering one side only.
+    const reviewHelper = VIEWER.slice(
+      VIEWER.indexOf("function getReviewEvidenceAsset"),
       VIEWER.indexOf("function hasAny")
     );
     // The production helper is dynamic. Expand that exact contract for Front and Back so the
@@ -150,10 +156,23 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
       expect(sideContract).not.toContain(`record[\`${side}_original\`]`);
       expect(sideContract).not.toContain(`record[\`${side}_display\`]`);
     }
+    for (const side of ["front", "back"]) {
+      const sideContract = reviewHelper.replaceAll("${side}", side);
+      expect(sideContract.indexOf(`record[\`${side}_review\`]`)).toBeGreaterThan(-1);
+      const other = side === "front" ? "back" : "front";
+      expect(sideContract).not.toContain(`record[\`${other}_review\`]`);
+      expect(sideContract).not.toContain(`record[\`${side}_original\`]`);
+      expect(sideContract).not.toContain(`record[\`${side}_display\`]`);
+    }
     expect(VIEWER).toMatch(/const WORKING_EVIDENCE_MAX_ZOOM = 12/);
     expect(VIEWER).toContain('"working-evidence"');
-    expect(VIEWER).toContain('data-inspection-source={workingEvidenceAsset?.source ?? "working-evidence-unavailable"}');
-    expect(VIEWER).toContain('data-working-evidence="full-resolution"');
+    expect(VIEWER).toContain('data-inspection-source={inspectionAsset?.source ?? "working-evidence-unavailable"}');
+    // "full-resolution" is reserved for admitted working evidence; a Super Admin review
+    // image is marked separately so it can never be mistaken for verified evidence.
+    expect(VIEWER).toContain(
+      'data-working-evidence={inspectionAsset?.source === "working-evidence" ? "full-resolution" : undefined}'
+    );
+    expect(VIEWER).toContain('data-review-evidence=');
     expect(VIEWER).not.toMatch(/pixelInspection/);
     expect(VIEWER).not.toMatch(/Full-Resolution Working Evidence/);
     expect(VIEWER).not.toMatch(/Legacy Original Inspection/);

@@ -78,16 +78,40 @@ describe("compact rail geometry", () => {
     expect(VIEWER).toContain("function getWorkingEvidenceAsset(urls: ImageUrls, side: Side)");
     const workingEvidenceSelector = VIEWER.slice(
       VIEWER.indexOf("function getWorkingEvidenceAsset"),
-      VIEWER.indexOf("function hasAny")
+      VIEWER.indexOf("function getReviewEvidenceAsset")
     );
     expect(workingEvidenceSelector).toContain("record[`${side}_working`]");
     expect(workingEvidenceSelector).not.toContain("record[`${side}_original`]");
     expect(workingEvidenceSelector).not.toContain("record[`${side}_display`]");
-    expect(VIEWER).toContain(
-      "const currentUrl = workingEvidenceAvailable ? (workingEvidenceAsset?.url ?? null) : null"
+    // 2026-08-21 Super Admin review images: the inspection image may ALSO be the
+    // certificate-bound authoritative scan — but ONLY on Super Admin surfaces that
+    // supply `reviewEvidence`, and ONLY when admitted working evidence is absent.
+    // The property this guard exists for is unchanged and is asserted below on BOTH
+    // branches: `currentUrl` still comes solely from the admitted inspection asset,
+    // never from a processed display/original derivative.
+    expect(VIEWER).toContain("const currentUrl = inspectionAsset?.url ?? null");
+    const inspectionSelection = VIEWER.slice(
+      VIEWER.indexOf("const reviewEvidenceAsset = getReviewEvidenceAsset("),
+      VIEWER.indexOf("const currentUrl = inspectionAsset?.url ?? null")
     );
-    expect(VIEWER).toContain('data-working-evidence="full-resolution"');
-    expect(VIEWER).toContain('data-inspection-source={workingEvidenceAsset?.source ?? "working-evidence-unavailable"}');
+    // Admitted working evidence stays strictly preferred over the review image.
+    expect(inspectionSelection).toContain("!workingEvidenceAvailable && Boolean(reviewEvidenceAsset)");
+    // A review image is NEVER inferred from a URL alone — the server must admit it.
+    expect(inspectionSelection).toContain("reviewEvidenceStatus?.available === true");
+    expect(inspectionSelection).toContain("const inspectionAsset = workingEvidenceAvailable");
+    // The review selector stays side-specific and must not reintroduce derivatives.
+    const reviewEvidenceSelector = VIEWER.slice(
+      VIEWER.indexOf("function getReviewEvidenceAsset"),
+      VIEWER.indexOf("function hasAny")
+    );
+    expect(reviewEvidenceSelector).toContain("record[`${side}_review`]");
+    expect(reviewEvidenceSelector).not.toContain("record[`${side}_original`]");
+    expect(reviewEvidenceSelector).not.toContain("record[`${side}_display`]");
+    // The "verified working evidence" marker must never be attached to a review image.
+    expect(VIEWER).toContain(
+      'data-working-evidence={inspectionAsset?.source === "working-evidence" ? "full-resolution" : undefined}'
+    );
+    expect(VIEWER).toContain('data-inspection-source={inspectionAsset?.source ?? "working-evidence-unavailable"}');
     // The INLINE grid keeps the 525px cap (it has no definite height to resolve
     // against). The RAIL path must instead be bounded by its real parent, or the
     // card is capped well below the space the rail actually offers — measured at
