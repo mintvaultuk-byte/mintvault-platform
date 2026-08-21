@@ -40,6 +40,8 @@
       <div class="station-identity-cell">
         <span class="identity-key">GRADING CREDITS</span>
         <span class="identity-value" id="stationCredits">—</span>
+        <span class="credit-low-warning" id="lowCreditsWarning" hidden>LOW CREDITS — TOP UP</span>
+        <button class="btn credit-buy-more" id="buyMoreCreditsBtn" hidden>BUY MORE CREDITS</button>
       </div>
     </section>
 
@@ -334,8 +336,8 @@
 
     <div class="modal billing-lock-modal" id="billingLockModal" aria-live="assertive">
       <div class="modal-card wide">
-        <div class="modal-title">NO GRADING CREDITS AVAILABLE</div>
-        <p class="billing-lock-subtitle">TOP UP TO CONTINUE</p>
+        <div class="modal-title" id="billingLockTitle">NO GRADING CREDITS AVAILABLE</div>
+        <p class="billing-lock-subtitle" id="billingLockSubtitle">TOP UP TO CONTINUE</p>
         <div class="billing-pack-grid" id="billingPackGrid">
           <button class="btn billing-pack" data-credits="5">5 CREDITS</button>
           <button class="btn billing-pack" data-credits="10">10 CREDITS</button>

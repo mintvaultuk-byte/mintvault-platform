@@ -67,8 +67,12 @@ import {
 import { hasRecentStepUp, recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
 import {
   canPurchaseCredits,
+  checkoutStripeEnvironmentStatus,
+  completePartnerCreditCheckoutOperation,
+  findActivePartnerCreditCheckoutOperation,
   listCreditPacks,
-  recordPartnerCreditCheckoutIntent,
+  presentPartnerCreditCheckoutOperation,
+  reservePartnerCreditCheckoutOperation,
   resolvePackForCheckout,
   validateStripePriceForCheckout,
 } from "./credit-purchase-service";
@@ -560,76 +564,125 @@ export function partnerApiRouter(): Router {
         }
 
         const packCode = typeof req.body?.packCode === "string" ? req.body.packCode : "";
-        const pack = await resolvePackForCheckout(packCode);
+        const checkoutEnvironment = checkoutStripeEnvironmentStatus();
+        if (!checkoutEnvironment.ok || checkoutEnvironment.environment === null) {
+          const error = new Error(checkoutEnvironment.message || "Stripe mode is not configured.") as Error & {
+            code?: string;
+          };
+          error.code = checkoutEnvironment.code || "STRIPE_ENV_UNDECLARED";
+          throw error;
+        }
+
+        /*
+         * Reuse a live operation BEFORE looking at the mutable pack catalogue. A pack may be
+         * disabled or its Stripe Price rotated after a buyer was sent to Checkout; that must stop
+         * only NEW purchases, never strand this already server-created operation.
+         */
+        let operation = await findActivePartnerCreditCheckoutOperation({
+          tenantId: principal.tenantId,
+          initiatingUserId: principal.userId,
+          packCode,
+          stripeEnvironment: checkoutEnvironment.environment,
+        });
+
+        if (!operation) {
+          const pack = await resolvePackForCheckout(packCode);
+          const { getUncachableStripeClient } = await import("../stripeClient");
+          const stripe = await getUncachableStripeClient();
+          const stripePrice = await stripe.prices.retrieve(pack.stripePriceId!);
+          const priceFields = stripePrice as {
+            id?: unknown;
+            currency?: unknown;
+            unit_amount?: unknown;
+            tax_behavior?: unknown;
+            livemode?: unknown;
+            active?: unknown;
+          };
+          const stripeEnvironment = validateStripePriceForCheckout(pack, {
+            id: typeof priceFields.id === "string" ? priceFields.id : null,
+            currency: typeof priceFields.currency === "string" ? priceFields.currency : null,
+            unitAmount: typeof priceFields.unit_amount === "number" ? priceFields.unit_amount : null,
+            taxBehavior: typeof priceFields.tax_behavior === "string" ? priceFields.tax_behavior : null,
+            livemode: typeof priceFields.livemode === "boolean" ? priceFields.livemode : null,
+            active: typeof priceFields.active === "boolean" ? priceFields.active : null,
+          });
+          operation = await reservePartnerCreditCheckoutOperation({
+            tenantId: principal.tenantId,
+            packCode: pack.code,
+            initiatingUserId: principal.userId,
+            stripePriceId: pack.stripePriceId!,
+            stripeCurrency: pack.stripeCurrency!,
+            stripeEnvironment,
+            credits: pack.credits,
+            pricePence: pack.pricePence,
+            taxBehavior: "inclusive",
+            // A creating operation is deliberately durable long enough for a request timeout to
+            // retry through the same Stripe idempotency key. Stripe returns its exact expiry below.
+            checkoutExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          });
+        }
 
         const { getUncachableStripeClient } = await import("../stripeClient");
         const stripe = await getUncachableStripeClient();
-        const stripePrice = await stripe.prices.retrieve(pack.stripePriceId!);
-        const priceFields = stripePrice as {
-          id?: unknown;
-          currency?: unknown;
-          unit_amount?: unknown;
-          tax_behavior?: unknown;
-          livemode?: unknown;
-          active?: unknown;
-        };
-        const stripeEnvironment = validateStripePriceForCheckout(pack, {
-          id: typeof priceFields.id === "string" ? priceFields.id : null,
-          currency: typeof priceFields.currency === "string" ? priceFields.currency : null,
-          unitAmount: typeof priceFields.unit_amount === "number" ? priceFields.unit_amount : null,
-          taxBehavior: typeof priceFields.tax_behavior === "string" ? priceFields.tax_behavior : null,
-          livemode: typeof priceFields.livemode === "boolean" ? priceFields.livemode : null,
-          active: typeof priceFields.active === "boolean" ? priceFields.active : null,
-        });
         const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
-        // Checkout Session metadata serves the successful purchase fulfilment webhook. A charge
-        // refund/dispute is emitted from the PaymentIntent/Charge object instead, so copy the same
-        // server-derived identifiers there as well. No quantity or price is ever client-provided.
-        const checkoutAttribution = {
-          partner_tenant_id: principal.tenantId,
-          partner_pack_code: pack.code,
-          partner_initiating_user_id: principal.userId,
-        };
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          line_items: [{ price: pack.stripePriceId!, quantity: 1 }],
-          // The webhook reads ONLY these keys to attribute the payment. The credit quantity is
-          // deliberately absent: it is resolved from partner_credit_packs by pack code at grant
-          // time, so tampered metadata cannot mint capacity.
-          metadata: checkoutAttribution,
-          payment_intent_data: { metadata: checkoutAttribution },
-          // MUST match a real client route. `/partner/credits` is not registered in App.tsx, so the
-          // partner catch-all route silently redirected the returning buyer to the dashboard and
-          // threw the `?purchase=` signal away — the one moment the shop most needs to be told
-          // "paid, processing, credits appear shortly". The wallet page is `/partner/billing`.
-          //
-          // NB: that catch-all's path pattern is deliberately NOT written out here. A slash-star
-          // sequence inside a comment opens a block comment as far as a naive stripper is
-          // concerned, and tests/partner-main-reconciliation-merge-loss.test.ts strips comments
-          // before asserting that routes still exist — so writing it literally silently swallowed
-          // every route below this point and failed a merge-loss sentinel.
-          success_url: `${appUrl}/partner/billing?purchase=processing`,
-          cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
-        });
-        if (!session.url) throw new Error("Stripe Checkout did not return a URL.");
-        await recordPartnerCreditCheckoutIntent({
-          stripeSessionId: session.id,
-          tenantId: principal.tenantId,
-          packCode: pack.code,
-          initiatingUserId: principal.userId,
-          stripePriceId: pack.stripePriceId!,
-          stripeCurrency: pack.stripeCurrency!,
-          stripeEnvironment,
-        });
-
-        res.json({
-          url: session.url,
-          packCode: pack.code,
-          credits: pack.credits,
-          pricePence: pack.pricePence,
-          displayPrice: pack.displayPrice,
-          vatIncluded: pack.vatIncluded,
-        });
+        if (!operation.checkoutUrl) {
+          let session;
+          if (operation.stripeSessionId) {
+            // 0099 is compatible with a pre-existing 0097 row whose Session was recorded before
+            // URLs were persisted: retrieve that same Session, never create a second one.
+            session = await stripe.checkout.sessions.retrieve(operation.stripeSessionId);
+          } else {
+            session = await stripe.checkout.sessions.create(
+              {
+                mode: "payment",
+                line_items: [{ price: operation.stripePriceId, quantity: 1 }],
+                // The webhook reads ONLY these attribution keys. Credits/price remain in the
+                // immutable server-created operation, never request or Stripe metadata authority.
+                metadata: {
+                  partner_tenant_id: principal.tenantId,
+                  partner_pack_code: operation.packCode,
+                  partner_initiating_user_id: principal.userId,
+                  partner_checkout_operation_key: operation.checkoutOperationKey,
+                },
+                // Checkout Session metadata serves the successful-purchase fulfilment webhook. A
+                // refund or dispute is emitted from the PaymentIntent/Charge object instead, so the
+                // same server-derived identifiers must be copied there too or charge.refunded /
+                // charge.dispute.created cannot attribute the event to a tenant.
+                payment_intent_data: {
+                  metadata: {
+                    partner_tenant_id: principal.tenantId,
+                    partner_pack_code: operation.packCode,
+                    partner_initiating_user_id: principal.userId,
+                    partner_checkout_operation_key: operation.checkoutOperationKey,
+                  },
+                },
+                // success_url MUST match a real client route. `/partner/credits` is not registered
+                // in App.tsx, so the partner catch-all silently redirected the returning buyer to
+                // the dashboard and discarded the `?purchase=` signal. The wallet page is
+                // `/partner/billing`.
+                //
+                // NB: that catch-all's path pattern is deliberately NOT written out here. A
+                // slash-star sequence inside a comment opens a block comment as far as a naive
+                // stripper is concerned, and tests/partner-main-reconciliation-merge-loss.test.ts
+                // strips comments before asserting routes still exist — writing it literally
+                // silently swallowed every route below this point.
+                success_url: `${appUrl}/partner/billing?purchase=processing`,
+                cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
+              },
+              { idempotencyKey: `partner-credit-checkout:${operation.checkoutOperationKey}` }
+            );
+          }
+          if (!session.url || !session.id || !session.expires_at) {
+            throw new Error("Stripe Checkout did not return a URL and expiry.");
+          }
+          operation = await completePartnerCreditCheckoutOperation({
+            checkoutOperationKey: operation.checkoutOperationKey,
+            stripeSessionId: session.id,
+            checkoutUrl: session.url,
+            checkoutExpiresAt: new Date(session.expires_at * 1000),
+          });
+        }
+        res.json({ url: operation.checkoutUrl, ...presentPartnerCreditCheckoutOperation(operation) });
       } catch (err) {
         const code = (err as { code?: string })?.code;
         if (code === "PACK_NOT_FOUND" || code === "PACK_NOT_PURCHASABLE") {

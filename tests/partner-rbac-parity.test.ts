@@ -42,7 +42,7 @@ const sql = readFileSync(join(process.cwd(), "migrations", MIGRATION), "utf8");
  *   0073 — partner.cards.preview, granted with `WHERE r.code IN (...)`
  *   0083 — partner.credits.purchase, granted with `WHERE r.code = '...'` (single role)
  *   0098 — partner.credits.view for SCANNER_OPERATOR, granted without widening purchase/admin scope
- *   0102 — Partner supplies view/submit authority, deliberately distinct from grading submissions
+ *   0104 — Partner supplies view/submit authority, deliberately distinct from grading submissions
  *
  * The two grant SHAPES differ, so the parser below handles both rather than assuming one.
  */

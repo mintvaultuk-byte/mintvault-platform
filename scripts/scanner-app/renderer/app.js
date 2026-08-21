@@ -13,6 +13,8 @@ const els = {
   stationOrganisation: document.getElementById("stationOrganisation"),
   stationIdentity: document.getElementById("stationIdentity"),
   stationUser: document.getElementById("stationUser"),
+  lowCreditsWarning: document.getElementById("lowCreditsWarning"),
+  buyMoreCreditsBtn: document.getElementById("buyMoreCreditsBtn"),
   targetCert: document.getElementById("targetCert"),
   targetSide: document.getElementById("targetSide"),
   targetHint: document.getElementById("targetHint"),
@@ -30,6 +32,8 @@ const els = {
   orphanList: document.getElementById("orphanList"),
   orphanClose: document.getElementById("orphanClose"),
   billingLockModal: document.getElementById("billingLockModal"),
+  billingLockTitle: document.getElementById("billingLockTitle"),
+  billingLockSubtitle: document.getElementById("billingLockSubtitle"),
   billingPackGrid: document.getElementById("billingPackGrid"),
   billingLockError: document.getElementById("billingLockError"),
   billingLockStatus: document.getElementById("billingLockStatus"),
@@ -171,6 +175,9 @@ let billingPacksLoading = false;
 let billingCheckoutInFlight = false;
 let billingPoll = null;
 let billingModalDismissedAtZero = false;
+let billingManualModalOpen = false;
+let billingCheckoutAwaitingWallet = false;
+let billingCheckoutBaselineCredits = null;
 let renderedWalletRefreshGeneration = null;
 
 function openModal(modal) {
@@ -195,7 +202,37 @@ function billingLocked(state) {
 }
 
 function shouldShowBillingLock(state) {
-  return billingLocked(state) && !stationHasReservedCardInProgress(state) && !billingModalDismissedAtZero;
+  return billingLocked(state) && !billingModalDismissedAtZero;
+}
+
+function canPurchaseCredits() {
+  return stationSetup?.summary?.canPurchaseCredits === true;
+}
+
+function lowCreditWarning(state) {
+  const credits = availableCreditsFromState(state);
+  return typeof credits === "number" && credits > 0 && credits <= 5;
+}
+
+function setBillingModalCopy(mode) {
+  const zero = mode === "zero";
+  els.billingLockTitle.textContent = zero ? "NO GRADING CREDITS AVAILABLE" : "BUY GRADING CREDITS";
+  els.billingLockSubtitle.textContent = zero ? "TOP UP TO CONTINUE" : "GBP • VAT INCLUDED";
+}
+
+function openBillingModal(mode, options = {}) {
+  billingManualModalOpen = mode === "manual";
+  billingModalDismissedAtZero = false;
+  setBillingModalCopy(mode);
+  els.billingLockModal.classList.toggle("billing-lock-nonblocking", options.nonBlocking === true);
+  openModal(els.billingLockModal);
+  void ensureBillingPacks();
+}
+
+function closeBillingModal() {
+  billingManualModalOpen = false;
+  els.billingLockModal.classList.remove("billing-lock-nonblocking");
+  closeModal(els.billingLockModal);
 }
 
 function setBillingError(message) {
@@ -222,12 +259,18 @@ function renderBillingPacks() {
     const credits = Number(button.dataset.credits);
     const pack = packForCredits(credits);
     const priceLabel = pack?.displayPrice ? ` — ${pack.displayPrice}` : "";
-    const vatLabel = pack?.vatIncluded ? " VAT included" : "";
+    const vatLabel = pack?.vatIncluded ? " VAT INCLUDED" : "";
     button.textContent = `${credits} CREDITS${priceLabel}${vatLabel}`;
-    button.disabled = billingPacksLoading || billingCheckoutInFlight || !pack?.purchasable;
+    button.disabled = billingPacksLoading || billingCheckoutInFlight || billingCheckoutAwaitingWallet || !pack?.purchasable;
     button.dataset.packCode = pack?.code || "";
   }
-  if (billingPacksLoading) {
+  if (billingCheckoutInFlight) {
+    els.billingLockStatus.textContent = "Starting checkout…";
+    setBillingError("");
+  } else if (billingCheckoutAwaitingWallet) {
+    els.billingLockStatus.textContent = "Checkout already open. Credits appear here automatically after payment.";
+    setBillingError("");
+  } else if (billingPacksLoading) {
     els.billingLockStatus.textContent = "Loading credit packs…";
     setBillingError("");
   } else if (billingPacks && !anyPurchasable) {
@@ -235,8 +278,7 @@ function renderBillingPacks() {
     els.billingLockStatus.textContent = message;
     setBillingError(message);
   } else {
-    els.billingLockStatus.textContent =
-      "Credits are added only after Stripe confirms payment through the verified webhook.";
+    els.billingLockStatus.textContent = "Credits appear automatically after payment.";
   }
 }
 
@@ -294,20 +336,36 @@ function renderBillingLock(state) {
     billingModalDismissedAtZero = false;
   }
   renderedWalletRefreshGeneration = walletRefreshGeneration;
+  // Reconcile every active signed-in Scanner. This survives a restart while Stripe is delivering a
+  // webhook: no renderer memory is needed to refresh the authoritative visible wallet.
+  if (stationSetup?.stage === "active") startBillingPoll();
+  else stopBillingPoll();
   const locked = billingLocked(state);
   if (!locked) {
     billingModalDismissedAtZero = false;
-    closeModal(els.billingLockModal);
-    stopBillingPoll();
+    const currentCredits = availableCreditsFromState(state);
+    const walletMovedAfterCheckout =
+      billingCheckoutAwaitingWallet &&
+      typeof currentCredits === "number" &&
+      typeof billingCheckoutBaselineCredits === "number" &&
+      currentCredits !== billingCheckoutBaselineCredits;
+    if (walletMovedAfterCheckout) {
+      billingCheckoutAwaitingWallet = false;
+      billingCheckoutBaselineCredits = null;
+      closeBillingModal();
+    } else if (!billingManualModalOpen) {
+      closeBillingModal();
+    }
     setBillingError("");
+    setBillingModalCopy("manual");
     return;
   }
-  if (!stationHasReservedCardInProgress(state)) startBillingPoll();
   if (shouldShowBillingLock(state)) {
-    openModal(els.billingLockModal);
-    void ensureBillingPacks();
+    // A reservation already paid for this Card Job can finish safely. Keep the canonical zero panel
+    // visible, but make it non-blocking so SCAN/FIX remains usable while NEW stays hard-disabled.
+    openBillingModal("zero", { nonBlocking: stationHasReservedCardInProgress(state) });
   } else {
-    closeModal(els.billingLockModal);
+    closeBillingModal();
   }
   renderBillingPacks();
 }
@@ -447,6 +505,10 @@ function renderAvailableCredits() {
   const live = lastState?.availableCredits;
   const credits = typeof live === "number" ? live : stationSetup?.summary?.availableCredits;
   els.stationCredits.textContent = typeof credits === "number" ? String(credits) : "—";
+  const mayPurchase = canPurchaseCredits();
+  els.lowCreditsWarning.hidden = !lowCreditWarning(lastState);
+  els.buyMoreCreditsBtn.hidden = !mayPurchase;
+  els.buyMoreCreditsBtn.disabled = billingCheckoutInFlight;
 }
 
 function availableCreditsFromState(state) {
@@ -1802,20 +1864,22 @@ async function startNewCard() {
 
 els.newCardBtn.addEventListener("click", () => void startNewCard());
 els.topUpNowBtn.addEventListener("click", () => {
-  billingModalDismissedAtZero = false;
   els.newCardError.hidden = true;
-  openModal(els.billingLockModal);
-  void ensureBillingPacks();
+  openBillingModal(billingLocked(lastState) ? "zero" : "manual");
+});
+els.buyMoreCreditsBtn.addEventListener("click", () => {
+  els.newCardError.hidden = true;
+  openBillingModal("manual");
 });
 
 els.billingLockClose.addEventListener("click", () => {
   billingModalDismissedAtZero = billingLocked(lastState);
-  closeModal(els.billingLockModal);
+  closeBillingModal();
 });
 
 els.billingPackGrid.addEventListener("click", async (event) => {
   const button = event.target?.closest?.("[data-credits]");
-  if (!button || button.disabled || billingCheckoutInFlight) return;
+  if (!button || button.disabled || billingCheckoutInFlight || billingCheckoutAwaitingWallet) return;
   const packCode = button.dataset.packCode;
   if (!packCode) {
     setBillingError("TOP-UP PACKS NOT YET CONFIGURED");
@@ -1828,13 +1892,18 @@ els.billingPackGrid.addEventListener("click", async (event) => {
   try {
     const result = await window.scanner.creditCheckout({ packCode });
     if (!result?.ok) {
+      billingCheckoutAwaitingWallet = false;
+      billingCheckoutBaselineCredits = null;
       setBillingError(result?.error || "Checkout could not start");
       return;
     }
-    els.billingLockStatus.textContent =
-      "Checkout opened. This station unlocks only after the verified Stripe webhook updates the wallet.";
+    billingCheckoutAwaitingWallet = true;
+    billingCheckoutBaselineCredits = availableCreditsFromState(lastState);
+    els.billingLockStatus.textContent = "Checkout opened. Credits appear here automatically after payment.";
     startBillingPoll();
   } catch (error) {
+    billingCheckoutAwaitingWallet = false;
+    billingCheckoutBaselineCredits = null;
     setBillingError(error?.message || "Checkout could not start");
   } finally {
     billingCheckoutInFlight = false;
@@ -1947,7 +2016,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (els.billingLockModal.classList.contains("visible")) {
     billingModalDismissedAtZero = billingLocked(lastState);
-    closeModal(els.billingLockModal);
+    closeBillingModal();
     return;
   }
   for (const modal of [els.orphanModal]) {

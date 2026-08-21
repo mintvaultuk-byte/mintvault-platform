@@ -236,12 +236,12 @@ export class WebhookHandlers {
 
     // ── Existing estimate credits checkout ─────────────────────────────────────
 
-    if (event.type === "checkout.session.completed") {
+    if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
       const session = event.data.object as Stripe.Checkout.Session;
       const meta = session.metadata || {};
 
       // Vault Club subscription checkout
-      if (session.mode === "subscription" && meta.user_id) {
+      if (event.type === "checkout.session.completed" && session.mode === "subscription" && meta.user_id) {
         await WebhookHandlers.handleSubscriptionCheckoutCompleted(event.id, session, stripe);
         return;
       }
@@ -250,7 +250,7 @@ export class WebhookHandlers {
       // A thrown (transient DB) error propagates to the route, which returns a
       // non-2xx so Stripe retries onto the safely rolled-back state; a permanent
       // condition (duplicate / not-paid / malformed) returns without throwing.
-      if (meta.type === "estimate_credits") {
+      if (event.type === "checkout.session.completed" && meta.type === "estimate_credits") {
         await fulfilEstimateCreditsPurchase(event.id, event.type, session);
       }
 
