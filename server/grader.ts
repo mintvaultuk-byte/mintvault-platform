@@ -18,7 +18,7 @@ import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
 import { sql, type SQL } from "drizzle-orm";
 import { storage } from "./storage";
-import { getR2SignedUrl, headR2 } from "./r2";
+import { checkR2ObjectReadable, getR2SignedUrl, headR2 } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
@@ -651,6 +651,13 @@ export type WorkingEvidenceStatus = {
   working: { width: number | null; height: number | null; format: string | null } | null;
 };
 
+export type ReviewEvidenceStatus = {
+  available: boolean;
+  reason: string | null;
+  recovery: string | null;
+  source: "certificate-bound-image";
+};
+
 export type WorkingEvidenceRow = {
   /** Present for ledger batches; admission itself is deliberately certificate-agnostic. */
   certificate_id?: number;
@@ -688,6 +695,14 @@ function unavailable(
     master: row ? { dpi: row.dpi, width: row.pixel_width, height: row.pixel_height } : null,
     working: row ? { width: row.working_width, height: row.working_height, format: row.working_format } : null,
   };
+}
+
+function reviewUnavailable(reason: string, recovery: string): ReviewEvidenceStatus {
+  return { available: false, reason, recovery, source: "certificate-bound-image" };
+}
+
+function reviewAvailable(): ReviewEvidenceStatus {
+  return { available: true, reason: null, recovery: null, source: "certificate-bound-image" };
 }
 
 function parseWorkingSettings(value: unknown): Record<string, unknown> | null {
@@ -937,6 +952,80 @@ export async function buildCertImagesPayload(certId: number): Promise<{
   const working = await buildWorkingEvidencePayload(certId);
   Object.assign(urls, working.urls);
   return { urls, quality: c.imageQualityChecks || {}, workingEvidence: working.workingEvidence };
+}
+
+function reviewImageKey(c: any, side: Side): string | null {
+  if (side === "front") {
+    return c.gradingFrontDisplay || c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath || null;
+  }
+  return c.gradingBackDisplay || c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath || null;
+}
+
+/**
+ * Admin Pending Review is read-only QA of the exact submitted certificate. It may render the
+ * certificate-bound scan image when the stricter grader working derivative is missing, but only from
+ * this admin-review namespace and only after storage confirms the bound object is readable.
+ */
+export async function buildAdminReviewImagesPayload(certId: number): Promise<{
+  urls: Record<string, string | null>;
+  quality: any;
+  workingEvidence: Record<Side, WorkingEvidenceStatus>;
+  reviewEvidence: Record<Side, ReviewEvidenceStatus>;
+} | null> {
+  const payload = await buildCertImagesPayload(certId);
+  const cert = await storage.getCertificate(certId);
+  if (!payload || !cert) return null;
+  const c = cert as any;
+  const reviewEvidence: Record<Side, ReviewEvidenceStatus> = {
+    front: reviewUnavailable(
+      "Canonical FRONT image binding is missing for this certificate.",
+      "Restore the certificate's authoritative FRONT image binding before review."
+    ),
+    back: reviewUnavailable(
+      "Canonical BACK image binding is missing for this certificate.",
+      "Restore the certificate's authoritative BACK image binding before review."
+    ),
+  };
+  await Promise.all(
+    sides.map(async (side) => {
+      const key = reviewImageKey(c, side);
+      if (!key) {
+        payload.urls[`${side}_review`] = null;
+        return;
+      }
+      const readable = await checkR2ObjectReadable(key);
+      if (!readable.ok) {
+        payload.urls[`${side}_review`] = null;
+        const upper = side.toUpperCase();
+        const reason =
+          readable.reason === "missing"
+            ? `Canonical ${upper} image storage object is missing.`
+            : readable.reason === "access_denied"
+              ? `Access denied while reading the canonical ${upper} image.`
+              : `Signed ${upper} review image could not be prepared because object storage is unavailable.`;
+        const recovery =
+          readable.reason === "missing"
+            ? `Restore the R2 object for the bound ${upper} image key.`
+            : readable.reason === "access_denied"
+              ? `Check R2 read policy for the bound ${upper} image key without loosening tenant isolation.`
+              : "Restore object-storage connectivity, then reload this review.";
+        reviewEvidence[side] = reviewUnavailable(reason, recovery);
+        return;
+      }
+      try {
+        payload.urls[`${side}_review`] = await getR2SignedUrl(key, 3600);
+        reviewEvidence[side] = reviewAvailable();
+      } catch {
+        payload.urls[`${side}_review`] = null;
+        const upper = side.toUpperCase();
+        reviewEvidence[side] = reviewUnavailable(
+          `Signed URL generation failed for the canonical ${upper} image.`,
+          `Check signing credentials and R2 namespace for the bound ${upper} image key.`
+        );
+      }
+    })
+  );
+  return { ...payload, reviewEvidence };
 }
 
 /** The grading state for a certificate. NO customer PII — grade/measurement data only. */
