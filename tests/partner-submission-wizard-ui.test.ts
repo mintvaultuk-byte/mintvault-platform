@@ -297,17 +297,16 @@ describe("partner workstation IA has mounted destinations for shell links", () =
      * /partner/* catch-all to the dashboard — asserted by the route loop above, which is what
      * actually protects the operator.
      *
-     * `certificates` has since graduated from a placeholder to a real page (PartnerCertificatesPage,
-     * App.tsx). Continuing to assert its placeholder pinned the OLD state and failed on forward
-     * progress, so it is asserted here as a real destination instead. The other three are still
-     * placeholders and are still pinned as such, so that any one of them graduating is a deliberate
-     * edit rather than a silent drift.
+     * `certificates` and `public-profile` have graduated to real pages. Continuing to assert their
+     * placeholders would pin the old state, so the mounted components and absence of their former
+     * placeholders are the contract. Supplies and orders remain explicit placeholders.
      */
     expect(APP).toContain("<PartnerCertificatesPage />");
     expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="supplies" />');
     expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="orders" />');
-    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
+    expect(APP).toContain("<PartnerPublicProfilePage />");
+    expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
   });
   it("placeholder copy is explicit about missing server contracts, not fake live data", () => {
     expect(WORKFLOW_PLACEHOLDER).toContain("partner-to-certificate contract");

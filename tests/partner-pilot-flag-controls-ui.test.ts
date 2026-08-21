@@ -66,6 +66,12 @@ const flagRows = (overrides: Partial<Record<string, boolean>> = {}): FlagRow[] =
     updatedAt: null,
   },
   {
+    flag: "public_partner_directory_enabled",
+    enabled: overrides.public_partner_directory_enabled ?? false,
+    configured: true,
+    updatedAt: null,
+  },
+  {
     flag: "partner_connector_enabled",
     enabled: true,
     configured: true,
@@ -127,7 +133,9 @@ beforeEach(() => {
   invalidateQueries.mockReset();
   navigate.mockReset();
   window.confirm = vi.fn();
+  window.prompt = vi.fn();
   vi.spyOn(window, "confirm").mockReturnValue(true);
+  vi.spyOn(window, "prompt").mockReturnValue("Release validation complete");
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -194,6 +202,35 @@ describe("Partner pilot flag controls", () => {
     expect(putRequests()).toHaveLength(0);
   });
 
+  it("requires a typed release reason before changing the public directory switch", async () => {
+    await mount(flagRows({ public_partner_directory_enabled: false }));
+    const button = await waitForTestId("pm-pilot-flag-toggle-public_partner_directory_enabled");
+
+    await act(async () => button.click());
+
+    expect(window.prompt).toHaveBeenCalledTimes(1);
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+    expect(putRequests()).toEqual([
+      {
+        method: "PUT",
+        url: "/api/super-admin/partner-flags/public_partner_directory_enabled",
+        body: { enabled: true, reason: "Release validation complete" },
+      },
+    ]);
+  });
+
+  it("does not mutate the public directory when its reason prompt is cancelled or blank", async () => {
+    vi.mocked(window.prompt).mockReturnValueOnce(null).mockReturnValueOnce("   ");
+    await mount(flagRows({ public_partner_directory_enabled: false }));
+    const button = await waitForTestId("pm-pilot-flag-toggle-public_partner_directory_enabled");
+
+    await act(async () => button.click());
+    await act(async () => button.click());
+
+    expect(putRequests()).toHaveLength(0);
+    expect(q("pm-banner")?.textContent).toContain("reason");
+  });
+
   it("failed mutations show an error and do not report success", async () => {
     apiRequest.mockImplementation((method: string, url: string) => {
       if (method === "GET" && url === "/api/super-admin/partner-flags") return ok({ flags: flagRows() });
@@ -230,12 +267,14 @@ describe("Partner pilot flag controls", () => {
   it("unsupported Partner flags cannot be submitted through the rendered UI", async () => {
     await mount(flagRows());
     await waitForTestId("pm-pilot-flags");
+    await waitForTestId("pm-pilot-flag-public_partner_directory_enabled");
 
     expect(q("pm-pilot-flag-partner_connector_enabled")).toBeNull();
     expect(q("pm-pilot-flag-toggle-partner_connector_enabled")).toBeNull();
     expect(container.textContent).not.toContain("partner_connector_enabled");
     expect(container.textContent).not.toContain("partner_grading_enabled");
     expect(container.textContent).not.toContain("partner_payments_enabled");
+    expect(q("pm-pilot-flag-public_partner_directory_enabled")).not.toBeNull();
   });
 
   it("renders no secret, session, credential or token material and logs none", async () => {

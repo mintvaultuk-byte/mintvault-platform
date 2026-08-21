@@ -7,19 +7,12 @@
  */
 import type { PoolClient } from "pg";
 import { withTenant } from "./db";
-
-const SECRET_KEYS = /pass(word)?|hash|secret|token|totp|recovery|otp|mfa_secret|private/i;
+import { redactSensitive } from "../lib/auth-security";
 
 /** Strip any secret-shaped keys from a details object before it is stored/logged. */
 export function redactDetails(obj: Record<string, unknown> | undefined | null): Record<string, unknown> {
   if (!obj) return {};
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (SECRET_KEYS.test(k)) out[k] = "[redacted]";
-    else if (v && typeof v === "object" && !Array.isArray(v)) out[k] = redactDetails(v as Record<string, unknown>);
-    else out[k] = v;
-  }
-  return out;
+  return redactSensitive(obj) as Record<string, unknown>;
 }
 
 export interface AuditInput {

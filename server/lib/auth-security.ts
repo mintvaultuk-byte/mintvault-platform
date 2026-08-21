@@ -6,7 +6,7 @@ export const STAFF_ABSOLUTE_SESSION_MS = 14 * 24 * 60 * 60 * 1000;
 
 const REDACTED = "[REDACTED]";
 const SENSITIVE_KEY_RE =
-  /(password|passphrase|pin|token|access_token|refresh_token|authorization|cookie|session|secret|passwordHash|pinHash|invitationLink|inviteToken)/i;
+  /(password|passphrase|pin|token|access_token|refresh_token|authorization|authorization_code|code_verifier|codeVerifier|clientAssertion|client_secret|credential|cookie|session|secret|passwordHash|pinHash|invitationLink|inviteToken)/i;
 const INVITATION_URL_TOKEN_RE = /(\/partner\/invite\?token=)[A-Za-z0-9_-]+/g;
 
 export function clearSessionCookie(res: Response) {

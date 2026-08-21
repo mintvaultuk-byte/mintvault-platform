@@ -5,9 +5,15 @@ export interface FeatureFlags {
   legalPagesLive: boolean;
   privacyNoticeLive: boolean;
   partnerApplicationsLive: boolean;
+  publicPartnerDirectoryLive: boolean;
 }
 
-const DEFAULT: FeatureFlags = { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false };
+const DEFAULT: FeatureFlags = {
+  legalPagesLive: false,
+  privacyNoticeLive: false,
+  partnerApplicationsLive: false,
+  publicPartnerDirectoryLive: false,
+};
 
 export const FeatureFlagsContext = createContext<FeatureFlags>(DEFAULT);
 
@@ -25,6 +31,10 @@ export function useFeatureFlagsQuery() {
         return res.json();
       } catch { return DEFAULT; }
     },
-    staleTime: 5 * 60 * 1000, // cache 5 minutes
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    // Bound the time an already-open page can retain a revoked public surface.
+    refetchInterval: 30_000,
   });
 }

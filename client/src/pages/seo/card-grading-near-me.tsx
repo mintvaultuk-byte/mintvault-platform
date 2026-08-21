@@ -4,13 +4,14 @@ import BreadcrumbNav, { breadcrumbSchema } from "@/components/breadcrumb-nav";
 import FaqSection, { faqSchema } from "@/components/faq-section";
 import CtaSection from "@/components/cta-section";
 import { Shield, Package, CheckCircle, ArrowRight } from "lucide-react";
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 
 const breadcrumbs = [
   { label: "Home", href: "/" },
   { label: "Card Grading Near Me" },
 ];
 
-const faqs = [
+const postalFaqs = [
   {
     question: "Is there a card grading service near me in the UK?",
     answer: "MintVault UK accepts card submissions by post from anywhere in the United Kingdom. Whether you are in London, Manchester, Birmingham, Edinburgh, Cardiff, or a rural area, the process is the same — submit online, post your cards, and receive them back graded and encapsulated in tamper-evident slabs.",
@@ -33,26 +34,41 @@ const faqs = [
   },
 ];
 
-const schema = [
-  breadcrumbSchema(breadcrumbs),
-  {
-    "@context": "https://schema.org",
-    "@type": "Service",
-    name: "Card Grading Near Me — UK Postal Service",
-    provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "UK card grading by post — no local drop-off required. MintVault accepts cards from anywhere in the UK. Professional grading from £19 per card.",
-    areaServed: "United Kingdom",
-    serviceType: "Trading Card Grading",
-  },
-  faqSchema(faqs),
-];
-
 export default function CardGradingNearMe() {
+  const { publicPartnerDirectoryLive } = useFeatureFlags();
+  const faqs = publicPartnerDirectoryLive
+    ? [
+        {
+          question: "Is there a card grading service near me in the UK?",
+          answer: "MintVault accepts postal submissions from anywhere in the United Kingdom. You can also use the Find a Partner directory to see currently approved local Partner shops where available.",
+        },
+        {
+          question: "Do I need to visit a physical location to get my cards graded?",
+          answer: "No. MintVault’s postal service remains available across the UK. Approved Partner locations are an optional local route where listed in the public directory.",
+        },
+        ...postalFaqs.slice(2),
+      ]
+    : postalFaqs;
+  const schema = [
+    breadcrumbSchema(breadcrumbs),
+    {
+      "@context": "https://schema.org",
+      "@type": "Service",
+      name: "Card Grading Near Me — UK Service",
+      provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
+      description: publicPartnerDirectoryLive
+        ? "UK card grading by post with approved local MintVault Partner shops where available."
+        : "UK card grading by post from anywhere in the United Kingdom.",
+      areaServed: "United Kingdom",
+      serviceType: "Trading Card Grading",
+    },
+    faqSchema(faqs),
+  ];
   return (
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Card Grading Near Me | UK Card Grading by Post | MintVault"
-        description="Looking for card grading near you in the UK? MintVault accepts postal submissions from anywhere in the UK. Professional grading from £19 — no drop-off needed."
+        description="Find UK card grading by post and, where available, approved local MintVault Partner shops. Professional grading from £19."
         canonical="https://mintvaultuk.com/card-grading-near-me"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -66,11 +82,18 @@ export default function CardGradingNearMe() {
         </h1>
 
         <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
-          MintVault UK is a fully postal card grading service, accepting submissions from anywhere in the United Kingdom. Whether you're in London, Glasgow, Cardiff, Belfast, or anywhere in between — you have access to professional UK card grading without needing to travel to a physical location.
+          MintVault UK accepts postal card-grading submissions from anywhere in the United Kingdom. Whether you're in London, Glasgow, Cardiff, Belfast, or anywhere in between, you can submit without needing to travel.
         </p>
 
         <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
-          Submit your cards online, pack them securely using our guidance, and post them to our UK facility. We'll grade, encapsulate, and return them via fully insured tracked delivery. No drop-off, no travel, no hassle.
+          Submit online and post directly to our UK facility, or{" "}
+          {publicPartnerDirectoryLive ? (
+            <>
+              use our <Link href="/find-a-partner" className="font-semibold text-[#D4AF37] underline">Find a Partner directory</Link> to see currently approved local shops. Partner availability varies by location.
+            </>
+          ) : (
+            <>pack securely using our guidance and use fully insured tracked delivery.</>
+          )}
         </p>
 
         <section className="mb-10" data-testid="section-nearme-how">

@@ -78,6 +78,9 @@ export const PARTNER_PILOT_MUTABLE_FLAGS = [
   "super_admin_command_centre_enabled",
   "partner_onboarding_enabled",
   "partner_login_enabled",
+  // Customer exposure is deliberately the only non-pilot runtime switch rendered here.
+  // Connector, grading, payment and Google controls remain outside this release shell.
+  "public_partner_directory_enabled",
 ] as const;
 export type PartnerPilotMutableFlag = (typeof PARTNER_PILOT_MUTABLE_FLAGS)[number];
 export type PartnerPilotDisplayFlag = PartnerPilotMutableFlag | typeof PARTNER_PILOT_READONLY_FLAG;
@@ -87,6 +90,7 @@ export const PARTNER_PILOT_FLAG_LABELS: Record<PartnerPilotDisplayFlag, string> 
   partner_portal_enabled: "Partner Portal",
   partner_onboarding_enabled: "Partner Onboarding",
   partner_login_enabled: "Partner Login",
+  public_partner_directory_enabled: "Public Partner Directory",
 };
 
 export function isPartnerPilotMutableFlag(flag: string): flag is PartnerPilotMutableFlag {

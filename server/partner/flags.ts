@@ -38,6 +38,13 @@ export const PARTNER_FLAGS = [
    * Turning this on is a deliberate act that should follow, not precede, a real continuation path.
    */
   "partner_submission_intake_enabled",
+  /** Independent public-customer exposure switch. A global TRUE permits the
+   * directory to evaluate exact location opt-ins; it never publishes a row by
+   * itself. */
+  "public_partner_directory_enabled",
+  /** Optional Google Business Profile integration. This flag is evaluated
+   * only inside Google routes and must never join the whole-portal gate. */
+  "google_partner_presence_enabled",
 ] as const;
 export type PartnerFlag = (typeof PARTNER_FLAGS)[number];
 

@@ -18,6 +18,7 @@ import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from ".
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
+import { PUBLIC_PARTNER_PROFILE_PREFIX } from "./public-presence-service";
 
 export interface ActorContext {
   actorUserId: string;
@@ -2476,6 +2477,11 @@ export interface PartnerLocationRow {
   stationCount: number;
   /** Users explicitly assigned here. Org-wide roles reach every location and are NOT counted. */
   assignedUserCount: number;
+  publicProfileConfigured: boolean;
+  publicProfileReady: boolean;
+  publicProfileLive: boolean;
+  publicProfileBlockingReasons: string[];
+  publicProfileUrl: string;
 }
 
 function cleanLocationName(value: unknown): string {
@@ -2526,15 +2532,23 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
     [org.id]
   );
   return rows.map((r) => ({
-    id: r.id,
-    publicRef: r.public_ref,
-    name: r.name,
-    address: r.address,
-    status: r.status,
-    createdAt: new Date(r.created_at).toISOString(),
-    stationCount: Number(r.station_count),
-    assignedUserCount: Number(r.assigned_user_count),
-  }));
+      id: r.id,
+      publicRef: r.public_ref,
+      name: r.name,
+      address: r.address,
+      status: r.status,
+      createdAt: new Date(r.created_at).toISOString(),
+      stationCount: Number(r.station_count),
+      assignedUserCount: Number(r.assigned_user_count),
+      // Publication state is intentionally loaded from the optional 0102
+      // public-only schema through the dedicated status endpoint. Keeping the
+      // base operational list independent allows schema-first deployment.
+      publicProfileConfigured: false,
+      publicProfileReady: false,
+      publicProfileLive: false,
+      publicProfileBlockingReasons: ["PUBLICATION_STATUS_SEPARATE"],
+      publicProfileUrl: `${PUBLIC_PARTNER_PROFILE_PREFIX}${encodeURIComponent(r.public_ref)}`,
+    }));
 }
 
 /**
