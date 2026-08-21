@@ -149,11 +149,7 @@ type LinkOptions = {
   contents: string[];
 };
 type CommercialMetricKey =
-  | "PAID_CARDS"
-  | "REVENUE_GBP"
-  | "PARTNER_APPLICATIONS"
-  | "QUALIFIED_PARTNERS"
-  | "GENUINE_REVIEWS";
+  "PAID_CARDS" | "REVENUE_GBP" | "PARTNER_APPLICATIONS" | "QUALIFIED_PARTNERS" | "GENUINE_REVIEWS";
 type CommercialScoreboard = {
   period: {
     kind: "MONTHLY";
@@ -624,19 +620,6 @@ function MetricCard({ label, metric }: { label: string; metric: Metric }) {
     </div>
   );
 }
-function MoneyMetricCard({ label, metric }: { label: string; metric: Metric }) {
-  return (
-    <div className="rounded border border-[var(--admin-line,#333)] p-3">
-      <p className="text-xs uppercase text-[var(--admin-muted,#8a8a8a)]">{label}</p>
-      <p className="mt-1 font-semibold">
-        {metric.state === "REAL" && typeof metric.value === "number"
-          ? formatGrowthMoneyGBP(metric.value)
-          : metric.state.replaceAll("_", " ")}
-      </p>
-      <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">{metric.reason ?? metric.source}</p>
-    </div>
-  );
-}
 function IncidentBanner({ incident }: { incident: Intelligence["incident"] }) {
   if (incident.status !== "ACTIVE") return null;
   return (
@@ -883,6 +866,540 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
   );
 }
 
+type TrafficDistributionSegment = {
+  key: string;
+  label: string;
+  requestCount: number;
+  percent: number;
+  color: string;
+};
+
+const TRAFFIC_CHART_COLORS = ["#d4af37", "#5aa7ff", "#9b7bff", "#51c78b", "#f08a5d", "#7dd3fc", "#f5d76e", "#94a3b8"];
+
+/** Uses only completed, fixed-class telemetry; this is never a people or session chart. */
+export function trafficDistributionSegments(
+  entries: Array<Pick<PerformanceAggregate, "key" | "label" | "requestCount">>
+): TrafficDistributionSegment[] {
+  const measured = entries.filter((entry) => Number.isFinite(entry.requestCount) && entry.requestCount > 0);
+  const total = measured.reduce((sum, entry) => sum + entry.requestCount, 0);
+  if (!total) return [];
+  return measured.map((entry, index) => ({
+    key: entry.key,
+    label: entry.label,
+    requestCount: entry.requestCount,
+    percent: (entry.requestCount / total) * 100,
+    color: TRAFFIC_CHART_COLORS[index % TRAFFIC_CHART_COLORS.length]!,
+  }));
+}
+
+function OverviewKpi({
+  label,
+  value,
+  detail,
+  status,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  status: Health;
+}) {
+  return (
+    <article className={`min-w-0 border-l-2 px-3 py-2 ${tone(status)}`}>
+      <p className="text-[9px] font-semibold uppercase tracking-[0.13em] opacity-75">{label}</p>
+      <p className="mt-1 truncate text-xl font-semibold tracking-tight sm:text-2xl" title={value}>
+        {value}
+      </p>
+      <p className="mt-1 truncate text-[10px] opacity-75" title={detail}>
+        {detail}
+      </p>
+    </article>
+  );
+}
+
+function CompactRing({ label, metric }: { label: string; metric: Metric }) {
+  const numeric = typeof metric.value === "number" ? Math.max(0, Math.min(100, metric.value)) : 0;
+  const accent = statusAccent(metric.status);
+  return (
+    <article
+      className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 p-3"
+      title={metric.reason ?? metric.source}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="grid h-14 w-14 shrink-0 place-items-center rounded-full"
+          style={{ background: `conic-gradient(${accent} ${numeric * 3.6}deg, rgba(255,255,255,.12) 0deg)` }}
+          role="img"
+          aria-label={`${label}: ${text(metric)}; ${metric.status}`}
+        >
+          <div className="grid h-11 w-11 place-items-center rounded-full bg-[var(--admin-panel,#151515)] text-center text-[10px] font-semibold leading-tight">
+            {text(metric)}
+          </div>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">{label}</p>
+          <p className="mt-1 text-xs opacity-75">
+            {metric.status} · {date(metric.lastUpdated)}
+          </p>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function CompactDigital({ label, metric }: { label: string; metric: Metric }) {
+  const value = text(metric);
+  const compactValue = value.length > 14;
+  return (
+    <article
+      className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 p-3"
+      title={metric.reason ?? metric.source}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">{label}</p>
+      <p
+        className={`mt-2 break-words font-semibold tracking-tight ${compactValue ? "text-base leading-snug" : "text-2xl"}`}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-[10px] uppercase tracking-[0.1em]" style={{ color: statusAccent(metric.status) }}>
+        {metric.status} · {date(metric.lastUpdated)}
+      </p>
+    </article>
+  );
+}
+
+function LatencyTrendChart({ diagnostics }: { diagnostics: PerformanceDiagnostics }) {
+  const entries = diagnostics.trafficClasses
+    .filter(
+      (entry) => entry.trendP95LatencyMs.filter((value): value is number => typeof value === "number").length >= 2
+    )
+    .slice(0, 4);
+  const values = entries.flatMap((entry) =>
+    entry.trendP95LatencyMs.filter((value): value is number => typeof value === "number")
+  );
+  if (!entries.length || !values.length) {
+    return <Empty>No authoritative multi-point p95 series has completed in this rolling 60-minute window.</Empty>;
+  }
+  const maximum = Math.max(...values);
+  const minimum = Math.min(...values);
+  const points = (series: Array<number | null>) =>
+    series
+      .map((value, index) => {
+        if (value == null) return null;
+        const x = 4 + (index / Math.max(1, series.length - 1)) * 92;
+        const y = maximum === minimum ? 48 : 88 - ((value - minimum) / (maximum - minimum)) * 76;
+        return `${x},${y}`;
+      })
+      .filter((value): value is string => value !== null)
+      .join(" ");
+  return (
+    <div className="p-3">
+      <svg
+        className="h-40 w-full"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        aria-label="Rolling 60-minute p95 latency by safe traffic class"
+      >
+        {[18, 38, 58, 78].map((y) => (
+          <path
+            key={y}
+            d={`M4 ${y} H96`}
+            stroke="currentColor"
+            strokeOpacity="0.12"
+            strokeWidth=".65"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {entries.map((entry, index) => (
+          <polyline
+            key={entry.key}
+            fill="none"
+            points={points(entry.trendP95LatencyMs)}
+            stroke={TRAFFIC_CHART_COLORS[index]!}
+            strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+        {entries.map((entry, index) => (
+          <span key={entry.key} className="flex items-center gap-1">
+            <i
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: TRAFFIC_CHART_COLORS[index] }}
+              aria-hidden="true"
+            />
+            {entry.label} · {entry.requestCount} req · {entry.confidence.replaceAll("_", " ")}
+          </span>
+        ))}
+      </div>
+      <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+        Bounded current-process telemetry · six 10-minute buckets · updated {date(diagnostics.lastUpdated)}
+      </p>
+    </div>
+  );
+}
+
+function TrafficDistribution({ diagnostics }: { diagnostics: PerformanceDiagnostics }) {
+  const segments = trafficDistributionSegments(diagnostics.trafficClasses);
+  if (!segments.length)
+    return <Empty>No completed route telemetry is available in this rolling 60-minute window.</Empty>;
+  let cursor = 0;
+  const stops = segments.map((segment) => {
+    const start = cursor;
+    cursor += segment.percent;
+    return `${segment.color} ${start}% ${cursor}%`;
+  });
+  return (
+    <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
+      <div
+        className="grid h-28 w-28 shrink-0 place-items-center rounded-full"
+        style={{ background: `conic-gradient(${stops.join(",")})` }}
+        role="img"
+        aria-label="Traffic distribution by fixed safe route class"
+      >
+        <div className="grid h-20 w-20 place-items-center rounded-full bg-[var(--admin-panel,#151515)] text-center">
+          <strong className="text-xl">{number(segments.reduce((sum, item) => sum + item.requestCount, 0))}</strong>
+          <span className="text-[9px] uppercase tracking-[0.12em]">requests / 60m</span>
+        </div>
+      </div>
+      <ul className="grid min-w-0 flex-1 gap-1 text-xs sm:grid-cols-2">
+        {segments.map((segment) => (
+          <li key={segment.key} className="flex min-w-0 items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1.5 truncate">
+              <i className="h-2 w-2 shrink-0 rounded-sm" style={{ background: segment.color }} aria-hidden="true" />
+              <span className="truncate">{segment.label}</span>
+            </span>
+            <span className="shrink-0 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+              {number(segment.requestCount)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function EndpointDiagnostics({ diagnostics }: { diagnostics: PerformanceDiagnostics }) {
+  return (
+    <div className="overflow-x-auto">
+      {diagnostics.topSlowRoutes.length ? (
+        <table className="w-full min-w-[560px] text-left text-xs">
+          <thead className="border-y border-[var(--admin-line,#333)] uppercase tracking-[0.1em] text-[var(--admin-muted,#8a8a8a)]">
+            <tr>
+              <th className="px-3 py-2 font-medium">Endpoint group</th>
+              <th className="px-3 py-2 font-medium">Requests</th>
+              <th className="px-3 py-2 font-medium">P95</th>
+              <th className="px-3 py-2 font-medium">5xx</th>
+              <th className="px-3 py-2 font-medium">Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {diagnostics.topSlowRoutes.map((entry) => (
+              <tr key={entry.key} className="border-b border-[var(--admin-line,#333)]">
+                <td className="px-3 py-2 font-medium">{entry.label}</td>
+                <td className="px-3 py-2">{number(entry.requestCount)}</td>
+                <td className="px-3 py-2" style={{ color: statusAccent(entry.status) }}>
+                  {entry.p95LatencyMs == null ? "—" : `${entry.p95LatencyMs} ms`}
+                </td>
+                <td className="px-3 py-2">{number(entry.fiveXCount)}</td>
+                <td className="px-3 py-2">{entry.confidence.replaceAll("_", " ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <Empty>No safe route group has completed in this rolling window.</Empty>
+      )}
+    </div>
+  );
+}
+
+function InfrastructureOverview({ data }: { data: Intelligence }) {
+  const { infrastructure } = data;
+  return (
+    <div className="grid min-w-0 gap-3 p-3">
+      <div className="min-w-0 rounded-lg border border-[var(--admin-line,#333)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--admin-line,#333)] px-3 py-2">
+          <p className="text-xs font-semibold">Fly Machines ({infrastructure.fly.machines.length})</p>
+          <span
+            className="text-[10px] uppercase tracking-[0.1em]"
+            style={{ color: statusAccent(infrastructure.fly.overallStatus) }}
+          >
+            {infrastructure.fly.overallStatus}
+          </span>
+        </div>
+        {infrastructure.fly.machines.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[690px] text-left text-[10px]">
+              <thead className="border-b border-[var(--admin-line,#333)] uppercase tracking-[0.1em] text-[var(--admin-muted,#8a8a8a)]">
+                <tr>
+                  <th className="px-3 py-2">Machine / region</th>
+                  <th className="px-3 py-2">CPU</th>
+                  <th className="px-3 py-2">RAM</th>
+                  <th className="px-3 py-2">Req rate</th>
+                  <th className="px-3 py-2">P95</th>
+                  <th className="px-3 py-2">5xx</th>
+                  <th className="px-3 py-2">Release</th>
+                  <th className="px-3 py-2">Health</th>
+                </tr>
+              </thead>
+              <tbody>
+                {infrastructure.fly.machines.map((machine) => (
+                  <tr key={machine.machineRef} className="border-b border-[var(--admin-line,#333)] last:border-0">
+                    <td className="px-3 py-2 font-medium">
+                      {machine.machineRef}
+                      <span className="ml-1 opacity-60">{machine.region}</span>
+                    </td>
+                    <td className="px-3 py-2">{text(machine.cpu)}</td>
+                    <td className="px-3 py-2">{text(machine.memory)}</td>
+                    <td className="px-3 py-2">{text(machine.requestRate)}</td>
+                    <td className="px-3 py-2">{text(machine.p95Latency)}</td>
+                    <td className="px-3 py-2">{text(machine.fiveXErrorRate)}</td>
+                    <td className="px-3 py-2">{text(machine.deployedVersion)}</td>
+                    <td className="px-3 py-2 font-semibold" style={{ color: statusAccent(machine.status) }}>
+                      {machine.status}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <Empty>Fly telemetry is not connected; no machine data is inferred.</Empty>
+        )}
+      </div>
+      <div className="min-w-0 rounded-lg border border-[var(--admin-line,#333)]">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--admin-line,#333)] px-3 py-2">
+          <p className="text-xs font-semibold">Neon</p>
+          <span
+            className="text-[10px] uppercase tracking-[0.1em]"
+            style={{ color: statusAccent(infrastructure.neon.availability.status) }}
+          >
+            {text(infrastructure.neon.availability)}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 divide-x divide-y divide-[var(--admin-line,#333)] sm:grid-cols-3">
+          {[
+            ["Connections", infrastructure.neon.connectionPressure],
+            ["Latency", infrastructure.neon.latency],
+            ["Compute", infrastructure.neon.compute],
+            ["Storage", infrastructure.neon.storage],
+            ["PITR", infrastructure.neon.pointInTimeRecovery],
+          ].map(([label, metric]) => (
+            <div key={label as string} className="p-2.5">
+              <p className="text-[9px] uppercase tracking-[0.1em] opacity-65">{label as string}</p>
+              <p className="mt-1 text-xs font-medium">{text(metric as Metric)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GrowthOverview({ data, summary, period }: { data: Intelligence; summary: Summary; period: Period }) {
+  const release = data.infrastructure.fly.machines[0]?.deployedVersion;
+  const healthScore = data.siteHealth.site;
+  const activity = [
+    ["Submission starts", data.livePulse.submissionStarts],
+    ["Checkout starts", data.livePulse.checkoutStarts],
+    ["Paid submissions", data.livePulse.paidSubmissions],
+    ["Paid cards", data.livePulse.paidCards],
+    ["Partner applications", data.livePulse.partnerApplications],
+    ["Revenue / 60m", data.livePulse.revenuePence],
+  ] as const;
+  return (
+    <section className="space-y-3" data-testid="growth-command-overview">
+      <section className="rounded-xl border border-[var(--admin-line,#333)] bg-[linear-gradient(115deg,rgba(212,175,55,.10),transparent_30%)] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,.05)]">
+        <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ background: statusAccent(data.freshness === "CURRENT" ? "GREEN" : "AMBER") }}
+              aria-hidden="true"
+            />
+            <strong className="text-sm uppercase tracking-[0.12em]">
+              {data.freshness === "CURRENT" ? "Live data" : "Stale snapshot"}
+            </strong>
+            <span className="text-[10px] text-[var(--admin-muted,#8a8a8a)]">Updated {date(data.generatedAt)}</span>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-[0.1em] text-[var(--admin-muted,#8a8a8a)]">
+            <span>Auto refresh · 30 sec</span>
+            <span>Release · {release ? text(release) : "not instrumented"}</span>
+            <span>Role · Super Admin</span>
+          </div>
+        </div>
+      </section>
+      <section
+        className="grid gap-px overflow-hidden rounded-xl border border-[var(--admin-line,#333)] bg-[var(--admin-line,#333)] sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7"
+        aria-label="Growth Command key signals"
+      >
+        <OverviewKpi
+          label="Requests / min"
+          value={text(data.livePulse.requestsPerMinute)}
+          detail="Current process telemetry"
+          status={data.livePulse.requestsPerMinute.status}
+        />
+        <OverviewKpi
+          label="Revenue"
+          value={formatGrowthMoneyGBP(summary.paid.revenuePence.value)}
+          detail={`${period === "today" ? "Today" : `Selected period · ${period}`}`}
+          status="GREEN"
+        />
+        <OverviewKpi
+          label="Paid cards"
+          value={number(summary.paid.paidCards.value)}
+          detail="Stripe-verified"
+          status="GREEN"
+        />
+        <OverviewKpi
+          label="Qualified leads"
+          value={number(summary.partnerApplications.qualified.value)}
+          detail="No automatic provisioning"
+          status="GREEN"
+        />
+        <OverviewKpi
+          label="Campaign readiness"
+          value={data.campaignReadiness.label.replaceAll("_", " ")}
+          detail="Advisory only"
+          status={data.campaignReadiness.status}
+        />
+        <OverviewKpi
+          label="Capacity"
+          value={data.capacity.label.replaceAll("_", " ")}
+          detail="Manual owner decision"
+          status={data.capacity.status}
+        />
+        <OverviewKpi
+          label="System status"
+          value={text(healthScore)}
+          detail={healthScore.source}
+          status={healthScore.status}
+        />
+      </section>
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
+        <Panel
+          title="System health overview"
+          sub="Current value, status and evidence timing. Unknown is not healthy."
+          bodyClassName="p-3"
+        >
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+            <CompactRing label="CPU" metric={data.siteHealth.cpu} />
+            <CompactRing label="RAM" metric={data.siteHealth.memory} />
+            <CompactDigital label="P95 latency" metric={data.siteHealth.p95Latency} />
+            <CompactDigital label="5xx error rate" metric={data.siteHealth.fiveXErrorRate} />
+            <CompactDigital label="Request rate" metric={data.siteHealth.requestRate} />
+            <CompactDigital label="DB pressure" metric={data.siteHealth.databasePressure} />
+          </div>
+        </Panel>
+        <Panel
+          title="Infrastructure overview"
+          sub="Read-only provider telemetry; no controls mutate infrastructure."
+          bodyClassName=""
+        >
+          <InfrastructureOverview data={data} />
+        </Panel>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        <Panel
+          title="Traffic overview"
+          sub="Completed fixed route classes · current process · 60 minutes"
+          bodyClassName=""
+        >
+          <TrafficDistribution diagnostics={data.performanceDiagnostics} />
+        </Panel>
+        <Panel title="Latency trend" sub="Real p95 only; no historical series is invented." bodyClassName="">
+          <LatencyTrendChart diagnostics={data.performanceDiagnostics} />
+        </Panel>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)_minmax(0,.85fr)]">
+        <Panel title="Top endpoints" sub="Safe fixed route groups only" bodyClassName="">
+          <EndpointDiagnostics diagnostics={data.performanceDiagnostics} />
+        </Panel>
+        <Panel
+          title="Search Console"
+          sub="External search authority remains distinct from request telemetry."
+          bodyClassName="p-3"
+        >
+          <div className="grid gap-2 sm:grid-cols-2">
+            <CompactDigital label="Connection" metric={data.seo.searchConsole} />
+            <CompactDigital label="Impressions" metric={data.seo.impressions} />
+            <CompactDigital label="Clicks" metric={data.seo.clicks} />
+            <CompactDigital label="CTR" metric={data.seo.ctr} />
+          </div>
+        </Panel>
+        <Panel
+          title="Alerts & signals"
+          sub="Deterministic server rules only."
+          bodyClassName="divide-y divide-[var(--admin-line,#333)]"
+        >
+          {data.insights.slice(0, 3).map((insight) => (
+            <article key={insight.id} className="p-3">
+              <div className="flex items-center justify-between gap-2">
+                <strong className="text-xs">{insight.title}</strong>
+                <Badge
+                  variant={
+                    insight.priority === "CRITICAL"
+                      ? "red"
+                      : insight.priority === "ACTION"
+                        ? "act"
+                        : insight.priority === "OPPORTUNITY"
+                          ? "prog"
+                          : "neu"
+                  }
+                >
+                  {insight.priority}
+                </Badge>
+              </div>
+              <p className="mt-1 text-[11px] text-[var(--admin-muted,#8a8a8a)]">{insight.detail}</p>
+            </article>
+          ))}
+          {data.insights.length === 0 && <Empty>Insufficient measured activity for a deterministic signal.</Empty>}
+        </Panel>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,.65fr)]">
+        <Panel
+          title="Live activity"
+          sub="Persisted business activity and bounded process telemetry; requests are not people."
+          bodyClassName="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3"
+        >
+          {activity.map(([label, metric]) => (
+            <CompactDigital key={label} label={label} metric={metric} />
+          ))}
+        </Panel>
+        <Panel title="Infrastructure control" sub="Monitor, detect and recommend only." bodyClassName="p-3">
+          <div className="grid gap-2 text-xs">
+            <div className="rounded border border-[var(--admin-line,#333)] p-2">
+              <span className="opacity-65">Mode</span>
+              <strong className="ml-2">{data.infrastructure.control.currentMode}</strong>
+            </div>
+            <div className="rounded border border-[var(--admin-line,#333)] p-2">
+              <span className="opacity-65">Guarded auto</span>
+              <strong className="ml-2">OFF</strong>
+            </div>
+            <div className="rounded border border-[var(--admin-line,#333)] p-2">
+              <span className="opacity-65">Baseline</span>
+              <strong className="ml-2">
+                {data.infrastructure.fly.machines.length
+                  ? `${data.infrastructure.fly.machines.length} observed machine${data.infrastructure.fly.machines.length === 1 ? "" : "s"}`
+                  : "not connected"}
+              </strong>
+            </div>
+            <div className="rounded border border-[var(--admin-line,#333)] p-2">
+              <span className="opacity-65">Monthly budget</span>
+              <strong className="ml-2">{data.infrastructure.budget.state.replaceAll("_", " ")}</strong>
+            </div>
+            <p className="pt-1 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+              Capacity changes are unavailable because no reviewed request, cost, safety and audit workflow is wired.
+            </p>
+          </div>
+        </Panel>
+      </div>
+      <CommercialScoreboardPanel scoreboard={data.scoreboard} selectedPeriod={period} />
+    </section>
+  );
+}
+
 export default function GrowthCommandPage() {
   const [, navigate] = useLocation();
   const searchLocation = useSearch();
@@ -1066,127 +1583,7 @@ export default function GrowthCommandPage() {
               {data.freshness === "STALE" ? "STALE — last known valid snapshot" : "CURRENT"}
             </p>
             <IncidentBanner incident={data.incident} />
-            {tab === "overview" && (
-              <section className="space-y-4">
-                <CommercialScoreboardPanel scoreboard={data.scoreboard} selectedPeriod={period} />
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                  <StatCard
-                    label="Paid cards"
-                    value={number(summary.paid.paidCards.value)}
-                    foot="Stripe-verified"
-                    testId="growth-paid-cards"
-                  />
-                  <StatCard
-                    label="Grading revenue (GBP)"
-                    value={formatGrowthMoneyGBP(summary.paid.revenuePence.value)}
-                    foot="Verified GBP Stripe amount"
-                    testId="growth-revenue"
-                  />
-                  <StatCard
-                    label="Paid submissions"
-                    value={number(summary.paid.paidSubmissions.value)}
-                    foot="Verified payment only"
-                    testId="growth-paid-submissions"
-                  />
-                  <StatCard
-                    label="Average cards / order"
-                    value={summary.paid.averageCardsPerPaidOrder.value.toFixed(2)}
-                    foot="Measured paid orders"
-                    testId="growth-average-cards"
-                  />
-                  <StatCard
-                    label="Qualified Partner leads"
-                    value={number(summary.partnerApplications.qualified.value)}
-                    foot="No automatic provisioning"
-                    testId="growth-qualified-leads"
-                  />
-                </div>
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <Panel
-                    title="Live Pulse"
-                    sub="Recent persisted business activity; fleet request telemetry needs a secure provider adapter."
-                  >
-                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                      <MetricCard label="Submission records" metric={data.livePulse.submissionStarts} />
-                      <MetricCard label="Checkout starts" metric={data.livePulse.checkoutStarts} />
-                      <MetricCard label="Paid submissions" metric={data.livePulse.paidSubmissions} />
-                      <MetricCard label="Paid cards" metric={data.livePulse.paidCards} />
-                      <MoneyMetricCard label="Revenue · last 60m (GBP)" metric={data.livePulse.revenuePence} />
-                      <MetricCard label="Partner applications" metric={data.livePulse.partnerApplications} />
-                      <MetricCard label="Requests / min" metric={data.livePulse.requestsPerMinute} />
-                    </div>
-                  </Panel>
-                  <Panel
-                    title="Capacity headroom"
-                    sub="Qualitative recommendation only; automatic scaling is disabled."
-                  >
-                    <div className="space-y-3 p-4">
-                      <Gauge
-                        label="Capacity"
-                        metric={{
-                          state: data.capacity.status === "UNKNOWN" ? "NOT_CONNECTED" : "REAL",
-                          status: data.capacity.status,
-                          value: data.capacity.label.replaceAll("_", " "),
-                          source: data.capacity.thresholdModel,
-                          reason: data.capacity.evidence.join(" "),
-                          lastUpdated: data.generatedAt,
-                        }}
-                      />
-                      <p className="text-sm">
-                        Recommendation: <strong>{data.capacity.recommendation.replaceAll("_", " ")}</strong>
-                      </p>
-                    </div>
-                  </Panel>
-                </div>
-                <div className="grid gap-4 xl:grid-cols-3">
-                  <Panel title="Campaign readiness" sub="Deterministic and advisory only; it never changes a campaign.">
-                    <div className="space-y-3 p-4">
-                      <Gauge
-                        label="Readiness"
-                        metric={{
-                          state: data.campaignReadiness.status === "UNKNOWN" ? "INSUFFICIENT_DATA" : "REAL",
-                          status: data.campaignReadiness.status,
-                          value: data.campaignReadiness.label.replaceAll("_", " "),
-                          source: data.campaignReadiness.definition,
-                          reason: data.campaignReadiness.evidence.join(" "),
-                          lastUpdated: data.generatedAt,
-                        }}
-                      />
-                      <p className="text-sm">{data.campaignReadiness.recommendation}</p>
-                    </div>
-                  </Panel>
-                  <Panel
-                    title="Revenue velocity"
-                    sub="Exact rolling hour, not a forecast or tiny-sample extrapolation."
-                  >
-                    <div className="grid gap-3 p-4 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
-                      <MetricCard
-                        label="Paid submissions / hour"
-                        metric={data.revenueVelocity.paidSubmissionsPerHour}
-                      />
-                      <MetricCard label="Paid cards / hour" metric={data.revenueVelocity.paidCardsPerHour} />
-                      <MoneyMetricCard label="Revenue / hour (GBP)" metric={data.revenueVelocity.revenuePencePerHour} />
-                    </div>
-                  </Panel>
-                  <Panel title="Infrastructure control" sub="Current authority is monitor, detect and recommend.">
-                    <div className="space-y-3 p-4">
-                      <div className={`rounded border p-3 ${tone(data.infrastructure.overallStatus)}`}>
-                        <p className="text-xs font-medium uppercase">Mode</p>
-                        <p className="mt-2 text-xl font-semibold">{data.infrastructure.control.currentMode}</p>
-                        <p className="mt-2 text-xs opacity-80">No provider mutation · no automatic spend</p>
-                      </div>
-                      <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
-                        Guarded auto is a future design requiring separate approval; it is unavailable now.
-                      </p>
-                    </div>
-                  </Panel>
-                </div>
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <PerformancePanel title="Acquisition mix" rows={summary.sourcePerformance} />
-                  <Insights insights={data.insights} />
-                </div>
-              </section>
-            )}
+            {tab === "overview" && <GrowthOverview data={data} summary={summary} period={period} />}
             {tab === "acquisition" && (
               <section className="space-y-4">
                 <PerformancePanel title="Source performance" rows={summary.sourcePerformance} />
@@ -1821,43 +2218,6 @@ export default function GrowthCommandPage() {
   );
 }
 
-function Insights({ insights }: { insights: Intelligence["insights"] }) {
-  return (
-    <Panel title="Actionable insights" sub="Deterministic rules with traceable inputs — not AI-generated commentary.">
-      {insights.length === 0 ? (
-        <Empty>Insufficient measured activity for an insight.</Empty>
-      ) : (
-        <div className="divide-y divide-[var(--admin-line,#333)]">
-          {insights.map((item) => (
-            <article key={item.id} className="p-4">
-              <div className="flex gap-2">
-                <Badge
-                  variant={
-                    item.priority === "CRITICAL"
-                      ? "red"
-                      : item.priority === "ACTION"
-                        ? "act"
-                        : item.priority === "OPPORTUNITY"
-                          ? "prog"
-                          : "neu"
-                  }
-                >
-                  {item.priority}
-                </Badge>
-                <h3 className="font-medium">{item.title}</h3>
-              </div>
-              <p className="mt-2 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">{item.detail}</p>
-              <p className="mt-2 text-xs">Recommended: {item.recommendation}</p>
-              <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
-                Rule {item.trace.ruleId} · {item.trace.window} · {item.trace.result}
-              </p>
-            </article>
-          ))}
-        </div>
-      )}
-    </Panel>
-  );
-}
 function Select({
   label,
   value,

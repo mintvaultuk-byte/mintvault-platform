@@ -101,7 +101,7 @@ describe("Growth infrastructure control and GBP truth", () => {
     });
   });
 
-  it("prioritises a red payment incident above other insights and revenue-path failures", () => {
+  it("prioritises a red payment incident above overview insights and revenue-path failures", () => {
     const incident = deriveIncidentMode({
       payments: metric("RED", "ERROR"),
       site: metric("RED", "ERROR"),
@@ -113,8 +113,12 @@ describe("Growth infrastructure control and GBP truth", () => {
     });
     expect(incident).toMatchObject({ status: "ACTIVE", severity: "RED", priorityKey: "PAYMENTS" });
     const page = fs.readFileSync("client/src/pages/admin/growth.tsx", "utf8");
-    expect(page.indexOf("<IncidentBanner")).toBeLessThan(page.indexOf("<Insights"));
+    // The visual target replaced the legacy Insights component, but an active
+    // payment incident must still precede the complete Overview surface.
+    expect(page.indexOf("<IncidentBanner")).toBeLessThan(page.indexOf("<GrowthOverview"));
     expect(page).toContain('data-testid="growth-incident-mode"');
+    expect(page).toContain('title="Alerts & signals"');
+    expect(page).toContain("data.insights.slice(0, 3).map");
   });
 
   it("promotes a correlated red capacity state into Incident Mode", () => {
