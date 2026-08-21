@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Menu, X, ChevronDown, HelpCircle, LayoutDashboard } from "lucide-react";
 import GradientButton from "@/components/ui/gradient-button";
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 
 interface DropdownItem {
   label: string;
@@ -224,6 +225,13 @@ function MobileNavItem({ item, location, onNavigate }: { item: NavItem; location
 export default function HeaderV2() {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileDialogRef = useRef<HTMLDivElement>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement>(null);
+  const { publicPartnerDirectoryLive } = useFeatureFlags();
+  const navItems = publicPartnerDirectoryLive
+    ? [...NAV_ITEMS.slice(0, 3), { label: "Find a Partner", href: "/find-a-partner" }, ...NAV_ITEMS.slice(3)]
+    : NAV_ITEMS;
 
   const { data: authMe } = useQuery<AuthMe | null>({
     queryKey: ["/api/auth/me"],
@@ -241,6 +249,37 @@ export default function HeaderV2() {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
+    };
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    mobileCloseRef.current?.focus();
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        mobileDialogRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      mobileTriggerRef.current?.focus();
     };
   }, [mobileOpen]);
 
@@ -265,8 +304,8 @@ export default function HeaderV2() {
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-6">
-            {NAV_ITEMS.map((item) =>
+          <nav className="hidden xl:flex items-center gap-6">
+            {navItems.map((item) =>
               item.dropdown ? (
                 <DropdownNavItem key={item.label} item={item} location={location} />
               ) : (
@@ -290,7 +329,7 @@ export default function HeaderV2() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="hidden md:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
+                  className="hidden xl:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
                   style={{ color: "var(--v2-ink-soft)" }}
                   aria-label={link.label}
                 >
@@ -303,7 +342,7 @@ export default function HeaderV2() {
             {isAuthed ? (
               <Link
                 href="/dashboard"
-                className="hidden md:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
+                className="hidden xl:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
                 style={{ color: "var(--v2-ink-soft)" }}
               >
                 <LayoutDashboard size={14} />
@@ -312,14 +351,14 @@ export default function HeaderV2() {
             ) : (
               <Link
                 href="/customer-login"
-                className="hidden md:inline-flex font-body text-sm font-medium no-underline transition-colors"
+                className="hidden xl:inline-flex font-body text-sm font-medium no-underline transition-colors"
                 style={{ color: "var(--v2-ink-soft)" }}
               >
                 Sign in
               </Link>
             )}
 
-            <Link href="/pricing" className="hidden md:inline-flex no-underline">
+            <Link href="/pricing" className="hidden xl:inline-flex no-underline">
               <GradientButton height="36px" className="gradient-btn-filled">
                 Pricing <ArrowRight size={14} />
               </GradientButton>
@@ -327,8 +366,9 @@ export default function HeaderV2() {
 
             {/* Mobile hamburger */}
             <button
+              ref={mobileTriggerRef}
               type="button"
-              className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg"
+              className="xl:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg"
               style={{ color: "var(--v2-ink)" }}
               onClick={() => setMobileOpen(true)}
               aria-label="Open menu"
@@ -342,7 +382,14 @@ export default function HeaderV2() {
 
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-[100] md:hidden flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+        <div
+          ref={mobileDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Main navigation"
+          className="fixed inset-0 z-[100] xl:hidden flex flex-col"
+          style={{ backgroundColor: "var(--v2-paper)" }}
+        >
           <div
             className="flex items-center justify-between px-6 h-16 border-b"
             style={{ borderColor: "var(--v2-line)" }}
@@ -359,6 +406,7 @@ export default function HeaderV2() {
               </span>
             </Link>
             <button
+              ref={mobileCloseRef}
               type="button"
               className="inline-flex items-center justify-center w-10 h-10 rounded-lg"
               style={{ color: "var(--v2-ink)" }}
@@ -370,7 +418,7 @@ export default function HeaderV2() {
           </div>
 
           <nav className="flex-1 px-6 py-8 flex flex-col gap-0 overflow-y-auto">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <MobileNavItem key={item.label} item={item} location={location} onNavigate={() => setMobileOpen(false)} />
             ))}
 

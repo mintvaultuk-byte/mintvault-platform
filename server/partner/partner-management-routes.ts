@@ -36,6 +36,7 @@ import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admi
 import { validatePartnerRbac, partnerRbacBlocksReadiness } from "./permissions";
 import { checkPartnerSchemaContract } from "./schema-contract";
 import { resolveGlobalFlag } from "./flags";
+import { getAdminGooglePresence } from "./google-presence-service";
 import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 /**
@@ -607,6 +608,14 @@ export function partnerManagementRouter(): Router {
   r.get("/partners/:partnerId/locations", async (req, res) => {
     try {
       res.json({ locations: await svc.listPartnerLocations(req.params.partnerId) });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.get("/partners/:partnerId/google-presence", async (req, res) => {
+    try {
+      res.json(await getAdminGooglePresence(req.params.partnerId));
     } catch (err) {
       sendError(res, err);
     }

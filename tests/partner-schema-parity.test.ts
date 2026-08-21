@@ -293,6 +293,11 @@ describe("partner schema ↔ migration parity", () => {
       // Review delivery and conversion instrumentation are application-scoped
       // because both are anchored to canonical grading submissions.
       "0101_growth_reviews_and_conversion.sql",
+      // Public-only Partner consent/approval authority, followed by the optional
+      // Google presence foundation. Both are migration-authoritative raw
+      // SQL, isolated from the whole-portal schema contract and never auto-enabled.
+      "0102_partner_public_presence.sql",
+      "0103_partner_google_presence.sql",
     ]);
   });
 

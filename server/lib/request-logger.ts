@@ -1,5 +1,5 @@
 /**
- * API request/response logging middleware.
+ * Request/response logging middleware for APIs and the bounded public rollout surface.
  *
  * EXTRACTED FROM server/index.ts (behaviour-preserving, no semantic change). It was previously an
  * inline `app.use(...)` closure over the module-local `log` helper, which made it impossible to
@@ -52,8 +52,25 @@ export const BODY_LOG_SUPPRESSED_PREFIXES = [
   // duplicate-check probe added in the partner-management UX work echoes the same categories back.
   // redactSensitive only masks credential-SHAPED KEY NAMES, so none of it would be redacted.
   "/api/super-admin/partner-management",
+  // Public-profile review includes operational/home addresses and unpublished,
+  // Partner-attested contact drafts. Keep the entire legacy grading-partners
+  // response surface body-private; method/path/status/duration remain logged.
+  "/api/super-admin/grading-partners",
+  // Public Partner responses intentionally expose only an allowlisted DTO, but
+  // still contain business contact/address data that must not be copied into logs.
+  "/api/public/partners",
   "/api/partner",
 ];
+
+/** Public HTML/XML paths whose status and duration are required for rollout thresholds. */
+export function isPublicRolloutTelemetryPath(reqPath: string): boolean {
+  return (
+    reqPath === "/find-a-partner" ||
+    reqPath === "/find-a-partner/" ||
+    reqPath === "/sitemap.xml" ||
+    reqPath.startsWith("/partners/location/")
+  );
+}
 
 export function isBodyLogSuppressed(reqPath: string): boolean {
   return BODY_LOG_SUPPRESSED_PREFIXES.some((prefix) => reqPath.startsWith(prefix));
@@ -83,9 +100,9 @@ export function createRequestLogger(sink: RequestLogSink): RequestHandler {
       } catch {
         // Observability is strictly fail-open and must never affect a response.
       }
-      if (reqPath.startsWith("/api")) {
+      if (reqPath.startsWith("/api") || isPublicRolloutTelemetryPath(reqPath)) {
         let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
-        if (capturedJsonResponse && !isBodyLogSuppressed(reqPath)) {
+        if (reqPath.startsWith("/api") && capturedJsonResponse && !isBodyLogSuppressed(reqPath)) {
           const safeBody = redactSensitive(capturedJsonResponse);
           logLine += ` :: ${JSON.stringify(safeBody)}`;
         }

@@ -8,11 +8,12 @@
  * so). Unavailable statistics are labeled, never shown as a fake 0. No future-phase controls appear.
  * Logic is in ./partner-management-helpers (unit-tested); this is a thin renderer with data-testids.
  */
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
 import {
   canSuspendLocation,
@@ -57,6 +58,8 @@ import {
 import { ReadinessPanel } from "@/components/partner/readiness-panel";
 import { PartnerDrilldown } from "./partner-dashboard";
 import { partnerLifecycleSummary } from "./partner-network-lifecycle";
+import { PublicPartnerProfileView } from "@/components/public-partner-profile-view";
+import type { AuthenticatedPublicProfileRow, AuthenticatedPublicProfileStatus } from "@shared/public-partner";
 
 const BASE = "/api/super-admin/partner-management";
 const TABS = [
@@ -154,6 +157,21 @@ interface PartnerLocationRow {
   stationCount: number;
   /** Users pinned to this floor. Org-wide roles are deliberately not counted. */
   assignedUserCount: number;
+  publicProfileConfigured: boolean;
+  publicProfileReady: boolean;
+  publicProfileLive: boolean;
+  publicProfileBlockingReasons: string[];
+  publicProfileUrl: string;
+}
+
+interface AdminGooglePresenceRow {
+  locationId: string;
+  state: "NOT_CONNECTED" | "CONNECTING" | "CONNECTED" | "ACTION_REQUIRED" | "REVOKED" | "ERROR";
+  businessName: string | null;
+  businessAddress: string | null;
+  placeId: string | null;
+  mapsUrl: string | null;
+  lastSyncAt: string | null;
 }
 
 /** Shape of one row from GET /partners/:id/users (see listPartnerUsers in partner-management-service). */
@@ -355,6 +373,25 @@ export default function PartnerManagementDetailPage() {
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/locations`).then((r) => r.json()),
     enabled: on && tab === "locations",
   });
+  const googlePresence = useQuery<{ available: boolean; locations: AdminGooglePresenceRow[] }>({
+    queryKey: [`${BASE}/partners`, partnerId, "google-presence"],
+    queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/google-presence`).then((r) => r.json()),
+    enabled: on && tab === "locations",
+  });
+  const publicProfileStatus = useQuery<AuthenticatedPublicProfileStatus>({
+    queryKey: ["/api/super-admin/grading-partners", partnerId, "public-profile"],
+    queryFn: () => apiRequest("GET", `/api/super-admin/grading-partners/${partnerId}/public-profile`).then((r) => r.json()),
+    enabled: on && tab === "locations",
+  });
+  const [publicPreview, setPublicPreview] = useState<AuthenticatedPublicProfileRow | null>(null);
+  const publicPreviewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const publicPreviewWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (!publicPreview && publicPreviewWasOpenRef.current) {
+      publicPreviewWasOpenRef.current = false;
+      publicPreviewTriggerRef.current?.focus();
+    }
+  }, [publicPreview]);
   const onboarding = useQuery({
     queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"],
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/onboarding-readiness`).then((r) => r.json()),
@@ -399,6 +436,7 @@ export default function PartnerManagementDetailPage() {
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.locations(partnerId) });
+      queryClient.invalidateQueries({ queryKey: ["/api/super-admin/grading-partners", partnerId, "public-profile"] });
       queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
@@ -692,6 +730,9 @@ export default function PartnerManagementDetailPage() {
   }, [modal, noteOpen, userOpen, profileOpen, inviteEdit, profileDirty]);
 
   const nextStatuses = useMemo(() => (org ? allowedNextStatuses(org.status) : []), [org]);
+  const publicByLocation = new Map(
+    (publicProfileStatus.data?.locations ?? []).map((location) => [location.id, location] as const)
+  );
 
   if (authed === null || detail.isLoading) {
     return (
@@ -746,6 +787,26 @@ export default function PartnerManagementDetailPage() {
       crumb="Partner Network"
     >
       <div data-testid="pm-detail-root">
+        {publicPreview?.preview && (
+          <Dialog
+            open
+            onOpenChange={(open) => {
+              if (!open) setPublicPreview(null);
+            }}
+          >
+            <DialogContent
+              className="max-h-[90vh] max-w-6xl overflow-y-auto bg-[#FAFAF8] p-6 text-[#171717]"
+              data-testid="admin-public-profile-preview-dialog"
+            >
+              <DialogHeader className="mb-2 border-b border-[#D8D2C7] pb-4 pr-8">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#765B00]">Private Super Admin preview</p>
+                <DialogTitle className="text-xl">Exact customer view — version {publicPreview.version}</DialogTitle>
+                <DialogDescription>Escape closes this private preview and returns focus to the action that opened it.</DialogDescription>
+              </DialogHeader>
+              <PublicPartnerProfileView location={publicPreview.preview} />
+            </DialogContent>
+          </Dialog>
+        )}
         {banner && (
           <div
             data-testid="pm-detail-banner"
@@ -1092,6 +1153,8 @@ export default function PartnerManagementDetailPage() {
                       <th>Reference</th>
                       <th>Address</th>
                       <th>Status</th>
+                      <th>Public profile</th>
+                      <th>Google Business</th>
                       <th>Stations</th>
                       <th>Assigned users</th>
                       <th>Created</th>
@@ -1123,6 +1186,65 @@ export default function PartnerManagementDetailPage() {
                             {l.status}
                           </Badge>
                         </td>
+                        <td data-testid={`pm-location-public-${l.id}`}>
+                          {(() => {
+                            const publicLocation = publicByLocation.get(l.id);
+                            if (publicProfileStatus.data?.available === false) return <div>Migration not applied — private</div>;
+                            if (!publicLocation) return <div>{publicProfileStatus.isLoading ? "Loading…" : "Partner consent required"}</div>;
+                            return <div>
+                              <div>{publicLocation.publication.live ? "Live" : publicLocation.publication.approved ? "Approved — not live" : publicLocation.publication.readyForApproval ? "Ready for approval" : "Not ready"}</div>
+                              <div className="text-xs text-muted-foreground">{publicLocation.privacyState.replaceAll("_", " ")}</div>
+                              {publicLocation.preview && (
+                                <button
+                                  type="button"
+                                  className="mr-2 text-xs underline"
+                                  onClick={(event) => {
+                                    publicPreviewTriggerRef.current = event.currentTarget;
+                                    publicPreviewWasOpenRef.current = true;
+                                    setPublicPreview(publicLocation);
+                                  }}
+                                >
+                                  View public profile
+                                </button>
+                              )}
+                              {publicLocation.publication.live && (
+                                <a href={publicLocation.publicUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline">
+                              Open public page
+                                </a>
+                              )}
+                            </div>;
+                          })()}
+                        </td>
+                        <td data-testid={`pm-location-google-${l.id}`}>
+                          {(() => {
+                            const google = googlePresence.data?.locations.find((row) => row.locationId === l.id);
+                            if (googlePresence.data?.available === false) return "Not configured";
+                            if (!google) return googlePresence.isLoading ? "Loading…" : "Not connected";
+                            return (
+                              <div>
+                                <div>{google.state.replaceAll("_", " ")}</div>
+                                {google.businessName && <div className="text-xs text-muted-foreground">{google.businessName}</div>}
+                                {google.lastSyncAt && (
+                                  <div className="text-xs text-muted-foreground">
+                                    Last sync {new Date(google.lastSyncAt).toLocaleString()}
+                                  </div>
+                                )}
+                                {google.placeId && <div className="text-xs text-muted-foreground">Place ID {google.placeId}</div>}
+                                {google.mapsUrl && (
+                                  <a
+                                    href={google.mapsUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs underline"
+                                    aria-label={`Open ${google.businessName || l.name} Google Business listing in Google Maps`}
+                                  >
+                                    Open in Google Maps
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
                         {/*
                           stationCount excludes REVOKED and is NOT the same number the suspend
                           confirmation reports (which counts ACTIVE only). Labelled so the two
@@ -1134,6 +1256,8 @@ export default function PartnerManagementDetailPage() {
                         <td>
                           <LocationActions
                             location={l}
+                            publication={publicByLocation.get(l.id)}
+                            profileVersion={publicProfileStatus.data?.profile?.version}
                             partnerId={partnerId}
                             busy={mutation.isPending}
                             activeLocationCount={
@@ -2402,12 +2526,16 @@ function UserInput({
  */
 function LocationActions({
   location,
+  publication,
+  profileVersion,
   partnerId,
   busy,
   activeLocationCount,
   openModal,
 }: {
   location: PartnerLocationRow;
+  publication?: AuthenticatedPublicProfileRow;
+  profileVersion?: number;
   partnerId: string;
   busy: boolean;
   activeLocationCount: number;
@@ -2423,8 +2551,62 @@ function LocationActions({
   }) => void;
 }) {
   const suspendable = canSuspendLocation(location.status, activeLocationCount);
+  const published = publication?.publication.locationListed === true;
+  const canPublish =
+    publication?.publication.readyForApproval === true &&
+    !!publication.preview &&
+    Number.isInteger(profileVersion) &&
+    Number.isInteger(publication.version);
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || (!published && !canPublish)}
+        title={!published && !canPublish
+          ? "Partner Owner consent and a complete safe public preview are required before publication."
+          : undefined}
+        data-testid={`pm-location-public-toggle-${location.id}`}
+        onClick={() =>
+          openModal({
+            kind: published ? "location-unpublish" : "location-publish",
+            title: `${published ? "Unpublish" : "Approve and publish"} ${location.name}`,
+            successMessage: published ? "Public profile unpublished." : "Exact public profile version approved.",
+            highRisk: true,
+            body: (
+              <div style={{ fontSize: 12, opacity: 0.85 }}>
+                <p>{published
+                  ? "The page will stop resolving and leave the public directory immediately."
+                  : `Approve Partner-attested version ${publication?.version}. The separate View public profile action renders the exact customer DTO.`}</p>
+                {!published && publication?.preview && (
+                  <ul>
+                    <li>Business: {publication.preview.displayName}</li>
+                    <li>Location: {publication.preview.locationName}</li>
+                    <li>{publication.preview.address ? `Public street address: ${publication.preview.address}` : `Private-address service area: ${publication.preview.serviceArea}`}</li>
+                    <li>Maps: {publication.preview.mapsUrl ? "shown" : "not shown"}</li>
+                    <li>Phone/email/website: {[publication.preview.phone, publication.preview.email, publication.preview.websiteUrl].filter(Boolean).join(" · ") || "none"}</li>
+                  </ul>
+                )}
+              </div>
+            ),
+            run: async (reason) =>
+              (
+                await runAdminProtected(() => apiRequest(
+                  "POST",
+                  `/api/super-admin/grading-partners/${partnerId}/locations/${location.id}/publication`,
+                  {
+                    enabled: !published,
+                    reason,
+                    expectedProfileVersion: profileVersion,
+                    expectedLocationVersion: publication?.version,
+                  }
+                ))
+              ).json(),
+          })
+        }
+      >
+        {published ? "Unpublish" : "Approve & publish"}
+      </AdminButton>
       <AdminButton
         size="sm"
         variant="ghost"

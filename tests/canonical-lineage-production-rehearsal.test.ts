@@ -70,6 +70,8 @@ const PRODUCTION_SOURCE_HISTORY = [
 const ALREADY_APPLIED_GB03 = "0095_growth_partner_applications";
 const ATTRIBUTION_MIGRATION = "0100_growth_commercial_attribution.sql";
 const COMPLETION_MIGRATION = "0101_growth_reviews_and_conversion.sql";
+const PUBLIC_PRESENCE_MIGRATION = "0102_partner_public_presence.sql";
+const GOOGLE_PRESENCE_MIGRATION = "0103_partner_google_presence.sql";
 
 /** The expected ordered plan after canonical Partner/Scanner integration. */
 const CANONICAL_PENDING = [
@@ -151,6 +153,7 @@ let migrator: pg.Client;
 let applied: string[];
 let growthApplied: string[];
 let completionApplied: string[];
+let publicPresenceApplied: string[];
 
 describe("canonical Partner/Scanner production-journal rehearsal", () => {
   beforeAll(async () => {
@@ -198,7 +201,11 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
 
     const files = listMigrationFiles();
     const preGrowthFiles = files.filter(
-      (file) => file.filename !== ATTRIBUTION_MIGRATION && file.filename !== COMPLETION_MIGRATION
+      (file) =>
+        file.filename !== ATTRIBUTION_MIGRATION &&
+        file.filename !== COMPLETION_MIGRATION &&
+        file.filename !== PUBLIC_PRESENCE_MIGRATION &&
+        file.filename !== GOOGLE_PRESENCE_MIGRATION
     );
     const before = await planMigrations(migrator as never, preGrowthFiles);
     expect(before.alreadyApplied).toHaveLength(41);
@@ -214,9 +221,13 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     const result = await applyMigrations(migrator as never, preGrowthFiles, { allowDestructive: true });
     applied = result.applied;
 
-    // GB-04 release rehearsal starts from the current production journal shape:
-    // 62 immutable applied entries and exactly one new canonical migration.
-    const attributionFiles = files.filter((file) => file.filename !== COMPLETION_MIGRATION);
+    // Growth attribution starts from the current 62-entry Partner/Scanner journal.
+    const attributionFiles = files.filter(
+      (file) =>
+        file.filename !== COMPLETION_MIGRATION &&
+        file.filename !== PUBLIC_PRESENCE_MIGRATION &&
+        file.filename !== GOOGLE_PRESENCE_MIGRATION
+    );
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
     expect(growthBefore.alreadyApplied).toHaveLength(62);
     expect(growthBefore.pending).toEqual([ATTRIBUTION_MIGRATION]);
@@ -226,13 +237,27 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
 
     // Completion Night starts from the exact observed 63-entry production
     // journal and has one additive, non-destructive migration to apply.
-    const completionBefore = await planMigrations(migrator as never, files);
+    const completionFiles = files.filter(
+      (file) => file.filename !== PUBLIC_PRESENCE_MIGRATION && file.filename !== GOOGLE_PRESENCE_MIGRATION
+    );
+    const completionBefore = await planMigrations(migrator as never, completionFiles);
     expect(completionBefore.alreadyApplied).toHaveLength(63);
     expect(completionBefore.pending).toEqual([COMPLETION_MIGRATION]);
     expect(completionBefore.inconsistent).toEqual([]);
     expect(completionBefore.checksumMismatches).toEqual([]);
     expect(completionBefore.destructive).toEqual([]);
-    completionApplied = (await applyMigrations(migrator as never, files)).applied;
+    completionApplied = (await applyMigrations(migrator as never, completionFiles)).applied;
+
+    // Public presence follows the canonical Growth 0101. The optional Google
+    // schema remains a separate 0103 identity: this rehearsal proves only
+    // migration compatibility, never production activation.
+    const publicPresenceBefore = await planMigrations(migrator as never, files);
+    expect(publicPresenceBefore.alreadyApplied).toHaveLength(64);
+    expect(publicPresenceBefore.pending).toEqual([PUBLIC_PRESENCE_MIGRATION, GOOGLE_PRESENCE_MIGRATION]);
+    expect(publicPresenceBefore.inconsistent).toEqual([]);
+    expect(publicPresenceBefore.checksumMismatches).toEqual([]);
+    expect(publicPresenceBefore.destructive).toEqual([]);
+    publicPresenceApplied = (await applyMigrations(migrator as never, files)).applied;
   }, 180_000);
 
   afterAll(async () => {
@@ -245,14 +270,15 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(applied).toEqual([...CANONICAL_PENDING]);
     expect(growthApplied).toEqual([ATTRIBUTION_MIGRATION]);
     expect(completionApplied).toEqual([COMPLETION_MIGRATION]);
+    expect(publicPresenceApplied).toEqual([PUBLIC_PRESENCE_MIGRATION, GOOGLE_PRESENCE_MIGRATION]);
     const after = await planMigrations(migrator as never, listMigrationFiles());
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(64);
+    expect(after.alreadyApplied).toHaveLength(66);
   });
 
-  it("applies 0100 and then only 0101 from the exact 63-entry production journal shape", async () => {
+  it("applies growth 0100/0101 before public 0102 and optional Google 0103", async () => {
     const acquisition = await admin.query<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='submission_acquisition'

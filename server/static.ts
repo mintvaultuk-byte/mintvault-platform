@@ -2,6 +2,13 @@ import express, { type Express, type Request, type Response } from "express";
 import fs from "fs";
 import path from "path";
 import { getSeoMeta, isKnownPublicRoute, type SeoMeta } from "./seo-config";
+import {
+  getPublicPartnerLocation,
+  getPublicPartnerDirectoryState,
+  isValidPublicPartnerRef,
+  PublicPartnerPresenceUnavailableError,
+  type PublicPartnerLocation,
+} from "./partner/public-presence-service";
 
 function escapeHtml(str: string): string {
   return str
@@ -48,12 +55,7 @@ function injectMeta(html: string, meta: SeoMeta): string {
   return out;
 }
 
-export function renderPublicHtml(baseHtml: string, pathname: string): { status: number; html: string; noindex: boolean } {
-  if (isKnownPublicRoute(pathname)) {
-    const meta = getSeoMeta(pathname);
-    return { status: 200, html: injectMeta(baseHtml, meta), noindex: !!meta.noindex };
-  }
-
+function renderNotFoundHtml(baseHtml: string): { status: number; html: string; noindex: boolean } {
   const notFound: SeoMeta = {
     title: "Page Not Found | MintVault UK",
     description: "The page you requested could not be found.",
@@ -61,6 +63,91 @@ export function renderPublicHtml(baseHtml: string, pathname: string): { status: 
     noindex: true,
   };
   return { status: 404, html: injectMeta(baseHtml, notFound), noindex: true };
+}
+
+export function renderPublicHtml(baseHtml: string, pathname: string): { status: number; html: string; noindex: boolean } {
+  if (isKnownPublicRoute(pathname)) {
+    const meta = getSeoMeta(pathname);
+    return { status: 200, html: injectMeta(baseHtml, meta), noindex: !!meta.noindex };
+  }
+
+  return renderNotFoundHtml(baseHtml);
+}
+
+export interface PublicPartnerSeoResolver {
+  directoryEnabled(): Promise<boolean>;
+  profile(publicRef: string): Promise<PublicPartnerLocation | null>;
+}
+
+const defaultPublicPartnerSeoResolver: PublicPartnerSeoResolver = {
+  directoryEnabled: async () => (await getPublicPartnerDirectoryState()) === "ENABLED",
+  profile: getPublicPartnerLocation,
+};
+
+/**
+ * Public Partner routes are data-dependent: a client-only route registration
+ * would turn unpublished profiles into indexable soft 404s. Resolve these two
+ * paths before returning HTML while leaving the existing deterministic static
+ * renderer untouched for every established route and its unit tests.
+ */
+export async function renderPublicHtmlWithPartnerPresence(
+  baseHtml: string,
+  pathname: string,
+  resolver: PublicPartnerSeoResolver = defaultPublicPartnerSeoResolver
+): Promise<{ status: number; html: string; noindex: boolean }> {
+  const clean = (pathname.split("?")[0].split("#")[0] || "/").replace(/\/+$/, "") || "/";
+  if (clean === "/find-a-partner") {
+    if (!(await resolver.directoryEnabled())) return renderNotFoundHtml(baseHtml);
+    const meta = getSeoMeta(clean);
+    meta.structuredData = [
+      {
+        "@type": "CollectionPage",
+        name: "Find a MintVault Partner",
+        url: "https://mintvaultuk.com/find-a-partner",
+        description: meta.description,
+      },
+    ];
+    return { status: 200, html: injectMeta(baseHtml, meta), noindex: false };
+  }
+
+  const match = clean.match(/^\/partners\/location\/([^/]+)$/);
+  if (match) {
+    let publicRef = "";
+    try {
+      publicRef = decodeURIComponent(match[1]);
+    } catch {
+      return renderNotFoundHtml(baseHtml);
+    }
+    if (!isValidPublicPartnerRef(publicRef)) return renderNotFoundHtml(baseHtml);
+    const location = await resolver.profile(publicRef);
+    if (!location) return renderNotFoundHtml(baseHtml);
+    const canonical = `https://mintvaultuk.com/partners/location/${encodeURIComponent(location.publicRef)}`;
+    const schema: Record<string, unknown> = {
+      "@type": "LocalBusiness",
+      name: location.displayName,
+      url: canonical,
+      parentOrganization: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
+    };
+    if (location.address) {
+      schema.address = { "@type": "PostalAddress", streetAddress: location.address, addressCountry: "GB" };
+    }
+    if (location.serviceArea) schema.areaServed = location.serviceArea;
+    if (location.mapsUrl) schema.hasMap = location.mapsUrl;
+    if (location.phone) schema.telephone = location.phone;
+    if (location.email) schema.email = location.email;
+    if (location.websiteUrl) schema.sameAs = [location.websiteUrl];
+    const meta: SeoMeta = {
+      title: `${location.displayName} — ${location.locationName} | MintVault Partner`,
+      description: location.address
+        ? `${location.displayName} is an approved MintVault Partner location at ${location.address}. View public shop details.`
+        : `${location.displayName} is an approved MintVault Partner serving ${location.serviceArea}. View public contact details.`,
+      canonical,
+      structuredData: [schema],
+    };
+    return { status: 200, html: injectMeta(baseHtml, meta), noindex: false };
+  }
+
+  return renderPublicHtml(baseHtml, pathname);
 }
 
 // Express removes the matched portion of a mounted wildcard route from
@@ -89,10 +176,24 @@ export function serveStatic(app: Express) {
 
   // Fall through only for recognised client routes. Unknown paths are a real
   // 404 with noindex rather than an indexable SPA soft-404.
-  app.use("/{*path}", (req: Request, res: Response) => {
-    const rendered = renderPublicHtml(baseHtml, publicRequestPath(req.originalUrl));
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    if (rendered.noindex) res.setHeader("X-Robots-Tag", "noindex, nofollow");
-    res.status(rendered.status).send(rendered.html);
+  app.use("/{*path}", async (req: Request, res: Response) => {
+    try {
+      const rendered = await renderPublicHtmlWithPartnerPresence(baseHtml, publicRequestPath(req.originalUrl));
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      if (rendered.noindex) res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.status(rendered.status).send(rendered.html);
+    } catch (err) {
+      if (!(err instanceof PublicPartnerPresenceUnavailableError)) throw err;
+      const unavailable: SeoMeta = {
+        title: "Partner discovery temporarily unavailable | MintVault UK",
+        description: "Partner discovery is temporarily unavailable. Please try again shortly.",
+        canonical: "https://mintvaultuk.com/find-a-partner",
+        noindex: true,
+      };
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.setHeader("Retry-After", "60");
+      res.status(503).send(injectMeta(baseHtml, unavailable));
+    }
   });
 }

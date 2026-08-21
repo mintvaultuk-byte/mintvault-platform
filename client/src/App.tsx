@@ -171,11 +171,14 @@ const PartnerGradingPage = lazy(() => import("@/pages/partner/grading"));
 const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
+const PartnerPublicProfilePage = lazy(() => import("@/pages/partner/public-profile"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
 const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
 const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
+const FindAPartnerPage = lazy(() => import("@/pages/find-a-partner"));
+const PublicPartnerProfilePage = lazy(() => import("@/pages/public-partner-profile"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -398,7 +401,7 @@ function PartnerPortalRoutes() {
           </Route>
           <Route path="/partner/public-profile">
             <PartnerRouteGuard requiredPermission="partner.location.view">
-              <PartnerWorkflowPlaceholderPage kind="public-profile" />
+              <PartnerPublicProfilePage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/help">
@@ -644,6 +647,8 @@ function Router() {
                   <Redirect to="/verify" />
                 </Route>
                 <Route path="/why-mintvault" component={WhyMintVaultPage} />
+                <Route path="/partners/location/:publicRef" component={PublicPartnerProfilePage} />
+                <Route path="/find-a-partner" component={FindAPartnerPage} />
                 <Route path="/partners" component={PartnersPage} />
                 <Route path="/labels" component={LabelsPage} />
                 <Route path="/reports" component={ReportsPage} />
@@ -749,7 +754,14 @@ function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
     <FeatureFlagsContext.Provider
-      value={data || { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false }}
+      value={
+        data || {
+          legalPagesLive: false,
+          privacyNoticeLive: false,
+          partnerApplicationsLive: false,
+          publicPartnerDirectoryLive: false,
+        }
+      }
     >
       {children}
     </FeatureFlagsContext.Provider>
