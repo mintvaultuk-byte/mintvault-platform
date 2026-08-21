@@ -24,8 +24,8 @@ export function mintVaultDatabaseIdentity(raw: string, variable = "MINTVAULT_DAT
   return `postgresql://${hostname}:${port}${parsed.pathname}`;
 }
 
-export function mintVaultDatabaseFingerprint(raw: string): string {
-  return fingerprintIdentity(mintVaultDatabaseIdentity(raw));
+export function mintVaultDatabaseFingerprint(raw: string, variable = "MINTVAULT_DATABASE_URL"): string {
+  return fingerprintIdentity(mintVaultDatabaseIdentity(raw, variable));
 }
 
 export function fingerprintIdentity(identity: string): string {
@@ -52,10 +52,11 @@ export function classifyMintVaultRuntimeEnvironment(
 
 export function assertMintVaultDatabaseEnvironmentSafety(
   databaseUrl: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  variable = "MINTVAULT_DATABASE_URL"
 ): { runtime: MintVaultRuntimeEnvironment; fingerprint: string } {
   const runtime = classifyMintVaultRuntimeEnvironment(env);
-  const fingerprint = mintVaultDatabaseFingerprint(databaseUrl);
+  const fingerprint = mintVaultDatabaseFingerprint(databaseUrl, variable);
   const configuredProductionFingerprint = normalizeFingerprint(env.MINTVAULT_PRODUCTION_DATABASE_FINGERPRINT);
   const configuredStagingFingerprint = normalizeFingerprint(env.MINTVAULT_STAGING_DATABASE_FINGERPRINT);
   const productionFingerprints = new Set(KNOWN_PRODUCTION_DATABASE_FINGERPRINTS);
@@ -63,13 +64,13 @@ export function assertMintVaultDatabaseEnvironmentSafety(
 
   if (runtime !== "production" && productionFingerprints.has(fingerprint)) {
     throw new Error(
-      `[database-guard] Refusing ${runtime} startup: MINTVAULT_DATABASE_URL fingerprint ${fingerprint} is a production database identity. Configure an isolated database before booting this runtime.`
+      `[database-guard] Refusing ${runtime} startup: ${variable} fingerprint ${fingerprint} is a production database identity. Configure an isolated database before booting this runtime.`
     );
   }
 
   if (runtime === "staging" && configuredStagingFingerprint && fingerprint !== configuredStagingFingerprint) {
     throw new Error(
-      `[database-guard] Refusing staging startup: MINTVAULT_DATABASE_URL fingerprint ${fingerprint} does not match MINTVAULT_STAGING_DATABASE_FINGERPRINT.`
+      `[database-guard] Refusing staging startup: ${variable} fingerprint ${fingerprint} does not match MINTVAULT_STAGING_DATABASE_FINGERPRINT.`
     );
   }
 
@@ -79,7 +80,7 @@ export function assertMintVaultDatabaseEnvironmentSafety(
     fingerprint !== configuredProductionFingerprint
   ) {
     throw new Error(
-      `[database-guard] Refusing production startup: MINTVAULT_DATABASE_URL fingerprint ${fingerprint} does not match MINTVAULT_PRODUCTION_DATABASE_FINGERPRINT.`
+      `[database-guard] Refusing production startup: ${variable} fingerprint ${fingerprint} does not match MINTVAULT_PRODUCTION_DATABASE_FINGERPRINT.`
     );
   }
 

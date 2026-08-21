@@ -128,6 +128,50 @@ describe("MintVault database environment guard", () => {
     ).toThrow(/Refusing test startup/);
   });
 
+  it("names the offending variable so every partner pool is covered, not just MINTVAULT_DATABASE_URL", () => {
+    // server/partner/db.ts and server/partner/connector-db.ts open their own pg.Pool straight from
+    // process.env. If the guard only covered MINTVAULT_DATABASE_URL, staging could be repointed at
+    // an isolated branch for the main pool while the partner pools still opened the shared/production
+    // identity — isolation on 1 of 5 connections. Each caller passes its own variable name.
+    for (const variable of [
+      "PARTNER_DATABASE_URL",
+      "PARTNER_ADMIN_DATABASE_URL",
+      "PARTNER_CONNECTOR_DATABASE_URL",
+    ]) {
+      expect(() =>
+        assertMintVaultDatabaseEnvironmentSafety(
+          PROD_INCIDENT_URL,
+          { FLY_APP_NAME: "mintvault-v2", NODE_ENV: "production" } as NodeJS.ProcessEnv,
+          variable
+        )
+      ).toThrow(new RegExp(`Refusing staging startup: ${variable} fingerprint`));
+    }
+  });
+
+  it("applies the pinned staging fingerprint to partner pools, so they cannot straddle two databases", () => {
+    const stagingUrl =
+      "postgresql://staging:secret@ep-staging-branch-123.eu-west-2.aws.neon.tech/neondb?sslmode=require";
+    const otherUrl =
+      "postgresql://staging:secret@ep-other-staging-456.eu-west-2.aws.neon.tech/neondb?sslmode=require";
+    const env = {
+      FLY_APP_NAME: "mintvault-v2",
+      NODE_ENV: "production",
+      MINTVAULT_STAGING_DATABASE_FINGERPRINT: mintVaultDatabaseFingerprint(stagingUrl),
+    } as NodeJS.ProcessEnv;
+
+    // The pooled and direct endpoints of the SAME branch fingerprint identically, so one pin
+    // legitimately covers every URL — pooled main pool and direct connector pool alike.
+    const pooled = stagingUrl.replace("ep-staging-branch-123", "ep-staging-branch-123-pooler");
+    expect(() =>
+      assertMintVaultDatabaseEnvironmentSafety(pooled, env, "PARTNER_DATABASE_URL")
+    ).not.toThrow();
+
+    // A partner pool left on a DIFFERENT branch is refused even though it is not production.
+    expect(() =>
+      assertMintVaultDatabaseEnvironmentSafety(otherUrl, env, "PARTNER_CONNECTOR_DATABASE_URL")
+    ).toThrow(/PARTNER_CONNECTOR_DATABASE_URL fingerprint .* does not match/);
+  });
+
   it("classifies mintvault-v2 as staging before generic NODE_ENV=production", () => {
     expect(
       classifyMintVaultRuntimeEnvironment({

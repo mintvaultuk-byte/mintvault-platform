@@ -15,6 +15,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import pg from "pg";
+import { assertMintVaultDatabaseEnvironmentSafety } from "../lib/database-environment-guard";
 
 let pool: pg.Pool | null = null;
 
@@ -91,6 +92,14 @@ function getPool(): pg.Pool {
     // Fail closed: the partner runtime must not fall back to the privileged connection.
     throw new Error("PARTNER_DATABASE_URL is not configured — partner runtime refuses to start (fail closed).");
   }
+  // Same environment-isolation gate as MINTVAULT_DATABASE_URL (server/config.ts). Without it a
+  // non-production runtime could be repointed at an isolated DB for the main pool while this pool
+  // still opened the production/shared identity — defeating isolation on 4 of the 5 connections.
+  assertMintVaultDatabaseEnvironmentSafety(
+    process.env.PARTNER_DATABASE_URL,
+    process.env,
+    "PARTNER_DATABASE_URL"
+  );
   if (!pool) {
     pool = new pg.Pool({
       connectionString: process.env.PARTNER_DATABASE_URL,
@@ -175,6 +184,11 @@ function getAdminPool(): pg.Pool {
   assertPartnerAccountingDatabaseTopology();
   const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
   if (!url) throw new Error("No admin DB URL configured for partner control shell.");
+  assertMintVaultDatabaseEnvironmentSafety(
+    url,
+    process.env,
+    process.env.PARTNER_ADMIN_DATABASE_URL ? "PARTNER_ADMIN_DATABASE_URL" : "MINTVAULT_DATABASE_URL"
+  );
   if (!adminPool) {
     adminPool = new pg.Pool({ connectionString: url, max: 4 });
     adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
