@@ -636,6 +636,10 @@ const IMAGE_KEY_MAP: Array<[string, (c: any) => string | null]> = [
   ["back_highcontrast", (c) => c.gradingBackHighcontrast || null],
   ["back_edgeenhanced", (c) => c.gradingBackEdgeenhanced || null],
   ["back_inverted", (c) => c.gradingBackInverted || null],
+  ["angled_original", (c) => c.gradingAngledOriginal || null],
+  ["angled_cropped", (c) => c.gradingAngledCropped || null],
+  ["closeup_original", (c) => c.gradingCloseupOriginal || null],
+  ["closeup_cropped", (c) => c.gradingCloseupCropped || null],
   ["front_display", (c) => c.gradingFrontDisplay || c.gradingFrontCropped || c.frontImagePath || null],
   ["back_display", (c) => c.gradingBackDisplay || c.gradingBackCropped || c.backImagePath || null],
 ];
@@ -962,11 +966,12 @@ function reviewImageKey(c: any, side: Side): string | null {
 }
 
 /**
- * Admin Pending Review is read-only QA of the exact submitted certificate. It may render the
+ * Super Admin review/preview is read-only QA of the exact submitted certificate. It may render the
  * certificate-bound scan image when the stricter grader working derivative is missing, but only from
- * this admin-review namespace and only after storage confirms the bound object is readable.
+ * explicitly Super Admin-authorised namespaces and only after storage confirms the bound object is
+ * readable.
  */
-export async function buildAdminReviewImagesPayload(certId: number): Promise<{
+export async function buildSuperAdminCertImagesPayload(certId: number): Promise<{
   urls: Record<string, string | null>;
   quality: any;
   workingEvidence: Record<Side, WorkingEvidenceStatus>;
@@ -1026,6 +1031,15 @@ export async function buildAdminReviewImagesPayload(certId: number): Promise<{
     })
   );
   return { ...payload, reviewEvidence };
+}
+
+export async function buildAdminReviewImagesPayload(certId: number): Promise<{
+  urls: Record<string, string | null>;
+  quality: any;
+  workingEvidence: Record<Side, WorkingEvidenceStatus>;
+  reviewEvidence: Record<Side, ReviewEvidenceStatus>;
+} | null> {
+  return buildSuperAdminCertImagesPayload(certId);
 }
 
 /** The grading state for a certificate. NO customer PII — grade/measurement data only. */
