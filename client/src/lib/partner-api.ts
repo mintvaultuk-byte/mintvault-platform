@@ -709,8 +709,33 @@ export interface PartnerOnboardingReadiness {
   users: Array<{ id: string; email: string; readiness: PartnerUserLoginReadiness }>;
 }
 
+export interface PartnerFirstShopOnboarding {
+  organisation: { id: string; legalName: string; status: string };
+  mainLocation: {
+    id: string;
+    name: string;
+    status: string;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    addressCity: string | null;
+    addressPostcode: string | null;
+    addressCountry: string | null;
+  } | null;
+  primaryContact: { full_name?: string; email?: string; contact_type?: string; active?: boolean; is_primary?: boolean } | null;
+  owner: { email: string; userStatus: string; readiness?: PartnerUserLoginReadiness } | null;
+  operational: PartnerOperationalReadiness;
+}
+
 export const partnerOperations = {
   view: () => req<PartnerOperationsView>("GET", "/api/partner/dashboard/operations"),
   fixQueue: () => req<{ items: PartnerFixQueueEntry[] }>("GET", "/api/partner/fix-queue"),
   readiness: () => req<PartnerOnboardingReadiness>("GET", "/api/partner/onboarding-readiness"),
+};
+
+export const partnerOnboarding = {
+  view: () => req<PartnerFirstShopOnboarding>("GET", "/api/partner/onboarding"),
+  updateMainLocation: (deliveryAddress: { line1: string; line2?: string | null; city: string; postcode: string; country: string }, idempotencyKey: string) =>
+    req("PATCH", "/api/partner/onboarding/main-location", { deliveryAddress, idempotencyKey }),
+  updateOperationsContact: (input: { fullName: string; email: string }, idempotencyKey: string) =>
+    req("PUT", "/api/partner/onboarding/operations-contact", { ...input, idempotencyKey }),
 };

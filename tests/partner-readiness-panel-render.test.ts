@@ -9,6 +9,8 @@ const facts: PartnerReadinessFacts = {
   orgStatus: "ACTIVE", portalEnabled: true, loginFlagEnabled: true, emergencyStop: false,
   owner: { userStatus: "ACTIVE", passwordConfigured: true, invitationValid: false, mfaRequired: false, mfaConfigured: false },
   locationEligible: true,
+  deliveryAddressReady: true,
+  operationsContactReady: true,
   station: { enrolledCount: 1, approvedActiveCount: 1, pendingApprovalCount: 0, active: { scannerConnected: true, lastSeenAt: new Date().toISOString(), calibrationStatus: "VALID", currentCalibrationId: "calibration", currentProfileRevisionId: "revision", appVersion: "1.4.0", minimumSupportedVersion: null } },
   credits: 0, nowMs: Date.now(),
 };
@@ -43,7 +45,7 @@ describe("P5 readiness renderer", () => {
     const ready = derivePartnerOperationalReadiness({ ...facts, credits: 5 });
     const partner = renderToStaticMarkup(createElement(ReadinessPanel, { readiness: ready, audience: "PARTNER" }));
     const admin = renderToStaticMarkup(createElement(ReadinessPanel, { readiness: ready, audience: "SUPER_ADMIN" }));
-    for (const dimension of ["organisation", "owner", "location", "station", "scanner", "credits"]) {
+    for (const dimension of ["organisation", "owner", "location", "delivery", "operationsContact", "station", "scanner", "credits"]) {
       expect(partner).toContain(`readiness-dimension-${dimension}`);
       expect(admin).toContain(`readiness-dimension-${dimension}`);
     }

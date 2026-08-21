@@ -4,8 +4,9 @@
  * which is the surface it is used for; the auth/MFA tables and columns added in 0002–0005 are
  * accessed by the runtime through raw SQL / SECURITY DEFINER functions (never typed Drizzle access),
  * so they are MIGRATION-authoritative and intentionally not modelled in Drizzle. The four Supplies
- * tables are the one approved later typed surface and remain bound to their own 0102 migration;
- * foundation parity remains pinned to 0001. Pure: reads files, no DB.
+ * tables are the one approved later typed surface and remain bound to their own 0102 migration.
+ * Additive typed columns must be listed against their exact, numbered extension migration; this
+ * test does not infer schema authority from runtime code. Pure: reads files, no DB.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -16,6 +17,10 @@ import * as partnerSchema from "../shared/partner-schema";
 
 const foundationMigration = readFileSync(join(process.cwd(), "migrations", "0001_partner_foundation.sql"), "utf8");
 const suppliesMigration = readFileSync(join(process.cwd(), "migrations", "0102_partner_supplies_orders.sql"), "utf8");
+const firstShopDeliveryAddressMigration = readFileSync(
+  join(process.cwd(), "migrations", "0103_partner_first_shop_delivery_address.sql"),
+  "utf8",
+);
 const SUPPLIES_TABLES = [
   "partner_supplies_orders",
   "partner_supplies_order_items",
@@ -303,6 +308,7 @@ describe("partner schema ↔ migration parity", () => {
       // because both are anchored to canonical grading submissions.
       "0101_growth_reviews_and_conversion.sql",
       "0102_partner_supplies_orders.sql",
+      "0103_partner_first_shop_delivery_address.sql",
     ]);
   });
 
@@ -333,7 +339,7 @@ describe("partner schema ↔ migration parity", () => {
     for (const t of drizzleTableNames()) expect(t.startsWith("partner_")).toBe(true);
   });
 
-  it("every Drizzle column name exists in its authoritative migration's CREATE TABLE (F5 — column drift guard)", () => {
+  it("every Drizzle column name exists in its authoritative CREATE TABLE or explicitly pinned additive migration (F5 — column drift guard)", () => {
     // Parse the migration's CREATE TABLE column names per table.
     const tableCols = new Map<string, Set<string>>();
     const blockRe = /CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\n\);/gi;
@@ -350,19 +356,38 @@ describe("partner schema ↔ migration parity", () => {
         tableCols.set(table, cols);
       }
     }
-    // ALTER TABLE ... ADD COLUMN (org tenant_id)
+    // ALTER TABLE ... ADD COLUMN (org tenant_id). The only approved typed additive
+    // extension is listed explicitly below; a new migration cannot become authority
+    // merely by containing a similarly named column.
     const alterRe = /ALTER TABLE\s+(\w+)\s+ADD COLUMN IF NOT EXISTS\s+(\w+)/gi;
     for (const sql of [foundationMigration, suppliesMigration]) {
       let a: RegExpExecArray | null;
       while ((a = alterRe.exec(sql)) !== null) tableCols.get(a[1])?.add(a[2]);
     }
 
+    const approvedAdditiveColumns = new Map<string, Set<string>>([
+      [
+        "partner_locations",
+        new Set(
+          [...firstShopDeliveryAddressMigration.matchAll(/ADD COLUMN IF NOT EXISTS\s+(address_[a-z0-9_]+)/gi)].map(
+            (match) => match[1],
+          ),
+        ),
+      ],
+    ]);
+    expect(approvedAdditiveColumns.get("partner_locations")).toEqual(
+      new Set(["address_line1", "address_line2", "address_city", "address_postcode", "address_country"]),
+    );
+
     for (const table of Object.values(partnerSchema).filter((v): v is PgTable => is(v, PgTable))) {
       const name = getTableName(table);
       const migCols = tableCols.get(name);
       expect(migCols, `migration has no CREATE TABLE for ${name}`).toBeTruthy();
       for (const col of Object.values(getTableColumns(table))) {
-        expect(migCols!.has(col.name), `column ${name}.${col.name} missing from migration`).toBe(true);
+        expect(
+          migCols!.has(col.name) || approvedAdditiveColumns.get(name)?.has(col.name),
+          `column ${name}.${col.name} missing from migration`,
+        ).toBe(true);
       }
     }
   });

@@ -29,8 +29,10 @@ const STATUS_STYLE: Record<ReadinessStatus, { dot: string; label: string }> = {
 
 const DIMENSION_LABEL: Record<string, string> = {
   organisation: "Account",
-  owner: "Owner login",
   location: "Location",
+  delivery: "Delivery address",
+  operationsContact: "Operations contact",
+  owner: "Owner login",
   station: "Scanner station",
   scanner: "Scanner health",
   credits: "Grading Credits",

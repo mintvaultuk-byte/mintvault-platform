@@ -26,11 +26,12 @@ function balanceLabel(status: string): string {
  * each tile sends the operator to a route that performs a real action.
  */
 export default function PartnerDashboardPage() {
-  const { hasPermission } = usePartnerSession();
+  const { hasPermission, session } = usePartnerSession();
   const canCreateSubmissions = hasPermission("partner.orders.view");
   const canAssessCards = hasPermission("partner.cards.assess");
   const canViewCredits = hasPermission("partner.credits.view");
   const canPurchaseCredits = hasPermission("partner.credits.purchase");
+  const isPartnerOwner = session?.role?.toLocaleLowerCase("en-GB").includes("owner") === true;
 
   const operations = useQuery({
     queryKey: ["/api/partner/dashboard/operations"],
@@ -40,6 +41,11 @@ export default function PartnerDashboardPage() {
     queryKey: ["/api/partner/credits"],
     queryFn: () => partnerCredits.view(),
     enabled: canViewCredits,
+  });
+  const readiness = useQuery({
+    queryKey: ["/api/partner/onboarding-readiness"],
+    queryFn: () => partnerOperations.readiness(),
+    enabled: isPartnerOwner,
   });
   const hasCardsToContinueGrading =
     (operations.data?.counts.readyToGrade !== undefined && operations.data.counts.readyToGrade > 0) ||
@@ -64,6 +70,22 @@ export default function PartnerDashboardPage() {
           </Link>
         ) : null}
       </header>
+
+      {isPartnerOwner && readiness.data && !readiness.data.operational.overall.ready ? (
+        <Card className="border-primary/40" data-testid="card-complete-shop-setup">
+          <CardContent className="flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center">
+            <div>
+              <p className="font-medium">Finish shop setup</p>
+              <p className="text-sm text-muted-foreground">
+                Confirm your Main location and operations contact in one guided checklist before Scanner and Supplies work begins.
+              </p>
+            </div>
+            <Link href="/partner/onboarding">
+              <Button data-testid="button-complete-shop-setup">Complete shop setup</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <section aria-labelledby="card-work-title" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">

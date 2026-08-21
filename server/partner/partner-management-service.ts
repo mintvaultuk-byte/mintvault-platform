@@ -13,11 +13,25 @@ import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
-import { ensureWallet } from "./partner-wallet-service";
+import { ensureWallet, ensureWalletWithClient } from "./partner-wallet-service";
 import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from "./operational-readiness";
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
+import {
+  formatPartnerDeliveryAddress,
+  isCompletePartnerDeliveryAddress,
+  isValidPartnerPostcode,
+  normalisePartnerDeliveryAddress,
+  type PartnerDeliveryAddress,
+  type PartnerDeliveryAddressInput,
+} from "@shared/partner-delivery-address";
+import {
+  hasValidPartnerOperationalContact,
+  PARTNER_OPERATIONAL_EMAIL_RE,
+  normalisePartnerOperationalEmail,
+} from "@shared/partner-operational-contact";
+import type { PartnerOperationalReadiness, ReadinessAction, ReadinessDimensionKey } from "@shared/partner-readiness";
 
 export interface ActorContext {
   actorUserId: string;
@@ -130,6 +144,7 @@ type AuditAction =
   // cancellation so the trail can tell a super-admin void from an operator abandoning a blank card.
   | "partner_card_job_voided"
   | "partner_created"
+  | "partner_first_shop_onboarded"
   | "profile_updated"
   | "status_changed"
   | "contact_added"
@@ -488,6 +503,204 @@ export async function createPartner(
       alreadyCompleted: false,
     };
   });
+}
+
+export interface FirstShopOnboardingInput {
+  legalName: string;
+  locationName: string;
+  deliveryAddress: PartnerDeliveryAddressInput;
+  operationsContact: { fullName: string; email: string };
+  owner: { firstName: string; lastName: string; email: string };
+}
+
+function requireFirstShopAddress(raw: PartnerDeliveryAddressInput): PartnerDeliveryAddress {
+  const address = normalisePartnerDeliveryAddress(raw);
+  if (!address) {
+    throw new G5RequestError(
+      "VALIDATION_ERROR",
+      "Enter address line 1, town/city, a valid postcode, and country for the Main location."
+    );
+  }
+  return address;
+}
+
+function requireOperationalContact(fullNameRaw: string, emailRaw: string): { fullName: string; email: string } {
+  const fullName = fullNameRaw.trim();
+  const email = normalisePartnerOperationalEmail(emailRaw);
+  if (!fullName || !PARTNER_OPERATIONAL_EMAIL_RE.test(email)) {
+    throw new G5RequestError("VALIDATION_ERROR", "An operations contact name and valid email are required.");
+  }
+  return { fullName, email };
+}
+
+/**
+ * Atomically creates the durable first-shop records that are knowable before
+ * the Owner accepts their invite: Partner, Main location, structured delivery
+ * address, PRIMARY operations contact, Owner invitation and zero-balance wallet.
+ *
+ * Station enrolment and MFA intentionally stay outside this transaction: they
+ * require a real shop Mac and a real Owner. The readiness contract shows those
+ * as pending rather than manufacturing a false completion state.
+ */
+export async function createFirstShopOnboarding(actor: ActorContext, input: FirstShopOnboardingInput, reason: string) {
+  const legalName = input.legalName.trim();
+  if (legalName.length < 2 || legalName.length > 500) {
+    throw new G5RequestError("VALIDATION_ERROR", "A legal or shop name of 2–500 characters is required.");
+  }
+  const locationName = input.locationName.trim();
+  if (locationName.length < 2 || locationName.length > 120) {
+    throw new G5RequestError("VALIDATION_ERROR", "A Main location name of 2–120 characters is required.");
+  }
+  if (!actor.idempotencyKey || !/^[A-Za-z0-9._:-]{16,128}$/.test(actor.idempotencyKey)) {
+    throw new G5RequestError("VALIDATION_ERROR", "A stable onboarding request key is required.");
+  }
+  const deliveryAddress = requireFirstShopAddress(input.deliveryAddress);
+  const operationsContact = requireOperationalContact(input.operationsContact.fullName, input.operationsContact.email);
+  const ownerFirstName = input.owner.firstName.trim();
+  const ownerLastName = input.owner.lastName.trim();
+  const ownerEmail = normalisePartnerOperationalEmail(input.owner.email);
+  if (!ownerFirstName || !ownerLastName || !PARTNER_OPERATIONAL_EMAIL_RE.test(ownerEmail)) {
+    throw new G5RequestError("VALIDATION_ERROR", "A Partner Owner name and valid email are required.");
+  }
+
+  const committed = await withPartnerAdminTransaction(async (client) => {
+    // The audit table's success uniqueness protects the terminal write, but it
+    // cannot prevent two new organisation rows from being inserted before that
+    // write. A transaction-scoped advisory lock makes one request key one first
+    // shop, including double click, retry and two-browser races.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [actor.idempotencyKey]);
+    // Separate browser tabs do not share an idempotency key. Serialise their normalised legal/shop
+    // name too, then re-check inside that lock, so concurrent first-shop submissions cannot create
+    // duplicate canonical Partner records merely because the legacy table permits similar names.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `first-shop-name:${legalName.trim().toLocaleLowerCase("en-GB")}`,
+    ]);
+    const replay = await client.query<{ entity_id: string }>(
+      `SELECT entity_id FROM partner_management_audit
+        WHERE idempotency_key=$1 AND action_type='partner_first_shop_onboarded' AND result='succeeded'
+        ORDER BY created_at DESC LIMIT 1`,
+      [actor.idempotencyKey]
+    );
+    if (replay.rows[0]?.entity_id) return { replayed: true as const, partnerId: replay.rows[0].entity_id, invite: null };
+
+    // A guided first-shop submit has no "override duplicate" affordance. Requiring the operator
+    // to resolve a matching canonical Partner first is safer than quietly creating Shop 1 twice.
+    if (
+      (
+        await client.query(
+          "SELECT 1 FROM partner_organisations WHERE lower(btrim(legal_name))=lower(btrim($1)) LIMIT 1",
+          [legalName]
+        )
+      ).rows.length
+    ) {
+      throw new G5RequestError(
+        "VALIDATION_ERROR",
+        "A Partner with that legal or shop name already exists. Open its guided readiness instead of creating a duplicate."
+      );
+    }
+    if ((await client.query("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) LIMIT 1", [ownerEmail])).rows.length) {
+      throw new G5RequestError("DUPLICATE_PARTNER_USER", "That team member cannot be invited.");
+    }
+    const ownerRole = await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code='PARTNER_OWNER'");
+    if (ownerRole.rows.length !== 1) {
+      throw new G5RequestError("PARTNER_ROLE_NOT_CONFIGURED", "Partner Owner role is not configured.");
+    }
+
+    const org = await client.query<{ id: string }>(
+      "INSERT INTO partner_organisations (legal_name, status) VALUES ($1,'PENDING') RETURNING id",
+      [legalName]
+    );
+    const partnerId = org.rows[0].id;
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, reason, result)
+       VALUES ($1::uuid,'partner_first_shop_onboarded',$2,$3,$4,$5,'partner',$1::uuid::text,$6,'__attempt__','attempted')`,
+      [partnerId, actor.actorUserId, actor.actorEmail, actor.requestId, actor.idempotencyKey, null]
+    );
+    await client.query("INSERT INTO partner_profiles (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING", [partnerId]);
+    const location = await client.query<{ id: string }>(
+      `INSERT INTO partner_locations
+         (tenant_id, partner_id, name, address, address_line1, address_line2, address_city, address_postcode, address_country, status, created_by)
+       VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,'ACTIVE',$9)
+       RETURNING id`,
+      [
+        partnerId,
+        locationName,
+        formatPartnerDeliveryAddress(deliveryAddress),
+        deliveryAddress.line1,
+        deliveryAddress.line2,
+        deliveryAddress.city,
+        deliveryAddress.postcode,
+        deliveryAddress.country,
+        actor.actorUserId,
+      ]
+    );
+    const contact = await client.query<{ id: string }>(
+      `INSERT INTO partner_contacts
+         (tenant_id, full_name, email, contact_type, is_primary, active, created_by_user_id, created_by_email)
+       VALUES ($1,$2,$3,'operations',true,true,$4,$5)
+       RETURNING id`,
+      [partnerId, operationsContact.fullName, operationsContact.email, actor.actorUserId, actor.actorEmail]
+    );
+    const user = await client.query<{ id: string }>(
+      `INSERT INTO partner_users (tenant_id, partner_id, email, first_name, last_name, status, created_by)
+       VALUES ($1,$1,$2,$3,$4,'INVITED',$5)
+       RETURNING id`,
+      [partnerId, ownerEmail, ownerFirstName, ownerLastName, actor.actorUserId]
+    );
+    await client.query("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
+      partnerId,
+      user.rows[0].id,
+      ownerRole.rows[0].id,
+    ]);
+    const invite = await createInvitationRecord(
+      client,
+      { ...actor, idempotencyKey: undefined },
+      partnerId,
+      user.rows[0].id,
+      ownerEmail,
+      "PARTNER_OWNER",
+      "partner_user_invited",
+      "First-shop Owner invitation"
+    );
+    const wallet = await ensureWalletWithClient(client, { actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, partnerId);
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, after_state, reason, result)
+       VALUES ($1::uuid,'partner_first_shop_onboarded',$2,$3,$4,$5,'partner',$1::uuid::text,$6,$7,'succeeded')`,
+      [
+        partnerId,
+        actor.actorUserId,
+        actor.actorEmail,
+        actor.requestId,
+        actor.idempotencyKey,
+        JSON.stringify({
+          status: "PENDING",
+          mainLocationId: location.rows[0].id,
+          operationsContactId: contact.rows[0].id,
+          ownerUserId: user.rows[0].id,
+          walletId: wallet.id,
+        }),
+        reason,
+      ]
+    );
+    return { replayed: false as const, partnerId, invite };
+  });
+
+  if (committed.replayed || !committed.invite) {
+    return { result: { partnerId: committed.partnerId, invitationDeliveryStatus: "NOT_RETRIED" }, alreadyCompleted: true };
+  }
+  const { delivery, ...invite } = committed.invite;
+  let invitationDeliveryStatus: string;
+  try {
+    invitationDeliveryStatus = await recordInvitationDelivery({ ...invite, delivery });
+  } catch {
+    // The durable Partner/Owner/invitation transaction has committed. The
+    // existing invitation route reports the same explicit unknown outcome rather
+    // than claiming delivery failed or attempting a duplicate send.
+    invitationDeliveryStatus = "DELIVERY_STATUS_UNKNOWN";
+  }
+  return { result: { partnerId: committed.partnerId, invitationDeliveryStatus }, alreadyCompleted: false };
 }
 
 const PROFILE_FIELDS = [
@@ -1556,6 +1769,43 @@ function buildLoginReadiness(
   };
 }
 
+function guidedReadinessHref(partnerId: string, dimension: ReadinessDimensionKey): string | undefined {
+  const guide = `/admin/partners/${encodeURIComponent(partnerId)}/onboarding`;
+  if (dimension === "organisation") return `${guide}?step=shop`;
+  if (dimension === "location" || dimension === "delivery") return `${guide}?step=location`;
+  if (dimension === "operationsContact") return `${guide}?step=contact`;
+  if (dimension === "owner") return `${guide}?step=owner`;
+  if (dimension === "station" || dimension === "scanner") return `/admin/partners/${encodeURIComponent(partnerId)}/stations`;
+  if (dimension === "credits") return `/admin/partners/${encodeURIComponent(partnerId)}/credits`;
+  return undefined;
+}
+
+function attachGuidedReadinessActions(
+  readiness: PartnerOperationalReadiness,
+  partnerId: string
+): PartnerOperationalReadiness {
+  const withHref = (action: ReadinessAction, dimension: ReadinessDimensionKey): ReadinessAction =>
+    action.audience === "SUPER_ADMIN" && !action.href
+      ? { ...action, href: guidedReadinessHref(partnerId, dimension) }
+      : action;
+  const dimensions = {} as PartnerOperationalReadiness["dimensions"];
+  for (const dimension of Object.keys(readiness.dimensions) as ReadinessDimensionKey[]) {
+    dimensions[dimension] = {
+      ...readiness.dimensions[dimension],
+      actions: readiness.dimensions[dimension].actions.map((action) => withHref(action, dimension)),
+    };
+  }
+  return {
+    ...readiness,
+    dimensions,
+    actions: readiness.actions.map((action) => ({
+      ...withHref(action, action.dimension),
+      dimension: action.dimension,
+      code: action.code,
+    })),
+  };
+}
+
 export async function getPartnerOnboardingReadiness(partnerId: string) {
   const org = await loadPartner(partnerId);
   let portalEnabled = false;
@@ -1622,6 +1872,93 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       LIMIT 500`,
     [org.id]
   );
+  /*
+   * Main-location delivery and operations-contact readiness deliberately come from the exact
+   * records that Supplies snapshots. An owner account can be valid while the shop's delivery or
+   * contact record is incomplete; keeping this fact separate prevents either surface inventing a
+   * duplicate profile/contact authority.
+   */
+  const { rows: foundationRows } = await partnerAdminQuery<{
+    location_address: string | null;
+    address_line1: string | null;
+    address_line2: string | null;
+    address_city: string | null;
+    address_postcode: string | null;
+    address_country: string | null;
+    profile_postcode: string | null;
+    profile_country: string | null;
+    contact_name: string | null;
+    contact_email: string | null;
+    contact_active: boolean | null;
+    contact_primary: boolean | null;
+    contact_type: string | null;
+  }>(
+    `SELECT main.address AS location_address,
+            main.address_line1, main.address_line2, main.address_city,
+            main.address_postcode, main.address_country,
+            profile.address_postcode AS profile_postcode, profile.address_country AS profile_country,
+            operations.full_name AS contact_name, operations.email AS contact_email,
+            operations.active AS contact_active, operations.is_primary AS contact_primary,
+            operations.contact_type
+       FROM partner_organisations organisation
+       LEFT JOIN LATERAL (
+         SELECT l.address, l.address_line1, l.address_line2, l.address_city,
+                l.address_postcode, l.address_country
+           FROM partner_locations l
+          WHERE l.tenant_id=organisation.id AND l.status='ACTIVE'
+          ORDER BY (lower(btrim(l.name)) = 'main location') DESC, l.created_at ASC, l.id ASC
+          LIMIT 1
+       ) main ON true
+       LEFT JOIN partner_profiles profile ON profile.tenant_id=organisation.id
+       LEFT JOIN LATERAL (
+         SELECT c.full_name, c.email, c.active, c.is_primary, c.contact_type
+           FROM partner_contacts c
+          WHERE c.tenant_id=organisation.id AND c.active AND c.is_primary
+                AND c.contact_type='operations'
+          ORDER BY c.created_at ASC, c.id ASC
+          LIMIT 1
+       ) operations ON true
+      WHERE organisation.id=$1`,
+    [org.id]
+  );
+  const foundation = foundationRows[0];
+  const hasStructuredAddress = !!foundation && [
+    foundation.address_line1,
+    foundation.address_line2,
+    foundation.address_city,
+    foundation.address_postcode,
+    foundation.address_country,
+  ].some((value) => value != null);
+  const structuredDeliveryAddressReady =
+    !!foundation &&
+    isCompletePartnerDeliveryAddress({
+      line1: foundation.address_line1,
+      line2: foundation.address_line2,
+      city: foundation.address_city,
+      postcode: foundation.address_postcode,
+      country: foundation.address_country,
+    });
+  // Records created before 0103 retain the raw location address plus profile postcode/country.
+  // Once any structured value exists, incomplete structured data must fail closed instead of
+  // falling back to stale legacy fields.
+  const legacyDeliveryAddressReady =
+    !!foundation &&
+    !hasStructuredAddress &&
+    (foundation.location_address?.trim().length ?? 0) >= 12 &&
+    !!foundation.profile_postcode &&
+    !!foundation.profile_country &&
+    isValidPartnerPostcode(foundation.profile_postcode, foundation.profile_country);
+  const deliveryAddressReady = structuredDeliveryAddressReady || legacyDeliveryAddressReady;
+  const operationsContactReady =
+    !!foundation &&
+    hasValidPartnerOperationalContact({
+      fullName: foundation.contact_name,
+      email: foundation.contact_email,
+      active: foundation.contact_active,
+      primary: foundation.contact_primary,
+      type: foundation.contact_type,
+    });
+
   /*
    * Station readiness is probed SEPARATELY rather than joined into the query above, because
    * `partner_stations` arrives in migration 0045 and several test migration lists deliberately stop
@@ -1741,7 +2078,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
     rows.find((u: any) => u.user_status !== "REVOKED") ??
     rows[0];
 
-  const operational = derivePartnerOperationalReadiness({
+  const operational = attachGuidedReadinessActions(derivePartnerOperationalReadiness({
     orgStatus: org.status,
     portalEnabled: flagsReadable ? portalEnabled : null,
     loginFlagEnabled: flagsReadable ? loginFlagEnabled : null,
@@ -1760,10 +2097,12 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
         }
       : null,
     locationEligible: ownerRow?.location_eligible === true,
+    deliveryAddressReady,
+    operationsContactReady,
     station: stationFacts,
     credits,
     nowMs: Date.now(),
-  });
+  }), org.id);
 
   return {
     organisation: { id: org.id, legalName: org.legal_name, status: org.status },
@@ -2469,6 +2808,11 @@ export interface PartnerLocationRow {
   id: string;
   publicRef: string;
   name: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressCity: string | null;
+  addressPostcode: string | null;
+  addressCountry: string | null;
   address: string | null;
   status: string;
   createdAt: string;
@@ -2507,13 +2851,19 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
     id: string;
     public_ref: string;
     name: string;
+    address_line1: string | null;
+    address_line2: string | null;
+    address_city: string | null;
+    address_postcode: string | null;
+    address_country: string | null;
     address: string | null;
     status: string;
     created_at: string;
     station_count: string;
     assigned_user_count: string;
   }>(
-    `SELECT l.id, l.public_ref, l.name, l.address, l.status, l.created_at,
+    `SELECT l.id, l.public_ref, l.name, l.address_line1, l.address_line2, l.address_city,
+            l.address_postcode, l.address_country, l.address, l.status, l.created_at,
             COALESCE((SELECT count(*) FROM partner_stations s
                        WHERE s.location_id = l.id AND s.tenant_id = l.tenant_id
                          AND s.status <> 'REVOKED'), 0)::text AS station_count,
@@ -2529,6 +2879,11 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
     id: r.id,
     publicRef: r.public_ref,
     name: r.name,
+    addressLine1: r.address_line1,
+    addressLine2: r.address_line2,
+    addressCity: r.address_city,
+    addressPostcode: r.address_postcode,
+    addressCountry: r.address_country,
     address: r.address,
     status: r.status,
     createdAt: new Date(r.created_at).toISOString(),
@@ -2618,10 +2973,19 @@ export async function updatePartnerLocation(
     "address" in input && input.address !== undefined ? cleanLocationAddress(input.address) : before.rows[0].address;
 
   return withAudit(actor, org.id, "partner_location_updated", reason, before.rows[0], async () => {
+    const rawAddressEdited = "address" in input && input.address !== undefined;
     try {
       await partnerAdminQuery(
-        `UPDATE partner_locations SET name=$3, address=$4, updated_at=now() WHERE id=$1 AND tenant_id=$2`,
-        [locationId, org.id, name, address]
+        `UPDATE partner_locations
+            SET name=$3, address=$4,
+                address_line1=CASE WHEN $5 THEN NULL ELSE address_line1 END,
+                address_line2=CASE WHEN $5 THEN NULL ELSE address_line2 END,
+                address_city=CASE WHEN $5 THEN NULL ELSE address_city END,
+                address_postcode=CASE WHEN $5 THEN NULL ELSE address_postcode END,
+                address_country=CASE WHEN $5 THEN NULL ELSE address_country END,
+                updated_at=now()
+          WHERE id=$1 AND tenant_id=$2`,
+        [locationId, org.id, name, address, rawAddressEdited]
       );
     } catch (err) {
       if ((err as { constraint?: string })?.constraint === "uq_partner_locations_tenant_name_live") {
@@ -2636,6 +3000,162 @@ export async function updatePartnerLocation(
       afterState: { name, address },
     };
   });
+}
+
+/**
+ * The guided onboarding address editor. It writes only the selected existing
+ * Main-location record and stores the legacy display string as a deterministic
+ * rendering of the structured canonical fields; it never creates another
+ * location or profile address.
+ */
+export async function updateFirstShopDeliveryAddress(
+  actor: ActorContext,
+  partnerId: string,
+  locationId: string,
+  rawAddress: PartnerDeliveryAddressInput,
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  const address = requireFirstShopAddress(rawAddress);
+  const before = await partnerAdminQuery<{ id: string; status: string }>(
+    "SELECT id, status FROM partner_locations WHERE id=$1 AND tenant_id=$2",
+    [locationId, org.id]
+  );
+  if (before.rows.length !== 1 || before.rows[0].status !== "ACTIVE") {
+    throw new G5RequestError("PARTNER_NOT_FOUND", "Active Main location not found for this partner.");
+  }
+  return withAudit(actor, org.id, "partner_location_updated", reason, { locationId }, async () => {
+    await partnerAdminQuery(
+      `UPDATE partner_locations
+          SET address=$3, address_line1=$4, address_line2=$5, address_city=$6,
+              address_postcode=$7, address_country=$8, updated_at=now()
+        WHERE id=$1 AND tenant_id=$2`,
+      [
+        locationId,
+        org.id,
+        formatPartnerDeliveryAddress(address),
+        address.line1,
+        address.line2,
+        address.city,
+        address.postcode,
+        address.country,
+      ]
+    );
+    return {
+      result: { locationId, address },
+      entityType: "location",
+      entityId: locationId,
+      afterState: { structuredDeliveryAddress: true },
+    };
+  });
+}
+
+/**
+ * Reconciles an existing primary contact in place when it is the wrong type,
+ * rather than creating a duplicate contact merely to make readiness green.
+ */
+export async function upsertFirstShopOperationsContact(
+  actor: ActorContext,
+  partnerId: string,
+  raw: { fullName: string; email: string },
+  reason: string
+) {
+  const contact = requireOperationalContact(raw.fullName, raw.email);
+  const org = await loadPartner(partnerId);
+  const existing = await partnerAdminQuery<{ id: string; version: number }>(
+    `SELECT id, version
+       FROM partner_contacts
+      WHERE tenant_id=$1 AND active AND is_primary
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1`,
+    [org.id]
+  );
+  if (existing.rows[0]) {
+    const updated = await updateContact(
+      actor,
+      org.id,
+      existing.rows[0].id,
+      { fullName: contact.fullName, email: contact.email, contactType: "operations", isPrimary: true },
+      existing.rows[0].version,
+      reason
+    );
+    return { ...updated, result: { contactId: existing.rows[0].id, reused: true } };
+  }
+  const created = await addContact(
+    actor,
+    org.id,
+    { fullName: contact.fullName, email: contact.email, contactType: "operations", phone: null, title: null, isPrimary: true },
+    reason
+  );
+  return { ...created, result: { contactId: (created.result as { contactId: string } | null)?.contactId ?? null, reused: false } };
+}
+
+async function loadOnboardingMainLocation(partnerId: string): Promise<{
+  id: string;
+  name: string;
+  status: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressCity: string | null;
+  addressPostcode: string | null;
+  addressCountry: string | null;
+} | null> {
+  const { rows } = await partnerAdminQuery<{
+    id: string;
+    name: string;
+    status: string;
+    address_line1: string | null;
+    address_line2: string | null;
+    address_city: string | null;
+    address_postcode: string | null;
+    address_country: string | null;
+  }>(
+    `SELECT id, name, status, address_line1, address_line2, address_city, address_postcode, address_country
+       FROM partner_locations
+      WHERE tenant_id=$1 AND status='ACTIVE'
+      ORDER BY (lower(btrim(name)) = 'main location') DESC, created_at ASC, id ASC
+      LIMIT 1`,
+    [partnerId]
+  );
+  const location = rows[0];
+  return location
+    ? {
+        id: location.id,
+        name: location.name,
+        status: location.status,
+        addressLine1: location.address_line1,
+        addressLine2: location.address_line2,
+        addressCity: location.address_city,
+        addressPostcode: location.address_postcode,
+        addressCountry: location.address_country,
+      }
+    : null;
+}
+
+export async function getFirstShopOnboarding(partnerId: string) {
+  const org = await loadPartner(partnerId);
+  const [mainLocation, contacts, readiness, profile] = await Promise.all([
+    loadOnboardingMainLocation(org.id),
+    listContacts(org.id),
+    getPartnerOnboardingReadiness(org.id),
+    partnerAdminQuery<{ version: number }>("SELECT version FROM partner_profiles WHERE tenant_id=$1", [org.id]),
+  ]);
+  // The direct loader intentionally mirrors readiness/Supplies' exact selection rule rather than
+  // reusing the alphabetised locations-directory query. This also keeps early first-shop setup
+  // available before a station exists.
+  const primaryContact =
+    (contacts.contacts as Array<{ active: boolean; is_primary: boolean }>).find(
+      (contact) => contact.active && contact.is_primary
+    ) ?? null;
+  const owner = readiness.users.find((user: { role: string }) => user.role === "OWNER") ?? null;
+  return {
+    organisation: readiness.organisation,
+    profileVersion: profile.rows[0]?.version ?? 1,
+    mainLocation,
+    primaryContact,
+    owner,
+    operational: readiness.operational,
+  };
 }
 
 /**

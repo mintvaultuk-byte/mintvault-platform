@@ -9,6 +9,8 @@ import {
 import { getFleetStationLifecycleSummary } from "../partner/station-service";
 import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from "../partner/operational-readiness";
 import { normaliseCommandCentreTimestamp } from "./timestamp";
+import { isCompletePartnerDeliveryAddress, isValidPartnerPostcode } from "@shared/partner-delivery-address";
+import { hasValidPartnerOperationalContact } from "@shared/partner-operational-contact";
 
 const PARTNER_SOURCE_BUDGET_MS = 650;
 const PARTNER_SNAPSHOT_BUDGET_MS = 1_200;
@@ -98,6 +100,19 @@ type ReadinessFactRow = {
   mfa_required: boolean | null;
   mfa_configured: boolean | null;
   location_eligible: boolean | null;
+  location_address: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  address_city: string | null;
+  address_postcode: string | null;
+  address_country: string | null;
+  profile_postcode: string | null;
+  profile_country: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_active: boolean | null;
+  contact_primary: boolean | null;
+  contact_type: string | null;
   station_enrolled: number | string;
   station_approved_active: number | string;
   station_pending: number | string;
@@ -130,6 +145,13 @@ async function listReadinessFacts(
             owner.user_status AS owner_status,
             owner.password_configured, owner.invitation_valid,
             owner.mfa_required, owner.mfa_configured, owner.location_eligible,
+            main.address AS location_address,
+            main.address_line1, main.address_line2, main.address_city,
+            main.address_postcode, main.address_country,
+            profile.address_postcode AS profile_postcode, profile.address_country AS profile_country,
+            operations.full_name AS contact_name, operations.email AS contact_email,
+            operations.active AS contact_active, operations.is_primary AS contact_primary,
+            operations.contact_type,
             COALESCE(station.enrolled, 0)::int AS station_enrolled,
             COALESCE(station.approved_active, 0)::int AS station_approved_active,
             COALESCE(station.pending_approval, 0)::int AS station_pending,
@@ -175,6 +197,22 @@ async function listReadinessFacts(
             u.created_at DESC, u.email ASC
           LIMIT 1
        ) owner ON true
+       LEFT JOIN LATERAL (
+         SELECT l.address, l.address_line1, l.address_line2, l.address_city,
+                l.address_postcode, l.address_country
+           FROM partner_locations l
+          WHERE l.tenant_id=o.id AND l.status='ACTIVE'
+          ORDER BY (lower(btrim(l.name)) = 'main location') DESC, l.created_at ASC, l.id ASC
+          LIMIT 1
+       ) main ON true
+       LEFT JOIN partner_profiles profile ON profile.tenant_id=o.id
+       LEFT JOIN LATERAL (
+         SELECT c.full_name, c.email, c.active, c.is_primary, c.contact_type
+           FROM partner_contacts c
+          WHERE c.tenant_id=o.id AND c.active AND c.is_primary AND c.contact_type='operations'
+          ORDER BY c.created_at ASC, c.id ASC
+          LIMIT 1
+       ) operations ON true
        LEFT JOIN LATERAL (
          SELECT count(*) FILTER (WHERE s.status <> 'REVOKED') AS enrolled,
                 count(*) FILTER (WHERE s.status='ACTIVE' AND s.approved_at IS NOT NULL AND l.status='ACTIVE') AS approved_active,
@@ -274,6 +312,37 @@ async function readOnboardingCandidates(
               mfaConfigured: row.mfa_configured === true,
             },
       locationEligible: row.location_eligible === true,
+      deliveryAddressReady: (() => {
+        const hasStructured = [
+          row.address_line1,
+          row.address_line2,
+          row.address_city,
+          row.address_postcode,
+          row.address_country,
+        ].some((value) => value != null);
+        if (hasStructured) {
+          return isCompletePartnerDeliveryAddress({
+            line1: row.address_line1,
+            line2: row.address_line2,
+            city: row.address_city,
+            postcode: row.address_postcode,
+            country: row.address_country,
+          });
+        }
+        return (
+          (row.location_address?.trim().length ?? 0) >= 12 &&
+          !!row.profile_postcode &&
+          !!row.profile_country &&
+          isValidPartnerPostcode(row.profile_postcode, row.profile_country)
+        );
+      })(),
+      operationsContactReady: hasValidPartnerOperationalContact({
+        fullName: row.contact_name,
+        email: row.contact_email,
+        active: row.contact_active,
+        primary: row.contact_primary,
+        type: row.contact_type,
+      }),
       station: {
         enrolledCount: Number(row.station_enrolled),
         approvedActiveCount: Number(row.station_approved_active),

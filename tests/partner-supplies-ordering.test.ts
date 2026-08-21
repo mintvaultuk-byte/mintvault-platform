@@ -598,6 +598,21 @@ describe("Partner supplies ordering (real PostgreSQL)", () => {
     });
   });
 
+  it("uses the structured Main-location delivery address rather than a profile shadow address", async () => {
+    await admin.query(
+      `UPDATE partner_locations
+          SET address=NULL, address_line1='3 Canonical Road', address_line2='Unit 7',
+              address_city='London', address_postcode='W1A 1AA', address_country='United Kingdom'
+        WHERE id=$1`,
+      [LC]
+    );
+    await admin.query("UPDATE partner_profiles SET address_postcode=NULL, address_country=NULL WHERE tenant_id=$1", [C]);
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LC))).resolves.toMatchObject({
+      delivery: { address: "3 Canonical Road, Unit 7, London, W1A 1AA, United Kingdom", postcode: "W1A 1AA", country: "United Kingdom" },
+      contact: { name: "C Operations", email: "c.operations@example.test" },
+    });
+  });
+
   it("locks address snapshots, rejects partner-side status writes, and permits only the Super Admin lifecycle", async () => {
     const created = await supplies.createSuppliesOrder(principal(A, UA, LA), {
       items: [allItems[0]],

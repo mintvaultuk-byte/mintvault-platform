@@ -125,8 +125,8 @@ function normalizeEntry(row: Record<string, unknown>): LedgerEntry {
   return { ...(row as unknown as LedgerEntry), amount: parseBalance(row.amount) };
 }
 
-async function loadOrg(tenantId: string): Promise<void> {
-  const r = await partnerAdminQuery<{ id: string }>("SELECT id FROM partner_organisations WHERE id = $1", [tenantId]);
+async function loadOrgWithClient(client: Queryable, tenantId: string): Promise<void> {
+  const r = await client.query<{ id: string }>("SELECT id FROM partner_organisations WHERE id = $1", [tenantId]);
   if (r.rowCount === 0) throw new WalletRequestError("ORG_NOT_FOUND", "Partner organisation not found.");
 }
 
@@ -136,14 +136,23 @@ async function loadOrg(tenantId: string): Promise<void> {
  * definitive read). Creates NO credits (empty ledger → zero balance).
  */
 export async function ensureWallet(_actor: WalletActor, tenantIdRaw: string): Promise<PartnerWallet> {
+  return ensureWalletWithClient(partnerAdminQueryable, _actor, tenantIdRaw);
+}
+
+/**
+ * Transaction-aware form of `ensureWallet`. First-shop onboarding uses this
+ * with its existing Partner-management transaction so a newly ACTIVE-ready
+ * shop cannot be committed without its zero-balance canonical wallet.
+ */
+export async function ensureWalletWithClient(
+  client: Queryable,
+  _actor: WalletActor,
+  tenantIdRaw: string
+): Promise<PartnerWallet> {
   const tenantId = requireTenantId(tenantIdRaw);
-  await loadOrg(tenantId);
-  await partnerAdminQuery("INSERT INTO partner_wallets (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING", [
-    tenantId,
-  ]);
-  const r = await partnerAdminQuery<PartnerWallet>(`SELECT ${WALLET_COLS} FROM partner_wallets WHERE tenant_id = $1`, [
-    tenantId,
-  ]);
+  await loadOrgWithClient(client, tenantId);
+  await client.query("INSERT INTO partner_wallets (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING", [tenantId]);
+  const r = await client.query<PartnerWallet>(`SELECT ${WALLET_COLS} FROM partner_wallets WHERE tenant_id = $1`, [tenantId]);
   if (r.rowCount === 0) throw new WalletRequestError("INTERNAL_ERROR", "wallet ensure failed.");
   return r.rows[0];
 }

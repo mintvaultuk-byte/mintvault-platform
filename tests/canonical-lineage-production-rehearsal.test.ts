@@ -95,6 +95,7 @@ const CANONICAL_PENDING = [
   "0097_partner_credit_checkout_sessions.sql",
   "0098_scanner_operator_credit_view.sql",
   "0102_partner_supplies_orders.sql",
+  "0103_partner_first_shop_delivery_address.sql",
 ] as const;
 
 const sha256 = (sql: string): string => createHash("sha256").update(sql).digest("hex");
@@ -210,25 +211,26 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       "0084_partner_location_management.sql",
       "0094_scanner_capture_physical_release.sql",
       "0096_partner_card_job_void_management_audit.sql",
+      "0103_partner_first_shop_delivery_address.sql",
     ]);
 
     const result = await applyMigrations(migrator as never, preGrowthFiles, { allowDestructive: true });
     applied = result.applied;
 
-    // GB-04 release rehearsal starts from the current production journal shape plus the
-    // already-applied Supplies migration, and exactly one new canonical migration.
+    // Growth rehearsal starts from the complete Partner/Scanner journal, including
+    // Supplies and the additive first-shop delivery-address migration.
     const attributionFiles = files.filter((file) => file.filename !== COMPLETION_MIGRATION);
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
-    expect(growthBefore.alreadyApplied).toHaveLength(63);
+    expect(growthBefore.alreadyApplied).toHaveLength(64);
     expect(growthBefore.pending).toEqual([ATTRIBUTION_MIGRATION]);
     expect(growthBefore.inconsistent).toEqual([]);
     expect(growthBefore.checksumMismatches).toEqual([]);
     growthApplied = (await applyMigrations(migrator as never, attributionFiles)).applied;
 
-    // Completion Night starts from the exact observed 64-entry rehearsal
+    // Completion Night starts from the exact 65-entry rehearsal
     // journal and has one additive, non-destructive migration to apply.
     const completionBefore = await planMigrations(migrator as never, files);
-    expect(completionBefore.alreadyApplied).toHaveLength(64);
+    expect(completionBefore.alreadyApplied).toHaveLength(65);
     expect(completionBefore.pending).toEqual([COMPLETION_MIGRATION]);
     expect(completionBefore.inconsistent).toEqual([]);
     expect(completionBefore.checksumMismatches).toEqual([]);
@@ -250,10 +252,10 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(65);
+    expect(after.alreadyApplied).toHaveLength(66);
   });
 
-  it("applies 0100 and then only 0101 from the exact 63-entry production journal shape", async () => {
+  it("applies 0100 and then only 0101 from the exact 64-entry production journal shape", async () => {
     const acquisition = await admin.query<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='submission_acquisition'
@@ -314,10 +316,13 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
          ('users','password_failed_count'), ('users','password_locked_until'),
          ('partner_sessions','last_step_up_at'), ('scanner_capture_sessions','calibration_id'),
          ('scanner_capture_sessions','acquisition_region'), ('scanner_capture_sessions','physical_released'),
-         ('partner_credit_packs','stripe_currency')
+         ('partner_credit_packs','stripe_currency'),
+         ('partner_locations','address_line1'), ('partner_locations','address_line2'),
+         ('partner_locations','address_city'), ('partner_locations','address_postcode'),
+         ('partner_locations','address_country')
        ) ORDER BY table_name, column_name
     `);
-    expect(columns.rows).toHaveLength(7);
+    expect(columns.rows).toHaveLength(12);
 
     const audit = await admin.query<{ definition: string }>(`
       SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
@@ -328,6 +333,7 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(audit.rows[0].definition).toContain("partner_card_job_voided");
     expect(audit.rows[0].definition).toContain("partner_location_created");
     expect(audit.rows[0].definition).toContain("partner_wallet_backfilled");
+    expect(audit.rows[0].definition).toContain("partner_first_shop_onboarded");
 
     const indexes = await admin.query<{ indexname: string; indexdef: string }>(`
       SELECT indexname, indexdef FROM pg_indexes

@@ -140,6 +140,7 @@ const AdminCommunityPage = lazy(() => import("@/pages/admin/community"));
 const AdminPartnerNetworkPage = lazy(() => import("@/pages/admin/partner-network"));
 const AdminPartnerManagementPage = lazy(() => import("@/pages/admin/partner-management"));
 const AdminPartnerManagementDetailPage = lazy(() => import("@/pages/admin/partner-management-detail"));
+const AdminPartnerFirstShopOnboardingPage = lazy(() => import("@/pages/admin/partner-first-shop-onboarding"));
 const AdminProjectControlPage = lazy(() => import("@/pages/admin/project-control"));
 const AdminProjectControlPackagePage = lazy(() => import("@/pages/admin/project-control-package"));
 const AdminProjectControlShopLaunchPage = lazy(() => import("@/pages/admin/project-control-shop-launch"));
@@ -162,6 +163,7 @@ const PartnerInvitePage = lazy(() => import("@/pages/partner/invite"));
 const PartnerPasswordResetRequestPage = lazy(() => import("@/pages/partner/password-reset-request"));
 const PartnerPasswordResetPage = lazy(() => import("@/pages/partner/password-reset"));
 const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
+const PartnerOnboardingPage = lazy(() => import("@/pages/partner/onboarding"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
 const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
@@ -341,6 +343,11 @@ function PartnerPortalRoutes() {
               <PartnerDashboardPage />
             </PartnerRouteGuard>
           </Route>
+          <Route path="/partner/onboarding">
+            <PartnerRouteGuard>
+              <PartnerOnboardingPage />
+            </PartnerRouteGuard>
+          </Route>
           <Route path="/partner/submissions/new">
             <PartnerRouteGuard>
               <PartnerSubmissionWizardPage />
@@ -506,6 +513,9 @@ function Router() {
               <AdminPartnerManagementPage />
             </PartnerNetworkRoute>
           </Route>
+          <Route path="/admin/partners/onboarding">
+            <AdminPartnerFirstShopOnboardingPage />
+          </Route>
           <Route path="/admin/partners/dashboard">
             <PartnerNetworkLegacyRoute canonical="/admin/partners">
               <AdminPartnerDashboardPage />
@@ -521,13 +531,7 @@ function Router() {
             </PartnerNetworkRoute>
           </Route>
           <Route path="/admin/partners/:partnerId/onboarding">
-            <PartnerNetworkRoute
-              legacy={(pathname) =>
-                pathname.replace(/^\/admin\/partners\/([^/]+)\/onboarding$/, "/admin/partner-network/partners/$1")
-              }
-            >
-              <AdminPartnerManagementDetailPage />
-            </PartnerNetworkRoute>
+            <AdminPartnerFirstShopOnboardingPage />
           </Route>
           <Route path="/admin/partners/:partnerId/cards">
             <PartnerNetworkRoute

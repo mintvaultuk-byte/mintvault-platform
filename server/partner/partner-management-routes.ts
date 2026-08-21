@@ -300,6 +300,17 @@ export function partnerManagementRouter(): Router {
       sendError(res, err);
     }
   });
+  /**
+   * Guided first-shop view. This is a projection of the existing Partner/location/contact/user
+   * authorities, not a second onboarding record or a client-side checklist.
+   */
+  r.get("/partners/:partnerId/first-shop", async (req, res) => {
+    try {
+      res.json(await svc.getFirstShopOnboarding(req.params.partnerId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
 
   // ---- MUTATIONS ----
   r.use(g5MutationRateLimit);
@@ -327,6 +338,97 @@ export function partnerManagementRouter(): Router {
       const legalName = requireNonEmpty(req.body?.legalName, "legalName");
       const reason = optionalReason(req.body?.reason, "partner created");
       mutationResponse(res, actor.requestId, await svc.createPartner(actor, { legalName }, reason));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Atomically creates the first shop's canonical Partner, Main location, contact, Owner invite and wallet. */
+  r.post("/first-shop", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.createFirstShopOnboarding(
+          actor,
+          {
+            legalName: requireNonEmpty(req.body?.legalName, "legalName"),
+            locationName: requireNonEmpty(req.body?.locationName, "locationName"),
+            deliveryAddress: {
+              line1: requireNonEmpty(req.body?.deliveryAddress?.line1, "deliveryAddress.line1"),
+              line2: optionalText(req.body?.deliveryAddress?.line2, "deliveryAddress.line2", 200),
+              city: requireNonEmpty(req.body?.deliveryAddress?.city, "deliveryAddress.city"),
+              postcode: requireNonEmpty(req.body?.deliveryAddress?.postcode, "deliveryAddress.postcode"),
+              country: requireNonEmpty(req.body?.deliveryAddress?.country, "deliveryAddress.country"),
+            },
+            operationsContact: {
+              fullName: requireNonEmpty(req.body?.operationsContact?.fullName, "operationsContact.fullName"),
+              email: requireNonEmpty(req.body?.operationsContact?.email, "operationsContact.email"),
+            },
+            owner: {
+              firstName: requireNonEmpty(req.body?.owner?.firstName, "owner.firstName"),
+              lastName: requireNonEmpty(req.body?.owner?.lastName, "owner.lastName"),
+              email: requireNonEmpty(req.body?.owner?.email, "owner.email"),
+            },
+          },
+          optionalReason(req.body?.reason, "first shop onboarding created")
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.patch("/partners/:partnerId/first-shop/location", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const partnerId = String(req.params.partnerId);
+      // Never accept a browser-selected location here. The guided flow must edit the exact
+      // Main-location record that readiness and Supplies treat as canonical, otherwise a
+      // multi-location Partner could "complete" a different shop floor while remaining blocked.
+      const snapshot = await svc.getFirstShopOnboarding(partnerId);
+      if (!snapshot.mainLocation) {
+        throw new G5RequestError("PARTNER_NOT_FOUND", "No active Main location is available for this Partner.");
+      }
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.updateFirstShopDeliveryAddress(
+          actor,
+          partnerId,
+          snapshot.mainLocation.id,
+          {
+            line1: requireNonEmpty(req.body?.deliveryAddress?.line1, "deliveryAddress.line1"),
+            line2: optionalText(req.body?.deliveryAddress?.line2, "deliveryAddress.line2", 200),
+            city: requireNonEmpty(req.body?.deliveryAddress?.city, "deliveryAddress.city"),
+            postcode: requireNonEmpty(req.body?.deliveryAddress?.postcode, "deliveryAddress.postcode"),
+            country: requireNonEmpty(req.body?.deliveryAddress?.country, "deliveryAddress.country"),
+          },
+          optionalReason(req.body?.reason, "Main location delivery address updated")
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.put("/partners/:partnerId/first-shop/operations-contact", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.upsertFirstShopOperationsContact(
+          actor,
+          String(req.params.partnerId),
+          {
+            fullName: requireNonEmpty(req.body?.fullName, "fullName"),
+            email: requireNonEmpty(req.body?.email, "email"),
+          },
+          optionalReason(req.body?.reason, "primary operations contact updated")
+        )
+      );
     } catch (err) {
       sendError(res, err);
     }

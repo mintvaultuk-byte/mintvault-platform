@@ -84,6 +84,8 @@ export type PartnerReadinessCode =
   | "USER_SUSPENDED"
   // Location
   | "LOCATION_REQUIRED"
+  | "DELIVERY_ADDRESS_REQUIRED"
+  | "OPERATIONS_CONTACT_REQUIRED"
   // Station
   | "STATION_SETUP_REQUIRED"
   | "STATION_APPROVAL_PENDING"
@@ -97,7 +99,15 @@ export type PartnerReadinessCode =
   // Any authority that could not be consulted
   | "CONFIGURATION_UNAVAILABLE";
 
-export type ReadinessDimensionKey = "organisation" | "owner" | "location" | "station" | "scanner" | "credits";
+export type ReadinessDimensionKey =
+  | "organisation"
+  | "location"
+  | "delivery"
+  | "operationsContact"
+  | "owner"
+  | "station"
+  | "scanner"
+  | "credits";
 
 export interface PartnerOperationalReadiness {
   overall: {

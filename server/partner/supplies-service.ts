@@ -13,6 +13,13 @@ import { sendPartnerSuppliesOrderNotification } from "../email";
 import { writePartnerAudit } from "./audit";
 import { partnerAdminQuery, partnerRuntimeQuery, withPartnerAdminTransaction, withTenant } from "./db";
 import type { PartnerPrincipal } from "./session";
+import {
+  formatPartnerDeliveryAddress,
+  normalisePartnerDeliveryAddress,
+  normalisePartnerPostcode,
+  isValidPartnerPostcode,
+} from "@shared/partner-delivery-address";
+import { hasValidPartnerOperationalContact } from "@shared/partner-operational-contact";
 
 export const SUPPLIES_PRODUCTS = [
   { code: "PLASTIC_GRADED_SLABS", label: "Plastic graded slabs" },
@@ -26,7 +33,6 @@ type NotificationStatus = "PENDING" | "CLAIMED" | "SENT" | "FAILED";
 
 const PRODUCT_BY_CODE = new Map(SUPPLIES_PRODUCTS.map((product) => [product.code, product]));
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._:-]{16,128}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UK_POSTCODE_RE = /\b(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
 const NOTE_SECRET_RE = /\b(?:password|passphrase|pwd|secret|credential|api[ _-]?key|access[ _-]?key|private[ _-]?key|token|session|cookie|mfa|totp|otp|bearer)\b/i;
 const SUPPLIES_MIGRATION = "0102_partner_supplies_orders.sql";
@@ -226,13 +232,26 @@ async function resolveDeliverySnapshot(client: PoolClient, principal: PartnerPri
     trading_name: string | null;
     location_name: string;
     location_address: string | null;
+    address_line1: string | null;
+    address_line2: string | null;
+    address_city: string | null;
+    address_postcode: string | null;
+    address_country: string | null;
+    profile_postcode: string | null;
+    profile_country: string | null;
     contact_name: string | null;
     contact_email: string | null;
     contact_phone: string | null;
+    contact_active: boolean | null;
+    contact_primary: boolean | null;
+    contact_type: string | null;
   }>(
     `SELECT o.id AS tenant_id, l.partner_id, l.id AS location_id, u.id AS user_id,
             o.legal_name, p.trading_name, l.name AS location_name, l.address AS location_address,
-            c.full_name AS contact_name, c.email AS contact_email, c.phone AS contact_phone
+            l.address_line1, l.address_line2, l.address_city, l.address_postcode, l.address_country,
+            p.address_postcode AS profile_postcode, p.address_country AS profile_country,
+            c.full_name AS contact_name, c.email AS contact_email, c.phone AS contact_phone,
+            c.active AS contact_active, c.is_primary AS contact_primary, c.contact_type
        FROM partner_locations l
        JOIN partner_organisations o ON o.id=l.tenant_id
        JOIN partner_users u ON u.id=$2 AND u.tenant_id=l.tenant_id AND u.status='ACTIVE'
@@ -251,24 +270,60 @@ async function resolveDeliverySnapshot(client: PoolClient, principal: PartnerPri
   if (!row) {
     throw new SuppliesError("LOCATION_SELECTION_REQUIRED", "Select an active shop location before requesting supplies.", 409);
   }
-  const address = row.location_address?.trim() ?? "";
-  const postcode = address ? postcodeFromAddress(address) : null;
-  if (!address || address.length < 12 || !postcode) {
+  const hasStructuredAddress = [
+    row.address_line1,
+    row.address_line2,
+    row.address_city,
+    row.address_postcode,
+    row.address_country,
+  ].some((value) => value != null);
+  const structuredAddress = normalisePartnerDeliveryAddress({
+    line1: row.address_line1 ?? "",
+    line2: row.address_line2,
+    city: row.address_city ?? "",
+    postcode: row.address_postcode ?? "",
+    country: row.address_country ?? "",
+  });
+  // Legacy shops retain their historic raw location address and profile postcode/country. New
+  // first-shop records always take the structured path above. This explicit compatibility branch
+  // prevents existing, valid shops from becoming invalid merely because their data predates 0103.
+  const legacyAddress = row.location_address?.trim() ?? "";
+  const legacyCountry = row.profile_country?.trim() || "GB";
+  const legacyPostcode = row.profile_postcode?.trim() || (legacyAddress ? postcodeFromAddress(legacyAddress) : null);
+  const legacyValid =
+    !hasStructuredAddress &&
+    legacyAddress.length >= 12 &&
+    !!legacyPostcode &&
+    isValidPartnerPostcode(legacyPostcode, legacyCountry);
+  if (!structuredAddress && !legacyValid) {
     throw new SuppliesError(
       "DELIVERY_ADDRESS_REQUIRED",
       "This shop needs a complete delivery address with postcode. Ask your Partner Owner or MintVault administrator to update the location.",
       409
     );
   }
-  const contactName = row.contact_name?.trim() ?? "";
-  const contactEmail = row.contact_email?.trim().toLowerCase() ?? "";
-  if (!contactName || !EMAIL_RE.test(contactEmail)) {
+  if (
+    !hasValidPartnerOperationalContact({
+      fullName: row.contact_name,
+      email: row.contact_email,
+      active: row.contact_active,
+      primary: row.contact_primary,
+      type: row.contact_type,
+    })
+  ) {
     throw new SuppliesError(
       "DELIVERY_CONTACT_REQUIRED",
       "This Partner needs an active operational contact with a valid email before supplies can be requested.",
       409
     );
   }
+  const contactName = row.contact_name!.trim();
+  const contactEmail = row.contact_email!.trim().toLowerCase();
+  const address = structuredAddress ? formatPartnerDeliveryAddress(structuredAddress) : legacyAddress;
+  const postcode = structuredAddress
+    ? structuredAddress.postcode
+    : normalisePartnerPostcode(legacyPostcode!);
+  const country = structuredAddress ? structuredAddress.country : legacyCountry;
   return {
     tenantId: row.tenant_id,
     partnerId: row.partner_id,
@@ -281,7 +336,7 @@ async function resolveDeliverySnapshot(client: PoolClient, principal: PartnerPri
     contactPhone: row.contact_phone?.trim() || null,
     address,
     postcode,
-    country: "GB",
+    country,
   };
 }
 

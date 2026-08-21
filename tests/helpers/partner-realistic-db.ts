@@ -180,6 +180,27 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
 export const PARTNER_MIGRATIONS_WITH_SUPPLIES = [
   ...PARTNER_MIGRATIONS_WITH_RBAC_SEED,
   "0102_partner_supplies_orders",
+  "0103_partner_first_shop_delivery_address",
+] as const;
+
+/**
+ * First-shop onboarding creates the wallet in the same transaction as its organisation/location/
+ * contact/Owner invitation. Unlike supplies-only proofs it therefore needs the G6 wallet lineage,
+ * followed by the complete management audit/RBAC/supplies vocabulary in migration order.
+ */
+export const PARTNER_MIGRATIONS_WITH_FIRST_SHOP = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0031_partner_user_management",
+  "0032_partner_final_owner_invariant",
+  "0033_partner_audit_action_precision",
+  "0074_partner_submission_lifecycle_and_location_snapshot",
+  "0084_partner_location_management",
+  "0086_partner_session_step_up",
+  "0096_partner_card_job_void_management_audit",
+  "0034_partner_rbac_seed",
+  "0102_partner_supplies_orders",
+  "0103_partner_first_shop_delivery_address",
 ] as const;
 
 /**
@@ -366,6 +387,9 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: durable operational supplies orders/outbox, RLS and additive RBAC only. It
   // touches no core certificate/payment table, so every Partner-only realistic harness may model it.
   "0102_partner_supplies_orders",
+  // PARTNER scope: additive structured delivery fields on the existing partner_locations authority
+  // plus a management-audit vocabulary extension. It touches no core table.
+  "0103_partner_first_shop_delivery_address",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -458,6 +482,7 @@ export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
   // the forward-only vocabulary repair in every real-Postgres Card Job harness so the exercised
   // workflow runs against the same constraint contract as production will after migration.
   "0096_partner_card_job_void_management_audit",
+  "0103_partner_first_shop_delivery_address",
 ] as const;
 /**
  * 0044 widens partner_submissions.status past the three states 0007 allowed (draft /

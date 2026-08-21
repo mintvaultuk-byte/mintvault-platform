@@ -34,8 +34,14 @@ import { auditInOwnTxn } from "./audit";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
-import { acceptPartnerInvitation } from "./partner-management-service";
+import {
+  acceptPartnerInvitation,
+  getFirstShopOnboarding,
+  updateFirstShopDeliveryAddress,
+  upsertFirstShopOperationsContact,
+} from "./partner-management-service";
 import { toG5Error, g5StatusFor, requireReason, optionalReason, G5RequestError } from "./partner-management-errors";
+import { getUserRoles } from "./permissions";
 import {
   changeTeamMemberRole,
   deliverTeamInvitationAfterCommit,
@@ -80,6 +86,42 @@ function sendPartnerTeamError(res: import("express").Response, err: unknown): vo
 
 function noStore(res: import("express").Response): void {
   res.setHeader("Cache-Control", "private, no-store");
+}
+
+function requiredPartnerOnboardingText(raw: unknown, field: string, max = 500): string {
+  if (typeof raw !== "string") throw new G5RequestError("VALIDATION_ERROR", `${field} is required.`);
+  const value = raw.trim();
+  if (!value || value.length > max) throw new G5RequestError("VALIDATION_ERROR", `${field} is invalid.`);
+  return value;
+}
+
+function optionalPartnerOnboardingText(raw: unknown, field: string, max = 200): string | null {
+  if (raw == null || raw === "") return null;
+  return requiredPartnerOnboardingText(raw, field, max);
+}
+
+/**
+ * First-shop edits are self-service for the canonical Partner Owner, never a browser-supplied
+ * tenant or a broad team-management permission. The admin service remains the single writer and
+ * audit authority; this helper only derives its actor from the authenticated session.
+ */
+export async function currentPartnerOwnerActor(req: import("express").Request) {
+  const principal = req.partner;
+  if (!principal) throw new G5RequestError("UNAUTHENTICATED", "Sign in to continue.");
+  return withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, async (client) => {
+    const roles = await getUserRoles(client, principal.userId);
+    if (!roles.includes("PARTNER_OWNER")) {
+      throw new G5RequestError("FORBIDDEN", "Only the Partner Owner can confirm first-shop setup.");
+    }
+    const user = await client.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [principal.userId]);
+    if (!user.rows[0]?.email) throw new G5RequestError("UNAUTHENTICATED", "Partner account details are unavailable.");
+    return {
+      actorUserId: principal.userId,
+      actorEmail: user.rows[0].email,
+      requestId: String(req.headers["x-request-id"] ?? `partner-onboarding-${req.method}-${Date.now()}`),
+      idempotencyKey: typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined,
+    };
+  });
 }
 
 /**
@@ -571,6 +613,72 @@ export function partnerApiRouter(): Router {
         .json({ error: { code: "readiness_unavailable", message: "Setup status is unavailable right now." } });
     }
   });
+
+  /** The Owner's guided view of the same canonical first-shop record Super Admin sees. */
+  r.get("/onboarding", requirePartnerCapability("partner.dashboard.view"), async (req, res) => {
+    try {
+      await currentPartnerOwnerActor(req);
+      res.json(await getFirstShopOnboarding(req.partner!.tenantId));
+    } catch (err) {
+      sendPartnerTeamError(res, err);
+    }
+  });
+
+  r.patch(
+    "/onboarding/main-location",
+    requirePartnerCapability("partner.dashboard.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerTeamMutationLimiter,
+    async (req, res) => {
+      try {
+        const actor = await currentPartnerOwnerActor(req);
+        const snapshot = await getFirstShopOnboarding(req.partner!.tenantId);
+        if (!snapshot.mainLocation) throw new G5RequestError("PARTNER_NOT_FOUND", "No active Main location is available.");
+        const result = await updateFirstShopDeliveryAddress(
+          actor,
+          req.partner!.tenantId,
+          snapshot.mainLocation.id,
+          {
+            line1: requiredPartnerOnboardingText(req.body?.deliveryAddress?.line1, "Address line 1", 200),
+            line2: optionalPartnerOnboardingText(req.body?.deliveryAddress?.line2, "Address line 2", 200),
+            city: requiredPartnerOnboardingText(req.body?.deliveryAddress?.city, "Town or city", 120),
+            postcode: requiredPartnerOnboardingText(req.body?.deliveryAddress?.postcode, "Postcode", 32),
+            country: requiredPartnerOnboardingText(req.body?.deliveryAddress?.country, "Country", 120),
+          },
+          "Partner Owner confirmed Main location delivery address"
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_first_shop_main_location", err);
+      }
+    }
+  );
+
+  r.put(
+    "/onboarding/operations-contact",
+    requirePartnerCapability("partner.dashboard.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerTeamMutationLimiter,
+    async (req, res) => {
+      try {
+        const actor = await currentPartnerOwnerActor(req);
+        const result = await upsertFirstShopOperationsContact(
+          actor,
+          req.partner!.tenantId,
+          {
+            fullName: requiredPartnerOnboardingText(req.body?.fullName, "Contact name", 200),
+            email: requiredPartnerOnboardingText(req.body?.email, "Operational email", 320),
+          },
+          "Partner Owner confirmed primary operations contact"
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_first_shop_operations_contact", err);
+      }
+    }
+  );
 
   r.get("/sessions", requirePartnerAuth, async (req, res) => {
     try {

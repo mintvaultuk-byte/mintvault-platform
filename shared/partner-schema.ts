@@ -70,6 +70,13 @@ export const partnerLocations = pgTable("partner_locations", {
   tenantId: uuid("tenant_id").notNull(),
   partnerId: uuid("partner_id").notNull(),
   name: text("name").notNull(),
+  // Canonical structured delivery address for new first-shop onboarding. `address`
+  // remains a legacy display/fallback field for historical rows.
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  addressCity: text("address_city"),
+  addressPostcode: text("address_postcode"),
+  addressCountry: text("address_country"),
   address: text("address"),
   status: text("status").notNull().default("PENDING"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
