@@ -411,6 +411,13 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: additive structured delivery fields on the existing partner_locations authority
   // plus a management-audit vocabulary extension. It touches no core table.
   "0105_partner_first_shop_delivery_address",
+  // PARTNER scope: forward-only lineage convergence carrying 0102's public-presence body verbatim
+  // for hosts whose 0102 slot is occupied by the pre-rename supplies identity. Same tables, same
+  // namespace, idempotent — so it is a no-op wherever 0102 already applied.
+  "0106_lineage_convergence_public_presence",
+  // PARTNER scope: widens the partner_management_audit idempotency index to
+  // (tenant_id, action_type, idempotency_key). One partner_* table, no core dependency.
+  "0107_partner_management_audit_idempotency_scope",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

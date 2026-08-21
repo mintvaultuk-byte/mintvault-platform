@@ -274,10 +274,10 @@ describe("lineage exclusion declarations", () => {
     }
   });
 
-  it("the SHIPPED declarations file resolves the real staging lineage: 3 excluded, 0 undeclared", () => {
+  it("the SHIPPED declarations file resolves the real staging lineage: 4 excluded, 0 undeclared", () => {
     const files = listMigrationFiles();
     const exclusions = loadLineageExclusions();
-    expect(exclusions).toHaveLength(3);
+    expect(exclusions).toHaveLength(4);
     for (const d of exclusions) {
       expect(
         files.some((f) => f.filename === d.incoming),

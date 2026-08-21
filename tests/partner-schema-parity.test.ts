@@ -316,6 +316,10 @@ describe("partner schema ↔ migration parity", () => {
       "0103_partner_google_presence.sql",
       "0104_partner_supplies_orders.sql",
       "0105_partner_first_shop_delivery_address.sql",
+      // Forward-only lineage convergence for the 0102 slot collision, and the idempotency-namespace
+      // widening that stops a customer-chosen key matching a Super Admin action.
+      "0106_lineage_convergence_public_presence.sql",
+      "0107_partner_management_audit_idempotency_scope.sql",
     ]);
   });
 
