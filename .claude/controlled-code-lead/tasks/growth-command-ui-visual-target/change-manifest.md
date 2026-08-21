@@ -21,6 +21,7 @@
 | `tests/growth-command-gb04b.test.ts` | Add a bounded deterministic assertion for any new client-side presentation derivation. | F1 | A |
 | `client/src/App.tsx` | DEV-gate a local-only Growth visual acceptance route. | Local visual acceptance approval | A |
 | `client/src/pages/dev-growth-command-visual-harness.tsx` | Mount the shipping Growth page under a synthetic in-browser Super Admin session and exact local fixture responses; unknown `/api/` paths are blocked. | Local visual acceptance approval | A |
+| `tests/growth-infrastructure-control.test.ts` | Re-pin the red-payment incident assertion from the removed legacy `<Insights` component to the Overview boundary and its rendered Alerts & signals capability. | CI contract drift F3 | A |
 
 ## Files explicitly not touched
 
@@ -39,6 +40,7 @@
 2. Replace only the Overview composition, retaining existing tabs and commercial controls.
 3. Add a focused regression assertion, type-check, build, and perform authenticated visual checks where a local session is available.
 4. Use only the DEV-gated local render harness for browser acceptance; do not use credentials, sessions, databases, or providers.
+5. Preserve the red-payment incident precedence and the rendered deterministic Insights capability across the approved Overview recomposition without changing production code.
 
 ## Regression gates required (Stage 6)
 
