@@ -52,7 +52,7 @@ const ADDITIVE_MIGRATIONS = [
   "0085_partner_scanner_operator_role.sql",
   "0092_partner_station_calibrate_permission.sql",
   "0098_scanner_operator_credit_view.sql",
-  "0102_partner_supplies_orders.sql",
+  "0104_partner_supplies_orders.sql",
 ] as const;
 const additiveSqlByFile = ADDITIVE_MIGRATIONS.map(
   (file) => [file, readFileSync(join(process.cwd(), "migrations", file), "utf8")] as const

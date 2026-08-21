@@ -70,6 +70,10 @@ const PRODUCTION_SOURCE_HISTORY = [
 const ALREADY_APPLIED_GB03 = "0095_growth_partner_applications";
 const ATTRIBUTION_MIGRATION = "0100_growth_commercial_attribution.sql";
 const COMPLETION_MIGRATION = "0101_growth_reviews_and_conversion.sql";
+const PUBLIC_PRESENCE_MIGRATION = "0102_partner_public_presence.sql";
+const GOOGLE_PRESENCE_MIGRATION = "0103_partner_google_presence.sql";
+const SUPPLIES_MIGRATION = "0104_partner_supplies_orders.sql";
+const FIRST_SHOP_ADDRESS_MIGRATION = "0105_partner_first_shop_delivery_address.sql";
 
 /** The expected ordered plan after canonical Partner/Scanner integration. */
 const CANONICAL_PENDING = [
@@ -94,8 +98,6 @@ const CANONICAL_PENDING = [
   "0096_partner_card_job_void_management_audit.sql",
   "0097_partner_credit_checkout_sessions.sql",
   "0098_scanner_operator_credit_view.sql",
-  "0102_partner_supplies_orders.sql",
-  "0103_partner_first_shop_delivery_address.sql",
 ] as const;
 
 const sha256 = (sql: string): string => createHash("sha256").update(sql).digest("hex");
@@ -153,6 +155,8 @@ let migrator: pg.Client;
 let applied: string[];
 let growthApplied: string[];
 let completionApplied: string[];
+let publicPresenceApplied: string[];
+let firstShopApplied: string[];
 
 describe("canonical Partner/Scanner production-journal rehearsal", () => {
   beforeAll(async () => {
@@ -200,7 +204,13 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
 
     const files = listMigrationFiles();
     const preGrowthFiles = files.filter(
-      (file) => file.filename !== ATTRIBUTION_MIGRATION && file.filename !== COMPLETION_MIGRATION
+      (file) =>
+        file.filename !== ATTRIBUTION_MIGRATION &&
+        file.filename !== COMPLETION_MIGRATION &&
+        file.filename !== PUBLIC_PRESENCE_MIGRATION &&
+        file.filename !== GOOGLE_PRESENCE_MIGRATION &&
+        file.filename !== SUPPLIES_MIGRATION &&
+        file.filename !== FIRST_SHOP_ADDRESS_MIGRATION
     );
     const before = await planMigrations(migrator as never, preGrowthFiles);
     expect(before.alreadyApplied).toHaveLength(41);
@@ -211,31 +221,70 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       "0084_partner_location_management.sql",
       "0094_scanner_capture_physical_release.sql",
       "0096_partner_card_job_void_management_audit.sql",
-      "0103_partner_first_shop_delivery_address.sql",
     ]);
 
     const result = await applyMigrations(migrator as never, preGrowthFiles, { allowDestructive: true });
     applied = result.applied;
 
-    // Growth rehearsal starts from the complete Partner/Scanner journal, including
-    // Supplies and the additive first-shop delivery-address migration.
-    const attributionFiles = files.filter((file) => file.filename !== COMPLETION_MIGRATION);
+    // Growth attribution starts from the converged Partner/Scanner journal, before any of
+    // the four release-candidate migrations that sit above it.
+    const attributionFiles = files.filter(
+      (file) =>
+        file.filename !== COMPLETION_MIGRATION &&
+        file.filename !== PUBLIC_PRESENCE_MIGRATION &&
+        file.filename !== GOOGLE_PRESENCE_MIGRATION &&
+        file.filename !== SUPPLIES_MIGRATION &&
+        file.filename !== FIRST_SHOP_ADDRESS_MIGRATION
+    );
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
-    expect(growthBefore.alreadyApplied).toHaveLength(64);
+    expect(growthBefore.alreadyApplied).toHaveLength(62);
     expect(growthBefore.pending).toEqual([ATTRIBUTION_MIGRATION]);
     expect(growthBefore.inconsistent).toEqual([]);
     expect(growthBefore.checksumMismatches).toEqual([]);
     growthApplied = (await applyMigrations(migrator as never, attributionFiles)).applied;
 
-    // Completion Night starts from the exact 65-entry rehearsal
+    // Completion Night starts from the exact 63-entry rehearsal
     // journal and has one additive, non-destructive migration to apply.
-    const completionBefore = await planMigrations(migrator as never, files);
-    expect(completionBefore.alreadyApplied).toHaveLength(65);
+    const completionFiles = files.filter(
+      (file) =>
+        file.filename !== PUBLIC_PRESENCE_MIGRATION &&
+        file.filename !== GOOGLE_PRESENCE_MIGRATION &&
+        file.filename !== SUPPLIES_MIGRATION &&
+        file.filename !== FIRST_SHOP_ADDRESS_MIGRATION
+    );
+    const completionBefore = await planMigrations(migrator as never, completionFiles);
+    expect(completionBefore.alreadyApplied).toHaveLength(63);
     expect(completionBefore.pending).toEqual([COMPLETION_MIGRATION]);
     expect(completionBefore.inconsistent).toEqual([]);
     expect(completionBefore.checksumMismatches).toEqual([]);
     expect(completionBefore.destructive).toEqual([]);
-    completionApplied = (await applyMigrations(migrator as never, files)).applied;
+    completionApplied = (await applyMigrations(migrator as never, completionFiles)).applied;
+
+    // Public presence follows the canonical Growth 0101. The optional Google
+    // schema remains a separate 0103 identity: this rehearsal proves only
+    // migration compatibility, never production activation.
+    const publicPresenceFiles = files.filter(
+      (file) => file.filename !== SUPPLIES_MIGRATION && file.filename !== FIRST_SHOP_ADDRESS_MIGRATION
+    );
+    const publicPresenceBefore = await planMigrations(migrator as never, publicPresenceFiles);
+    expect(publicPresenceBefore.alreadyApplied).toHaveLength(64);
+    expect(publicPresenceBefore.pending).toEqual([PUBLIC_PRESENCE_MIGRATION, GOOGLE_PRESENCE_MIGRATION]);
+    expect(publicPresenceBefore.inconsistent).toEqual([]);
+    expect(publicPresenceBefore.checksumMismatches).toEqual([]);
+    expect(publicPresenceBefore.destructive).toEqual([]);
+    publicPresenceApplied = (await applyMigrations(migrator as never, publicPresenceFiles)).applied;
+
+    // First-shop onboarding sits ABOVE the public-presence pair after reconciliation: the
+    // supplies authority and the additive structured delivery address on partner_locations.
+    // 0105 rewrites the management-audit vocabulary constraint, so it is a declared,
+    // owner-approved destructive entry and must be planned as one.
+    const firstShopBefore = await planMigrations(migrator as never, files);
+    expect(firstShopBefore.alreadyApplied).toHaveLength(66);
+    expect(firstShopBefore.pending).toEqual([SUPPLIES_MIGRATION, FIRST_SHOP_ADDRESS_MIGRATION]);
+    expect(firstShopBefore.inconsistent).toEqual([]);
+    expect(firstShopBefore.checksumMismatches).toEqual([]);
+    expect(firstShopBefore.destructive.map((entry) => entry.filename)).toEqual([FIRST_SHOP_ADDRESS_MIGRATION]);
+    firstShopApplied = (await applyMigrations(migrator as never, files, { allowDestructive: true })).applied;
   }, 180_000);
 
   afterAll(async () => {
@@ -248,14 +297,16 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(applied).toEqual([...CANONICAL_PENDING]);
     expect(growthApplied).toEqual([ATTRIBUTION_MIGRATION]);
     expect(completionApplied).toEqual([COMPLETION_MIGRATION]);
+    expect(publicPresenceApplied).toEqual([PUBLIC_PRESENCE_MIGRATION, GOOGLE_PRESENCE_MIGRATION]);
+    expect(firstShopApplied).toEqual([SUPPLIES_MIGRATION, FIRST_SHOP_ADDRESS_MIGRATION]);
     const after = await planMigrations(migrator as never, listMigrationFiles());
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(66);
+    expect(after.alreadyApplied).toHaveLength(68);
   });
 
-  it("applies 0100 and then only 0101 from the exact 64-entry production journal shape", async () => {
+  it("applies growth 0100/0101, then public 0102/0103, then first-shop 0104/0105 in order", async () => {
     const acquisition = await admin.query<{ column_name: string }>(`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema='public' AND table_name='submission_acquisition'

@@ -35,7 +35,7 @@ const PRODUCT_BY_CODE = new Map(SUPPLIES_PRODUCTS.map((product) => [product.code
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._:-]{16,128}$/;
 const UK_POSTCODE_RE = /\b(?:GIR\s?0AA|[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/i;
 const NOTE_SECRET_RE = /\b(?:password|passphrase|pwd|secret|credential|api[ _-]?key|access[ _-]?key|private[ _-]?key|token|session|cookie|mfa|totp|otp|bearer)\b/i;
-const SUPPLIES_MIGRATION = "0102_partner_supplies_orders.sql";
+const SUPPLIES_MIGRATION = "0104_partner_supplies_orders.sql";
 const CLAIM_LEASE_SECONDS = 5 * 60;
 const MAX_NOTIFICATION_ATTEMPTS = 12;
 // Resend retains an idempotency key for 24h. Keep one hour of clock/queue margin: once a worker

@@ -16,9 +16,9 @@ import { PgTable } from "drizzle-orm/pg-core";
 import * as partnerSchema from "../shared/partner-schema";
 
 const foundationMigration = readFileSync(join(process.cwd(), "migrations", "0001_partner_foundation.sql"), "utf8");
-const suppliesMigration = readFileSync(join(process.cwd(), "migrations", "0102_partner_supplies_orders.sql"), "utf8");
+const suppliesMigration = readFileSync(join(process.cwd(), "migrations", "0104_partner_supplies_orders.sql"), "utf8");
 const firstShopDeliveryAddressMigration = readFileSync(
-  join(process.cwd(), "migrations", "0103_partner_first_shop_delivery_address.sql"),
+  join(process.cwd(), "migrations", "0105_partner_first_shop_delivery_address.sql"),
   "utf8",
 );
 const SUPPLIES_TABLES = [
@@ -307,8 +307,13 @@ describe("partner schema ↔ migration parity", () => {
       // Review delivery and conversion instrumentation are application-scoped
       // because both are anchored to canonical grading submissions.
       "0101_growth_reviews_and_conversion.sql",
-      "0102_partner_supplies_orders.sql",
-      "0103_partner_first_shop_delivery_address.sql",
+      // Public-only Partner consent/approval authority, followed by the optional
+      // Google presence foundation. Both are migration-authoritative raw
+      // SQL, isolated from the whole-portal schema contract and never auto-enabled.
+      "0102_partner_public_presence.sql",
+      "0103_partner_google_presence.sql",
+      "0104_partner_supplies_orders.sql",
+      "0105_partner_first_shop_delivery_address.sql",
     ]);
   });
 

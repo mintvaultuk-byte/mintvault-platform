@@ -301,11 +301,23 @@ describe("partner workstation IA keeps live workflow primary and relegates dead 
     ]) {
       expect(APP).toContain(route);
     }
+    /*
+     * The invariant is that each shell link lands on a MOUNTED route rather than falling through the
+     * /partner/* catch-all to the dashboard — asserted by the route loop above, which is what
+     * actually protects the operator.
+     *
+     * `certificates`, `supplies`, `orders` and `public-profile` have all graduated from placeholders
+     * to real pages. Continuing to assert their placeholders would pin the old state, so the mounted
+     * components and the absence of their former placeholders are the contract.
+     */
     expect(APP).toContain("<PartnerCertificatesPage />");
     expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="certificates" />');
     expect(APP).toContain("<PartnerSuppliesPage />");
     expect(APP).toContain("<PartnerSuppliesOrdersPage />");
-    expect(APP).toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
+    expect(APP).toContain("<PartnerPublicProfilePage />");
+    expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="supplies" />');
+    expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="orders" />');
+    expect(APP).not.toContain('<PartnerWorkflowPlaceholderPage kind="public-profile" />');
   });
   it("relegated placeholder copy remains explicit about missing server contracts, not fake live data", () => {
     expect(WORKFLOW_PLACEHOLDER).toContain("partner-to-certificate contract");

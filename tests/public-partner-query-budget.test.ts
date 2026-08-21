@@ -1,0 +1,50 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { partnerAdminQuery } = vi.hoisted(() => ({ partnerAdminQuery: vi.fn() }));
+vi.mock("../server/partner/db", () => ({ partnerAdminQuery }));
+
+import {
+  getPublicPartnerLocation,
+  listPublicPartnerLocations,
+} from "../server/partner/public-presence-service";
+
+const rows = Array.from({ length: 100 }, (_, index) => ({
+  tenant_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  location_id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+  public_ref: `shop-ref-${String(index).padStart(3, "0")}`,
+  display_name: `Shop ${index}`,
+  location_name: `Town ${index}`,
+  privacy_state: "PUBLIC_STOREFRONT",
+  address: `${index} High Street, Town AB1 2CD`,
+  service_area: null,
+  website: null,
+  phone: null,
+  email: null,
+  maps_enabled: true,
+  cards_graded: "0",
+}));
+
+beforeEach(() => {
+  partnerAdminQuery.mockReset();
+  partnerAdminQuery.mockImplementation(async (sql: string) => {
+    if (sql.includes("to_regclass('public.partner_google_profile_cache')")) return { rows: [{ ready: true }] };
+    if (sql.includes("FROM partner_google_profile_cache")) return { rows: [] };
+    if (sql.includes("lower(public_ref)=lower($2)")) return { rows: [rows[0]] };
+    return { rows };
+  });
+});
+
+describe("public Partner fixed query budget", () => {
+  it("uses three bounded SQL calls for 100 directory rows, not one call per Partner", async () => {
+    expect(await listPublicPartnerLocations({ limit: 100 })).toHaveLength(100);
+    expect(partnerAdminQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps search and profile on the same three-call budget", async () => {
+    expect(await listPublicPartnerLocations({ search: "Town", limit: 100 })).toHaveLength(100);
+    expect(partnerAdminQuery).toHaveBeenCalledTimes(3);
+    partnerAdminQuery.mockClear();
+    expect(await getPublicPartnerLocation(rows[0].public_ref)).not.toBeNull();
+    expect(partnerAdminQuery).toHaveBeenCalledTimes(3);
+  });
+});

@@ -1,0 +1,9 @@
+{
+  "captured_at": "2026-08-21",
+  "governance_version": "1.2",
+  "input_hash": "f1ce573a2427e8fffbb28ca8e0a7d1e72069e8880e578335a9ffe566f5eaac10",
+  "baseline_main": "718f60e750128251fd78774616354bf7c3ebafe7",
+  "live_lineage": "337776e6",
+  "task": "growth-partner-canonical-reconciliation",
+  "external_mutations_authorised": false
+}

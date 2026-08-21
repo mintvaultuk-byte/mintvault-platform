@@ -3,6 +3,7 @@
  * routes are ever mounted here (see app.ts + the route-isolation test).
  */
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import {
   partnerLogin,
   partnerLogout,
@@ -63,7 +64,7 @@ import {
   getMfaStatus,
   verifyStepUp,
 } from "./mfa-service";
-import { recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
+import { hasRecentStepUp, recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
 import {
   canPurchaseCredits,
   listCreditPacks,
@@ -78,6 +79,21 @@ import {
   listOwnPartnerSessions,
   revokeOwnPartnerSession,
 } from "./portal-view-service";
+import {
+  beginGoogleBusinessConnection,
+  completeGoogleBusinessOAuth,
+  confirmGoogleBusinessCandidate,
+  disconnectGoogleBusinessConnection,
+  getGooglePresenceCapability,
+  getGooglePresenceStatus,
+  GooglePresenceError,
+  refreshGoogleBusinessConnection,
+} from "./google-presence-service";
+import {
+  getPartnerPublicProfileStatus,
+  PublicPublicationError,
+  savePartnerPublicDraft,
+} from "./public-publication-service";
 
 function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
   const g5 = toG5Error(err);
@@ -122,6 +138,78 @@ export async function currentPartnerOwnerActor(req: import("express").Request) {
       idempotencyKey: typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined,
     };
   });
+}
+
+function sendGooglePresenceError(res: import("express").Response, err: unknown): void {
+  if (err instanceof GooglePresenceError) {
+    const messages: Record<GooglePresenceError["code"], string> = {
+      forbidden: "Only a Partner Owner can manage the Google Business connection.",
+      invalid_request: "The Google Business request was invalid.",
+      location_unavailable: "That location or Google listing is not available.",
+      already_connected: "This location already has a Google Business connection.",
+      oauth_invalid: "Google authorisation could not be verified. Start the connection again.",
+      oauth_replayed: "This Google authorisation link has expired or has already been used.",
+      candidate_expired: "That Google listing choice has expired. Start the connection again.",
+      listing_already_connected: "That Google listing is already connected to a MintVault Partner location.",
+      operation_frozen: "Google Business changes are paused for this location.",
+      provider_unavailable: "Google Business is temporarily unavailable. Your MintVault profile is unaffected.",
+    };
+    res.status(err.status).json({ error: { code: err.code, message: messages[err.code] } });
+    return;
+  }
+  console.error("[partner google] operation failed:", (err as Error)?.message ?? "unknown");
+  res.status(503).json({
+    error: { code: "google_business_unavailable", message: "Google Business is temporarily unavailable." },
+  });
+}
+
+function sendPublicPublicationError(res: import("express").Response, err: unknown): void {
+  if (err instanceof PublicPublicationError) {
+    res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  console.error("[partner-publication] request failed:", (err as Error)?.message ?? "unknown");
+  res.status(503).json({ error: { code: "PUBLIC_PROFILE_UNAVAILABLE", message: "Public profiles are temporarily unavailable." } });
+}
+
+// The actor-bound Partner limiter below is the primary control because OAuth
+// query values and source IPs are attacker-controlled. Keep this conventional
+// edge limiter too: it bounds burst traffic before callback authorization and
+// is recognisable to the static security gate that protects this exposed route.
+const googleCallbackRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
+
+/** OAuth returns as a top-level navigation, so the standard JSON mutation
+ * guards would strand the browser on a JSON error document. Enforce the same
+ * three gates before state consumption/token exchange and redirect to an
+ * actionable, secret-free Partner page on denial. */
+async function requireGoogleCallbackMutation(
+  req: import("express").Request,
+  res: import("express").Response,
+  next: import("express").NextFunction
+): Promise<void> {
+  const principal = req.partner;
+  if (!principal) {
+    res.redirect(303, "/partner/login");
+    return;
+  }
+  if (principal.viewOnly || principal.sensitiveDisabled) {
+    res.redirect(303, "/partner/public-profile?google=frozen");
+    return;
+  }
+  try {
+    if (await hasRecentStepUp(principal.sessionId)) {
+      next();
+      return;
+    }
+  } catch (err) {
+    console.error("[partner google] callback step-up verification failed:", (err as Error).message);
+  }
+  res.redirect(303, "/partner/public-profile?google=step_up_required");
 }
 
 /**
@@ -855,6 +943,193 @@ export function partnerApiRouter(): Router {
     });
     res.json(rows);
   });
+
+  // Public-profile state is backed by the separate public-only consent schema.
+  // Operational addresses remain visible only on this authenticated surface;
+  // preview is built by the exact public DTO mapper.
+  r.get("/public-profile", requirePartnerCapability("partner.location.view"), async (req, res) => {
+    noStore(res);
+    try {
+      res.json(await getPartnerPublicProfileStatus(req.partner!));
+    } catch (err) {
+      sendPublicPublicationError(res, err);
+    }
+  });
+
+  r.post(
+    "/public-profile/locations/:locationId",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    requireRecentAuth(),
+    async (req, res) => {
+      noStore(res);
+      try {
+        if (
+          !Number.isInteger(req.body?.expectedProfileVersion) || req.body.expectedProfileVersion < 0 ||
+          !Number.isInteger(req.body?.expectedLocationVersion) || req.body.expectedLocationVersion < 0
+        ) {
+          res.status(400).json({ error: "The exact profile and location versions are required before saving." });
+          return;
+        }
+        await savePartnerPublicDraft(req.partner!, String(req.params.locationId), req.body ?? {});
+        res.json({ ok: true });
+      } catch (err) {
+        sendPublicPublicationError(res, err);
+      }
+    }
+  );
+
+  // Google Business is an optional, isolated Partner feature. Its positive gate
+  // is evaluated inside these routes only; missing Google config/schema never
+  // changes portal login, public-profile reads, or any grading operation.
+  r.get("/google-business/status", requirePartnerCapability("partner.location.view"), async (req, res) => {
+    const capability = await getGooglePresenceCapability();
+    if (!capability.available) {
+      res.json({ available: false, reason: capability.reason, owner: false, locations: [] });
+      return;
+    }
+    try {
+      res.json({ available: true, ...(await getGooglePresenceStatus(req.partner!)) });
+    } catch (err) {
+      sendGooglePresenceError(res, err);
+    }
+  });
+
+  r.post(
+    "/google-business/connect",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    requireRecentAuth(),
+    async (req, res) => {
+      const capability = await getGooglePresenceCapability();
+      if (!capability.available) {
+        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        return;
+      }
+      if (typeof req.body?.locationId !== "string") {
+        sendGooglePresenceError(res, new GooglePresenceError("invalid_request", 400));
+        return;
+      }
+      try {
+        res.json(await beginGoogleBusinessConnection(req.partner!, req.body.locationId, capability.config));
+      } catch (err) {
+        sendGooglePresenceError(res, err);
+      }
+    }
+  );
+
+  r.get(
+    "/google-business/callback",
+    googleCallbackRateLimit,
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireGoogleCallbackMutation,
+    async (req, res) => {
+      const capability = await getGooglePresenceCapability();
+      if (!capability.available) {
+        res.redirect(303, "/partner/public-profile?google=unavailable");
+        return;
+      }
+      if (typeof req.query.error === "string") {
+        res.redirect(303, "/partner/public-profile?google=cancelled");
+        return;
+      }
+      try {
+        await completeGoogleBusinessOAuth({
+          principal: req.partner!,
+          state: typeof req.query.state === "string" ? req.query.state : "",
+          code: typeof req.query.code === "string" ? req.query.code : "",
+          config: capability.config,
+        });
+        res.redirect(303, "/partner/public-profile?google=select");
+      } catch (err) {
+        if (err instanceof GooglePresenceError) {
+          res.redirect(303, `/partner/public-profile?google=${encodeURIComponent(err.code)}`);
+          return;
+        }
+        console.error("[partner google] callback failed:", (err as Error)?.message ?? "unknown");
+        res.redirect(303, "/partner/public-profile?google=unavailable");
+      }
+    }
+  );
+
+  r.post(
+    "/google-business/confirm",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    requireRecentAuth(),
+    async (req, res) => {
+      const capability = await getGooglePresenceCapability();
+      if (!capability.available) {
+        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        return;
+      }
+      if (typeof req.body?.locationId !== "string" || typeof req.body?.candidateHandle !== "string") {
+        sendGooglePresenceError(res, new GooglePresenceError("invalid_request", 400));
+        return;
+      }
+      try {
+        await confirmGoogleBusinessCandidate({
+          principal: req.partner!,
+          locationId: req.body.locationId,
+          candidateHandle: req.body.candidateHandle,
+        });
+        res.json({ ok: true });
+      } catch (err) {
+        sendGooglePresenceError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/google-business/:locationId/refresh",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    requireRecentAuth(),
+    async (req, res) => {
+      const capability = await getGooglePresenceCapability();
+      if (!capability.available) {
+        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        return;
+      }
+      try {
+        await refreshGoogleBusinessConnection(req.partner!, String(req.params.locationId), capability.config);
+        res.json({ ok: true });
+      } catch (err) {
+        sendGooglePresenceError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/google-business/:locationId/disconnect",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.location.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    requireRecentAuth(),
+    async (req, res) => {
+      const capability = await getGooglePresenceCapability();
+      if (!capability.available) {
+        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        return;
+      }
+      try {
+        await disconnectGoogleBusinessConnection(req.partner!, String(req.params.locationId), capability.config);
+        res.json({ ok: true });
+      } catch (err) {
+        sendGooglePresenceError(res, err);
+      }
+    }
+  );
 
   // ---- location switching (Item 2) ----
   r.post("/session/location", partnerLocationSwitchLimiter, requirePartnerAuth, async (req, res) => {

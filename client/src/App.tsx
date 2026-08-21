@@ -36,6 +36,9 @@ const DevCardDetailsHarness = import.meta.env.DEV
 const DevAdminShellGeometryHarness = import.meta.env.DEV
   ? lazy(() => import("@/pages/dev-admin-shell-geometry-harness"))
   : (null as unknown as ReturnType<typeof lazy>);
+const DevGrowthCommandVisualHarness = import.meta.env.DEV
+  ? lazy(() => import("@/pages/dev-growth-command-visual-harness"))
+  : (null as unknown as ReturnType<typeof lazy>);
 const CertDetailPage = lazy(() => import("@/pages/cert-detail"));
 const WhyMintVaultPage = lazy(() => import("@/pages/why-mintvault"));
 const PartnersPage = lazy(() => import("@/pages/partners"));
@@ -171,6 +174,7 @@ const PartnerGradingPage = lazy(() => import("@/pages/partner/grading"));
 const PartnerCustomersPage = lazy(() => import("@/pages/partner/customers"));
 const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
+const PartnerPublicProfilePage = lazy(() => import("@/pages/partner/public-profile"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
@@ -178,6 +182,8 @@ const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"
 const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
 const PartnerSuppliesOrdersPage = lazy(() => import("@/pages/partner/supplies-orders"));
 const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
+const FindAPartnerPage = lazy(() => import("@/pages/find-a-partner"));
+const PublicPartnerProfilePage = lazy(() => import("@/pages/public-partner-profile"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -405,7 +411,7 @@ function PartnerPortalRoutes() {
           </Route>
           <Route path="/partner/public-profile">
             <PartnerRouteGuard requiredPermission="partner.location.view">
-              <PartnerWorkflowPlaceholderPage kind="public-profile" />
+              <PartnerPublicProfilePage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/help">
@@ -455,6 +461,7 @@ function Router() {
           )}
           {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
           {import.meta.env.DEV && <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />}
+          {import.meta.env.DEV && <Route path="/dev/growth-command-visual" component={DevGrowthCommandVisualHarness} />}
           <Route path="/admin/command" component={AdminCommandCentrePage} />
           <Route path="/admin/growth" component={AdminGrowthPage} />
           <Route path="/admin" component={AdminPage} />
@@ -648,6 +655,8 @@ function Router() {
                   <Redirect to="/verify" />
                 </Route>
                 <Route path="/why-mintvault" component={WhyMintVaultPage} />
+                <Route path="/partners/location/:publicRef" component={PublicPartnerProfilePage} />
+                <Route path="/find-a-partner" component={FindAPartnerPage} />
                 <Route path="/partners" component={PartnersPage} />
                 <Route path="/labels" component={LabelsPage} />
                 <Route path="/reports" component={ReportsPage} />
@@ -753,7 +762,14 @@ function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
     <FeatureFlagsContext.Provider
-      value={data || { legalPagesLive: false, privacyNoticeLive: false, partnerApplicationsLive: false }}
+      value={
+        data || {
+          legalPagesLive: false,
+          privacyNoticeLive: false,
+          partnerApplicationsLive: false,
+          publicPartnerDirectoryLive: false,
+        }
+      }
     >
       {children}
     </FeatureFlagsContext.Provider>

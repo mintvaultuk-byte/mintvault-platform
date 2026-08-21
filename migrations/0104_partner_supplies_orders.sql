@@ -1,4 +1,4 @@
--- 0102 — Partner supplies ordering (STAGING rollout candidate)
+-- 0104 — Partner supplies ordering (STAGING rollout candidate)
 --
 -- Durable, tenant-scoped operational orders for the fixed Partner supplies catalogue.  This is not
 -- a checkout, payment, price or inventory system: it records a Partner request first, snapshots
@@ -21,7 +21,7 @@ BEGIN
   IF to_regclass('public.partner_roles') IS NULL
      OR to_regclass('public.partner_permissions') IS NULL
      OR to_regclass('public.partner_role_permissions') IS NULL THEN
-    RAISE EXCEPTION '0102 requires the Partner RBAC catalogue from 0034';
+    RAISE EXCEPTION '0104 requires the Partner RBAC catalogue from 0034';
   END IF;
 END$$;
 
@@ -288,12 +288,12 @@ BEGIN
      OR to_regclass('public.partner_supplies_order_items') IS NULL
      OR to_regclass('public.partner_supplies_order_events') IS NULL
      OR to_regclass('public.partner_supplies_order_notifications') IS NULL THEN
-    RAISE EXCEPTION '0102 did not create the Partner supplies tables';
+    RAISE EXCEPTION '0104 did not create the Partner supplies tables';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_partner_supplies_orders_tenant_idempotency') THEN
-    RAISE EXCEPTION '0102 did not create tenant-local supplies idempotency';
+    RAISE EXCEPTION '0104 did not create tenant-local supplies idempotency';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_partner_supplies_orders_enforce_update' AND tgenabled = 'A') THEN
-    RAISE EXCEPTION '0102 did not enable the supplies transition trigger';
+    RAISE EXCEPTION '0104 did not enable the supplies transition trigger';
   END IF;
 END$$;

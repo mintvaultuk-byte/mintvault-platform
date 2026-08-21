@@ -11,7 +11,7 @@
 
 ## Exact source changes
 
-- Add `migrations/0102_partner_supplies_orders.sql` and matching additive Drizzle mirrors in `shared/partner-schema.ts`.
+- Add `migrations/0104_partner_supplies_orders.sql` and matching additive Drizzle mirrors in `shared/partner-schema.ts`.
 - Add only explicit `partner.supplies.view` and `partner.supplies.submit` RBAC permissions to the canonical map and migration seed; no existing permission is revoked.
 - Add `server/partner/supplies-service.ts`, `server/partner/supplies-routes.ts`, and `server/partner/supplies-admin-routes.ts`; mount through the existing authenticated Partner and Super Admin composition only.
 - Add a narrow `sendPartnerSuppliesOrderNotification` template to the existing Resend authority and a bounded advisory-locked retry tick. No new provider, no hard-coded recipient, and no payment code.

@@ -32,6 +32,7 @@ import {
   normalisePartnerOperationalEmail,
 } from "@shared/partner-operational-contact";
 import type { PartnerOperationalReadiness, ReadinessAction, ReadinessDimensionKey } from "@shared/partner-readiness";
+import { PUBLIC_PARTNER_PROFILE_PREFIX } from "./public-presence-service";
 
 export interface ActorContext {
   actorUserId: string;
@@ -2820,6 +2821,11 @@ export interface PartnerLocationRow {
   stationCount: number;
   /** Users explicitly assigned here. Org-wide roles reach every location and are NOT counted. */
   assignedUserCount: number;
+  publicProfileConfigured: boolean;
+  publicProfileReady: boolean;
+  publicProfileLive: boolean;
+  publicProfileBlockingReasons: string[];
+  publicProfileUrl: string;
 }
 
 function cleanLocationName(value: unknown): string {
@@ -2889,6 +2895,14 @@ export async function listPartnerLocations(partnerId: string): Promise<PartnerLo
     createdAt: new Date(r.created_at).toISOString(),
     stationCount: Number(r.station_count),
     assignedUserCount: Number(r.assigned_user_count),
+    // Publication state is intentionally loaded from the optional public-presence
+    // schema through the dedicated status endpoint. Keeping the base operational
+    // list independent allows schema-first deployment.
+    publicProfileConfigured: false,
+    publicProfileReady: false,
+    publicProfileLive: false,
+    publicProfileBlockingReasons: ["PUBLICATION_STATUS_SEPARATE"],
+    publicProfileUrl: `${PUBLIC_PARTNER_PROFILE_PREFIX}${encodeURIComponent(r.public_ref)}`,
   }));
 }
 

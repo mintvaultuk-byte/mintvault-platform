@@ -419,7 +419,7 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
   });
 
   it("approves only the protected 0103 first-shop management-audit CHECK widen", () => {
-    const migrationPath = "migrations/0103_partner_first_shop_delivery_address.sql";
+    const migrationPath = "migrations/0105_partner_first_shop_delivery_address.sql";
     const migration = readFileSync(migrationPath, "utf8");
     const findings = lintSql(migration);
     const dropConstraint = findings.find((x) => x.kind === "drop_constraint");
@@ -431,7 +431,7 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
   });
 
   it("does not let the 0103 approval omit or add management-audit actions", () => {
-    const migrationPath = "migrations/0103_partner_first_shop_delivery_address.sql";
+    const migrationPath = "migrations/0105_partner_first_shop_delivery_address.sql";
     const migration = readFileSync(migrationPath, "utf8");
     const findings = lintSql(migration);
 

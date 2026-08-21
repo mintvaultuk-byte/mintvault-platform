@@ -200,7 +200,7 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     ].every((action) => block.includes(`'${action}'`));
   }
 
-  if (filename === "0103_partner_first_shop_delivery_address.sql") {
+  if (filename === "0105_partner_first_shop_delivery_address.sql") {
     // 0103 makes the existing management-audit vocabulary one action wider. PostgreSQL cannot
     // alter a CHECK expression in place, so this is a deliberately narrow transactional
     // DROP/ADD replacement: exact table/constraint, exact order, and the complete expected
@@ -305,7 +305,7 @@ function approvedDestructiveFindingSuffix(filePath: string): string {
   if (filename === "0096_partner_card_job_void_management_audit.sql") {
     return " (approved protected constraint replacement)";
   }
-  if (filename === "0103_partner_first_shop_delivery_address.sql") {
+  if (filename === "0105_partner_first_shop_delivery_address.sql") {
     return " (approved protected first-shop audit constraint replacement)";
   }
   return " (approved protected migration replacement)";

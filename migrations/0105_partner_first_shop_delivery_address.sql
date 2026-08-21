@@ -1,4 +1,4 @@
--- 0103 — Canonical structured delivery address for first-shop onboarding
+-- 0105 — Canonical structured delivery address for first-shop onboarding
 --
 -- A Partner's delivery location has always been `partner_locations`, but the
 -- original model had only a display string. Supplies then had to borrow postcode
@@ -37,7 +37,7 @@ BEGIN
       FROM information_schema.columns
      WHERE table_schema='public' AND table_name='partner_locations' AND column_name='address_postcode'
   ) THEN
-    RAISE EXCEPTION '0103 did not add partner_locations.address_postcode';
+    RAISE EXCEPTION '0105 did not add partner_locations.address_postcode';
   END IF;
   IF NOT EXISTS (
     SELECT 1
@@ -47,6 +47,6 @@ BEGIN
        AND pg_get_constraintdef(oid) LIKE '%partner_card_job_voided%'
        AND pg_get_constraintdef(oid) LIKE '%partner_created%'
   ) THEN
-    RAISE EXCEPTION '0103 did not preserve and widen the Partner management audit vocabulary';
+    RAISE EXCEPTION '0105 did not preserve and widen the Partner management audit vocabulary';
   END IF;
 END$$;
