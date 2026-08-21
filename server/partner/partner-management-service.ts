@@ -1939,7 +1939,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       postcode: foundation.address_postcode,
       country: foundation.address_country,
     });
-  // Records created before 0103 retain the raw location address plus profile postcode/country.
+  // Records created before 0105 retain the raw location address plus profile postcode/country.
   // Once any structured value exists, incomplete structured data must fail closed instead of
   // falling back to stale legacy fields.
   const legacyDeliveryAddressReady =

@@ -120,6 +120,21 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
 ] as const;
 
 /**
+ * Partner onboarding-readiness proofs.
+ *
+ * getPartnerOnboardingReadiness() reads the STRUCTURED delivery-address columns that 0105 adds to
+ * partner_locations (address_line1/city/postcode/country). Without 0105 the readiness query raises
+ * `column main.address_line1 does not exist`, the route answers 500, and every downstream
+ * invitation/login assertion in the onboarding matrix then fails as though authentication itself
+ * were broken. That is the same mis-read the 0086 note above records, so the FIXTURE is corrected
+ * here rather than the assertions weakened.
+ */
+export const PARTNER_MIGRATIONS_WITH_ONBOARDING_READINESS = [
+  ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  "0105_partner_first_shop_delivery_address",
+] as const;
+
+/**
  * Partner user management + the final-owner invariant, WITH the credit lifecycle.
  *
  * Submit now reserves a grading credit PER CARD (server/partner/submission-service.ts), so any
