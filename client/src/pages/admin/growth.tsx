@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, Copy, ExternalLink, RefreshCw } from "lucide-react";
-import { AdminButton, AdminShell, Badge, Panel, StatCard, adminButtonClass } from "@/components/admin";
+import { AdminButton, AdminShell, Badge, Panel, adminButtonClass } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 const BASE = "/api/super-admin/growth";
@@ -396,23 +396,6 @@ const date = (value: string | null) =>
   value && !Number.isNaN(new Date(value).getTime())
     ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
     : "Not available";
-function performanceMetric(item: PerformanceAggregate, lastUpdated: string | null): Metric {
-  const p95 = item.p95LatencyMs;
-  const confidence =
-    item.confidence === "SUFFICIENT"
-      ? `P50 ${item.p50LatencyMs ?? "—"}ms · average ${item.averageLatencyMs ?? "—"}ms · ${item.fiveXCount} 5xx`
-      : item.confidence === "LOW_SAMPLE"
-        ? `LOW SAMPLE: ${item.requestCount}/${5} requests; p95 is shown without a health colour.`
-        : "INSUFFICIENT DATA: no completed request sample in this rolling window.";
-  return {
-    state: item.requestCount ? "REAL" : "INSUFFICIENT_DATA",
-    status: item.status,
-    value: p95 == null ? "INSUFFICIENT DATA" : `${p95} ms`,
-    source: "Bounded machine-local route telemetry",
-    reason: confidence,
-    lastUpdated,
-  };
-}
 const text = (metric: Metric) =>
   (metric.state === "REAL" || metric.state === "STALE") && metric.value !== undefined
     ? `${metric.value}${metric.unit ? ` ${metric.unit}` : ""}${metric.state === "STALE" ? " · STALE" : ""}`
@@ -530,32 +513,39 @@ function Sparkline({ values, status }: { values: Array<number | null>; status: H
     </svg>
   );
 }
+/**
+ * The full-size thin radial gauge. Reserved for a bounded percentage — CPU, RAM
+ * or pressure — where the proportion itself is the message. A boolean state uses
+ * StatusTile instead, so a ring never implies a measurement that does not exist.
+ */
 function RadialRing({ label, metric }: { label: string; metric: Metric }) {
   const numeric = typeof metric.value === "number" ? Math.min(100, Math.max(0, metric.value)) : null;
   const accent = statusAccent(metric.status);
   const progress = numeric == null ? 0 : numeric * 3.6;
   return (
-    <div
-      className={`rounded-xl border p-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,.05)] ${tone(metric.status)}`}
+    <article
+      className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 p-3 text-center"
       data-testid={`growth-gauge-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`}
+      title={metric.reason ?? metric.source}
     >
-      <div className="flex justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">{label}</p>
-        <span className="text-[10px] font-semibold tracking-[0.12em]">{metric.status}</span>
+      <div className="flex items-center justify-between gap-2">
+        <p className="break-words text-[10px] font-semibold uppercase tracking-[0.08em]">{label}</p>
+        <span className="text-[10px] font-semibold tracking-[0.1em]" style={{ color: accent }}>
+          {metric.status}
+        </span>
       </div>
       <div
-        className="relative mx-auto mt-4 grid h-24 w-24 place-items-center rounded-full"
+        className="relative mx-auto mt-3 grid h-20 w-20 place-items-center rounded-full"
         role="img"
         aria-label={`${label}: ${metric.status}; ${text(metric)}`}
-        style={{ background: `conic-gradient(${accent} ${progress}deg, rgba(255,255,255,.08) ${progress}deg 360deg)` }}
+        style={{ background: `conic-gradient(${accent} ${progress}deg, rgba(255,255,255,.10) ${progress}deg 360deg)` }}
       >
-        <div className="grid h-[5.1rem] w-[5.1rem] place-items-center rounded-full bg-[var(--admin-panel,#151515)] px-2">
-          <span className="text-sm font-semibold leading-tight">{text(metric)}</span>
+        <div className="grid h-[4.3rem] w-[4.3rem] place-items-center rounded-full bg-[var(--admin-panel,#151515)] px-1">
+          <span className="break-words text-sm font-semibold leading-tight">{text(metric)}</span>
         </div>
       </div>
-      <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
-      <p className="mt-2 text-[10px] uppercase opacity-60">Updated {date(metric.lastUpdated)}</p>
-    </div>
+      <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">{date(metric.lastUpdated)}</p>
+    </article>
   );
 }
 function DigitalMetric({
@@ -569,55 +559,49 @@ function DigitalMetric({
   sampleCount?: number;
   trend?: Array<number | null>;
 }) {
+  const value = text(metric);
   return (
-    <div className={`rounded-xl border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.05)] ${tone(metric.status)}`}>
-      <div className="flex justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">{label}</p>
-        <span className="text-[10px] font-semibold">{metric.status}</span>
+    <article
+      className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 p-3"
+      title={metric.reason ?? metric.source}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <p className="break-words text-[10px] font-semibold uppercase tracking-[0.08em]">{label}</p>
+        <span className="text-[10px] font-semibold" style={{ color: statusAccent(metric.status) }}>
+          {metric.status}
+        </span>
       </div>
-      <p className="mt-3 text-3xl font-semibold tracking-tight">{text(metric)}</p>
+      <p className={`mt-2 break-words font-semibold tracking-tight ${kpiValueClass(value)}`}>{value}</p>
       {typeof sampleCount === "number" && (
-        <p className="mt-1 text-[10px] uppercase tracking-[0.12em] opacity-70">{sampleCount} requests</p>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.1em] opacity-70">{number(sampleCount)} requests</p>
       )}
       {trend && <Sparkline values={trend} status={metric.status} />}
-      <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
-      <p className="mt-2 text-[10px] uppercase opacity-60">Updated {date(metric.lastUpdated)}</p>
-    </div>
+      <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">{date(metric.lastUpdated)}</p>
+    </article>
   );
 }
+/**
+ * The canonical compact status tile. One label, one value, one dot. Used for
+ * every service and configuration state across the console so a boolean never
+ * occupies the space of a measured metric.
+ */
 function StatusTile({ label, metric }: { label: string; metric: Metric }) {
   return (
-    <div className={`rounded-xl border p-4 shadow-[inset_0_1px_0_rgba(255,255,255,.05)] ${tone(metric.status)}`}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">{label}</p>
-        <span
-          className="h-2 w-2 rounded-full"
-          style={{ backgroundColor: statusAccent(metric.status) }}
-          aria-hidden="true"
-        />
+    <article
+      className="flex items-center justify-between gap-2 rounded-lg border border-[var(--admin-line,#333)] bg-black/15 px-3 py-2"
+      title={metric.reason ?? metric.source}
+    >
+      <div className="min-w-0">
+        <p className="break-words text-[10px] font-semibold uppercase tracking-[0.06em]">{label}</p>
+        <p className="mt-0.5 break-words text-xs font-semibold leading-snug">{text(metric)}</p>
       </div>
-      <p className="mt-3 text-lg font-semibold">{text(metric)}</p>
-      <p className="mt-2 text-xs opacity-80">{metric.reason ?? metric.source}</p>
-      <p className="mt-2 text-[10px] uppercase opacity-60">
-        {metric.status} · {date(metric.lastUpdated)}
-      </p>
-    </div>
-  );
-}
-function Gauge({ label, metric }: { label: string; metric: Metric }) {
-  if (label === "CPU" || label === "RAM" || label === "Capacity headroom")
-    return <RadialRing label={label} metric={metric} />;
-  if (label.includes("P95") || label.includes("Request") || label.includes("5XX"))
-    return <DigitalMetric label={label} metric={metric} />;
-  return <StatusTile label={label} metric={metric} />;
-}
-function MetricCard({ label, metric }: { label: string; metric: Metric }) {
-  return (
-    <div className="rounded border border-[var(--admin-line,#333)] p-3">
-      <p className="text-xs uppercase text-[var(--admin-muted,#8a8a8a)]">{label}</p>
-      <p className="mt-1 font-semibold">{text(metric)}</p>
-      <p className="mt-1 text-xs text-[var(--admin-muted,#8a8a8a)]">{metric.reason ?? metric.source}</p>
-    </div>
+      <span
+        className="mt-0.5 h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: statusAccent(metric.status) }}
+        role="img"
+        aria-label={`${label} status ${metric.status}`}
+      />
+    </article>
   );
 }
 function IncidentBanner({ incident }: { incident: Intelligence["incident"] }) {
@@ -830,14 +814,6 @@ function CommercialScoreboardPanel({
     </Panel>
   );
 }
-function Value({ label, value }: { label: string; value: Count | undefined }) {
-  return (
-    <div>
-      <p className="text-xs uppercase text-[var(--admin-muted,#8a8a8a)]">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value ? number(value.value) : "…"}</p>
-    </div>
-  );
-}
 function PartnerValue({ label, value }: { label: string; value: PartnerOperationalMetric }) {
   return (
     <div>
@@ -892,6 +868,24 @@ export function trafficDistributionSegments(
   }));
 }
 
+/**
+ * Operational status values must stay readable. An ellipsis on a state such as
+ * "INSUFFICIENT TELEMETRY" or "HEALTHY HEADROOM" hides the only word that tells
+ * the owner what to do, so the value step-scales and may wrap to two lines
+ * instead of truncating.
+ */
+export function kpiValueClass(value: string): string {
+  // Sized against the narrowest cell the strip produces: a seven-column strip on
+  // a 1440px viewport leaves about 127px of content width. A single word wider
+  // than that would be split mid-word by the break-words safety net, which is
+  // how "HEADROOM" became "HEADROO / M", so each tier is chosen to fit there.
+  const length = value.length;
+  if (length <= 6) return "text-xl sm:text-2xl";
+  if (length <= 10) return "text-lg sm:text-xl";
+  if (length <= 16) return "text-sm sm:text-base leading-snug";
+  return "text-xs sm:text-sm leading-snug";
+}
+
 function OverviewKpi({
   label,
   value,
@@ -906,13 +900,31 @@ function OverviewKpi({
   return (
     <article className={`min-w-0 border-l-2 px-3 py-2 ${tone(status)}`}>
       <p className="text-[9px] font-semibold uppercase tracking-[0.13em] opacity-75">{label}</p>
-      <p className="mt-1 truncate text-xl font-semibold tracking-tight sm:text-2xl" title={value}>
+      <p className={`mt-1 break-words font-semibold tracking-tight ${kpiValueClass(value)}`} title={value}>
         {value}
       </p>
-      <p className="mt-1 truncate text-[10px] opacity-75" title={detail}>
+      <p className="mt-1 line-clamp-2 text-[10px] opacity-75" title={detail}>
         {detail}
       </p>
     </article>
+  );
+}
+
+/** One KPI strip implementation. Every tab uses it so the top band never drifts. */
+const KPI_STRIP_COLUMNS: Record<number, string> = {
+  4: "sm:grid-cols-2 lg:grid-cols-4",
+  5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5",
+  6: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6",
+  7: "sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7",
+};
+function GrowthKpiStrip({ label, columns = 5, children }: { label: string; columns?: number; children: ReactNode }) {
+  return (
+    <section
+      className={`grid gap-px overflow-hidden rounded-xl border border-[var(--admin-line,#333)] bg-[var(--admin-line,#333)] ${KPI_STRIP_COLUMNS[columns] ?? KPI_STRIP_COLUMNS[5]}`}
+      aria-label={label}
+    >
+      {children}
+    </section>
   );
 }
 
@@ -936,8 +948,8 @@ function CompactRing({ label, metric }: { label: string; metric: Metric }) {
           </div>
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">{label}</p>
-          <p className="mt-1 text-xs opacity-75">
+          <p className="break-words text-[10px] font-semibold uppercase tracking-[0.08em]">{label}</p>
+          <p className="mt-1 break-words text-[10px] leading-tight opacity-75">
             {metric.status} · {date(metric.lastUpdated)}
           </p>
         </div>
@@ -964,6 +976,533 @@ function CompactDigital({ label, metric }: { label: string; metric: Metric }) {
         {metric.status} · {date(metric.lastUpdated)}
       </p>
     </article>
+  );
+}
+
+/**
+ * A polished "nothing real to draw yet" panel. It preserves the chart's place in
+ * the layout without inventing a single point, so an unconnected authority reads
+ * as deliberate rather than broken.
+ */
+function GrowthEmptyState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="flex min-h-[8.5rem] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--admin-line,#333)] bg-black/20 px-4 py-6 text-center">
+      <svg className="h-8 w-14 opacity-30" viewBox="0 0 56 32" aria-hidden="true">
+        <path d="M2 26 H54" stroke="currentColor" strokeWidth="1.5" strokeOpacity=".5" />
+        <path d="M2 20 H54 M2 12 H54" stroke="currentColor" strokeWidth="1" strokeOpacity=".22" />
+        <path d="M4 24 L16 18 L28 21 L40 11 L52 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" />
+      </svg>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-ink-dim,#b9b2a1)]">{title}</p>
+      <p className="max-w-sm text-[11px] text-[var(--admin-muted,#8a8a8a)]">{detail}</p>
+    </div>
+  );
+}
+
+type BarRow = { key: string; label: string; value: number; display: string; status?: Health };
+
+/**
+ * The single categorical chart for the whole console. It plots measured
+ * categories only; an empty input renders the empty state rather than a zeroed
+ * axis, because a flat line at zero reads as a measurement and this is not one.
+ */
+function GrowthBarSeries({ rows, empty }: { rows: BarRow[]; empty: { title: string; detail: string } }) {
+  const measured = rows.filter((row) => Number.isFinite(row.value) && row.value > 0);
+  if (!measured.length) return <GrowthEmptyState title={empty.title} detail={empty.detail} />;
+  const maximum = Math.max(...measured.map((row) => row.value));
+  return (
+    <ul className="space-y-2">
+      {measured.map((row) => (
+        <li key={row.key} className="min-w-0">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0 break-words text-[11px] leading-tight" title={row.label}>
+              {row.label}
+            </span>
+            <span className="shrink-0 text-[11px] font-semibold tabular-nums">{row.display}</span>
+          </div>
+          <div className="mt-1 h-2 w-full overflow-hidden rounded-sm bg-white/[.06]">
+            <div
+              className="h-full rounded-sm"
+              style={{
+                width: `${Math.max(2, (row.value / maximum) * 100)}%`,
+                background: row.status ? statusAccent(row.status) : "#d4af37",
+              }}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+type FunnelStep = { key: string; label: string; value: number | null; detail: string };
+
+/**
+ * Conversion funnel. Each step is drawn from its own measured count; a step with
+ * no authority is drawn muted and labelled, never interpolated from neighbours.
+ */
+function GrowthFunnel({ steps }: { steps: FunnelStep[] }) {
+  const known = steps.filter((step): step is FunnelStep & { value: number } => typeof step.value === "number");
+  if (known.length < 2)
+    return (
+      <GrowthEmptyState
+        title="Funnel collecting"
+        detail="At least two canonical funnel stages must be measured before a funnel can be drawn."
+      />
+    );
+  const head = Math.max(...known.map((step) => step.value), 1);
+  return (
+    <ol className="space-y-2">
+      {steps.map((step, index) => {
+        const measured = typeof step.value === "number";
+        const width = measured ? Math.max(4, ((step.value as number) / head) * 100) : 100;
+        const previous = steps[index - 1];
+        // A stage that exceeds the one above it is a change of unit, not a
+        // conversion — paid cards are counted per card, paid orders per order.
+        // Showing a percentage there would read as a >100% conversion rate, so a
+        // multiplier is shown instead.
+        const carry =
+          measured && previous && typeof previous.value === "number" && previous.value > 0
+            ? (step.value as number) <= previous.value
+              ? `${(((step.value as number) / previous.value) * 100).toFixed(1)}%`
+              : `×${((step.value as number) / previous.value).toFixed(1)}`
+            : null;
+        return (
+          <li key={step.key} className="min-w-0">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 truncate text-[11px]">{step.label}</span>
+              <span className="shrink-0 text-[11px] font-semibold tabular-nums">
+                {measured ? number(step.value as number) : "Not measured"}
+                {carry && <span className="ml-2 opacity-60">{carry}</span>}
+              </span>
+            </div>
+            <div className="mt-1 h-6 w-full overflow-hidden rounded-sm bg-white/[.05]">
+              <div
+                className="grid h-full place-items-start rounded-sm"
+                style={{
+                  width: `${width}%`,
+                  background: measured
+                    ? "linear-gradient(90deg,rgba(212,175,55,.85),rgba(212,175,55,.35))"
+                    : "repeating-linear-gradient(135deg,rgba(255,255,255,.06) 0 6px,transparent 6px 12px)",
+                }}
+              />
+            </div>
+            <p className="mt-1 text-[10px] text-[var(--admin-muted,#8a8a8a)]">{step.detail}</p>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
+ * AI / model service health is only reported where the route class has actually
+ * been exercised. There is no separate provider probe, so an unexercised class
+ * reports NOT INSTRUMENTED rather than borrowing another service's colour.
+ */
+export function aiModelServiceMetric(diagnostics: PerformanceDiagnostics, lastUpdated: string | null): Metric {
+  const entry = diagnostics.trafficClasses.find((item) => item.trafficClass === "AI_MODEL");
+  if (!entry || entry.requestCount === 0) {
+    return {
+      state: "NOT_INSTRUMENTED",
+      status: "UNKNOWN",
+      source: "Bounded route telemetry",
+      reason: "No AI or model request completed in this window, so no health can be claimed.",
+      lastUpdated,
+    };
+  }
+  return {
+    state: entry.confidence === "SUFFICIENT" ? "REAL" : "INSUFFICIENT_DATA",
+    status: entry.confidence === "SUFFICIENT" ? entry.status : "UNKNOWN",
+    value: entry.p95LatencyMs == null ? `${entry.requestCount} requests` : `${entry.p95LatencyMs} ms p95`,
+    unit: "",
+    source: "Bounded route telemetry",
+    ...(entry.confidence === "SUFFICIENT" ? {} : { reason: `Low sample · ${entry.requestCount} requests` }),
+    lastUpdated,
+  };
+}
+
+export type CampaignSummary = {
+  activeCount: number;
+  paidSubmissions: number;
+  revenuePence: number;
+  partnerApplications: number;
+  bestLabel: string;
+  bestDetail: string;
+};
+
+/**
+ * Campaign headline figures, summed from the controlled-code rows the server
+ * returns. A campaign counts as active only where it produced a measured
+ * outcome, so an approved but unused code never inflates the count.
+ */
+export function deriveCampaigns(rows: Campaign[]): CampaignSummary {
+  const measured = rows.filter((row) => row.paidSubmissions > 0 || row.revenuePence > 0 || row.partnerApplications > 0);
+  const best = [...measured].sort(
+    (a, b) => b.revenuePence - a.revenuePence || b.paidSubmissions - a.paidSubmissions
+  )[0];
+  return {
+    activeCount: measured.length,
+    paidSubmissions: rows.reduce((sum, row) => sum + row.paidSubmissions, 0),
+    revenuePence: rows.reduce((sum, row) => sum + row.revenuePence, 0),
+    partnerApplications: rows.reduce((sum, row) => sum + row.partnerApplications, 0),
+    bestLabel: best ? best.campaign : "No measured campaign",
+    bestDetail: best
+      ? `${formatGrowthMoneyGBP(best.revenuePence)} · ${number(best.paidSubmissions)} paid orders`
+      : "No controlled code has produced a measured outcome",
+  };
+}
+
+/**
+ * Review authorities are binary and server-owned. CONNECTED is only ever shown
+ * for an authority the server itself reports as ready, so an unconfigured
+ * destination, sender or public reputation source can never read as live.
+ */
+export function reviewAuthorityMetric(
+  state: "CONNECTED" | "NOT_CONNECTED",
+  reason: string,
+  lastUpdated: string | null
+): Metric {
+  return {
+    state: state === "CONNECTED" ? "REAL" : "NOT_CONNECTED",
+    status: state === "CONNECTED" ? "GREEN" : "UNKNOWN",
+    value: state.replaceAll("_", " "),
+    unit: "",
+    source: "Server-owned review authority",
+    reason,
+    lastUpdated,
+  };
+}
+
+/**
+ * Loss between consecutive measured funnel stages. A pair is skipped entirely
+ * unless both stages are measured, so a missing stage never manufactures a
+ * drop-off that nobody observed.
+ */
+export function stageDropOff(stages: Array<{ key: string; label: string; metric: Metric }>): BarRow[] {
+  const rows: BarRow[] = [];
+  for (let index = 1; index < stages.length; index += 1) {
+    const previous = stages[index - 1];
+    const current = stages[index];
+    if (typeof previous?.metric.value !== "number" || typeof current?.metric.value !== "number") continue;
+    const lost = previous.metric.value - current.metric.value;
+    if (lost <= 0) continue;
+    rows.push({
+      key: `${previous.key}-${current.key}`,
+      label: `${previous.label} → ${current.label}`,
+      value: lost,
+      display: `${number(lost)} lost · ${((lost / previous.metric.value) * 100).toFixed(1)}%`,
+      status: "AMBER",
+    });
+  }
+  return rows;
+}
+
+export type AttributionSummary = {
+  attributedPaidSubmissions: number;
+  attributedRevenuePence: number;
+  partnerApplications: number;
+  bestSourceLabel: string;
+  bestSourceDetail: string;
+  coveragePercent: number;
+  attributedMetric: Metric;
+  unattributedMetric: Metric;
+};
+
+/**
+ * Acquisition headline figures, summed from the measured per-source rows the
+ * server already returns. Nothing is modelled: an order without a controlled
+ * code stays unattributed rather than being assigned to a best guess.
+ */
+export function deriveAttribution(
+  sourcePerformance: Performance[],
+  unattributedPaidSubmissions: number,
+  lastUpdated: string | null
+): AttributionSummary {
+  const attributedPaidSubmissions = sourcePerformance.reduce((sum, row) => sum + row.paidSubmissions, 0);
+  const attributedRevenuePence = sourcePerformance.reduce((sum, row) => sum + row.revenuePence, 0);
+  const partnerApplications = sourcePerformance.reduce((sum, row) => sum + row.partnerApplications, 0);
+  const best = [...sourcePerformance]
+    .filter((row) => row.revenuePence > 0 || row.paidSubmissions > 0)
+    .sort((a, b) => b.revenuePence - a.revenuePence || b.paidSubmissions - a.paidSubmissions)[0];
+  const denominator = attributedPaidSubmissions + unattributedPaidSubmissions;
+  return {
+    attributedPaidSubmissions,
+    attributedRevenuePence,
+    partnerApplications,
+    bestSourceLabel: best ? best.category.replaceAll("_", " ") : "No measured source",
+    bestSourceDetail: best
+      ? `${formatGrowthMoneyGBP(best.revenuePence)} · ${number(best.paidSubmissions)} paid orders`
+      : "No paid order carried a controlled code",
+    coveragePercent: denominator > 0 ? (attributedPaidSubmissions / denominator) * 100 : 0,
+    attributedMetric: {
+      state: "REAL",
+      status: "GREEN",
+      value: attributedPaidSubmissions,
+      unit: "orders",
+      source: "Controlled attribution",
+      lastUpdated,
+    },
+    unattributedMetric: {
+      state: "REAL",
+      status: unattributedPaidSubmissions > 0 ? "AMBER" : "GREEN",
+      value: unattributedPaidSubmissions,
+      unit: "orders",
+      source: "Paid orders with no controlled code",
+      lastUpdated,
+    },
+  };
+}
+
+/**
+ * A Search Console chart position. The layout reserves the space so the tab
+ * reads as a finished dashboard awaiting a connection, but no series is drawn
+ * and no number is implied until Google is the authority for it.
+ */
+function SearchConsoleChartSlot({ metric }: { metric: Metric }) {
+  if (metric.state === "REAL")
+    return (
+      <div className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 p-3">
+        <p className="break-words text-lg font-semibold leading-snug">{text(metric)}</p>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.1em]" style={{ color: statusAccent(metric.status) }}>
+          {metric.status} · {date(metric.lastUpdated)}
+        </p>
+        <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">{metric.source}</p>
+      </div>
+    );
+  // NOT_CONNECTED and NOT_INSTRUMENTED both mean "Google is not an authority for
+  // this yet". The heading says so plainly; the server's precise state stays
+  // visible underneath so no distinction is lost.
+  const awaiting = metric.state === "NOT_CONNECTED" || metric.state === "NOT_INSTRUMENTED";
+  return (
+    <GrowthEmptyState
+      title={awaiting ? "Awaiting Search Console connection" : metric.state.replaceAll("_", " ")}
+      detail={`${metric.state.replaceAll("_", " ")} · ${
+        metric.reason ??
+        "Search performance is only ever reported from Search Console. Nothing is estimated from request telemetry."
+      }`}
+    />
+  );
+}
+
+
+/**
+ * Route performance as one compact table rather than nine equally-weighted
+ * boxes. Labels are the server's fixed safe templates, so no query string,
+ * customer identifier or other request detail can reach this surface.
+ */
+function RoutePerformanceTable({ diagnostics }: { diagnostics: PerformanceDiagnostics }) {
+  const rows = diagnostics.trafficClasses;
+  if (!rows.length)
+    return (
+      <GrowthEmptyState
+        title="No completed route telemetry"
+        detail="No safe route class has completed a request in this rolling 60-minute window."
+      />
+    );
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[680px] text-left text-xs">
+        <thead className="border-y border-[var(--admin-line,#333)] uppercase tracking-[0.1em] text-[var(--admin-muted,#8a8a8a)]">
+          <tr>
+            <th className="px-3 py-2 font-medium">Route class</th>
+            <th className="px-3 py-2 font-medium">Requests</th>
+            <th className="px-3 py-2 font-medium">P50</th>
+            <th className="px-3 py-2 font-medium">P95</th>
+            <th className="px-3 py-2 font-medium">Errors</th>
+            <th className="px-3 py-2 font-medium">Status</th>
+            <th className="px-3 py-2 font-medium">Trend</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((entry) => (
+            <tr key={entry.key} className="border-b border-[var(--admin-line,#333)]">
+              <td className="px-3 py-2">
+                <span className="font-medium">{entry.label}</span>
+                <span className="ml-2 text-[10px] uppercase tracking-[0.1em] opacity-55">{entry.trafficClass}</span>
+              </td>
+              <td className="px-3 py-2 tabular-nums">{number(entry.requestCount)}</td>
+              <td className="px-3 py-2 tabular-nums">{entry.p50LatencyMs == null ? "—" : `${entry.p50LatencyMs} ms`}</td>
+              <td className="px-3 py-2 font-semibold tabular-nums" style={{ color: statusAccent(entry.status) }}>
+                {entry.p95LatencyMs == null ? "—" : `${entry.p95LatencyMs} ms`}
+              </td>
+              <td className="px-3 py-2 tabular-nums">{number(entry.fiveXCount)}</td>
+              <td className="px-3 py-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <i
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: statusAccent(entry.status) }}
+                    aria-hidden="true"
+                  />
+                  <span className="text-[10px] uppercase tracking-[0.1em]">
+                    {entry.confidence === "SUFFICIENT" ? entry.status : entry.confidence.replaceAll("_", " ")}
+                  </span>
+                </span>
+              </td>
+              <td className="w-24 px-3 py-2">
+                <div className="-mt-3 w-20">
+                  <Sparkline values={entry.trendP95LatencyMs} status={entry.status} />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="px-3 py-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+        Fixed safe route templates only · current process · 60-minute window · updated {date(diagnostics.lastUpdated)}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Which fixed route classes represent a paying member of the public, and which
+ * represent this console. Keys are the server's own traffic-class identifiers.
+ * Classes outside both sets (Partner, Scanner, AI / model, Other) are shown in
+ * the route table and named beneath the split rather than silently folded into
+ * a headline they would misrepresent.
+ */
+const CUSTOMER_TRAFFIC_CLASSES = ["PUBLIC_CUSTOMER", "SUBMISSION_CHECKOUT", "VERIFY_CERTIFICATE"] as const;
+const INTERNAL_TRAFFIC_CLASSES = ["SUPER_ADMIN", "GROWTH_COMMAND", "HEALTH_INTERNAL"] as const;
+
+const HEALTH_RANK: Record<Health, number> = { GREEN: 0, UNKNOWN: 1, AMBER: 2, RED: 3 };
+
+export type ExperienceBand = {
+  status: Health;
+  headline: string;
+  worstP95LatencyMs: number | null;
+  requestCount: number;
+  contributors: string[];
+  measured: boolean;
+};
+
+/**
+ * Reduce one set of route classes to a single band. Only classes with a
+ * sufficient sample can set a colour; anything else leaves the band UNKNOWN so a
+ * quiet window is never painted as healthy.
+ */
+export function summariseExperienceBand(
+  entries: Array<Pick<PerformanceAggregate, "trafficClass" | "label" | "requestCount" | "p95LatencyMs" | "status" | "confidence">>,
+  classes: readonly string[]
+): ExperienceBand {
+  const scoped = entries.filter((entry) => classes.includes(entry.trafficClass));
+  const measured = scoped.filter((entry) => entry.confidence === "SUFFICIENT" && entry.requestCount > 0);
+  const requestCount = scoped.reduce((sum, entry) => sum + entry.requestCount, 0);
+  if (!measured.length) {
+    return {
+      status: "UNKNOWN",
+      headline: "INSUFFICIENT TELEMETRY",
+      worstP95LatencyMs: null,
+      requestCount,
+      contributors: [],
+      measured: false,
+    };
+  }
+  const status = measured.reduce<Health>(
+    (worst, entry) => (HEALTH_RANK[entry.status] > HEALTH_RANK[worst] ? entry.status : worst),
+    "GREEN"
+  );
+  const latencies = measured
+    .map((entry) => entry.p95LatencyMs)
+    .filter((value): value is number => typeof value === "number");
+  return {
+    status,
+    headline: status === "GREEN" ? "HEALTHY" : status === "AMBER" ? "INVESTIGATE" : status === "RED" ? "INVESTIGATE" : "UNKNOWN",
+    worstP95LatencyMs: latencies.length ? Math.max(...latencies) : null,
+    requestCount,
+    contributors: measured.map((entry) => entry.label),
+    measured: true,
+  };
+}
+
+function ExperienceBandCard({
+  title,
+  sub,
+  band,
+}: {
+  title: string;
+  sub: string;
+  band: ExperienceBand;
+}) {
+  const value = band.worstP95LatencyMs == null ? band.headline : `${band.headline} · ${band.worstP95LatencyMs} ms`;
+  return (
+    <article className={`rounded-xl border p-3 ${tone(band.status)}`}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.13em]">{title}</p>
+        <span
+          className="mt-1 h-2 w-2 shrink-0 rounded-full"
+          style={{ background: statusAccent(band.status) }}
+          aria-hidden="true"
+        />
+      </div>
+      <p className={`mt-2 break-words font-semibold tracking-tight ${kpiValueClass(value)}`}>{value}</p>
+      <p className="mt-1 text-[10px] uppercase tracking-[0.1em] opacity-70">{sub}</p>
+      <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+        {band.measured
+          ? `Worst of ${band.contributors.join(", ")} · ${number(band.requestCount)} requests / 60m`
+          : `${number(band.requestCount)} requests / 60m · no class reached a sufficient sample`}
+      </p>
+    </article>
+  );
+}
+
+/**
+ * The headline that stops an internal console latency reading as a customer
+ * outage. Customer experience and this console are scored from separate route
+ * classes and never share a colour.
+ */
+function ExperienceSplit({ data }: { data: Intelligence }) {
+  const entries = data.performanceDiagnostics.trafficClasses;
+  const customer = summariseExperienceBand(entries, CUSTOMER_TRAFFIC_CLASSES);
+  const internal = summariseExperienceBand(entries, INTERNAL_TRAFFIC_CLASSES);
+  const excluded = entries
+    .filter(
+      (entry) =>
+        !CUSTOMER_TRAFFIC_CLASSES.includes(entry.trafficClass as (typeof CUSTOMER_TRAFFIC_CLASSES)[number]) &&
+        !INTERNAL_TRAFFIC_CLASSES.includes(entry.trafficClass as (typeof INTERNAL_TRAFFIC_CLASSES)[number]) &&
+        entry.requestCount > 0
+    )
+    .map((entry) => entry.label);
+  const capacityValue = data.capacity.label.replaceAll("_", " ");
+  return (
+    <div className="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-4">
+      <ExperienceBandCard
+        title="Customer experience"
+        sub="Public site · submission · verify"
+        band={customer}
+      />
+      <ExperienceBandCard
+        title="Internal admin performance"
+        sub="Super Admin · Growth Command"
+        band={internal}
+      />
+      <article className={`rounded-xl border p-3 ${tone(data.capacity.status)}`}>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.13em]">Capacity</p>
+        <p className={`mt-2 break-words font-semibold tracking-tight ${kpiValueClass(capacityValue)}`}>
+          {capacityValue}
+        </p>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.1em] opacity-70">Owner decision only</p>
+        <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">{data.capacity.thresholdModel}</p>
+      </article>
+      <article className="rounded-xl border border-[var(--admin-line,#333)] bg-black/15 p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.13em]">Recommendation</p>
+        <p
+          className={`mt-2 break-words font-semibold tracking-tight ${kpiValueClass(data.capacity.recommendation.replaceAll("_", " "))}`}
+        >
+          {data.capacity.recommendation.replaceAll("_", " ")}
+        </p>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.1em] opacity-70">Advisory · no control mutates</p>
+        <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+          {internal.status !== "GREEN" && customer.status === "GREEN"
+            ? "Internal console latency does not indicate a customer-facing fault."
+            : "Automatic scaling is disabled."}
+        </p>
+      </article>
+      {excluded.length > 0 && (
+        <p className="text-[10px] text-[var(--admin-muted,#8a8a8a)] sm:col-span-2 xl:col-span-4">
+          Scored separately in the route table and excluded from both headlines: {excluded.join(", ")}.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1188,7 +1727,7 @@ function InfrastructureOverview({ data }: { data: Intelligence }) {
           ].map(([label, metric]) => (
             <div key={label as string} className="p-2.5">
               <p className="text-[9px] uppercase tracking-[0.1em] opacity-65">{label as string}</p>
-              <p className="mt-1 text-xs font-medium">{text(metric as Metric)}</p>
+              <p className="mt-1 break-words text-xs font-medium leading-snug">{text(metric as Metric)}</p>
             </div>
           ))}
         </div>
@@ -1230,10 +1769,7 @@ function GrowthOverview({ data, summary, period }: { data: Intelligence; summary
           </div>
         </div>
       </section>
-      <section
-        className="grid gap-px overflow-hidden rounded-xl border border-[var(--admin-line,#333)] bg-[var(--admin-line,#333)] sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7"
-        aria-label="Growth Command key signals"
-      >
+      <GrowthKpiStrip label="Growth Command key signals" columns={7}>
         <OverviewKpi
           label="Requests / min"
           value={text(data.livePulse.requestsPerMinute)}
@@ -1276,7 +1812,7 @@ function GrowthOverview({ data, summary, period }: { data: Intelligence; summary
           detail={healthScore.source}
           status={healthScore.status}
         />
-      </section>
+      </GrowthKpiStrip>
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
         <Panel
           title="System health overview"
@@ -1498,6 +2034,23 @@ export default function GrowthCommandPage() {
   });
   const data = command.data;
   const summary = data?.summary;
+  // Customer-facing latency is derived once and reused by the Site Health KPI
+  // strip and the experience split, so the headline and the split can never
+  // disagree about whether the public surface is healthy.
+  const publicExperience = summariseExperienceBand(
+    data?.performanceDiagnostics.trafficClasses ?? [],
+    CUSTOMER_TRAFFIC_CLASSES
+  );
+  const attribution = deriveAttribution(
+    summary?.sourcePerformance ?? [],
+    summary?.paid.unattributedPaidSubmissions.value ?? 0,
+    data?.generatedAt ?? null
+  );
+  // The first four canonical funnel stages drive both the KPI strip and the
+  // funnel, so the two can never disagree.
+  const conversionStages = (data?.conversion.stages ?? []).slice(0, 4);
+  const conversionDropOff = stageDropOff(conversionStages);
+  const campaigns = deriveCampaigns(summary?.campaignPerformance ?? []);
   const selected = detail.data?.lead;
   const external = safeExternalUrl(selected?.webPresence);
   const selectTab = (next: Tab) => {
@@ -1585,119 +2138,435 @@ export default function GrowthCommandPage() {
             <IncidentBanner incident={data.incident} />
             {tab === "overview" && <GrowthOverview data={data} summary={summary} period={period} />}
             {tab === "acquisition" && (
-              <section className="space-y-4">
+              <section className="space-y-3">
+                <GrowthKpiStrip label="Acquisition key signals" columns={5}>
+                  <OverviewKpi
+                    label="Attributed paid orders"
+                    value={number(attribution.attributedPaidSubmissions)}
+                    detail="Controlled attribution only"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Attributed revenue"
+                    value={formatGrowthMoneyGBP(attribution.attributedRevenuePence)}
+                    detail="Verified paid authority"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Partner applications"
+                    value={number(attribution.partnerApplications)}
+                    detail="Distinct from paid orders"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Unattributed orders"
+                    value={number(summary.paid.unattributedPaidSubmissions.value)}
+                    detail="No controlled code present"
+                    status={summary.paid.unattributedPaidSubmissions.value > 0 ? "AMBER" : "GREEN"}
+                  />
+                  <OverviewKpi
+                    label="Best measured source"
+                    value={attribution.bestSourceLabel}
+                    detail={attribution.bestSourceDetail}
+                    status={attribution.bestSourceLabel === "No measured source" ? "UNKNOWN" : "GREEN"}
+                  />
+                </GrowthKpiStrip>
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <Panel title="Revenue by source" sub="Verified paid revenue, GBP." bodyClassName="p-3">
+                    <GrowthBarSeries
+                      rows={summary.sourcePerformance.map((row) => ({
+                        key: row.category,
+                        label: row.category.replaceAll("_", " "),
+                        value: row.revenuePence,
+                        display: formatGrowthMoneyGBP(row.revenuePence),
+                      }))}
+                      empty={{
+                        title: "No attributed revenue",
+                        detail: "No paid order in this period carried a controlled attribution code.",
+                      }}
+                    />
+                  </Panel>
+                  <Panel
+                    title="Orders and applications by source"
+                    sub="Paid orders and Partner applications stay distinct measured outcomes."
+                    bodyClassName="p-3"
+                  >
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">
+                          Paid orders
+                        </p>
+                        <GrowthBarSeries
+                          rows={summary.sourcePerformance.map((row) => ({
+                            key: `orders-${row.category}`,
+                            label: row.category.replaceAll("_", " "),
+                            value: row.paidSubmissions,
+                            display: number(row.paidSubmissions),
+                          }))}
+                          empty={{ title: "No paid orders", detail: "No attributed paid order in this period." }}
+                        />
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">
+                          Partner applications
+                        </p>
+                        <GrowthBarSeries
+                          rows={summary.sourcePerformance.map((row) => ({
+                            key: `apps-${row.category}`,
+                            label: row.category.replaceAll("_", " "),
+                            value: row.partnerApplications,
+                            display: number(row.partnerApplications),
+                          }))}
+                          empty={{
+                            title: "No applications",
+                            detail: "No Partner application in this period carried a measured source.",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </Panel>
+                </div>
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <Panel title="Campaign trend" sub="Revenue by controlled campaign code." bodyClassName="p-3">
+                    <GrowthBarSeries
+                      rows={summary.campaignPerformance.map((row) => ({
+                        key: `${row.category}-${row.campaign}`,
+                        label: row.campaign,
+                        value: row.revenuePence,
+                        display: formatGrowthMoneyGBP(row.revenuePence),
+                      }))}
+                      empty={{
+                        title: "No campaign revenue",
+                        detail: "No controlled campaign code has produced a paid order in this period.",
+                      }}
+                    />
+                    {summary.historical.state === "NOT_INSTRUMENTED" && (
+                      <p className="mt-3 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+                        A time series is not drawn: {summary.historical.reason}
+                      </p>
+                    )}
+                  </Panel>
+                  <Panel
+                    title="Attribution coverage"
+                    sub="How much paid volume carries a controlled code."
+                    bodyClassName="p-3"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <div
+                        className="grid h-24 w-24 shrink-0 place-items-center rounded-full"
+                        style={{
+                          background: `conic-gradient(#d4af37 ${attribution.coveragePercent * 3.6}deg, rgba(255,255,255,.10) 0deg)`,
+                        }}
+                        role="img"
+                        aria-label={`Attribution coverage ${attribution.coveragePercent.toFixed(1)} percent`}
+                      >
+                        <div className="grid h-[4.6rem] w-[4.6rem] place-items-center rounded-full bg-[var(--admin-panel,#151515)] text-center">
+                          <strong className="text-base">{attribution.coveragePercent.toFixed(0)}%</strong>
+                          <span className="text-[8px] uppercase tracking-[0.1em]">attributed</span>
+                        </div>
+                      </div>
+                      <div className="grid min-w-0 flex-1 gap-2">
+                        <CompactDigital label="Attributed orders" metric={attribution.attributedMetric} />
+                        <CompactDigital
+                          label="Unattributed orders"
+                          metric={attribution.unattributedMetric}
+                        />
+                      </div>
+                    </div>
+                  </Panel>
+                </div>
                 <PerformancePanel title="Source performance" rows={summary.sourcePerformance} />
-                <CampaignPanel title="Campaign performance" rows={summary.campaignPerformance} />
               </section>
             )}
             {tab === "seo" && (
-              <section className="space-y-4">
+              <section className="space-y-3">
+                <GrowthKpiStrip label="Search performance key signals" columns={5}>
+                  <OverviewKpi
+                    label="Search Console"
+                    value={text(data.seo.searchConsole)}
+                    detail={data.seo.searchConsole.reason ?? data.seo.searchConsole.source}
+                    status={data.seo.searchConsole.status}
+                  />
+                  <OverviewKpi
+                    label="Impressions"
+                    value={text(data.seo.impressions)}
+                    detail="Search Console authority only"
+                    status={data.seo.impressions.status}
+                  />
+                  <OverviewKpi
+                    label="Clicks"
+                    value={text(data.seo.clicks)}
+                    detail="Search Console authority only"
+                    status={data.seo.clicks.status}
+                  />
+                  <OverviewKpi
+                    label="CTR"
+                    value={text(data.seo.ctr)}
+                    detail="Search Console authority only"
+                    status={data.seo.ctr.status}
+                  />
+                  <OverviewKpi
+                    label="Average position"
+                    value={text(data.seo.averagePosition)}
+                    detail="Search Console authority only"
+                    status={data.seo.averagePosition.status}
+                  />
+                </GrowthKpiStrip>
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <Panel
+                    title="Search visibility trend"
+                    sub="Impressions and average position over time."
+                    bodyClassName="p-3"
+                  >
+                    <SearchConsoleChartSlot metric={data.seo.trend} />
+                  </Panel>
+                  <Panel title="Clicks and impressions" sub="Click-through performance over time." bodyClassName="p-3">
+                    <SearchConsoleChartSlot metric={data.seo.clicks} />
+                  </Panel>
+                </div>
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <Panel title="Top queries" sub="Ranked search queries from Search Console." bodyClassName="p-3">
+                    <SearchConsoleChartSlot metric={data.seo.topQueries} />
+                  </Panel>
+                  <Panel title="Top landing pages" sub="Ranked entry pages from Search Console." bodyClassName="p-3">
+                    <SearchConsoleChartSlot metric={data.seo.topPages} />
+                  </Panel>
+                </div>
                 <Panel
-                  title="SEO & Traffic"
-                  sub="Search performance comes only from Search Console; it is not guessed from requests."
+                  title="Technical SEO"
+                  sub="MintVault-owned route configuration. This is not Google performance and never substitutes for it."
+                  bodyClassName="grid gap-2 p-3 sm:grid-cols-3"
                 >
-                  <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Gauge label="Search Console" metric={data.seo.searchConsole} />
-                    <MetricCard label="Impressions" metric={data.seo.impressions} />
-                    <MetricCard label="Clicks" metric={data.seo.clicks} />
-                    <MetricCard label="CTR" metric={data.seo.ctr} />
-                    <MetricCard label="Average position" metric={data.seo.averagePosition} />
-                    <MetricCard label="Click trend" metric={data.seo.trend} />
-                    <MetricCard label="Top queries" metric={data.seo.topQueries} />
-                    <MetricCard label="Top landing pages" metric={data.seo.topPages} />
-                  </div>
+                  <StatusTile label="Sitemap" metric={data.seo.technical.sitemap} />
+                  <StatusTile label="Robots" metric={data.seo.technical.robots} />
+                  <StatusTile label="Indexability" metric={data.seo.technical.indexabilityPolicy} />
                 </Panel>
-                <Panel
-                  title="Technical SEO configuration"
-                  sub="MintVault-owned route configuration, distinct from external crawler visibility."
-                >
-                  <div className="grid gap-3 p-4 sm:grid-cols-3">
-                    <Gauge label="Sitemap" metric={data.seo.technical.sitemap} />
-                    <Gauge label="Robots" metric={data.seo.technical.robots} />
-                    <Gauge label="Indexability policy" metric={data.seo.technical.indexabilityPolicy} />
-                  </div>
-                </Panel>
+                <p className="text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+                  Search performance comes only from Search Console; it is never guessed from request telemetry. Updated{" "}
+                  {date(data.seo.lastUpdated)}
+                </p>
               </section>
             )}
             {tab === "conversion" && (
-              <Panel title="Conversion" sub="Funnel percentages require a canonical event and time authority.">
-                <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                  {data.conversion.stages.map((stage) => (
-                    <MetricCard key={stage.key} label={stage.label} metric={stage.metric} />
+              <section className="space-y-3">
+                <GrowthKpiStrip label="Conversion key signals" columns={5}>
+                  {conversionStages.map((stage) => (
+                    <OverviewKpi
+                      key={stage.key}
+                      label={stage.label}
+                      value={text(stage.metric)}
+                      detail={stage.metric.reason ?? stage.metric.source}
+                      status={stage.metric.status}
+                    />
                   ))}
+                  <OverviewKpi
+                    label="Submission → paid"
+                    value={text(data.conversion.submissionToPaid)}
+                    detail="Canonical persisted events"
+                    status={data.conversion.submissionToPaid.status}
+                  />
+                </GrowthKpiStrip>
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,.8fr)]">
+                  <Panel
+                    title="Conversion funnel"
+                    sub="Submission → checkout → paid → cards. Each stage is its own measured count."
+                    bodyClassName="p-3"
+                  >
+                    <GrowthFunnel
+                      steps={conversionStages.map((stage) => ({
+                        key: stage.key,
+                        label: stage.label,
+                        value: typeof stage.metric.value === "number" ? stage.metric.value : null,
+                        detail: stage.metric.reason ?? stage.metric.source,
+                      }))}
+                    />
+                  </Panel>
+                  <Panel title="Stage conversion" sub="Rates require a canonical event and time authority." bodyClassName="p-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <CompactDigital label="Submission → checkout" metric={data.conversion.submissionToCheckout} />
+                      <CompactDigital label="Checkout → paid" metric={data.conversion.checkoutToPaid} />
+                      <CompactDigital label="Submission → paid" metric={data.conversion.submissionToPaid} />
+                      <CompactDigital label="Cards / paid order" metric={data.conversion.cardsPerPaidOrder} />
+                    </div>
+                  </Panel>
                 </div>
-                <div className="grid gap-3 border-t border-[var(--admin-line,#333)] p-4 md:grid-cols-2">
-                  <MetricCard label="Submission → checkout" metric={data.conversion.submissionToCheckout} />
-                  <MetricCard label="Checkout → paid" metric={data.conversion.checkoutToPaid} />
-                  <MetricCard label="Submission → paid" metric={data.conversion.submissionToPaid} />
-                  <MetricCard label="Cards / paid order" metric={data.conversion.cardsPerPaidOrder} />
-                  <MetricCard label="Drop-off" metric={data.conversion.dropOff} />
-                  <MetricCard label="Previous-period comparison" metric={data.conversion.comparison} />
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <Panel title="Conversion trend" sub="Rate movement across periods." bodyClassName="p-3">
+                    {data.conversion.comparison.state === "REAL" ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <CompactDigital label="Previous-period comparison" metric={data.conversion.comparison} />
+                        <CompactDigital label="Submission → paid" metric={data.conversion.submissionToPaid} />
+                      </div>
+                    ) : (
+                      <GrowthEmptyState
+                        title="Trend collecting"
+                        detail={
+                          data.conversion.comparison.reason ??
+                          "A conversion trend needs at least two comparable measured periods. None is invented in the meantime."
+                        }
+                      />
+                    )}
+                  </Panel>
+                  <Panel title="Drop-off" sub="Shown only where cohort authority is sufficient." bodyClassName="p-3">
+                    {data.conversion.dropOff.state === "REAL" ? (
+                      <>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <CompactDigital label="Drop-off" metric={data.conversion.dropOff} />
+                          <CompactDigital label="Cards / paid order" metric={data.conversion.cardsPerPaidOrder} />
+                        </div>
+                        <GrowthBarSeries
+                          rows={conversionDropOff}
+                          empty={{
+                            title: "Insufficient data",
+                            detail: "Consecutive measured stages are required before a drop-off can be attributed.",
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <GrowthEmptyState
+                        title="Insufficient data"
+                        detail={
+                          data.conversion.dropOff.reason ??
+                          "Cohort authority is not sufficient to attribute drop-off to a stage."
+                        }
+                      />
+                    )}
+                  </Panel>
                 </div>
-                <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">{data.conversion.definition}</p>
-              </Panel>
+                <p className="text-[10px] text-[var(--admin-muted,#8a8a8a)]">{data.conversion.definition}</p>
+              </section>
             )}
             {tab === "reviews" && (
-              <section className="space-y-4" data-testid="growth-reviews">
+              <section className="space-y-3" data-testid="growth-reviews">
                 {reviews.isError ? (
                   <Retry message="Review reporting could not be loaded." retry={() => void reviews.refetch()} />
                 ) : !reviews.data ? (
                   <Empty>Loading aggregate review lifecycle…</Empty>
                 ) : (
                   <>
-                    <Panel
-                      title="Reviews & Reputation"
-                      sub="Neutral requests after genuine delivered completion. Grade, sentiment and marketing consent are never eligibility inputs."
-                    >
-                      <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                        <StatCard label="Eligible" value={number(reviews.data.eligible)} foot="Delivered completion" />
-                        <StatCard label="Scheduled" value={number(reviews.data.scheduled)} foot="Durable outbox" />
-                        <StatCard label="Sent" value={number(reviews.data.sent)} foot="Provider accepted" />
-                        <StatCard label="Clicked" value={number(reviews.data.clicked)} foot="Request link only" />
-                        <StatCard
-                          label="Failed"
-                          value={number(reviews.data.deliveryFailed)}
-                          foot="Bounded retry lifecycle"
+                    <GrowthKpiStrip label="Review lifecycle key signals" columns={7}>
+                      <OverviewKpi
+                        label="Eligible"
+                        value={number(reviews.data.eligible)}
+                        detail="Delivered completion"
+                        status="GREEN"
+                      />
+                      <OverviewKpi
+                        label="Scheduled"
+                        value={number(reviews.data.scheduled)}
+                        detail="Durable outbox"
+                        status="GREEN"
+                      />
+                      <OverviewKpi
+                        label="Sent"
+                        value={number(reviews.data.sent)}
+                        detail="Provider accepted"
+                        status="GREEN"
+                      />
+                      <OverviewKpi
+                        label="Clicked"
+                        value={number(reviews.data.clicked)}
+                        detail="Request link only"
+                        status="GREEN"
+                      />
+                      <OverviewKpi
+                        label="Failed"
+                        value={number(reviews.data.deliveryFailed)}
+                        detail="Bounded retry lifecycle"
+                        status={reviews.data.deliveryFailed > 0 ? "AMBER" : "GREEN"}
+                      />
+                      <OverviewKpi
+                        label="Suppressed"
+                        value={number(reviews.data.suppressed)}
+                        detail="Customer or admin preference"
+                        status="GREEN"
+                      />
+                      <OverviewKpi
+                        label="Published reviews"
+                        value={reviews.data.publicReviews.state.replaceAll("_", " ")}
+                        detail="No rating or count is ever inferred"
+                        status="UNKNOWN"
+                      />
+                    </GrowthKpiStrip>
+                    <div className="grid gap-3 xl:grid-cols-2">
+                      <Panel
+                        title="Review request lifecycle"
+                        sub="Every request state, from eligibility to outcome."
+                        bodyClassName="p-3"
+                      >
+                        <GrowthBarSeries
+                          rows={[
+                            ["eligible", "Eligible", reviews.data.eligible, "GREEN"],
+                            ["scheduled", "Scheduled", reviews.data.scheduled, "GREEN"],
+                            ["sent", "Sent", reviews.data.sent, "GREEN"],
+                            ["clicked", "Clicked", reviews.data.clicked, "GREEN"],
+                            ["failed", "Delivery failed", reviews.data.deliveryFailed, "RED"],
+                            ["uncertain", "Delivery uncertain", reviews.data.deliveryUncertain, "AMBER"],
+                            ["suppressed", "Suppressed", reviews.data.suppressed, "UNKNOWN"],
+                            ["cancelled", "Cancelled", reviews.data.cancelled, "UNKNOWN"],
+                          ].map(([key, label, value, status]) => ({
+                            key: key as string,
+                            label: label as string,
+                            value: value as number,
+                            display: number(value as number),
+                            status: status as Health,
+                          }))}
+                          empty={{
+                            title: "No review activity",
+                            detail:
+                              "No delivered completion has become eligible for a neutral review request in this period.",
+                          }}
                         />
-                        <StatCard
-                          label="Uncertain"
-                          value={number(reviews.data.deliveryUncertain)}
-                          foot="No invented delivery state"
-                        />
-                        <StatCard
-                          label="Suppressed"
-                          value={number(reviews.data.suppressed)}
-                          foot="Customer/admin preference"
-                        />
-                        <StatCard
-                          label="Cancelled"
-                          value={number(reviews.data.cancelled)}
-                          foot="Eligibility withdrawn"
-                        />
-                      </div>
-                    </Panel>
-                    <div className="grid gap-4 xl:grid-cols-2">
-                      <Panel title="Request delivery" sub="Activation is server-owned and fail-closed.">
-                        <div className="p-4">
-                          <Badge variant={reviews.data.configuration.state === "READY" ? "prog" : "wait"}>
-                            {reviews.data.configuration.state.replaceAll("_", " ")}
-                          </Badge>
-                          <p className="mt-3 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">
-                            {reviews.data.configuration.reason ??
-                              "Approved HTTPS destination, verified MintVault sender and token authority are configured."}
-                          </p>
-                        </div>
                       </Panel>
-                      <Panel title="Public reputation authority" sub="No rating or public-review count is inferred.">
-                        <div className="p-4">
-                          <Badge variant="neu">{reviews.data.publicReviews.state.replaceAll("_", " ")}</Badge>
-                          <p className="mt-3 text-sm text-[var(--admin-ink-dim,#b9b2a1)]">
-                            {reviews.data.publicReviews.reason}
-                          </p>
-                        </div>
+                      <Panel title="Delivery outcome" sub="Requests that reached a provider." bodyClassName="p-3">
+                        {reviews.data.sent > 0 ? (
+                          <GrowthFunnel
+                            steps={[
+                              { key: "eligible", label: "Eligible", value: reviews.data.eligible, detail: "Delivered completion" },
+                              { key: "scheduled", label: "Scheduled", value: reviews.data.scheduled, detail: "Durable outbox" },
+                              { key: "sent", label: "Sent", value: reviews.data.sent, detail: "Provider accepted" },
+                              { key: "clicked", label: "Clicked", value: reviews.data.clicked, detail: "Request link only" },
+                            ]}
+                          />
+                        ) : (
+                          <GrowthEmptyState
+                            title="No delivery yet"
+                            detail="No review request has been accepted by a sending provider, so no delivery outcome exists to chart."
+                          />
+                        )}
                       </Panel>
                     </div>
-                    <p className="text-xs text-[var(--admin-muted,#8a8a8a)]">
+                    <Panel
+                      title="Review authority"
+                      sub="Destination, sender and public reputation are separate authorities and are never inferred."
+                      bodyClassName="grid gap-2 p-3 sm:grid-cols-3"
+                    >
+                      <StatusTile
+                        label="Destination"
+                        metric={reviewAuthorityMetric(
+                          reviews.data.configuration.state === "READY" ? "CONNECTED" : "NOT_CONNECTED",
+                          reviews.data.configuration.reason ?? "Approved HTTPS review destination is configured.",
+                          reviews.data.lastUpdated
+                        )}
+                      />
+                      <StatusTile
+                        label="Sender"
+                        metric={reviewAuthorityMetric(
+                          reviews.data.configuration.state === "READY" ? "CONNECTED" : "NOT_CONNECTED",
+                          reviews.data.configuration.reason ?? "Verified MintVault sender and token authority are configured.",
+                          reviews.data.lastUpdated
+                        )}
+                      />
+                      <StatusTile
+                        label="Public reputation"
+                        metric={reviewAuthorityMetric(
+                          "NOT_CONNECTED",
+                          reviews.data.publicReviews.reason,
+                          reviews.data.lastUpdated
+                        )}
+                      />
+                    </Panel>
+                    <p className="text-[10px] text-[var(--admin-muted,#8a8a8a)]">
                       {reviews.data.definition} · Updated {date(reviews.data.lastUpdated)}
                     </p>
                   </>
@@ -1705,255 +2574,365 @@ export default function GrowthCommandPage() {
               </section>
             )}
             {tab === "health" && (
-              <section className="space-y-4">
+              <section className="space-y-3">
+                <GrowthKpiStrip label="Site health key signals" columns={7}>
+                  <OverviewKpi
+                    label="Site status"
+                    value={text(data.siteHealth.site)}
+                    detail={data.siteHealth.site.source}
+                    status={data.siteHealth.site.status}
+                  />
+                  <OverviewKpi
+                    label="CPU"
+                    value={text(data.siteHealth.cpu)}
+                    detail="Current process"
+                    status={data.siteHealth.cpu.status}
+                  />
+                  <OverviewKpi
+                    label="RAM"
+                    value={text(data.siteHealth.memory)}
+                    detail="Current process"
+                    status={data.siteHealth.memory.status}
+                  />
+                  <OverviewKpi
+                    label="Public P95"
+                    value={
+                      publicExperience.worstP95LatencyMs == null
+                        ? publicExperience.headline
+                        : `${publicExperience.worstP95LatencyMs} ms`
+                    }
+                    detail="Customer-facing route classes"
+                    status={publicExperience.status}
+                  />
+                  <OverviewKpi
+                    label="5xx"
+                    value={text(data.siteHealth.fiveXErrorRate)}
+                    detail="Rolling window"
+                    status={data.siteHealth.fiveXErrorRate.status}
+                  />
+                  <OverviewKpi
+                    label="DB pressure"
+                    value={text(data.siteHealth.databasePressure)}
+                    detail={text(data.siteHealth.databaseLatency)}
+                    status={data.siteHealth.databasePressure.status}
+                  />
+                  <OverviewKpi
+                    label="Machines"
+                    value={text(data.siteHealth.flyMachines)}
+                    detail="Fly telemetry"
+                    status={data.siteHealth.flyMachines.status}
+                  />
+                </GrowthKpiStrip>
                 <Panel
-                  title="Site health"
-                  sub="Status includes text as well as colour. Unknown means missing authority, not healthy."
+                  title="Experience split"
+                  sub="Customer-facing routes and this console are scored separately; one never colours the other."
+                  bodyClassName=""
                 >
-                  <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
-                    {[
-                      ["Site", data.siteHealth.site],
-                      ["CPU", data.siteHealth.cpu],
-                      ["RAM", data.siteHealth.memory],
-                      ["Request rate", data.siteHealth.requestRate],
-                      ["P95 latency", data.siteHealth.p95Latency],
-                      ["5XX error rate", data.siteHealth.fiveXErrorRate],
-                      ["Database", data.siteHealth.database],
-                      ["Database pressure", data.siteHealth.databasePressure],
-                      ["Database latency", data.siteHealth.databaseLatency],
-                      ["Fly machines", data.siteHealth.flyMachines],
-                      ["Payments", data.siteHealth.payments],
-                      ["Email", data.siteHealth.email],
-                      ["Partner API", data.siteHealth.partnerApi],
-                      ["Scanner API", data.siteHealth.scannerApi],
-                    ].map(([label, metric]) => (
-                      <Gauge key={label as string} label={label as string} metric={metric as Metric} />
-                    ))}
-                  </div>
+                  <ExperienceSplit data={data} />
                 </Panel>
-                <Panel
-                  title="Performance diagnostics"
-                  sub={`Bounded 60-minute telemetry from machine ${data.performanceDiagnostics.machineRef}. Route labels are fixed safe templates; low samples are never coloured as a latency incident.`}
-                >
-                  <div
-                    className={`m-4 rounded-xl border p-4 ${tone(data.performanceInsight.status)}`}
-                    data-testid="growth-performance-insight"
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                  <Panel title="Resource utilisation" sub="CPU and RAM · current process" bodyClassName="p-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <RadialRing label="CPU" metric={data.siteHealth.cpu} />
+                      <RadialRing label="RAM" metric={data.siteHealth.memory} />
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <DigitalMetric label="Request rate" metric={data.siteHealth.requestRate} />
+                      <RadialRing label="DB pressure" metric={data.siteHealth.databasePressure} />
+                    </div>
+                  </Panel>
+                  <Panel
+                    title="Traffic and latency"
+                    sub="Real p95 by fixed route class; no historical series is invented."
+                    bodyClassName=""
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <h3 className="font-semibold">{data.performanceInsight.title}</h3>
-                      <Badge
-                        variant={
-                          data.performanceInsight.status === "GREEN"
-                            ? "prog"
-                            : data.performanceInsight.status === "RED"
-                              ? "red"
-                              : "wait"
-                        }
-                      >
-                        {data.performanceInsight.status}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-sm">{data.performanceInsight.detail}</p>
-                    <p className="mt-2 text-xs uppercase tracking-[0.1em] opacity-75">
-                      {data.performanceInsight.recommendation}
-                    </p>
-                  </div>
-                  <div className="grid gap-3 px-4 pb-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {data.performanceDiagnostics.trafficClasses.map((entry) => (
-                      <DigitalMetric
-                        key={entry.key}
-                        label={entry.label}
-                        metric={performanceMetric(entry, data.performanceDiagnostics.lastUpdated)}
-                        sampleCount={entry.requestCount}
-                        trend={entry.trendP95LatencyMs}
-                      />
-                    ))}
-                  </div>
-                  <div className="grid gap-4 border-t border-[var(--admin-line,#333)] p-4 xl:grid-cols-2">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">Top slow route groups</p>
-                      {data.performanceDiagnostics.topSlowRoutes.length ? (
-                        <div className="mt-3 space-y-2">
-                          {data.performanceDiagnostics.topSlowRoutes.map((entry) => (
-                            <div
-                              key={entry.key}
-                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--admin-line,#333)] px-3 py-2 text-sm"
-                            >
-                              <span className="font-medium">{entry.label}</span>
-                              <span>
-                                {entry.p95LatencyMs ?? "—"} ms p95 · {entry.requestCount} req · {entry.fiveXCount} 5xx ·{" "}
-                                {entry.confidence.replaceAll("_", " ")}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <Empty>No safe route group has completed in this window.</Empty>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">Measured dependencies</p>
-                      <div className="mt-3 space-y-2">
-                        {data.performanceDiagnostics.dependencies.map((entry) => (
-                          <div
-                            key={entry.dependency}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--admin-line,#333)] px-3 py-2 text-sm"
-                          >
-                            <span className="font-medium">{entry.dependency.replaceAll("_", " ")}</span>
-                            <span>
-                              {entry.sampleCount
-                                ? `${entry.p95LatencyMs ?? "—"} ms p95 · ${entry.sampleCount} samples · ${entry.failures} failures`
-                                : "NOT INSTRUMENTED"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </Panel>
-                <Panel title="Capacity decision" sub="Scaling remains an owner decision.">
-                  <div className="p-4">
-                    <Gauge
-                      label="Capacity headroom"
-                      metric={{
-                        state: data.capacity.status === "UNKNOWN" ? "NOT_CONNECTED" : "REAL",
-                        status: data.capacity.status,
-                        value: data.capacity.label.replaceAll("_", " "),
-                        source: data.capacity.thresholdModel,
-                        reason: data.capacity.evidence.join(" "),
-                        lastUpdated: data.siteHealth.lastUpdated,
+                    <LatencyTrendChart diagnostics={data.performanceDiagnostics} />
+                  </Panel>
+                  <Panel title="Error trend" sub="5xx by route class in the rolling window." bodyClassName="p-3">
+                    <GrowthBarSeries
+                      rows={data.performanceDiagnostics.trafficClasses.map((entry) => ({
+                        key: entry.key,
+                        label: entry.label,
+                        value: entry.fiveXCount,
+                        display: `${number(entry.fiveXCount)} · ${entry.errorRatePercent == null ? "—" : `${entry.errorRatePercent.toFixed(2)}%`}`,
+                        status: entry.fiveXCount > 0 ? ("RED" as Health) : ("GREEN" as Health),
+                      }))}
+                      empty={{
+                        title: "No server errors",
+                        detail:
+                          "No route class recorded a 5xx response in this rolling 60-minute window. Nothing is plotted because nothing failed.",
                       }}
                     />
-                    <p className="mt-3 text-sm">
-                      Recommended next action: <strong>{data.capacity.recommendation.replaceAll("_", " ")}</strong>
-                    </p>
-                    <p className="mt-2 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                      Automatic scaling: DISABLED · Infrastructure mutation: UNAVAILABLE
-                    </p>
-                  </div>
+                  </Panel>
+                </div>
+                <Panel
+                  title="Service health"
+                  sub="Unknown means missing authority, not healthy."
+                  bodyClassName="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6"
+                >
+                  <StatusTile label="Database" metric={data.siteHealth.database} />
+                  <StatusTile label="Payments" metric={data.siteHealth.payments} />
+                  <StatusTile label="Email" metric={data.siteHealth.email} />
+                  <StatusTile label="Partner API" metric={data.siteHealth.partnerApi} />
+                  <StatusTile label="Scanner API" metric={data.siteHealth.scannerApi} />
+                  <StatusTile
+                    label="AI / model"
+                    metric={aiModelServiceMetric(data.performanceDiagnostics, data.siteHealth.lastUpdated)}
+                  />
                 </Panel>
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <Panel
-                    title="Fly machine intelligence"
-                    sub="Machine detail appears only from an approved least-privilege server authority."
-                  >
-                    <div className="p-4">
-                      <Gauge label="Fly connection" metric={data.infrastructure.fly.connection} />
-                      {data.infrastructure.fly.machines.length === 0 ? (
-                        <p className="mt-3 text-sm text-[var(--admin-muted,#8a8a8a)]">
-                          No machine rows are shown because Fly telemetry is not connected. No machine count, health,
-                          version or SHA is inferred.
+                <Panel
+                  title="Route performance"
+                  sub={`Fixed safe route templates from machine ${data.performanceDiagnostics.machineRef}. No query string, customer identifier or request body reaches this table.`}
+                  bodyClassName=""
+                >
+                  <RoutePerformanceTable diagnostics={data.performanceDiagnostics} />
+                </Panel>
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <Panel title="Performance signal" sub="Deterministic server rule." bodyClassName="p-3">
+                    <div className={`rounded-xl border p-3 ${tone(data.performanceInsight.status)}`} data-testid="growth-performance-insight">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold">{data.performanceInsight.title}</h3>
+                        <Badge
+                          variant={
+                            data.performanceInsight.status === "GREEN"
+                              ? "prog"
+                              : data.performanceInsight.status === "RED"
+                                ? "red"
+                                : "wait"
+                          }
+                        >
+                          {data.performanceInsight.status}
+                        </Badge>
+                      </div>
+                      <p className="mt-2 text-xs">{data.performanceInsight.detail}</p>
+                      <p className="mt-2 text-[10px] uppercase tracking-[0.1em] opacity-75">
+                        {data.performanceInsight.recommendation}
+                      </p>
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {data.performanceDiagnostics.dependencies.length === 0 ? (
+                        <p className="text-[11px] text-[var(--admin-muted,#8a8a8a)] sm:col-span-2">
+                          No measured dependency timing is available in this window.
                         </p>
                       ) : (
-                        <div className="mt-3 grid gap-3">
-                          {data.infrastructure.fly.machines.map((machine) => (
-                            <article key={machine.machineRef} className={`rounded border p-3 ${tone(machine.status)}`}>
-                              <div className="flex flex-wrap justify-between gap-2">
-                                <strong>{machine.machineRef}</strong>
-                                <span>
-                                  {machine.region} · {machine.status}
-                                </span>
-                              </div>
-                              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                                <MetricCard label="CPU" metric={machine.cpu} />
-                                <MetricCard label="RAM" metric={machine.memory} />
-                                <MetricCard label="Request rate" metric={machine.requestRate} />
-                                <MetricCard label="Request count" metric={machine.requestCount} />
-                                <MetricCard label="P95 latency" metric={machine.p95Latency} />
-                                <MetricCard label="5XX error rate" metric={machine.fiveXErrorRate} />
-                                <MetricCard label="Deployed version" metric={machine.deployedVersion} />
-                                <MetricCard label="Deployed SHA" metric={machine.deployedSha} />
-                              </div>
-                            </article>
-                          ))}
-                        </div>
+                        data.performanceDiagnostics.dependencies.map((entry) => (
+                          <div
+                            key={entry.dependency}
+                            className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 px-3 py-2"
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">
+                              {entry.dependency.replaceAll("_", " ")}
+                            </p>
+                            <p className="mt-1 text-xs font-semibold">
+                              {entry.sampleCount
+                                ? `${entry.p95LatencyMs ?? "—"} ms p95 · ${entry.sampleCount} samples`
+                                : "Not instrumented"}
+                            </p>
+                            {entry.sampleCount > 0 && (
+                              <p className="mt-0.5 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+                                {entry.failures} failures
+                              </p>
+                            )}
+                          </div>
+                        ))
                       )}
                     </div>
                   </Panel>
                   <Panel
-                    title="Neon database intelligence"
-                    sub="Availability is distinct from provider pressure and cost."
+                    title="Infrastructure"
+                    sub="Read-only provider telemetry; no control on this page mutates infrastructure."
+                    bodyClassName=""
                   >
-                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-                      <Gauge label="Availability" metric={data.infrastructure.neon.availability} />
-                      <MetricCard label="Connection pressure" metric={data.infrastructure.neon.connectionPressure} />
-                      <MetricCard label="Latency" metric={data.infrastructure.neon.latency} />
-                      <MetricCard label="Compute" metric={data.infrastructure.neon.compute} />
-                      <MetricCard label="Storage" metric={data.infrastructure.neon.storage} />
-                      <MetricCard
-                        label="Point-in-time recovery"
-                        metric={data.infrastructure.neon.pointInTimeRecovery}
-                      />
-                    </div>
-                    <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                      Neon mutation: UNAVAILABLE · Monitor and recommend only
-                    </p>
+                    <InfrastructureOverview data={data} />
                   </Panel>
                 </div>
-                <div className="grid gap-4 xl:grid-cols-[1.4fr_.6fr]">
-                  <Panel title="Infrastructure cost" sub="Month-to-date provider authority; estimates are forbidden.">
-                    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
+                  <Panel
+                    title="Fly machines"
+                    sub="Machine detail appears only from an approved least-privilege server authority."
+                    bodyClassName="p-3"
+                  >
+                    {data.infrastructure.fly.machines.length === 0 ? (
+                      <GrowthEmptyState
+                        title="Fly telemetry not connected"
+                        detail="No machine count, health, version or SHA is inferred while the provider authority is absent."
+                      />
+                    ) : (
+                      <div className="grid gap-2">
+                        {data.infrastructure.fly.machines.map((machine) => (
+                          <article
+                            key={machine.machineRef}
+                            className={`rounded-lg border p-3 ${tone(machine.status)}`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <strong className="text-xs">{machine.machineRef}</strong>
+                              <span className="text-[10px] uppercase tracking-[0.1em]">
+                                {machine.region} · {machine.status} · {text(machine.deployedVersion)}
+                              </span>
+                            </div>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                              <CompactRing label="CPU" metric={machine.cpu} />
+                              <CompactRing label="RAM" metric={machine.memory} />
+                              <CompactDigital label="P95" metric={machine.p95Latency} />
+                              <CompactDigital label="Requests" metric={machine.requestCount} />
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </Panel>
+                  <Panel title="Database and cost" sub="Availability, pressure and month-to-date provider billing." bodyClassName="p-3">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <StatusTile label="Fly connection" metric={data.infrastructure.fly.connection} />
+                      <StatusTile label="Availability" metric={data.infrastructure.neon.availability} />
+                      <StatusTile label="Connections" metric={data.infrastructure.neon.connectionPressure} />
+                      <StatusTile label="Latency" metric={data.infrastructure.neon.latency} />
+                      <StatusTile label="Compute" metric={data.infrastructure.neon.compute} />
+                      <StatusTile label="Storage" metric={data.infrastructure.neon.storage} />
+                      <StatusTile label="Recovery" metric={data.infrastructure.neon.pointInTimeRecovery} />
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       {data.infrastructure.costs.providers.map((cost) => (
-                        <div key={cost.provider} className={`rounded border p-3 ${tone(cost.status)}`}>
-                          <p className="text-xs font-medium uppercase">{cost.provider} · MTD</p>
-                          <p className="mt-2 text-lg font-semibold">
+                        <div
+                          key={cost.provider}
+                          className={`rounded-lg border px-3 py-2 ${tone(cost.status)}`}
+                          title={cost.reason ?? "Authoritative provider billing"}
+                        >
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">{cost.provider} · MTD</p>
+                          <p className="mt-1 break-words text-xs font-semibold leading-snug">
                             {cost.state === "REAL" && typeof cost.amountMajor === "number" && cost.sourceCurrency
-                              ? (formatProviderMoney(cost.amountMajor, cost.sourceCurrency) ?? "INVALID CURRENCY")
+                              ? (formatProviderMoney(cost.amountMajor, cost.sourceCurrency) ?? "Invalid currency")
                               : cost.state.replaceAll("_", " ")}
                           </p>
-                          <p className="mt-2 text-xs opacity-80">{cost.reason ?? "Authoritative provider billing"}</p>
                         </div>
                       ))}
                     </div>
-                    <div className="grid gap-3 border-t border-[var(--admin-line,#333)] p-4 sm:grid-cols-3">
-                      <MetricCard label="GBP-normalised total" metric={data.infrastructure.costs.normalisedTotalGBP} />
-                      <MetricCard label="Cost / paid card" metric={data.infrastructure.costs.costPerPaidCardGBP} />
-                      <MetricCard label="Cost / paid order" metric={data.infrastructure.costs.costPerPaidOrderGBP} />
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <StatusTile label="Normalised total" metric={data.infrastructure.costs.normalisedTotalGBP} />
+                      <StatusTile label="Cost / paid card" metric={data.infrastructure.costs.costPerPaidCardGBP} />
+                      <StatusTile label="Cost / paid order" metric={data.infrastructure.costs.costPerPaidOrderGBP} />
                     </div>
-                    <p className="px-4 pb-4 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                      {data.infrastructure.costs.currencyPolicy}
+                    <p className="mt-2 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+                      {data.infrastructure.costs.currencyPolicy} · Budget{" "}
+                      {data.infrastructure.budget.state.replaceAll("_", " ")} · automatic shutdown DISABLED · automatic
+                      spend DISABLED · Neon mutation UNAVAILABLE
                     </p>
-                  </Panel>
-                  <Panel title="Monthly budget guardrail" sub="Owner-defined future boundary; no automatic shutdown.">
-                    <div className="p-4">
-                      <Gauge
-                        label="Budget"
-                        metric={{
-                          state: "NOT_INSTRUMENTED",
-                          status: data.infrastructure.budget.status,
-                          source: "Owner-approved infrastructure budget",
-                          reason: data.infrastructure.budget.reason,
-                          lastUpdated: null,
-                        }}
-                      />
-                      <p className="mt-3 text-xs text-[var(--admin-muted,#8a8a8a)]">
-                        Automatic shutdown: DISABLED · Automatic spend: DISABLED
-                      </p>
-                    </div>
                   </Panel>
                 </div>
               </section>
             )}
             {tab === "partners" && (
-              <section className="space-y-4">
+              <section className="space-y-3">
+                <GrowthKpiStrip label="Partner pipeline key signals" columns={6}>
+                  <OverviewKpi
+                    label="Applications"
+                    value={number(data.partnerPipeline.total.value)}
+                    detail="All measured applications"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="New"
+                    value={number(data.partnerPipeline.new.value)}
+                    detail="Awaiting first contact"
+                    status={data.partnerPipeline.new.value > 0 ? "AMBER" : "GREEN"}
+                  />
+                  <OverviewKpi
+                    label="Contacted"
+                    value={number(data.partnerPipeline.contacted.value)}
+                    detail="Outreach recorded"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Qualified"
+                    value={number(data.partnerPipeline.qualified.value)}
+                    detail="No automatic provisioning"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Onboarding"
+                    value={number(data.partnerPipeline.onboarding.value)}
+                    detail="Partner Management owns accounts"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Active Partners"
+                    value={
+                      summary.activePartners.state === "MEASURED"
+                        ? number(summary.activePartners.value)
+                        : "Not instrumented"
+                    }
+                    detail={
+                      summary.activePartners.state === "MEASURED"
+                        ? "Operational Partner accounts"
+                        : summary.activePartners.reason
+                    }
+                    status={summary.activePartners.state === "MEASURED" ? "GREEN" : "UNKNOWN"}
+                  />
+                </GrowthKpiStrip>
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                  <Panel
+                    title="Pipeline progression"
+                    sub="Each bar is a current application state, not a cumulative funnel stage, so a later state can exceed an earlier one."
+                    bodyClassName="p-3"
+                  >
+                    <GrowthFunnel
+                      steps={[
+                        { key: "total", label: "All applications", value: data.partnerPipeline.total.value, detail: "Measured applications" },
+                        { key: "contacted", label: "Contacted", value: data.partnerPipeline.contacted.value, detail: "Outreach recorded" },
+                        { key: "qualified", label: "Qualified", value: data.partnerPipeline.qualified.value, detail: "Manually qualified" },
+                        { key: "onboarding", label: "Onboarding", value: data.partnerPipeline.onboarding.value, detail: "Handed to Partner Management" },
+                      ]}
+                    />
+                  </Panel>
+                  <Panel title="Pipeline state" sub="Every application state, including closed." bodyClassName="p-3">
+                    <GrowthBarSeries
+                      rows={[
+                        ["new", "New", data.partnerPipeline.new.value, "AMBER"],
+                        ["contacted", "Contacted", data.partnerPipeline.contacted.value, "GREEN"],
+                        ["qualified", "Qualified", data.partnerPipeline.qualified.value, "GREEN"],
+                        ["onboarding", "Onboarding", data.partnerPipeline.onboarding.value, "GREEN"],
+                        ["not_a_fit", "Not a fit", data.partnerPipeline.notAFit.value, "UNKNOWN"],
+                      ].map(([key, label, value, status]) => ({
+                        key: key as string,
+                        label: label as string,
+                        value: value as number,
+                        display: number(value as number),
+                        status: status as Health,
+                      }))}
+                      empty={{
+                        title: "No applications",
+                        detail: "No Partner application has been received in this measured view.",
+                      }}
+                    />
+                  </Panel>
+                  <Panel
+                    title="Applications by source"
+                    sub="Acquisition source of measured applications."
+                    bodyClassName="p-3"
+                  >
+                    <GrowthBarSeries
+                      rows={summary.sourcePerformance.map((row) => ({
+                        key: `partner-${row.category}`,
+                        label: row.category.replaceAll("_", " "),
+                        value: row.partnerApplications,
+                        display: number(row.partnerApplications),
+                      }))}
+                      empty={{
+                        title: "No measured source",
+                        detail: "No Partner application in this period carried a controlled acquisition source.",
+                      }}
+                    />
+                  </Panel>
+                </div>
                 <Panel
-                  title="Partner pipeline"
+                  title="Partner operational authority"
                   sub="Growth qualifies applications; Partner Management owns operational Partner accounts."
+                  bodyClassName="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-4"
                 >
-                  <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-6">
-                    <Value label="All applications" value={data.partnerPipeline.total} />
-                    <Value label="New" value={data.partnerPipeline.new} />
-                    <Value label="Contacted" value={data.partnerPipeline.contacted} />
-                    <Value label="Qualified" value={data.partnerPipeline.qualified} />
-                    <Value label="Not a fit" value={data.partnerPipeline.notAFit} />
-                    <Value label="Onboarding" value={data.partnerPipeline.onboarding} />
-                  </div>
-                  <div className="grid gap-3 border-t border-[var(--admin-line,#333)] p-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <PartnerValue label="Active Partners" value={summary.activePartners} />
-                    <PartnerValue label="Partner-originated cards" value={summary.partnerCardsPerPartner} />
-                    <PartnerValue label="Partner revenue" value={summary.partnerRevenue} />
-                    <PartnerValue label="Repeat customer rate" value={summary.repeatCustomerRate} />
-                  </div>
+                  <PartnerValue label="Active Partners" value={summary.activePartners} />
+                  <PartnerValue label="Partner-originated cards" value={summary.partnerCardsPerPartner} />
+                  <PartnerValue label="Partner revenue" value={summary.partnerRevenue} />
+                  <PartnerValue label="Repeat customer rate" value={summary.repeatCustomerRate} />
                 </Panel>
                 <div className="grid gap-4 2xl:grid-cols-[1.35fr_.65fr]">
                   <Panel
@@ -2123,7 +3102,96 @@ export default function GrowthCommandPage() {
               </section>
             )}
             {tab === "campaigns" && (
-              <section className="space-y-4">
+              <section className="space-y-3">
+                <GrowthKpiStrip label="Campaign key signals" columns={5}>
+                  <OverviewKpi
+                    label="Active measured campaigns"
+                    value={number(campaigns.activeCount)}
+                    detail="Controlled codes with measured results"
+                    status={campaigns.activeCount > 0 ? "GREEN" : "UNKNOWN"}
+                  />
+                  <OverviewKpi
+                    label="Attributed orders"
+                    value={number(campaigns.paidSubmissions)}
+                    detail="Verified paid authority"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Attributed revenue"
+                    value={formatGrowthMoneyGBP(campaigns.revenuePence)}
+                    detail="Campaign-attributed, GBP"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Partner applications"
+                    value={number(campaigns.partnerApplications)}
+                    detail="Distinct from paid orders"
+                    status="GREEN"
+                  />
+                  <OverviewKpi
+                    label="Best campaign"
+                    value={campaigns.bestLabel}
+                    detail={campaigns.bestDetail}
+                    status={campaigns.bestLabel === "No measured campaign" ? "UNKNOWN" : "GREEN"}
+                  />
+                </GrowthKpiStrip>
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <Panel title="Revenue by campaign" sub="Verified paid revenue by controlled code." bodyClassName="p-3">
+                    <GrowthBarSeries
+                      rows={summary.campaignPerformance.map((row) => ({
+                        key: `rev-${row.category}-${row.campaign}`,
+                        label: row.campaign,
+                        value: row.revenuePence,
+                        display: formatGrowthMoneyGBP(row.revenuePence),
+                      }))}
+                      empty={{
+                        title: "No campaign revenue",
+                        detail: "No controlled campaign code has produced a paid order in this period.",
+                      }}
+                    />
+                  </Panel>
+                  <Panel
+                    title="Orders and applications by campaign"
+                    sub="Paid orders and Partner applications remain distinct outcomes."
+                    bodyClassName="p-3"
+                  >
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">
+                          Paid orders
+                        </p>
+                        <GrowthBarSeries
+                          rows={summary.campaignPerformance.map((row) => ({
+                            key: `ord-${row.category}-${row.campaign}`,
+                            label: row.campaign,
+                            value: row.paidSubmissions,
+                            display: number(row.paidSubmissions),
+                          }))}
+                          empty={{ title: "No paid orders", detail: "No campaign produced a paid order." }}
+                        />
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">
+                          Partner applications
+                        </p>
+                        <GrowthBarSeries
+                          rows={summary.campaignPerformance.map((row) => ({
+                            key: `app-${row.category}-${row.campaign}`,
+                            label: row.campaign,
+                            value: row.partnerApplications,
+                            display: number(row.partnerApplications),
+                          }))}
+                          empty={{ title: "No applications", detail: "No campaign produced a Partner application." }}
+                        />
+                      </div>
+                    </div>
+                    {summary.historical.state === "NOT_INSTRUMENTED" && (
+                      <p className="mt-3 text-[10px] text-[var(--admin-muted,#8a8a8a)]">
+                        Performance over time is not drawn: {summary.historical.reason}
+                      </p>
+                    )}
+                  </Panel>
+                </div>
                 <CampaignPanel title="Campaign performance" rows={summary.campaignPerformance} />
                 <Panel
                   title="Controlled campaign link generator"
@@ -2187,8 +3255,13 @@ export default function GrowthCommandPage() {
                         </p>
                       )}
                       {link.data?.url && (
-                        <div className="flex flex-col gap-2 rounded border border-[var(--admin-line,#333)] p-3 sm:flex-row sm:items-center">
-                          <code className="min-w-0 flex-1 break-all text-xs">{link.data.url}</code>
+                        <div className="flex flex-col gap-2 rounded-lg border border-[var(--admin-gold,#d4af37)]/45 bg-[linear-gradient(115deg,rgba(212,175,55,.12),transparent_60%)] p-3 sm:flex-row sm:items-center">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--admin-gold-hi,#ecd585)]">
+                              Tracked link ready
+                            </p>
+                            <code className="mt-1 block min-w-0 break-all text-xs">{link.data.url}</code>
+                          </div>
                           <AdminButton
                             size="sm"
                             onClick={() => {

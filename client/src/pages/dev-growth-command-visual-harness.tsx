@@ -38,11 +38,23 @@ const series = (base: number, spread: number) => [
   base + spread / 3,
 ];
 
-function route(key: string, label: string, requestCount: number, p95LatencyMs: number, status: "GREEN" | "AMBER" = "GREEN") {
+/**
+ * Keys mirror the server's own GrowthTrafficClass identifiers so the harness
+ * exercises the same classification the production console does, rather than a
+ * parallel vocabulary that would let a classification bug pass unseen.
+ */
+function route(
+  key: string,
+  label: string,
+  requestCount: number,
+  p95LatencyMs: number,
+  status: "GREEN" | "AMBER" | "RED" = "GREEN",
+  confidence: "SUFFICIENT" | "LOW_SAMPLE" | "INSUFFICIENT_DATA" = "SUFFICIENT"
+) {
   return {
     key,
     label,
-    trafficClass: key === "admin" ? "INTERNAL" : "PUBLIC",
+    trafficClass: key,
     requestCount,
     p50LatencyMs: Math.round(p95LatencyMs * 0.52),
     p95LatencyMs,
@@ -52,17 +64,25 @@ function route(key: string, label: string, requestCount: number, p95LatencyMs: n
     fiveXCount: 0,
     errorRatePercent: 0,
     trendP95LatencyMs: series(p95LatencyMs, 22),
-    confidence: "SUFFICIENT",
+    confidence,
     status,
   };
 }
 
 function intelligence(period: string) {
+  // Reproduces the owner-reported production shape for visual acceptance: a fast
+  // customer surface alongside a slow internal console. The console must not
+  // colour the customer band. These are fixture values, never shipped defaults.
   const trafficClasses = [
-    route("growth_command", "Growth Command", 42, 128),
-    route("public_site", "Public site", 31, 172),
-    route("checkout", "Checkout", 14, 211),
-    route("admin", "Admin", 8, 86),
+    route("PUBLIC_CUSTOMER", "Public customer", 214, 64),
+    route("SUBMISSION_CHECKOUT", "Submission / checkout", 48, 128),
+    route("VERIFY_CERTIFICATE", "Verify / certificate", 96, 71),
+    route("PARTNER", "Partner", 31, 143),
+    route("SCANNER", "Scanner", 12, 96, "GREEN", "LOW_SAMPLE"),
+    route("SUPER_ADMIN", "Super Admin", 26, 318, "AMBER"),
+    route("GROWTH_COMMAND", "Growth Command", 42, 2448, "RED"),
+    route("AI_MODEL", "AI / model", 5, 880, "AMBER", "LOW_SAMPLE"),
+    route("HEALTH_INTERNAL", "Health / internal", 180, 9),
   ];
   const paid = { state: "MEASURED" as const, value: 12 };
   const metricSet = {
@@ -103,8 +123,17 @@ function intelligence(period: string) {
     summary: {
       period,
       paid: metricSet,
-      sourcePerformance: [],
-      campaignPerformance: [],
+      sourcePerformance: [
+        { category: "DIRECT", paidSubmissions: 5, paidCards: 19, revenuePence: 52300, partnerApplications: 2 },
+        { category: "OUTREACH", paidSubmissions: 4, paidCards: 16, revenuePence: 41200, partnerApplications: 7 },
+        { category: "ORGANIC_SEARCH", paidSubmissions: 2, paidCards: 8, revenuePence: 21300, partnerApplications: 2 },
+        { category: "REFERRAL", paidSubmissions: 1, paidCards: 3, revenuePence: 10000, partnerApplications: 1 },
+      ],
+      campaignPerformance: [
+        { category: "OUTREACH", campaign: "medway_cataclysm", paidSubmissions: 3, paidCards: 12, revenuePence: 31800, partnerApplications: 5 },
+        { category: "OUTREACH", campaign: "kent_card_shops", paidSubmissions: 1, paidCards: 4, revenuePence: 9400, partnerApplications: 2 },
+        { category: "ORGANIC_SEARCH", campaign: "grading_guide", paidSubmissions: 2, paidCards: 8, revenuePence: 21300, partnerApplications: 0 },
+      ],
       partnerApplications: { total: paid, new: { state: "MEASURED", value: 3 }, contacted: { state: "MEASURED", value: 4 }, qualified: { state: "MEASURED", value: 5 }, notAFit: { state: "MEASURED", value: 0 }, onboarding: { state: "MEASURED", value: 1 } },
       activePartners: { state: "MEASURED", value: 5 },
       partnerCardsPerPartner: { state: "NOT_INSTRUMENTED", reason: "Local fixture" },
@@ -137,7 +166,12 @@ function intelligence(period: string) {
     incident: { status: "CLEAR", severity: null, priorityKey: null, title: "No local fixture incident", detail: "", recommendation: "" },
     revenueVelocity: { window: "60m", minimumPaidSample: 3, paidSubmissionsPerHour: metric(12, "submissions/h"), paidCardsPerHour: metric(46, "cards/h"), revenuePencePerHour: metric(124800, "pence/h"), comparison: metric("LOCAL ONLY", ""), definition: "Local fixture", lastUpdated: FIXTURE_UPDATED },
     seo: { searchConsole: metric(undefined, "", "UNKNOWN"), impressions: metric(undefined, "", "UNKNOWN"), clicks: metric(undefined, "", "UNKNOWN"), ctr: metric(undefined, "", "UNKNOWN"), averagePosition: metric(undefined, "", "UNKNOWN"), trend: metric(undefined, "", "UNKNOWN"), topQueries: metric(undefined, "", "UNKNOWN"), topPages: metric(undefined, "", "UNKNOWN"), technical: { sitemap: metric("Available", ""), robots: metric("Available", ""), indexabilityPolicy: metric("Not connected", "", "UNKNOWN") }, lastUpdated: FIXTURE_UPDATED },
-    conversion: { stages: [], submissionToCheckout: metric(83.3, "%"), checkoutToPaid: metric(80, "%"), submissionToPaid: metric(66.7, "%"), cardsPerPaidOrder: metric(3.8, "cards"), dropOff: metric(33.3, "%"), comparison: metric("Local fixture", ""), definition: "Local fixture" },
+    conversion: { stages: [
+      { key: "submission_started", label: "Submission starts", metric: metric(18, "count") },
+      { key: "checkout_started", label: "Checkout starts", metric: metric(15, "count") },
+      { key: "paid", label: "Paid submissions", metric: metric(12, "count") },
+      { key: "paid_cards", label: "Paid cards", metric: metric(46, "count") },
+    ], submissionToCheckout: metric(83.3, "%"), checkoutToPaid: metric(80, "%"), submissionToPaid: metric(66.7, "%"), cardsPerPaidOrder: metric(3.8, "cards"), dropOff: metric(33.3, "%"), comparison: metric("Local fixture", ""), definition: "Local fixture" },
     scoreboard, insights: [
       { id: "local-green", priority: "INFO", title: "Local visual fixture", detail: "Synthetic data is confined to this DEV-only browser route.", recommendation: "Do not treat this as production evidence.", trace: { ruleId: "LOCAL_VISUAL", window: "none", result: "fixture" } },
       { id: "local-latency", priority: "ACTION", title: "Latency under observation", detail: "One fixture machine has elevated p95 samples.", recommendation: "Inspect real telemetry before action.", trace: { ruleId: "LOCAL_VISUAL", window: "60m", result: "fixture" } },
