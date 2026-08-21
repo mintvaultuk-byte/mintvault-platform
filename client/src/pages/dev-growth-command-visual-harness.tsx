@@ -143,7 +143,7 @@ function intelligence(period: string) {
     },
     partnerPipeline: { total: paid, new: { state: "MEASURED", value: 3 }, contacted: { state: "MEASURED", value: 4 }, qualified: { state: "MEASURED", value: 5 }, notAFit: { state: "MEASURED", value: 0 }, onboarding: { state: "MEASURED", value: 1 } },
     livePulse: {
-      submissionStarts: metric(18, "count"), checkoutStarts: metric(15, "count"), paidSubmissions: metric(12, "count"), paidCards: metric(46, "count"), revenuePence: metric(124800, "pence"), partnerApplications: metric(3, "count"), requestsPerMinute: metric(6.6, "requests/min"), requestsLastHour: metric(95, "requests"),
+      submissionStarts: metric(18, "count"), checkoutStarts: metric(15, "count"), paidSubmissions: metric(12, "count"), paidCards: metric(46, "count"), revenuePence: metric(124800, "GBP pence"), partnerApplications: metric(3, "count"), requestsPerMinute: metric(6.6, "requests/min"), requestsLastHour: metric(95, "requests"),
       revenueVelocity: { window: "60m", minimumPaidSample: 3, paidSubmissionsPerHour: metric(12, "submissions/h"), paidCardsPerHour: metric(46, "cards/h"), revenuePencePerHour: metric(124800, "pence/h"), comparison: metric("LOCAL ONLY", ""), definition: "Local fixture", lastUpdated: FIXTURE_UPDATED }, lastUpdated: FIXTURE_UPDATED,
     },
     siteHealth: {

@@ -29,13 +29,24 @@ const route = (
 ) => ({ trafficClass, label, requestCount, p95LatencyMs, status, confidence });
 
 describe("KPI values never truncate an operational state", () => {
-  it("steps the font down instead of clipping the words an owner acts on", () => {
-    // The live defects were "INSUFFICIENT TEL..." and "HEALTHY HEADRO...".
-    expect(kpiValueClass("INSUFFICIENT TELEMETRY")).toContain("text-xs");
-    expect(kpiValueClass("HEALTHY HEADROOM")).toContain("text-sm");
-    expect(kpiValueClass("NOT CONNECTED")).toContain("text-sm");
-    expect(kpiValueClass("HEADROOM")).toContain("text-lg");
+  it("sizes on the longest word, because that is what cannot be broken", () => {
+    // A string wraps for free at its spaces; only a single long word can
+    // overflow and be split. "NOT INSTRUMENTED" is 16 characters but its
+    // binding constraint is the 12-character "INSTRUMENTED".
+    expect(kpiValueClass("NOT INSTRUMENTED")).toBe(kpiValueClass("INSTRUMENTED"));
+    expect(kpiValueClass("HEALTHY HEADROOM")).toBe(kpiValueClass("HEADROOM"));
+    expect(kpiValueClass("INSUFFICIENT TELEMETRY")).toContain("text-sm");
+    expect(kpiValueClass("NOT CONNECTED")).toContain("text-lg");
     expect(kpiValueClass("46")).toContain("text-xl");
+  });
+
+  it("never gives a longer word a larger tier than a shorter one", () => {
+    const order = ["text-xs", "text-sm", "text-lg", "text-xl"];
+    const rank = (value: string) => order.findIndex((tier) => kpiValueClass(value).startsWith(tier));
+    const words = ["46", "READY", "HEADROOM", "CONNECTED", "INSTRUMENTED", "EXTRAORDINARILYLONGWORD"];
+    for (let i = 1; i < words.length; i += 1) {
+      expect(rank(words[i]!), `${words[i]} vs ${words[i - 1]}`).toBeLessThanOrEqual(rank(words[i - 1]!));
+    }
   });
 
   it("never assigns the largest tier to a word too wide for the narrowest cell", () => {
