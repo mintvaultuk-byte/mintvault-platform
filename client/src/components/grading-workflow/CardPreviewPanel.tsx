@@ -3,7 +3,8 @@
  *
  * A plain <img> fed by (a) the object URL of a just-uploaded file, or (b) the
  * existing signed evidence URLs from GET /api/admin/certificates/:id/images
- * (front_working / back_working, falling back to front_display / back_display).
+ * (front_working / back_working only). A compact display derivative is never
+ * substituted for workstation inspection evidence.
  * Front/Back tabs, button-only zoom (+/−/Fit),
  * click-and-drag panning while zoomed, and a full-screen modal. The mouse wheel
  * is NOT captured — it scrolls the page/panel normally. Deliberately NOT the
@@ -22,6 +23,9 @@ import {
 
 interface ImagesResponse {
   urls?: Record<string, string | null>;
+  workingEvidence?: Partial<
+    Record<"front" | "back", { available: boolean; reason: string | null; recovery: string | null }>
+  >;
 }
 
 // Button-only zoom levels: 100% → 175% → … → 550% → 600% (75 percentage
@@ -90,9 +94,18 @@ export function CardPreviewPanel({
     [frontObjectUrl, backObjectUrl]
   );
 
-  const frontUrl = frontObjectUrl ?? data?.urls?.front_working ?? data?.urls?.front_display ?? null;
-  const backUrl = backObjectUrl ?? data?.urls?.back_working ?? data?.urls?.back_display ?? null;
+  // A signed URL is insufficient proof on its own. The server must have
+  // admitted this side against the immutable 1200-DPI master in the same
+  // response, otherwise the details/review surface fails visibly closed.
+  const frontUrl =
+    frontObjectUrl ?? (data?.workingEvidence?.front?.available === true ? data.urls?.front_working ?? null : null);
+  const backUrl =
+    backObjectUrl ?? (data?.workingEvidence?.back?.available === true ? data.urls?.back_working ?? null : null);
   const url = side === "front" ? frontUrl : backUrl;
+  const unavailableReason =
+    data?.workingEvidence?.[side]?.reason ?? `${side.toUpperCase()} cannot be inspected from a display derivative.`;
+  const unavailableRecovery =
+    data?.workingEvidence?.[side]?.recovery ?? "Restore canonical full-resolution working evidence for this side.";
 
   // Reset only when an already-loaded image is actually replaced. Initial load,
   // side switches and fullscreen preserve workstation-owned inspection state.
@@ -216,8 +229,10 @@ export function CardPreviewPanel({
           draggable={false}
         />
       ) : (
-        <div className="flex h-40 items-center justify-center text-center text-[11px] text-[var(--admin-ink-faint)]">
-          {side === "front" ? "No front image yet — upload one in the grading workstation." : "No back image yet."}
+        <div className="flex h-40 flex-col items-center justify-center gap-1 px-4 text-center text-[11px] text-[var(--admin-ink-faint)]">
+          <p className="font-bold text-amber-300">FULL-RESOLUTION EVIDENCE UNAVAILABLE</p>
+          <p>{unavailableReason}</p>
+          <p>{unavailableRecovery}</p>
         </div>
       )}
     </div>

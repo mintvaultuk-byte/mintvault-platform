@@ -1,0 +1,11 @@
+{
+  "task": "growth-command-gb04d",
+  "capturedAt": "2026-08-20T11:21:43Z",
+  "governanceVersion": "1.2",
+  "combinedHash": "a87b4b87340c986446937dce6ec4d37cd5471ff182d08569e1075b9746139ce4",
+  "baselineSha": "ee7fbe43e995b623b488bb9875ca37d261c2dfc4",
+  "engineeringMode": "HOSTILE",
+  "engineeringRisk": "CRITICAL",
+  "graphStatus": "REBUILD_REQUIRED",
+  "resolvedInstructions": ["AGENTS.md", "CLAUDE.md"]
+}

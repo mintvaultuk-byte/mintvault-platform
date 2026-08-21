@@ -10,6 +10,7 @@
 | PPNR-006 | EXTERNAL FOLLOW-UP | F | Google OAuth/API credentials and live pilot prerequisites are absent. | Keep optional `0103` schema, flag and provider integration inactive. | Source/flag boundaries reviewed. | Deferred safely |
 | PPNR-007 | EXTERNAL INPUT | G | A legitimate new Partner requires owner-controlled business/contact/location/access data. | Collect exact inputs and obtain action-time approval only after code release is ready. | Not applicable before owner input. | Waiting |
 | PPNR-008 | HIGH | A | The critical Super Admin control-shell test used two parameterised `INSERT`s in one PostgreSQL prepared statement, which PostgreSQL rejects before it can prove exact public-profile approval. | Split the fixture into two atomic parameterised inserts. | Isolated suite 12/12; full fail-closed Partner matrix 70 suites / 1,315 assertions. | Locally verified |
+| PPNR-009 | BLOCKER | B/D/E | `origin/main` advanced 33 commits from the local candidate base to `2d776db9`; safe deployment refuses a checkout that is behind main. | Reconcile the eight true merge conflicts, retain both authorities, then rerun all affected release proofs against the new exact SHA. | Read-only merge-tree deterministically reports conflicts in eight shared files. | In progress |
 
 ## Latest evidence
 

@@ -984,3 +984,33 @@ export async function listFleetStations(input: {
   ]);
   return { stations: rows.rows, total: Number(total.rows[0]?.total ?? 0), page, pageSize };
 }
+
+/**
+ * Aggregate-only fleet lifecycle projection for read-only cross-tenant summaries.
+ *
+ * Unlike listFleetStations, this deliberately selects no station, tenant, location,
+ * device or telemetry field. Callers still need the Partner visibility gate before
+ * using it; a missing partner_stations relation throws so it cannot become a false
+ * zero.
+ */
+export async function getFleetStationLifecycleSummary(): Promise<
+  Record<StationStatus, number>
+> {
+  const result = await partnerAdminQuery<{ status: StationStatus; n: string }>(
+    "SELECT status, count(*)::bigint AS n FROM partner_stations GROUP BY status",
+  );
+  const summary: Record<StationStatus, number> = {
+    PENDING: 0,
+    ACTIVE: 0,
+    SUSPENDED: 0,
+    REVOKED: 0,
+  };
+
+  for (const row of result.rows) {
+    if (row.status in summary) {
+      summary[row.status] = Number(row.n);
+    }
+  }
+
+  return summary;
+}

@@ -44,13 +44,9 @@ interface CenteringResult {
 interface Props {
   side: "front" | "back";
   certId: number;
-  /** RAW original image URL. Display the raw (not the cropped) so /recrop —
-   *  which rotates the raw first then crops — never double-rotates. */
-  rawImageUrl: string;
-  /** Browser-safe, deterministic derivative of the immutable master. New
-   * evidence records MUST provide this; rawImageUrl is retained only for
-   * legacy JPEG-only records and server-side recrop compatibility. */
-  workingImageUrl?: string;
+  /** Browser-safe, server-admitted full-resolution derivative of the immutable
+   * 1200-DPI master. Card Tool never falls back to a raw, cropped, or display URL. */
+  workingImageUrl: string;
   /** Called after a successful compute (recrop ± centering) so the panel can
    *  refresh the images + grading queries. */
   onDone: () => void;
@@ -103,16 +99,6 @@ interface Props {
   cropSyncStatus?: "idle" | "pending" | "synced" | "failed";
   /** Re-runs THIS side's failed crop upload; resolves the display URL on success. */
   onRetryCrop?: () => Promise<string | undefined>;
-  /** Phase to open in. "defects" jumps straight to defect-marking on an
-   *  existing crop (centering already saved + crop image present), skipping the
-   *  8-dot capture. Defaults to "capture". */
-  initialPhase?: "capture" | "defects";
-  /** When opening directly in "defects", the already-cropped display image URL
-   *  to load as the defects-phase <img> (no /recrop re-run needed). */
-  existingCroppedUrl?: string;
-  /** Authoritative working crop, when the pipeline provides one. The legacy
-   * display/cropped URL remains an explicit fallback for historical cards. */
-  workingCroppedUrl?: string;
   /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
   apiBase?: string;
 }
@@ -303,7 +289,6 @@ function SideDiagram({
 export default function ManualCardTool({
   side,
   certId,
-  rawImageUrl,
   workingImageUrl,
   onDone,
   onCancel,
@@ -317,16 +302,12 @@ export default function ManualCardTool({
   onStartCropUpload,
   cropSyncStatus = "idle",
   onRetryCrop,
-  initialPhase = "capture",
-  existingCroppedUrl,
-  workingCroppedUrl,
   apiBase = "/api/admin",
 }: Props) {
-  // TIFF masters are intentionally not browser measurement inputs. New records
-  // use the deterministic working derivative; old records retain their actual
-  // JPEG evidence rather than pretending a TIFF exists.
-  const measurementImageUrl = workingImageUrl ?? rawImageUrl;
-  const initialWorkingCropUrl = workingCroppedUrl ?? existingCroppedUrl;
+  // TIFF masters are intentionally not browser measurement inputs. This
+  // required input is the verified full-resolution working derivative, so a
+  // Card Tool measurement can never silently use a legacy JPEG/display image.
+  const measurementImageUrl = workingImageUrl;
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
   const [innerPts, setInnerPts] = useState<Point[]>([]);
@@ -351,21 +332,15 @@ export default function ManualCardTool({
   // — the crop and centering are already durably saved by handleCompute.
   // No `onDefectAdded` prop → phase stays "capture" forever and the tool
   // closes on Compute as it did pre-merge.
-  // Opens in `initialPhase`: "defects" when the panel knows this side already
-  // has a crop (skip the 8-dot capture entirely), else "capture".
-  const [phase, setPhase] = useState<"capture" | "defects">(initialPhase);
-  // After Compute: the cache-busted signed URL of the freshly-cropped display
-  // image, returned by /recrop's response. Becomes the <img src> for the
-  // defects phase so the operator marks pins on the new crop (not the raw).
-  // When opening directly in defects, seeded from the existing crop URL.
-  const [croppedDisplayUrl, setCroppedDisplayUrl] = useState<string | null>(
-    initialPhase === "defects" && initialWorkingCropUrl ? initialWorkingCropUrl : null
-  );
+  // Never reopen directly on an old display crop. Defect inspection begins from
+  // the current admitted working source and uses the locally reconstructed crop
+  // geometry below, so no compact derivative can re-enter the Card Tool.
+  const [phase, setPhase] = useState<"capture" | "defects">("capture");
   // Optimistic local crop preview shown the instant Compute fires, while the
   // real crop uploads to R2 in the background. Geometry mirrors the server's
   // rotate(deskew)+rectangular-extract exactly (in natural pixels) so defect
-  // pins — which are frame-relative percentages — land identically once the
-  // R2 image swaps in. Cleared back to null once croppedDisplayUrl arrives.
+  // pins — which are frame-relative percentages — remain tied to the admitted
+  // working source throughout the defects phase.
   const [localPreview, setLocalPreview] = useState<null | {
     rawW: number;
     rawH: number;
@@ -409,9 +384,7 @@ export default function ManualCardTool({
   // Seeded immediately when opening directly in defects so prior pins for this
   // side are visible without a Compute (handleCompute seeds it on the normal
   // capture→defects path).
-  const [committedDefects, setCommittedDefects] = useState<Defect[]>(
-    initialPhase === "defects" ? (existingDefects ?? []).filter((d) => d.image_side === side) : []
-  );
+  const [committedDefects, setCommittedDefects] = useState<Defect[]>([]);
   const lastDefectClickAtRef = useRef<number>(0);
   // Cursor position in % while hovering the image in placement mode; drives the
   // live targeting reticle. Null when not hovering / not placing.
@@ -1151,9 +1124,8 @@ export default function ManualCardTool({
         const ch = (RH * crop.height_pct) / 100;
 
         setLocalPreview({ rawW, rawH, d: deskewDeg, RW, RH, cl, ct, cw, ch });
-        setCroppedDisplayUrl(null);
         // Drive the fit/zoom math off the crop's aspect so the frame size (and
-        // therefore pin percentages) match the R2 crop that swaps in later.
+        // therefore pin percentages) match the locally reconstructed crop.
         setImgDims({ w: Math.max(1, Math.round(cw)), h: Math.max(1, Math.round(ch)) });
         setHover(null);
         setDrag(null);
@@ -1161,15 +1133,12 @@ export default function ManualCardTool({
         setPhase("defects");
 
         // Background: centering (parallel, non-blocking) + crop upload (panel-
-        // owned, retried, gates approval). On upload success, swap the <img>
-        // from the local preview to the R2 display URL — seamless, identical
-        // framing. On failure the panel surfaces it and blocks approval.
+        // owned, retried, gates approval). Its display result is deliberately
+        // not used as a Card Tool source; the tool remains on working evidence.
         sendCentering().catch((e) =>
           toast({ title: "Centering save failed", description: e.message, variant: "destructive" })
         );
-        onStartCropUpload(cropPayload).then((url) => {
-          if (url) setCroppedDisplayUrl(url);
-        });
+        void onStartCropUpload(cropPayload);
         doneToast();
         return;
       }
@@ -1187,8 +1156,7 @@ export default function ManualCardTool({
       await sendCentering();
       doneToast();
 
-      if (onDefectAdded && typeof cropJson.displayUrl === "string" && cropJson.displayUrl.length > 0) {
-        setCroppedDisplayUrl(cropJson.displayUrl);
+      if (onDefectAdded) {
         setHover(null);
         setDrag(null);
         setCommittedDefects((existingDefects ?? []).filter((d) => d.image_side === side));
@@ -1441,9 +1409,7 @@ export default function ManualCardTool({
                       <button
                         type="button"
                         onClick={() => {
-                          onRetryCrop().then((url) => {
-                            if (url) setCroppedDisplayUrl(url);
-                          });
+                          void onRetryCrop();
                         }}
                         className="underline hover:no-underline"
                       >
@@ -1579,16 +1545,13 @@ export default function ManualCardTool({
                   touchTapRef.current = null;
                 }}
               >
-                {phase === "defects" && localPreview && !croppedDisplayUrl ? (
+                {phase === "defects" && localPreview ? (
                   // ── Optimistic local crop preview ──────────────────────────
                   // A CSS-only reconstruction of the server crop (rotate-expand
-                  // the already-loaded raw <img>, then clip to the crop rect in
-                  // an overflow:hidden frame). Display-only — no canvas, so no
-                  // CORS taint. The frame is sized exactly like the R2 crop will
-                  // be (renderW × renderH, driven by the crop aspect we fed into
-                  // imgDims), so when croppedDisplayUrl arrives and this swaps to
-                  // the <img> below, nothing shifts — and defect pins, being
-                  // %-of-frame, stay pinned to the same spot.
+                  // the already-loaded working <img>, then clip to the crop rect in
+                  // an overflow:hidden frame). It retains the admitted working
+                  // raster as its source — no canvas or compact R2 display
+                  // derivative — while pin coordinates remain %-of-frame.
                   <div
                     className="block cursor-crosshair"
                     style={{
@@ -1630,12 +1593,8 @@ export default function ManualCardTool({
                   </div>
                 ) : (
                   <img
-                    // In defects phase, swap to the freshly-cropped display image
-                    // returned by /recrop. imgDims re-measures via onLoad so
-                    // coordinate capture stays accurate against the new image's
-                    // natural pixels (same aspect as the preview → no pin shift).
-                    src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : measurementImageUrl}
-                    alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
+                    src={measurementImageUrl}
+                    alt={`${side} ${phase === "defects" ? "working crop" : "working evidence"}`}
                     className="block cursor-crosshair"
                     style={
                       renderW != null && renderH != null

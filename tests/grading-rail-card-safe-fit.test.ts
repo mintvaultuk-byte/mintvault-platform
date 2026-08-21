@@ -136,33 +136,27 @@ describe("the rail fits the WHOLE source scan, measured, with a safety margin", 
     expect(VIEWER).toMatch(/const railFitEnabled = fillHost && !markMode;/);
   });
 
-  it("uses canonical full-resolution working evidence for FRONT and BACK pixel inspection", () => {
-    expect(VIEWER).toMatch(/function getPixelInspectionAsset/);
+  it("uses canonical full-resolution working evidence automatically for FRONT and BACK", () => {
+    expect(VIEWER).toMatch(/function getWorkingEvidenceAsset/);
     const inspectionHelper = VIEWER.slice(
-      VIEWER.indexOf("function getPixelInspectionAsset"),
+      VIEWER.indexOf("function getWorkingEvidenceAsset"),
       VIEWER.indexOf("function hasAny")
     );
     // The production helper is dynamic. Expand that exact contract for Front and Back so the
-    // precedence proof cannot accidentally cover one side only.
+    // no-fallback proof cannot accidentally cover one side only.
     for (const side of ["front", "back"]) {
       const sideContract = inspectionHelper.replaceAll("${side}", side);
       expect(sideContract.indexOf(`record[\`${side}_working\`]`)).toBeGreaterThan(-1);
-      expect(sideContract.indexOf(`record[\`${side}_original\`]`)).toBeGreaterThan(-1);
-      expect(sideContract.indexOf(`record[\`${side}_working\`]`)).toBeLessThan(
-        sideContract.indexOf(`record[\`${side}_original\`]`)
-      );
+      expect(sideContract).not.toContain(`record[\`${side}_original\`]`);
+      expect(sideContract).not.toContain(`record[\`${side}_display\`]`);
     }
-    expect(VIEWER).toMatch(/const PIXEL_INSPECTION_MAX_ZOOM = 12/);
+    expect(VIEWER).toMatch(/const WORKING_EVIDENCE_MAX_ZOOM = 12/);
     expect(VIEWER).toContain('"working-evidence"');
-    expect(VIEWER).toContain("data-inspection-source={");
-    expect(VIEWER).toContain(
-      'pixelInspection ? `${pixelInspectionAsset?.source ?? "unavailable"}-no-smoothing` : "display"'
-    );
-    expect(VIEWER).toMatch(/imageRendering: "pixelated"/);
-    expect(VIEWER).toMatch(/data-pixel-inspection=\{pixelInspection \? "no-smoothing" : undefined\}/);
-    expect(VIEWER).toMatch(/function pixelInspectionLabel/);
-    expect(VIEWER).toMatch(/Full-Resolution Working Evidence/);
-    expect(VIEWER).toMatch(/Legacy Original Inspection/);
+    expect(VIEWER).toContain('data-inspection-source={workingEvidenceAsset?.source ?? "working-evidence-unavailable"}');
+    expect(VIEWER).toContain('data-working-evidence="full-resolution"');
+    expect(VIEWER).not.toMatch(/pixelInspection/);
+    expect(VIEWER).not.toMatch(/Full-Resolution Working Evidence/);
+    expect(VIEWER).not.toMatch(/Legacy Original Inspection/);
   });
 
   it("reports the clearances it computed, for runtime acceptance", () => {

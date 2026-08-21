@@ -42,6 +42,7 @@ import { getPartnerAdminCapability } from "./admin-capability";
 import { PARTNER_FLAGS, resolveGlobalFlag, type PartnerFlag } from "./flags";
 import { requireAdminStepUp } from "../lib/admin-step-up";
 import { PUBLIC_DIRECTORY_FLAG } from "./public-presence-service";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 export const PARTNER_GLOBAL_FLAGS_BASE = "/api/super-admin/partner-flags";
 
@@ -59,10 +60,7 @@ const flagAdminRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: { code: "RATE_LIMITED", message: "Too many partner flag requests, please slow down." } },
-  // `req.ip` — NOT a hand-parsed `X-Forwarded-For`. The app sets `trust proxy = 1`
-  // (server/index.ts), so Express resolves req.ip one hop in front of Fly's proxy; reading the raw
-  // header would let any caller mint a fresh bucket per request. See dashboard-routes.ts.
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
 });
 
 /**

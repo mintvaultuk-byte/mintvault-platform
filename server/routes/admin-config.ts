@@ -2,7 +2,9 @@ import { sendServerError } from "../lib/error-response";
 import type { Express, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { storage } from "../storage";
-import { requireAdmin } from "../auth";
+import { isSuperAdminEmail, requireAdmin } from "../auth";
+import { isCommandCentreEnabledRuntime } from "../command-centre/flag";
+import { isCommandCentreBuildCompatible } from "../command-centre/auth";
 import { uploadToR2 } from "../r2";
 import { db } from "../db";
 import { sql, inArray } from "drizzle-orm";
@@ -80,7 +82,7 @@ export function registerAdminConfigRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/admin/db-info", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/db-info", requireAdmin, async (req, res) => {
     try {
       const { getDatabaseUrl } = await import("../config");
       const dbUrl = getDatabaseUrl();
@@ -111,6 +113,10 @@ export function registerAdminConfigRoutes(app: Express): void {
 
       res.json({
         env: process.env.NODE_ENV || "development",
+        command_centre_available:
+          isCommandCentreBuildCompatible() &&
+          (await isCommandCentreEnabledRuntime()) &&
+          isSuperAdminEmail((req.session as { adminEmail?: unknown }).adminEmail),
         host: neonHost,
         database: dbName,
         source: "MINTVAULT_DATABASE_URL",

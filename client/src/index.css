@@ -1363,3 +1363,20 @@
   transform: scale(1.02) !important;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12) !important;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .gold-burst,
+  .gold-burst-soft,
+  .gold-burst-outer {
+    display: none !important;
+    animation: none !important;
+  }
+
+  .command-centre-nav-chevron,
+  [data-testid="command-centre-page"] * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -9,6 +9,7 @@ import {
   destroySessionAndClearCookie,
   isAbsoluteSessionExpired,
 } from "./lib/auth-security";
+import { adminClientIpRateLimitKey, canonicalAdminIp, resolveAdminClientIp } from "./lib/admin-client-ip";
 
 // Aligned 2026-05-04 with the user row migrated to role='admin' by
 // migrateAccountSchema(). PIN auth flow uses storage.getUserByEmail(ADMIN_EMAIL)
@@ -102,15 +103,6 @@ const MAX_PIN_ATTEMPTS = 5;
 const FAILED_LOGIN_DELAY_MS = 400;
 const PENDING_ADMIN_TTL_MS = 5 * 60 * 1000;
 
-function getClientIp(req: Request): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (forwarded) {
-    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-    return first.trim();
-  }
-  return req.ip || req.socket.remoteAddress || "unknown";
-}
-
 function timingSafeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf8");
   const bufB = Buffer.from(b, "utf8");
@@ -123,7 +115,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 export function isLoginRateLimited(req: Request): boolean {
-  const ip = getClientIp(req);
+  const ip = adminClientIpRateLimitKey(req);
   const now = Date.now();
   const entry = loginAttempts.get(ip);
 
@@ -138,7 +130,7 @@ export function isLoginRateLimited(req: Request): boolean {
 }
 
 export function isPinRateLimited(req: Request): boolean {
-  const ip = getClientIp(req);
+  const ip = adminClientIpRateLimitKey(req);
   const now = Date.now();
   const entry = pinAttempts.get(ip);
 
@@ -153,7 +145,7 @@ export function isPinRateLimited(req: Request): boolean {
 }
 
 export function recordFailedLogin(req: Request): void {
-  const ip = getClientIp(req);
+  const ip = adminClientIpRateLimitKey(req);
   const now = Date.now();
   const entry = loginAttempts.get(ip);
 
@@ -165,7 +157,7 @@ export function recordFailedLogin(req: Request): void {
 }
 
 export function recordFailedPin(req: Request): number {
-  const ip = getClientIp(req);
+  const ip = adminClientIpRateLimitKey(req);
   const now = Date.now();
   const entry = pinAttempts.get(ip);
 
@@ -179,12 +171,12 @@ export function recordFailedPin(req: Request): number {
 }
 
 export function clearLoginAttempts(req: Request): void {
-  const ip = getClientIp(req);
+  const ip = adminClientIpRateLimitKey(req);
   loginAttempts.delete(ip);
 }
 
 export function clearPinAttempts(req: Request): void {
-  const ip = getClientIp(req);
+  const ip = adminClientIpRateLimitKey(req);
   pinAttempts.delete(ip);
 }
 
@@ -287,16 +279,19 @@ export async function requireSuperAdmin(req: Request, res: Response, next: NextF
 }
 
 export function adminIpAllowlist(req: Request, res: Response, next: NextFunction) {
+  const clientIp = resolveAdminClientIp(req);
+  if (!clientIp) return res.status(403).json({ error: "Forbidden" });
+
   const allowlist = process.env.ADMIN_IP_ALLOWLIST;
   if (!allowlist) return next();
 
-  const allowed = allowlist
+  const entries = allowlist
     .split(",")
     .map((ip) => ip.trim())
     .filter(Boolean);
-  if (allowed.length === 0) return next();
+  if (entries.length === 0) return next();
 
-  const clientIp = getClientIp(req);
+  const allowed = entries.map(canonicalAdminIp).filter((ip): ip is string => ip !== null);
   if (allowed.includes(clientIp)) return next();
 
   return res.status(403).json({ error: "Forbidden" });

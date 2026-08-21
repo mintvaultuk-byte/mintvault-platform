@@ -73,6 +73,7 @@ import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerPublicPartnerPresenceRoutes } from "./partner/public-presence-routes";
+import { registerCommandCentreRoutes } from "./command-centre/routes";
 import { registerCommercialGrowthRoutes } from "./routes/admin/commercial-growth";
 import { registerReviewRequestRoutes } from "./routes/reviews";
 import { registerGrowthMcpRoutes } from "./routes/growth-mcp";
@@ -105,6 +106,7 @@ import {
   migratePerOperatorSchema,
   isGraderLocked,
   checkGradePublishGates,
+  buildWorkingEvidencePayload,
 } from "./grader";
 
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
@@ -287,6 +289,7 @@ import { FEATURE_FLAGS } from "./config/feature-flags";
  * to lose the original error to a second one.
  */
 import { CaptureGeometryError } from "./lib/lide400-capture-authority";
+import { adminClientIpRateLimitKey } from "./lib/admin-client-ip";
 
 // `/api/health` remains a generic public readiness probe only. Detailed
 // database/infrastructure intelligence belongs exclusively behind the Super
@@ -2888,6 +2891,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
   registerPartnerStationAdminRoutes(app); // server-paginated station fleet control
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
+  registerCommandCentreRoutes(app); // Command Centre is feature-gated and Super-Admin read-only
   registerCommercialGrowthRoutes(app); // GB-04 aggregate/lead Super Admin Growth Command
   registerReviewRequestRoutes(app); // GB-05 signed review redirect + explicit suppression confirmation
   registerGrowthMcpRoutes(app); // GB-04C dedicated aggregate-only external MCP transport
@@ -3393,6 +3397,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     standardHeaders: true,
     legacyHeaders: false,
     validate: false,
+    keyGenerator: adminClientIpRateLimitKey,
   });
   const socialStudioCertificateBodySchema = z.object({
     certNumber: z.string().trim().min(1).max(80),
@@ -7961,37 +7966,15 @@ Defects (admin-confirmed): ${defectLines}`;
         })
       );
 
-      // New scanner evidence has a native-geometry browser working asset in
-      // the additive ledger. It is intentionally distinct from both the TIFF
-      // master and the 1600px display derivative. Absence is normal for
-      // legacy JPEG-only certificates.
-      try {
-        const evidence = (
-          await db.execute(sql`
-            SELECT side, working_object_key
-            FROM certificate_image_evidence
-            WHERE certificate_id = ${id}
-              AND evidence_class = 'NEW_IMMUTABLE_MASTER'
-              AND is_current = true
-          `)
-        ).rows as Array<{ side: string; working_object_key: string | null }>;
-        await Promise.all(
-          evidence.map(async (row) => {
-            if ((row.side !== "front" && row.side !== "back") || !row.working_object_key) return;
-            try {
-              urls[`${row.side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
-            } catch {
-              urls[`${row.side}_working`] = null;
-            }
-          })
-        );
-      } catch {
-        // The table is introduced additively; retain legacy compatibility
-        // during rolling deployment or for records without a master.
-      }
+      // One shared admission gate serves both admin and restricted-grader UI.
+      // It signs a working key only when the ledger proves it preserves the
+      // Canon master's dimensions with no resize; otherwise the viewer shows a
+      // side-specific unavailable/recovery state rather than a display fallback.
+      const working = await buildWorkingEvidencePayload(id);
+      Object.assign(urls, working.urls);
 
       const quality = c.imageQualityChecks || {};
-      res.json({ urls, quality });
+      res.json({ urls, quality, workingEvidence: working.workingEvidence });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to get images" });
     }

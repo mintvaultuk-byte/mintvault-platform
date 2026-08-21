@@ -40,6 +40,7 @@ import { getPartnerReadVisibility, type PartnerReadVisibility } from "./dashboar
 import { isDashboardPartnerStatus, isPartnerSortKey, isRiskLevel, isSortDirection } from "@shared/partner-dashboard";
 import { addCredits, removeCredits } from "./partner-credit-admin-service";
 import { WalletRequestError } from "./partner-wallet-errors";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 export const PARTNER_DASHBOARD_BASE = "/api/super-admin/partner-dashboard";
 
@@ -54,16 +55,7 @@ const dashboardReadRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: { code: "RATE_LIMITED", message: "Too many dashboard requests, please slow down." } },
-  /**
-   * `req.ip` — NOT a hand-parsed `X-Forwarded-For`.
-   *
-   * The app sets `trust proxy = 1` (server/index.ts), so Express already resolves `req.ip` to
-   * the client address one hop in front of Fly's proxy. Reading the raw header instead meant
-   * any caller could rotate the header and mint a fresh rate-limit bucket per request. Trusting
-   * exactly one hop also avoids the opposite failure — collapsing every client onto the proxy's
-   * own IP, which would let one noisy operator throttle all of them.
-   */
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
 });
 
 function statusFor(code: string): number {

@@ -1,29 +1,30 @@
 # Rollback — Growth Completion Night
 
-## Before activation
+## Recorded recovery authority
 
-The branch is isolated and production remains `facfd36f`. If the candidate is rejected before activation, do not apply `0101`, do not create configuration/secrets, and do not deploy. Preserve the branch and evidence; no production rollback is necessary.
+- Live application: `f4285b71`, Fly v1111, image `deployment-01M0ES4KPD6QC64WSVP2SXMR28`
+- Last known-good rollback image: `registry.fly.io/mintvault:deployment-01M0DYQHT8R6V6QV265H918CED` (v1110, served `facfd36f`)
+- Neon recovery/history window confirmed under established release governance: 6 hours at release time
+- Production journal after release: 64 applied migrations through `0101`, zero pending/inconsistent/checksum mismatch
 
-## Application
+## Application containment
 
-After an authorized release, contain new review scheduling by removing/disabling its approved configuration, then non-destructively revert runtime commits `c2d18aea` and `079d5336` on a clean release branch. Deploy the last known-good application SHA through the repository safe-deploy path only after approval validation. Never reset or clean the dirty launch/main worktrees.
+If a genuine regression is confirmed, deploy the recorded v1110 image through the repository safe-deploy path under release authority. Do not reset/rewrite canonical history or use the dirty launch/local-main worktrees. Verify served SHA, both machines, health and public/protected boundaries after containment.
 
 ## Database
 
-Migration `0101_growth_reviews_and_conversion.sql` is additive. On application rollback, retain its tables, indexes and data so the old application ignores them. Never drop review, suppression, delivery-attempt, conversion-event or commercial-target revision data as an emergency rollback. Verify the journal and schema inventory after containment; any later removal requires a separately reviewed forward migration.
+Migration `0101_growth_reviews_and_conversion.sql` is additive. Retain its tables, indexes, constraints and journal row when rolling the application back; the older application ignores them. Never drop review, suppression, delivery-attempt, conversion-event or commercial-target revision data as an emergency action. Never edit the migration journal. Any later removal requires a separately reviewed forward migration.
 
-The commercial target store is append-only metadata. Reverting the application removes its editor/read surface but must retain every target and null-clear revision plus its generic audit rows. No rollback may replace that history with a destructive delete or down migration.
+The commercial target store is append-only metadata. An application rollback must retain every target/null-clear revision and audit row.
 
 ## Email and reviews
 
-Remove/disable `REVIEW_DESTINATION_URL`, its hostname allowlist or `RESEND_DOMAIN_VERIFIED` through the authorized configuration path so the scheduler returns `NOT_CONFIGURED`. Revoke/rotate `REVIEW_TOKEN_SECRET` only with awareness that outstanding preference/click links will stop resolving. Already delivered email cannot be recalled; suppressions and attempts remain auditable.
+The review destination/sender is currently not configured, so no connection containment is required. If configured later, removing/disabling the approved destination, hostname allowlist or sender should return scheduling to `NOT_CONFIGURED`. Token rotation can invalidate outstanding preference/click links and requires separate consideration.
 
 ## MCP and providers
 
-Remove or rotate `GROWTH_MCP_TOKEN_SHA256` to fail the endpoint closed. Disconnect any custom app at the client/workspace side. No database credential is shared with MCP. Optional provider adapters remain `NOT CONNECTED`; if later configured, revoke their dedicated credentials separately.
-
-The Infrastructure/GBP addendum creates no provider configuration, mutation authority, autoscaling action or spend. Before activation, rejection needs no provider rollback. After an authorized application release, revert only the addendum application commit to restore the previous Growth UI/contracts; no Fly/Neon/billing side effect exists to undo.
+Growth MCP auth/client and optional provider reads are currently not connected. If configured later, revoke the dedicated credential/client connection separately. No MCP database credential or write authority exists. The application has no provider mutation, autoscaling or spending authority to undo.
 
 ## Public authority and cache
 
-Reverting the application removes the new population presentation and initial-HTML structured data. In-process public cache entries expire within 60 seconds; downstream search-engine caches may persist and must not be represented as immediately recallable.
+Application rollback removes the Completion Night public presentation while preserving underlying data. In-process public cache entries expire within 60 seconds; downstream search caches may persist and must not be represented as immediately recallable.

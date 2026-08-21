@@ -18,11 +18,13 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+import "./command-centre/registry";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import { validatePartnerRbacAtBoot } from "./partner/permissions";
 import pg from "pg";
 import path from "path";
 import { partnerAccountingTopologyReadiness } from "./partner/db";
+import { adminClientIpRateLimitKey } from "./lib/admin-client-ip";
 
 const app = express();
 const httpServer = createServer(app);
@@ -171,11 +173,10 @@ app.use("/api/admin", adminIpAllowlist);
  * passed the allowlist from the same address, so no caller that could previously reach a
  * super-admin route loses access.
  *
- * CONFIGURATION COMPATIBILITY: `adminIpAllowlist` returns `next()` immediately when
- * ADMIN_IP_ALLOWLIST is unset or empty, so on any deployment not using the allowlist this is
- * a no-op. It reuses the same variable and the same middleware — no new configuration, no new
- * failure mode. It also adds defence against a stolen session cookie being replayed from an
- * address the operator never uses.
+ * CONFIGURATION COMPATIBILITY: when ADMIN_IP_ALLOWLIST is unset or empty there is no address-list
+ * restriction, but the request must still carry a valid Admin network identity. Fly edge requests
+ * always do; malformed/direct requests fail closed. The same middleware also defends against a
+ * stolen session cookie being replayed from an address the operator never uses.
  */
 app.use("/api/super-admin", adminIpAllowlist);
 
@@ -222,7 +223,10 @@ app.use(express.urlencoded({ extended: false }));
 const PgStore = connectPgSimple(session);
 const sessionPool = new pg.Pool({
   connectionString: getDatabaseUrl(),
-  ssl: { rejectUnauthorized: false },
+  // The disposable runtime harness runs the real application with NODE_ENV=test
+  // against loopback PostgreSQL, which has no TLS listener. Production, staging
+  // and normal development retain their existing TLS transport unchanged.
+  ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false },
   max: 8,
   // 30s tolerates Neon autosuspend cold-start (see server/db.ts for the
   // same rationale). Session reads/writes happen on nearly every request,
@@ -268,14 +272,7 @@ const adminRateLimit = rateLimit({
   validate: false,
   message: { error: "Too many requests, please try again later" },
   skip: (req: any) => req.session?.isAdmin === true,
-  keyGenerator: (req) => {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-      return first.trim();
-    }
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
+  keyGenerator: adminClientIpRateLimitKey,
 });
 app.use("/api/admin", adminRateLimit);
 

@@ -21,6 +21,7 @@
 | 5 — Implementation | done | 2026-08-20 | Candidate merged locally; four conflicts reconciled; public migration renamed to 0102, Google to optional 0103; public-directory control added. |
 | 6 — Regression | done | 2026-08-20 | Focused UI, real PostgreSQL lineage/public migration, public HTTP/SSR/SEO/cache and Google isolation suites are green; TypeScript/lint/build are green. The full fail-closed Partner matrix is green: 70 suites / 1,315 assertions. |
 | 7 — Final report | done (local) | 2026-08-20 | Local reconciliation is checkpointed with protected production operations expressly pending the owner decision described below. |
+| 8 — Current-main reconciliation and activation | in progress | 2026-08-21 | Owner approved scoped production execution. Fresh fetch revealed `origin/main=2d776db9`, 33 commits ahead; reconciliation and target-time preflight are required before any mutation. |
 
 ## Accepted investigation findings
 
@@ -45,4 +46,4 @@
 
 ## Next authorised action
 
-The next action needs an explicit owner decision on the revised migration scope: approve current-main `0101_growth_reviews_and_conversion.sql` followed by public `0102_partner_public_presence.sql`, while explicitly excluding optional Google `0103_partner_google_presence.sql`. No push, deployment, migration, flag activation, Partner reset, or Partner creation is authorised to execute before that decision and the target-time recovery/manifest gates.
+The owner approved production execution on 2026-08-21: current-main `0101_growth_reviews_and_conversion.sql`, then public `0102_partner_public_presence.sql`, expressly excluding optional Google `0103_partner_google_presence.sql` and any batch. The immediate next action is reconciling `2d776db9` and rerunning affected proofs; target-time recovery/schema/journal/health gates remain mandatory before any mutation.

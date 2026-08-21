@@ -297,6 +297,25 @@ export async function getNetworkSummary(walletSchema = true): Promise<NetworkSum
 }
 
 /**
+ * Bounded identifier-only candidates for the fixed connector exception policy.
+ * This is intentionally not the existing connector record list: legal names,
+ * imports, mappings, errors and audit detail never leave this service.
+ */
+export async function listConnectorExceptionCandidates(limit = 100): Promise<
+  Array<{ id: string; updatedAt: string }>
+> {
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const result = await partnerAdminQuery<{ id: string; updated_at: string }>(
+    "SELECT id::text AS id, updated_at FROM partner_connector_records " +
+      "WHERE state IN ('manual_review', 'reconciliation_required') " +
+      "ORDER BY updated_at ASC, id ASC LIMIT $1",
+    [safeLimit],
+  );
+
+  return result.rows.map((row) => ({ id: row.id, updatedAt: row.updated_at }));
+}
+
+/**
  * R2 canonical network projection. This deliberately composes bounded, set-based service reads
  * on the server: one browser request, no per-partner fan-out, and no new business authority.
  */

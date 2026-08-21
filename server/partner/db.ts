@@ -13,6 +13,7 @@
  *
  * Tenant/location context comes from the validated session — NEVER from a request payload.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import pg from "pg";
 
 let pool: pg.Pool | null = null;
@@ -168,6 +169,19 @@ export async function partnerRuntimeQuery<T extends pg.QueryResultRow = pg.Query
  * MintVault admin auth. Kept distinct from the tenant runtime path.
  */
 let adminPool: pg.Pool | null = null;
+const partnerAdminReadContext = new AsyncLocalStorage<pg.PoolClient>();
+
+function getAdminPool(): pg.Pool {
+  assertPartnerAccountingDatabaseTopology();
+  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
+  if (!url) throw new Error("No admin DB URL configured for partner control shell.");
+  if (!adminPool) {
+    adminPool = new pg.Pool({ connectionString: url, max: 4 });
+    adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
+  }
+  return adminPool;
+}
+
 export function partnerAdminDbConfigured(): boolean {
   return !!(process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL);
 }
@@ -175,32 +189,83 @@ export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryRe
   sql: string,
   params: unknown[] = []
 ): Promise<pg.QueryResult<T>> {
-  assertPartnerAccountingDatabaseTopology();
-  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
-  if (!url) throw new Error("No admin DB URL configured for partner control shell.");
-  if (!adminPool) {
-    adminPool = new pg.Pool({ connectionString: url, max: 4 });
-    // Idle pooled clients emit errors on the POOL, not on any query promise. Without a listener
-    // Node treats that as an uncaught exception and exits — a boot-loop on Fly now that the RBAC
-    // bootstrap creates this pool on every machine. Matches server/db.ts and the session pool.
-    adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
+  const scopedClient = partnerAdminReadContext.getStore();
+  return scopedClient ? scopedClient.query<T>(sql, params) : getAdminPool().query<T>(sql, params);
+}
+
+/**
+ * Command Centre bulkhead for existing Partner read services. Every nested
+ * partnerAdminQuery shares one connection, PostgreSQL cancels an over-budget
+ * statement, and the connection is destroyed on the total deadline so work
+ * cannot continue after the HTTP source budget has expired.
+ */
+export async function withPartnerAdminReadBudget<T>(operation: () => Promise<T>, deadlineMs = 650): Promise<T> {
+  const readPool = getAdminPool();
+  const deadlineAt = Date.now() + deadlineMs;
+  let timedOut = false;
+  const acquired = await new Promise<{ client: pg.PoolClient; release: (destroy?: boolean) => void }>(
+    (resolve, reject) => {
+      let settled = false;
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        reject(new Error("PARTNER_READ_TIMEOUT"));
+        return;
+      }
+      const timer = setTimeout(() => {
+        settled = true;
+        reject(new Error("PARTNER_READ_TIMEOUT"));
+      }, remainingMs);
+      readPool.connect((error, client, release) => {
+        if (settled) {
+          if (client) release(true);
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        if (error || !client) reject(error ?? new Error("PARTNER_READ_CLIENT_UNAVAILABLE"));
+        else resolve({ client, release });
+      });
+    }
+  );
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      timedOut = true;
+      acquired.release(true);
+      throw new Error("PARTNER_READ_TIMEOUT");
+    }
+    const transaction = async () => {
+      await acquired.client.query("BEGIN READ ONLY");
+      await acquired.client.query("SET LOCAL statement_timeout = '500ms'");
+      const value = await partnerAdminReadContext.run(acquired.client, operation);
+      await acquired.client.query("COMMIT");
+      return value;
+    };
+    const result = await Promise.race([
+      transaction(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          acquired.release(true);
+          reject(new Error("PARTNER_READ_TIMEOUT"));
+        }, remainingMs);
+      }),
+    ]);
+    return result;
+  } catch (error) {
+    if (!timedOut) await acquired.client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (!timedOut) acquired.release();
   }
-  return adminPool.query<T>(sql, params);
 }
 
 /** Privileged partner-schema transaction helper for domain services that need row locks. */
 export async function withPartnerAdminTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
-  assertPartnerAccountingDatabaseTopology();
-  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
-  if (!url) throw new Error("No admin DB URL configured for partner control shell.");
-  if (!adminPool) {
-    adminPool = new pg.Pool({ connectionString: url, max: 4 });
-    // Idle pooled clients emit errors on the POOL, not on any query promise. Without a listener
-    // Node treats that as an uncaught exception and exits — a boot-loop on Fly now that the RBAC
-    // bootstrap creates this pool on every machine. Matches server/db.ts and the session pool.
-    adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
-  }
-  const client = await adminPool.connect();
+  const client = await getAdminPool().connect();
   try {
     await client.query("BEGIN");
     const result = await fn(client);

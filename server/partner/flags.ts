@@ -11,6 +11,10 @@ import { partnerRuntimeQuery } from "./db";
 
 /** Sensitive flags that gate live behaviour; all default OFF until explicitly enabled. */
 export const PARTNER_FLAGS = [
+  // Cross-domain Super Admin kill switch. It deliberately lives in this
+  // established global Pilot Flags store so navigation, route and API share
+  // one persisted, audited state rather than introducing another flag system.
+  "super_admin_command_centre_enabled",
   "partner_portal_enabled",
   "partner_login_enabled",
   "partner_onboarding_enabled",

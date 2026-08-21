@@ -20,6 +20,7 @@
  */
 import type { Express, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
+import { adminClientIpRateLimitKey } from "../../lib/admin-client-ip";
 import { desc, eq } from "drizzle-orm";
 import { ZodError } from "zod";
 import { requireSuperAdmin } from "../../auth";
@@ -45,6 +46,7 @@ const catalogueMutationLimit = rateLimit({
   max: 240,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: adminClientIpRateLimitKey,
   message: { error: "Too many catalogue changes. Please wait a few minutes and try again." },
 });
 

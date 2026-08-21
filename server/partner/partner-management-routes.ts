@@ -37,6 +37,7 @@ import { validatePartnerRbac, partnerRbacBlocksReadiness } from "./permissions";
 import { checkPartnerSchemaContract } from "./schema-contract";
 import { resolveGlobalFlag } from "./flags";
 import { getAdminGooglePresence } from "./google-presence-service";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 /**
  * Static operator remedy. Used when RBAC blocks readiness but the validator itself had no remedy to
@@ -52,12 +53,7 @@ const g5MutationRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: { code: "RATE_LIMITED", message: "Too many operations, please slow down." } },
-  // `req.ip` — NOT a hand-parsed X-Forwarded-For. The app sets `trust proxy = 1` (server/index.ts),
-  // so Express resolves req.ip one hop in front of Fly's proxy, which APPENDS the real client
-  // address. Reading the raw header took the LEFTMOST value — i.e. whatever the caller wrote — so
-  // any caller could mint itself a fresh bucket per request. Same correction as the partner login
-  // limiter (4c6e8a71 / 33709fe5) and the sibling super-admin routers.
-  keyGenerator: (req) => req.ip ?? req.socket?.remoteAddress ?? "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
 });
 
 function actorOf(req: Request): ActorContext {

@@ -1,8 +1,7 @@
 /**
  * Growth infrastructure intelligence is deliberately a read/recommendation
- * boundary. It contains no provider client, credential lookup or mutation
- * method. Provider adapters can populate these DTOs only after a separate
- * least-privilege approval.
+ * boundary. Provider clients remain in separate server-only adapters and can
+ * populate these DTOs only through approved least-privilege read authority.
  */
 import type {
   CapacityStatus,
@@ -10,6 +9,7 @@ import type {
   IntelligenceMetric,
   IntelligenceState,
 } from "./growth-intelligence-service";
+import type { FlyTelemetrySnapshot } from "./fly-telemetry-service";
 
 export type FlyMachineSnapshot = {
   machineRef: string;
@@ -18,6 +18,7 @@ export type FlyMachineSnapshot = {
   cpu: IntelligenceMetric;
   memory: IntelligenceMetric;
   requestRate: IntelligenceMetric;
+  requestCount: IntelligenceMetric;
   p95Latency: IntelligenceMetric;
   fiveXErrorRate: IntelligenceMetric;
   deployedVersion: IntelligenceMetric;
@@ -297,7 +298,13 @@ export function deriveIncidentMode(input: IncidentInput): IncidentMode {
 }
 
 export function buildInfrastructureIntelligence(
-  input: { database: IntelligenceMetric; capacity: CapacityStatus },
+  input: {
+    database: IntelligenceMetric;
+    databasePressure?: IntelligenceMetric;
+    databaseLatency?: IntelligenceMetric;
+    capacity: CapacityStatus;
+    fly?: FlyTelemetrySnapshot;
+  },
   now: string
 ): InfrastructureIntelligence {
   const flyReason = "A least-privilege server-side Fly telemetry authority is not connected.";
@@ -305,7 +312,7 @@ export function buildInfrastructureIntelligence(
   const costReason = "Authoritative provider billing data is not connected; no cost is estimated.";
   const notConnected = (source: string, reason: string) => unavailable("NOT_CONNECTED", source, reason);
   return {
-    overallStatus: input.capacity.status,
+    overallStatus: input.fly?.overallStatus === "RED" ? "RED" : input.capacity.status,
     control: {
       currentMode: "MANUAL",
       currentAuthority: "MONITOR_DETECT_RECOMMEND",
@@ -317,15 +324,16 @@ export function buildInfrastructureIntelligence(
         "No Fly or Neon mutation is available. A future guarded mode requires approved machine, capacity, budget, cooldown, sustained-window, confirmation, audit and rollback controls.",
     },
     fly: {
-      connection: notConnected("Fly fleet telemetry", flyReason),
-      overallStatus: input.capacity.status,
-      machines: [],
+      connection: input.fly?.connection ?? notConnected("Fly fleet telemetry", flyReason),
+      overallStatus: input.fly?.overallStatus ?? input.capacity.status,
+      machines: input.fly?.machines ?? [],
       expectedMachineFields: [
         "status",
         "region",
         "cpu",
         "memory",
         "requestRate",
+        "requestCount",
         "p95Latency",
         "fiveXErrorRate",
         "deployedVersion",
@@ -334,8 +342,9 @@ export function buildInfrastructureIntelligence(
     },
     neon: {
       availability: input.database,
-      connectionPressure: notConnected("Neon telemetry", neonReason),
-      latency: notConnected("Neon telemetry", neonReason),
+      connectionPressure:
+        input.databasePressure ?? notConnected("Current application PostgreSQL pool counters", neonReason),
+      latency: input.databaseLatency ?? notConnected("Current application database readiness query", neonReason),
       compute: notConnected("Neon telemetry", neonReason),
       storage: notConnected("Neon telemetry", neonReason),
       pointInTimeRecovery: notConnected("Neon telemetry", neonReason),

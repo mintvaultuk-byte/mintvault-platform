@@ -1,0 +1,18 @@
+{
+  "capturedAt": "2026-08-19T20:57:02Z",
+  "repository": "/Users/cornelius/mintvault-command-centre-reconciled",
+  "baselineCommit": "c485a7f839fd6614948740eca3972e3f8a081f68",
+  "governanceVersion": "1.2",
+  "combinedHash": "de71677d7151e9372c8465794e504b2aded531b4c2469a7b6ba685e96964afd1",
+  "files": {
+    "AGENTS.md": "41f66799828be9ef5c6258e10fcccc82fcf1e3954c47dcacd536a0bfcbe11a0c",
+    "CLAUDE.md": "7280e6e9927b5c9e26be9b4001b66d6968dfef7d770f6f08466a6c06f1ec90b3",
+    "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md": "91f5de760d89e84a7c0d95e4dc77c77549933e8d219a74a86a9fc89955a43ebc",
+    "docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md": "b1633f642bf46f03331cfbb4fe04ddff0e9f54ec232e5c5c786fe510de07ab63",
+    ".claude/governance-version.md": "79ba1bf1696b76e8efb701bf602f91b06c3ce72fda92e3cba2bc8003246de080",
+    ".claude/governance-changelog.md": "796cd9b50f3eed5d7d688e88249df641416fdaaebce71c5ac19fbf4005a2b0ec",
+    ".claude/skills/controlled-code-lead/SKILL.md": "8df2dd4059c9f975d99e62bed70f1cff7fa0d11d5cf5cb698462b7afe801fced",
+    ".claude/controlled-code-lead/protected-systems.md": "d582f96598ba278d39b467b84a4d89a66fdc1bcbea07e7c74ab2974636ffdaf3",
+    ".claude/controlled-code-lead/scope-and-concurrency.md": "c59e6dbd78ac2c11bd443c265c60fb379930d81718f9cdfeba8d5e4939907b08"
+  }
+}

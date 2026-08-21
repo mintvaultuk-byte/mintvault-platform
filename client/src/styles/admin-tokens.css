@@ -78,6 +78,19 @@
   color-scheme: dark;
 }
 
+/* Command Centre cards must never inherit light-page card tokens while they
+   are rendered inside the scoped dark admin shell. The explicit surface and
+   ink values keep KPI/attention labels readable at every viewport. */
+.admin-root .command-centre-surface {
+  background: var(--admin-panel);
+  border-color: var(--admin-line-hard);
+  color: var(--admin-ink);
+}
+
+.admin-root .command-centre-surface .text-muted-foreground {
+  color: var(--admin-ink-dim);
+}
+
 /* Custom scrollbar for the admin dark surface */
 .admin-root *::-webkit-scrollbar {
   width: 10px;

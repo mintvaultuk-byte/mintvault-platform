@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -28,6 +28,8 @@ import {
   Library,
   PackageCheck,
   Share2,
+  ChevronDown,
+  TreePine,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -50,7 +52,8 @@ export type AdminTab =
   | "transfers"
   | "scans"
   | "sets"
-  | "growth";
+  | "growth"
+  | "command-centre";
 
 interface DbInfo {
   env: string;
@@ -59,6 +62,7 @@ interface DbInfo {
   card_master_active_count: number;
   card_sets_active_count: number;
   certificates_count: number;
+  command_centre_available?: boolean;
 }
 
 type NavLeaf = {
@@ -78,7 +82,10 @@ type NavLink = {
    * the server has confirmed the current admin is a Super Admin. */
   superAdminOnly?: boolean;
 };
-type NavItem = NavLeaf | NavLink;
+type NavGroup = NavLink & {
+  children: readonly NavLink[];
+};
+type NavItem = NavLeaf | NavLink | NavGroup;
 type NavSection = { heading: string; items: NavItem[] };
 
 // Nav order is the OWNER'S WORKFLOW order (set 2026-07-03) — the flattened
@@ -136,6 +143,36 @@ const NAV: NavSection[] = [
   },
 ];
 
+export function navigationForCommandCentre(commandCentreAvailable: boolean): NavSection[] {
+  if (!commandCentreAvailable) {
+    return NAV;
+  }
+
+  return NAV.map((section) => {
+    if (section.heading !== "Insight") {
+      return section;
+    }
+
+    return {
+      ...section,
+      items: [
+        ...section.items,
+        {
+          href: "/admin/command",
+          label: "Command Centre",
+          icon: Activity,
+          children: [
+            { href: "/admin/command?view=overview", label: "Overview", icon: LayoutDashboard },
+            { href: "/admin/command?view=attention", label: "Attention", icon: Activity },
+            { href: "/admin/command?view=tree", label: "Work Tree", icon: TreePine },
+            { href: "/admin/command?view=skills", label: "Skills", icon: Library },
+          ],
+        },
+      ],
+    };
+  });
+}
+
 const PARTNER_NETWORK_CONSOLIDATION_ENABLED = import.meta.env.VITE_PARTNER_NETWORK_CONSOLIDATION === "true";
 const PARTNER_NETWORK_HOME = PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners" : "/admin/partners/dashboard";
 
@@ -151,6 +188,10 @@ function crumbForTab(tab: AdminTab): { title: string; path: string } {
   return { title: "Admin", path: "MINTVAULT" };
 }
 
+function adminTabDestination(tab: AdminTab): string {
+  return tab === "dashboard" ? "/admin" : "/admin?tab=" + encodeURIComponent(tab);
+}
+
 interface AdminShellProps {
   activeTab: AdminTab;
   onTabChange: (t: AdminTab) => void;
@@ -164,6 +205,14 @@ interface AdminShellProps {
       viewport height so a full-height child (e.g. the grading workstation) can
       fill it. Non-focus rendering is unchanged. */
   focus?: boolean;
+  /** Command Centre is a snapshot surface: do not retain the shell's legacy
+      environment polling while it is mounted. */
+  disableEnvironmentPolling?: boolean;
+  /** Command Centre must not fetch or render the shell's unrelated database
+      metadata. Its own read-only endpoint is the only live domain payload. */
+  commandCentreMode?: boolean;
+  /** Set only after the protected Command Centre GET has returned successfully. */
+  commandCentreAvailable?: boolean;
   children: ReactNode;
 }
 
@@ -177,12 +226,17 @@ export default function AdminShell({
   title,
   crumb,
   focus,
+  disableEnvironmentPolling = false,
+  commandCentreMode = false,
+  commandCentreAvailable = false,
   children,
 }: AdminShellProps) {
   const [pathname] = useLocation();
+  const [commandGroupOpen, setCommandGroupOpen] = useState(pathname === "/admin/command");
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
-    refetchInterval: 60000,
+    enabled: !commandCentreMode,
+    refetchInterval: disableEnvironmentPolling ? false : 60000,
   });
   const { data: adminSession } = useQuery<AdminSession>({
     queryKey: ["/api/admin/session"],
@@ -201,6 +255,9 @@ export default function AdminShell({
   const derived = crumbForTab(activeTab);
   const topTitle = title ?? derived.title;
   const topCrumb = crumb ?? derived.path;
+  const navigation = navigationForCommandCentre(
+    commandCentreAvailable || (!commandCentreMode && dbInfo?.command_centre_available === true)
+  );
 
   // Focus mode (e.g. the grading workstation) drops BOTH the top header chrome
   // and the left sidebar so the workstation gets the full viewport width — just
@@ -234,11 +291,58 @@ export default function AdminShell({
             <div className="admin-brand__sub">Admin Console</div>
           </div>
 
-          {NAV.map((section) => (
+          {navigation.map((section) => (
             <nav className="admin-nav" key={section.heading}>
               <div className="admin-nav-h">{section.heading}</div>
               {section.items.map((item) => {
                 const Icon = item.icon;
+                if ("children" in item) {
+                  const currentDestination =
+                    typeof window === "undefined" ? pathname : `${pathname}${window.location.search}`;
+                  return (
+                    <div key={item.href} data-testid="nav-command-centre-group">
+                      <div className="flex items-center">
+                        <Link
+                          href={item.href}
+                          className={`admin-nav-i min-w-0 flex-1 ${pathname === item.href ? "is-on" : ""}`.trim()}
+                          data-testid="nav-command-centre"
+                        >
+                          <Icon /> {item.label}
+                        </Link>
+                        <button
+                          type="button"
+                          className="admin-nav-i !w-auto !px-2"
+                          data-testid="nav-command-centre-toggle"
+                          aria-label={`${commandGroupOpen ? "Collapse" : "Expand"} Command Centre navigation`}
+                          aria-expanded={commandGroupOpen}
+                          aria-controls="command-centre-nav-children"
+                          onClick={() => setCommandGroupOpen((open) => !open)}
+                        >
+                          <ChevronDown
+                            className={`command-centre-nav-chevron transition-transform ${commandGroupOpen ? "rotate-180" : ""}`}
+                          />
+                        </button>
+                      </div>
+                      {commandGroupOpen && (
+                        <div id="command-centre-nav-children" className="pl-4">
+                          {item.children.map((child) => {
+                            const ChildIcon = child.icon;
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                className={`admin-nav-i ${currentDestination === child.href ? "is-on" : ""}`.trim()}
+                                data-testid={`nav-command-centre-${child.label.toLowerCase().replace(/\s+/g, "-")}`}
+                              >
+                                <ChildIcon /> {child.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
                 if ("href" in item) {
                   if (item.superAdminOnly && adminSession?.isSuperAdmin !== true) return null;
                   return (
@@ -247,6 +351,19 @@ export default function AdminShell({
                       href={item.href}
                       className={`admin-nav-i ${pathname === item.href ? "is-on" : ""}`.trim()}
                       data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <Icon /> {item.label}
+                    </Link>
+                  );
+                }
+                if (commandCentreMode) {
+                  return (
+                    <Link
+                      key={item.key}
+                      href={adminTabDestination(item.key)}
+                      className="admin-nav-i"
+                      data-testid={`nav-${item.key}`}
+                      title={item.title}
                     >
                       <Icon /> {item.label}
                     </Link>
@@ -268,32 +385,50 @@ export default function AdminShell({
             </nav>
           ))}
 
-          <div className="admin-side-foot">
-            <span className={`admin-env ${envIsProd ? "" : "is-staging"}`.trim()} data-testid="badge-env">
-              <span className="admin-env__dot" />
-              ENV · {envLabel}
-            </span>
-            {dbInfo && (
-              <span className="admin-build" data-testid="text-db-counts">
-                {shortHost}/{dbInfo.db_name}
-                <br />
-                CM {dbInfo.card_master_active_count} · CS {dbInfo.card_sets_active_count} · Certs{" "}
-                {dbInfo.certificates_count}
+          {!commandCentreMode && (
+            <div className="admin-side-foot">
+              <span className={`admin-env ${envIsProd ? "" : "is-staging"}`.trim()} data-testid="badge-env">
+                <span className="admin-env__dot" />
+                ENV · {envLabel}
               </span>
-            )}
-          </div>
+              {dbInfo && (
+                <span className="admin-build" data-testid="text-db-counts">
+                  {shortHost}/{dbInfo.db_name}
+                  <br />
+                  CM {dbInfo.card_master_active_count} · CS {dbInfo.card_sets_active_count} · Certs{" "}
+                  {dbInfo.certificates_count}
+                </span>
+              )}
+            </div>
+          )}
         </aside>
 
         {/* ── Main column ─────────────────────────────────────────────── */}
         <div className="admin-main">
           {pathname.startsWith("/admin/partners") && (
-            <nav className="flex flex-wrap items-center gap-3 border-b border-[var(--admin-line)] px-5 py-2 text-sm" aria-label="Partner Network">
+            <nav
+              className="flex flex-wrap items-center gap-3 border-b border-[var(--admin-line)] px-5 py-2 text-sm"
+              aria-label="Partner Network"
+            >
               <span className="font-semibold">Partner Network</span>
-              <Link href={PARTNER_NETWORK_HOME} className="underline">Overview</Link>
-              <Link href={PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners/directory" : PARTNER_NETWORK_HOME} className="underline">Partners</Link>
-              <Link href="/admin/partners/stations" className="underline">Stations</Link>
-              <Link href="/admin/partners/infrastructure" className="underline">Infrastructure</Link>
-              <Link href="/admin/partners/settings" className="underline">Settings</Link>
+              <Link href={PARTNER_NETWORK_HOME} className="underline">
+                Overview
+              </Link>
+              <Link
+                href={PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners/directory" : PARTNER_NETWORK_HOME}
+                className="underline"
+              >
+                Partners
+              </Link>
+              <Link href="/admin/partners/stations" className="underline">
+                Stations
+              </Link>
+              <Link href="/admin/partners/infrastructure" className="underline">
+                Infrastructure
+              </Link>
+              <Link href="/admin/partners/settings" className="underline">
+                Settings
+              </Link>
             </nav>
           )}
           <header className="admin-top">
@@ -302,24 +437,26 @@ export default function AdminShell({
               <div className="admin-crumb__p">{topCrumb}</div>
             </div>
 
-            <div className="admin-pills" data-testid="env-banner">
-              <span className="admin-pill">
-                <Check size={11} /> DB
-              </span>
-              {dbInfo && (
-                <>
-                  <span className="admin-pill">
-                    CM <b>{dbInfo.card_master_active_count}</b>
-                  </span>
-                  <span className="admin-pill">
-                    CS <b>{dbInfo.card_sets_active_count}</b>
-                  </span>
-                  <span className="admin-pill">
-                    Certs <b>{dbInfo.certificates_count}</b>
-                  </span>
-                </>
-              )}
-            </div>
+            {!commandCentreMode && (
+              <div className="admin-pills" data-testid="env-banner">
+                <span className="admin-pill">
+                  <Check size={11} /> DB
+                </span>
+                {dbInfo && (
+                  <>
+                    <span className="admin-pill">
+                      CM <b>{dbInfo.card_master_active_count}</b>
+                    </span>
+                    <span className="admin-pill">
+                      CS <b>{dbInfo.card_sets_active_count}</b>
+                    </span>
+                    <span className="admin-pill">
+                      Certs <b>{dbInfo.certificates_count}</b>
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="admin-topright">
               {search && (

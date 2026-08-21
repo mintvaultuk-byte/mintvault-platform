@@ -1,7 +1,7 @@
 # Change manifest — Public Partner Network v1 final production release
 
-**Date:** 2026-08-20
-**Lead session:** `codex/public-partner-v1-final-release-20260820@f4285b71`
+**Date:** 2026-08-20, amended 2026-08-21
+**Lead session:** `codex/public-partner-v1-final-release-20260820@29cfd5f7`
 
 ## Findings this manifest addresses
 
@@ -26,6 +26,7 @@
 | `tests/canonical-lineage-production-rehearsal.test.ts`, `tests/helpers/partner-realistic-db.ts`, `tests/partner-schema-parity.test.ts`, migration inventories and public-presence tests/docs | Rebuild ordered lineage as growth 0101 → public 0102 → optional Google 0103, and update exact names/counts/rehearsal claims. | PPNR-001/002. | B/E/G |
 | `client/src/pages/admin/partner-management-helpers.ts`, `client/src/pages/admin/partner-management.tsx`, focused mounted UI tests | Add a dedicated public-directory release control that requires a nonblank bounded reason, confirmation and `runAdminProtected` fresh-step-up retry; leave non-public operational flags unavailable. | PPNR-003. | B/G |
 | Public release runbook/ledger/rollback and task docs | Limit live negative checking to safe existing cases; record proposed containment and current fresh evidence. | PPNR-004. | G |
+| Current-main reconciliation (only merge conflicts in `client/src/App.tsx`, Partner settings helpers/page, `server/lib/request-logger.ts`, Partner flags/routes and their mounted regression) | Current `origin/main` advanced from `f4285b71` to `2d776db9`; deploy guard correctly refuses a stale checkout. Retain both the new main security/runtime contracts and the reviewed public-presence contracts. | PPNR-009. | B/D/E |
 
 ## Files explicitly NOT touched
 
@@ -37,9 +38,8 @@
 ## Protected actions required
 
 - [x] Local code reconciliation and rename of un-applied migration artifacts — covered by the owner’s bounded final-release instruction; no migration is applied by this step.
-- [ ] Push/merge to the remote main branch — requires the exact final SHA, release proof and deployment-time owner record.
-- [ ] Production migration — only the reconciled public-presence migration, after a backup/recovery point and target-schema/journal preflight; no Google migration.
-- [ ] Production deployment/flag activation/reset/Partner creation — after the preceding gates and only against explicit targets.
+- [x] Push/merge to the remote main branch, selective migration of current-main Growth `0101` then public presence `0102`, production deployment, production flag activation, safe reset and one fresh Partner journey — explicitly approved by the owner on 2026-08-21, within the exact scope below.
+- [ ] Target-time execution — only after fresh target journal/schema/recovery preflight and successful reconciliation of `2d776db9`. Google `0103`, batch migration, secrets, payment/credit, Scanner/MVGS and any unproven target remain excluded.
 
 ## Order of operations
 
@@ -48,6 +48,7 @@
 3. Add the public-directory control and step-up/reason regression proof.
 4. Run migration/reconciliation and public/Partner UI regressions; repair any reproduced blocker/high.
 5. Capture a fresh candidate proof set before considering protected production operations.
+6. Reconcile the candidate with the newly fetched current main (`2d776db9`), rerun affected gates, and use the canonical scoped migration runner for exactly `0101_growth_reviews_and_conversion.sql` followed by `0102_partner_public_presence.sql`.
 
 ## Regression gates required
 
@@ -57,3 +58,5 @@
 - Targeted hostile re-review of merge, migration identity, UI kill-switch/step-up and public route surfaces.
 
 **Approved to proceed to Stage 5:** bounded local reconciliation only; protected production actions remain pending the listed gates — 2026-08-20.
+
+**Owner approval to proceed to protected execution:** 2026-08-21 — apply only current-main Growth `0101`, verify it, then Public Partner Presence `0102`, verify it; do not apply Google `0103` or a batch of pending migrations. Deployment must begin with public presence off and use the documented rollback position.

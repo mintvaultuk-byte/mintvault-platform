@@ -20,6 +20,7 @@ import {
 import { getPartnerAdminCapability } from "./admin-capability";
 import { G5RequestError, g5StatusFor, toG5Error } from "./partner-management-errors";
 import { setPartnerUserStatus, resetPartnerUserMfa, type ActorContext } from "./partner-management-service";
+import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
 
 async function adminAudit(
   tenantId: string,
@@ -40,8 +41,7 @@ async function adminAudit(
  * Mutation ceiling for this legacy router. /api/super-admin/* sits outside the /api/admin prefix, so
  * it inherits neither adminIpAllowlist nor adminRateLimit — this router previously had no limiter at
  * all, which meant the legacy MFA-reset URL was an unthrottled route to a security-relevant action.
- * Keyed on req.ip (trust proxy = 1), never a hand-parsed X-Forwarded-For, matching the sibling
- * super-admin routers.
+ * Keyed on the same Fly-aware client authority as every protected Admin network control.
  */
 const legacyMutationRateLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -50,7 +50,7 @@ const legacyMutationRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: "Too many operations, please slow down.", code: "RATE_LIMITED" },
-  keyGenerator: (req) => req.ip ?? req.socket?.remoteAddress ?? "unknown",
+  keyGenerator: adminClientIpRateLimitKey,
 });
 
 function actorOf(req: Request): ActorContext {
