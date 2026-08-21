@@ -3,6 +3,7 @@
  * routes are ever mounted here (see app.ts + the route-isolation test).
  */
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import {
   partnerLogin,
   partnerLogout,
@@ -128,6 +129,17 @@ function sendPublicPublicationError(res: import("express").Response, err: unknow
   console.error("[partner-publication] request failed:", (err as Error)?.message ?? "unknown");
   res.status(503).json({ error: { code: "PUBLIC_PROFILE_UNAVAILABLE", message: "Public profiles are temporarily unavailable." } });
 }
+
+// The actor-bound Partner limiter below is the primary control because OAuth
+// query values and source IPs are attacker-controlled. Keep this conventional
+// edge limiter too: it bounds burst traffic before callback authorization and
+// is recognisable to the static security gate that protects this exposed route.
+const googleCallbackRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
 
 /** OAuth returns as a top-level navigation, so the standard JSON mutation
  * guards would strand the browser on a JSON error document. Enforce the same
@@ -904,6 +916,7 @@ export function partnerApiRouter(): Router {
 
   r.get(
     "/google-business/callback",
+    googleCallbackRateLimit,
     partnerTeamMutationLimiter,
     requirePartnerCapability("partner.location.view"),
     requireGoogleCallbackMutation,

@@ -8,6 +8,7 @@ const spies = vi.hoisted(() => ({
   fresh: vi.fn(async () => false),
   complete: vi.fn(async () => ({ locationId: "11111111-1111-4111-8111-111111111111", candidateCount: 1 })),
 }));
+let callbackTestIp = 10;
 
 vi.mock("../server/partner/step-up", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../server/partner/step-up")>();
@@ -38,6 +39,7 @@ describe("Google OAuth callback mutation guards (HTTP)", () => {
   let server: http.Server;
   let base: string;
   let userId: string;
+  let clientIp: string;
 
   beforeEach(async () => {
     spies.fresh.mockReset().mockResolvedValue(false);
@@ -46,8 +48,10 @@ describe("Google OAuth callback mutation guards (HTTP)", () => {
       candidateCount: 1,
     });
     userId = randomUUID();
+    clientIp = `198.51.100.${callbackTestIp++}`;
     const app = express();
     app.use((req, _res, next) => {
+      Object.defineProperty(req, "ip", { configurable: true, value: clientIp });
       const mode = req.headers["x-test-mode"];
       req.partner = {
         sessionId: "22222222-2222-4222-8222-222222222222",

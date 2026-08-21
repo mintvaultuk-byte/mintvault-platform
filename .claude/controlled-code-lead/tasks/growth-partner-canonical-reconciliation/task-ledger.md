@@ -18,8 +18,8 @@
 | 2 — Investigation | complete | The normal merge had no textual conflicts; exact migration identity, live/public route composition and source preservation were inspected. |
 | 3 — Lead verification | complete | Growth source/test bytes remain canonical; `0102`/`0103` match live exactly; behavioral and migration suites passed. |
 | 4 — Implementation authorisation | complete | Owner's final reconciliation instruction authorises the bounded candidate, push, PR and exact-SHA verification. |
-| 5 — Implementation | complete pending security-repair commit | The semantic merge was clean. GitHub CodeQL then identified two real preserved-live security defects, repaired minimally without authority or layout change. |
-| 6 — Regression | local proof complete; new exact-SHA CI pending | 339 initial focused tests plus 35 security-repair assertions, 25 migration/schema tests, check/lint/build/Graphify/governance passed. |
+| 5 — Implementation | complete pending edge-limiter commit | The semantic merge was clean. GitHub CodeQL then identified two real preserved-live security defects, repaired minimally without authority or layout change. The CodeQL-recognised edge limiter complements the existing actor limiter. |
+| 6 — Regression | local proof complete; new exact-SHA CI pending | 339 initial focused tests plus 19 final security assertions, 25 migration/schema tests, check/lint/build/Graphify/governance passed. |
 | 7 — Final report | pending | No deployment in this task. |
 
 ## Links
