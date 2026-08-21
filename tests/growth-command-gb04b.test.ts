@@ -11,7 +11,11 @@ import {
   type CapacityThresholds,
 } from "../server/growth-intelligence-service";
 import type { GrowthSummary } from "../server/commercial-growth-service";
-import { consumeManualGrowthRefresh, growthIntelligenceUrl } from "../client/src/pages/admin/growth";
+import {
+  consumeManualGrowthRefresh,
+  growthIntelligenceUrl,
+  trafficDistributionSegments,
+} from "../client/src/pages/admin/growth";
 
 const thresholds: CapacityThresholds = {
   cpuWarningPercent: 65,
@@ -160,6 +164,22 @@ describe("GB-04B Growth intelligence authority", () => {
     const manualRefresh = { current: true };
     expect(growthIntelligenceUrl("30d", consumeManualGrowthRefresh(manualRefresh))).toContain("refresh=1");
     expect(growthIntelligenceUrl("30d", consumeManualGrowthRefresh(manualRefresh))).not.toContain("refresh=1");
+  });
+
+  it("builds a traffic distribution only from completed safe route-class request counts", () => {
+    expect(
+      trafficDistributionSegments([
+        { key: "PUBLIC_CUSTOMER", label: "Public customer", requestCount: 6 },
+        { key: "GROWTH_COMMAND", label: "Growth Command", requestCount: 2 },
+        { key: "PARTNER", label: "Partner", requestCount: 0 },
+      ])
+    ).toEqual([
+      expect.objectContaining({ key: "PUBLIC_CUSTOMER", requestCount: 6, percent: 75 }),
+      expect.objectContaining({ key: "GROWTH_COMMAND", requestCount: 2, percent: 25 }),
+    ]);
+    expect(
+      trafficDistributionSegments([{ key: "PUBLIC_CUSTOMER", label: "Public customer", requestCount: 0 }])
+    ).toEqual([]);
   });
 
   it("keeps database availability separate from database pressure and provider metrics", async () => {

@@ -1,0 +1,6 @@
+# Issue register — Growth Command approved visual target
+
+| ID | Summary | Source | Severity | Confidence | File:Line | Class | Lead-verified | Proof level | Status | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| F1 | Current Growth overview did not meet the owner-approved dense command-centre hierarchy. | Owner-approved visual target | medium | confirmed | `client/src/pages/admin/growth.tsx` | A | yes | Authenticated local browser render | — | n/a | n/a | not activated | IMPLEMENTED | Recomposition uses existing response authorities only. Type-check, 19 focused Growth tests, build, targeted changed-file lint, and governance are green; the DEV-only synthetic session proof is local visual acceptance, never production evidence. |
+| F2 | The Fly table's intrinsic width widened the desktop page; narrow unavailable values overlapped in SEO tiles. | Approved local visual acceptance | medium | confirmed | `client/src/pages/admin/growth.tsx` | A | yes | Authenticated local browser render | — | n/a | n/a | not activated | FIXED | Shrinkable grid tracks contain the existing table scroll, and long unavailable labels wrap in compact tiles. Final 1440×900 and 390×844 renders have page scrollWidth equal to viewport width and zero browser-console errors. |

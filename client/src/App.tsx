@@ -36,6 +36,9 @@ const DevCardDetailsHarness = import.meta.env.DEV
 const DevAdminShellGeometryHarness = import.meta.env.DEV
   ? lazy(() => import("@/pages/dev-admin-shell-geometry-harness"))
   : (null as unknown as ReturnType<typeof lazy>);
+const DevGrowthCommandVisualHarness = import.meta.env.DEV
+  ? lazy(() => import("@/pages/dev-growth-command-visual-harness"))
+  : (null as unknown as ReturnType<typeof lazy>);
 const CertDetailPage = lazy(() => import("@/pages/cert-detail"));
 const WhyMintVaultPage = lazy(() => import("@/pages/why-mintvault"));
 const PartnersPage = lazy(() => import("@/pages/partners"));
@@ -445,6 +448,7 @@ function Router() {
           )}
           {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
           {import.meta.env.DEV && <Route path="/dev/admin-shell-geometry" component={DevAdminShellGeometryHarness} />}
+          {import.meta.env.DEV && <Route path="/dev/growth-command-visual" component={DevGrowthCommandVisualHarness} />}
           <Route path="/admin/command" component={AdminCommandCentrePage} />
           <Route path="/admin/growth" component={AdminGrowthPage} />
           <Route path="/admin" component={AdminPage} />
