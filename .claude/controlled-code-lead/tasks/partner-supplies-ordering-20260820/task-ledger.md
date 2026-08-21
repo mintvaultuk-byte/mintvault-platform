@@ -19,7 +19,7 @@
 | 3 — Lead verification | done | 2026-08-20 | Findings SP-01 through SP-07 are evidence-backed and accepted below. |
 | 4 — Implementation authorisation | done | 2026-08-20 | Owner authorised staging-only implementation and one eventual staging test order. |
 | 5 — Implementation | done | 2026-08-20 | Durable order/outbox, scoped Partner/Super Admin surfaces, cache policy, retry/reconciliation safety and all requested three products are implemented. |
-| 6 — Regression | in progress | 2026-08-20 | Pre-merge exact-SHA Supplies suite passed; the normal live-ancestry check rejected a divergent live release, closing SP-13 by a non-bypass merge. The combined Supplies/full-resolution 15-file suite now passes 231 tests and TypeScript is green. Final merge-SHA full suite, SQL/lint/build, migration dry-run and guarded deploy/browser/E2E remain pending. |
+| 6 — Regression | in progress | 2026-08-21 | Live Supplies readiness investigation found zero canonical contacts for the exact active staging tenant and no contact audit event. SP-14 narrows the existing delivery query to the explicitly required active primary operations contact; the requested real-PostgreSQL matrix is being run before a guarded staging redeploy. |
 | 7 — Final report | pending | | |
 
 ## Reviewer assignments (Stage 1)

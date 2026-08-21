@@ -21,11 +21,14 @@ vi.mock("../server/email", async (importOriginal) => {
 
 const A = "aaaaaaaa-1020-0000-0000-000000000001";
 const B = "bbbbbbbb-1020-0000-0000-000000000002";
+const C = "cccccccc-1020-0000-0000-000000000003";
 const LA = "aaaaaaaa-1020-0000-0000-0000000000a1";
 const LB = "bbbbbbbb-1020-0000-0000-0000000000b1";
+const LC = "cccccccc-1020-0000-0000-0000000000c1";
 const UA = "aaaaaaaa-1020-0000-0000-0000000000a2";
 const UA_VIEWER = "aaaaaaaa-1020-0000-0000-0000000000a3";
 const UB = "bbbbbbbb-1020-0000-0000-0000000000b2";
+const UC = "cccccccc-1020-0000-0000-0000000000c2";
 const ADMIN_ACTOR = "cccccccc-1020-0000-0000-000000000001";
 
 let cluster: DisposablePostgres17;
@@ -535,6 +538,64 @@ describe("Partner supplies ordering (real PostgreSQL)", () => {
     expect(aOrders.some((order) => order.id === b.order.id)).toBe(false);
     expect(bOrders.map((order) => order.id)).toContain(b.order.id);
     expect(aViewerOrders).toEqual([]);
+  });
+
+  it("requires this tenant's active primary operations contact before Supplies is admitted", async () => {
+    await admin.query("INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'sup-c','Supplies C Ltd','ACTIVE')", [C]);
+    await admin.query("INSERT INTO partner_profiles (tenant_id, trading_name) VALUES ($1,'C Cards')", [C]);
+    await admin.query(
+      "INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, address, status) VALUES ($1,'sup-lc',$2,$2,'C Shop','3 C Street, London, W1A 1AA','ACTIVE')",
+      [LC, C]
+    );
+    await admin.query(
+      "INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, status) VALUES ($1,'sup-uc',$2,$2,'owner-c@example.test','ACTIVE')",
+      [UC, C]
+    );
+
+    // Tenant B already has a valid contact. It must not authorise tenant C.
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LC))).rejects.toMatchObject({
+      code: "DELIVERY_CONTACT_REQUIRED",
+      status: 409,
+    });
+
+    await admin.query(
+      `INSERT INTO partner_contacts (tenant_id, full_name, email, contact_type, is_primary, active)
+       VALUES ($1,'C General','general@example.test','general',true,true)`,
+      [C]
+    );
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LC))).rejects.toMatchObject({
+      code: "DELIVERY_CONTACT_REQUIRED",
+      status: 409,
+    });
+
+    await admin.query("UPDATE partner_contacts SET is_primary=false WHERE tenant_id=$1", [C]);
+    await admin.query(
+      "INSERT INTO partner_contacts (tenant_id, full_name, email, contact_type, is_primary, active) VALUES ($1,'C Operations','not-an-email','operations',true,true)",
+      [C]
+    );
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LC))).rejects.toMatchObject({
+      code: "DELIVERY_CONTACT_REQUIRED",
+      status: 409,
+    });
+
+    await admin.query("UPDATE partner_contacts SET email='c.operations@example.test', active=false WHERE tenant_id=$1 AND contact_type='operations'", [C]);
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LC))).rejects.toMatchObject({
+      code: "DELIVERY_CONTACT_REQUIRED",
+      status: 409,
+    });
+
+    await admin.query("UPDATE partner_contacts SET active=true WHERE tenant_id=$1 AND contact_type='operations'", [C]);
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LC))).resolves.toMatchObject({
+      contact: { name: "C Operations", email: "c.operations@example.test" },
+      delivery: { postcode: "W1A 1AA", country: "GB" },
+    });
+
+    // Contacts are tenant-scoped by schema; selecting another tenant's location is the only
+    // location-binding failure mode and it must be rejected before contact admission.
+    await expect(supplies.getSuppliesDeliveryPreview(principal(C, UC, LA))).rejects.toMatchObject({
+      code: "LOCATION_SELECTION_REQUIRED",
+      status: 409,
+    });
   });
 
   it("locks address snapshots, rejects partner-side status writes, and permits only the Super Admin lifecycle", async () => {

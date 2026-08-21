@@ -237,7 +237,13 @@ async function resolveDeliverySnapshot(client: PoolClient, principal: PartnerPri
        JOIN partner_organisations o ON o.id=l.tenant_id
        JOIN partner_users u ON u.id=$2 AND u.tenant_id=l.tenant_id AND u.status='ACTIVE'
        LEFT JOIN partner_profiles p ON p.tenant_id=o.id
-       LEFT JOIN partner_contacts c ON c.tenant_id=o.id AND c.is_primary AND c.active
+       -- Supplies notifications are an operational workflow. A billing, technical or general
+       -- primary contact is not silently repurposed as the shop-floor delivery authority.
+       LEFT JOIN partner_contacts c
+         ON c.tenant_id=o.id
+        AND c.is_primary
+        AND c.active
+        AND c.contact_type='operations'
       WHERE l.id=$1 AND l.tenant_id=$3 AND l.status='ACTIVE'`,
     [principal.locationId, principal.userId, principal.tenantId]
   );
