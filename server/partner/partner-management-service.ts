@@ -396,10 +396,51 @@ async function recordTerminal(
   );
 }
 
-async function priorSuccess(idempotencyKey: string | undefined): Promise<boolean> {
+/**
+ * Has this exact operation already succeeded?
+ *
+ * Scoped to (tenant, action, key), matching the uq_partner_management_audit_idem index that 0107
+ * widens to the same three columns. It used to match on the KEY ALONE, which was safe only while
+ * MintVault staff were the sole producers of a key. First-shop onboarding added self-service
+ * Partner Owner routes that write this ledger too, so a customer-chosen key could otherwise make a
+ * later Super Admin mutation — including suspend, revoke-invitation, reset-MFA and revoke-sessions —
+ * report `{ ok: true, alreadyCompleted: true }` without executing.
+ *
+ * Two independent defences, deliberately both: partner-originated keys are namespaced with the
+ * authenticated tenant at the route boundary (partnerOriginatedIdempotencyKey, server/partner/routes.ts),
+ * and the replay match here can no longer cross a tenant or an action even if a key were to collide.
+ */
+async function priorSuccess(
+  idempotencyKey: string | undefined,
+  tenantId: string,
+  action: AuditAction
+): Promise<boolean> {
   if (!idempotencyKey) return false;
   const { rows } = await partnerAdminQuery(
-    `SELECT 1 FROM partner_management_audit WHERE idempotency_key = $1 AND result = 'succeeded' LIMIT 1`,
+    `SELECT 1 FROM partner_management_audit
+      WHERE idempotency_key = $1 AND tenant_id = $2 AND action_type = $3 AND result = 'succeeded'
+      LIMIT 1`,
+    [idempotencyKey, tenantId, action]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Replay guard for partner CREATION, which cannot use priorSuccess().
+ *
+ * At create time no tenant exists yet, so the key namespace is necessarily pre-tenant. This match
+ * is therefore deliberately CROSS-TENANT — that is exactly the property a duplicate-create guard
+ * needs, because the failure it prevents is "the same request key produced a second organisation".
+ * It is still narrowed to the 'partner_created' action so it can never collide with a mutation on
+ * an existing partner. The 0107 index cannot serve this case: a retry would carry a different
+ * tenant_id and so would not conflict.
+ */
+async function priorCreateSuccess(idempotencyKey: string | undefined): Promise<boolean> {
+  if (!idempotencyKey) return false;
+  const { rows } = await partnerAdminQuery(
+    `SELECT 1 FROM partner_management_audit
+      WHERE idempotency_key = $1 AND action_type = 'partner_created' AND result = 'succeeded'
+      LIMIT 1`,
     [idempotencyKey]
   );
   return rows.length > 0;
@@ -425,7 +466,7 @@ async function withAudit<T>(
   beforeState: unknown,
   delegate: () => Promise<DelegateResult<T>>
 ): Promise<{ result: T; alreadyCompleted: boolean } | { result: null; alreadyCompleted: true }> {
-  if (await priorSuccess(actor.idempotencyKey)) return { result: null, alreadyCompleted: true };
+  if (await priorSuccess(actor.idempotencyKey, tenantId, action)) return { result: null, alreadyCompleted: true };
   await recordAttempt(actor, tenantId, action, null, null, beforeState);
   try {
     const d = await delegate();
@@ -459,10 +500,10 @@ export async function createPartner(
   reason: string
 ) {
   // Idempotency for create: the org INSERT below has no natural unique key, so a same-key retry would
-  // otherwise create a duplicate org before withAudit's own priorSuccess check. Short-circuit here,
-  // BEFORE any write, when a prior succeeded action already used this key (create's key namespace is
-  // pre-tenant, so this pre-check is global — matching the ledger's global idempotency namespace).
-  if (await priorSuccess(actor.idempotencyKey)) return { result: null, alreadyCompleted: true };
+  // otherwise create a duplicate org before withAudit's own replay check. Short-circuit here, BEFORE
+  // any write, when a prior succeeded creation already used this key. Create's key namespace is
+  // pre-tenant, so this check is deliberately cross-tenant but action-scoped — see priorCreateSuccess.
+  if (await priorCreateSuccess(actor.idempotencyKey)) return { result: null, alreadyCompleted: true };
   return withPartnerAdminTransaction(async (client) => {
     const org = await client.query<{ id: string }>(
       `INSERT INTO partner_organisations (legal_name, status) VALUES ($1,'PENDING') RETURNING id`,
@@ -2987,7 +3028,20 @@ export async function updatePartnerLocation(
     "address" in input && input.address !== undefined ? cleanLocationAddress(input.address) : before.rows[0].address;
 
   return withAudit(actor, org.id, "partner_location_updated", reason, before.rows[0], async () => {
-    const rawAddressEdited = "address" in input && input.address !== undefined;
+    /*
+     * Only a CHANGED raw address clears the structured record.
+     *
+     * The intent of the wipe is sound: once an operator rewrites the one-string address, the
+     * structured columns behind it are stale, and resolveDeliverySnapshot correctly fails closed on
+     * a half-structured record rather than mixing the two authorities. But the admin "Edit location"
+     * modal always submits `address`, prefilled from the stored value — so changing only the NAME
+     * counted as an address edit and silently NULLed address_line1..address_country. A first shop
+     * onboarded through the guided flow would then fall back to the legacy path, and Supplies would
+     * start refusing with DELIVERY_ADDRESS_REQUIRED — an error whose remedy text points at a screen
+     * that cannot restore those fields. Comparing against the stored value makes an unchanged string
+     * what it actually is: not an edit.
+     */
+    const rawAddressEdited = "address" in input && input.address !== undefined && address !== before.rows[0].address;
     try {
       await partnerAdminQuery(
         `UPDATE partner_locations

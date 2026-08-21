@@ -289,7 +289,18 @@ async function resolveDeliverySnapshot(client: PoolClient, principal: PartnerPri
   // prevents existing, valid shops from becoming invalid merely because their data predates 0103.
   const legacyAddress = row.location_address?.trim() ?? "";
   const legacyCountry = row.profile_country?.trim() || "GB";
-  const legacyPostcode = row.profile_postcode?.trim() || (legacyAddress ? postcodeFromAddress(legacyAddress) : null);
+  /*
+   * The SHOP's own address wins over the company profile.
+   *
+   * partner_profiles is one row per TENANT; partner_locations is many per tenant. Taking
+   * profile.address_postcode first meant a multi-location partner whose profile carries a head-office
+   * postcode had EVERY shop's supplies order snapshotted with that head-office postcode beside that
+   * shop's own street address — two contradicting postcodes in one delivery instruction, and the
+   * snapshot is immutable once written. Borrowing the profile postcode is precisely the defect 0105
+   * exists to end; it survived here in the legacy branch. The profile is now only a fallback for a
+   * location whose address string contains no recognisable postcode at all.
+   */
+  const legacyPostcode = (legacyAddress ? postcodeFromAddress(legacyAddress) : null) || row.profile_postcode?.trim() || null;
   const legacyValid =
     !hasStructuredAddress &&
     legacyAddress.length >= 12 &&
@@ -515,6 +526,18 @@ export async function createSuppliesOrder(
   }
 }
 
+/**
+ * Every supplies order for the SHOP, not just the ones the caller personally submitted.
+ *
+ * 0104 states the authority explicitly: "Owners and managers may view/submit; Reception may view the
+ * resulting status but cannot request stock." The read was scoped to `requesting_user_id`, which
+ * contradicted that in two ways — PARTNER_RECEPTION holds partner.supplies.view but can never be a
+ * requester, so their list was unconditionally empty; and a Partner Owner could not see an order
+ * their own Manager placed, which disappeared entirely if that Manager was later suspended.
+ *
+ * The boundary that matters is the TENANT, and it is enforced twice: the explicit predicate below
+ * and RLS on the restricted partner_runtime role. Widening from user to tenant does not weaken it.
+ */
 export async function listOwnSuppliesOrders(principal: PartnerPrincipal): Promise<SuppliesOrderView[]> {
   await assertSuppliesSchemaAvailable();
   return withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, async (client) => {
@@ -523,10 +546,10 @@ export async function listOwnSuppliesOrders(principal: PartnerPrincipal): Promis
               n.uncertain_delivery_at AS notification_uncertain_delivery_at
          FROM partner_supplies_orders o
          LEFT JOIN partner_supplies_order_notifications n ON n.order_id=o.id AND n.tenant_id=o.tenant_id
-        WHERE o.tenant_id=$1 AND o.requesting_user_id=$2
+        WHERE o.tenant_id=$1
         ORDER BY o.created_at DESC, o.id DESC
         LIMIT 200`,
-      [principal.tenantId, principal.userId]
+      [principal.tenantId]
     );
     if (orders.rows.length === 0) return [];
     const orderIds = orders.rows.map((order) => order.id);

@@ -25,13 +25,14 @@ import {
   partnerLoginIpLimiter,
   partnerLoginLimiter,
   partnerMfaLimiter,
+  partnerMfaAccountLimiter,
   partnerResetLimiter,
   partnerLocationSwitchLimiter,
   partnerInviteLimiter,
   partnerTeamMutationLimiter,
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
-import { auditInOwnTxn } from "./audit";
+import { auditInOwnTxn, writePartnerSecurity } from "./audit";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
@@ -139,9 +140,37 @@ export async function currentPartnerOwnerActor(req: import("express").Request) {
       actorUserId: principal.userId,
       actorEmail: user.rows[0].email,
       requestId: String(req.headers["x-request-id"] ?? `partner-onboarding-${req.method}-${Date.now()}`),
-      idempotencyKey: typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : undefined,
+      idempotencyKey: partnerOriginatedIdempotencyKey(req.body?.idempotencyKey, principal.tenantId),
     };
   });
+}
+
+/**
+ * Namespace and validate a CUSTOMER-supplied idempotency key before it can reach the Super Admin
+ * management ledger.
+ *
+ * `partner_management_audit.idempotency_key` is a GLOBAL namespace: priorSuccess() matches on the
+ * key alone, and uq_partner_management_audit_idem is unique on the key alone. Until first-shop
+ * onboarding added self-service Owner routes, only MintVault staff could name a key. Passing a raw
+ * body value through would let any Partner Owner register a key of their choosing and thereby make
+ * a LATER Super Admin mutation carrying the same key short-circuit to
+ * `{ ok: true, alreadyCompleted: true }` without executing — including the containment actions
+ * (suspend partner, revoke invitation, reset MFA, revoke sessions). The ledger is append-only and
+ * the index is unique-on-success, so such a collision would be permanent.
+ *
+ * Two defences, deliberately both: the key is validated to the same shape createFirstShopOnboarding
+ * already enforces, and it is prefixed with the authenticated tenant so a partner-originated key can
+ * never be spelled the same way as a staff-originated one. The tenant comes from the session, never
+ * the body.
+ */
+function partnerOriginatedIdempotencyKey(raw: unknown, tenantId: string): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(value)) {
+    throw new G5RequestError("VALIDATION_ERROR", "idempotencyKey is invalid.");
+  }
+  return `partner:${tenantId}:${value}`;
 }
 
 function sendGooglePresenceError(res: import("express").Response, err: unknown): void {
@@ -334,7 +363,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 
-  r.post("/auth/mfa", partnerMfaLimiter, async (req, res) => {
+  r.post("/auth/mfa", partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -362,6 +391,20 @@ export function partnerApiRouter(): Router {
       return false;
     });
     if (!ok) {
+      /*
+       * A wrong second factor used to write NOTHING — no counter, no audit row, no security event —
+       * so a sustained guessing campaign against one account was invisible to the account holder and
+       * to us. The account-keyed limiter above is the bound; this is the evidence. Written
+       * best-effort: failing to record the attempt must never turn a refused login into a 500.
+       */
+      await withTenant({ tenantId: req.partner.tenantId }, async (c) =>
+        writePartnerSecurity(c, {
+          tenantId: req.partner!.tenantId,
+          severity: "medium",
+          kind: "partner_mfa_failed",
+          detail: { userId: req.partner!.userId, method: typeof recoveryCode === "string" && recoveryCode ? "recovery_code" : "totp" },
+        })
+      ).catch(() => {});
       res.status(401).json({ error: "invalid code" });
       return;
     }
@@ -632,30 +675,26 @@ export function partnerApiRouter(): Router {
             // URLs were persisted: retrieve that same Session, never create a second one.
             session = await stripe.checkout.sessions.retrieve(operation.stripeSessionId);
           } else {
+            // ONE server-derived attribution object, deliberately built once and used in both
+            // places. The Checkout Session metadata serves the successful-purchase fulfilment
+            // webhook; a refund or dispute is emitted from the PaymentIntent/Charge object instead,
+            // so the SAME identifiers must reach payment_intent_data or charge.refunded /
+            // charge.dispute.created cannot attribute the event to a tenant. Sharing the constant
+            // is what makes "the same attribution" provable rather than a coincidence of two
+            // literals that could drift apart. The webhook reads ONLY these keys: credits and price
+            // remain in the immutable server-created operation, never in Stripe metadata.
+            const checkoutAttribution = {
+              partner_tenant_id: principal.tenantId,
+              partner_pack_code: operation.packCode,
+              partner_initiating_user_id: principal.userId,
+              partner_checkout_operation_key: operation.checkoutOperationKey,
+            };
             session = await stripe.checkout.sessions.create(
               {
                 mode: "payment",
                 line_items: [{ price: operation.stripePriceId, quantity: 1 }],
-                // The webhook reads ONLY these attribution keys. Credits/price remain in the
-                // immutable server-created operation, never request or Stripe metadata authority.
-                metadata: {
-                  partner_tenant_id: principal.tenantId,
-                  partner_pack_code: operation.packCode,
-                  partner_initiating_user_id: principal.userId,
-                  partner_checkout_operation_key: operation.checkoutOperationKey,
-                },
-                // Checkout Session metadata serves the successful-purchase fulfilment webhook. A
-                // refund or dispute is emitted from the PaymentIntent/Charge object instead, so the
-                // same server-derived identifiers must be copied there too or charge.refunded /
-                // charge.dispute.created cannot attribute the event to a tenant.
-                payment_intent_data: {
-                  metadata: {
-                    partner_tenant_id: principal.tenantId,
-                    partner_pack_code: operation.packCode,
-                    partner_initiating_user_id: principal.userId,
-                    partner_checkout_operation_key: operation.checkoutOperationKey,
-                  },
-                },
+                metadata: checkoutAttribution,
+                payment_intent_data: { metadata: checkoutAttribution },
                 // success_url MUST match a real client route. `/partner/credits` is not registered
                 // in App.tsx, so the partner catch-all silently redirected the returning buyer to
                 // the dashboard and discarded the `?purchase=` signal. The wallet page is
@@ -1211,7 +1250,7 @@ export function partnerApiRouter(): Router {
    * asking again inside the window. It returns NO new session and NO token: this raises the
    * privilege of the session already in hand rather than issuing anything new.
    */
-  r.post("/auth/step-up", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+  r.post("/auth/step-up", requirePartnerAuth, partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     const principal = req.partner!;
     try {
       const result = await verifyStepUp(
@@ -1347,7 +1386,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true });
   });
 
-  r.post("/mfa/confirm", partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/confirm", partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -1376,7 +1415,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once
   });
 
-  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });

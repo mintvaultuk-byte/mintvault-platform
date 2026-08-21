@@ -22,7 +22,7 @@ export default function PartnerSuppliesOrdersPage() {
         <div>
           <p className="text-xs font-semibold uppercase text-primary">Shop stock</p>
           <h1 className="text-2xl font-semibold">My Orders</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Track the current status of supplies requested by your account.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Track the current status of supplies requested for this shop.</p>
         </div>
         <Button asChild data-testid="button-order-supplies">
           <Link href="/partner/supplies">Order supplies</Link>

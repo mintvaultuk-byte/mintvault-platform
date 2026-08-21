@@ -200,6 +200,28 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     ].every((action) => block.includes(`'${action}'`));
   }
 
+  if (filename === "0107_partner_management_audit_idempotency_scope.sql") {
+    // 0107 WIDENS the management-audit idempotency namespace from (key) to
+    // (tenant_id, action_type, key). PostgreSQL cannot alter a partial unique index's key list in
+    // place, so the replacement is a transactional DROP + CREATE of the SAME index name. Approve it
+    // only when the file provably drops that exact index and recreates it, in that order, with all
+    // three columns and the same partial predicate. Do not generalise this to other indexes.
+    if (finding.severity !== "block" || finding.kind !== "drop_index") return false;
+    const cleaned = stripSqlNoise(sql);
+    const drop = /\bDROP\s+INDEX\s+IF\s+EXISTS\s+uq_partner_management_audit_idem\s*;/i.exec(cleaned);
+    const create =
+      /\bCREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+uq_partner_management_audit_idem\s+ON\s+partner_management_audit\s*\(\s*tenant_id\s*,\s*action_type\s*,\s*idempotency_key\s*\)/i.exec(
+        cleaned
+      );
+    if (!drop || !create || drop.index > create.index) return false;
+    // stripSqlNoise() blanks string literals, so the partial predicate's 'succeeded' value has to
+    // be verified against the RAW sql. Ordering is still judged on the cleaned text, where comments
+    // cannot fake a statement.
+    const rawCreate =
+      /\bCREATE\s+UNIQUE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+uq_partner_management_audit_idem\s+ON\s+partner_management_audit\s*\(\s*tenant_id\s*,\s*action_type\s*,\s*idempotency_key\s*\)\s*WHERE\s+idempotency_key\s+IS\s+NOT\s+NULL\s+AND\s+result\s*=\s*'succeeded'\s*;/i;
+    return rawCreate.test(sql);
+  }
+
   if (filename === "0105_partner_first_shop_delivery_address.sql") {
     // 0103 makes the existing management-audit vocabulary one action wider. PostgreSQL cannot
     // alter a CHECK expression in place, so this is a deliberately narrow transactional
@@ -307,6 +329,9 @@ function approvedDestructiveFindingSuffix(filePath: string): string {
   }
   if (filename === "0105_partner_first_shop_delivery_address.sql") {
     return " (approved protected first-shop audit constraint replacement)";
+  }
+  if (filename === "0107_partner_management_audit_idempotency_scope.sql") {
+    return " (approved protected idempotency-namespace index widening)";
   }
   return " (approved protected migration replacement)";
 }

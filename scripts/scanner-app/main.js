@@ -1022,7 +1022,16 @@ function setupIpc() {
       const result = await stationClient.creditCheckout(packCode);
       if (!result.ok) {
         const error = result.body?.error || {};
-        return { ok: false, status: result.status, error: error.message || error || "Checkout could not start" };
+        // The CODE crosses IPC too, not just the message: the renderer has to distinguish
+        // "step-up required" (which the Scanner cannot satisfy — there is no in-app step-up flow)
+        // from an ordinary failure, so it can hand the operator to the browser wallet instead of
+        // showing a dead end at the exact moment the shop most needs to buy.
+        return {
+          ok: false,
+          status: result.status,
+          code: typeof error.code === "string" ? error.code : null,
+          error: error.message || error || "Checkout could not start",
+        };
       }
       const url = result.body?.url;
       if (!url) return { ok: false, error: "Checkout did not return a Stripe URL" };

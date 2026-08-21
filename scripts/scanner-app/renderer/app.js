@@ -38,6 +38,7 @@ const els = {
   billingLockError: document.getElementById("billingLockError"),
   billingLockStatus: document.getElementById("billingLockStatus"),
   billingLockClose: document.getElementById("billingLockClose"),
+  billingOpenBrowser: document.getElementById("billingOpenBrowser"),
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn: document.getElementById("logsBtn"),
   settingsToggle: document.getElementById("settingsToggle"),
@@ -1877,6 +1878,32 @@ els.billingLockClose.addEventListener("click", () => {
   closeBillingModal();
 });
 
+/**
+ * Hand the operator to the web wallet.
+ *
+ * Buying credits from the Scanner requires a recent password step-up, and the Electron app has no
+ * step-up flow — `recordStepUp` is written by exactly one route, the web portal's. A SCANNER_OPERATOR
+ * is additionally denied partner.credits.purchase outright by 0098. So for the shop-floor operator
+ * every pack button in this modal can only ever answer 403. `openPartnerBilling` was already exposed
+ * across the preload bridge and implemented in main.js, and was never called from anywhere: this is
+ * that escape hatch, wired up.
+ */
+async function openBillingInBrowser() {
+  try {
+    const result = await window.scanner.openPartnerBilling();
+    if (!result?.ok) {
+      setBillingError(result?.error || "Could not open the billing page");
+      return;
+    }
+    els.billingLockStatus.textContent = "Billing opened in your browser. Credits appear here automatically after payment.";
+    startBillingPoll();
+  } catch (error) {
+    setBillingError(error?.message || "Could not open the billing page");
+  }
+}
+
+els.billingOpenBrowser.addEventListener("click", () => void openBillingInBrowser());
+
 els.billingPackGrid.addEventListener("click", async (event) => {
   const button = event.target?.closest?.("[data-credits]");
   if (!button || button.disabled || billingCheckoutInFlight || billingCheckoutAwaitingWallet) return;
@@ -1894,6 +1921,13 @@ els.billingPackGrid.addEventListener("click", async (event) => {
     if (!result?.ok) {
       billingCheckoutAwaitingWallet = false;
       billingCheckoutBaselineCredits = null;
+      // 403 here is not a transient error the operator can retry away: it means this account may not
+      // purchase from the Scanner at all (no step-up flow, or no purchase permission). Say so, and
+      // point at the control that does work, rather than repeating a message that offers no action.
+      if (result?.status === 403 || result?.code === "step_up_required" || result?.code === "forbidden") {
+        setBillingError("This account cannot buy credits from the Scanner. Use OPEN BILLING IN BROWSER, or ask a Partner Owner.");
+        return;
+      }
       setBillingError(result?.error || "Checkout could not start");
       return;
     }

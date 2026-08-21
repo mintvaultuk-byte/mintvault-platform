@@ -773,7 +773,50 @@ export interface GrantOutcome {
  * (unpaid session, missing attribution): a webhook that raises gets retried by Stripe forever, so a
  * permanent non-condition must be reported as handled, not as a failure.
  */
+/**
+ * Refusal reasons that are NOT an accounting exception.
+ *
+ *  session_not_paid            — no money moved; nothing is owed.
+ *  not_a_partner_credit_purchase — another product's checkout entirely.
+ *  already_granted             — the correct, expected answer to a replayed event.
+ *
+ * EVERY other refusal below happens on a session Stripe has told us is PAID. The customer's card
+ * has been charged and they will receive nothing. Those must leave a durable, tenant-attributed
+ * record a human can act on.
+ */
+const BENIGN_REFUSALS = new Set(["session_not_paid", "not_a_partner_credit_purchase", "already_granted"]);
+
+/**
+ * Fulfil a paid partner credit purchase, recording an accounting exception for any PAID session
+ * that is nonetheless refused.
+ *
+ * WHY THIS WRAPPER EXISTS: the refusals below deliberately RETURN rather than throw, because a
+ * webhook that raises is retried by Stripe forever and a permanent condition must be reported as
+ * handled. But "handled" was being reported to Stripe while the only trace on our side was a console
+ * line — so "money taken, no credits" was indistinguishable from success and rotated out of the logs.
+ * A pack repointed to a new Stripe Price mid-purchase, a disabled pack, or a lost intent row all
+ * produce exactly that. `recordPurchaseException` already existed and was wired only into
+ * charge.refunded / charge.dispute.created; this puts the settlement path on the same footing.
+ *
+ * The exception write is idempotent on `stripe-exception:{eventId}` and best-effort: failing to
+ * record must never convert a permanent refusal back into an infinite Stripe retry.
+ */
 export async function fulfilPartnerCreditPurchase(
+  session: PartnerCheckoutSession,
+  stripeEventId: string
+): Promise<GrantOutcome> {
+  const outcome = await fulfilPartnerCreditPurchaseInner(session, stripeEventId);
+  if (!outcome.granted && outcome.reason && !BENIGN_REFUSALS.has(outcome.reason)) {
+    await recordPurchaseException(stripeEventId, {
+      tenantId: session.metadata?.partner_tenant_id ?? null,
+      sessionId: session.id ?? null,
+      kind: outcome.reason,
+    }).catch(() => {});
+  }
+  return outcome;
+}
+
+async function fulfilPartnerCreditPurchaseInner(
   session: PartnerCheckoutSession,
   stripeEventId: string
 ): Promise<GrantOutcome> {

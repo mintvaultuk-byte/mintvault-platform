@@ -537,7 +537,12 @@ describe("Partner supplies ordering (real PostgreSQL)", () => {
     const aViewerOrders = await supplies.listOwnSuppliesOrders(principal(A, UA_VIEWER, LA));
     expect(aOrders.some((order) => order.id === b.order.id)).toBe(false);
     expect(bOrders.map((order) => order.id)).toContain(b.order.id);
-    expect(aViewerOrders).toEqual([]);
+    // The supplies list is SHOP-scoped, not submitter-scoped (0104: Reception may view the status
+    // but cannot request stock, so a submitter-scoped list would always be empty for them). The
+    // invariant that matters is the tenant boundary: a viewer in tenant A sees tenant A's orders and
+    // never tenant B's.
+    expect(aViewerOrders.map((order) => order.id)).toEqual(aOrders.map((order) => order.id));
+    expect(aViewerOrders.some((order) => order.id === b.order.id)).toBe(false);
   });
 
   it("requires this tenant's active primary operations contact before Supplies is admitted", async () => {
