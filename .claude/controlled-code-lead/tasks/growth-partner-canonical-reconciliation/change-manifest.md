@@ -11,6 +11,7 @@ Create one candidate from canonical `718f60e7` and live `337776e6` using a norma
 | Live-only Partner public-presence source, routes, public pages, tests and docs | Preserve exact live lineage through the merge; alter only a proven conflict resolution. | Protected / semantic merge |
 | `migrations/0102_*`, `migrations/0103_*`, their rollback material and migration tests | Preserve existing bytes and identity; do not create, apply, renumber or edit a migration. | Protected / immutable lineage |
 | Growth visual source and F3 test/docs from `718f60e7` | Preserve exact approved behavior and visual composition. | Protected visual contract |
+| `server/partner/routes.ts`, `server/static.ts`, and their narrow regressions | Repair two confirmed CodeQL high findings without altering Partner authority, public data policy, or visual composition. | A / security repair |
 | This task directory and controlled-code-lead index | Record decisions, proof and boundaries. | Governance only |
 
 ## Explicitly prohibited

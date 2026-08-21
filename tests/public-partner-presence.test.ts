@@ -215,4 +215,16 @@ describe("public Partner direct-response SEO boundary", () => {
     expect(result.html).toContain("Find a MintVault Partner | UK Grading Locations");
     expect(result.html).toContain('"@type":"CollectionPage"');
   });
+
+  it("replaces static metadata even when unrelated malformed tags precede it", async () => {
+    const malformedPrefix = '<meta name="twitter:description" '.repeat(2_000);
+    const result = await renderPublicHtmlWithPartnerPresence(`${malformedPrefix}${BASE_HTML}`, "/find-a-partner", {
+      directoryEnabled: async () => true,
+      profile: async () => null,
+    });
+    expect(result.status).toBe(200);
+    expect(result.html).toContain(
+      'name="twitter:description" content="Search approved MintVault Partner shops, view public location details, and open directions in Google Maps."'
+    );
+  });
 });

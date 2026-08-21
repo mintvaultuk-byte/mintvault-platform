@@ -16,3 +16,10 @@
 - Migration / schema: 4 files / 25 passed against disposable test topology.
 - Typecheck, lint (0 errors), production build, Graphify build/check, Engineering OS and governance self-tests passed.
 - Broader suite: 5,376 passed, 1,015 skipped, 5 DB-environment failures; classified GPR-004, not a candidate defect.
+
+## Security repair proof recorded 2026-08-21
+
+- GitHub Advanced Security’s seven high CodeQL findings on the initial merge were accepted as GPR-005 rather than waived because the candidate would make those live lines canonical.
+- The Google OAuth callback allows exactly 30 actor-bound exchanges per minute and returns 429 before a 31st provider exchange.
+- Metadata injection still renders SEO tags when malformed tags occur before the trusted base markup, using a bounded scanner that cannot trigger the reported polynomial tag regex.
+- 35 focused assertions, `npm run check`, changed-file lint (0 errors), production build and Graphify build/check passed. A new exact-SHA CodeQL result remains required.

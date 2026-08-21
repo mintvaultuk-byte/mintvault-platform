@@ -904,6 +904,7 @@ export function partnerApiRouter(): Router {
 
   r.get(
     "/google-business/callback",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.location.view"),
     requireGoogleCallbackMutation,
     async (req, res) => {

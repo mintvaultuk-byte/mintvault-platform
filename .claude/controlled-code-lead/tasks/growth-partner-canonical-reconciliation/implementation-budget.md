@@ -11,7 +11,7 @@ If conflict resolution would require a product-design, authority, schema, paymen
 
 ## Actual before candidate commit
 
-- Authored runtime conflict resolutions: **0**. The merge was clean.
+- Authored runtime conflict resolutions: **0**. The merge was clean. A later CodeQL repair added two narrow security changes: callback rate limiting and linear metadata-tag substitution.
 - Migration edits or applications: **0**.
 - Candidate source delta: live’s existing 81-file / 6,814-insertion public-presence delta, plus 12 new task-evidence files and the task-index row.
-- Local test evidence: 339 focused assertions, 25 migration/schema assertions, and 5,376 broader-suite assertions passed. The remaining five broader-suite failures are CI-environment-only and are recorded as GPR-004.
+- Local test evidence: 339 initial focused assertions, 35 repair-focused assertions, 25 migration/schema assertions, and 5,376 broader-suite assertions passed. The remaining five broader-suite failures are CI-environment-only and are recorded as GPR-004.

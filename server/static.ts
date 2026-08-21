@@ -18,6 +18,36 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function replaceTitleTag(html: string, title: string): string {
+  const open = "<title>";
+  const close = "</title>";
+  const lower = html.toLowerCase();
+  const start = lower.indexOf(open);
+  if (start === -1) return html;
+  const end = lower.indexOf(close, start + open.length);
+  if (end === -1) return html;
+  return `${html.slice(0, start)}<title>${title}</title>${html.slice(end + close.length)}`;
+}
+
+function replaceMetaTag(html: string, marker: string, replacement: string): string {
+  const lower = html.toLowerCase();
+  let cursor = 0;
+  while (cursor < html.length) {
+    const start = lower.indexOf("<meta", cursor);
+    if (start === -1) return html;
+    let end = start + 5;
+    while (end < html.length && html[end] !== ">" && html[end] !== "<") end += 1;
+    if (end >= html.length) return html;
+    if (html[end] === "<") {
+      cursor = end;
+      continue;
+    }
+    if (lower.startsWith(marker, start)) return `${html.slice(0, start)}${replacement}${html.slice(end + 1)}`;
+    cursor = end + 1;
+  }
+  return html;
+}
+
 function injectMeta(html: string, meta: SeoMeta): string {
   const title = escapeHtml(meta.title);
   const desc  = escapeHtml(meta.description);
@@ -32,14 +62,13 @@ function injectMeta(html: string, meta: SeoMeta): string {
         .replace(/\u2029/g, "\\u2029")
     : "";
 
-  let out = html
-    .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
-    .replace(/<meta name="description"[^>]*>/i, `<meta name="description" content="${desc}" />`)
-    .replace(/<meta property="og:title"[^>]*>/i, `<meta property="og:title" content="${title}" />`)
-    .replace(/<meta property="og:description"[^>]*>/i, `<meta property="og:description" content="${desc}" />`)
-    .replace(/<meta property="og:url"[^>]*>/i, `<meta property="og:url" content="${canon}" />`)
-    .replace(/<meta name="twitter:title"[^>]*>/i, `<meta name="twitter:title" content="${title}" />`)
-    .replace(/<meta name="twitter:description"[^>]*>/i, `<meta name="twitter:description" content="${desc}" />`);
+  let out = replaceTitleTag(html, title);
+  out = replaceMetaTag(out, '<meta name="description"', `<meta name="description" content="${desc}" />`);
+  out = replaceMetaTag(out, '<meta property="og:title"', `<meta property="og:title" content="${title}" />`);
+  out = replaceMetaTag(out, '<meta property="og:description"', `<meta property="og:description" content="${desc}" />`);
+  out = replaceMetaTag(out, '<meta property="og:url"', `<meta property="og:url" content="${canon}" />`);
+  out = replaceMetaTag(out, '<meta name="twitter:title"', `<meta name="twitter:title" content="${title}" />`);
+  out = replaceMetaTag(out, '<meta name="twitter:description"', `<meta name="twitter:description" content="${desc}" />`);
 
   // Inject canonical, image and robots before </head>. This is rendered on the
   // initial response rather than waiting for client-side effects.

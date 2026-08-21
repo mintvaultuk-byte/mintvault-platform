@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -36,6 +37,7 @@ import { partnerApiRouter } from "../server/partner/routes";
 describe("Google OAuth callback mutation guards (HTTP)", () => {
   let server: http.Server;
   let base: string;
+  let userId: string;
 
   beforeEach(async () => {
     spies.fresh.mockReset().mockResolvedValue(false);
@@ -43,13 +45,14 @@ describe("Google OAuth callback mutation guards (HTTP)", () => {
       locationId: "11111111-1111-4111-8111-111111111111",
       candidateCount: 1,
     });
+    userId = randomUUID();
     const app = express();
     app.use((req, _res, next) => {
       const mode = req.headers["x-test-mode"];
       req.partner = {
         sessionId: "22222222-2222-4222-8222-222222222222",
         tenantId: "33333333-3333-4333-8333-333333333333",
-        userId: "44444444-4444-4444-8444-444444444444",
+        userId,
         locationId: "11111111-1111-4111-8111-111111111111",
         mfaPassed: true,
         permissions: new Set(["partner.location.view"]),
@@ -100,5 +103,14 @@ describe("Google OAuth callback mutation guards (HTTP)", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/partner/public-profile?google=select");
     expect(spies.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds a Google OAuth callback before repeated provider exchanges", async () => {
+    spies.fresh.mockResolvedValue(true);
+    const responses: Response[] = [];
+    for (let attempt = 0; attempt < 31; attempt += 1) responses.push(await callback("normal"));
+    expect(responses.slice(0, 30).every((response) => response.status === 303)).toBe(true);
+    expect(responses[30].status).toBe(429);
+    expect(spies.complete).toHaveBeenCalledTimes(30);
   });
 });
