@@ -33,10 +33,12 @@ export async function certIsPristine(cert: CertificateRecord): Promise<boolean> 
     .map((d) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
 
   const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
-  const { loadMvgsCalibration } = await import("./mvgs-calibration");
+  const { calibrationForRulesVersion } = await import("@shared/mvgs/registry");
   const certAny = cert as any;
   const surfaceFlags = (certAny.surfaceValues as any) ?? {};
-  const calibration = await loadMvgsCalibration();
+  // Version-routed, not "current rules": a certificate is re-rendered under the
+  // ruleset it was ISSUED under, so a future v1.5 cannot restate an old slab.
+  const calibration = calibrationForRulesVersion((cert as any).mvgsRulesVersion);
   const mvgsDeductions = scoreMvgsV2(
     {
       centeringFrontLr: cert.centeringFrontLr,

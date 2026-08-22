@@ -55,6 +55,7 @@ export const MVGS_V14_FILES = [
   "shared/centering.ts",
   "server/grading-prompt.ts",
   "shared/grade-presentation.ts",
+  "server/lib/cert-pristine.ts",
 ] as const;
 
 /**
@@ -149,6 +150,35 @@ export function mvgsV14Verdict(file: string, diff: string): MvgsV14Verdict {
       return { authorised: false, reason: `shared/grade-presentation.ts may not carry scoring logic: ${strayLeaf[0]}` };
     }
     return { authorised: true, reason: "authorised: client-safe grade vocabulary leaf" };
+  }
+
+  if (file === "server/lib/cert-pristine.ts") {
+    // MVGS v1.4 FREEZE — founder-approved 2026-08-22, narrowly, for one thing:
+    // this path used to call `loadMvgsCalibration()`, reading six scoring
+    // thresholds out of a MUTABLE `pipeline_settings` row that was `locked:false`
+    // in production. A frozen ruleset cannot have a mutable input, so calibration
+    // is now routed by the certificate's STORED rules version.
+    //
+    // THIS AUTHORISES NO MATHS. The Pristine gate, the deduction weights and the
+    // subgrade logic are untouched; the calibration values are provably identical
+    // (tests/mvgs-v14-freeze.test.ts asserts the frozen constants equal
+    // DEFAULT_MVGS_CALIBRATION, which is what the production row held).
+    const removedMutableRead = /^-.*loadMvgsCalibration/m.test(diff);
+    const addedVersionRouting = /^\+.*calibrationForRulesVersion/m.test(diff);
+    if (!removedMutableRead || !addedVersionRouting) {
+      return {
+        authorised: false,
+        reason: "server/lib/cert-pristine.ts change does not match the authorised calibration-pinning shape",
+      };
+    }
+    const strayPristine = added.filter((l) => SCORING_LITERAL.test(l));
+    if (strayPristine.length > 0) {
+      return {
+        authorised: false,
+        reason: `server/lib/cert-pristine.ts may not gain scoring logic: ${strayPristine[0]}`,
+      };
+    }
+    return { authorised: true, reason: "authorised: calibration pinned to the stored rules version" };
   }
 
   if (file === "shared/mvgs-scoring.ts") {

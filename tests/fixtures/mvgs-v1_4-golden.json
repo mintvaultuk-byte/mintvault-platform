@@ -1,0 +1,2461 @@
+{
+  "rulesVersion": "v1.4",
+  "corpusVersion": 1,
+  "generatedFrom": "shared/mvgs/v1_4 — the frozen authority, invoked directly",
+  "vectors": [
+    {
+      "id": "grade-10-flawless",
+      "description": "no defects, perfect centering → 10",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "grade-9.5-one-front-corner",
+      "description": "1 front-corner D1 → 9.5 (the rung that was unreachable before v1.4)",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 9,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -4
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "grade-9-low-variance",
+      "description": "1 corner + 1 edge D1 → 9, no +0.5 bump",
+      "expected": {
+        "score": 85,
+        "overall": 9,
+        "tier": "Mint",
+        "label": "Mint",
+        "subgrades": {
+          "centering": 10,
+          "corners": 9,
+          "edges": 9,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -4,
+          "edges": -3
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "grade-8.5-two-front-corners",
+      "description": "2 front-corner D1 → 8.5",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 8,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -8
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "grade-8-spread",
+      "description": "corners + edges + surface spread → 8",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 8,
+          "edges": 9,
+          "surface": 9
+        },
+        "deductions": {
+          "corners": -8,
+          "edges": -3,
+          "surface": -4
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "grade-8-even-wear",
+      "description": "corners/edges/surface all bucket to 8, low variance → 8",
+      "expected": {
+        "score": 75,
+        "overall": 8,
+        "tier": "NM-Mint",
+        "label": "NM-Mint",
+        "subgrades": {
+          "centering": 10,
+          "corners": 8,
+          "edges": 8,
+          "surface": 8
+        },
+        "deductions": {
+          "corners": -8,
+          "edges": -6,
+          "surface": -8
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "grade-7-even-wear",
+      "description": "corners/edges/surface all bucket to 7, low variance → 7",
+      "expected": {
+        "score": 65,
+        "overall": 7,
+        "tier": "Near Mint",
+        "label": "Near Mint",
+        "subgrades": {
+          "centering": 10,
+          "corners": 7,
+          "edges": 7,
+          "surface": 7
+        },
+        "deductions": {
+          "corners": -9,
+          "edges": -9,
+          "surface": -9
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "grade-7.5-surface",
+      "description": "5 surface SC D1 → 7.5",
+      "expected": {
+        "score": 70,
+        "overall": 7.5,
+        "tier": "NM+",
+        "label": "NM+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 7
+        },
+        "deductions": {
+          "surface": -10
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x6",
+      "description": "6 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 6
+        },
+        "deductions": {
+          "surface": -12
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x7",
+      "description": "7 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 6
+        },
+        "deductions": {
+          "surface": -14
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x8",
+      "description": "8 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 50,
+        "overall": 5.5,
+        "tier": "Excellent+",
+        "label": "Excellent+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 5
+        },
+        "deductions": {
+          "surface": -16
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x9",
+      "description": "9 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 4
+        },
+        "deductions": {
+          "surface": -18
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x10",
+      "description": "10 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 4
+        },
+        "deductions": {
+          "surface": -20
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x11",
+      "description": "11 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 3
+        },
+        "deductions": {
+          "surface": -22
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x12",
+      "description": "12 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 20,
+        "overall": 2.5,
+        "tier": "Good+",
+        "label": "Good+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 2
+        },
+        "deductions": {
+          "surface": -24
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sc-x13",
+      "description": "13 surface SC D1 — walks the lower rungs",
+      "expected": {
+        "score": 10,
+        "overall": 1.5,
+        "tier": "Fair",
+        "label": "Fair",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 1
+        },
+        "deductions": {
+          "surface": -25
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-corner-d1-x1",
+      "description": "1 front-corner D1",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 9,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -4
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-corner-d1-x2",
+      "description": "2 front-corner D1",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 8,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -8
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-corner-d1-x3",
+      "description": "3 front-corner D1",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 6,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -12
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-corner-d1-x4",
+      "description": "4 front-corner D1",
+      "expected": {
+        "score": 50,
+        "overall": 5.5,
+        "tier": "Excellent+",
+        "label": "Excellent+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 5,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -16
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-corner-d1-x5",
+      "description": "5 front-corner D1",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 4,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -20
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-corner-d1-x6",
+      "description": "6 front-corner D1",
+      "expected": {
+        "score": 20,
+        "overall": 2.5,
+        "tier": "Good+",
+        "label": "Good+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 2,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -24
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x1",
+      "description": "1 front-edge D1",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 9,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -3
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x2",
+      "description": "2 front-edge D1",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 8,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -6
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x3",
+      "description": "3 front-edge D1",
+      "expected": {
+        "score": 70,
+        "overall": 7.5,
+        "tier": "NM+",
+        "label": "NM+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 7,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -9
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x4",
+      "description": "4 front-edge D1",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 6,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -12
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x5",
+      "description": "5 front-edge D1",
+      "expected": {
+        "score": 50,
+        "overall": 5.5,
+        "tier": "Excellent+",
+        "label": "Excellent+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 5,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -15
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x6",
+      "description": "6 front-edge D1",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 4,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -18
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x7",
+      "description": "7 front-edge D1",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 3,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -21
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "front-edge-d1-x8",
+      "description": "8 front-edge D1",
+      "expected": {
+        "score": 20,
+        "overall": 2.5,
+        "tier": "Good+",
+        "label": "Good+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 2,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -24
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "category-corners-d2",
+      "description": "corner D2 pins only",
+      "expected": {
+        "score": 98,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "category-edges-d2",
+      "description": "edge D2 pins only",
+      "expected": {
+        "score": 98,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "category-surface-d2",
+      "description": "surface PL D2 pins only",
+      "expected": {
+        "score": 98,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "surface": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "surface-sp-holo-multiplier",
+      "description": "SP D1 in the front art/holo zone (x1.5)",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 8
+        },
+        "deductions": {
+          "surface": -6
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "back-corner-is-lighter",
+      "description": "back-corner D1 vs front-corner D1",
+      "expected": {
+        "score": 98,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "back-surface-half-multiplier",
+      "description": "back-surface SC D1 (x0.5)",
+      "expected": {
+        "score": 99,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "surface": -1
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "dark-border-front-wh",
+      "description": "front-edge WH D1 with a dark front border (x1.25)",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 8,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -7.5
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "dark-border-back-only",
+      "description": "dark back border does not affect front edges",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 8,
+          "surface": 10
+        },
+        "deductions": {
+          "edges": -6
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "combo-all-four-categories",
+      "description": "centering + corners + edges + surface together",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 8,
+          "corners": 9,
+          "edges": 9,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -5,
+          "corners": -4,
+          "edges": -3,
+          "surface": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "combo-eye-appeal-plus",
+      "description": "eye appeal +2",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 9,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -4,
+          "eye_appeal": 2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "combo-eye-appeal-minus",
+      "description": "eye appeal -2",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 9,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -4,
+          "eye_appeal": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "combo-crease-cr-d1",
+      "description": "CR D1 crease forces the hard 74 score cap",
+      "expected": {
+        "score": 70,
+        "overall": 7.5,
+        "tier": "NM+",
+        "label": "NM+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 7
+        },
+        "deductions": {
+          "surface": -10
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-10",
+      "description": "crease spanning 10% of the card axis",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 4.5,
+          "reason": "crease 10.0% of card span (<25% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-25",
+      "description": "crease spanning 25% of the card axis",
+      "expected": {
+        "score": 35,
+        "overall": 4,
+        "tier": "VG-EX",
+        "label": "VG-EX",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 4,
+          "reason": "crease 25.0% of card span (25-50% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-26",
+      "description": "crease spanning 26% of the card axis",
+      "expected": {
+        "score": 35,
+        "overall": 4,
+        "tier": "VG-EX",
+        "label": "VG-EX",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 4,
+          "reason": "crease 26.0% of card span (25-50% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-50",
+      "description": "crease spanning 50% of the card axis",
+      "expected": {
+        "score": 35,
+        "overall": 4,
+        "tier": "VG-EX",
+        "label": "VG-EX",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 4,
+          "reason": "crease 50.0% of card span (25-50% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-51",
+      "description": "crease spanning 51% of the card axis",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 3.5,
+          "reason": "crease 51.0% of card span (50-75% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-75",
+      "description": "crease spanning 75% of the card axis",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 3.5,
+          "reason": "crease 75.0% of card span (50-75% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-76",
+      "description": "crease spanning 76% of the card axis",
+      "expected": {
+        "score": 25,
+        "overall": 3,
+        "tier": "Very Good",
+        "label": "Very Good",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 3,
+          "reason": "crease 76.0% of card span (>75% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-crease-span-100",
+      "description": "crease spanning 100% of the card axis",
+      "expected": {
+        "score": 25,
+        "overall": 3,
+        "tier": "Very Good",
+        "label": "Very Good",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "crease",
+          "grade": 3,
+          "reason": "crease 100.0% of card span (>75% bracket)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-wrinkle-tiny_back",
+      "description": "wrinkle severity tiny_back",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "wrinkle",
+          "grade": 6.5,
+          "reason": "wrinkle: tiny back"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-wrinkle-longer_back",
+      "description": "wrinkle severity longer_back",
+      "expected": {
+        "score": 55,
+        "overall": 6,
+        "tier": "EX-Mint",
+        "label": "EX-Mint",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "wrinkle",
+          "grade": 6,
+          "reason": "wrinkle: longer back"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-wrinkle-small_front",
+      "description": "wrinkle severity small_front",
+      "expected": {
+        "score": 50,
+        "overall": 5.5,
+        "tier": "Excellent+",
+        "label": "Excellent+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "wrinkle",
+          "grade": 5.5,
+          "reason": "wrinkle: small front"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-wrinkle-multiple_front",
+      "description": "wrinkle severity multiple_front",
+      "expected": {
+        "score": 45,
+        "overall": 5,
+        "tier": "Excellent",
+        "label": "Excellent",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "wrinkle",
+          "grade": 5,
+          "reason": "wrinkle: multiple front"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-tear-minor",
+      "description": "tear severity minor",
+      "expected": {
+        "score": 15,
+        "overall": 2,
+        "tier": "Good",
+        "label": "Good",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "tear",
+          "grade": 2,
+          "reason": "tear: minor"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-tear-significant",
+      "description": "tear severity significant",
+      "expected": {
+        "score": 10,
+        "overall": 1.5,
+        "tier": "Fair",
+        "label": "Fair",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "tear",
+          "grade": 1.5,
+          "reason": "tear: significant"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "ceiling-tear-major",
+      "description": "tear severity major",
+      "expected": {
+        "score": 5,
+        "overall": 1,
+        "tier": "Poor",
+        "label": "Poor",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": {
+          "source": "tear",
+          "grade": 1,
+          "reason": "major tear / missing material — routed to NO (existing code)"
+        },
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": true,
+        "pristine": false
+      }
+    },
+    {
+      "id": "whitening-one-edge",
+      "description": "one front edge, 40% coverage",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": 9,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "whitening-all-four-front",
+      "description": "all four front edges affected",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": 8,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-lr-50-50",
+      "description": "front L/R 50/50",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-front-lr-52-48",
+      "description": "front L/R 52/48",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-front-lr-53-47",
+      "description": "front L/R 53/47",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-front-lr-54-46",
+      "description": "front L/R 54/46",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-front-lr-55-45",
+      "description": "front L/R 55/45",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-front-lr-56-44",
+      "description": "front L/R 56/44",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 9,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-55",
+      "description": "front L/R 55/45 (band edge 55 and just past)",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-front-boundary-56",
+      "description": "front L/R 56/44 (band edge 55 and just past)",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 9,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-60",
+      "description": "front L/R 60/40 (band edge 60 and just past)",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 9,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-61",
+      "description": "front L/R 61/39 (band edge 60 and just past)",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 8,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -5
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-65",
+      "description": "front L/R 65/35 (band edge 65 and just past)",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 8,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -5
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-66",
+      "description": "front L/R 66/34 (band edge 65 and just past)",
+      "expected": {
+        "score": 70,
+        "overall": 7.5,
+        "tier": "NM+",
+        "label": "NM+",
+        "subgrades": {
+          "centering": 7,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -8
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-70",
+      "description": "front L/R 70/30 (band edge 70 and just past)",
+      "expected": {
+        "score": 70,
+        "overall": 7.5,
+        "tier": "NM+",
+        "label": "NM+",
+        "subgrades": {
+          "centering": 7,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -8
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-71",
+      "description": "front L/R 71/29 (band edge 70 and just past)",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 6,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -11
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-75",
+      "description": "front L/R 75/25 (band edge 75 and just past)",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 6,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -11
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-76",
+      "description": "front L/R 76/24 (band edge 75 and just past)",
+      "expected": {
+        "score": 50,
+        "overall": 5.5,
+        "tier": "Excellent+",
+        "label": "Excellent+",
+        "subgrades": {
+          "centering": 5,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -14
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-80",
+      "description": "front L/R 80/20 (band edge 80 and just past)",
+      "expected": {
+        "score": 50,
+        "overall": 5.5,
+        "tier": "Excellent+",
+        "label": "Excellent+",
+        "subgrades": {
+          "centering": 5,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -14
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-81",
+      "description": "front L/R 81/19 (band edge 80 and just past)",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 4,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -16
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-85",
+      "description": "front L/R 85/15 (band edge 85 and just past)",
+      "expected": {
+        "score": 40,
+        "overall": 4.5,
+        "tier": "VG-EX+",
+        "label": "VG-EX+",
+        "subgrades": {
+          "centering": 4,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -16
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-86",
+      "description": "front L/R 86/14 (band edge 85 and just past)",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 3,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -18
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-90",
+      "description": "front L/R 90/10 (band edge 90 and just past)",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 3,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -18
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-91",
+      "description": "front L/R 91/9 (band edge 90 and just past)",
+      "expected": {
+        "score": 20,
+        "overall": 2.5,
+        "tier": "Good+",
+        "label": "Good+",
+        "subgrades": {
+          "centering": 2,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -19
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-95",
+      "description": "front L/R 95/5 (band edge 95 and just past)",
+      "expected": {
+        "score": 20,
+        "overall": 2.5,
+        "tier": "Good+",
+        "label": "Good+",
+        "subgrades": {
+          "centering": 2,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -19
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-boundary-96",
+      "description": "front L/R 96/4 (band edge 95 and just past)",
+      "expected": {
+        "score": 10,
+        "overall": 1.5,
+        "tier": "Fair",
+        "label": "Fair",
+        "subgrades": {
+          "centering": 1,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -20
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-75",
+      "description": "back L/R 75/25 (band edge 75 and just past)",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "centering-back-boundary-76",
+      "description": "back L/R 76/24 (band edge 75 and just past)",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 9,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -1
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-85",
+      "description": "back L/R 85/15 (band edge 85 and just past)",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 9,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -1
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-86",
+      "description": "back L/R 86/14 (band edge 85 and just past)",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 8,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-90",
+      "description": "back L/R 90/10 (band edge 90 and just past)",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 8,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-91",
+      "description": "back L/R 91/9 (band edge 90 and just past)",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 6,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -4
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-95",
+      "description": "back L/R 95/5 (band edge 95 and just past)",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 6,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -4
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-boundary-96",
+      "description": "back L/R 96/4 (band edge 95 and just past)",
+      "expected": {
+        "score": 30,
+        "overall": 3.5,
+        "tier": "VG+",
+        "label": "VG+",
+        "subgrades": {
+          "centering": 3,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -5
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-worst-of-four",
+      "description": "worst axis wins across front and back",
+      "expected": {
+        "score": 60,
+        "overall": 6.5,
+        "tier": "EX-Mint+",
+        "label": "EX-Mint+",
+        "subgrades": {
+          "centering": 6,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -5,
+          "centering_back": -4
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-front-tb-axis",
+      "description": "front T/B drives the subgrade",
+      "expected": {
+        "score": 70,
+        "overall": 7.5,
+        "tier": "NM+",
+        "label": "NM+",
+        "subgrades": {
+          "centering": 7,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -8
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "centering-back-tb-axis",
+      "description": "back T/B drives the subgrade",
+      "expected": {
+        "score": 80,
+        "overall": 8.5,
+        "tier": "NM-Mint+",
+        "label": "NM-Mint+",
+        "subgrades": {
+          "centering": 8,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_back": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "pristine-eligible",
+      "description": "flawless, zero deductions → Black Label eligible",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {},
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": true
+      }
+    },
+    {
+      "id": "pristine-rejected-tiny-d2",
+      "description": "buckets to 10 chips but carries a real D2 deduction",
+      "expected": {
+        "score": 100,
+        "overall": 10,
+        "tier": "Gem Mint",
+        "label": "Pristine 10P",
+        "subgrades": {
+          "centering": 10,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "corners": -0.5
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    },
+    {
+      "id": "pristine-rejected-centering",
+      "description": "centering below 10 blocks Black Label",
+      "expected": {
+        "score": 90,
+        "overall": 9.5,
+        "tier": "Mint+",
+        "label": "Mint+",
+        "subgrades": {
+          "centering": 9,
+          "corners": 10,
+          "edges": 10,
+          "surface": 10
+        },
+        "deductions": {
+          "centering_front": -2
+        },
+        "ceiling": null,
+        "edgesSubgradeFromWhitening": null,
+        "tearForceNotGraded": false,
+        "pristine": false
+      }
+    }
+  ],
+  "centeringAxes": {
+    "50/50": {
+      "front": 10,
+      "back": 10
+    },
+    "51/49": {
+      "front": 10,
+      "back": 10
+    },
+    "52/48": {
+      "front": 10,
+      "back": 10
+    },
+    "53/47": {
+      "front": 10,
+      "back": 10
+    },
+    "54/46": {
+      "front": 10,
+      "back": 10
+    },
+    "55/45": {
+      "front": 10,
+      "back": 10
+    },
+    "56/44": {
+      "front": 9,
+      "back": 10
+    },
+    "57/43": {
+      "front": 9,
+      "back": 10
+    },
+    "58/42": {
+      "front": 9,
+      "back": 10
+    },
+    "59/41": {
+      "front": 9,
+      "back": 10
+    },
+    "60/40": {
+      "front": 9,
+      "back": 10
+    },
+    "61/39": {
+      "front": 8,
+      "back": 10
+    },
+    "62/38": {
+      "front": 8,
+      "back": 10
+    },
+    "63/37": {
+      "front": 8,
+      "back": 10
+    },
+    "64/36": {
+      "front": 8,
+      "back": 10
+    },
+    "65/35": {
+      "front": 8,
+      "back": 10
+    },
+    "66/34": {
+      "front": 7,
+      "back": 10
+    },
+    "67/33": {
+      "front": 7,
+      "back": 10
+    },
+    "68/32": {
+      "front": 7,
+      "back": 10
+    },
+    "69/31": {
+      "front": 7,
+      "back": 10
+    },
+    "70/30": {
+      "front": 7,
+      "back": 10
+    },
+    "71/29": {
+      "front": 6,
+      "back": 10
+    },
+    "72/28": {
+      "front": 6,
+      "back": 10
+    },
+    "73/27": {
+      "front": 6,
+      "back": 10
+    },
+    "74/26": {
+      "front": 6,
+      "back": 10
+    },
+    "75/25": {
+      "front": 6,
+      "back": 10
+    },
+    "76/24": {
+      "front": 5,
+      "back": 9
+    },
+    "77/23": {
+      "front": 5,
+      "back": 9
+    },
+    "78/22": {
+      "front": 5,
+      "back": 9
+    },
+    "79/21": {
+      "front": 5,
+      "back": 9
+    },
+    "80/20": {
+      "front": 5,
+      "back": 9
+    },
+    "81/19": {
+      "front": 4,
+      "back": 9
+    },
+    "82/18": {
+      "front": 4,
+      "back": 9
+    },
+    "83/17": {
+      "front": 4,
+      "back": 9
+    },
+    "84/16": {
+      "front": 4,
+      "back": 9
+    },
+    "85/15": {
+      "front": 4,
+      "back": 9
+    },
+    "86/14": {
+      "front": 3,
+      "back": 8
+    },
+    "87/13": {
+      "front": 3,
+      "back": 8
+    },
+    "88/12": {
+      "front": 3,
+      "back": 8
+    },
+    "89/11": {
+      "front": 3,
+      "back": 8
+    },
+    "90/10": {
+      "front": 3,
+      "back": 8
+    },
+    "91/9": {
+      "front": 2,
+      "back": 6
+    },
+    "92/8": {
+      "front": 2,
+      "back": 6
+    },
+    "93/7": {
+      "front": 2,
+      "back": 6
+    },
+    "94/6": {
+      "front": 2,
+      "back": 6
+    },
+    "95/5": {
+      "front": 2,
+      "back": 6
+    },
+    "96/4": {
+      "front": 1,
+      "back": 3
+    },
+    "97/3": {
+      "front": 1,
+      "back": 3
+    },
+    "98/2": {
+      "front": 1,
+      "back": 3
+    },
+    "99/1": {
+      "front": 1,
+      "back": 3
+    }
+  }
+}

@@ -583,6 +583,18 @@ jobs:
             psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
           done
 
+      # ── MVGS v1.4 immutability gate ────────────────────────────────────────
+      # Runs BEFORE lint/typecheck/test so a freeze violation is the first thing
+      # a contributor sees, with the "create a new rules version" message, rather
+      # than being buried under a wall of unrelated output 14 minutes later.
+      #
+      # This step only VERIFIES. The re-seal tool is a separate script that
+      # demands an explicit flag and is deliberately wired into no npm script, so
+      # nothing here — and nothing an agent runs to "make CI green" — can update
+      # the expected hashes.
+      - name: MVGS v1.4 freeze verification
+        run: npx tsx scripts/mvgs/verify-freeze.ts
+
       - name: Lint
         run: npm run lint
 

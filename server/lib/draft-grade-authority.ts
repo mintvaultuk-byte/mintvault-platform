@@ -12,7 +12,7 @@
  * off the client.
  */
 import { centeringSubgrade, centeringSubgradeStrict } from "@shared/centering";
-import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
+import { scoreMvgsV1_4, MVGS_V1_4_VERSION } from "@shared/mvgs/v1_4";
 import {
   gradeFromMvgsScore,
   legacyCeilingForFlags,
@@ -22,7 +22,6 @@ import {
 } from "@shared/mvgs-scoring";
 import { isPristine } from "@shared/pristine";
 import { kindOfGradeType } from "./grade-kind";
-import { loadMvgsCalibration } from "./mvgs-calibration";
 
 export interface DraftGradeAuthority {
   overall: string;
@@ -99,27 +98,28 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
       tier: String(defect.tier),
       zone: String(defect.zone),
     }));
-  const calibration = await loadMvgsCalibration();
-  const result = scoreMvgsV2(
-    {
-      centeringFrontLr: String(supplied(body, "centering_front_lr", cert.centeringFrontLr) || "") || null,
-      centeringFrontTb: String(supplied(body, "centering_front_tb", cert.centeringFrontTb) || "") || null,
-      centeringBackLr: String(supplied(body, "centering_back_lr", cert.centeringBackLr) || "") || null,
-      centeringBackTb: String(supplied(body, "centering_back_tb", cert.centeringBackTb) || "") || null,
-      defects: pins,
-      darkBorderFront: Boolean(supplied(body, "dark_border_front", cert.darkBorderFront ?? cert.darkBorder)),
-      darkBorderBack: Boolean(supplied(body, "dark_border_back", cert.darkBorderBack ?? cert.darkBorder)),
-      eyeAppealModifier: numberOr(supplied(body, "eye_appeal_modifier", cert.eyeAppealModifier)),
-      whiteningLines: asArray(supplied(body, "whitening_lines", cert.whiteningLines)) as any,
-      creaseLines: asArray(supplied(body, "crease_lines", cert.creaseLines)) as any,
-      creaseSpanPct: numberOr(supplied(body, "crease_span_pct", cert.creaseSpanPct), 0) || null,
-      wrinkleSeverity: (supplied(body, "wrinkle_severity", cert.wrinkleSeverity) || null) as any,
-      tearSeverity: (supplied(body, "tear_severity", cert.tearSeverity) || null) as any,
-      hasCrease: Boolean(surface.hasCrease),
-      hasTear: Boolean(surface.hasTear),
-    },
-    calibration
-  );
+  // FROZEN v1.4. The calibration is no longer read from `pipeline_settings`:
+  // that row was `locked: false` in production, so six scoring thresholds — the
+  // whitening ladder, the dark-border multiplier and the crease ceilings — could
+  // be changed without touching a protected byte of the engine. A frozen ruleset
+  // cannot have a mutable input. Re-tuning now means shipping v1.5.
+  const result = scoreMvgsV1_4({
+    centeringFrontLr: String(supplied(body, "centering_front_lr", cert.centeringFrontLr) || "") || null,
+    centeringFrontTb: String(supplied(body, "centering_front_tb", cert.centeringFrontTb) || "") || null,
+    centeringBackLr: String(supplied(body, "centering_back_lr", cert.centeringBackLr) || "") || null,
+    centeringBackTb: String(supplied(body, "centering_back_tb", cert.centeringBackTb) || "") || null,
+    defects: pins,
+    darkBorderFront: Boolean(supplied(body, "dark_border_front", cert.darkBorderFront ?? cert.darkBorder)),
+    darkBorderBack: Boolean(supplied(body, "dark_border_back", cert.darkBorderBack ?? cert.darkBorder)),
+    eyeAppealModifier: numberOr(supplied(body, "eye_appeal_modifier", cert.eyeAppealModifier)),
+    whiteningLines: asArray(supplied(body, "whitening_lines", cert.whiteningLines)) as any,
+    creaseLines: asArray(supplied(body, "crease_lines", cert.creaseLines)) as any,
+    creaseSpanPct: numberOr(supplied(body, "crease_span_pct", cert.creaseSpanPct), 0) || null,
+    wrinkleSeverity: (supplied(body, "wrinkle_severity", cert.wrinkleSeverity) || null) as any,
+    tearSeverity: (supplied(body, "tear_severity", cert.tearSeverity) || null) as any,
+    hasCrease: Boolean(surface.hasCrease),
+    hasTear: Boolean(surface.hasTear),
+  });
 
   const centeringRatios = [
     String(supplied(body, "centering_front_lr", cert.centeringFrontLr) || "") || null,

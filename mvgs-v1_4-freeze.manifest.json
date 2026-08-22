@@ -1,0 +1,18 @@
+{
+  "rulesVersion": "v1.4",
+  "sealedAtCommit": "d7072a0f66379e810568b950f3ffc2174998d0b6",
+  "sealedAt": "2026-08-22T12:34:21.991Z",
+  "provenOnRelease": "v1120 / 320c731a",
+  "files": {
+    "server/lib/draft-grade-authority.ts": "93aaa70baee2ce11f3bf66db16fc546f8789204edd0240286f68bdb68514acf4",
+    "server/lib/grade-kind.ts": "1374c476c9041fecc0cccbb0dc794c7e3aa4bdbe3d3af27f2d36bcff61d8bb3f",
+    "shared/centering.ts": "f75923a7f616db68c15c09273254892ceb28bc55a27d59bf31e857e2481c2355",
+    "shared/grade-presentation.ts": "bc37c4d1418dee04fadb8465dace469b63f8ec704b26f2a37008fe3f50bfe8af",
+    "shared/mvgs-input-builder.ts": "23b999dfafd76c1123e0eac8c1bc5076d796c6700d02a3c98184c90771a26f3d",
+    "shared/mvgs-scoring.ts": "2498c48b550595dc637ba6847e1f81b89ea4f6f3e3f368900c38d0b5babff5f4",
+    "shared/mvgs/registry.ts": "cf8790f7c09de9ae1201a96ac723c762d084c1e8506baf161c3b6ed6faf1de56",
+    "shared/mvgs/v1_4/calibration.ts": "99d3303d2b17b0a4106efd5ac4e222e1596711b22fb30ae41d9a48f24b85cfd9",
+    "shared/mvgs/v1_4/index.ts": "e17955304c24f5c7693c33a3c37a14f153e8e647bf021e6799b067afb994a303",
+    "shared/pristine.ts": "3b8251d57647fb0fb6b770c7d906f84e1a3b75877f3d83768f56606d15d798c8"
+  }
+}
