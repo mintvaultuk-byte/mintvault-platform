@@ -230,6 +230,15 @@ export interface PartnerTableRow {
   activeLocations: number;
   /** Existing station records with a non-active, disconnected, or non-valid calibration state. */
   stationAttention: number;
+  /**
+   * Stations enrolled and waiting for MintVault to approve them.
+   *
+   * Deliberately SEPARATE from `stationAttention` rather than folded into it. A pending station is
+   * not a fault — it is a job for the operator, and it is the commonest thing that stalls a shop
+   * mid-onboarding. Overview offers "Approve Scanner" against this number, so it must not be
+   * diluted by offline or uncalibrated stations that approving would not fix.
+   */
+  stationsPendingApproval: number;
   lastActivityAt: string | null;
   alertCount: number;
 }

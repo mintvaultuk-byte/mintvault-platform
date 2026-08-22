@@ -122,7 +122,12 @@ const WORKSPACE_LABELS: Record<WorkspaceTab, string> = {
   cards: "Cards",
   staff: "Staff",
   locations: "Locations",
-  stations: "Stations",
+  /*
+   * SCANNER, not "Stations". The operator's word for the Mac on their counter is the Scanner; the
+   * route key stays `stations` so every existing deep link, redirect and readiness action href
+   * keeps resolving. This is a label, not a rename of any authority.
+   */
+  stations: "Scanner",
   credits: "Credits",
   activity: "Activity",
   security: "Security",

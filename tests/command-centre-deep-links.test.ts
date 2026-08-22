@@ -50,8 +50,13 @@ describe("Command Centre deep-link validation", () => {
     for (const route of requiredRouteShapes) {
       expect(app).toContain(route);
     }
+    /*
+     * Stations left everyday navigation in the four-tab consolidation. Command Centre deep links to
+     * /admin/partners/stations must therefore still RESOLVE — they now redirect to the full console
+     * under Settings → Advanced rather than to the retired Partner Master Dashboard.
+     */
     const stationRoute = app.slice(app.indexOf('path="/admin/partners/stations"'), app.indexOf('path="/admin/partners/infrastructure"'));
-    expect(stationRoute).toContain('legacy="/admin/partners/dashboard"');
+    expect(stationRoute).toContain('canonical="/admin/partners/settings/stations"');
   });
 
   it("does not turn unresolved route templates into browser-visible controls", () => {

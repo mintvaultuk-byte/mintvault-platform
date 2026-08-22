@@ -417,7 +417,18 @@ const AGGREGATE_CTES = `
   ),
   station AS (
     SELECT tenant_id,
-           count(*) FILTER (WHERE status <> 'ACTIVE' OR scanner_connected IS NOT TRUE OR calibration_status <> 'VALID')::int AS station_attention
+           count(*) FILTER (WHERE status <> 'ACTIVE' OR scanner_connected IS NOT TRUE OR calibration_status <> 'VALID')::int AS station_attention,
+           /*
+            * PENDING APPROVAL, split out of the lumped attention count.
+            *
+            * station_attention answers "is something wrong with this shop's Scanners?", which is
+            * the right question for a table cell and the wrong one for an action list: a station
+            * waiting for MintVault to approve it is not a fault, it is a job for the operator, and
+            * it is the single most common thing that stalls a shop mid-onboarding. Overview's Needs
+            * Attention offers "Approve Scanner" against THIS count, so it must not be diluted by
+            * offline or uncalibrated stations that no approval would fix.
+            */
+           count(*) FILTER (WHERE status = 'PENDING')::int AS stations_pending_approval
       FROM partner_stations GROUP BY tenant_id
   )`;
 
@@ -470,6 +481,7 @@ export function buildPartnerListBase(
              COALESCE(sec.security_alerts, 0)     AS security_alerts,
              COALESCE(loc.active_locations, 0)    AS active_locations,
              COALESCE(station.station_attention, 0) AS station_attention,
+             COALESCE(station.stations_pending_approval, 0) AS stations_pending_approval,
              conn.last_activity                   AS last_activity,
              ${walletSelect}
         FROM partner_organisations o
@@ -561,6 +573,7 @@ export async function listPartnersForDashboard(
       activeStaff: num(r.active_staff),
       activeLocations: num(r.active_locations),
       stationAttention: num(r.station_attention),
+      stationsPendingApproval: num(r.stations_pending_approval),
       lastActivityAt: iso(r.last_activity),
       alertCount: num(r.security_alerts) + num(r.open_corrections) + (String(r.status) === "SUSPENDED" ? 1 : 0),
     };
