@@ -247,6 +247,90 @@ describe("first-shop guided onboarding (real PostgreSQL)", () => {
     expect(snapshot.mainLocation?.id).not.toBe(secondary.rows[0].id);
   });
 
+  it("rejects a globally-taken Owner email with an actionable reason and leaves no partial shop behind", async () => {
+    // The reservation survives revocation: uq_partner_users_email_lower has no status predicate, so a
+    // REVOKED user at another Partner still holds its email. This is the exact live staging shape that
+    // blocked Shop #1 (mintvaultuk@gmail.com, REVOKED at another tenant) and returned a message the
+    // Super Admin could not act on.
+    const holder = await service.createFirstShopOnboarding(
+      actor("first-shop-email-holder-0009"),
+      {
+        legalName: "Email Holder Ltd",
+        locationName: "Main location",
+        deliveryAddress: { line1: "9 Holder Road", city: "London", postcode: "N7 8AA", country: "GB" },
+        operationsContact: { fullName: "Holder Operations", email: "operations@email-holder.test" },
+        owner: { firstName: "Holder", lastName: "Owner", email: "taken.owner@email-holder.test" },
+      },
+      "duplicate owner email proof — holder"
+    );
+    const holderId = (holder.result as { partnerId: string }).partnerId;
+    await admin.query("UPDATE partner_users SET status='REVOKED' WHERE tenant_id=$1", [holderId]);
+
+    const before = await admin.query<{ orgs: string; users: string; locs: string; contacts: string; invites: string; wallets: string }>(
+      `SELECT (SELECT count(*) FROM partner_organisations) orgs, (SELECT count(*) FROM partner_users) users,
+              (SELECT count(*) FROM partner_locations) locs, (SELECT count(*) FROM partner_contacts) contacts,
+              (SELECT count(*) FROM partner_invitations) invites, (SELECT count(*) FROM partner_wallets) wallets`
+    );
+    const deliveredBefore = delivery.sent.length;
+
+    await expect(
+      service.createFirstShopOnboarding(
+        actor("first-shop-duplicate-owner-0010"),
+        {
+          legalName: "Duplicate Owner Email Ltd",
+          locationName: "Main location",
+          deliveryAddress: { line1: "10 Duplicate Road", city: "London", postcode: "N7 9AA", country: "GB" },
+          operationsContact: { fullName: "Duplicate Operations", email: "operations@duplicate-owner.test" },
+          owner: { firstName: "Duplicate", lastName: "Owner", email: "TAKEN.OWNER@email-holder.test" },
+        },
+        "duplicate owner email proof — clash"
+      )
+    ).rejects.toMatchObject({
+      code: "DUPLICATE_PARTNER_USER",
+      message: expect.stringContaining("Email Holder Ltd"),
+    });
+
+    // The rejection must name the state, not the opaque partner-facing wording.
+    await service
+      .createFirstShopOnboarding(
+        actor("first-shop-duplicate-owner-0011"),
+        {
+          legalName: "Duplicate Owner Email Two Ltd",
+          locationName: "Main location",
+          deliveryAddress: { line1: "11 Duplicate Road", city: "London", postcode: "N7 9AB", country: "GB" },
+          operationsContact: { fullName: "Duplicate Operations", email: "operations@duplicate-owner-2.test" },
+          owner: { firstName: "Duplicate", lastName: "Owner", email: "taken.owner@email-holder.test" },
+        },
+        "duplicate owner email proof — wording"
+      )
+      .then(
+        () => {
+          throw new Error("expected the duplicate Owner email to be rejected");
+        },
+        (err: { message: string }) => {
+          expect(err.message).toContain("REVOKED");
+          expect(err.message).not.toBe("That team member cannot be invited.");
+        }
+      );
+
+    const after = await admin.query<typeof before.rows[0]>(
+      `SELECT (SELECT count(*) FROM partner_organisations) orgs, (SELECT count(*) FROM partner_users) users,
+              (SELECT count(*) FROM partner_locations) locs, (SELECT count(*) FROM partner_contacts) contacts,
+              (SELECT count(*) FROM partner_invitations) invites, (SELECT count(*) FROM partner_wallets) wallets`
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+    const ghost = await admin.query<{ n: string }>(
+      "SELECT count(*) n FROM partner_organisations WHERE legal_name LIKE 'Duplicate Owner Email%'"
+    );
+    expect(Number(ghost.rows[0].n)).toBe(0);
+    const ghostAudit = await admin.query<{ n: string }>(
+      "SELECT count(*) n FROM partner_management_audit WHERE idempotency_key IN ($1,$2)",
+      ["first-shop-duplicate-owner-0010", "first-shop-duplicate-owner-0011"]
+    );
+    expect(Number(ghostAudit.rows[0].n)).toBe(0);
+    expect(delivery.sent).toHaveLength(deliveredBefore);
+  });
+
   it("derives Partner Owner onboarding authority from the authenticated tenant session, not request data", async () => {
     const created = await service.createFirstShopOnboarding(
       actor("first-shop-owner-route-authority-0008"),

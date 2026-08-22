@@ -645,8 +645,31 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
         "A Partner with that legal or shop name already exists. Open its guided readiness instead of creating a duplicate."
       );
     }
-    if ((await client.query("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) LIMIT 1", [ownerEmail])).rows.length) {
-      throw new G5RequestError("DUPLICATE_PARTNER_USER", "That team member cannot be invited.");
+    // Partner emails are unique across EVERY Partner (uq_partner_users_email_lower, migration 0003),
+    // and that reservation survives revocation because a REVOKED user keeps its row. So this block is
+    // correct — but the wording was not. "That team member cannot be invited." is the PARTNER-facing
+    // team-service message, deliberately opaque there because naming another tenant would be a
+    // cross-tenant "does this person work for another shop?" oracle. This surface is Super Admin only
+    // (requireSuperAdmin + step-up) and already lists every Partner, so there is no oracle to protect
+    // and the opaque wording told the one operator entitled to the answer nothing — the guided flow
+    // read as a broken button. The sibling super-admin invite (invitePartnerUser) has always been
+    // explicit; this now matches it, and names the owning Partner so the block is actionable.
+    const ownerClash = await client.query<{ status: string; legal_name: string }>(
+      `SELECT u.status, o.legal_name
+         FROM partner_users u
+         JOIN partner_organisations o ON o.id = u.tenant_id
+        WHERE lower(u.email)=lower($1)
+        LIMIT 1`,
+      [ownerEmail]
+    );
+    if (ownerClash.rows.length) {
+      const clashName = ownerClash.rows[0].legal_name.slice(0, 80);
+      throw new G5RequestError(
+        "DUPLICATE_PARTNER_USER",
+        `That Owner email already belongs to an existing Partner user (${clashName} — status ${ownerClash.rows[0].status}). ` +
+          "Partner emails are unique across every Partner, and a revoked user still holds its email. " +
+          `Use a different Owner email, or remove that user from ${clashName} first.`
+      );
     }
     const ownerRole = await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code='PARTNER_OWNER'");
     if (ownerRole.rows.length !== 1) {
