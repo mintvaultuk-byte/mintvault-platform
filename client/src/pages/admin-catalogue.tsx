@@ -15,7 +15,9 @@ import { Panel, AdminButton, Badge } from "@/components/admin";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { CATALOGUE_CATEGORIES, type CatalogueCategory, type CatalogueItem } from "@shared/schema";
+import { CATALOGUE_CATEGORIES } from "@shared/vocabulary";
+import type { CatalogueCategory } from "@shared/vocabulary";
+import type { CatalogueItem } from "@shared/schema";
 
 const CATEGORY_LABELS: Record<CatalogueCategory, string> = {
   rarity: "Rarities",

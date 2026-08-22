@@ -45,10 +45,17 @@
  * gate, or certificate numbering. Those are all still hard-refused below and by the callers'
  * own calculation-token assertions, which are applied UNCHANGED on top of this.
  */
-import { addedCodeOf } from "./strip-non-code";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { addedCodeOf, stripNonCode } from "./strip-non-code";
 
 /** Files this authorisation covers. Anything else stays hard-blocked by the callers. */
-export const MVGS_V14_FILES = ["shared/mvgs-scoring.ts", "shared/centering.ts", "server/grading-prompt.ts"] as const;
+export const MVGS_V14_FILES = [
+  "shared/mvgs-scoring.ts",
+  "shared/centering.ts",
+  "server/grading-prompt.ts",
+  "shared/grade-presentation.ts",
+] as const;
 
 /**
  * The ONLY executable lines shared/mvgs-scoring.ts is permitted to LOSE. Removal is the
@@ -123,8 +130,46 @@ export function mvgsV14Verdict(file: string, diff: string): MvgsV14Verdict {
     return { authorised: true, reason: "authorised: prompts read the canonical centering chart" };
   }
 
+  if (file === "shared/grade-presentation.ts") {
+    // The client-safe leaf. It holds the grade vocabulary a browser needs to
+    // RENDER an authoritative result. It may hold NO calculation, and it must
+    // never reach back into the engine, the centering tables or the barrel.
+    // Matched against the RAW diff: module specifiers are string tokens and the
+    // analyser blanks them, so addedSrc cannot see a path.
+    if (/^\+.*from\s*["'](\.\/)?(mvgs-scoring|centering|pristine|mvgs-input-builder|schema)["']/m.test(diff)) {
+      return {
+        authorised: false,
+        reason: "shared/grade-presentation.ts must not import the engine or the schema barrel",
+      };
+    }
+    const strayLeaf = added.filter(
+      (l) => SCORING_LITERAL.test(l) && !/return "[A-Za-z+ -]+";/.test(l) && !/value:\s*-?\d/.test(l)
+    );
+    if (strayLeaf.length > 0) {
+      return { authorised: false, reason: `shared/grade-presentation.ts may not carry scoring logic: ${strayLeaf[0]}` };
+    }
+    return { authorised: true, reason: "authorised: client-safe grade vocabulary leaf" };
+  }
+
   if (file === "shared/mvgs-scoring.ts") {
-    const unauthorisedRemovals = removed.filter((l) => !MVGS_SCORING_AUTHORISED_REMOVALS.includes(l));
+    // A LOSSLESS MOVE is authorised: a line may leave the engine only if that
+    // exact line still exists in the client-safe leaf. This is deliberately
+    // stronger than a name whitelist — it makes "quietly delete a cap, a
+    // ceiling or a deduction weight while calling it a refactor" inexpressible,
+    // because a deleted line exists nowhere and fails here.
+    const leafPath = join(process.cwd(), "shared", "grade-presentation.ts");
+    const leaf = existsSync(leafPath) ? readFileSync(leafPath, "utf8") : "";
+    // Normalise the leaf through the SAME analyser the diff went through:
+    // addedCodeOf blanks string contents ("judge code, not prose"), so a raw
+    // read of the leaf would never match a blanked removed line.
+    const leafLines = new Set(
+      stripNonCode(leaf)
+        .split("\n")
+        .map((l) => l.trim())
+    );
+    const unauthorisedRemovals = removed.filter(
+      (l) => !MVGS_SCORING_AUTHORISED_REMOVALS.includes(l) && !leafLines.has(l)
+    );
     if (unauthorisedRemovals.length > 0) {
       return {
         authorised: false,
@@ -136,10 +181,17 @@ export function mvgsV14Verdict(file: string, diff: string): MvgsV14Verdict {
       /const\s+varianceThreshold\s*=\s*Math\.min\(\s*HIGH_VARIANCE_GAP\s*,\s*MAX_SUBGRADE_GAP_PER_CATEGORY\s*\*\s*\(10\s*-\s*lowest\)\s*\)/.test(
         addedSrc
       ) && /let\s+maxGrade\s*=\s*gap\s*>=\s*varianceThreshold/.test(addedSrc);
-    if (!hasThreshold) {
+    // Either the v1.4 floor-rule fix, or the presentation move that re-exports
+    // the relocated ladder. This diff must actually be one of the two.
+    // Same reason: the specifier "./grade-presentation" is blanked in addedSrc.
+    const isPresentationMove = /^\+\s*export \{ mvgsTierName \} from "\.\/grade-presentation";/m.test(diff);
+    if (!hasThreshold && !isPresentationMove) {
+      return { authorised: false, reason: "shared/mvgs-scoring.ts change matches no authorised shape" };
+    }
+    if (isPresentationMove && !leaf.includes("export function mvgsTierName")) {
       return {
         authorised: false,
-        reason: "shared/mvgs-scoring.ts change does not match the authorised floor-rule fix",
+        reason: "mvgsTierName left the engine but does not exist in shared/grade-presentation.ts",
       };
     }
     // The two named constants are the ONLY new scoring-shaped literals permitted.

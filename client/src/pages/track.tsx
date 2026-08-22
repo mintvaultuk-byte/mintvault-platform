@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
-import { SUBMISSION_STATUS_LABELS } from "@shared/schema";
+import { SUBMISSION_STATUS_LABELS } from "@shared/commerce";
 import { carrierIdFromLegacyName, carrierLabel, serviceLabel, trackUrl } from "@shared/carriers";
 import SubmissionProgress, { CUSTOMER_LABELS } from "@/components/submission-progress";
 

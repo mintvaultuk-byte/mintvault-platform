@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { CheckCircle, Package, FileText, Download, Mail } from "lucide-react";
-import { pricingTiers, submissionTypes, SUBMISSION_STATUS_LABELS } from "@shared/schema";
+import { pricingTiers, submissionTypes, SUBMISSION_STATUS_LABELS } from "@shared/commerce";
 import { COMPANY, formatPostalAddress } from "@shared/company";
 
 export default function SubmitSuccessPage() {

@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { apiRequest } from "@/lib/queryClient";
-import { pricingTiers, submissionTypes, getInsuranceTier, getInsuranceSurchargePerCard } from "@shared/schema";
+import { pricingTiers, submissionTypes, getInsuranceTier, getInsuranceSurchargePerCard } from "@shared/commerce";
 import type { PricingTier } from "@shared/schema";
 import {
   ArrowLeft,

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
-import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { gradeLabelFull, isNonNumericGrade } from "@shared/grade-presentation";
 import { getVariantDisplayLabel } from "@/lib/variantOptions";
 import {
   Plus,

@@ -12,7 +12,7 @@ import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import GradientButton from "@/components/ui/gradient-button";
 import CardPopulationChart from "@/components/v2/card-population-chart";
-import { pricingTiers } from "@shared/schema";
+import { pricingTiers } from "@shared/commerce";
 import type { SlabShowcaseItem } from "@/components/SlabShowcase";
 
 // Code-split: Three.js + showcase only load when the hero has certs to show.
