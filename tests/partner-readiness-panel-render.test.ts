@@ -9,6 +9,7 @@ const facts: PartnerReadinessFacts = {
   orgStatus: "ACTIVE", portalEnabled: true, loginFlagEnabled: true, emergencyStop: false,
   owner: { userStatus: "ACTIVE", passwordConfigured: true, invitationValid: false, mfaRequired: false, mfaConfigured: false },
   locationEligible: true,
+  staff: { scanCapableCount: 1, locationScopedWithoutLocation: 0 },
   deliveryAddressReady: true,
   operationsContactReady: true,
   station: { enrolledCount: 1, approvedActiveCount: 1, pendingApprovalCount: 0, active: { scannerConnected: true, lastSeenAt: new Date().toISOString(), calibrationStatus: "VALID", currentCalibrationId: "calibration", currentProfileRevisionId: "revision", appVersion: "1.4.0", minimumSupportedVersion: null } },

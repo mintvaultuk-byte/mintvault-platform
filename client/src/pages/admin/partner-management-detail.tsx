@@ -15,6 +15,7 @@ import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin"
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
+import type { PartnerDeletionAssessment } from "@shared/partner-deletion";
 import {
   canSuspendLocation,
   statusBadgeVariant,
@@ -121,7 +122,12 @@ const WORKSPACE_LABELS: Record<WorkspaceTab, string> = {
   cards: "Cards",
   staff: "Staff",
   locations: "Locations",
-  stations: "Stations",
+  /*
+   * SCANNER, not "Stations". The operator's word for the Mac on their counter is the Scanner; the
+   * route key stays `stations` so every existing deep link, redirect and readiness action href
+   * keeps resolving. This is a label, not a rename of any authority.
+   */
+  stations: "Scanner",
   credits: "Credits",
   activity: "Activity",
   security: "Security",
@@ -262,7 +268,13 @@ export default function PartnerManagementDetailPage() {
      * could not be validated, was not keyboard-trappable, dropped the typed value on cancel and is
      * invisible to screen readers.
      */
-    input?: { label: string; initial: string; testId: string; required?: boolean };
+    /**
+     * `mustEqual` turns the field from "not empty" into "exactly this". Used by permanent deletion,
+     * where the whole point of typing the shop's name is that it identifies WHICH shop — so text
+     * that cannot possibly work must not enable a destructive button and send the operator to a
+     * server refusal with no inline explanation.
+     */
+    input?: { label: string; initial: string; testId: string; required?: boolean; mustEqual?: string };
     /**
      * A SECOND optional field, added for locations: a shop floor is created with a name and an
      * address together, and splitting that into two sequential one-field dialogs would mean a
@@ -432,7 +444,18 @@ export default function PartnerManagementDetailPage() {
       setBanner(
         modal?.successMessage ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage) : "Action completed."
       );
+      const deleted = modal?.kind === "partner-permanent-delete";
       closeModal();
+      /*
+       * A deleted Partner has no detail page left to refresh. Staying here would immediately re-fetch
+       * a record that no longer exists and replace a successful deletion with "Partner not found" —
+       * so the operator is returned to the directory, where the removal is visible.
+       */
+      if (deleted) {
+        queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
+        navigate(isLegacyPath ? "/admin/partner-network/partners" : "/admin/partners/directory");
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.locations(partnerId) });
@@ -1282,6 +1305,26 @@ export default function PartnerManagementDetailPage() {
           </Panel>
         )}
 
+        {((workspaceTab === "overview" && !administrationTab) || (isLegacyPath && tab === "overview")) && (
+          <PermanentDeletionPanel
+            partnerId={partnerId}
+            legalName={org.legal_name}
+            busy={mutation.isPending}
+            /*
+             * openModalSeeded, NOT setModal. `modalValue` is ONE piece of state shared by every
+             * dialog on this page, and several openers seed it by hand — openBrandingEdit writes the
+             * branding display name straight into it. Opening this dialog with a bare setModal
+             * touches none of that, so the DESTRUCTIVE confirmation box inherited whatever the last
+             * dialog left behind; on staging (2026-08-22) it opened already containing "shop".
+             *
+             * The server refused it correctly and nothing was deleted, but a confirmation field that
+             * arrives pre-filled and enabled is the exact trap that typing the shop's name exists to
+             * prevent. openModalSeeded honours `initial: ""` and blanks the field every time.
+             */
+            openModal={openModalSeeded}
+          />
+        )}
+
         {tab === "profile" && (
           <Panel
             title="Company Profile"
@@ -1596,6 +1639,17 @@ export default function PartnerManagementDetailPage() {
                         : `${modal.input.label} is required.`}
                     </div>
                   )}
+                  {!!modal.input.mustEqual &&
+                    modalValue.trim() !== "" &&
+                    modalValue.trim() !== modal.input.mustEqual && (
+                      <div
+                        role="alert"
+                        data-testid="pm-modal-input-mismatch"
+                        style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}
+                      >
+                        That does not match. Type exactly: {modal.input.mustEqual}
+                      </div>
+                    )}
                 </div>
               )}
               {modal.input2 && (
@@ -1705,6 +1759,7 @@ export default function PartnerManagementDetailPage() {
                       : !reasonValid(reason)) ||
                     (modal.highRisk && typed.trim() !== TYPED_CONFIRM) ||
                     (!!modal.input?.required && modalValue.trim() === "") ||
+                    (!!modal.input?.mustEqual && modalValue.trim() !== modal.input.mustEqual) ||
                     mutation.isPending
                   }
                   onClick={() => mutation.mutate(modal.run)}
@@ -2550,7 +2605,7 @@ function LocationActions({
     successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
-    input?: { label: string; initial: string; testId: string; required?: boolean };
+    input?: { label: string; initial: string; testId: string; required?: boolean; mustEqual?: string };
     input2?: { label: string; initial: string; testId: string; required?: boolean };
     run: (reason: string, value: string, value2: string) => Promise<unknown>;
   }) => void;
@@ -3011,5 +3066,143 @@ function UserActions({
         Reset MFA
       </AdminButton>
     </div>
+  );
+}
+
+/**
+ * PERMANENT DELETION — shown only when the SERVER says the shop can actually be deleted.
+ *
+ * WHY THE ASSESSMENT COMES FIRST. Deletion here is decided by dozens of foreign keys, most of them
+ * deliberately ON DELETE RESTRICT. A button that simply issued the DELETE would, for almost every
+ * real Partner, produce a raw PostgreSQL foreign-key violation on screen — naming one arbitrary
+ * constraint out of several, in a vocabulary no operator can act on. So this panel asks the server
+ * first and renders one of two entirely different things: a destructive control, or the reasons
+ * there isn't one. It never offers a button that is certain to fail.
+ *
+ * Everything shown is server-derived. This component classifies nothing and counts nothing.
+ */
+function PermanentDeletionPanel({
+  partnerId,
+  legalName,
+  busy,
+  openModal,
+}: {
+  partnerId: string;
+  legalName: string;
+  busy: boolean;
+  openModal: (modal: {
+    kind: string;
+    title: string;
+    successMessage?: string;
+    highRisk?: boolean;
+    body?: ReactNode;
+    input?: { label: string; initial: string; testId: string; required?: boolean; mustEqual?: string };
+    run: (reason: string, value: string, value2: string) => Promise<unknown>;
+  }) => void;
+}) {
+  const assessment = useQuery<PartnerDeletionAssessment>({
+    queryKey: [`${BASE}/partners/${partnerId}/deletion-assessment`],
+  });
+
+  if (assessment.isLoading) {
+    return (
+      <Panel title="Permanent deletion">
+        <div data-testid="pm-delete-loading">Checking what depends on this shop…</div>
+      </Panel>
+    );
+  }
+  if (!assessment.data) {
+    return (
+      <Panel title="Permanent deletion">
+        {/* Fail closed in the UI too: an unreadable assessment shows no destructive control. */}
+        <div role="alert" data-testid="pm-delete-unavailable">
+          MintVault could not confirm what depends on this shop, so it cannot be permanently deleted here.
+        </div>
+      </Panel>
+    );
+  }
+
+  const data = assessment.data;
+  if (!data.canDelete) {
+    return (
+      <Panel title="Permanent deletion" sub="Not available for this shop">
+        <div data-testid="pm-delete-blocked" data-can-delete="false">
+          <p style={{ marginTop: 0, fontWeight: 700, letterSpacing: "0.04em" }}>CANNOT PERMANENTLY DELETE</p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {data.blockers.map((blocker) => (
+              <li key={blocker.code + blocker.dependency} data-testid={`pm-delete-blocker-${blocker.code}`}>
+                {blocker.message}
+              </li>
+            ))}
+          </ul>
+          <p style={{ fontSize: 12, opacity: 0.75, marginBottom: 0 }}>
+            Suspend or revoke the shop instead. Its records are kept.
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Permanent deletion" sub="This shop has setup records only">
+      <div data-testid="pm-delete-available" data-can-delete="true">
+        <p style={{ marginTop: 0 }}>This removes {data.removes.join(", ")}.</p>
+        <p style={{ fontSize: 12, opacity: 0.85 }}>Kept: {data.retains.join(", ")}.</p>
+        {/*
+          * The canonical audit surface already exists as this shop's own Audit tab, so this links to
+          * it rather than inventing a second one. The attempt row is written BEFORE the deletion and
+          * survives it (migration 0108), which is exactly why it is worth reading first.
+          */}
+        <p style={{ fontSize: 12 }}>
+          <Link href={`/admin/partners/${partnerId}/security`} className="underline" data-testid="pm-delete-audit-link">
+            Review this shop&apos;s audit history first →
+          </Link>
+        </p>
+        <AdminButton
+          size="sm"
+          variant="gold"
+          disabled={busy}
+          onClick={() =>
+            openModal({
+              kind: "partner-permanent-delete",
+              title: `Permanently delete ${legalName}?`,
+              highRisk: true,
+              successMessage: "Shop permanently deleted. Its audit and security history was kept.",
+              body: (
+                <p style={{ fontSize: 12 }}>
+                  This cannot be undone. The shop record, its locations, staff accounts, sessions,
+                  invitations, contacts, branding and empty credit wallet are destroyed. Every audit and
+                  security event about it is kept and re-attributed to a deletion tombstone.
+                </p>
+              ),
+              input: {
+                label: `Type the shop's exact legal name to confirm: ${data.confirmationPhrase}`,
+                initial: "",
+                testId: "pm-delete-confirm-name",
+                required: true,
+                // The server checks this too and remains the real gate; stating it here means the
+                // operator is told what is wrong inside the dialog rather than by a refusal after
+                // pressing a destructive button that was never going to work.
+                mustEqual: data.confirmationPhrase,
+              },
+              run: async (reasonText, typedName) =>
+                (
+                  // The SAME admin step-up every other destructive Partner action uses. The server
+                  // requires it independently; this only makes the browser satisfy it up front.
+                  await runAdminProtected(() =>
+                    apiRequest("POST", `${BASE}/partners/${partnerId}/permanent-delete`, {
+                      reason: reasonText,
+                      confirmLegalName: typedName,
+                    })
+                  )
+                ).json(),
+            })
+          }
+          data-testid="pm-delete-partner"
+        >
+          Permanently delete setup-only partner
+        </AdminButton>
+      </div>
+    </Panel>
   );
 }

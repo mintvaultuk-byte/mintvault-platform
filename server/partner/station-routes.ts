@@ -518,6 +518,13 @@ export function partnerStationRouter(): Router {
           actorUserId: operator.userId,
           actorEmail: req.body?.operatorEmail ?? operator.userId,
           cardName: typeof req.body?.cardName === "string" ? req.body.cardName : null,
+          /*
+           * The ONBOARDING TEST declaration. Accepted only as this exact literal and otherwise
+           * ignored, so no malformed or unexpected body value can classify a card — and a shop
+           * cannot mark someone else's card, because the tenant still comes from the signed station
+           * identity above and never from the body.
+           */
+          purpose: req.body?.purpose === "ONBOARDING_TEST" ? "ONBOARDING_TEST" : "NORMAL",
         });
         // 200 on replay, 201 on a genuinely new job: a retrying station can tell the difference
         // without having to compare ids, and neither answer costs a second credit.
@@ -527,7 +534,8 @@ export function partnerStationRouter(): Router {
           const status =
             error.code === "INSUFFICIENT_CREDITS"
               ? 402
-              : error.code === "IDEMPOTENCY_CONFLICT"
+              : // Both are "you cannot have this right now because of state that already exists".
+                error.code === "IDEMPOTENCY_CONFLICT" || error.code === "TEST_CARD_ALREADY_OPEN"
                 ? 409
                 : error.code === "CARD_UNIT_INVALID"
                   ? 400

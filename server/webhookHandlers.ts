@@ -8,6 +8,7 @@ import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } 
 import { writeAuthAudit } from "./account-auth";
 // Partner Grading Credit packs: the webhook is the ONLY grant authority (P5).
 import { fulfilPartnerCreditPurchase, recordPurchaseException } from "./partner/credit-purchase-service";
+import { PARTNER_SUPPLY_CHECKOUT_TYPE, fulfilPartnerSupplyOrder } from "./partner/supply-service";
 import { auditLog } from "@shared/schema";
 import { fulfilPaidSubmission } from "./routes/submissions";
 import { sendVaultClubWelcomeEmail, sendVaultClubCancelledEmail, sendVaultClubPaymentFailedEmail } from "./email";
@@ -307,6 +308,24 @@ export class WebhookHandlers {
         console.log(
           `[webhook] partner credit purchase event=${event.id} tenant=${meta.partner_tenant_id} ` +
             `pack=${meta.partner_pack_code} granted=${outcome.granted} credits=${outcome.credits}` +
+            (outcome.reason ? ` reason=${outcome.reason}` : "")
+        );
+      }
+
+      /*
+       * PARTNER SUPPLY ORDER. A supply order has its own immutable payment record and is the only
+       * thing this branch touches — it grants no Grading Credits and reads no wallet.
+       *
+       * A SIGNED Stripe event is the only thing that may advance PENDING_PAYMENT. The browser
+       * return url grants nothing, and neither does any Partner route: `fulfilPartnerSupplyOrder`
+       * refuses a session whose payment_status is not "paid", validates the metadata shape, and is
+       * idempotent on replay, so a redelivered event cannot create a second payment or a second
+       * order.
+       */
+      if (meta.type === PARTNER_SUPPLY_CHECKOUT_TYPE) {
+        const outcome = await fulfilPartnerSupplyOrder(event.id, session);
+        console.log(
+          `[webhook] partner supply order event=${event.id} paid=${outcome.paid}` +
             (outcome.reason ? ` reason=${outcome.reason}` : "")
         );
       }

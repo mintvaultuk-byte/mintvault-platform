@@ -448,6 +448,38 @@ export default function PartnerManagementPage() {
           </div>
         )}
 
+        {/*
+          * ADVANCED. Station Fleet and the connector/infrastructure console used to occupy two of
+          * six everyday navigation slots while answering questions an operator asks rarely.
+          * Network-wide station problems now reach the operator through Overview → Needs Attention,
+          * and per-shop station work lives in that shop's own workspace — so the full consoles
+          * belong here, whole and unchanged, rather than in the daily path.
+          */}
+        {showSettingsControls && (
+          <Panel
+            title="Advanced"
+            sub="Full network-wide consoles. Everyday work lives on Overview and inside each shop."
+            className="mb-4"
+          >
+            <div className="flex flex-wrap items-center gap-2" data-testid="pm-advanced-links">
+              <Link
+                href="/admin/partners/settings/stations"
+                className={adminButtonClass({ variant: "ghost", size: "sm" })}
+                data-testid="pm-advanced-stations"
+              >
+                Station Fleet
+              </Link>
+              <Link
+                href="/admin/partners/settings/infrastructure"
+                className={adminButtonClass({ variant: "ghost", size: "sm" })}
+                data-testid="pm-advanced-infrastructure"
+              >
+                Infrastructure &amp; connectors
+              </Link>
+            </div>
+          </Panel>
+        )}
+
         {showSettingsControls && (
           <Panel title="Partner Pilot Flags" sub="Super Admin pilot controls" className="mb-4">
             <div data-testid="pm-pilot-flags">
@@ -532,7 +564,11 @@ export default function PartnerManagementPage() {
         )}
 
         {showSettingsControls && (
-          <Panel title="Wallets / Credits" sub="Owner-approved staging controls" className="mb-4">
+          <Panel
+            title="Maintenance — Wallets / Credits"
+            sub="Owner-approved backfill. Infrequent, financial, and recorded in the management-audit ledger."
+            className="mb-4"
+          >
             <div data-testid="pm-wallet-backfill" style={{ display: "grid", gap: 12 }}>
               <div>
                 <strong>Provision Missing Partner Wallets</strong>
@@ -619,7 +655,7 @@ export default function PartnerManagementPage() {
                   {walletBackfillMutation.isPending ? "Provisioning…" : "Provision Missing Partner Wallets"}
                 </AdminButton>
                 <Link
-                  href="/admin/partners/directory"
+                  href="/admin/partners/shops"
                   className={adminButtonClass({ variant: "ghost", size: "sm" })}
                   data-testid="pm-wallet-dashboard-link"
                 >

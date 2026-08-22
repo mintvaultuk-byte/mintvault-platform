@@ -4,11 +4,35 @@ import { STATION_STALE_MINUTES } from "./dashboard-operations-service";
 import type {
   PartnerOperationalReadiness,
   PartnerReadinessCode,
+  PartnerTestCardReadiness,
+  PartnerTestCardState,
   ReadinessAction,
   ReadinessDimension,
   ReadinessDimensionKey,
   ReadinessStatus,
 } from "@shared/partner-readiness";
+
+/** The canonical Card Job facts the onboarding test-card verdict is derived from. */
+export interface PartnerTestCardFacts {
+  /**
+   * How many of this tenant's onboarding-test Card Jobs have reached a completion state.
+   *
+   * Counted rather than taken from the latest job so the verdict is MONOTONE: a shop that has
+   * already proven a card end to end stays proven, even if it later starts a second test card (a
+   * new location, a re-test after a hardware change). Without this, beginning a re-test would drag
+   * a working shop's onboarding backwards.
+   */
+  completedCount: number;
+  /** The most recently created onboarding-test Card Job, or null when the shop has never started one. */
+  latest: {
+    id: string;
+    mvNumber: string | null;
+    /** Canonical partner_card_jobs.status. */
+    status: string;
+    /** null when the scanner evidence authority could not be consulted — see the shared type. */
+    sidesAccepted: Array<"front" | "back"> | null;
+  } | null;
+}
 
 export interface PartnerReadinessFacts {
   orgStatus: string;
@@ -56,10 +80,39 @@ export interface PartnerReadinessFacts {
     } | null;
   } | null;
   /**
+   * STAFF who can actually operate a Scanner.
+   *
+   * `locationScopedWithoutLocation` counts ACTIVE users holding a LOCATION-SCOPED role that has no
+   * `partner_user_locations` assignment. Such an operator carries every scanning capability and
+   * still resolves to ZERO eligible locations, so the Scanner offers nothing to enrol against —
+   * observed on staging 2026-08-21, where it cost an onboarding session. It is a BLOCKED state, not
+   * a warning: nothing downstream can succeed until it is assigned.
+   *
+   * Org-wide roles (OWNER/MANAGER/FINANCE_VIEWER) are deliberately NOT counted — they are eligible
+   * at every ACTIVE location by design and must keep that semantic.
+   *
+   * null when the role/assignment authority could not be consulted — UNKNOWN, never PASS.
+   */
+  staff: {
+    scanCapableCount: number;
+    locationScopedWithoutLocation: number;
+  } | null;
+  /**
    * Ledger-derived usable credit balance. `"NO_WALLET"` is a real, actionable state (a legacy
    * partner never provisioned one); null means the wallet authority could not be consulted.
    */
   credits: number | "NO_WALLET" | null;
+  /**
+   * THE ONBOARDING TEST CARD, as the Card Job authority reports it.
+   *
+   * Populated ONLY from Card Jobs explicitly marked `purpose = 'ONBOARDING_TEST'` (migration 0109).
+   * There is no fallback to "the newest job", "the newest MV" or "the job created around setup
+   * time": each of those silently mislabels a real customer's card the moment one is scanned during
+   * onboarding, and a gate built on a mislabel is worse than no gate.
+   *
+   * null means the Card Job authority could not be consulted — UNKNOWN, never a pass.
+   */
+  testCard: PartnerTestCardFacts | null;
   /** now(), injected so staleness assertions are deterministic in tests. */
   nowMs: number;
 }
@@ -84,6 +137,7 @@ const DIMENSION_ORDER: ReadinessDimensionKey[] = [
   "delivery",
   "operationsContact",
   "owner",
+  "staff",
   "station",
   "scanner",
   "credits",
@@ -104,6 +158,7 @@ export function derivePartnerOperationalReadiness(facts: PartnerReadinessFacts):
     delivery: deriveDeliveryAddress(facts),
     operationsContact: deriveOperationsContact(facts),
     owner: deriveOwner(facts),
+    staff: deriveStaff(facts),
     station: deriveStation(facts),
     scanner: deriveScanner(facts),
     credits: deriveCredits(facts),
@@ -120,7 +175,164 @@ export function derivePartnerOperationalReadiness(facts: PartnerReadinessFacts):
       ? []
       : dimensions[key].actions.map((a) => ({ ...a, dimension: key, code: dimensions[key].code }))
   );
-  return { overall, dimensions, actions };
+
+  const testCard = deriveTestCard(facts);
+  /*
+   * ONBOARDING is a STRICTER question than `overall.ready`, and deliberately a separate one.
+   *
+   * `ready` answers "can this shop grade a card now?" and must keep answering exactly that — the
+   * Command Centre's blocked-partner rollup and the Partner Portal both depend on it, and a shop
+   * that has never scanned a test card genuinely can grade. `onboarding.complete` answers "is
+   * first-shop setup finished?", which additionally requires the shop to have proven one card end
+   * to end. Both fail closed: `ready` is false whenever any dimension is UNKNOWN, and the test card
+   * is COMPLETE only on positive evidence, so an unreadable authority can never complete onboarding.
+   */
+  const onboarding = !ready
+    ? { complete: false, code: overall.code, message: overall.message }
+    : testCard.state === "COMPLETE"
+      ? { complete: true, code: "READY" as const, message: "First-shop onboarding is complete." }
+      : { complete: false, code: testCard.code, message: testCard.message };
+
+  return { overall, dimensions, actions, testCard, onboarding };
+}
+
+/**
+ * THE ONBOARDING TEST CARD — one card, scanned once, proving the whole chain works before the shop
+ * is handed a live counter.
+ *
+ * WHAT IT IS DERIVED FROM, AND WHAT IT IS NOT. Exclusively from Card Jobs the server explicitly
+ * marked `purpose = 'ONBOARDING_TEST'` at creation (migration 0109), and from the canonical
+ * `partner_card_jobs.status` lifecycle that the capture and grading paths already advance. It never
+ * looks at the newest Card Job, the newest MV number, the newest submission or a creation
+ * timestamp. Every one of those is a guess, and every one of them starts naming a real customer's
+ * card the moment a shop scans a live card during onboarding.
+ *
+ * MONOTONE ONCE PROVEN. `completedCount > 0` wins over whatever the latest test card is doing, so
+ * starting a second test card (new location, re-test after a hardware change) cannot drag a working
+ * shop's onboarding backwards. A shop has either proven a card end to end or it has not, and that
+ * fact does not expire.
+ */
+function deriveTestCard(f: PartnerReadinessFacts): PartnerTestCardReadiness {
+  // `== null` deliberately covers undefined: an unasked question must never resolve to a pass.
+  if (f.testCard == null) {
+    return testCardVerdict("UNKNOWN", null);
+  }
+  if (f.testCard.completedCount > 0) {
+    return testCardVerdict("COMPLETE", f.testCard.latest);
+  }
+  const latest = f.testCard.latest;
+  if (!latest) return testCardVerdict("NOT_STARTED", null);
+  return testCardVerdict(testCardStateOf(latest.status), latest);
+}
+
+/**
+ * The Card Job lifecycle, read as onboarding progress.
+ *
+ * The mapping is total: an unrecognised status resolves to UNKNOWN rather than to a guess, so a
+ * future lifecycle state cannot silently complete somebody's onboarding.
+ */
+export function testCardStateOf(status: string): PartnerTestCardState {
+  switch (status) {
+    // Paid for and/or being photographed. FIX_REQUIRED belongs here: a side was invalidated and
+    // must be re-shot, which is still "finish the capture", not a blocker anybody has to escalate.
+    case "CREDIT_RESERVED":
+    case "NEEDS_SCAN":
+    case "CAPTURING":
+    case "FIX_REQUIRED":
+      return "CAPTURING";
+    // Both sides accepted. From READY_TO_GRADE onwards the card has left the shop floor and is with
+    // MintVault — grading, submitted, or in QA. To the shop these are one thing: it is with Staff.
+    case "READY_TO_GRADE":
+    case "GRADING":
+    case "SUBMITTED":
+    case "QA_REVIEW":
+      return "READY_TO_GRADE";
+    // APPROVED is the completion condition: MintVault has graded the card and signed it off, which
+    // is the whole thing the test exists to prove. PRINTABLE and COMPLETED are further along the
+    // same road, so they complete too — a slab already printed obviously passed its test.
+    case "APPROVED":
+    case "PRINTABLE":
+    case "COMPLETED":
+      return "COMPLETE";
+    case "CANCELLED":
+      return "BLOCKED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+/** One state in, one fully-formed verdict out — so the copy and the state can never disagree. */
+function testCardVerdict(
+  state: PartnerTestCardState,
+  latest: PartnerTestCardFacts["latest"]
+): PartnerTestCardReadiness {
+  const cardJob = latest
+    ? { id: latest.id, mvNumber: latest.mvNumber, status: latest.status, sidesAccepted: latest.sidesAccepted }
+    : null;
+  const scan: ReadinessAction[] = [
+    { audience: "PARTNER", label: "Scan one test card in MintVault Scanner" },
+    { audience: "SUPER_ADMIN", label: "Ask the shop to scan its test card" },
+  ];
+  switch (state) {
+    case "NOT_STARTED":
+      return {
+        state,
+        status: "BLOCKED",
+        code: "TEST_CARD_REQUIRED",
+        message: "Scan one test card in MintVault Scanner.",
+        actions: scan,
+        cardJob: null,
+      };
+    case "CAPTURING":
+      return {
+        state,
+        status: "PENDING",
+        code: "TEST_CARD_IN_PROGRESS",
+        message: "Complete FRONT and BACK.",
+        actions: [{ audience: "PARTNER", label: "Finish capturing both sides in MintVault Scanner" }],
+        cardJob,
+      };
+    case "READY_TO_GRADE":
+      return {
+        state,
+        status: "PENDING",
+        code: "TEST_CARD_AWAITING_REVIEW",
+        message: "Test card has reached Staff review.",
+        // Nothing for the shop to do, and no Partner-facing destination that would help — so no
+        // Partner action at all, rather than a button that cannot change anything.
+        actions: [{ audience: "SUPER_ADMIN", label: "Grade and approve the test card" }],
+        cardJob,
+      };
+    case "COMPLETE":
+      return {
+        state,
+        status: "PASS",
+        code: "READY",
+        message: "Test card completed successfully.",
+        actions: [],
+        cardJob,
+      };
+    case "BLOCKED":
+      return {
+        state,
+        status: "BLOCKED",
+        code: "TEST_CARD_BLOCKED",
+        // The one authoritative blocker the lifecycle can produce: the test card was cancelled or
+        // voided, so there is nothing in flight and the shop must start another one.
+        message: "The onboarding test card was cancelled, so scan another test card.",
+        actions: scan,
+        cardJob,
+      };
+    default:
+      return {
+        state: "UNKNOWN",
+        status: "UNKNOWN",
+        code: "CONFIGURATION_UNAVAILABLE",
+        message: "Test card status unavailable.",
+        actions: [],
+        cardJob: null,
+      };
+  }
 }
 
 function deriveOrganisation(f: PartnerReadinessFacts): ReadinessDimension {
@@ -375,4 +587,41 @@ function deriveCredits(f: PartnerReadinessFacts): ReadinessDimension {
     return dim("BLOCKED", "CREDITS_REQUIRED", "This shop has no Grading Credits left, so grading cannot start.", buy);
   }
   return pass("READY", "This shop has Grading Credits available.");
+}
+
+/**
+ * STAFF — is there an operator who can actually run a Scanner at this shop?
+ *
+ * Two distinct failures, deliberately separated because the fix differs:
+ *   STAFF_OPERATOR_REQUIRED            nobody scan-capable exists yet -> create one.
+ *   STAFF_LOCATION_ASSIGNMENT_REQUIRED one exists but is location-scoped with no location -> assign.
+ *
+ * The second is the silent one. The user looks correct in every list, holds every scanning
+ * capability, and still sees "No active authorised location is available for this account" at the
+ * Scanner, because listPermittedStationLocations intersects location-scoped users with their
+ * explicit assignments. Readiness now states that condition instead of leaving it to be discovered
+ * at the glass.
+ */
+function deriveStaff(f: PartnerReadinessFacts): ReadinessDimension {
+  // `== null` deliberately covers undefined too: an omitted fact is "not established", and this
+  // contract must never resolve an unasked question to PASS.
+  if (f.staff == null) {
+    return dim("UNKNOWN", "CONFIGURATION_UNAVAILABLE", "MintVault could not confirm this shop's operators.");
+  }
+  if (f.staff.locationScopedWithoutLocation > 0) {
+    return dim(
+      "BLOCKED",
+      "STAFF_LOCATION_ASSIGNMENT_REQUIRED",
+      f.staff.locationScopedWithoutLocation === 1
+        ? "An operator has no authorised location, so their Scanner cannot be set up."
+        : `${f.staff.locationScopedWithoutLocation} operators have no authorised location, so their Scanners cannot be set up.`,
+      [{ audience: "SUPER_ADMIN", label: "Assign an authorised location" }]
+    );
+  }
+  if (f.staff.scanCapableCount < 1) {
+    return dim("BLOCKED", "STAFF_OPERATOR_REQUIRED", "This shop has no operator who can scan cards.", [
+      { audience: "SUPER_ADMIN", label: "Add an operator" },
+    ]);
+  }
+  return pass("READY", "This shop has an operator who can scan cards.");
 }

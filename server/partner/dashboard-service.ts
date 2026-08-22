@@ -417,7 +417,18 @@ const AGGREGATE_CTES = `
   ),
   station AS (
     SELECT tenant_id,
-           count(*) FILTER (WHERE status <> 'ACTIVE' OR scanner_connected IS NOT TRUE OR calibration_status <> 'VALID')::int AS station_attention
+           count(*) FILTER (WHERE status <> 'ACTIVE' OR scanner_connected IS NOT TRUE OR calibration_status <> 'VALID')::int AS station_attention,
+           /*
+            * PENDING APPROVAL, split out of the lumped attention count.
+            *
+            * station_attention answers "is something wrong with this shop's Scanners?", which is
+            * the right question for a table cell and the wrong one for an action list: a station
+            * waiting for MintVault to approve it is not a fault, it is a job for the operator, and
+            * it is the single most common thing that stalls a shop mid-onboarding. Overview's Needs
+            * Attention offers "Approve Scanner" against THIS count, so it must not be diluted by
+            * offline or uncalibrated stations that no approval would fix.
+            */
+           count(*) FILTER (WHERE status = 'PENDING')::int AS stations_pending_approval
       FROM partner_stations GROUP BY tenant_id
   )`;
 
@@ -470,6 +481,7 @@ export function buildPartnerListBase(
              COALESCE(sec.security_alerts, 0)     AS security_alerts,
              COALESCE(loc.active_locations, 0)    AS active_locations,
              COALESCE(station.station_attention, 0) AS station_attention,
+             COALESCE(station.stations_pending_approval, 0) AS stations_pending_approval,
              conn.last_activity                   AS last_activity,
              ${walletSelect}
         FROM partner_organisations o
@@ -561,6 +573,7 @@ export async function listPartnersForDashboard(
       activeStaff: num(r.active_staff),
       activeLocations: num(r.active_locations),
       stationAttention: num(r.station_attention),
+      stationsPendingApproval: num(r.stations_pending_approval),
       lastActivityAt: iso(r.last_activity),
       alertCount: num(r.security_alerts) + num(r.open_corrections) + (String(r.status) === "SUSPENDED" ? 1 : 0),
     };
@@ -1105,7 +1118,7 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
   // partner count, on an endpoint that auto-refreshes. `limit` bounds each source, and the
   // severity sort still runs across the combined set, so prioritisation is unchanged for any
   // realistic alert volume.
-  const [orgs, security, escalations, lockedUsers, lowCredit] = await Promise.all([
+  const [orgs, security, escalations, lockedUsers, lowCredit, supplyExceptions] = await Promise.all([
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT id, legal_name, status, created_at FROM partner_organisations
         WHERE status IN ('SUSPENDED','PENDING')
@@ -1159,9 +1172,45 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
           null
         )
       : null,
+    /*
+     * SUPPLY ORDERS STUCK BEHIND A HUMAN. A paid supplies order that hit a fulfilment problem is
+     * money already taken and goods not sent, so it belongs in the same alert feed as everything
+     * else that needs a person — otherwise it is only visible to somebody who happens to open the
+     * Supplies screen.
+     *
+     * Tolerated as missing so a database without migration 0111 keeps producing every OTHER alert
+     * rather than failing the whole feed, exactly like the wallet source above.
+     */
+    tolerateMissingTable(
+      () =>
+        partnerAdminQuery<Record<string, unknown>>(
+          `SELECT DISTINCT ON (e.order_id) e.order_id, e.tenant_id, e.created_at, o.legal_name
+             FROM partner_supply_order_events e
+             JOIN partner_organisations o ON o.id = e.tenant_id
+            WHERE e.action = 'manual_exception_required'
+            ORDER BY e.order_id, e.id DESC
+            LIMIT $1`,
+          [limit]
+        ),
+      null
+    ),
   ]);
 
   const alerts: DashboardAlert[] = [];
+
+  for (const exception of supplyExceptions?.rows ?? []) {
+    alerts.push({
+      id: `supply-exception-${exception.order_id}`,
+      partnerId: String(exception.tenant_id),
+      partnerName: String(exception.legal_name),
+      severity: "medium",
+      kind: "supply_manual_exception",
+      reason: "A paid supplies order needs a manual decision.",
+      recommendedAction: "Open Supplies and resolve the order, or refund it.",
+      detectedAt: iso(exception.created_at),
+      link: "/admin/partners/supplies",
+    });
+  }
 
   for (const c of lowCredit?.rows ?? []) {
     const balance = num(c.available_balance);

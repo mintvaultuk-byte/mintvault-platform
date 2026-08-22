@@ -112,3 +112,19 @@ export const igImageUpload = multer({
     cb(new Error(`Unsupported format ${file.mimetype} — accepted: JPEG, PNG, TIFF, WebP`));
   },
 });
+
+/**
+ * Supply product images. 4 MB, ONE file, and a deliberately tight mimetype gate.
+ *
+ * This is a first pass only: the authority validates the MAGIC BYTES and then genuinely decodes the
+ * image server-side (setSupplyProductImageForSuperAdmin), because a declared mimetype and a file
+ * extension are both attacker-controlled. Rejecting obvious rubbish here just keeps it out of memory.
+ */
+export const supplyProductImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ok = ["image/png", "image/jpeg", "image/webp"].includes((file.mimetype || "").toLowerCase());
+    cb(null, ok);
+  },
+});

@@ -19,6 +19,7 @@ export interface PartnerLifecycleSummary {
 const STAGE: Record<ReadinessDimensionKey, string> = {
   organisation: "Organisation details",
   owner: "Staff setup",
+  staff: "Staff setup",
   location: "Location setup",
   delivery: "Delivery address",
   operationsContact: "Operations contact",
@@ -30,6 +31,7 @@ const STAGE: Record<ReadinessDimensionKey, string> = {
 const LABEL: Record<ReadinessDimensionKey, string> = {
   organisation: "Organisation",
   owner: "Staff",
+  staff: "Operator access",
   location: "Location",
   delivery: "Delivery address",
   operationsContact: "Operations contact",
@@ -41,6 +43,7 @@ const LABEL: Record<ReadinessDimensionKey, string> = {
 const DESTINATION: Record<ReadinessDimensionKey, { suffix: string; label: string }> = {
   organisation: { suffix: "", label: "Review organisation" },
   owner: { suffix: "/staff", label: "Open Staff" },
+  staff: { suffix: "/staff", label: "Open Staff" },
   location: { suffix: "/locations", label: "Open Locations" },
   delivery: { suffix: "/onboarding?step=location", label: "Edit delivery address" },
   operationsContact: { suffix: "/onboarding?step=contact", label: "Edit operations contact" },

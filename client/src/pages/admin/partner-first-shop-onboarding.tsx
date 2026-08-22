@@ -33,7 +33,23 @@ type FirstShop = {
   primaryContact: Contact | null;
   owner: { id?: string; email: string; userStatus: string; readiness?: { onboardingState?: string } } | null;
   operational: PartnerOperationalReadiness;
+  /** When MintVault declared this shop's next card to be its onboarding test. null = not armed. */
+  testCardArmedAt: string | null;
+  /** False when the arming authority could not be read (migration 0109 not applied here). */
+  testCardArmingReadable: boolean;
 };
+
+type StaffUser = {
+  id: string;
+  email: string;
+  status: string;
+  role?: string;
+  role_codes?: string[];
+  location_eligible?: boolean;
+};
+type FleetStation = { stationCode?: string; station_code?: string; status: string; tenantId?: string; tenant_id?: string };
+
+const ORG_WIDE_ROLE_CODES = ["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"];
 
 function requestKey(): string {
   return `first-shop-${crypto.randomUUID()}`;
@@ -207,6 +223,89 @@ export default function PartnerFirstShopOnboardingPage() {
     setValue(value);
   };
 
+  /*
+   * Staff + station data the wizard needs to ACT rather than link out. Both come from the existing
+   * canonical admin endpoints; nothing here re-derives an authority.
+   */
+  const staffQuery = useQuery<{ users: StaffUser[] }>({
+    queryKey: [`${BASE}/partners/${partnerId}/users`],
+    enabled: Boolean(partnerId),
+  });
+  const locationsQuery = useQuery<{ locations: Location[] }>({
+    queryKey: [`${BASE}/partners/${partnerId}/locations`],
+    enabled: Boolean(partnerId),
+  });
+  const stationsQuery = useQuery<{ stations: FleetStation[] }>({
+    queryKey: [`/api/super-admin/fleet/stations?tenantId=${partnerId}`],
+    enabled: Boolean(partnerId),
+    refetchInterval: 15_000,
+  });
+
+  const activeLocations = (locationsQuery.data?.locations ?? []).filter((l) => l.status === "ACTIVE");
+  /*
+   * Operators the Scanner cannot serve: ACTIVE, NOT org-wide, and not eligible at any location.
+   * Same rule the server readiness dimension uses — this only decides who to OFFER a fix for.
+   */
+  const unassignedOperators = (staffQuery.data?.users ?? []).filter(
+    (u) =>
+      u.status === "ACTIVE" &&
+      !(u.role_codes ?? []).some((c) => ORG_WIDE_ROLE_CODES.includes(c)) &&
+      u.location_eligible !== true
+  );
+  const pendingStations = (stationsQuery.data?.stations ?? []).filter((st) => st.status === "PENDING");
+  const stationCodeOf = (st: FleetStation) => st.stationCode ?? st.station_code ?? "";
+
+  const [assignLocationId, setAssignLocationId] = useState<string>("");
+  const assignLocation = useMutation({
+    mutationFn: async (userId: string) => {
+      const locationId = assignLocationId || activeLocations[0]?.id;
+      if (!locationId) throw new Error("No ACTIVE location is available to assign.");
+      // Canonical, audited authority (partner_user_locations_changed). No direct SQL.
+      return runAdminProtected(() =>
+        apiRequest("POST", `${BASE}/partners/${partnerId}/users/${userId}/locations`, {
+          locationIds: [locationId],
+          reason: "First-shop onboarding: authorise operator location",
+        }).then((r) => r.json())
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/users`] });
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/first-shop`] });
+    },
+  });
+
+  const approveStation = useMutation({
+    mutationFn: async (stationCode: string) =>
+      // The EXISTING station transition authority, behind its existing admin step-up.
+      runAdminProtected(() =>
+        apiRequest("POST", `/api/super-admin/fleet/stations/${encodeURIComponent(stationCode)}/active`, {
+          reason: "First-shop onboarding: approve shop Scanner",
+        }).then((r) => r.json())
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [`/api/super-admin/fleet/stations?tenantId=${partnerId}`] });
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/first-shop`] });
+    },
+  });
+
+  /*
+   * ARM THE TEST CARD. The wizard cannot scan a card — that happens physically, on the shop Mac —
+   * so what it can do is DECLARE that the next card scanned there is the test. The server consumes
+   * that declaration inside the NEW transaction and stamps the Card Job, which is why this step can
+   * be truthful about a card nobody here has touched.
+   */
+  const armTestCard = useMutation({
+    mutationFn: async () =>
+      apiRequest("POST", `${BASE}/partners/${partnerId}/first-shop/test-card/arm`, {
+        reason: "First-shop onboarding: arm the shop's test card",
+      }).then((response) => response.json()),
+    onSuccess: () => {
+      setBanner("The next card scanned at this shop will be recorded as its onboarding test card.");
+      void onboarding.refetch();
+    },
+    onError: (error) => setBanner(errorMessage(error, "The onboarding test card was not armed.")),
+  });
+
   return (
     <AdminShell activeTab="dashboard" onTabChange={() => navigate("/admin")} onLogout={() => navigate("/admin")} title="First-shop onboarding" crumb="Partner Network">
       <div data-testid="first-shop-onboarding-root" style={{ maxWidth: 980 }}>
@@ -289,13 +388,161 @@ export default function PartnerFirstShopOnboardingPage() {
               <p>{shop.owner ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}` : "No Partner Owner has been invited."}</p>
               <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-owner-action">Open Owner setup</Link>
             </Step>
-            <Step number={5} title="Station" complete={shop.operational.dimensions.station.status === "PASS"}>
-              <p>Station enrolment must come from the real shop Scanner. Approval remains a protected Super Admin action.</p>
-              <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
+            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"}>
+              <p data-testid="first-shop-staff-message">{shop.operational.dimensions.staff?.message ?? "Operator access could not be confirmed."}</p>
+              {unassignedOperators.length > 0 && (
+                <div data-testid="first-shop-staff-unassigned" style={{ marginTop: 10 }}>
+                  <p style={{ fontSize: 12, opacity: 0.85 }}>
+                    A location-scoped operator has every scanning capability but no authorised location, so their
+                    Scanner is offered nothing to enrol against. Assign a location here.
+                  </p>
+                  {activeLocations.length === 0 ? (
+                    <p role="alert" data-testid="first-shop-staff-no-location">
+                      This shop has no ACTIVE location yet — complete the location step first.
+                    </p>
+                  ) : (
+                    <>
+                      <label style={{ display: "grid", gap: 4, maxWidth: 320, marginBottom: 8 }}>
+                        <span style={{ fontSize: 12, opacity: 0.8 }}>Authorised location *</span>
+                        <select
+                          data-testid="first-shop-staff-location-select"
+                          value={assignLocationId || activeLocations[0].id}
+                          onChange={(event) => setAssignLocationId(event.target.value)}
+                          style={{ background: "#0d0d0d", color: "#fff", border: "1px solid #555", borderRadius: 7, padding: "8px 10px" }}
+                        >
+                          {activeLocations.map((l) => (
+                            <option key={l.id} value={l.id}>{l.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      {unassignedOperators.map((u) => (
+                        <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                          <span data-testid={`first-shop-staff-user-${u.id}`}>{u.email}{u.role ? ` — ${u.role}` : ""}</span>
+                          <AdminButton
+                            size="sm"
+                            variant="gold"
+                            disabled={assignLocation.isPending}
+                            onClick={() => assignLocation.mutate(u.id)}
+                            data-testid={`first-shop-assign-location-${u.id}`}
+                          >
+                            Assign location
+                          </AdminButton>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+              <div style={{ marginTop: 10 }}>
+                <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-staff-action">Open Staff</Link>
+              </div>
             </Step>
-            <Step number={6} title="Readiness" complete={shop.operational.overall.ready}>
+            <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"}>
+              <p data-testid="first-shop-station-message">{shop.operational.dimensions.station.message}</p>
+              {pendingStations.length > 0 ? (
+                <div data-testid="first-shop-station-pending" style={{ marginTop: 10 }}>
+                  {/* The wizard answers "what do I do next?" here, instead of sending the operator
+                      to hunt through Station Fleet. Approval itself is still the existing canonical
+                      station transition behind its existing admin step-up. */}
+                  <p style={{ fontWeight: 700, letterSpacing: "0.04em" }}>SCANNER WAITING FOR APPROVAL</p>
+                  {pendingStations.map((st) => (
+                    <div key={stationCodeOf(st)} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                      <code>{stationCodeOf(st)}</code>
+                      <AdminButton
+                        size="sm"
+                        variant="gold"
+                        disabled={approveStation.isPending}
+                        onClick={() => approveStation.mutate(stationCodeOf(st))}
+                        data-testid={`first-shop-approve-station-${stationCodeOf(st)}`}
+                      >
+                        Approve Scanner
+                      </AdminButton>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                  Station enrolment must come from the real shop Scanner: the operator signs in on the Mac and
+                  registers it. This step updates by itself when a request arrives.
+                </p>
+              )}
+              <div style={{ marginTop: 10 }}>
+                <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
+              </div>
+            </Step>
+            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"}>
+              <p data-testid="first-shop-scanner-message">{shop.operational.dimensions.scanner.message}</p>
+              <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                Calibration happens physically in the Scanner app on the shop Mac. This step turns green once the
+                station reports a VALID calibration.
+              </p>
+            </Step>
+            <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"}>
+              <p data-testid="first-shop-credits-message">{shop.operational.dimensions.credits.message}</p>
+              <div style={{ marginTop: 10 }}>
+                <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link>
+              </div>
+            </Step>
+            <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"}>
+              {/*
+                * EVERY WORD HERE COMES FROM THE SERVER. The state, the sentence and the actions are
+                * all produced by derivePartnerOperationalReadiness from the explicit
+                * `purpose = 'ONBOARDING_TEST'` marker and the Card Job lifecycle. Nothing on this
+                * page inspects a status, counts a card or infers which job the test one is — that
+                * inference is the exact defect the marker was added to remove.
+                */}
+              <p data-testid="first-shop-test-card-message" data-state={shop.operational.testCard.state}>
+                {shop.operational.testCard.message}
+              </p>
+              {shop.operational.testCard.cardJob?.mvNumber && (
+                <p style={{ fontSize: 12, opacity: 0.85 }} data-testid="first-shop-test-card-mv">
+                  Test card: <code>{shop.operational.testCard.cardJob.mvNumber}</code>
+                  {shop.operational.testCard.cardJob.sidesAccepted
+                    ? ` — captured: ${
+                        shop.operational.testCard.cardJob.sidesAccepted.length > 0
+                          ? shop.operational.testCard.cardJob.sidesAccepted.join(" + ")
+                          : "neither side yet"
+                      }`
+                    : ""}
+                </p>
+              )}
+              {shop.operational.testCard.state === "NOT_STARTED" &&
+                (!shop.testCardArmingReadable ? (
+                  <p role="alert" data-testid="first-shop-test-card-unavailable">
+                    Test card status unavailable.
+                  </p>
+                ) : shop.testCardArmedAt ? (
+                  <p data-testid="first-shop-test-card-armed" style={{ fontSize: 12, opacity: 0.85 }}>
+                    Armed. The next card scanned in MintVault Scanner at this shop is recorded as the
+                    onboarding test card. It costs one Grading Credit, exactly like any other card.
+                  </p>
+                ) : (
+                  <div data-testid="first-shop-test-card-arm-panel" style={{ marginTop: 10 }}>
+                    <p style={{ fontSize: 12, opacity: 0.85 }}>
+                      The shop scans its test card on its own Mac. Arm it here first so MintVault records
+                      that card as the test rather than guessing which one it was.
+                    </p>
+                    <AdminButton
+                      size="sm"
+                      variant="gold"
+                      disabled={armTestCard.isPending}
+                      onClick={() => armTestCard.mutate()}
+                      data-testid="first-shop-arm-test-card"
+                    >
+                      {armTestCard.isPending ? "Arming…" : "Arm the test card"}
+                    </AdminButton>
+                  </div>
+                ))}
+            </Step>
+            <Step number={10} title="Ready" complete={shop.operational.onboarding.complete}>
+              {/*
+                * `onboarding.complete`, NOT `overall.ready`. The two are different questions and the
+                * server keeps them apart: `ready` is "can this shop grade a card now", which is true
+                * before any test card exists, while `onboarding.complete` additionally requires the
+                * shop to have put one card all the way through. This step is the second question.
+                */}
+              <p data-testid="first-shop-ready-message">{shop.operational.onboarding.message}</p>
               <ReadinessPanel readiness={shop.operational} audience="SUPER_ADMIN" />
-              <div style={{ marginTop: 10 }}><Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link></div>
             </Step>
           </>
         )}

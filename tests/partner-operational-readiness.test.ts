@@ -22,6 +22,7 @@ const healthy = (over: Partial<PartnerReadinessFacts> = {}): PartnerReadinessFac
     mfaConfigured: true,
   },
   locationEligible: true,
+  staff: { scanCapableCount: 1, locationScopedWithoutLocation: 0 },
   deliveryAddressReady: true,
   operationsContactReady: true,
   station: {
@@ -285,5 +286,75 @@ describe("P5 operational readiness collection (real PostgreSQL)", () => {
     expect(after.rows[0]).toEqual(before.rows[0]);
     await admin.query("UPDATE partner_feature_flags SET enabled=true WHERE flag='partner_emergency_stop'");
     expect((await service.getPartnerOnboardingReadiness(partnerId)).operational.overall.code).toBe("EMERGENCY_STOP");
+  });
+});
+
+/**
+ * STAFF / LOCATION-SCOPED OPERATOR ACCESS.
+ *
+ * Staging 2026-08-21: an ACTIVE MVGS_ASSESSMENT_TECHNICIAN held every scanning capability
+ * (partner.stations.enrol, partner.cards.scan, partner.stations.calibrate) but had no
+ * partner_user_locations row. listPermittedStationLocations therefore returned zero rows and the
+ * Scanner reported "No active authorised location is available for this account" — while every
+ * admin surface showed the user as correctly configured. Readiness now states that condition.
+ */
+describe("staff — location-scoped operators must have an authorised location", () => {
+  it("BLOCKS when a location-scoped operator has no assignment", () => {
+    const r = derivePartnerOperationalReadiness(healthy({
+      staff: { scanCapableCount: 0, locationScopedWithoutLocation: 1 },
+    }));
+    expect(r.dimensions.staff.status).toBe("BLOCKED");
+    expect(r.dimensions.staff.code).toBe("STAFF_LOCATION_ASSIGNMENT_REQUIRED");
+    expect(r.overall.ready).toBe(false);
+    // The fix belongs to MintVault, not the shop.
+    expect(r.dimensions.staff.actions[0].audience).toBe("SUPER_ADMIN");
+  });
+
+  it("pluralises without lying when several operators are unassigned", () => {
+    const r = derivePartnerOperationalReadiness(healthy({
+      staff: { scanCapableCount: 0, locationScopedWithoutLocation: 3 },
+    }));
+    expect(r.dimensions.staff.message).toContain("3 operators");
+  });
+
+  it("BLOCKS when the shop has nobody who can scan at all", () => {
+    const r = derivePartnerOperationalReadiness(healthy({
+      staff: { scanCapableCount: 0, locationScopedWithoutLocation: 0 },
+    }));
+    expect(r.dimensions.staff.code).toBe("STAFF_OPERATOR_REQUIRED");
+    expect(r.overall.ready).toBe(false);
+  });
+
+  it("PASSES when an eligible operator exists", () => {
+    const r = derivePartnerOperationalReadiness(healthy({
+      staff: { scanCapableCount: 1, locationScopedWithoutLocation: 0 },
+    }));
+    expect(r.dimensions.staff.status).toBe("PASS");
+    expect(r.overall.ready).toBe(true);
+  });
+
+  it("an ORG-WIDE owner alone satisfies staff — org-wide roles are eligible everywhere", () => {
+    // Org-wide roles are never counted as unassigned; that semantic must not regress.
+    const r = derivePartnerOperationalReadiness(healthy({
+      staff: { scanCapableCount: 1, locationScopedWithoutLocation: 0 },
+    }));
+    expect(r.dimensions.staff.status).toBe("PASS");
+  });
+
+  it("an unconsulted staff authority is UNKNOWN and withholds READY — never PASS", () => {
+    const r = derivePartnerOperationalReadiness(healthy({ staff: null }));
+    expect(r.dimensions.staff.status).toBe("UNKNOWN");
+    expect(r.dimensions.staff.code).toBe("CONFIGURATION_UNAVAILABLE");
+    expect(r.overall.ready).toBe(false);
+  });
+
+  it("is ordered BEFORE station — an unassigned operator cannot enrol a station", () => {
+    // Advice must be actionable: telling the operator to set up a station first is a dead end.
+    const r = derivePartnerOperationalReadiness(healthy({
+      staff: { scanCapableCount: 0, locationScopedWithoutLocation: 1 },
+      station: { enrolledCount: 0, approvedActiveCount: 0, pendingApprovalCount: 0, active: null },
+    }));
+    expect(r.overall.code).toBe("STAFF_LOCATION_ASSIGNMENT_REQUIRED");
+    expect(r.actions[0].dimension).toBe("staff");
   });
 });

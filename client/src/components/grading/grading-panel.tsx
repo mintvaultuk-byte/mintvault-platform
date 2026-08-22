@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { cardToolImageSource } from "./card-tool-image-source";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { classifyLookupError } from "@/lib/lookup-errors";
@@ -2704,6 +2705,14 @@ export default function GradingPanel({
   }
 
   const urls = imageData?.urls || {};
+  /* Both the enable gate and the launch payload read ONE authority — see card-tool-image-source. */
+  const cardToolImageUrl = (side: "front" | "back"): string | null =>
+    cardToolImageSource({
+      side,
+      urls,
+      workingEvidence: imageData?.workingEvidence,
+      reviewEvidence: imageData?.reviewEvidence,
+    });
 
   // Card-identity status light (DISPLAY ONLY — reads existing ai_analysis flags +
   // the per-device AI-identify toggle; no AI calls, no writes). FOUR states so a
@@ -4124,18 +4133,22 @@ export default function GradingPanel({
         </div>
       </div>
 
-      {/* 8-dot Card Tool — crop + deskew + centering always begin from the
-          side's server-admitted full-resolution working evidence. A display,
-          cropped, or legacy-original URL may never unlock this tool. */}
+      {/* 8-dot Card Tool — crop + deskew + centering always begin from a SERVER-ADMITTED
+          full-resolution image for THAT EXACT SIDE. Priority is unchanged: working evidence
+          first, and only if the stricter derivative is absent may the certificate-bound
+          authoritative review image stand in. `reviewEvidence` is emitted solely by
+          buildSuperAdminCertImagesPayload, so it is present only on authorised Super Admin
+          surfaces; grader and Partner payloads never carry it and stay working-evidence-only.
+          A display, cropped, or legacy-original URL still may never unlock this tool, and the
+          side is resolved explicitly — never first-available — so FRONT can never open BACK. */}
       {active &&
         manualCardToolSide &&
-        imageData?.workingEvidence?.[manualCardToolSide]?.available === true &&
-        (manualCardToolSide === "front" ? urls.front_working : urls.back_working) && (
+        cardToolImageUrl(manualCardToolSide) && (
           <ManualCardTool
             apiBase={apiBase}
             certId={certId}
             side={manualCardToolSide}
-            workingImageUrl={(manualCardToolSide === "front" ? urls.front_working : urls.back_working) as string}
+            workingImageUrl={cardToolImageUrl(manualCardToolSide) as string}
             onCentering={(result) => {
               if (!active) return;
               if (result.side === "front") {
